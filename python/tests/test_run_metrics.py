@@ -9,6 +9,7 @@ from unittest import mock
 from agentrealm_agent import __main__ as cli, config
 from agentrealm_agent.run_metrics import (
     LevelTimer,
+    RunMetrics,
     compare_run_metrics,
     compute_metrics,
     load_metrics_source,
@@ -161,6 +162,48 @@ class MetricsCliTest(unittest.TestCase):
         self.assertEqual(diff["kills"], 1)
         self.assertEqual(diff["gems"], 3)
 
+    def test_compare_metrics_from_toml_and_json(self):
+        (self.dir / "wren.trace.jsonl").write_text(
+            json.dumps({"call": "tick", "events": [{"kind": "Died"}], "gems": 2}) + "\n", encoding="utf-8"
+        )
+        snap = self.dir / "cand.json"
+        snap.write_text(json.dumps(SNAPSHOT), encoding="utf-8")
+        rc, out, _ = self.main("compare-metrics", str(self.toml), str(snap))
+        self.assertEqual(rc, 0)
+        diff = json.loads(out)
+        self.assertEqual((diff["deaths"], diff["kills"], diff["gems"]), (-1, 1, 3))
+
+    def test_compare_metrics_errors_exit_2(self):
+        good = self.dir / "good.json"
+        good.write_text(json.dumps(SNAPSHOT), encoding="utf-8")
+        cases = {
+            "missing": (str(self.dir / "nope.json"), "no such file"),
+            "toml without trace": (str(self.toml), "no trace"),
+            "bad json": (self._write("bad.json", "{not json"), "not metrics JSON"),
+            "not an object": (self._write("list.json", "[1, 2]"), "JSON object"),
+            "missing keys": (self._write("partial.json", '{"deaths": 1}'), "missing"),
+            "bad count": (self._write("neg.json", json.dumps({**SNAPSHOT, "deaths": -1})), "deaths"),
+            "two characters": (
+                self._write("two.txt", f"wren: {json.dumps(SNAPSHOT)}\nkit: {json.dumps(SNAPSHOT)}\n"),
+                "2 metrics lines",
+            ),
+            "empty capture": (self._write("empty.txt", "\n"), "no metrics line"),
+        }
+        for name, (spec, needle) in cases.items():
+            with self.subTest(name):
+                rc, out, err = self.main("compare-metrics", spec, str(good))
+                self.assertEqual(rc, 2)
+                self.assertEqual(out, "")
+                self.assertIn(needle, err)
+
+    def _write(self, name, text):
+        path = self.dir / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+
+SNAPSHOT = {"deaths": 0, "kills": 1, "gems": 5, "levels_cleared": 0, "time_per_level": {}, "bad_lines": 0}
+
 
 class CompareRunMetricsTest(unittest.TestCase):
     def test_compare_run_metrics_deltas(self):
@@ -180,7 +223,22 @@ class CompareRunMetricsTest(unittest.TestCase):
         self.assertEqual(diff["deaths"], -1)
         self.assertEqual(diff["kills"], 1)
         self.assertEqual(diff["gems"], 3)
-        self.assertEqual(diff["time_per_level"]["1"], 90.0)
+        self.assertEqual(diff["time_per_level"], {"1": None})
+
+    def test_time_per_level_one_sided_is_none(self):
+        base = RunMetrics(time_per_level={1: 100.0, 2: 50.0})
+        cand = RunMetrics(time_per_level={1: 80.0, 3: 40.0})
+        diff = compare_run_metrics(base, cand)
+        self.assertEqual(diff["time_per_level"], {"1": -20.0, "2": None, "3": None})
+
+    def test_gems_none_on_either_side(self):
+        seen, unseen = RunMetrics(gems=3), RunMetrics(gems=None)
+        self.assertIsNone(compare_run_metrics(seen, unseen)["gems"])
+        self.assertIsNone(compare_run_metrics(unseen, seen)["gems"])
+
+    def test_from_dict_round_trips(self):
+        m = RunMetrics(deaths=1, kills=2, gems=None, levels_cleared=1, time_per_level={1: 9.5}, bad_lines=3)
+        self.assertEqual(RunMetrics.from_dict(json.loads(json.dumps(m.to_dict()))), m)
 
     def test_load_metrics_from_cli_capture(self):
         with tempfile.TemporaryDirectory() as tmp:

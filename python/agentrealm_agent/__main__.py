@@ -8,11 +8,12 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 
 from . import config
 from .client import ApiError, Client
 from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
-from .run_metrics import compare_run_metrics, load_metrics_source, metrics_from_trace
+from .run_metrics import RunMetrics, compare_run_metrics, load_metrics_source, metrics_from_trace
 from .runner import Runner
 
 # How long `run` waits for the driver threads to stop before saving.
@@ -97,26 +98,27 @@ def status(client: Client, cfgs: list[config.CharacterConfig]) -> int:
     return 0
 
 
-def _metrics_from_spec(spec: str):
-    from pathlib import Path
-
+def _metrics_from_spec(spec: str) -> RunMetrics:
     path = Path(spec)
     if path.suffix.lower() == ".toml":
         cfg = config.load(str(path))
         trace = cfg.trace_path
         if not trace.is_file():
-            raise FileNotFoundError(f"no trace at {trace}")
+            raise FileNotFoundError(f"{spec}: no trace at {trace}")
         return metrics_from_trace(trace)
     if not path.is_file():
-        raise FileNotFoundError(spec)
-    return load_metrics_source(path)
+        raise FileNotFoundError(f"{spec}: no such file")
+    try:
+        return load_metrics_source(path)
+    except ValueError as e:
+        raise ValueError(f"{spec}: {e}") from None
 
 
 def compare_metrics_cmd(baseline: str, candidate: str) -> int:
     try:
         base = _metrics_from_spec(baseline)
         cand = _metrics_from_spec(candidate)
-    except (OSError, ValueError, config.ConfigError, json.JSONDecodeError) as e:
+    except (OSError, ValueError, config.ConfigError) as e:
         print(e, file=sys.stderr)
         return 2
     print(json.dumps(compare_run_metrics(base, cand), sort_keys=True))

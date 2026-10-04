@@ -133,6 +133,10 @@ class WeaponDamageTest(unittest.TestCase):
     def test_another_character_in_sight_records_nothing(self):
         self.assertEqual(self.absorb([_npc_damaged()], others_in_sight=True), {})
 
+    def test_another_character_in_sight_at_the_use_records_nothing(self):
+        use = it.AppliedUse(tick=11, map_id=1, x=3, y=4, npc_type="rat", others_in_sight=True)
+        self.assertEqual(self.absorb([_npc_damaged()], uses=(use,)), {})
+
     def test_malformed_tick_is_skipped_without_raising(self):
         for tick in ("soon", None, [1]):
             with self.subTest(tick=tick):
@@ -396,6 +400,18 @@ class RunnerItemLearningTest(unittest.TestCase):
         r.world.entities = [Entity("npc", 5, (2, 1), "rat"), Entity("character", 99, (2, 2))]
         self._queue(r, [{"verb": "Use", "target": {"kind": "block", "x": 2, "y": 1}}])
         r.apply_intent_results([{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}])
+        r._learn_items_from_tick(None, [_npc_damaged(amount=2, x=2, y=1)])
+        self.assertEqual(kb.items, {})
+
+    def test_weapon_damage_skipped_when_a_character_left_sight_before_the_observation(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._runner(kb)
+        r.world.map_id = 1
+        r.world.armed_code = "pocket_knife"
+        r.world.entities = [Entity("npc", 5, (2, 1), "rat"), Entity("character", 99, (2, 2))]
+        self._queue(r, [{"verb": "Use", "target": {"kind": "block", "x": 2, "y": 1}}])
+        r.apply_intent_results([{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}])
+        r.world.entities = [Entity("npc", 5, (2, 1), "rat")]
         r._learn_items_from_tick(None, [_npc_damaged(amount=2, x=2, y=1)])
         self.assertEqual(kb.items, {})
 

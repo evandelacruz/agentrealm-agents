@@ -9,8 +9,8 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   Reads, Snapshots). Overwritten, since prices are tuned in play.
 - ``weapon_damage``: ``{npc_type_code: max hit}``, the largest ``NPCDamaged``
   amount seen against that NPC type, from the one ``NPCDamaged`` on the block
-  and tick an applied ``Use`` resolved, when no other character is in sight,
-  filed under the subtype armed after that response's observation (API
+  and tick an applied ``Use`` resolved, when no other character was in sight
+  when the ``Use`` applied or at the response's observation, filed under the subtype armed after that response's observation (API
   Events). Damage is rolled and the target's defense lowers it (docs/
   GAME_NOTES.md Combat), so one hit is a sample, not the weapon's stat; the
   max is kept per NPC type and only ever rises.
@@ -47,7 +47,9 @@ class AppliedUse:
     """An applied ``Use`` intent, for matching block-anchored combat events.
 
     ``npc_type`` is the NPC we saw on the target block when the ``Use``
-    applied, or empty when there was not exactly one.
+    applied, or empty when there was not exactly one. ``others_in_sight`` is
+    whether another character was in sight then: one who has left by the
+    response's observation could still have struck the block.
     """
 
     tick: int
@@ -55,6 +57,7 @@ class AppliedUse:
     x: int
     y: int
     npc_type: str = ""
+    others_in_sight: bool = False
 
 
 def _supply_code(entry: Any) -> str | None:
@@ -250,14 +253,16 @@ def absorb_npc_damaged(
 
     ``NPCDamaged`` is copied to every character that sees the block (API
     Events) and a miss emits nothing, so a hit is ours only when no other
-    character could have struck: none in sight, and exactly one ``NPCDamaged``
-    on the block and tick our ``Use`` resolved (docs/GAME_NOTES.md). It is
+    character could have struck: none in sight when the ``Use`` applied
+    (``AppliedUse.others_in_sight``) or at the response's observation
+    (``others_in_sight``), and exactly one ``NPCDamaged`` on the block and
+    tick our ``Use`` resolved (docs/GAME_NOTES.md). It is
     kept as the max per NPC type seen on that block (``merge_weapon_hit``); a
     ``Use`` with no single NPC type on its block records nothing.
     """
     if not armed_code or not applied_uses or others_in_sight:
         return
-    hits: dict[AppliedUse, list[int | None]] = {u: [] for u in applied_uses if u.npc_type}
+    hits: dict[AppliedUse, list[int | None]] = {u: [] for u in applied_uses if u.npc_type and not u.others_in_sight}
     for ev in events:
         if ev.get("kind") != "NPCDamaged":
             continue

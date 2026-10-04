@@ -277,7 +277,7 @@ A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, sha
 - `read_cells`: `{"<map_id>": ["x,y", …]}`, readable cells whose `Read` applied, and `spoken_npcs`: NPC ids whose `Say` applied, so `Investigate` never repeats one (PLAN.md A30). Each grows by one entry per sign or NPC in the world.
 - Break attempts per (block, capability), and the result.
 - NPC type stats, item stats, compose results, and what each entrance turned out to need.
-- `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value (PLAN.md A18).
+- `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value, and `weapon_damage`, the max observed hit per `npc_type_code` from an `NPCDamaged` matched to our `Use` (PLAN.md A18).
 - Level progress: which levels are cleared, and the route and solution for each.
 
 This is what makes a second run better than the first, and it is what the strategist reads. None of it is committed.

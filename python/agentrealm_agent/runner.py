@@ -692,7 +692,8 @@ class Runner:
                 block = use_target_block(intent, w.entities)
                 if block is not None:
                     npc_type = npc_type_on_block(block, w.entities)
-                    self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type))
+                    others = any(e.kind == "character" for e in w.entities)
+                    self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type, others))
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
             self._note_investigation(intent, result)

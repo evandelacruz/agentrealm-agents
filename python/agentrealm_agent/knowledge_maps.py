@@ -7,6 +7,8 @@ Shape, under ``kb.maps["<map_id>"]``:
   ``"to_map_id"``, ``"to_x"``, ``"to_y"`` once a step onto it has been
   observed to land somewhere, and ``"locked": true`` once a Step onto it
   was refused ``door_locked`` (A14). The API never names a door's destination.
+- ``"hunting"``: ``{"x,y": {"strength_ceiling"?, "closed"?}}`` from ``get_zone``
+  reads and ``over_strength_ceiling`` rejections (A14, A27).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from .world import DOORS, MapView, Pos, WorldModel
 
 TERRAIN = "terrain"
 DOORS_KEY = "doors"
+HUNTING = "hunting"
 
 
 def _cell_key(p: Pos) -> str:
@@ -128,3 +131,22 @@ def iter_doors(kb: KnowledgeBase, map_id: int) -> list[dict[str, Any]]:
     with kb.lock:
         entry = kb.maps.get(str(map_id), {})
         return list(entry.get(DOORS_KEY) or [])
+
+
+def record_hunting_zone(
+    kb: KnowledgeBase | None, map_id: int, pos: Pos, ceiling: int | None, *, closed: bool = False
+) -> None:
+    """Merge a hunting-ground cell's ceiling, and ``closed`` after ``over_strength_ceiling``."""
+    if kb is None:
+        return
+    entry: dict[str, Any] = {}
+    if ceiling is not None:
+        entry["strength_ceiling"] = ceiling
+    if closed:
+        entry["closed"] = True
+    with kb.lock:
+        hunting = kb.maps.setdefault(str(map_id), {}).setdefault(HUNTING, {})
+        prev = hunting.get(_cell_key(pos))
+        if isinstance(prev, dict):
+            entry = {**prev, **entry}
+        hunting[_cell_key(pos)] = entry

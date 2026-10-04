@@ -11,6 +11,7 @@ from agentrealm_agent.brain import Decision, Memory, choose_call, use_on
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.runner import Runner
+from agentrealm_agent.threat import type_key_for_entity
 from agentrealm_agent.world import Entity, WorldModel
 
 
@@ -140,6 +141,22 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(r.mem.need_self and r.mem.need_position)
         self.assertIsNone(r.world.pos)
         self.assertEqual(r.world.recent_damage, [(11, 3)])
+        # npc 4 was never perceived: no type to file the hit under.
+        self.assertEqual(r.world.threat.by_type, {})
+
+    def test_damage_is_keyed_by_type_from_the_same_observation(self):
+        # The observation that first lists the attacker arrives with the
+        # Damaged event; the hit is filed under its type, not its id.
+        fake = FakeClient([{"tick": 12, "window_remaining_ms": 0, "events_by_tick": [
+            {"tick": 11, "events": [{"tick": 11, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 3}]}],
+            "observation": {"version": 2, "delta": {"entities": {"npcs": {"added": [
+                {"id": 4, "x": 1, "y": 0, "npc_type_code": "gristlewick"}]}}}}}])
+        r = self.runner(fake, Policy(goals=["hold"]))
+        r.tick()
+        npc = next(e for e in r.world.entities if e.kind == "npc" and e.id == 4)
+        self.assertEqual(type_key_for_entity(npc), ("npc", "gristlewick"))
+        self.assertEqual(r.world.threat.by_type, {("npc", "gristlewick"): 3})
+        self.assertEqual(r.world.threat.damage_per_hit(type_key_for_entity(npc)), 3)
 
     def test_a_step_sent_as_we_die_is_not_assumed(self):
         # Died forgets the position; the step sent that round trip has no
@@ -153,8 +170,76 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(r.world.map_id)
 
 
+    def test_back_to_back_use_queues_honor_weapon_cooldown(self):
+        # A1: the next Use queue opens with Waits still owed after the last one.
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
+        self.assertEqual(r.intents_for(Decision(use, "test")), [use])
+        r.mem.last_use_tick = 10
+        r.world.tick = 11
+        second = r.intents_for(Decision(use, "test"))
+        self.assertEqual([i["verb"] for i in second], ["Wait"] * 9 + ["Use"])
+
+    def test_say_carries_speech_cooldown(self):
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        say = {"verb": "Say", "text": "hi", "target": {"kind": "character", "character_id": 3}}
+        self.assertEqual(r.intents_for(Decision(say, "test")), [say])
+        r.mem.last_speech_tick = 20
+        r.world.tick = 25
+        second = r.intents_for(Decision(say, "test"))
+        self.assertEqual([i["verb"] for i in second], ["Wait"] * 5 + ["Say"])
+
+    def test_applied_use_and_say_start_their_cooldowns(self):
+        # A1: an applied result records its tick; a rejected one leaves the clock alone.
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
+        r.mem.last_use_tick, r.world.tick = 10, 11
+        queue = r.intents_for(Decision(use, "test"))
+        self.assertFalse(r.on_result({"tick": 20, "outcome": "applied"}, len(queue) - 1))
+        self.assertEqual(r.mem.last_use_tick, 20)
+        say = {"verb": "Broadcast", "text": "hi"}
+        self.assertEqual(r.intents_for(Decision(say, "test")), [say])
+        self.assertFalse(r.on_result({"tick": 21, "outcome": "applied"}, 0))
+        self.assertEqual(r.mem.last_speech_tick, 21)
+        self.assertEqual(r.mem.last_use_tick, 20)
+
+    def test_rejected_use_does_not_start_the_cooldown(self):
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
+        r.intents_for(Decision(use, "test"))
+        rejection = {"category": "state", "code": "target_out_of_range", "retryability": "transient"}
+        self.assertTrue(r.on_result({"tick": 30, "outcome": "rejected", "rejection": rejection}, 0))
+        self.assertIsNone(r.mem.last_use_tick)
+        say = {"verb": "Say", "text": "hi", "target": {"kind": "character", "character_id": 3}}
+        r.intents_for(Decision(say, "test"))
+        self.assertTrue(r.on_result({"tick": 31, "outcome": "rejected", "rejection": rejection}, 0))
+        self.assertIsNone(r.mem.last_speech_tick)
+
+    def test_death_clears_use_and_speech_cooldowns(self):
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r.mem.last_use_tick, r.mem.last_speech_tick = 10, 12
+        r.on_events([{"tick": 13, "kind": "Died", "cause": "npc"}])
+        self.assertIsNone(r.mem.last_use_tick)
+        self.assertIsNone(r.mem.last_speech_tick)
+
+    def test_cooldown_past_the_horizon_sends_nothing_and_traces_it(self):
+        # The Use cannot land inside the horizon: hold it this round trip, say why.
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r.queue_horizon_ticks = 3
+        use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
+        r.mem.last_use_tick, r.world.tick = 10, 11
+        self.assertIsNone(r.intents_for(Decision(use, "test")))
+        self.assertIsNone(r.mem.pending)
+        self.assertIsNone(r.mem.pending_intents)
+        trace = r.cfg.trace_path.read_text()
+        self.assertIn('"call": "pace"', trace)
+        self.assertIn('"held": {"verb": "Use"', trace)
+        # Once the cooldown is within reach, the Use goes.
+        r.world.tick = 18
+        self.assertEqual([i["verb"] for i in r.intents_for(Decision(use, "test"))], ["Wait"] * 2 + ["Use"])
+
     def test_non_movement_intent_is_sent_alone(self):
-        # Only movement becomes a paced queue; a Take goes as one intent.
+        # Movement, Use, and Say become paced queues; a Take goes as one intent.
         fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
         r = self.runner(fake, Policy(goals=["hold"], pickup=True))
         r.world.entities = [Entity("supply", 5, (1, 0), "apple")]
@@ -342,6 +427,19 @@ class NeverAttackRunnerTest(RunnerTest):
             r.tick()
         self.assertEqual(fake.sent[0][0], [{"verb": "Wait"}])
         self.assertIsNone(r.mem.pending, "a dropped Use is not awaited")
+
+    def test_a_paced_use_on_a_forbidden_target_is_replaced_by_one_wait(self):
+        # A Use still owing cooldown is sent behind Waits; the guard drops the
+        # whole queue, so no stale paced queue is left awaiting its results.
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self.runner_with_directives(fake, 'never_attack = ["character"]\n')
+        r.mem.last_use_tick = r.world.tick
+        with mock.patch("agentrealm_agent.runner.decide",
+                        return_value=Decision(use_on(r.world.entities[0]), "fight")):
+            r.tick()
+        self.assertEqual(fake.sent[0][0], [{"verb": "Wait"}])
+        self.assertIsNone(r.mem.pending_intents)
+        self.assertIsNone(r.mem.held_queue)
 
     def test_use_on_an_allowed_target_is_sent(self):
         fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])

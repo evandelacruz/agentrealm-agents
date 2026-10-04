@@ -95,6 +95,13 @@ class Client:
     def entities(self, cid: int, map_id: int, x0: int, y0: int, width: int, height: int) -> dict:
         return self._call("GET", f"/characters/{cid}/entity-tiles", query=_rect(map_id, x0, y0, width, height))
 
+    def zone(self, cid: int, map_id: int, x: int, y: int) -> dict:
+        return self._call(
+            "GET",
+            f"/characters/{cid}/zone",
+            query={"map_id": map_id, "x": x, "y": y},
+        )
+
     # The round trip.
 
     def tick(

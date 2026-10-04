@@ -12,11 +12,14 @@ from .brain import Decision, Memory, choose_call, decide, reject_step
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
+from .knowledge_base import KnowledgeBase
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
     QUEUE_HORIZON_INTENTS,
     build_paced_walk_queue,
+    pace_speech,
+    pace_uses,
     queue_horizon_intents,
     step_landing,
     trim_to_horizon,
@@ -24,6 +27,7 @@ from .executor import (
 )
 from .poll_cadence import calm_poll_interval
 from .world import DOORS, WorldModel, terrain_cells
+from .zone_discovery import apply_town, apply_zone, zone_failed
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
@@ -49,12 +53,21 @@ class Pacer:
 
 
 class Runner:
-    def __init__(self, cfg: CharacterConfig, client: Client, character_id: int, stop: threading.Event, out=print):
+    def __init__(
+        self,
+        cfg: CharacterConfig,
+        client: Client,
+        character_id: int,
+        stop: threading.Event,
+        out=print,
+        knowledge: KnowledgeBase | None = None,
+    ):
         self.cfg = cfg
         self.client = client
         self.cid = character_id
         self.stop = stop
         self.out = out
+        self.knowledge = knowledge
         self.world = WorldModel(character_id)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
@@ -83,6 +96,7 @@ class Runner:
         horizon_s = max(1, int(world.get("queue_horizon_seconds", DEFAULT_QUEUE_HORIZON_SECONDS)))
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
+        apply_town(self.world, world.get("town"))
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:
@@ -147,6 +161,23 @@ class Runner:
             m.alarm = False
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
+        elif call == "zone":
+            probe, m.zone_probe = m.zone_probe, None
+            if probe is None:
+                return 0.0  # choose_call picked no cell: spend nothing
+            map_id, (x, y) = probe
+            try:
+                z = c.zone(self.cid, map_id, x, y)
+            except ApiError as e:
+                # A 4xx about the cell (unrevealed, out of bounds): drop it so
+                # the next spare window probes another one. Transient and
+                # character-level failures leave it to retry.
+                if _cell_refused(e):
+                    zone_failed(w, map_id, (x, y))
+                raise
+            fact = apply_zone(w, map_id, x, y, z)
+            w.tick = max(w.tick, int(z.get("tick", 0)))
+            self.log(call, f"@{map_id}:{x},{y} safe={fact.safe}", {"zone": z})
         else:
             return self.tick()
         return 0.0
@@ -182,8 +213,10 @@ class Runner:
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
         rejected = self.apply_intent_results(r.get("intent_results") or [])
+        earlier = w.entities
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        w.learn_threat(events, earlier)
         self.on_events(events)
         if r.get("queue") and not rejected and not m.cancel_queue:
             # A rejection or a door already dropped our queue; an echoed server
@@ -259,29 +292,37 @@ class Runner:
     def _apply_never_attack(self, intents: list[dict] | None) -> list[dict] | None:
         """Executor guard: drop any Use aimed at a never_attack target.
 
-        If that empties the submit, send a Wait instead of nothing, so the
-        server queue is replaced rather than left running.
+        A paced Use arrives behind its cooldown Waits, so the whole submit
+        becomes one Wait: the server queue is replaced rather than left
+        running, and none of the dropped queue is awaited.
         """
         if not intents:
             return intents
         blocked = self.directives.directives.never_attack
         if not blocked:
             return intents
-        out = [i for i in intents if not use_blocked_by_never_attack(i, self.world.entities, blocked)]
-        if not out:
-            self.mem.pending = None
-            return [wait()]
-        return out
+        if not any(use_blocked_by_never_attack(i, self.world.entities, blocked) for i in intents):
+            return intents
+        m = self.mem
+        m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+        m.pending = None
+        return [wait()]
 
     def intents_for(self, d: Decision) -> list[dict] | None:
-        """Movement decisions become paced Step/Wait queues; others stay one intent."""
+        """Movement, Use, and Say/Broadcast become paced queues; others stay one intent."""
         w, m = self.world, self.mem
         if d.intent is None:
             return None
-        if d.intent.get("verb") != "SetPosition":
+        intent = d.intent
+        verb = intent.get("verb")
+        if verb != "SetPosition":
+            if verb == "Use":
+                return self._paced_action(intent, pace_uses, m.last_use_tick)
+            if verb in ("Say", "Broadcast"):
+                return self._paced_action(intent, pace_speech, m.last_speech_tick)
             m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
-            m.pending = d.intent
-            return [d.intent]
+            m.pending = intent
+            return [intent]
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
@@ -311,6 +352,32 @@ class Runner:
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
         return intents
+
+    def _paced_action(self, intent: dict, pace, last_tick: int | None) -> list[dict] | None:
+        """``intent`` behind the Waits its cooldown still owes, cut at the horizon.
+
+        None when the cooldown outlasts the horizon: nothing is sent this
+        round trip, and the trace says why.
+        """
+        w, m = self.world, self.mem
+        since = None if last_tick is None else max(1, w.tick - last_tick)
+        paced = trim_to_horizon(pace([intent], ticks_since_last=since), limit=self.queue_horizon_ticks)
+        while paced and paced[-1]["verb"] == "Wait":
+            paced.pop()
+        if not paced:
+            self.log(
+                "pace",
+                f"{_fmt_intent(intent)} held: cooldown outlasts the {self.queue_horizon_ticks}-tick horizon",
+                {"held": intent, "ticks_since_last": since, "horizon": self.queue_horizon_ticks},
+            )
+            return None
+        if len(paced) == 1:
+            m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+            m.pending = paced[0]
+        else:
+            m.pending_intents, m.pending_queue, m.pending_next_index = paced, None, 0
+            m.pending = None
+        return paced
 
     def apply_intent_results(self, results: list[dict]) -> bool:
         """Fold intent results since the last call. True if the last one rejected."""
@@ -365,6 +432,10 @@ class Runner:
                     m.need_position, m.path = True, []
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True
+            if intent and intent.get("verb") == "Use":
+                m.last_use_tick = int(result.get("tick", w.tick))
+            if intent and intent.get("verb") in ("Say", "Broadcast"):
+                m.last_speech_tick = int(result.get("tick", w.tick))
             if m.pending is not None and index == 0:
                 m.pending = None
             return False
@@ -389,6 +460,7 @@ class Runner:
             if kind == "Died":
                 m.need_self = m.need_position = True
                 m.path, m.last_step_tick = [], None
+                m.last_use_tick = m.last_speech_tick = None
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
                 m.held_queue = None
@@ -406,6 +478,15 @@ class Runner:
             self.mem.need_self = self.mem.need_position = True
             return time.time() + 1.0
         return time.time() + 1.0
+
+
+def _cell_refused(e: ApiError) -> bool:
+    """A zone read refused for the cell itself, not for the character or the line."""
+    if e.network or e.paused or e.rate_limited:
+        return False
+    if e.status in (401, 403) or e.status >= 500:
+        return False
+    return e.code not in ("not_on_map", "character_not_live")
 
 
 def _fmt_submit(intents: list[dict] | None, d: Decision) -> str:

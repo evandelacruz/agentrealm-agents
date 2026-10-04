@@ -92,6 +92,17 @@ class ReloadTest(unittest.TestCase):
             self.assertTrue(watch.maybe_reload())
             self.assertEqual(watch.directives.never_attack, ["character", "goblin"])
 
+    def test_a_deleted_file_restores_the_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "wren.directives.toml"
+            watch = DirectivesWatch(p)
+            self._write(p, 'never_attack = ["character"]\n', 1_000_000)
+            self.assertTrue(watch.maybe_reload())
+            p.unlink()
+            self.assertTrue(watch.maybe_reload())
+            self.assertEqual(watch.directives, default_directives())
+            self.assertFalse(watch.maybe_reload())
+
     def test_a_broken_file_on_first_load_gives_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "wren.directives.toml"

@@ -5,6 +5,8 @@ from __future__ import annotations
 import heapq
 from dataclasses import dataclass, field
 
+from .threat import ThreatTable, absorb_damaged, damage_amount
+
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
 # warp: never occupied, but stepping onto one warps.
 WALKABLE = {"grass", "dirt", "tile", "fire", "lava"}
@@ -34,6 +36,17 @@ Pos = tuple[int, int]
 
 # Extra cost of a step onto a `costly` tile: worth a long detour to avoid one.
 COSTLY_STEP = 100
+
+
+
+@dataclass(frozen=True)
+class ZoneFact:
+    """A get_zone answer for one cell (A7)."""
+
+    safe: bool
+    brightness: float = 1.0
+    strength_ceiling: int | None = None
+
 
 NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
 
@@ -92,6 +105,7 @@ class WorldModel:
     terrain_map: int | None = None
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
+    threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
     # leaves the world when its last supply is withdrawn (B116).
@@ -99,6 +113,19 @@ class WorldModel:
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[int]] = field(default_factory=dict)
+    # Zone facts from get_zone (A7): map_id -> cell -> fact. Safe tiles derive
+    # from these (zone_discovery.safe_tiles).
+    zones: dict[int, dict[Pos, ZoneFact]] = field(default_factory=dict)
+    # Cells whose get_zone read failed, never probed again (A7).
+    zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
+    # Town and Respawned locations used to seed safe-tile probes.
+    respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
+
+    def record_respawn_anchor(self, map_id: int, pos: Pos) -> None:
+        """Seeds safe-tile probes around a town or Respawned location (A7)."""
+        anchor = (map_id, pos)
+        if anchor not in self.respawn_anchors:
+            self.respawn_anchors.append(anchor)
 
     @property
     def view(self) -> MapView:
@@ -313,7 +340,9 @@ class WorldModel:
                 flat.append(ev)
                 kind = ev.get("kind")
                 if kind == "Damaged":
-                    self.recent_damage.append((int(ev.get("tick", group["tick"])), int(ev.get("amount", 0))))
+                    amount = damage_amount(ev)
+                    if amount is not None:
+                        self.recent_damage.append((int(ev.get("tick", group["tick"])), amount))
                 elif kind == "BlockChanged" and ev.get("map_id") in self.maps:
                     self.maps[ev["map_id"]].tiles[(int(ev["x"]), int(ev["y"]))] = ev.get("block_type", "")
                 elif kind == "SupplyTaken":
@@ -322,7 +351,25 @@ class WorldModel:
                     self.forget_position()
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
+                elif kind == "Respawned":
+                    try:
+                        self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))
+                    except (KeyError, TypeError, ValueError):
+                        pass  # no location on the event: nothing to anchor probes to
         return flat
+
+    def learn_threat(self, events: list[dict], earlier: list[Entity]) -> None:
+        """Folds this round trip's Damaged events into the threat table (A6).
+
+        Call after apply_observation, so a source first listed in the same
+        response resolves to its type. A source that left view in that
+        response is looked up in earlier, the entities before it. There is
+        no entity list per event tick, so a source seen in neither is not
+        recorded.
+        """
+        for ev in events:
+            if ev.get("kind") == "Damaged":
+                absorb_damaged(self.threat, ev, self.entities, earlier)
 
     def apply_observation(self, obs: dict | None) -> None:
         """Folds a tick observation into the model (Manual §7.2).

@@ -147,6 +147,7 @@ class DirectivesWatch:
     A file that fails to read or parse keeps the last good directives
     (defaults on first load) and is retried once any of those differ from
     the failed version, even when the mtime matches the last good load.
+    Deleting the file restores the defaults.
     """
 
     path: Path

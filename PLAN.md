@@ -20,17 +20,18 @@ It is outside the formal backlog. It is built interactively and changes as the A
 | `GET /characters/{id}/world` | Tick rate, sandbox flag, status. |
 | `GET /characters/{id}/terrain-tiles?map_id&x0&y0&width&height` | Block types inside perception, plus revealed ground, as a grid: `rows` of `legend` symbols, `?` for clouds. |
 | `GET /characters/{id}/entity-tiles?…` | Characters, NPCs, supplies inside perception. |
+| `GET /characters/{id}/zone?map_id&x&y` | Zone at a revealed cell: `safe`, `brightness`, and a hunting ground's `strength_ceiling`. |
 | `POST /characters/{id}/tick` `{"intents": [{...}], "snapshot_version": N}` | Replaces the character's queue with an ordered list (`[]` clears it; no `intents` leaves it running). Optional `snapshot_version` is the observation version last applied; the server answers with a delta when it still matches. Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
 
 Auth is `Authorization: Bearer <key>`.
 
-**One request per character per tick, with a burst of 3, on every character route.** Reads count. The limiter is a token bucket refilled on the front's tick interval ([Manual §7.4](https://agentrealm.gg/docs/manual#74-rate-limits)). So the agent runs a call budget: each tick it spends its call on the read it most needs or on the tick submit. The round trip carries the observation (B15). This agent reads ground chest contents and its own `health` / `max_health` from it (tracked, not yet used by any decision); terrain and entity reads still compete with intents for the same budget.
+**One request per character per tick, with a burst of 3, on every character route.** Reads count. The limiter is a token bucket refilled on the front's tick interval ([Manual §7.4](https://agentrealm.gg/docs/manual#74-rate-limits)). So the agent runs a call budget: each tick it spends its call on the read it most needs or on the tick submit. The round trip carries the observation (B15). This agent reads ground chest contents and its own `health` / `max_health` from it (tracked, not yet used by any decision). Each `Damaged` event also updates a threat table, after the same response's observation is applied: max damage per hit per hostile type, keyed by the source's type code, with an unmeasured default until something is measured (A6). A hit whose source is not among the entities perceived before or after that response, or has no type code, is not recorded. Trap and `occupy` damage is recorded under its own keys but never raises the default for an unmeasured hostile. Retreat and fight margins will read it in later M7 slices. Terrain and entity reads still compete with intents for the same budget.
 
 The runner paces one call per wall-clock window (`epoch / tick interval`). That is stricter than the bucket requires: safe, but slower than it could be.
 
 ## Real time
 
-Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; the agent sends movement as a paced `Step`/`Wait` queue and every other intent as a one-intent queue (M6). A reflex that fires while a queue runs replaces it (see **Reflexes**). It does not yet send a new queue when a read or event makes the rest of a running path wrong; that is the rest of M6. `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
+Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; the agent sends movement as a paced `Step`/`Wait` queue, `Use` and `Say`/`Broadcast` through the attack and speech pacers, and most other intents as a one-intent queue (M6). A reflex that fires while a queue runs replaces it (see **Reflexes**). It does not yet send a new queue when a read or event makes the rest of a running path wrong; that is the rest of M6. `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
 
 ## Architecture
 
@@ -55,9 +56,9 @@ Checked top to bottom:
 1. Position unknown, or a door or death may have moved us → read position.
 2. Terrain around us is stale (map changed, or we moved more than half the perception range since the last terrain read) → read terrain.
 3. Entities are older than the character's `entity_refresh` ticks, or a `Damaged`/`Attacked` event just arrived → read entities.
-4. Otherwise → `POST tick` with the chosen intent, or with none, when the cadence below says it is due; else send nothing this window.
+4. Otherwise → `POST tick` with the chosen intent, or with none, when the cadence below says it is due; else a pending `get_zone` on a revealed cell around a respawn anchor or along the path (A7), or send nothing this window.
 
-`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the intents still queued run out. A paced movement queue opens the gap up to its length; a one-intent queue still brings the next poll a tick later. A window the gap skips sends nothing. The reads above outrank it, so a calm gap's spare windows go to stale terrain first, then stale entities. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
+`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the intents still queued run out. A paced movement queue opens the gap up to its length; a one-intent queue still brings the next poll a tick later. A window the gap skips sends nothing unless step 4 has a zone probe ready. The reads above outrank it, so a calm gap's spare windows go to stale terrain first, then stale entities, then safe-tile discovery. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
 
 Self is re-read after `Died`, and every 60 windows otherwise.
 
@@ -121,7 +122,7 @@ entity_refresh = 5                  # ticks between entity reads when calm
 
 Created character IDs are saved in `python/.state/<name>.json` (gitignored), so `run` finds the character again.
 
-A separate runtime file, `characters/<name>.directives.toml`, is re-read whenever it changes (A8). It carries survival `params` (defaults and ranges in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)), a hard `never_attack` list enforced in the reflexes and on tick submit, and optional strategist fields (`goals`, `instructions`) for later milestones. Only `never_attack` changes behavior so far; `params` are parsed and validated for the items that will read them (A9, A23). A file that fails to read or parse keeps the last good directives, or the defaults on first load.
+A separate runtime file, `characters/<name>.directives.toml`, is re-read whenever it changes (A8). It carries survival `params` (defaults and ranges in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)), a hard `never_attack` list enforced in the reflexes and on tick submit, and optional strategist fields (`goals`, `instructions`) for later milestones. Only `never_attack` changes behavior so far; `params` are parsed and validated for the items that will read them (A9, A23). A file that fails to read or parse keeps the last good directives, or the defaults on first load; deleting the file restores the defaults.
 
 ## CLI
 
@@ -161,7 +162,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
 | M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. The agent's default base URL is the local stack. | M1 |
 
-**M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2), applying snapshot versions, deltas and health in the world model, and tick POSTs that carry the last applied observation version (A3). Not yet: the runner does not pace `Use`/`Say` through `executor/pacing.py` (A1).
+**M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, `Use` and `Say`/`Broadcast` through `executor/pacing.py` with cooldowns carried across queues (A1), multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2), applying snapshot versions, deltas and health in the world model, and tick POSTs that carry the last applied observation version (A3).
 
 | ID | Item | Depends on |
 |---|---|---|
@@ -177,7 +178,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 |---|---|---|
 | A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. | A1, A2 |
 | A6 | **Threat table.** Damage per hit per hostile type from `Damaged`; the unmeasured default. | |
-| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. | |
+| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery only: it records safe tiles; acting on them is A9–A11. A failed zone read drops that cell from probing. | |
 | A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
 | A9 | **Retreat, Flee and Escape.** `retreat_hits` and the `risk`/`lives_floor` formula; retreat to a known safe tile. | A5, A6, A7, A8 |
 | A10 | **Heal.** Food in reach, carried potion, measured safe-zone regeneration, else wait in town and raise `buy`. | A5, A7 |
@@ -192,7 +193,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 
 | ID | Item | Depends on |
 |---|---|---|
-| A17 | **Per-world knowledge base.** `python/.state/worlds/<world_code>.json`: load, save, sections, shared by the world's characters. | |
+| A17 | **Per-world knowledge base.** `python/.state/worlds/<world_code>.json`: load, save, sections, shared by the world's characters. Loaded once when `run` starts, saved once at exit; one `run` process per world. | |
 | A18 | **Item table.** Keyed by `supply_subtype_code`, filled from `Arm`, `Wear`, prices seen and capabilities. | A17 |
 | A19 | **Equip.** Score slots, swap when a carried item is better. | A5, A18 |
 | A20 | **Loot.** `Take`, `WithdrawFromChest`, `Drop` junk when full; hearts first. | A5 |

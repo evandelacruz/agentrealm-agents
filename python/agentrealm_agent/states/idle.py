@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from ..brain import set_position
-from ..client import Intent
 from ..world import WorldModel
-from .base import State, StateOutcome
-from ..brain import PlayContext
+from .base import PlayContext, State, StateOutcome
+from .intents import set_position
 
 
 class IdleState(State):
@@ -19,7 +17,8 @@ class IdleState(State):
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        if ctx.policy.kind == "idle" or world.pos is None or not world.alive:
+        # Sync and Downed rank above Idle, so here we are placed and alive.
+        if ctx.policy.kind == "idle":
             return StateOutcome(None, "idle", state=self.name)
         options = world.open_neighbours(world.pos, set(ctx.memory.blocked))
         if not options:

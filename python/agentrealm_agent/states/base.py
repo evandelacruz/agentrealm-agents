@@ -1,13 +1,25 @@
-"""State protocol and the outcome of one dispatch round."""
+"""State protocol, the context states run in, and one dispatch round's outcome."""
 
 from __future__ import annotations
 
+import random
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..client import Intent
+from ..config import Policy
+from ..memory import Memory
 from ..world import WorldModel
-from ..brain import PlayContext
+
+
+@dataclass
+class PlayContext:
+    """Policy, memory, and runtime knobs passed into the state machine (A5)."""
+
+    memory: Memory
+    policy: Policy
+    rng: random.Random
+    never_attack: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -21,7 +33,11 @@ class StateOutcome:
 
 
 class State(ABC):
-    """Priority state: guard, act, done (M7 / A5)."""
+    """Priority state: guard, act, done (M7 / A5).
+
+    ``guard`` says whether the state may take over; ``done`` whether the
+    active state may let go. The gap between the two is the hysteresis.
+    """
 
     name: str
 

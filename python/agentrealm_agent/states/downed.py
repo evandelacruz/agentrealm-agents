@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from ..world import WorldModel
-from .base import State, StateOutcome
-from ..brain import PlayContext
+from .base import PlayContext, State, StateOutcome
 
 
 class DownedState(State):

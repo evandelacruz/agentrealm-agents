@@ -40,7 +40,7 @@ Copy a file from `python/characters/` and edit it. Names must be unique in the w
 | Key | Meaning |
 |---|---|
 | `name`, `avatar`, `model_agent`, `world` | Identity. `avatar` is an outfit code. `model_agent` is what rankings aggregate on. |
-| `policy.kind` | `idle` sends nothing. `wander` takes random steps. `scripted` runs the reflexes and goals below through the **Explore** state (A5). Each tick POST, a priority dispatcher picks **Sync**, **Downed**, **Explore**, or **Idle** and returns intents. |
+| `policy.kind` | `idle` sends nothing. `wander` takes random steps. `scripted` runs the reflexes and goals below through the **Explore** state (A5). Before each `POST tick`, a priority dispatcher picks **Sync**, **Downed**, **Explore**, or **Idle**, and that state returns the intents to send. |
 | `policy.goals` | Tried in order: `explore`, `doors`, `goto` (with `policy.goto = [x, y]`), `wander`, `hold`. Paths may run through unseen ground (fog costs 2 per step to known ground's 1), but the agent only steps onto tiles it has seen; a goal whose next step is unseen yields to the next goal. |
 | `policy.on_hostile` | `flee`, `fight`, or `ignore`, for anything in `policy.hostile` (`npc`, `character`) within `policy.hostile_range`. |
 | `policy.pickup` | Take supplies within one block. |

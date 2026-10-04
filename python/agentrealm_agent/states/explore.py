@@ -4,22 +4,14 @@ from __future__ import annotations
 
 import random
 
-from ..brain import (
-    PlayContext,
-    _flee_step,
-    _grid,
-    _next_step,
-    _replan,
-    set_position,
-    take,
-    use_on,
-    withdraw_all,
-)
 from ..config import Policy
 from ..directives import attack_forbidden
+from ..memory import Memory
 from ..navigation import cost_path
-from ..world import WorldModel, chebyshev
-from .base import State, StateOutcome
+from ..pathing import flee_step, grid_params, next_step, replan
+from ..world import Pos, WorldModel, chebyshev
+from .base import PlayContext, State, StateOutcome
+from .intents import set_position, take, use_on, withdraw_all
 
 
 class ExploreState(State):
@@ -39,7 +31,7 @@ class ExploreState(State):
 
 def scripted_outcome(
     w: WorldModel,
-    m,
+    m: Memory,
     policy: Policy,
     rng: random.Random,
     *,
@@ -48,12 +40,13 @@ def scripted_outcome(
 ) -> StateOutcome:
     """Reflex list then plan (PLAN.md). M7 test seam: list[Intent] in the outcome."""
     here = w.pos
-    assert here is not None
+    if here is None:
+        return StateOutcome(None, "position unknown", state=state)
     view = w.view
 
     hazards = {p for p, b in view.tiles.items() if b in policy.avoid_blocks}
     blocked = set(m.blocked) | hazards
-    escape: set = set()
+    escape: set[Pos] = set()
     if here in hazards:
         safe = w.open_neighbours(here, blocked)
         if safe:
@@ -68,11 +61,10 @@ def scripted_outcome(
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
         if policy.on_hostile == "fight":
             if target.kind == "character" and not attack_forbidden(target, never_attack):
-                m.path = []
                 return StateOutcome(
                     [use_on(target)], f"fight {target.kind} {target.id}", reflex=True, state=state
                 )
-        away = _flee_step(w, hostiles, blocked)
+        away = flee_step(w, hostiles, blocked)
         if away is not None:
             m.path = []
             return StateOutcome(
@@ -95,15 +87,15 @@ def scripted_outcome(
                 )
             if contents is None:
                 return StateOutcome(None, f"open chest {chest_id}", state=state)
-        elif m.goal != "chest" or not _next_step(w, plan_avoid, m.path):
-            found = cost_path(w, at, _grid(policy, plan_avoid, escape))
-            if _next_step(w, plan_avoid, found):
+        elif m.goal != "chest" or not next_step(w, plan_avoid, m.path):
+            found = cost_path(w, at, grid_params(policy, plan_avoid, escape))
+            if next_step(w, plan_avoid, found):
                 m.path, m.goal = found, "chest"
 
-    step = _next_step(w, plan_avoid, m.path)
+    step = next_step(w, plan_avoid, m.path)
     if step is None:
-        _replan(w, m, policy, rng, plan_avoid, escape)
-        step = _next_step(w, plan_avoid, m.path)
+        replan(w, m, policy, rng, plan_avoid, escape)
+        step = next_step(w, plan_avoid, m.path)
     if step is not None:
         return StateOutcome([set_position(step)], f"{m.goal} → {m.path[-1]}", state=state)
 

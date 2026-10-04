@@ -1,12 +1,17 @@
 """A5: priority dispatcher and list[Intent] test seam."""
 
+import importlib
 import random
 import unittest
+from unittest import mock
 
-from agentrealm_agent.brain import Memory, PlayContext, decide
+from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
-from agentrealm_agent.states import dispatch, scripted_outcome
+from agentrealm_agent.memory import Memory
+from agentrealm_agent.states import STATES, PlayContext, State, StateOutcome, dispatch, scripted_outcome
 from agentrealm_agent.world import Entity, WorldModel
+
+dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")
 
 
 def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
@@ -55,17 +60,109 @@ class DispatchPriorityTest(unittest.TestCase):
         self.assertEqual(out.state, "Idle")
         self.assertIsNone(out.intents)
 
-    def test_scripted_outcome_matches_decide(self):
+    def test_wander_policy_steps_through_idle(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        out = dispatch(w, PlayContext(Memory(), Policy(kind="wander"), random.Random(0)))
+        self.assertEqual(out.state, "Idle")
+        self.assertEqual(len(out.intents), 1)
+        step = out.intents[0]
+        self.assertEqual(step["verb"], "SetPosition")
+        self.assertIn((step["x"], step["y"]), w.open_neighbours((1, 1), set()))
+
+    def test_wander_keeps_off_blocked_tiles(self):
+        w = world(["..", ".."], at=(0, 0))
+        m = Memory(blocked={(1, 0): 1, (0, 1): 1})
+        out = dispatch(w, PlayContext(m, Policy(kind="wander"), random.Random(0)))
+        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 1))
+
+    def test_no_state_sends_nothing(self):
+        w = world(["..."])
+        m = Memory(state="Explore")
+        out = dispatch(w, PlayContext(m, Policy(kind="bogus"), random.Random(0)))
+        self.assertEqual((out.state, out.intents, out.reason), ("", None, "no state"))
+        self.assertEqual(m.state, "")
+
+
+class BlockedAgingTest(unittest.TestCase):
+    def test_dispatch_ages_blocked_tiles_once(self):
+        w = world(["..."])
+        m = Memory(blocked={(1, 0): 2, (2, 0): 1})
+        dispatch(w, ctx(w, m))
+        self.assertEqual(m.blocked, {(1, 0): 1})
+
+    def test_no_state_still_ages_blocked_tiles(self):
+        w = world(["..."])
+        m = Memory(blocked={(1, 0): 2})
+        dispatch(w, PlayContext(m, Policy(kind="bogus"), random.Random(0)))
+        self.assertEqual(m.blocked, {(1, 0): 1})
+
+
+class HysteresisTest(unittest.TestCase):
+    class Sticky(State):
+        """Takes over on ``on``, lets go only on ``off``."""
+
+        name = "Sticky"
+        on = off = False
+
+        def guard(self, world, ctx):
+            return self.on
+
+        def done(self, world, ctx):
+            return self.off
+
+        def act(self, world, ctx):
+            return StateOutcome(None, "sticky", state=self.name)
+
+    def test_active_state_runs_until_done(self):
+        sticky = self.Sticky()
+        w = world(["..."])
+        m = Memory()
+        with mock.patch.object(dispatch_module, "STATES", (STATES[0], STATES[1], sticky, *STATES[2:])):
+            sticky.on = True
+            self.assertEqual(dispatch(w, ctx(w, m)).state, "Sticky")
+            sticky.on = False
+            self.assertEqual(dispatch(w, ctx(w, m)).state, "Sticky")
+            w.pos = None
+            self.assertEqual(dispatch(w, ctx(w, m)).state, "Sync")
+            w.pos = (0, 0)
+            self.assertEqual(dispatch(w, ctx(w, m)).state, "Explore")
+            m.state, sticky.off = "Sticky", True
+            self.assertEqual(dispatch(w, ctx(w, m)).state, "Explore")
+
+
+class DecideShimTest(unittest.TestCase):
+    def test_decide_keeps_the_first_intent_reason_and_reflex(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("npc", 5, (2, 1))]
         pol = Policy(kind="scripted")
-        m = Memory()
-        rng = random.Random(0)
-        out = scripted_outcome(w, m, pol, rng, never_attack=[])
-        d = decide(w, Memory(), pol, rng)
-        self.assertEqual(out.intents[0] if out.intents else None, d.intent)
-        self.assertEqual(out.reflex, d.reflex)
+        out = scripted_outcome(w, Memory(), pol, random.Random(0), never_attack=[])
+        d = decide(w, Memory(), pol, random.Random(0))
+        self.assertTrue(out.reflex)
+        self.assertEqual(out.intents, [d.intent])
+        self.assertEqual((d.reason, d.reflex), (out.reason, out.reflex))
 
+    def test_decide_maps_no_intents_to_none(self):
+        w = world(["..."])
+        w.alive = False
+        d = decide(w, Memory(), Policy(kind="scripted"), random.Random(0))
+        self.assertIsNone(d.intent)
+        self.assertEqual((d.reason, d.reflex), ("downed", False))
+
+    def test_decide_passes_never_attack_through(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [Entity("character", 9, (2, 1))]
+        pol = Policy(kind="scripted", on_hostile="fight", hostile=["character"])
+        self.assertEqual(decide(w, Memory(), pol, random.Random(0)).intent["verb"], "Use")
+        d = decide(w, Memory(), pol, random.Random(0), never_attack=["character"])
+        self.assertEqual(d.intent["verb"], "SetPosition")
+
+    def test_fight_keeps_the_plan(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [Entity("character", 9, (2, 1))]
+        m = Memory(path=[(0, 0)], goal="explore")
+        pol = Policy(kind="scripted", on_hostile="fight", hostile=["character"])
+        decide(w, m, pol, random.Random(0))
+        self.assertEqual(m.path, [(0, 0)])
 
 if __name__ == "__main__":
     unittest.main()

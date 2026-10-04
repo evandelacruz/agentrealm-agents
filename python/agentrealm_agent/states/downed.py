@@ -13,7 +13,7 @@ class DownedState(State):
         return not world.alive
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        return StateOutcome(None, "downed", state=self.name)
+        return StateOutcome(None, "downed", state=self.name, wait=True)
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return world.alive

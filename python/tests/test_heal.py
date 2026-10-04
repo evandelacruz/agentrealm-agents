@@ -117,12 +117,19 @@ class HealStateTest(unittest.TestCase):
         w.zones[7] = {}
         m = Memory()
         out = dispatch(w, ctx(m))
-        self.assertIsNone(out.intents)
+        self.assertEqual(out.state, "Explore")
+        self.assertIsNotNone(out.intents)
+        self.assertEqual(out.yielded, ["Heal: no reachable safe tile, yield to Explore"])
         self.assertEqual(m.heal_backoff_until, w.tick + HEAL_BACKOFF_TICKS)
         w.tick += 7
-        self.assertEqual(dispatch(w, ctx(m)).state, "Explore")
+        out = dispatch(w, ctx(m))
+        self.assertEqual((out.state, out.yielded), ("Explore", []))
+        # Backoff over: Heal claims the round again, still finds nothing, backs off again.
         w.tick = m.heal_backoff_until
-        self.assertEqual(dispatch(w, ctx(m)).state, "Heal")
+        out = dispatch(w, ctx(m))
+        self.assertEqual(out.state, "Explore")
+        self.assertEqual(out.yielded, ["Heal: no reachable safe tile, yield to Explore"])
+        self.assertEqual(m.heal_backoff_until, w.tick + HEAL_BACKOFF_TICKS)
 
     def test_hostile_in_range_keeps_heal_out(self):
         # Retreat or Flee (A9) answers the hostile; Heal waits until none is in range.
@@ -201,7 +208,11 @@ class HealStateTest(unittest.TestCase):
         dispatch(w, ctx(m))
         w.tick = HEAL_WAIT_TICKS
         out = dispatch(w, ctx(m))
-        self.assertEqual(out.reason, "no health back, yield to Explore")
+        # Heal gives up and the same window goes to Explore (A44).
+        self.assertEqual(out.state, "Explore")
+        self.assertIsNotNone(out.intents)
+        self.assertEqual(out.yielded, ["Heal: no health back, yield to Explore"])
+        self.assertEqual(m.heal_backoff_until, w.tick + HEAL_BACKOFF_TICKS)
         w.tick += 7
         self.assertEqual(dispatch(w, ctx(m)).state, "Explore")
 

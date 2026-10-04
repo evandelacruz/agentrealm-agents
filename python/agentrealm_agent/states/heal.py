@@ -88,15 +88,15 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
             m.heal_regen_absent = True  # this run only: never saved (one noisy window)
             known = "no"
         else:
-            return _out(None, "measure safe-zone regen")
+            return _out(None, "measure safe-zone regen", wait=True)
     if known == "yes":
-        return _out(None, "rest in safe zone")
+        return _out(None, "rest in safe zone", wait=True)
     raise_buy_potion(m, why="hurt in town, no food or potion")
-    return _out(None, "wait in town, buy potion")
+    return _out(None, "wait in town, buy potion", wait=True)
 
 
-def _out(intents: list[dict] | None, reason: str) -> StateOutcome:
-    return StateOutcome(intents, reason, state=HealState.name)
+def _out(intents: list[dict] | None, reason: str, *, wait: bool = False) -> StateOutcome:
+    return StateOutcome(intents, reason, state=HealState.name, wait=wait)
 
 
 def _plan_blocked(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> tuple[set[Pos], set[Pos]]:

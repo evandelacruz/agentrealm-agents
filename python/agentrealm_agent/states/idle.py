@@ -20,10 +20,10 @@ class IdleState(State):
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         # Sync and Downed rank above Idle, so here we are placed and alive.
         if ctx.policy.kind == "idle":
-            return StateOutcome(None, "idle", state=self.name)
+            return StateOutcome(None, "idle", state=self.name, wait=True)
         avoid, _ = navigation_avoid_costly(ctx.memory.nav, ctx.knowledge, world.map_id, world.tick)
         options = world.open_neighbours(world.pos, avoid)
         if not options:
-            return StateOutcome(None, "wander: boxed in", state=self.name)
+            return StateOutcome(None, "wander: boxed in", state=self.name, wait=True)
         p = ctx.rng.choice(sorted(options))
         return StateOutcome([set_position(p)], "wander", state=self.name)

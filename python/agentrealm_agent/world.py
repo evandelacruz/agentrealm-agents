@@ -94,6 +94,7 @@ class MapView:
 class WorldModel:
     character_id: int
     map_id: int | None = None
+    map_level: int | None = None  # level number on interior maps (position read, Manual §5.3)
     pos: Pos | None = None
     perception: int = 1
     movement: int = 1
@@ -166,6 +167,13 @@ class WorldModel:
             self.snapshot_version = None  # entities no longer match its base
         self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
+        if "level" in p:
+            try:
+                self.map_level = int(p["level"])
+            except (TypeError, ValueError):
+                self.map_level = None
+        else:
+            self.map_level = None
 
     def perception_rect(self) -> tuple[int, int, int, int]:
         """x0, y0, width, height of the perception window around us."""

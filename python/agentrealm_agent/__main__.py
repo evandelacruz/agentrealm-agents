@@ -1,4 +1,4 @@
-"""python -m agentrealm_agent create|run|status|metrics <character.toml> ..."""
+"""python -m agentrealm_agent create|run|status|metrics|compare-metrics ..."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import time
 from . import config
 from .client import ApiError, Client
 from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
-from .run_metrics import metrics_from_trace
+from .run_metrics import compare_run_metrics, load_metrics_source, metrics_from_trace
 from .runner import Runner
 
 # How long `run` waits for the driver threads to stop before saving.
@@ -32,8 +32,16 @@ def main(argv: list[str] | None = None) -> int:
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("characters", nargs="+", help="character .toml files")
+    cmp = sub.add_parser(
+        "compare-metrics",
+        help="numeric deltas between two runs (trace, metrics JSON, or character .toml)",
+    )
+    cmp.add_argument("baseline", help="baseline trace (.jsonl), metrics snapshot (.json), or character .toml")
+    cmp.add_argument("candidate", help="candidate trace, snapshot, or character .toml")
     args = ap.parse_args(argv)
 
+    if args.cmd == "compare-metrics":
+        return compare_metrics_cmd(args.baseline, args.candidate)
     try:
         cfgs = [config.load(p) for p in args.characters]
     except (config.ConfigError, OSError) as e:
@@ -86,6 +94,32 @@ def status(client: Client, cfgs: list[config.CharacterConfig]) -> int:
             print(f"{cfg.name} ({cid}): lives={s['lives']} alive={s['alive']} placed={s['placed']}")
         except ApiError as e:
             print(f"{cfg.name} ({cid}): {e}", file=sys.stderr)
+    return 0
+
+
+def _metrics_from_spec(spec: str):
+    from pathlib import Path
+
+    path = Path(spec)
+    if path.suffix.lower() == ".toml":
+        cfg = config.load(str(path))
+        trace = cfg.trace_path
+        if not trace.is_file():
+            raise FileNotFoundError(f"no trace at {trace}")
+        return metrics_from_trace(trace)
+    if not path.is_file():
+        raise FileNotFoundError(spec)
+    return load_metrics_source(path)
+
+
+def compare_metrics_cmd(baseline: str, candidate: str) -> int:
+    try:
+        base = _metrics_from_spec(baseline)
+        cand = _metrics_from_spec(candidate)
+    except (OSError, ValueError, config.ConfigError, json.JSONDecodeError) as e:
+        print(e, file=sys.stderr)
+        return 2
+    print(json.dumps(compare_run_metrics(base, cand), sort_keys=True))
     return 0
 
 

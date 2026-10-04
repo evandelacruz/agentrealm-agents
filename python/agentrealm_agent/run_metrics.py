@@ -1,4 +1,4 @@
-"""Run metrics from a character trace (A41).
+"""Run metrics from a character trace (A41) and compare runs (A42).
 
 Parses JSONL written by ``Runner`` and returns counts and timings for
 evaluation (M12): levels cleared, deaths, kills, gems, and time per level.
@@ -6,6 +6,9 @@ evaluation (M12): levels cleared, deaths, kills, gems, and time per level.
 The trace is append-only across runs. Metrics cover the last run only: each
 run starts with a ``world`` record, and everything before the last one is
 ignored.
+
+``compare_run_metrics`` subtracts a baseline from a candidate so a regression
+shows up as a number (M12).
 """
 
 from __future__ import annotations
@@ -34,6 +37,20 @@ class RunMetrics:
             "time_per_level": {str(k): v for k, v in sorted(self.time_per_level.items())},
             "bad_lines": self.bad_lines,
         }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> RunMetrics:
+        tpl = raw.get("time_per_level") or {}
+        time_per_level = {int(k): float(v) for k, v in tpl.items()}
+        gems = raw.get("gems")
+        return cls(
+            deaths=int(raw.get("deaths", 0)),
+            kills=int(raw.get("kills", 0)),
+            gems=None if gems is None else int(gems),
+            levels_cleared=int(raw.get("levels_cleared", 0)),
+            time_per_level=time_per_level,
+            bad_lines=int(raw.get("bad_lines", 0)),
+        )
 
 
 class LevelTimer:
@@ -138,6 +155,56 @@ def metrics_from_trace(path: Path) -> RunMetrics:
     out = compute_metrics(iter_trace(path, bad))
     out.bad_lines = bad[0]
     return out
+
+
+def _parse_metrics_json(text: str) -> RunMetrics:
+    return RunMetrics.from_dict(json.loads(text))
+
+
+def _parse_metrics_cli_line(text: str) -> RunMetrics:
+    """One line from ``metrics`` stdout: ``name: {json}``."""
+    line = text.strip()
+    if not line:
+        raise ValueError("empty metrics line")
+    if ": " not in line:
+        return _parse_metrics_json(line)
+    _, payload = line.split(": ", 1)
+    return _parse_metrics_json(payload)
+
+
+def load_metrics_source(path: Path) -> RunMetrics:
+    """Metrics from a trace (``.jsonl``), snapshot (``.json``), or CLI capture."""
+    suffix = path.suffix.lower()
+    if suffix == ".jsonl":
+        return metrics_from_trace(path)
+    if suffix == ".json":
+        return _parse_metrics_json(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            return _parse_metrics_cli_line(line)
+    raise ValueError(f"no metrics in {path}")
+
+
+def compare_run_metrics(baseline: RunMetrics, candidate: RunMetrics) -> dict[str, Any]:
+    """Numeric deltas (candidate minus baseline) for each metric field."""
+    diff: dict[str, Any] = {
+        "deaths": candidate.deaths - baseline.deaths,
+        "kills": candidate.kills - baseline.kills,
+        "levels_cleared": candidate.levels_cleared - baseline.levels_cleared,
+        "bad_lines": candidate.bad_lines - baseline.bad_lines,
+    }
+    if baseline.gems is not None and candidate.gems is not None:
+        diff["gems"] = candidate.gems - baseline.gems
+    else:
+        diff["gems"] = None
+    levels = set(baseline.time_per_level) | set(candidate.time_per_level)
+    diff["time_per_level"] = {
+        str(level): (candidate.time_per_level.get(level, 0.0) - baseline.time_per_level.get(level, 0.0))
+        for level in sorted(levels)
+    }
+    return diff
 
 
 def tick_trace_extras(

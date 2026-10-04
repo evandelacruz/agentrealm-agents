@@ -7,7 +7,14 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import __main__ as cli, config
-from agentrealm_agent.run_metrics import LevelTimer, compute_metrics, metrics_from_trace, tick_trace_extras
+from agentrealm_agent.run_metrics import (
+    LevelTimer,
+    compare_run_metrics,
+    compute_metrics,
+    load_metrics_source,
+    metrics_from_trace,
+    tick_trace_extras,
+)
 
 OVERWORLD = 1
 
@@ -139,6 +146,48 @@ class MetricsCliTest(unittest.TestCase):
         rc, _, err = self.main("status", str(self.toml))
         self.assertEqual(rc, 2)
         self.assertIn("AGENTREALM_API_KEY", err)
+
+    def test_compare_metrics_cli(self):
+        base = {"call": "tick", "events": [{"kind": "Died"}], "gems": 1}
+        cand = {"call": "tick", "events": [{"kind": "Died"}, {"kind": "NPCDied"}], "gems": 4}
+        trace_base = self.dir / "base.trace.jsonl"
+        trace_cand = self.dir / "cand.trace.jsonl"
+        trace_base.write_text(json.dumps(base) + "\n", encoding="utf-8")
+        trace_cand.write_text(json.dumps(cand) + "\n", encoding="utf-8")
+        rc, out, _ = self.main("compare-metrics", str(trace_base), str(trace_cand))
+        self.assertEqual(rc, 0)
+        diff = json.loads(out)
+        self.assertEqual(diff["deaths"], 0)
+        self.assertEqual(diff["kills"], 1)
+        self.assertEqual(diff["gems"], 3)
+
+
+class CompareRunMetricsTest(unittest.TestCase):
+    def test_compare_run_metrics_deltas(self):
+        base = compute_metrics([{"call": "tick", "events": [{"kind": "Died"}], "gems": 2}])
+        cand = compute_metrics(
+            [
+                {
+                    "call": "tick",
+                    "events": [{"kind": "NPCDied"}],
+                    "gems": 5,
+                    "level_clear_ceremony": {"level_number": 1},
+                    "level_duration_s": 90.0,
+                }
+            ]
+        )
+        diff = compare_run_metrics(base, cand)
+        self.assertEqual(diff["deaths"], -1)
+        self.assertEqual(diff["kills"], 1)
+        self.assertEqual(diff["gems"], 3)
+        self.assertEqual(diff["time_per_level"]["1"], 90.0)
+
+    def test_load_metrics_from_cli_capture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "wren.metrics.txt"
+            path.write_text('wren: {"deaths": 2, "kills": 1, "gems": 0, "levels_cleared": 0, "time_per_level": {}, "bad_lines": 0}\n', encoding="utf-8")
+            m = load_metrics_source(path)
+        self.assertEqual(m.deaths, 2)
 
 
 if __name__ == "__main__":

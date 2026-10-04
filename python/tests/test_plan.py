@@ -265,6 +265,17 @@ class ScriptedOutcomeTest(unittest.TestCase):
         self.assertIsNone(plan.current(), "wait done after its seconds")
         self.assertIsNotNone(out.intents, "falls back to policy goals")
 
+    def test_stale_path_does_not_override_the_plan_head(self):
+        w = open_world()
+        plan = Plan([{"op": "travel", "to": "point", "x": 0, "y": 3}], dict(PARAM_DEFAULTS))
+        m = Memory()
+        m.path, m.goal = [(1, 0)], "explore"
+        out = scripted_outcome(w, m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
+                               never_attack=[], plan=plan)
+        self.assertEqual(m.goal, "plan_travel")
+        self.assertEqual(m.path[-1], (0, 3))
+        self.assertNotEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 0), "stale explore step not taken")
+
 
 class PathForPlanOpTest(unittest.TestCase):
     def test_explore_area_paths_to_frontier_in_the_area(self):

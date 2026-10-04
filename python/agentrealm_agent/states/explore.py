@@ -10,7 +10,7 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..plan import Plan
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import next_step, replan
+from ..pathing import next_step, path_owned_by_plan, replan
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position, take, use_on
@@ -63,7 +63,7 @@ def scripted_outcome(
         if op is not None and op["op"] == "wait":
             return StateOutcome(None, "plan wait", state=state)
 
-    step = next_step(w, plan_avoid, m.path)
+    step = next_step(w, plan_avoid, m.path) if path_owned_by_plan(plan, m) else None
     if step is None:
         replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge, plan=plan)
         step = next_step(w, plan_avoid, m.path)

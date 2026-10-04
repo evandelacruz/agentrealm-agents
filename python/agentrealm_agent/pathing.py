@@ -67,6 +67,25 @@ def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos |
     return None
 
 
+def plan_op_goal(op: GoalOp) -> str:
+    """The ``Memory.goal`` label a path for ``op`` carries, or "" when no path serves it (A34)."""
+    if op["op"] == "explore_area":
+        return "explore_area"
+    if op["op"] == "travel" and op["to"] in ("point", "entrance", "town"):
+        return {"point": "plan_travel", "entrance": "plan_entrance", "town": "plan_town"}[op["to"]]
+    return ""
+
+
+def path_owned_by_plan(plan: Plan | None, m: Memory) -> bool:
+    """False when ``m.path`` was set for something other than the plan's head op.
+
+    A path left by a ``policy.goals`` round, or from before a ``goals`` reload,
+    must not keep driving movement once the stack's head is a different op (A34).
+    """
+    op = plan.current() if plan is not None else None
+    return op is None or (m.goal != "" and m.goal == plan_op_goal(op))
+
+
 def path_for_plan_op(
     op: GoalOp,
     w: WorldModel,
@@ -83,7 +102,7 @@ def path_for_plan_op(
         if not targets and op["radius"] < EXPLORE_ANYWHERE and chebyshev(w.pos, center) > op["radius"]:
             targets = {center}
         found = nearest_target(w, targets, grid_params(policy, blocked, costly))
-        return (found[1], "explore_area") if found and found[1] else None
+        return (found[1], plan_op_goal(op)) if found and found[1] else None
     if op["op"] != "travel":
         return None
     params = grid_params(policy, blocked, costly, allow_goal_door=True)
@@ -92,16 +111,16 @@ def path_for_plan_op(
         dest_map = op.get("map_id", w.map_id)
         nav = nav_search(m, w, "plan_goto", target) if dest_map == w.map_id else None
         path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
-        return (path, "plan_travel") if path else None
+        return (path, plan_op_goal(op)) if path else None
     if op["to"] == "entrance":
         path = doors_goal_path(w, knowledge, params)
-        return (path, "plan_entrance") if path else None
+        return (path, plan_op_goal(op)) if path else None
     if op["to"] == "town":
         for map_id, pos in w.respawn_anchors:
             if map_id == w.map_id:
                 path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav_search(m, w, "plan_town", pos))
                 if path:
-                    return path, "plan_town"
+                    return path, plan_op_goal(op)
     return None
 
 

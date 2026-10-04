@@ -1,0 +1,196 @@
+"""What the agent decides, with no server. See PLAN.md."""
+
+import random
+import unittest
+
+from saims_agent.brain import Memory, choose_call, decide
+from saims_agent.config import Policy
+from saims_agent.world import Entity, WorldModel, terrain_cells
+
+
+def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
+    """A map from rows of glyphs: . dirt, # wall, D door, ~ lava. Everything given is known."""
+    glyph = {".": "dirt", "#": "wall", "D": "framed_door", "~": "lava"}
+    w = WorldModel(character_id=1, map_id=7, pos=at, perception=perception)
+    for y, row in enumerate(rows):
+        for x, g in enumerate(row):
+            w.view.tiles[(x, y)] = glyph[g]
+    w.terrain_center, w.terrain_map = at, 7
+    return w
+
+
+def scripted(**kw) -> Policy:
+    return Policy(kind="scripted", **kw)
+
+
+class PathTest(unittest.TestCase):
+    def test_path_takes_diagonals_and_avoids_walls_and_occupants(self):
+        # Movement is Chebyshev (internal/domain/movement.go): a diagonal is one step.
+        w = world([
+            "...",
+            ".#.",
+            "...",
+        ])
+        # Straight-line distance is 2; the wall in the middle makes it 3.
+        self.assertEqual(len(w.path((2, 2))), 3)
+        w.entities = [Entity("npc", 9, (1, 0))]
+        p = w.path((2, 0))
+        self.assertNotIn((1, 0), p)
+        self.assertNotIn((1, 1), p)
+
+    def test_unknown_ground_is_never_pathed(self):
+        w = world(["..", ".."])
+        self.assertIsNone(w.path((5, 5)))
+
+
+class ExploreTest(unittest.TestCase):
+    def test_explore_heads_to_the_nearest_frontier(self):
+        w = world([
+            "....",
+            "....",
+        ])
+        # Mark everything around the known strip as void except the east edge.
+        for x in range(-1, 5):
+            w.view.tiles.setdefault((x, -1), "")
+            w.view.tiles.setdefault((x, 2), "")
+        w.view.tiles[(-1, 0)] = w.view.tiles[(-1, 1)] = ""
+        d = decide(w, Memory(), scripted(goals=["explore"]), random.Random(0))
+        self.assertEqual(d.intent["verb"], "SetPosition")
+        self.assertEqual(d.intent["x"], 1)
+
+    def test_terrain_read_marks_missing_cells_as_known_void(self):
+        w = WorldModel(character_id=1, pos=(1, 1), map_id=7)
+        w.apply_terrain({"map_id": 7, "x0": 0, "y0": 0, "width": 3, "height": 3,
+                         "legend": {"d": {"block_type": "dirt"}}, "rows": ["???", "?d?", "???"]})
+        self.assertEqual(w.view.frontier(), set())
+
+    def test_terrain_grid_decodes_cells_and_art(self):
+        # docs/API.md Tiles (B102): rows are y0+j, symbols x0+i, art rides beside the grid.
+        cells = terrain_cells({"x0": 4, "y0": 6, "legend": {"s": {"block_type": "statue"}, "g": {"block_type": "grass"}},
+                               "rows": ["g?", "?s"], "art": [{"x": 5, "y": 7, "art": "statue_head", "facing": "left"}]})
+        self.assertEqual(cells, {(4, 6): {"block_type": "grass"},
+                                 (5, 7): {"block_type": "statue", "art": "statue_head", "facing": "left"}})
+
+
+class ReflexTest(unittest.TestCase):
+    def test_reflex_order(self):
+        # One rule per case; the first matching rule in PLAN.md wins.
+        cases = [
+            ("lava underfoot beats a nearby hostile",
+             ["~..", "...", "..."], (0, 0), [Entity("npc", 5, (2, 2))], scripted(),
+             "SetPosition", lambda i: (i["x"], i["y"]) != (0, 0)),
+            ("flee steps away from an npc",
+             ["...", "...", "..."], (1, 1), [Entity("npc", 5, (2, 1))], scripted(),
+             "SetPosition", lambda i: i["x"] == 0),
+            ("fight swings at a character in range",
+             ["...", "...", "..."], (1, 1), [Entity("character", 5, (2, 1))],
+             scripted(on_hostile="fight", hostile=["character"], hostile_range=1),
+             "Use", lambda i: i["target"] == {"kind": "character", "character_id": 5}),
+            ("take a supply in reach before walking",
+             ["...", "...", "..."], (1, 1), [Entity("supply", 8, (1, 2))], scripted(goals=["goto"], goto=(2, 2)),
+             "Take", lambda i: i["supply_id"] == 8),
+            ("ignore leaves the plan in charge",
+             ["...", "...", "..."], (0, 0), [Entity("npc", 5, (1, 0))],
+             scripted(on_hostile="ignore", goals=["goto"], goto=(2, 2), pickup=False),
+             "SetPosition", lambda i: (i["x"], i["y"]) == (1, 1)),
+        ]
+        for name, rows, at, ents, pol, verb, check in cases:
+            with self.subTest(name):
+                w = world(rows, at=at)
+                w.entities = ents
+                d = decide(w, Memory(), pol, random.Random(0))
+                self.assertIsNotNone(d.intent, d.reason)
+                self.assertEqual(d.intent["verb"], verb, d.reason)
+                self.assertTrue(check(d.intent), d.intent)
+
+    def test_no_goal_sends_nothing(self):
+        # Invariant 4: no standing orders. Nothing to do means no intent.
+        w = world(["..."])
+        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
+        self.assertIsNone(d.intent)
+
+    def test_replanning_keeps_off_a_rejected_tile(self):
+        # Reflex 1 (PLAN.md): after a rejected step, the replan does not
+        # walk straight back into the same tile on the next decision.
+        cases = [
+            ("goto", scripted(goals=["goto"], goto=(2, 0), pickup=False)),
+            ("explore", scripted(goals=["explore"], pickup=False)),
+            ("wander", scripted(goals=["wander"], pickup=False)),
+        ]
+        for name, pol in cases:
+            with self.subTest(name):
+                w = world([".....", "....."])
+                m = Memory(blocked={(1, 0): 1})
+                d = decide(w, m, pol, random.Random(0))
+                if d.intent is not None:
+                    self.assertNotEqual((d.intent["x"], d.intent["y"]), (1, 0), d.reason)
+                self.assertEqual(m.blocked, {}, "the block lasts one decision")
+
+    def test_doors_goal_steps_onto_the_door(self):
+        w = world(["..D"])
+        d = decide(w, Memory(), scripted(goals=["doors"]), random.Random(0))
+        self.assertEqual((d.intent["x"], d.intent["y"]), (1, 0))
+
+
+class DeathChestTest(unittest.TestCase):
+    """B103: Died names the dropped chest; the agent goes back and empties it."""
+
+    def test_recover_death_chest(self):
+        w = world(["....."], at=(4, 0))
+        w.apply_events([{"tick": 5, "events": [{"kind": "Died", "cause": "killed", "chest_id": 80, "map_id": 7, "x": 0, "y": 0}]}])
+        self.assertEqual(w.death_chest, (7, (0, 0), 80))
+        w.map_id, w.pos = 7, (4, 0)  # respawned along the strip
+
+        m = Memory()
+        d = decide(w, m, scripted(goals=["hold"]), random.Random(0))
+        self.assertEqual((d.intent["verb"], d.intent["x"]), ("SetPosition", 3))
+
+        # Next to it, the contents are not known until a snapshot lists them.
+        w.pos = (1, 0)
+        self.assertIsNone(decide(w, Memory(), scripted(goals=["hold"]), random.Random(0)).intent)
+        w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": [
+            {"id": 80, "x": 0, "y": 0, "contents": [{"id": 1321, "supply_subtype_code": "bronze_sword"}]},
+        ]}}})
+        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
+        self.assertEqual(d.intent, {"verb": "WithdrawFromChest", "chest_id": 80})
+
+        # Emptied, a dropped chest leaves the world (B116): gone from the
+        # snapshot while its block is within reach, it is forgotten rather
+        # than waited on.
+        w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": []}}})
+        self.assertIsNone(w.death_chest)
+
+    def test_death_chest_out_of_reach_is_kept(self):
+        """Out of reach, a chest missing from the snapshot may only be out of sight."""
+        w = world(["....."], at=(4, 0))
+        w.apply_events([{"tick": 5, "events": [{"kind": "Died", "cause": "killed", "chest_id": 80, "map_id": 7, "x": 0, "y": 0}]}])
+        w.map_id, w.pos = 7, (4, 0)
+        w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": []}}})
+        self.assertEqual(w.death_chest, (7, (0, 0), 80))
+
+
+class SchedulerTest(unittest.TestCase):
+    def test_call_choice(self):
+        pol = scripted(entity_refresh=5)
+        cases = [
+            ("self first", dict(need_self=True), {}, "self"),
+            ("then position", dict(need_self=False, need_position=True), {}, "position"),
+            ("terrain after moving half the perception range", dict(need_self=False, need_position=False),
+             dict(terrain_center=(0, 0), pos=(2, 0), perception=3, entities_tick=10, tick=10), "terrain"),
+            ("entities when stale", dict(need_self=False, need_position=False),
+             dict(entities_tick=0, tick=5), "entities"),
+            ("entities on alarm", dict(need_self=False, need_position=False, alarm=True),
+             dict(entities_tick=10, tick=10), "entities"),
+            ("otherwise tick", dict(need_self=False, need_position=False),
+             dict(entities_tick=10, tick=12), "tick"),
+        ]
+        for name, mem, wkw, want in cases:
+            with self.subTest(name):
+                w = world(["...."], at=(0, 0), perception=3)
+                for k, v in wkw.items():
+                    setattr(w, k, v)
+                self.assertEqual(choose_call(w, Memory(**mem), pol), want)
+
+
+if __name__ == "__main__":
+    unittest.main()

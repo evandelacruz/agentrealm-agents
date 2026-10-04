@@ -1,0 +1,8 @@
+# The first agent from docs/guides/CreateACharacterAgent.md: one random step at a time.
+name = "Drifter"
+avatar = "default"
+model_agent = "saims-reference/wander"
+world = "sandbox"
+
+[policy]
+kind = "wander"

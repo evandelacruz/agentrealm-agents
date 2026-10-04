@@ -347,6 +347,18 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(intents, [{"verb": "Step", "direction": "right"}])
         self.assertEqual(r.mem.path, [(3, 0), (4, 0)])
 
+    def test_walk_queue_stops_before_an_occupied_cell(self):
+        # A12: the cost grid prices an NPC at 50 so the plan may run through
+        # it; the queue must not Step onto it. The rest of the plan stays.
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r.world.entities = [Entity("npc", 9, (3, 0))]
+        r.mem.path = [(1, 0), (2, 0), (3, 0), (4, 0)]
+        intents = r.intents_for(Decision({"verb": "SetPosition", "x": 1, "y": 0}, "test"))
+        steps = [i for i in intents if i["verb"] == "Step"]
+        self.assertEqual(steps, [{"verb": "Step", "direction": "right"}] * 2)
+        self.assertEqual(r.mem.path, [(3, 0), (4, 0)])
+        self.assertEqual(r.mem.path_blockers, set(), "no blocker queued at send time")
+
     def test_hostile_in_range_drops_the_held_queue_and_flees(self):
         # Reflex 3 runs every round trip, not only once the queue drains.
         fake = FakeClient([

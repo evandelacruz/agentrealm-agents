@@ -8,11 +8,10 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_step, remaining_path_stale
+from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_step, remaining_path_stale, walkable_prefix
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
-from .navigation import known_prefix
 from .knowledge_base import KnowledgeBase
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
@@ -359,7 +358,7 @@ class Runner:
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
-        prefix = known_prefix(m.path, w.view)
+        prefix = walkable_prefix(w, m, self.cfg.policy, m.path)
         on_path = bool(prefix) and prefix[0] == target
         cells = list(prefix) if on_path else [target]
         # Ticks since the last applied Step, counted to the latest tick we

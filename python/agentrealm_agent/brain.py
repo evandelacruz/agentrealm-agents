@@ -254,6 +254,21 @@ def _next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos 
     return None
 
 
+def walkable_prefix(w: WorldModel, m: Memory, policy: Policy, path: list[Pos]) -> list[Pos]:
+    """The path's known prefix, cut before the first cell not open now (A12).
+
+    The cost grid prices occupants instead of refusing them, so a plan may
+    run through an NPC; the executor never queues a Step onto one.
+    """
+    avoid = _plan_avoid(w, m, policy)
+    out: list[Pos] = []
+    for p in known_prefix(path, w.view):
+        if _cell_on_path_blocked(w, avoid, p):
+            break
+        out.append(p)
+    return out
+
+
 def _plan_avoid(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
     """Tiles movement plans treat as impassable (hazards, rejections, escape)."""
     hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}

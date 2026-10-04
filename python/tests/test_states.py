@@ -8,6 +8,7 @@ from unittest import mock
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.navigation.rejection import NavMemory
 from agentrealm_agent.states import STATES, PlayContext, State, StateOutcome, dispatch, scripted_outcome
 from agentrealm_agent.world import Entity, WorldModel
 
@@ -71,7 +72,7 @@ class DispatchPriorityTest(unittest.TestCase):
 
     def test_wander_keeps_off_blocked_tiles(self):
         w = world(["..", ".."], at=(0, 0))
-        m = Memory(blocked={(1, 0): 1, (0, 1): 1})
+        m = Memory(nav=NavMemory(impassable={(7, (1, 0))}, wait_tile=(7, (0, 1))))
         out = dispatch(w, PlayContext(m, Policy(kind="wander"), random.Random(0)))
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 1))
 
@@ -83,18 +84,20 @@ class DispatchPriorityTest(unittest.TestCase):
         self.assertEqual(m.state, "")
 
 
-class BlockedAgingTest(unittest.TestCase):
-    def test_dispatch_ages_blocked_tiles_once(self):
+class NavAgingTest(unittest.TestCase):
+    def test_dispatch_ages_rejection_learnings_once(self):
         w = world(["..."])
-        m = Memory(blocked={(1, 0): 2, (2, 0): 1})
+        w.tick = 20
+        m = Memory(nav=NavMemory(wait_tile=(7, (1, 0)), occupant_until={(7, (2, 0)): 21, (7, (1, 0)): 20}))
         dispatch(w, ctx(w, m))
-        self.assertEqual(m.blocked, {(1, 0): 1})
+        self.assertIsNone(m.nav.wait_tile)
+        self.assertEqual(m.nav.occupant_until, {(7, (2, 0)): 21})
 
-    def test_no_state_still_ages_blocked_tiles(self):
+    def test_no_state_still_ages_rejection_learnings(self):
         w = world(["..."])
-        m = Memory(blocked={(1, 0): 2})
+        m = Memory(nav=NavMemory(wait_tile=(7, (1, 0))))
         dispatch(w, PlayContext(m, Policy(kind="bogus"), random.Random(0)))
-        self.assertEqual(m.blocked, {(1, 0): 1})
+        self.assertIsNone(m.nav.wait_tile)
 
 
 class HysteresisTest(unittest.TestCase):

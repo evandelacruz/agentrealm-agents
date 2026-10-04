@@ -8,7 +8,8 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_step, remaining_path_stale, walkable_prefix
+from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
+from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
@@ -337,11 +338,13 @@ class Runner:
     def reflex_while_held(self) -> Decision | None:
         """A reflex (2–4b) that fires while a queue is held, else None.
 
-        Only a firing reflex may touch memory: the plan, the blocked tiles and
-        the rng stay as they were, so the held queue's steps are not planned twice.
+        Only a firing reflex may touch the plan and the rng; they stay as they
+        were otherwise, so the held queue's steps are not planned twice. The
+        navigation learnings always stay as they were: this probe is not the
+        decision window that ages them (A14).
         """
         m = self.mem
-        saved = (list(m.path), m.goal, dict(m.blocked), self.rng.getstate())
+        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate())
         d = decide(
             self.world,
             m,
@@ -350,9 +353,10 @@ class Runner:
             never_attack=self.directives.directives.never_attack,
             knowledge=self.knowledge,
         )
+        m.nav = saved[2]
         if d.reflex:
             return d
-        m.path, m.goal, m.blocked = saved[0], saved[1], saved[2]
+        m.path, m.goal = saved[0], saved[1]
         self.rng.setstate(saved[3])
         return None
 
@@ -365,7 +369,7 @@ class Runner:
         m = self.mem
         if m.held_queue is None or m.resend_held_queue:
             return
-        if remaining_path_stale(self.world, m, self.cfg.policy):
+        if remaining_path_stale(self.world, m, self.cfg.policy, self.knowledge):
             m.resend_held_queue = m.need_position = True
 
     def clear_held_tracking(self) -> None:
@@ -418,7 +422,7 @@ class Runner:
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
-        prefix = walkable_prefix(w, m, self.cfg.policy, m.path)
+        prefix = walkable_prefix(w, m, self.cfg.policy, m.path, self.knowledge)
         on_path = bool(prefix) and prefix[0] == target
         cells = list(prefix) if on_path else [target]
         # Ticks since the last applied Step, counted to the latest tick we
@@ -444,7 +448,7 @@ class Runner:
             m.path = m.path[queued:]
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
-        m.path_blockers = path_blockers(w, m, self.cfg.policy)
+        m.path_blockers = path_blockers(w, m, self.cfg.policy, self.knowledge)
         return intents
 
     def _paced_action(self, intent: dict, pace, last_tick: int | None) -> list[dict] | None:
@@ -537,7 +541,15 @@ class Runner:
                 m.pending = None
             return False
         if intent and intent.get("verb") == "Step" and w.pos is not None:
-            reject_step(m, step_landing(w.pos, intent["direction"]))
+            rej = result.get("rejection") or {}
+            learn_step_rejection(
+                m,
+                w,
+                self.knowledge,
+                step_landing(w.pos, intent["direction"]),
+                rej.get("code"),
+                int(result.get("tick", w.tick)),
+            )
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None
@@ -594,6 +606,9 @@ class Runner:
                 m.pending_next_index = 0
                 m.held_queue, m.resend_held_queue = None, False
                 m.warp_from = None
+        # WorldModel.apply_events already parsed BlockChanged (A14).
+        for map_id, p in w.changed_blocks:
+            on_block_changed(m, map_id, p)
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})

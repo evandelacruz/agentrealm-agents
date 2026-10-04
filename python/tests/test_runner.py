@@ -118,7 +118,7 @@ class RunnerTest(unittest.TestCase):
                 self.assertGreater(len(fake.sent[0][0]), 1)
                 self.assertEqual(r.mem.pending_queue, "q1" if queue_ids else None)
                 self.assertFalse(r.mem.need_position)
-                self.assertEqual(r.mem.blocked, {})
+                self.assertIsNone(r.mem.nav.wait_tile)
                 self.assertIsNotNone(r.mem.pending_intents, "our queue is still awaited")
                 self.assertEqual(r.mem.pending_next_index, 0)
 

@@ -5,7 +5,8 @@ Shape, under ``kb.maps["<map_id>"]``:
 - ``"terrain"``: ``{"x,y": block_type}`` for every revealed tile.
 - ``"doors"``: ``[{"x", "y", "block_type"}]`` sorted by cell, plus
   ``"to_map_id"``, ``"to_x"``, ``"to_y"`` once a step onto it has been
-  observed to land somewhere. The API never names a door's destination.
+  observed to land somewhere, and ``"locked": true`` once a Step onto it
+  was refused ``door_locked`` (A14). The API never names a door's destination.
 """
 
 from __future__ import annotations
@@ -104,6 +105,18 @@ def record_warp(
                 "to_y": to_pos[1],
             }
         )
+        doors.sort(key=lambda d: (d["x"], d["y"]))
+
+
+def record_locked_door(kb: KnowledgeBase, map_id: int, pos: Pos, block_type: str) -> None:
+    """Mark a door locked after a ``door_locked`` Step rejection (A14)."""
+    with kb.lock:
+        doors: list[dict[str, Any]] = _entry(kb, map_id)[DOORS_KEY]
+        for d in doors:
+            if int(d["x"]) == pos[0] and int(d["y"]) == pos[1]:
+                d["locked"] = True
+                return
+        doors.append({"x": pos[0], "y": pos[1], "block_type": block_type, "locked": True})
         doors.sort(key=lambda d: (d["x"], d["y"]))
 
 

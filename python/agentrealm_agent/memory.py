@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .navigation.rejection import NavMemory
 from .world import Pos
 
 
@@ -27,7 +28,7 @@ class Memory:
     last_step_tick: int | None = None  # tick our last Step applied, to pace the next queue
     last_use_tick: int | None = None  # tick our last Use applied (weapon cooldown, A1)
     last_speech_tick: int | None = None  # tick our last Say/Broadcast applied (A1)
-    blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
+    nav: NavMemory = field(default_factory=NavMemory)  # what Step rejections taught the map (A14)
     alarm: bool = False  # Damaged or Attacked since the last entity read
     last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)
     calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll

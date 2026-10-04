@@ -67,7 +67,7 @@
 
   "A29": {"state": "open"},
 
-  "A30": {"state": "partial", "remaining": "Door and entrance looks (walk to an unvisited door or entrance mark and record what it needs; fits A27) and scroll reads (needs a sourced way to tell a scroll supply, GAME_NOTES open questions)."},
+  "A30": {"state": "partial", "remaining": "Scroll reads (needs a sourced way to tell a scroll supply, GAME_NOTES open questions) and the curiosity cap (A32)."},
 
   "A31": {"state": "open"},
 

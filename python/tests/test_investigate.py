@@ -10,6 +10,7 @@ from unittest import mock
 from agentrealm_agent import config, runner as runner_mod
 from agentrealm_agent.brain import choose_call, decide
 from agentrealm_agent.config import CharacterConfig, Policy
+from agentrealm_agent.door_look import apply_door_look, ready_to_look
 from agentrealm_agent.interest_list import MAX_REJECTIONS, list_interest, pick_interest_tick, sight_range
 from agentrealm_agent.investigation import cell_was_read, mark_cell_read, mark_npc_spoken, spoken_npc_ids
 from agentrealm_agent.knowledge_base import KnowledgeBase
@@ -22,7 +23,7 @@ from agentrealm_agent.world import Entity, WorldModel, ZoneFact
 
 
 def world(rows: list[str], at=(1, 1), perception=3) -> WorldModel:
-    glyph = {".": "dirt", "#": "wall", "S": "wall"}
+    glyph = {".": "dirt", "#": "wall", "S": "wall", "D": "framed_door"}
     w = WorldModel(character_id=1, map_id=7, pos=at, perception=perception)
     for y, row in enumerate(rows):
         for x, g in enumerate(row):
@@ -74,6 +75,39 @@ class InterestListTest(unittest.TestCase):
         m = Memory(path=[(2, 1), (2, 2)])
         self.assertEqual(list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), m), [])
 
+    def test_unlooked_entrance_is_nominated(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["2,1"] = {"map_id": 7, "x": 2, "y": 1}
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([it.kind for it in items], ["look_door"])
+        self.assertEqual(items[0].pos, (2, 1))
+
+    def test_looked_entrance_is_skipped(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["2,1"] = {"map_id": 7, "x": 2, "y": 1, "looked": True}
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
+
+    def test_entrance_mark_with_door_tile_is_nominated(self):
+        w = world(["...", ".D.", "..."], at=(0, 1))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["1,1"] = {"map_id": 7, "x": 1, "y": 1}
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([it.kind for it in items], ["look_door"])
+
+
+class DoorLookTest(unittest.TestCase):
+    def test_locked_door_records_key_need(self):
+        w = WorldModel(1, map_id=7, pos=(1, 1), perception=5)
+        w.view.tiles[(2, 1)] = "framed_door"
+        w.view.locked[(2, 1)] = True
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["2,1"] = {"map_id": 7, "x": 2, "y": 1}
+        self.assertTrue(ready_to_look(w, 7, (2, 1)))
+        self.assertTrue(apply_door_look(kb, w, 7, (2, 1)))
+        self.assertEqual(kb.entrances["2,1"]["needs"], "key")
+        self.assertTrue(kb.entrances["2,1"]["locked"])
 
 
 class InvestigateStateTest(unittest.TestCase):
@@ -91,7 +125,7 @@ class InvestigateStateTest(unittest.TestCase):
         self.assertEqual(d.intent["verb"], "Say")
         self.assertEqual(d.intent["target"], {"kind": "npc", "npc_id": 4})
 
-    def test_act_has_no_side_effects(self):
+    def test_act_has_no_side_effects_for_read(self):
         w = world(["...", ".S.", "..."], at=(0, 1))
         kb = KnowledgeBase.empty("sandbox")
         ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
@@ -100,6 +134,26 @@ class InvestigateStateTest(unittest.TestCase):
         dispatch(w, ctx)
         after = kb.to_dict()
         self.assertEqual(before, after, "only an applied result marks the knowledge base")
+
+    def test_investigate_walks_to_entrance_mark(self):
+        rows = ["." * 8 for _ in range(8)]
+        w = world(rows, at=(0, 0), perception=8)
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["5,5"] = {"map_id": 7, "x": 5, "y": 5}
+        w.view.tiles[(5, 5)] = "framed_door"
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        out = dispatch(w, ctx)
+        self.assertEqual(out.state, "Investigate")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+
+    def test_investigate_records_entrance_when_already_adjacent(self):
+        w = world(["...", ".D.", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["1,1"] = {"map_id": 7, "x": 1, "y": 1}
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        out = dispatch(w, ctx)
+        self.assertTrue(kb.entrances["1,1"]["looked"])
+        self.assertIn("Investigate: looked", out.yielded[0])
 
 
 class SightRangeTest(unittest.TestCase):

@@ -853,7 +853,7 @@ def _fmt_intent(i: dict | None) -> str:
         return "Wait"
     if verb == "Use":
         t = i["target"]
-        return f"Use({t.get('kind')}:{t.get('character_id', '')})"
+        return f"Use({t.get('kind')}:{t.get('character_id', t.get('npc_id', ''))})"
     if verb == "Take":
         return f"Take({i['supply_id']})"
     if verb == "WithdrawFromChest":

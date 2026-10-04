@@ -13,6 +13,12 @@ def use_on(e: Entity) -> dict:
     return {"verb": "Use", "target": {"kind": "character", "character_id": e.id}}
 
 
+def use_npc(npc: Entity) -> dict:
+    # The server resolves the block the NPC stands on the tick the Use runs (B126),
+    # so a queued swing follows an NPC that moved after the plan.
+    return {"verb": "Use", "target": {"kind": "npc", "npc_id": npc.id}}
+
+
 def use_block(p: Pos) -> dict:
     return {"verb": "Use", "target": {"kind": "block", "x": p[0], "y": p[1]}}
 

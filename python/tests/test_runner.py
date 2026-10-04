@@ -205,6 +205,26 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(r.mem.last_speech_tick, 21)
         self.assertEqual(r.mem.last_use_tick, 20)
 
+    def test_npc_out_of_range_drops_the_swings_and_replans(self):
+        # A45: an NPC that left sight, died or moved out of reach answers the
+        # queued npc-target swing target_out_of_range; the rest is dropped and
+        # the next poll re-plans from a fresh position.
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        swing = {"verb": "Use", "target": {"kind": "npc", "npc_id": 5}}
+        r.mem.pending_intents = [swing, {"verb": "Wait"}, swing, {"verb": "Step", "direction": "left"}]
+        r.mem.pending_queue, r.mem.pending_next_index = "q1", 0
+        rejection = {"category": "range", "code": "target_out_of_range", "retryability": "precondition"}
+        results = [
+            {"queue_id": "q1", "index": 0, "tick": 30, "outcome": "applied"},
+            {"queue_id": "q1", "index": 1, "tick": 31, "outcome": "applied"},
+            {"queue_id": "q1", "index": 2, "tick": 32, "outcome": "rejected", "rejection": rejection},
+        ]
+        self.assertTrue(r.apply_intent_results(results))
+        self.assertEqual(r.mem.last_use_tick, 30)
+        self.assertIsNone(r.mem.pending_intents)
+        self.assertIsNone(r.mem.pending_queue)
+        self.assertTrue(r.mem.need_position)
+
     def test_rejected_use_does_not_start_the_cooldown(self):
         r = self.runner(FakeClient([]), Policy(goals=["hold"]))
         use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}

@@ -181,6 +181,11 @@ class UseTargetBlockTest(unittest.TestCase):
         use = {"verb": "Use", "target": {"kind": "character", "character_id": 7}}
         self.assertIsNone(it.use_target_block(use, []))
 
+    def test_npc_target_resolves_to_where_it_was_seen(self):
+        use = {"verb": "Use", "target": {"kind": "npc", "npc_id": 7}}
+        self.assertEqual(it.use_target_block(use, [Entity("character", 7, (1, 1)), Entity("npc", 7, (5, 6))]), (5, 6))
+        self.assertIsNone(it.use_target_block(use, []))
+
     def test_npc_type_only_for_one_npc_on_the_block(self):
         rat = Entity("npc", 1, (2, 1), "rat")
         self.assertEqual(it.npc_type_on_block((2, 1), [rat, Entity("character", 2, (2, 1))]), "rat")

@@ -219,6 +219,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A21 | **Shop.** Buy in-sight priced supplies the plan wants; restock to `potion_reserve`. Consumes Heal's `buy` ops (`Memory.buy_signals`, A10). | A5, A18 |
 | A22 | **Gather.** Gems from grass, bushes and gem piles in safe-ish ground. | A5 |
 | A23 | **Fight.** Group-aware win estimate, `never_attack`, retreat queued behind attacks, conservative until measured, never from a safe zone. Gates Fight on A9's estimate (`survival.would_lose`): a fight it says we lose goes to **Flee**, and the "threat outclasses us" **Retreat** trigger lands with it. | A5, A6, A8, A9 |
+| A45 | **Use on an NPC by id.** Fight's swings target `{"kind": "npc", "npc_id": N}` (`states/intents.use_npc`), so the server swings at the block the NPC stands on the tick the `Use` runs (B126) and a queued swing follows an NPC that moved after the plan. An NPC out of sight, dead or unknown that tick is `target_out_of_range`, which drops the rest of the queue and re-plans like any rejection. `never_attack` checks the target NPC's type by id. The item table matches `NPCDamaged` against the block the NPC was last seen on, so a hit after it moved is left unattributed, never misfiled. No `direction` target is used: the agent never aims a `Use` at a neighbour meant relative to where it will stand. | A23 |
 | A24 | **Healing from food and potions.** `Arm` + `Use` self; heal amounts learned per type; re-`Arm` the weapon after a drink (A10 leaves it unarmed). | A10, A20 |
 | A25 | **M8 acceptance.** M8 done-when. | A16, A19, A21, A22, A23, A24 |
 
@@ -264,7 +265,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A41 | **Run metrics.** Levels cleared, deaths, kills, gems, time per level, from the trace. | A5 |
 | A42 | **Comparison across commits.** A regression shows up as a number. | A41 |
 
-**Fight** (A23) swings at NPCs and characters when the win estimate clears `fight_margin`, using `Use` on the NPC's block, with retreat steps queued behind the attack. Out of weapon reach it steps closer; with no open step closer it lets go and **Flee** runs.
+**Fight** (A23) swings at NPCs and characters when the win estimate clears `fight_margin`, using `Use` on the NPC by id (the server finds its block on the tick the swing runs, A45), with retreat steps queued behind the attack. Out of weapon reach it steps closer; with no open step closer it lets go and **Flee** runs.
 
 The playable plan's strategist (M4) replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the remaining one-intent queues in **Real time**; until then those sections describe the shipped agent. Since A5, `states.dispatch` picks the intents; `brain.decide` stays only as a shim over it that keeps the first intent as a `Decision`, until the runner sends a state's whole queue. The call budget is unchanged: one request per character per tick, burst 3.
 

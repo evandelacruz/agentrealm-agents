@@ -80,7 +80,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 
 ## Combat
 
-- **No battle state.** Attacking is `Use` with a weapon armed: on a character, or on the block an NPC stands on (M §11; Guide).
+- **No battle state.** Attacking is `Use` with a weapon armed: on a character, or on the block an NPC stands on (M §11; Guide). A `Use` target `{"kind": "npc", "npc_id": N}` resolves that block on the tick the `Use` runs; an NPC not in sight that tick, dead, or unknown is `target_out_of_range`, and reach, safe zones, cooldown and the hit roll are those of a `Use` on the block (API Use, B126). `{"kind": "direction", "direction": d}` with `Step`'s eight words names the neighbouring block at run time.
 - **Rolls.**
   - To hit: d20 + attack ≥ 10 + target defense + target armor defense. 1 always misses, 20 always hits.
   - Damage: uniform from 1 to max(1, attack + weapon damage − defense − armor defense).

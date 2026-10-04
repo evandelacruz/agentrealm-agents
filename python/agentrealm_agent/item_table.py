@@ -211,6 +211,17 @@ def use_target_block(intent: dict, entities: list[Any]) -> Pos | None:
             return (int(target["x"]), int(target["y"]))
         except (KeyError, TypeError, ValueError):
             return None
+    if kind == "npc":
+        # Where we last saw it: the server swings at the block it stands on that
+        # tick, so a move since our read leaves the hit unmatched, never misfiled.
+        try:
+            nid = int(target["npc_id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        for e in entities:
+            if e.kind == "npc" and e.id == nid:
+                return e.pos
+        return None
     if kind == "character":
         try:
             cid = int(target["character_id"])

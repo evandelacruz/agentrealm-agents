@@ -1,4 +1,4 @@
-"""A23: Fight state, win-estimate gating, and NPC block attacks."""
+"""A23, A45: Fight state, win-estimate gating, and NPC attacks by id."""
 
 import random
 import unittest
@@ -45,11 +45,12 @@ class FightTargetTest(unittest.TestCase):
         w.entities = [Entity("npc", 5, (1, 0), code="goblin")]
         self.assertIsNone(fight_target(w, Policy(hostile=["npc"], on_hostile="fight"), ["goblin"]))
 
-    def test_attack_intent_uses_block_for_npc(self):
+    def test_attack_intent_targets_npc_by_id(self):
+        # The server finds the NPC's block on the tick the Use runs (A45, B126).
         e = Entity("npc", 3, (2, 1))
         self.assertEqual(
             attack_intent(e),
-            {"verb": "Use", "target": {"kind": "block", "x": 2, "y": 1}},
+            {"verb": "Use", "target": {"kind": "npc", "npc_id": 3}},
         )
 
 
@@ -77,7 +78,10 @@ class FightStateTest(unittest.TestCase):
             ctx(params={"risk": 1.0, "lives_floor": 1}, on_hostile="fight", hostile=["npc"], hostile_range=2),
         )
         self.assertEqual(out.state, "Fight")
-        self.assertEqual(out.intents[0]["target"], {"kind": "block", "x": 2, "y": 1})
+        self.assertEqual(out.intents[0]["target"], {"kind": "npc", "npc_id": 5})
+        swings = [i for i in out.intents if i["verb"] == "Use"]
+        self.assertTrue(swings)
+        self.assertTrue(all(i["target"] == {"kind": "npc", "npc_id": 5} for i in swings))
 
     def test_unmeasured_npc_at_default_params_flees(self):
         w = world(["...", "...", "..."], at=(1, 1))

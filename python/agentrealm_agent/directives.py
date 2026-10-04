@@ -140,6 +140,12 @@ def use_blocked_by_never_attack(
             if e.kind == "character" and e.id == cid:
                 return attack_forbidden(e, never_attack)
         return "character" in never_attack
+    if kind == "npc":
+        nid = target.get("npc_id")
+        for e in entities:
+            if e.kind == "npc" and e.id == nid:
+                return attack_forbidden(e, never_attack)
+        return False
     if kind == "block":
         x, y = target.get("x"), target.get("y")
         if x is None or y is None:

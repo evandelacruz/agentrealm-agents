@@ -142,6 +142,13 @@ class NeverAttackTest(unittest.TestCase):
         self.assertTrue(use_blocked_by_never_attack(intent, ents, ["goblin"]))
         self.assertFalse(use_blocked_by_never_attack(intent, ents, ["character"]))
 
+    def test_executor_drops_npc_use_on_never_attack_npc(self):
+        intent = {"verb": "Use", "target": {"kind": "npc", "npc_id": 9}}
+        ents = [Entity("npc", 9, (2, 1), code="goblin"), Entity("npc", 4, (3, 1), code="rat")]
+        self.assertTrue(use_blocked_by_never_attack(intent, ents, ["goblin"]))
+        self.assertFalse(use_blocked_by_never_attack(intent, ents, ["rat"]))
+        self.assertFalse(use_blocked_by_never_attack(intent, [], ["goblin"]))
+
     def test_executor_keeps_self_use(self):
         # Heal's Use on itself is eating or drinking, not an attack (A10).
         own = {"verb": "Use", "target": {"kind": "character", "character_id": 7}}

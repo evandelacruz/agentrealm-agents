@@ -13,7 +13,7 @@ from ..survival import nearest_safe_goal, on_safe_tile, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
-from .intents import set_position, use_block, use_on
+from .intents import set_position, use_npc, use_on
 
 
 # ``Use`` swings queued per submit, ahead of the retreat tail.
@@ -36,7 +36,7 @@ def fight_target(w: WorldModel, policy, never_attack: list[str]) -> Entity | Non
 
 def attack_intent(target: Entity) -> dict:
     if target.kind == "npc":
-        return use_block(target.pos)
+        return use_npc(target)
     return use_on(target)
 
 

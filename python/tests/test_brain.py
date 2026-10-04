@@ -185,18 +185,48 @@ class DeathChestTest(unittest.TestCase):
         self.assertEqual(w.death_chest, (7, (0, 0), 80))
 
 
+class TerrainStaleTest(unittest.TestCase):
+    def test_triggers(self):
+        w = world(["...."], at=(0, 0), perception=5)
+        self.assertFalse(w.terrain_stale(), "fresh after world() seeds terrain at pos")
+        w.terrain_center = (0, 0)
+        self.assertFalse(w.terrain_stale(), "still at the read center")
+        w.pos = (2, 0)
+        self.assertFalse(w.terrain_stale(), "half the window is perception // 2")
+        w.pos = (3, 0)
+        self.assertTrue(w.terrain_stale(), "past half the perception window")
+        w.pos = (0, 0)
+        w.map_id = 8
+        self.assertTrue(w.terrain_stale(), "map change")
+        w.map_id = 7
+        w.terrain_map = None
+        self.assertTrue(w.terrain_stale(), "never read on this map")
+
+
 class SchedulerTest(unittest.TestCase):
     def test_call_choice(self):
-        pol = scripted(entity_refresh=5)
+        pol = scripted(entity_refresh=5, hostile=["npc"])
         cases = [
             ("self first", dict(need_self=True), {}, "self"),
             ("then position", dict(need_self=False, need_position=True), {}, "position"),
             ("terrain after moving half the perception range", dict(need_self=False, need_position=False),
              dict(terrain_center=(0, 0), pos=(2, 0), perception=3, entities_tick=10, tick=10), "terrain"),
+            ("terrain on map change", dict(need_self=False, need_position=False),
+             dict(terrain_center=(0, 0), terrain_map=7, map_id=8, pos=(0, 0), entities_tick=10, tick=10), "terrain"),
             ("entities when stale", dict(need_self=False, need_position=False),
              dict(entities_tick=0, tick=5), "entities"),
             ("entities on alarm", dict(need_self=False, need_position=False, alarm=True),
              dict(entities_tick=10, tick=10), "entities"),
+            ("terrain before entities when both are stale", dict(need_self=False, need_position=False),
+             dict(terrain_center=(0, 0), pos=(2, 0), perception=3, entities_tick=0, tick=5), "terrain"),
+            ("calm skips inside the gap", dict(need_self=False, need_position=False, last_poll_tick=10, calm_poll_interval=7),
+             dict(entities_tick=10, tick=12), "skip"),
+            ("a spare calm window reads stale terrain",
+             dict(need_self=False, need_position=False, last_poll_tick=10, calm_poll_interval=7),
+             dict(terrain_center=(0, 0), pos=(3, 0), perception=5, entities_tick=10, tick=12), "terrain"),
+            ("a hostile within 3 blocks polls inside the gap",
+             dict(need_self=False, need_position=False, last_poll_tick=10, calm_poll_interval=7),
+             dict(entities=[Entity("npc", 9, (3, 0))], entities_tick=10, tick=11), "tick"),
             ("otherwise tick", dict(need_self=False, need_position=False),
              dict(entities_tick=10, tick=12), "tick"),
         ]

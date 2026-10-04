@@ -55,9 +55,9 @@ Checked top to bottom:
 1. Position unknown, or a door or death may have moved us → read position.
 2. Terrain around us is stale (map changed, or we moved more than half the perception range since the last terrain read) → read terrain.
 3. Entities are older than the character's `entity_refresh` ticks, or a `Damaged`/`Attacked` event just arrived → read entities.
-4. Otherwise → `POST tick` with the chosen intent, or with none.
+4. Otherwise → `POST tick` with the chosen intent, or with none, when the cadence below says it is due; else send nothing this window.
 
-`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the intents still queued run out. A paced movement queue opens the gap up to its length; a one-intent queue still brings the next poll a tick later. A window the gap skips sends nothing. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
+`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the intents still queued run out. A paced movement queue opens the gap up to its length; a one-intent queue still brings the next poll a tick later. A window the gap skips sends nothing. The reads above outrank it, so a calm gap's spare windows go to stale terrain first, then stale entities. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
 
 Self is re-read after `Died`, and every 60 windows otherwise.
 

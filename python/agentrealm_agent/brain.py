@@ -47,9 +47,10 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
     """One of: self, position, terrain, entities, tick, skip.
 
     skip spends nothing this window: calm, and the last poll's queue still
-    covers it (poll_cadence, M6). Urgent windows still take the reads above
-    tick, because entities come only from reads until snapshot deltas fold
-    them in (M6 remaining).
+    covers it (poll_cadence, M6). The reads rank above tick, so a calm gap's
+    spare windows go to stale terrain first, then stale entities. Urgent
+    windows still take those reads, because entities come only from reads
+    until snapshot deltas fold them in (M6 remaining).
     """
     if m.cancel_queue:
         return "tick"  # stop the stale queue before reading anything
@@ -59,7 +60,7 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
         return "position"
     if policy.kind in ("idle",):
         return gate_tick_call(w, m, policy)
-    if w.terrain_map != w.map_id or w.terrain_center is None or chebyshev(w.terrain_center, w.pos) > w.perception // 2:
+    if w.terrain_stale():
         return "terrain"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
         return "entities"

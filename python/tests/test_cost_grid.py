@@ -5,7 +5,14 @@ import unittest
 
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import Policy
-from agentrealm_agent.navigation import CostGridParams, cost_path, known_prefix, nearest_target
+from agentrealm_agent.navigation import (
+    CostGridParams,
+    NavSearchState,
+    cost_path,
+    known_prefix,
+    macro_cell,
+    nearest_target,
+)
 from agentrealm_agent.navigation.planner import COSTLY_STEP, _Grid
 from agentrealm_agent.world import Entity, WorldModel
 
@@ -97,6 +104,54 @@ class CostGridTest(unittest.TestCase):
     def test_known_prefix_stops_at_fog(self):
         w = grid([".."])
         self.assertEqual(known_prefix([(1, 0), (2, 0), (3, 0)], w.view), [(1, 0)])
+
+
+class TwoLevelSearchTest(unittest.TestCase):
+    def test_far_goal_plans_inside_perception_when_direct_search_is_budgeted(self):
+        from agentrealm_agent.navigation import planner as nav_mod
+
+        w = grid(["." * 40], at=(0, 0), perception=3)
+        goal = (30, 0)
+        nav = NavSearchState(goal=goal)
+        old_fine = nav_mod.FINE_NODE_BUDGET
+        nav_mod.FINE_NODE_BUDGET = 5
+        try:
+            p = cost_path(w, goal, CostGridParams(), nav=nav)
+            self.assertIsNotNone(p)
+            x0, _, width, _ = w.perception_rect()
+            x1 = x0 + width
+            for step in p:
+                self.assertGreaterEqual(step[0], x0)
+                self.assertLess(step[0], x1)
+            self.assertTrue(nav.coarse_done)
+            self.assertEqual(nav.macro_path[0], macro_cell((0, 0)))
+        finally:
+            nav_mod.FINE_NODE_BUDGET = old_fine
+
+    def test_unreachable_goal_still_returns_none(self):
+        w = grid(["#####", "#...#", "#...#", "#...#", "#####"], at=(10, 10), perception=5)
+        w.view.tiles[(10, 10)] = "dirt"
+        self.assertIsNone(cost_path(w, (2, 2), CostGridParams()))
+
+    def test_coarse_search_resumes_across_replans(self):
+        from agentrealm_agent.navigation import planner as nav_mod
+
+        w = grid(["." * 40], at=(0, 0), perception=3)
+        nav = NavSearchState(goal=(30, 0))
+        old_fine, old_coarse = nav_mod.FINE_NODE_BUDGET, nav_mod.COARSE_NODE_BUDGET
+        nav_mod.FINE_NODE_BUDGET = 5
+        nav_mod.COARSE_NODE_BUDGET = 1
+        try:
+            self.assertIsNone(cost_path(w, (30, 0), CostGridParams(), nav=nav))
+            self.assertFalse(nav.coarse_done)
+            self.assertTrue(nav.coarse_frontier)
+            nav_mod.COARSE_NODE_BUDGET = old_coarse
+            p = cost_path(w, (30, 0), CostGridParams(), nav=nav)
+            self.assertIsNotNone(p)
+            self.assertTrue(nav.coarse_done)
+        finally:
+            nav_mod.FINE_NODE_BUDGET = old_fine
+            nav_mod.COARSE_NODE_BUDGET = old_coarse
 
 
 class KnownPrefixBrainTest(unittest.TestCase):

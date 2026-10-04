@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from .config import Policy
 from .directives import attack_forbidden
 from .executor.movement import step_landing
-from .navigation import CostGridParams, cost_path, known_prefix, nearest_target
+from .navigation import CostGridParams, NavSearchState, cost_path, known_prefix, nearest_target
 from .poll_cadence import gate_tick_call, is_urgent
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import next_zone_probe
@@ -50,6 +50,7 @@ class Memory:
     resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
     path_blockers: set = field(default_factory=set)  # blocked cells the walk queue already crossed when sent (A43)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
+    nav: NavSearchState | None = None  # resume two-level search across replans (A13)
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
@@ -121,6 +122,7 @@ BLOCK_WINDOWS = 1  # decisions to keep off a tile after a step into it was rejec
 def reject_step(m: Memory, p: Pos) -> None:
     """Reflex 1: a rejected step clears the plan and keeps us off that tile."""
     m.path, m.goal = [], ""
+    m.nav = None
     m.blocked[p] = BLOCK_WINDOWS
 
 
@@ -199,7 +201,7 @@ def _decide(
             if contents is None:
                 return Decision(None, f"open chest {chest_id}")
         elif m.goal != "chest" or not _next_step(w, plan_avoid, m.path):
-            found = cost_path(w, at, _grid(policy, plan_avoid, escape))
+            found = cost_path(w, at, _grid(policy, plan_avoid, escape), nav=_nav(m, at))
             if _next_step(w, plan_avoid, found):
                 m.path, m.goal = found, "chest"
 
@@ -335,11 +337,18 @@ def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocke
     so a later goal (explore, say) gets the move while terrain reads catch up.
     """
     m.path, m.goal = [], ""
+    m.nav = None
     for goal in policy.goals:
-        found = _plan_goal(goal, w, policy, rng, blocked, costly)
+        found = _plan_goal(goal, w, m, policy, rng, blocked, costly)
         if _next_step(w, blocked, found):
             m.path, m.goal = found, goal
             return
+
+
+def _nav(m: Memory, goal: Pos) -> NavSearchState:
+    if m.nav is None or m.nav.goal != goal:
+        m.nav = NavSearchState(goal=goal)
+    return m.nav
 
 
 def _grid(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_door: bool = False) -> CostGridParams:
@@ -352,7 +361,13 @@ def _grid(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_door: bo
 
 
 def _plan_goal(
-    goal: str, w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]
+    goal: str,
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    rng: random.Random,
+    blocked: set[Pos],
+    costly: set[Pos],
 ) -> list[Pos] | None:
     view = w.view
     if goal == "hold":
@@ -362,7 +377,9 @@ def _plan_goal(
         return [rng.choice(sorted(options))] if options else None
     if goal == "goto":
         target = tuple(policy.goto)
-        return cost_path(w, target, _grid(policy, blocked, costly, allow_goal_door=True)) or None
+        return cost_path(
+            w, target, _grid(policy, blocked, costly, allow_goal_door=True), nav=_nav(m, target)
+        ) or None
     if goal == "doors":
         doors = {p for p, b in view.tiles.items() if b in DOORS}
         found = nearest_target(w, doors, _grid(policy, blocked, costly, allow_goal_door=True))

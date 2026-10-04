@@ -8,7 +8,8 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_step, remaining_path_stale, walkable_prefix
+from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
+from .navigation.rejection import clear_prefer_land_on_step, learn_step_rejection, on_block_changed, copy_nav
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
@@ -206,7 +207,14 @@ class Runner:
                 # reads it before this poll), so the new walk starts from
                 # where we are. With no walk to send, stop the old queue.
                 self.clear_held_tracking()
-                d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+                d = decide(
+                    w,
+                    m,
+                    self.cfg.policy,
+                    self.rng,
+                    never_attack=self.directives.directives.never_attack,
+                    knowledge=self.knowledge,
+                )
                 intents = self._apply_never_attack(self.intents_for(d))
                 if intents:
                     d = Decision(d.intent, "path stale, resend")
@@ -217,7 +225,14 @@ class Runner:
                 intents = None
         else:
             m.resend_held_queue = False
-            d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+            d = decide(
+                w,
+                m,
+                self.cfg.policy,
+                self.rng,
+                never_attack=self.directives.directives.never_attack,
+                knowledge=self.knowledge,
+            )
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
@@ -288,11 +303,18 @@ class Runner:
         the rng stay as they were, so the held queue's steps are not planned twice.
         """
         m = self.mem
-        saved = (list(m.path), m.goal, dict(m.blocked), self.rng.getstate())
-        d = decide(self.world, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate())
+        d = decide(
+            self.world,
+            m,
+            self.cfg.policy,
+            self.rng,
+            never_attack=self.directives.directives.never_attack,
+            knowledge=self.knowledge,
+        )
         if d.reflex:
             return d
-        m.path, m.goal, m.blocked = saved[0], saved[1], saved[2]
+        m.path, m.goal, m.nav = saved[0], saved[1], saved[2]
         self.rng.setstate(saved[3])
         return None
 
@@ -305,7 +327,7 @@ class Runner:
         m = self.mem
         if m.held_queue is None or m.resend_held_queue:
             return
-        if remaining_path_stale(self.world, m, self.cfg.policy):
+        if remaining_path_stale(self.world, m, self.cfg.policy, self.knowledge):
             m.resend_held_queue = m.need_position = True
 
     def clear_held_tracking(self) -> None:
@@ -358,7 +380,7 @@ class Runner:
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
-        prefix = walkable_prefix(w, m, self.cfg.policy, m.path)
+        prefix = walkable_prefix(w, m, self.cfg.policy, m.path, self.knowledge)
         on_path = bool(prefix) and prefix[0] == target
         cells = list(prefix) if on_path else [target]
         # Ticks since the last applied Step, counted to the latest tick we
@@ -384,7 +406,7 @@ class Runner:
             m.path = m.path[queued:]
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
-        m.path_blockers = path_blockers(w, m, self.cfg.policy)
+        m.path_blockers = path_blockers(w, m, self.cfg.policy, self.knowledge)
         return intents
 
     def _paced_action(self, intent: dict, pace, last_tick: int | None) -> list[dict] | None:
@@ -459,6 +481,7 @@ class Runner:
         if result.get("outcome") != "rejected":
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
+                clear_prefer_land_on_step(m, w.pos)
                 m.last_step_tick = int(result.get("tick", w.tick))
                 if w.view.tiles.get(w.pos) in DOORS:
                     # A door moves us; the Steps still queued behind this one
@@ -474,7 +497,15 @@ class Runner:
                 m.pending = None
             return False
         if intent and intent.get("verb") == "Step" and w.pos is not None:
-            reject_step(m, step_landing(w.pos, intent["direction"]))
+            rej = result.get("rejection") or {}
+            learn_step_rejection(
+                m,
+                w,
+                self.knowledge,
+                step_landing(w.pos, intent["direction"]),
+                rej.get("code"),
+                int(result.get("tick", w.tick)),
+            )
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None
@@ -498,6 +529,16 @@ class Runner:
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
                 m.held_queue, m.resend_held_queue = None, False
+            if kind == "BlockChanged":
+                try:
+                    on_block_changed(
+                        m,
+                        int(ev["map_id"]),
+                        (int(ev["x"]), int(ev["y"])),
+                        w.map_id,
+                    )
+                except (KeyError, TypeError, ValueError):
+                    pass
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})

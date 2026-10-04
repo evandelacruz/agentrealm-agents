@@ -12,7 +12,9 @@ from dataclasses import dataclass, field
 from .config import Policy
 from .directives import attack_forbidden
 from .executor.movement import step_landing
+from .knowledge_base import KnowledgeBase
 from .navigation import CostGridParams, cost_path, known_prefix, nearest_target
+from .navigation.rejection import NavMemory, consume_wait_tile, copy_nav, navigation_avoid_costly
 from .poll_cadence import gate_tick_call, is_urgent
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import next_zone_probe
@@ -41,7 +43,7 @@ class Memory:
     last_step_tick: int | None = None  # tick our last Step applied, to pace the next queue
     last_use_tick: int | None = None  # tick our last Use applied (weapon cooldown, A1)
     last_speech_tick: int | None = None  # tick our last Say/Broadcast applied (A1)
-    blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
+    nav: NavMemory = field(default_factory=NavMemory)
     alarm: bool = False  # Damaged or Attacked since the last entity read
     last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)
     calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll
@@ -115,15 +117,6 @@ class Decision:
     reflex: bool = False
 
 
-BLOCK_WINDOWS = 1  # decisions to keep off a tile after a step into it was rejected
-
-
-def reject_step(m: Memory, p: Pos) -> None:
-    """Reflex 1: a rejected step clears the plan and keeps us off that tile."""
-    m.path, m.goal = [], ""
-    m.blocked[p] = BLOCK_WINDOWS
-
-
 def decide(
     w: WorldModel,
     m: Memory,
@@ -131,18 +124,22 @@ def decide(
     rng: random.Random,
     *,
     never_attack: list[str] | None = None,
+    knowledge: KnowledgeBase | None = None,
 ) -> Decision:
-    """The reflex list from PLAN.md. The first rule that matches wins.
-
-    Each call is one decision window: it ages the tiles reflex 1 blocked.
-    """
-    d = _decide(w, m, policy, rng, never_attack=never_attack or [])
-    m.blocked = {p: n - 1 for p, n in m.blocked.items() if n > 1}
+    """The reflex list from PLAN.md. The first rule that matches wins."""
+    d = _decide(w, m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
+    consume_wait_tile(m)
     return d
 
 
 def _decide(
-    w: WorldModel, m: Memory, policy: Policy, rng: random.Random, *, never_attack: list[str]
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    rng: random.Random,
+    *,
+    never_attack: list[str],
+    knowledge: KnowledgeBase | None,
 ) -> Decision:
     if policy.kind == "idle" or w.pos is None or not w.alive:
         return Decision(None, "idle")
@@ -152,10 +149,10 @@ def _decide(
     if policy.kind == "wander":
         return _wander(w, m, rng)
 
-    # 1. A rejected step is kept out of every choice below until it ages out.
-    # Blocks that hurt are kept out the same way, so no plan walks into one.
+    # Rejection learnings and hazards stay out of plans (A14, reflex 1).
+    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
     hazards = {p for p, b in view.tiles.items() if b in policy.avoid_blocks}
-    blocked = set(m.blocked) | hazards
+    blocked = nav_avoid | hazards
     # Plans keep off hazards, except when standing on one with no safe step
     # off: then they may cross hazards, as few as they can, to get out.
     escape: set[Pos] = set()
@@ -167,6 +164,14 @@ def _decide(
             return Decision(set_position(min(safe)), f"off {view.tiles.get(here)}", reflex=True)
         escape = hazards
     plan_avoid = blocked - escape
+    plan_costly = escape | nav_costly
+
+    # would_strand: step onto the landing cell before other goals.
+    if m.nav.prefer_land is not None:
+        land = m.nav.prefer_land
+        if _step_open(w, plan_avoid, land):
+            m.path, m.goal = [land], "land"
+            return Decision(set_position(land), "land first")
 
     # 3. Hostiles.
     hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
@@ -199,7 +204,7 @@ def _decide(
             if contents is None:
                 return Decision(None, f"open chest {chest_id}")
         elif m.goal != "chest" or not _next_step(w, plan_avoid, m.path):
-            found = cost_path(w, at, _grid(policy, plan_avoid, escape))
+            found = cost_path(w, at, _grid(policy, plan_avoid, plan_costly))
             if _next_step(w, plan_avoid, found):
                 m.path, m.goal = found, "chest"
 
@@ -207,7 +212,7 @@ def _decide(
     # the next step is not open or not yet seen.
     step = _next_step(w, plan_avoid, m.path)
     if step is None:
-        _replan(w, m, policy, rng, plan_avoid, escape)
+        _replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge)
         step = _next_step(w, plan_avoid, m.path)
     if step is not None:
         return Decision(set_position(step), f"{m.goal} → {m.path[-1]}")
@@ -217,7 +222,7 @@ def _decide(
 
 
 def _wander(w: WorldModel, m: Memory, rng: random.Random) -> Decision:
-    options = w.open_neighbours(w.pos, set(m.blocked))
+    options = w.open_neighbours(w.pos, set(m.nav.impassable))
     if not options:
         return Decision(None, "wander: boxed in")
     return Decision(set_position(rng.choice(sorted(options))), "wander")
@@ -254,13 +259,15 @@ def _next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos 
     return None
 
 
-def walkable_prefix(w: WorldModel, m: Memory, policy: Policy, path: list[Pos]) -> list[Pos]:
+def walkable_prefix(
+    w: WorldModel, m: Memory, policy: Policy, path: list[Pos], knowledge: KnowledgeBase | None = None
+) -> list[Pos]:
     """The path's known prefix, cut before the first cell not open now (A12).
 
     The cost grid prices occupants instead of refusing them, so a plan may
     run through an NPC; the executor never queues a Step onto one.
     """
-    avoid = _plan_avoid(w, m, policy)
+    avoid = _plan_avoid(w, m, policy, knowledge)
     out: list[Pos] = []
     for p in known_prefix(path, w.view):
         if _cell_on_path_blocked(w, avoid, p):
@@ -269,10 +276,13 @@ def walkable_prefix(w: WorldModel, m: Memory, policy: Policy, path: list[Pos]) -
     return out
 
 
-def _plan_avoid(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
+def _plan_avoid(
+    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None
+) -> set[Pos]:
     """Tiles movement plans treat as impassable (hazards, rejections, escape)."""
+    nav_avoid, _ = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
     hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
-    blocked = set(m.blocked) | hazards
+    blocked = nav_avoid | hazards
     if w.pos is not None and w.pos in hazards and not w.open_neighbours(w.pos, blocked):
         return blocked - hazards
     return blocked
@@ -307,28 +317,36 @@ def _remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
     return cells
 
 
-def path_blockers(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
+def path_blockers(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> set[Pos]:
     """Cells the rest of the held walk queue steps onto that are not open now."""
     cells = _remaining_walk_cells(w, m)
     if not cells or not w.alive or policy.kind == "idle":
         return set()
-    avoid = _plan_avoid(w, m, policy)
+    avoid = _plan_avoid(w, m, policy, knowledge)
     out = {p for p in cells[1:] if _cell_on_path_blocked(w, avoid, p)}
     if not _step_open(w, avoid, cells[0]):
         out.add(cells[0])
     return out
 
 
-def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy) -> bool:
+def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> bool:
     """True when the rest of a held walk queue no longer matches the map (A43).
 
     A cell that was already blocked when the queue was sent does not count:
     the replan could not avoid it, so resending would only send it again.
     """
-    return bool(path_blockers(w, m, policy) - m.path_blockers)
+    return bool(path_blockers(w, m, policy, knowledge) - m.path_blockers)
 
 
-def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]) -> None:
+def _replan(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    rng: random.Random,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None,
+) -> None:
     """Take the first goal whose path starts on a seen, open step.
 
     A path whose first step lies in fog is skipped like an unreachable goal,
@@ -336,7 +354,7 @@ def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocke
     """
     m.path, m.goal = [], ""
     for goal in policy.goals:
-        found = _plan_goal(goal, w, policy, rng, blocked, costly)
+        found = _plan_goal(goal, w, policy, rng, blocked, costly, knowledge)
         if _next_step(w, blocked, found):
             m.path, m.goal = found, goal
             return
@@ -352,7 +370,13 @@ def _grid(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_door: bo
 
 
 def _plan_goal(
-    goal: str, w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]
+    goal: str,
+    w: WorldModel,
+    policy: Policy,
+    rng: random.Random,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None,
 ) -> list[Pos] | None:
     view = w.view
     if goal == "hold":

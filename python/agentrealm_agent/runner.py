@@ -37,6 +37,8 @@ from .m6_acceptance import M6AcceptanceMetrics
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
+from .interest_list import read_key, say_key
+from .investigation import mark_cell_read, mark_npc_spoken
 from .zone_discovery import apply_town, apply_zone, zone_failed
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
@@ -675,6 +677,7 @@ class Runner:
                 m.last_use_tick = int(result.get("tick", w.tick))
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
+            self._note_investigation(intent, result)
             if m.pending is not None and index == 0:
                 m.pending = None
             return False
@@ -692,6 +695,7 @@ class Runner:
         if self.acceptance is not None:
             code = (result.get("rejection") or {}).get("code", "?")
             self.acceptance.on_rejection(code, verb=(intent or {}).get("verb"))
+        self._note_investigation(intent, result)
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None
@@ -701,6 +705,27 @@ class Runner:
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
+
+    def _note_investigation(self, intent: dict | None, result: dict) -> None:
+        """Remember an applied Read/Say in the knowledge base; count a refused one."""
+        if not intent or intent.get("verb") not in ("Read", "Say"):
+            return
+        target = intent.get("target") or {}
+        applied = result.get("outcome") == "applied"
+        if target.get("kind") == "block" and None not in (target.get("map_id"), target.get("x"), target.get("y")):
+            map_id, pos = int(target["map_id"]), (int(target["x"]), int(target["y"]))
+            key = read_key(map_id, pos)
+            if applied:
+                mark_cell_read(self.knowledge, map_id, pos)
+        elif target.get("kind") == "npc" and target.get("npc_id") is not None:
+            key = say_key(int(target["npc_id"]))
+            if applied:
+                mark_npc_spoken(self.knowledge, int(target["npc_id"]))
+        else:
+            return
+        if result.get("outcome") == "rejected":
+            rejections = self.mem.investigate_rejections
+            rejections[key] = rejections.get(key, 0) + 1
 
     def _with_item_table(self, fn) -> None:
         kb = self.knowledge

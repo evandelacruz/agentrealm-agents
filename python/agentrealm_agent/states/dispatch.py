@@ -12,6 +12,7 @@ from .flee import FleeState
 from .gather import GatherState
 from .heal import HealState
 from .idle import IdleState
+from .investigate import InvestigateState
 from .loot import LootState
 from .recover import RecoverState
 from .retreat import RetreatState
@@ -32,6 +33,7 @@ STATES: tuple[State, ...] = (
     FleeState(),
     RecoverState(),
     LootState(),
+    InvestigateState(),
     GatherState(),
     TravelState(),
     ExploreState(),

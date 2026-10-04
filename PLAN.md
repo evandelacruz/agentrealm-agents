@@ -233,7 +233,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 
 | ID | Item | Depends on |
 |---|---|---|
-| A30 | **Interest list and Investigate.** `Read`, `Say`, `get_zone`, walk to look; the curiosity budget. | A5, A17 |
+| A30 | **Interest list and Investigate.** `Read`, `Say`, `get_zone`, walk to look; the curiosity budget. Shipped: `Read` of readable cells in sight and `Say` once to NPCs within 25 blocks, from where the agent stands (free, never charged); an applied one is remembered in the knowledge base, a target refused 3 times is dropped for the run; `get_zone` is A7's spare-window probes (respawn ring first, then the path); nothing A30 nominates moves the agent, so nothing is charged to the curiosity budget. Deferred: the curiosity cap (to A32, with the first detour item); door and entrance looks (a look needs a real read of what the door needs; to A27, which walks to entrance marks), and scrolls (no sourced way to tell a scroll supply from its code; GAME_NOTES open questions). | A5, A17 |
 | A31 | **Odd-block detector.** Nominates blocks for `Break`. | A28 |
 | A32 | **Clue capture and no-LLM clue rules.** Text with place and time; direction and capability biases. | A30 |
 | A33 | **M10 acceptance.** M10 done-when. | A29, A31, A32 |

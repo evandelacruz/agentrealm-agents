@@ -67,6 +67,8 @@ class MapView:
     tiles: dict[Pos, str] = field(default_factory=dict)
     # occupy_damage named by terrain reads (Manual §9.2 legend), 0 included.
     damage: dict[Pos, int] = field(default_factory=dict)
+    # Signs and statues (Manual §9.2): readable wall cells from terrain reads.
+    readable: dict[Pos, bool] = field(default_factory=dict)
 
     def walkable(self, p: Pos) -> bool:
         return self.tiles.get(p) in WALKABLE
@@ -191,8 +193,11 @@ class WorldModel:
             for x in range(x0, x0 + int(t["width"])):
                 view.tiles.setdefault((x, y), VOID)
         for (x, y), cell in terrain_cells(t).items():
-            view.tiles[(x, y)] = cell["block_type"]
-            _set_damage(view, (x, y), cell)
+            p = (x, y)
+            view.tiles[p] = cell["block_type"]
+            _set_damage(view, p, cell)
+            # A full read: a cell whose legend entry lacks the flag is not readable.
+            _set_readable(view, p, cell, full=True)
         self.terrain_center = self.pos
         self.terrain_map = self.map_id
 
@@ -288,12 +293,14 @@ class WorldModel:
             v = self.maps.setdefault(map_id, MapView())
             v.tiles[p] = cell.get("block_type", "")
             _set_damage(v, p, cell)
+            _set_readable(v, p, cell)
         for cell in patch.get("removed") or []:
             map_id = int(cell["map_id"])
             p = (int(cell["x"]), int(cell["y"]))
             v = self.maps.setdefault(map_id, MapView())
             v.tiles.pop(p, None)
             v.damage.pop(p, None)
+            v.readable.pop(p, None)
 
     def _apply_snapshot_terrain(self, terrain: dict) -> None:
         for cell in terrain.get("cells") or []:
@@ -302,6 +309,7 @@ class WorldModel:
             v = self.maps.setdefault(map_id, MapView())
             v.tiles[p] = cell.get("block_type", "")
             _set_damage(v, p, cell)
+            _set_readable(v, p, cell)
 
     def _chest_contents_from_entities(self, entities: dict) -> dict[int, list[InventorySupply]]:
         return {
@@ -481,6 +489,13 @@ def _set_damage(view: MapView, p: Pos, cell: dict) -> None:
         view.damage[p] = int(dmg)
     else:
         view.damage.pop(p, None)
+
+
+def _set_readable(view: MapView, p: Pos, cell: dict, *, full: bool = False) -> None:
+    if cell.get("readable"):
+        view.readable[p] = True
+    elif full or "readable" in cell:
+        view.readable.pop(p, None)
 
 
 def _opt_int(v) -> int | None:

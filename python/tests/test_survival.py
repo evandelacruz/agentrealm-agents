@@ -192,7 +192,8 @@ class FleeTest(unittest.TestCase):
     def test_out_of_range_is_not_fled(self):
         w = world([".....", ".....", "....."], at=(0, 1))
         w.entities = [Entity("npc", 5, (4, 1))]
-        self.assertEqual(dispatch(w, ctx(hostile_range=2)).state, "Explore")
+        # An NPC in speech range but out of hostile range is greeted (A30).
+        self.assertEqual(dispatch(w, ctx(hostile_range=2)).state, "Investigate")
 
 
 class OnHostileTest(unittest.TestCase):

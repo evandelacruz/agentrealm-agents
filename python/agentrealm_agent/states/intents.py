@@ -26,6 +26,14 @@ def withdraw_all(chest_id: int) -> dict:
     return {"verb": "WithdrawFromChest", "chest_id": chest_id}
 
 
+def read_block(map_id: int, pos: Pos) -> dict:
+    return {"verb": "Read", "target": {"kind": "block", "map_id": map_id, "x": pos[0], "y": pos[1]}}
+
+
+def say_to(npc: Entity, text: str = "hello") -> dict:
+    return {"verb": "Say", "text": text, "target": {"kind": "npc", "npc_id": npc.id}}
+
+
 def drop(supply_id: int) -> dict:
     return {"verb": "Drop", "supply_id": supply_id}
 

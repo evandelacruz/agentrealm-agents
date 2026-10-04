@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from .brain import Decision, Memory, choose_call, decide, reject_step
 from .client import ApiError, Client
 from .config import CharacterConfig
+from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .knowledge_base import KnowledgeBase
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
@@ -76,6 +77,8 @@ class Runner:
         self.queue_horizon_ticks = QUEUE_HORIZON_INTENTS
         cfg.trace_path.parent.mkdir(parents=True, exist_ok=True)
         self.trace = open(cfg.trace_path, "a", buffering=1)
+        self.directives = DirectivesWatch(cfg.directives_path)
+        self.directives.ensure_loaded()
 
     def log(self, call: str, detail: str, record: dict) -> None:
         w = self.world
@@ -105,6 +108,12 @@ class Runner:
                 # calm gap and entity_refresh would never come due. Responses
                 # carry the server's tick and correct it.
                 self.world.tick += 1
+                if self.directives.maybe_reload():
+                    self.log(
+                        "directives",
+                        f"reloaded never_attack={self.directives.directives.never_attack}",
+                        {"directives": {"params": self.directives.directives.params, "never_attack": self.directives.directives.never_attack}},
+                    )
                 call = choose_call(self.world, self.mem, self.cfg.policy)
                 if call == "skip":
                     self.mem.windows_since_self += 1
@@ -192,10 +201,11 @@ class Runner:
             else:
                 self.drop_held_queue()
                 # Something must replace the held queue, or it keeps running.
-                intents = self.intents_for(d) or [wait()]
+                intents = self._apply_never_attack(self.intents_for(d)) or [wait()]
         else:
-            d = decide(w, m, self.cfg.policy, self.rng)
+            d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
             intents = self.intents_for(d)
+            intents = self._apply_never_attack(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))
         if intents:
@@ -264,7 +274,7 @@ class Runner:
         """
         m = self.mem
         saved = (list(m.path), m.goal, dict(m.blocked), self.rng.getstate())
-        d = decide(self.world, m, self.cfg.policy, self.rng)
+        d = decide(self.world, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
         if d.reflex:
             return d
         m.path, m.goal, m.blocked = saved[0], saved[1], saved[2]
@@ -278,6 +288,25 @@ class Runner:
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
         m.pending, m.held_queue = None, None
         m.need_position, m.path = True, []
+
+    def _apply_never_attack(self, intents: list[dict] | None) -> list[dict] | None:
+        """Executor guard: drop any Use aimed at a never_attack target.
+
+        A paced Use arrives behind its cooldown Waits, so the whole submit
+        becomes one Wait: the server queue is replaced rather than left
+        running, and none of the dropped queue is awaited.
+        """
+        if not intents:
+            return intents
+        blocked = self.directives.directives.never_attack
+        if not blocked:
+            return intents
+        if not any(use_blocked_by_never_attack(i, self.world.entities, blocked) for i in intents):
+            return intents
+        m = self.mem
+        m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+        m.pending = None
+        return [wait()]
 
     def intents_for(self, d: Decision) -> list[dict] | None:
         """Movement, Use, and Say/Broadcast become paced queues; others stay one intent."""

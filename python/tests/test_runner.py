@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import config
-from agentrealm_agent.brain import Decision, Memory, choose_call
+from agentrealm_agent.brain import Decision, Memory, choose_call, use_on
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.runner import Runner
@@ -399,6 +399,66 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(fake.sent[1][0])
         self.assertEqual(r.mem.held_queue, held)
         self.assertEqual(r.mem.path, path, "the held queue's steps are not planned twice")
+
+
+class NeverAttackRunnerTest(RunnerTest):
+    """The executor drops a Use on a never_attack target, whatever decided it (A8)."""
+
+    def runner_with_directives(self, client, text: str | None) -> Runner:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "T.directives.toml"
+        if text is not None:
+            path.write_text(text)
+        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(goals=["hold"]),
+                              Path(tmp.name) / "T.toml")
+        r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None)
+        self.addCleanup(r.trace.close)
+        base = self.runner(client, Policy(goals=["hold"]))
+        r.world, r.mem = base.world, base.mem
+        r.world.entities = [Entity("character", 5, (1, 0))]
+        return r
+
+    def test_use_on_a_forbidden_target_is_replaced_by_wait(self):
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self.runner_with_directives(fake, 'never_attack = ["character"]\n')
+        with mock.patch("agentrealm_agent.runner.decide",
+                        return_value=Decision(use_on(r.world.entities[0]), "fight")):
+            r.tick()
+        self.assertEqual(fake.sent[0][0], [{"verb": "Wait"}])
+        self.assertIsNone(r.mem.pending, "a dropped Use is not awaited")
+
+    def test_a_paced_use_on_a_forbidden_target_is_replaced_by_one_wait(self):
+        # A Use still owing cooldown is sent behind Waits; the guard drops the
+        # whole queue, so no stale paced queue is left awaiting its results.
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self.runner_with_directives(fake, 'never_attack = ["character"]\n')
+        r.mem.last_use_tick = r.world.tick
+        with mock.patch("agentrealm_agent.runner.decide",
+                        return_value=Decision(use_on(r.world.entities[0]), "fight")):
+            r.tick()
+        self.assertEqual(fake.sent[0][0], [{"verb": "Wait"}])
+        self.assertIsNone(r.mem.pending_intents)
+        self.assertIsNone(r.mem.held_queue)
+
+    def test_use_on_an_allowed_target_is_sent(self):
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self.runner_with_directives(fake, 'never_attack = ["goblin"]\n')
+        use = use_on(r.world.entities[0])
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(use, "fight")):
+            r.tick()
+        self.assertEqual(fake.sent[0][0], [use])
+
+    def test_a_changed_directives_file_takes_effect_on_reload(self):
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self.runner_with_directives(fake, None)
+        self.assertEqual(r.directives.directives.never_attack, [])
+        r.directives.path.write_text('never_attack = ["character"]\n')
+        self.assertTrue(r.directives.maybe_reload())
+        with mock.patch("agentrealm_agent.runner.decide",
+                        return_value=Decision(use_on(r.world.entities[0]), "fight")):
+            r.tick()
+        self.assertEqual(fake.sent[0][0], [{"verb": "Wait"}])
 
 
 class NetworkTest(unittest.TestCase):

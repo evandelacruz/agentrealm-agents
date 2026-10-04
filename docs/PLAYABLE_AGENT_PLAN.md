@@ -80,6 +80,8 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 - **Terrain reads.** With perception 25 the terrain window is 51×51, so terrain is read only on a map change or after moving about half the window.
 - **Deltas feed the model.** Health, inventory and entity changes are folded into the world model from them.
 
+Shipped so far: `python/agentrealm_agent/executor.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_ticks`) and the next poll. The attack and speech accumulators are paced separately; there is no mixed-queue helper yet, and the runner does not use the module yet.
+
 ### State machine
 
 States are checked in priority order once per round trip: after each `POST tick` response is folded into the world model, before the next request. The first whose guard holds runs `act`, which returns the queue for the ticks until the next poll. Between round trips the server runs that queue one intent per tick, and nothing runs client-side; a state that must react within a tick (a hostile closing, health dropping) does so by switching the executor to its every-tick cadence. Each state has entry and exit conditions with hysteresis so it does not flip back and forth.

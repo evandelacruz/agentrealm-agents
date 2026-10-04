@@ -3,6 +3,10 @@
 Paths and poll cadences live in later slices; this module covers weapon-cooldown
 spacing for ``Use``, speech spacing for ``Say``/``Broadcast``, and bounding
 attack queues to the next poll so a slow round trip does not keep swinging.
+
+The attack and speech accumulators are separate: pace a homogeneous list with
+``pace_uses`` or ``pace_speech``. There is no mixed-queue helper yet. Pacing
+carries across queues through ``ticks_since_last``.
 """
 
 from __future__ import annotations
@@ -11,7 +15,14 @@ from typing import Callable, Iterable
 
 DEFAULT_WEAPON_COOLDOWN_TICKS = 10
 SPEECH_INTERVAL_TICKS = 10
-QUEUE_HORIZON_TICKS = 40
+
+
+def queue_horizon_ticks(world: dict) -> int:
+    """Longest queue the world accepts: ``queue_horizon_seconds × tick_rate_hz``."""
+    try:
+        return int(world["queue_horizon_seconds"] * world["tick_rate_hz"])
+    except KeyError as e:
+        raise ValueError(f"world is missing {e.args[0]}") from None
 
 
 def wait() -> dict:
@@ -37,19 +48,22 @@ def _pace_actions(
     *,
     interval_ticks: int,
     spends_cooldown: Callable[[dict], bool],
+    ticks_since_last: int | None,
 ) -> list[dict]:
-    """Insert ``Wait`` intents so consecutive cooldown actions are ``interval_ticks`` apart."""
-    if interval_ticks <= 1 or not actions:
-        return list(actions)
-    gap = interval_ticks - 1
+    """Insert ``Wait`` intents so cooldown actions land ``interval_ticks`` apart.
+
+    ``ticks_since_last`` is how many ticks before the queue's first slot the
+    last cooldown action ran (1 means the tick just before), or ``None`` when
+    the accumulator is already full. Other intents in between count toward the
+    gap.
+    """
+    ready_at = 0 if ticks_since_last is None else max(0, interval_ticks - ticks_since_last)
     out: list[dict] = []
-    saw_cooldown = False
     for intent in actions:
-        if saw_cooldown and spends_cooldown(intent):
-            out.extend(waits(gap))
-        out.append(intent)
         if spends_cooldown(intent):
-            saw_cooldown = True
+            out.extend(waits(ready_at - len(out)))
+            ready_at = len(out) + interval_ticks
+        out.append(intent)
     return out
 
 
@@ -57,18 +71,30 @@ def pace_uses(
     uses: Iterable[dict],
     *,
     cooldown_ticks: int = DEFAULT_WEAPON_COOLDOWN_TICKS,
+    ticks_since_last: int | None = None,
 ) -> list[dict]:
     """Space ``Use`` intents by weapon cooldown (10 ticks by default)."""
-    return _pace_actions(list(uses), interval_ticks=cooldown_ticks, spends_cooldown=uses_attack_cooldown)
+    return _pace_actions(
+        list(uses),
+        interval_ticks=cooldown_ticks,
+        spends_cooldown=uses_attack_cooldown,
+        ticks_since_last=ticks_since_last,
+    )
 
 
 def pace_speech(
     lines: Iterable[dict],
     *,
     interval_ticks: int = SPEECH_INTERVAL_TICKS,
+    ticks_since_last: int | None = None,
 ) -> list[dict]:
     """Space ``Say`` and ``Broadcast`` intents by the speech interval (10 ticks by default)."""
-    return _pace_actions(list(lines), interval_ticks=interval_ticks, spends_cooldown=uses_speech_cooldown)
+    return _pace_actions(
+        list(lines),
+        interval_ticks=interval_ticks,
+        spends_cooldown=uses_speech_cooldown,
+        ticks_since_last=ticks_since_last,
+    )
 
 
 def build_attack_queue(
@@ -76,20 +102,23 @@ def build_attack_queue(
     retreat: Iterable[dict] | None = None,
     *,
     poll_interval_ticks: int,
+    horizon_ticks: int,
     weapon_cooldown_ticks: int = DEFAULT_WEAPON_COOLDOWN_TICKS,
-    horizon_ticks: int = QUEUE_HORIZON_TICKS,
+    ticks_since_last_use: int | None = None,
 ) -> list[dict]:
     """Paced attacks with an optional retreat tail, capped for the next poll.
 
     A slow poll must not leave the character swinging after the fight turned.
     When the paced attacks plus retreat exceed the poll window (or queue
     horizon), attacks drop from the end until the queue fits, keeping the
-    retreat tail when possible.
+    retreat tail when possible. Trailing ``Wait``s left by the cut are
+    dropped too, so the retreat starts on the tick after the last swing.
+    ``horizon_ticks`` comes from the world (``queue_horizon_ticks``).
     """
     if poll_interval_ticks <= 0:
         raise ValueError("poll_interval_ticks must be positive")
     retreat_list = list(retreat or [])
-    paced = pace_uses(uses, cooldown_ticks=weapon_cooldown_ticks)
+    paced = pace_uses(uses, cooldown_ticks=weapon_cooldown_ticks, ticks_since_last=ticks_since_last_use)
     limit = min(horizon_ticks, poll_interval_ticks)
     if not paced and not retreat_list:
         return []
@@ -97,6 +126,7 @@ def build_attack_queue(
         return paced + retreat_list
     retreat_keep = min(len(retreat_list), limit)
     attack_budget = limit - retreat_keep
-    if attack_budget <= 0:
-        return retreat_list[:limit]
-    return paced[:attack_budget] + retreat_list[:retreat_keep]
+    attacks = paced[:attack_budget]
+    while attacks and attacks[-1] == wait():
+        attacks.pop()
+    return attacks + retreat_list[:retreat_keep]

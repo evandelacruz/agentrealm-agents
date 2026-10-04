@@ -30,6 +30,7 @@ from .executor import (
 )
 from .m6_acceptance import M6AcceptanceMetrics
 from .poll_cadence import calm_poll_interval, is_urgent
+from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
 from .zone_discovery import apply_town, apply_zone, zone_failed
 
@@ -89,6 +90,7 @@ class Runner:
         self.directives = DirectivesWatch(cfg.directives_path)
         self.directives.ensure_loaded()
         self.acceptance = acceptance
+        self._level_timer = LevelTimer()
 
     def log(self, call: str, detail: str, record: dict) -> None:
         w = self.world
@@ -107,6 +109,10 @@ class Runner:
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
         apply_town(self.world, world.get("town"))
+        town = world.get("town") or {}
+        if town.get("map_id") is not None:
+            # The town is on the overworld, so leaving its map enters a level (A41).
+            self._level_timer.overworld = int(town["map_id"])
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:
@@ -191,6 +197,7 @@ class Runner:
         elif call == "position":
             p = c.position(self.cid)
             w.apply_position(p)
+            self._level_timer.note_map(w.map_id, w.tick, time.time())
             self.note_warp_landing()
             m.need_position, m.path = False, []
             self.log(call, "", {"position": p})
@@ -331,17 +338,25 @@ class Runner:
             detail += " | " + ", ".join(_fmt_event(e) for e in events)
         if r.get("events_dropped"):
             detail += f" | dropped {r['events_dropped']}"
-        self.log(
-            "tick",
-            detail,
-            {
-                "intents": intents,
-                "reason": d.reason,
-                "held_queue": m.held_queue,
-                "events": events,
-                "dropped": r.get("events_dropped", 0),
-            },
+        now = time.time()
+        record = {
+            "intents": intents,
+            "reason": d.reason,
+            "held_queue": m.held_queue,
+            "events": events,
+            "dropped": r.get("events_dropped", 0),
+        }
+        record.update(
+            tick_trace_extras(
+                tick_response=r,
+                gems=w.gems,
+                level_timer=self._level_timer,
+                tick=w.tick,
+                now=now,
+            )
         )
+        self._level_timer.note_map(w.map_id, w.tick, now)
+        self.log("tick", detail, record)
         # The intent resolves at this sim window's boundary. Do not call
         # again until it has closed, so the next submit lands in a new tick.
         return time.time() + int(r.get("window_remaining_ms", 0)) / 1000.0 + WINDOW_MARGIN
@@ -408,7 +423,7 @@ class Runner:
         blocked = self.directives.directives.never_attack
         if not blocked:
             return intents
-        if not any(use_blocked_by_never_attack(i, self.world.entities, blocked) for i in intents):
+        if not any(use_blocked_by_never_attack(i, self.world.entities, blocked, self.world.character_id) for i in intents):
             return intents
         m = self.mem
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0

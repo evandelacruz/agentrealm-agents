@@ -49,25 +49,12 @@ def entrance_key(map_id: int, p: Pos) -> str:
     return f"{map_id}:{p[0]},{p[1]}"
 
 
-def _migrate_entrances_locked(kb: KnowledgeBase) -> None:
-    """Rekey rows from the old cell-only ``"x,y"`` shape. Caller holds ``kb.lock``."""
-    for key in [k for k in kb.entrances if ":" not in k]:
-        row = kb.entrances.pop(key)
-        try:
-            x, y = (int(p) for p in key.split(",", 1))
-            map_id = int(row["map_id"])
-        except (KeyError, TypeError, ValueError):
-            continue  # no map to key it by: drop it, the next minimap read restores it
-        kb.entrances.setdefault(entrance_key(map_id, (x, y)), row)
-
-
 def iter_entrances(kb: KnowledgeBase | None) -> list[tuple[int, Pos, dict[str, Any]]]:
     """Every entrance row as ``(map_id, pos, row)``; the row is the live dict."""
     if kb is None:
         return []
     out: list[tuple[int, Pos, dict[str, Any]]] = []
     with kb.lock:
-        _migrate_entrances_locked(kb)
         for key, row in kb.entrances.items():
             if not isinstance(row, dict):
                 continue
@@ -83,7 +70,6 @@ def iter_entrances(kb: KnowledgeBase | None) -> list[tuple[int, Pos, dict[str, A
 def merge_entrance(kb: KnowledgeBase, map_id: int, p: Pos, patch: dict[str, Any]) -> bool:
     """Merge ``patch`` into the entrance row at ``map_id:p``. False when there is none."""
     with kb.lock:
-        _migrate_entrances_locked(kb)
         row = kb.entrances.get(entrance_key(map_id, p))
         if not isinstance(row, dict):
             return False
@@ -94,7 +80,6 @@ def merge_entrance(kb: KnowledgeBase, map_id: int, p: Pos, patch: dict[str, Any]
 def sync_entrances(kb: KnowledgeBase, minimap: dict) -> None:
     """Merge minimap entrance marks into ``kb.entrances`` (Manual minimap)."""
     with kb.lock:
-        _migrate_entrances_locked(kb)
         for m in minimap.get("maps") or []:
             if not isinstance(m, dict):
                 continue

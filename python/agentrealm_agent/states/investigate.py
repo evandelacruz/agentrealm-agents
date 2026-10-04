@@ -50,6 +50,8 @@ def _look_outcome(
             if ctx.memory.goal == LOOK_GOAL:
                 ctx.memory.path, ctx.memory.goal = [], ""
             return StateOutcome(None, f"looked {pos}", state=InvestigateState.name)
+        # Adjacent but the cell is still unread: count a refusal so it cannot pin Investigate.
+        _count_refusal(ctx, reject_key)
         return StateOutcome(None, "door not revealed yet", state=InvestigateState.name)
     stand = approach_pos(w, pos)
     step = None
@@ -64,6 +66,10 @@ def _look_outcome(
     if step is not None:
         return StateOutcome([set_position(step)], reason, state=InvestigateState.name)
     # No route: count a refusal so an unreachable mark does not pin Investigate forever.
+    _count_refusal(ctx, reject_key)
+    return StateOutcome(None, f"{reason}; no path", state=InvestigateState.name)
+
+
+def _count_refusal(ctx: PlayContext, reject_key: str) -> None:
     rejections = ctx.memory.investigate_rejections
     rejections[reject_key] = rejections.get(reject_key, 0) + 1
-    return StateOutcome(None, f"{reason}; no path", state=InvestigateState.name)

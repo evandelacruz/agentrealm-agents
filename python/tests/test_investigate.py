@@ -137,12 +137,15 @@ class EntranceKeyTest(unittest.TestCase):
         self.assertEqual(kb.entrances["9:2,1"]["needs"], "key")
         self.assertNotIn("looked", kb.entrances["7:2,1"])
 
-    def test_cell_only_rows_migrate_on_read(self):
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["2,1"] = {"map_id": 7, "x": 2, "y": 1, "needs": "key"}
-        kb.entrances["4,4"] = {"x": 4, "y": 4}  # no map: dropped, the next minimap read restores it
-        sync_entrances(kb, {"maps": []})
-        self.assertEqual(kb.entrances, {"7:2,1": {"map_id": 7, "x": 2, "y": 1, "needs": "key"}})
+    def test_cell_only_rows_migrate_at_load(self):
+        kb = KnowledgeBase.from_dict("sandbox", {"entrances": {
+            "2,1": {"map_id": 7, "x": 2, "y": 1, "needs": "key"},
+            "4,4": {"x": 4, "y": 4},  # no map: kept as is, readers skip it
+        }})
+        self.assertEqual(kb.entrances, {
+            "7:2,1": {"map_id": 7, "x": 2, "y": 1, "needs": "key"},
+            "4,4": {"x": 4, "y": 4},
+        })
 
     def test_entrance_from_kb_without_map(self):
         kb = KnowledgeBase.empty("sandbox")
@@ -257,6 +260,18 @@ class InvestigateStateTest(unittest.TestCase):
             self.assertEqual(ctx.memory.investigate_rejections.get(look_key(7, (2, 2))), n)
         self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), ctx.memory), [])
 
+    def test_unrevealed_look_counts_a_rejection(self):
+        # Adjacent, but the look cannot finish: capped like an unreachable mark.
+        w = world(["...", ".D.", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:1,1"] = {"map_id": 7, "x": 1, "y": 1}
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        with mock.patch("agentrealm_agent.states.investigate.apply_door_look", return_value=False):
+            for n in range(1, MAX_REJECTIONS + 1):
+                dispatch(w, ctx)
+                self.assertEqual(ctx.memory.investigate_rejections.get(look_key(7, (1, 1))), n)
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), ctx.memory), [])
+
 
 class SightRangeTest(unittest.TestCase):
     def test_brightness_caps_sight(self):
@@ -282,6 +297,31 @@ class ReadableParsingTest(unittest.TestCase):
         self.assertEqual(w.view.readable, {(1, 0): True})
         w.apply_observation({"version": "3", "delta": {"terrain": {"removed": [{"map_id": 7, "x": 1, "y": 0}]}}})
         self.assertEqual(w.view.readable, {})
+
+
+class LockedParsingTest(unittest.TestCase):
+    def test_terrain_delta_and_snapshot(self):
+        w = WorldModel(character_id=1, pos=(1, 1), map_id=7)
+        w.apply_observation({"version": "1", "complete": True, "snapshot": {"terrain": {"cells": [
+            {"map_id": 7, "x": 2, "y": 1, "block_type": "framed_door", "locked": True},
+            {"map_id": 7, "x": 0, "y": 1, "block_type": "framed_door"},
+        ]}}})
+        self.assertEqual(w.view.locked, {(2, 1): True})
+        w.apply_observation({"version": "2", "delta": {"terrain": {
+            "changed": [{"map_id": 7, "x": 0, "y": 1, "block_type": "framed_door", "locked": True}]}}})
+        self.assertEqual(w.view.locked, {(2, 1): True, (0, 1): True})
+        w.apply_observation({"version": "3", "delta": {"terrain": {
+            "changed": [{"map_id": 7, "x": 2, "y": 1, "block_type": "framed_door", "locked": False}]}}})
+        self.assertEqual(w.view.locked, {(0, 1): True}, "an explicit false unlocks")
+        w.apply_observation({"version": "4", "delta": {"terrain": {"removed": [{"map_id": 7, "x": 0, "y": 1}]}}})
+        self.assertEqual(w.view.locked, {})
+        # The parsed flag reaches the look: a locked door records a key need.
+        w.apply_observation({"version": "5", "delta": {"terrain": {
+            "changed": [{"map_id": 7, "x": 2, "y": 1, "block_type": "framed_door", "locked": True}]}}})
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
+        self.assertTrue(apply_door_look(kb, w, 7, (2, 1)))
+        self.assertEqual(kb.entrances["7:2,1"]["needs"], "key")
 
 
 class ZoneProbeOrderTest(unittest.TestCase):

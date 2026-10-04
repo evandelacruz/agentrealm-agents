@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .item_table import loadout_from_inventory
 from .threat import ThreatTable, absorb_damaged, damage_amount
 
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
@@ -98,6 +99,9 @@ class WorldModel:
     lives: int = 0
     health: int | None = None
     max_health: int | None = None
+    attack_range: int | None = None  # armed weapon reach from get_self (B100)
+    armed_code: str | None = None
+    worn_codes: dict[str, str] = field(default_factory=dict)
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -142,6 +146,8 @@ class WorldModel:
             self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
+        # Absent while nothing, or no weapon, is armed (B100).
+        self.attack_range = _opt_int(s.get("attack_range"))
 
     def apply_position(self, p: dict) -> None:
         map_id = int(p["map_id"])
@@ -313,9 +319,16 @@ class WorldModel:
             else:
                 self.apply_position(pos)
 
+    def _apply_inventory(self, inv: dict | None) -> None:
+        if inv is None:
+            return
+        self.armed_code, self.worn_codes = loadout_from_inventory(inv)
+
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
         self._apply_vitals(snap, complete=True)
+        if "inventory" in snap:
+            self._apply_inventory(snap.get("inventory"))
         if "entities" in snap:
             entities = snap["entities"] or {}
             self.entities = self._entities_from_payload(entities)
@@ -329,6 +342,8 @@ class WorldModel:
     def _apply_delta_body(self, delta: dict) -> None:
         self._apply_body_scalars(delta)
         self._apply_vitals(delta, complete=False)
+        if "inventory" in delta:
+            self._apply_inventory(delta.get("inventory"))
         if "entities" in delta:
             self._apply_entity_delta(delta["entities"])
             self.entities_tick = self.tick

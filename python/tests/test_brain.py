@@ -123,7 +123,7 @@ class ReflexTest(unittest.TestCase):
                 w = world([".....", "....."])
                 from agentrealm_agent.navigation.rejection import NavMemory
 
-                m = Memory(nav=NavMemory(wait_tile=(1, 0)))
+                m = Memory(nav=NavMemory(wait_tile=(w.map_id, (1, 0))))
                 d = decide(w, m, pol, random.Random(0))
                 if d.intent is not None:
                     self.assertNotEqual((d.intent["x"], d.intent["y"]), (1, 0), d.reason)

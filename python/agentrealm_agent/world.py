@@ -106,6 +106,7 @@ class WorldModel:
     terrain_map: int | None = None
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
+    changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
@@ -343,6 +344,7 @@ class WorldModel:
         carry no subject_id (docs/API.md, Events), so each one is ours.
         """
         flat = []
+        self.changed_blocks = []
         for group in events_by_tick or []:
             for ev in group.get("events") or []:
                 flat.append(ev)
@@ -356,6 +358,7 @@ class WorldModel:
                     p = (int(ev["x"]), int(ev["y"]))
                     v.tiles[p] = ev.get("block_type", "")
                     v.damage.pop(p, None)
+                    self.changed_blocks.append((ev["map_id"], p))
                 elif kind == "SupplyTaken":
                     self.entities = [x for x in self.entities if not (x.kind == "supply" and x.id == ev.get("supply_id"))]
                 elif kind == "Died":

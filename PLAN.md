@@ -70,7 +70,17 @@ Movement goes as a paced `Step`, `Wait`×n, … queue along the path, cut at the
 
 The first rule that matches picks the intent. They run on every `POST tick`, also while a movement queue is in flight: rules 2–4b drop that queue and send their intent in its place; rule 5 leaves a live queue running.
 
-1. Previous intent rejected → clear the path. The next decision keeps off that block, in the replan too.
+1. Previous intent rejected → clear the path. A rejected `Step` teaches the map by its code (A14, `navigation/rejection.py`), every lesson keyed by map and cell:
+
+   | Code | What the agent records |
+   |---|---|
+   | `not_traversable` | Impassable until a `BlockChanged` on that map and cell. |
+   | `block_occupied` | Kept off for the next decision, then costs 100 extra for 30 ticks. |
+   | `conflict_lost` | Nothing; the next move may retry. |
+   | `door_locked` | Impassable, and stored as a locked door under the map's `doors` in the knowledge base, which every character of the world then keeps off. |
+   | `over_strength_ceiling` | Impassable this run, and stored under the map's `hunting` in the knowledge base with the zone's ceiling for A27's strength bracket. |
+   | `would_strand` | Step onto that cell first, after reflexes 2–3 and before pickups and goals; dropped once it is not open, after 3 tries, or when that step is refused again. |
+   | anything else | Kept off for the next decision only. |
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
 3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
 4. Supply underfoot or adjacent and `pickup = true` → `Take`.
@@ -82,7 +92,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
 
 ### Plan: goal and path
 
-A goal plus an A* path over the M7 cost grid (A12, `navigation/planner.py`). Step costs: known walkable 1; fog 2, so unseen ground is assumed open and paths may run through it; fire and lava 1 plus their `occupy_damage` from terrain reads, or plus 100 when no read has named it; an NPC or character standing there plus 50 (high but finite: they move); each hostile in `policy.hostile` plus 30 minus 5 per block of distance, out to 6 blocks. Known blocked tiles, void, rejected tiles, and break-nominated cells (until M9) are impassable, and a door is entered only as the goal, since stepping onto one warps. The search is boxed to the known tiles plus start and goal with a one-tile fog ring, so an unreachable goal returns no path instead of searching fog forever. The executor walks only the known prefix: the next step must be a seen walkable or door tile, and the queued walk stops before the first cell that is occupied or otherwise not open now, so it never Steps onto an NPC the grid priced at 50. A goal whose path starts on an unseen tile is skipped like an unreachable one, so the next goal in the list gets the move; with none left, the agent sends nothing until terrain reads catch up. `avoid_blocks` are impassable except when standing on one with no safe step off: then they cost 100 extra per step, so the plan crosses as few as it can. Movement is Chebyshev: diagonals cost the same as straight steps.
+A goal plus an A* path over the M7 cost grid (A12, `navigation/planner.py`). Step costs: known walkable 1; fog 2, so unseen ground is assumed open and paths may run through it; fire and lava 1 plus their `occupy_damage` from terrain reads, or plus 100 when no read has named it; an NPC or character standing there plus 50 (high but finite: they move); a cell a `block_occupied` rejection named in the last 30 ticks plus 100; each hostile in `policy.hostile` plus 30 minus 5 per block of distance, out to 6 blocks. Known blocked tiles, void, tiles a rejection made impassable (reflex 1), and break-nominated cells (until M9) are impassable, and a door is entered only as the goal, since stepping onto one warps. The search is boxed to the known tiles plus start and goal with a one-tile fog ring, so an unreachable goal returns no path instead of searching fog forever. The executor walks only the known prefix: the next step must be a seen walkable or door tile, and the queued walk stops before the first cell that is occupied or otherwise not open now, so it never Steps onto an NPC the grid priced at 50. A goal whose path starts on an unseen tile is skipped like an unreachable one, so the next goal in the list gets the move; with none left, the agent sends nothing until terrain reads catch up. `avoid_blocks` are impassable except when standing on one with no safe step off: then they cost 100 extra per step, so the plan crosses as few as it can. Movement is Chebyshev: diagonals cost the same as straight steps.
 
 | Goal | Target |
 |---|---|
@@ -185,7 +195,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A11 | **Recover.** Walk to the death chest only when the spot is safe. | A5, A7 |
 | A12 | **Cost-grid planner.** The cost table (fog, hazards, hostile danger, expiring occupants, break costs inert), walking the known prefix. | |
 | A13 | **Two-level search.** Coarse 16×16 corridor search and A* in the perception window, each with a node budget per tick. | A12 |
-| A14 | **Rejection learning.** What each rejection code teaches the map. | A12 |
+| A14 | **Rejection learning.** What each rejection code teaches the map (reflex 1 table): impassable, occupant cost for 30 ticks, locked doors and hunting closures in the knowledge base, land first. | A12, A17 |
 | A15 | **Stuck detection and escalation.** Steps 1, 3 and 5, backoff, frontier drop; the navigation fixtures and trace replay tests. | A5, A12, A14 |
 | A16 | **M7 acceptance.** M7 done-when. | A4, A9, A10, A11, A13, A15 |
 

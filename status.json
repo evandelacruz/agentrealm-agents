@@ -35,7 +35,7 @@
 
   "A13": {"state": "open"},
 
-  "A14": {"state": "done"},
+  "A14": {"state": "partial", "remaining": "The over_strength_ceiling closure written to the knowledge base `hunting` section is not read yet; A27 consumes it in the strength bracket (reset after an Equip change). This run keeps off the cell through the learned impassable set."},
 
   "A15": {"state": "open"},
 

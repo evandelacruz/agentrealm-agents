@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 
 from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
-from .navigation.rejection import clear_prefer_land_on_step, learn_step_rejection, on_block_changed, copy_nav
+from .navigation.rejection import clear_prefer_land_on_step, copy_nav, learn_step_rejection, on_block_changed
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
@@ -481,7 +481,7 @@ class Runner:
         if result.get("outcome") != "rejected":
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
-                clear_prefer_land_on_step(m, w.pos)
+                clear_prefer_land_on_step(m, w.map_id, w.pos)
                 m.last_step_tick = int(result.get("tick", w.tick))
                 if w.view.tiles.get(w.pos) in DOORS:
                     # A door moves us; the Steps still queued behind this one
@@ -529,16 +529,9 @@ class Runner:
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
                 m.held_queue, m.resend_held_queue = None, False
-            if kind == "BlockChanged":
-                try:
-                    on_block_changed(
-                        m,
-                        int(ev["map_id"]),
-                        (int(ev["x"]), int(ev["y"])),
-                        w.map_id,
-                    )
-                except (KeyError, TypeError, ValueError):
-                    pass
+        # WorldModel.apply_events already parsed BlockChanged (A14).
+        for map_id, p in w.changed_blocks:
+            on_block_changed(m, map_id, p)
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})

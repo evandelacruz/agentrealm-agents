@@ -14,7 +14,7 @@ from .directives import attack_forbidden
 from .executor.movement import step_landing
 from .knowledge_base import KnowledgeBase
 from .navigation import CostGridParams, cost_path, known_prefix, nearest_target
-from .navigation.rejection import NavMemory, consume_wait_tile, copy_nav, navigation_avoid_costly
+from .navigation.rejection import LAND_TRIES, NavMemory, end_decision, navigation_avoid_costly
 from .poll_cadence import gate_tick_call, is_urgent
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import next_zone_probe
@@ -128,7 +128,7 @@ def decide(
 ) -> Decision:
     """The reflex list from PLAN.md. The first rule that matches wins."""
     d = _decide(w, m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
-    consume_wait_tile(m)
+    end_decision(m.nav, w.tick)
     return d
 
 
@@ -146,11 +146,11 @@ def _decide(
     here = w.pos
     view = w.view
 
-    if policy.kind == "wander":
-        return _wander(w, m, rng)
-
-    # Rejection learnings and hazards stay out of plans (A14, reflex 1).
+    # Rejection learnings stay out of every choice below (A14, reflex 1).
     nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
+    if policy.kind == "wander":
+        return _wander(w, nav_avoid, rng)
+
     hazards = {p for p, b in view.tiles.items() if b in policy.avoid_blocks}
     blocked = nav_avoid | hazards
     # Plans keep off hazards, except when standing on one with no safe step
@@ -166,13 +166,6 @@ def _decide(
     plan_avoid = blocked - escape
     plan_costly = escape | nav_costly
 
-    # would_strand: step onto the landing cell before other goals.
-    if m.nav.prefer_land is not None:
-        land = m.nav.prefer_land
-        if _step_open(w, plan_avoid, land):
-            m.path, m.goal = [land], "land"
-            return Decision(set_position(land), "land first")
-
     # 3. Hostiles.
     hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
     if hostiles and policy.on_hostile != "ignore":
@@ -186,6 +179,16 @@ def _decide(
         if away is not None:
             m.path = []
             return Decision(set_position(away), f"flee {target.kind} {target.id}", reflex=True)
+
+    # would_strand (A14): step onto the landing cell before pickups and goals.
+    # Tried at most LAND_TRIES decisions, and dropped once it is not open.
+    if m.nav.prefer_land is not None:
+        land_map, land = m.nav.prefer_land
+        if land_map == w.map_id and m.nav.land_tries < LAND_TRIES and _step_open(w, plan_avoid, land):
+            m.nav.land_tries += 1
+            m.path, m.goal = [land], "land"
+            return Decision(set_position(land), "land first")
+        m.nav.prefer_land, m.nav.land_tries = None, 0
 
     # 4. Supplies within reach.
     if policy.pickup:
@@ -212,7 +215,7 @@ def _decide(
     # the next step is not open or not yet seen.
     step = _next_step(w, plan_avoid, m.path)
     if step is None:
-        _replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge)
+        _replan(w, m, policy, rng, plan_avoid, plan_costly)
         step = _next_step(w, plan_avoid, m.path)
     if step is not None:
         return Decision(set_position(step), f"{m.goal} → {m.path[-1]}")
@@ -221,8 +224,8 @@ def _decide(
     return Decision(None, "no goal reachable")
 
 
-def _wander(w: WorldModel, m: Memory, rng: random.Random) -> Decision:
-    options = w.open_neighbours(w.pos, set(m.nav.impassable))
+def _wander(w: WorldModel, avoid: set[Pos], rng: random.Random) -> Decision:
+    options = w.open_neighbours(w.pos, avoid)
     if not options:
         return Decision(None, "wander: boxed in")
     return Decision(set_position(rng.choice(sorted(options))), "wander")
@@ -338,15 +341,7 @@ def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: Kn
     return bool(path_blockers(w, m, policy, knowledge) - m.path_blockers)
 
 
-def _replan(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    rng: random.Random,
-    blocked: set[Pos],
-    costly: set[Pos],
-    knowledge: KnowledgeBase | None,
-) -> None:
+def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]) -> None:
     """Take the first goal whose path starts on a seen, open step.
 
     A path whose first step lies in fog is skipped like an unreachable goal,
@@ -354,7 +349,7 @@ def _replan(
     """
     m.path, m.goal = [], ""
     for goal in policy.goals:
-        found = _plan_goal(goal, w, policy, rng, blocked, costly, knowledge)
+        found = _plan_goal(goal, w, policy, rng, blocked, costly)
         if _next_step(w, blocked, found):
             m.path, m.goal = found, goal
             return
@@ -370,13 +365,7 @@ def _grid(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_door: bo
 
 
 def _plan_goal(
-    goal: str,
-    w: WorldModel,
-    policy: Policy,
-    rng: random.Random,
-    blocked: set[Pos],
-    costly: set[Pos],
-    knowledge: KnowledgeBase | None,
+    goal: str, w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]
 ) -> list[Pos] | None:
     view = w.view
     if goal == "hold":

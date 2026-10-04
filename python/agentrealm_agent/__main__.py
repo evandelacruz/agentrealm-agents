@@ -6,10 +6,15 @@ import argparse
 import os
 import sys
 import threading
+import time
 
 from . import config
 from .client import ApiError, Client
+from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
 from .runner import Runner
+
+# How long `run` waits for the driver threads to stop before saving.
+SHUTDOWN_JOIN_SECONDS = 5.0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,6 +88,16 @@ def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
     ids = _ids(cfgs)
     if ids is None:
         return 2
+    # Loaded once here, saved once at exit; see knowledge_base for the
+    # single-process assumption.
+    world_knowledge: dict[str, KnowledgeBase] = {}
+    try:
+        for cfg, _ in ids:
+            if cfg.world not in world_knowledge:
+                world_knowledge[cfg.world] = load_knowledge(cfg.world)
+    except (KnowledgeBaseError, OSError) as e:
+        print(f"knowledge base: {e}", file=sys.stderr)
+        return 2
     stop = threading.Event()
     lock = threading.Lock()
 
@@ -92,7 +107,7 @@ def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
 
     def drive(cfg: config.CharacterConfig, cid: int) -> None:
         try:
-            Runner(cfg, client, cid, stop, out).run()
+            Runner(cfg, client, cid, stop, out, knowledge=world_knowledge[cfg.world]).run()
         except ApiError as e:
             out(f"[{cfg.name}] stopped: {e}")
         except Exception as e:  # keep the other characters running
@@ -108,6 +123,16 @@ def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
     except KeyboardInterrupt:
         stop.set()
         out("stopping; characters stay in the world where they stand")
+    finally:
+        stop.set()
+        deadline = time.monotonic() + SHUTDOWN_JOIN_SECONDS
+        for t in threads:
+            t.join(max(0.0, deadline - time.monotonic()))
+        for base in world_knowledge.values():
+            try:
+                save_knowledge(base)
+            except OSError as e:
+                out(f"knowledge base {base.world_code}: not saved: {e}")
     return 0
 
 

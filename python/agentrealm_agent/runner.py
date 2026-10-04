@@ -8,14 +8,17 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .brain import Decision, Memory, choose_call, decide, reject_step, remaining_path_stale
+from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_step, remaining_path_stale
 from .client import ApiError, Client
 from .config import CharacterConfig
+from .knowledge_base import KnowledgeBase
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
     QUEUE_HORIZON_INTENTS,
     build_paced_walk_queue,
+    pace_speech,
+    pace_uses,
     queue_horizon_intents,
     step_landing,
     trim_to_horizon,
@@ -48,12 +51,21 @@ class Pacer:
 
 
 class Runner:
-    def __init__(self, cfg: CharacterConfig, client: Client, character_id: int, stop: threading.Event, out=print):
+    def __init__(
+        self,
+        cfg: CharacterConfig,
+        client: Client,
+        character_id: int,
+        stop: threading.Event,
+        out=print,
+        knowledge: KnowledgeBase | None = None,
+    ):
         self.cfg = cfg
         self.client = client
         self.cid = character_id
         self.stop = stop
         self.out = out
+        self.knowledge = knowledge
         self.world = WorldModel(character_id)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
@@ -151,7 +163,7 @@ class Runner:
             # longer holds (a door moved us): replace it with nothing.
             d = Decision(None, "cancel queue")
             intents = []
-            m.cancel_queue = False
+            m.cancel_queue = m.resend_held_queue = False
         elif m.held_queue is not None:
             # Reflexes still run every round trip. One that fires drops the
             # held queue and its intent replaces it. A stale path resends a
@@ -161,26 +173,34 @@ class Runner:
                 self.drop_held_queue()
                 intents = self.intents_for(d) or [wait()]
             elif m.resend_held_queue:
-                m.resend_held_queue = False
+                # Position was re-read when the path went stale (choose_call
+                # reads it before this poll), so the new walk starts from
+                # where we are. With no walk to send, stop the old queue.
                 self.clear_held_tracking()
                 d = decide(w, m, self.cfg.policy, self.rng)
                 intents = self.intents_for(d)
-                d = Decision(d.intent if intents else None, "path stale, resend" if intents else d.reason)
+                if intents:
+                    d = Decision(d.intent, "path stale, resend")
+                else:
+                    d, intents = Decision(None, f"path stale, stop ({d.reason})"), []
             else:
                 d = Decision(None, "queue held")
                 intents = None
         else:
+            m.resend_held_queue = False
             d = decide(w, m, self.cfg.policy, self.rng)
             intents = self.intents_for(d)
-        r = self.client.tick(self.cid, intents)
+        r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))
         if intents:
             m.queue_sent_tick = w.tick
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
         rejected = self.apply_intent_results(r.get("intent_results") or [])
+        earlier = w.entities
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        w.learn_threat(events, earlier)
         self.on_events(events)
         self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
@@ -247,17 +267,23 @@ class Runner:
         return None
 
     def note_held_path_stale(self) -> None:
-        if self.mem.held_queue is None:
+        """Mark the held walk queue for replacement when its path went wrong.
+
+        Its results after the replacement are no longer read, so position is
+        re-read before the replan (A43).
+        """
+        m = self.mem
+        if m.held_queue is None or m.resend_held_queue:
             return
-        if remaining_path_stale(self.world, self.mem, self.cfg.policy):
-            self.mem.resend_held_queue = True
+        if remaining_path_stale(self.world, m, self.cfg.policy):
+            m.resend_held_queue = m.need_position = True
 
     def clear_held_tracking(self) -> None:
         """Stop waiting on the held queue's results without forgetting position."""
         m = self.mem
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
         m.pending, m.held_queue = None, None
-        m.path = []
+        m.path, m.resend_held_queue = [], False
 
     def drop_held_queue(self) -> None:
         """Give up on the held queue. Its later results are no longer read, so
@@ -266,14 +292,20 @@ class Runner:
         self.mem.need_position = True
 
     def intents_for(self, d: Decision) -> list[dict] | None:
-        """Movement decisions become paced Step/Wait queues; others stay one intent."""
+        """Movement, Use, and Say/Broadcast become paced queues; others stay one intent."""
         w, m = self.world, self.mem
         if d.intent is None:
             return None
-        if d.intent.get("verb") != "SetPosition":
+        intent = d.intent
+        verb = intent.get("verb")
+        if verb != "SetPosition":
+            if verb == "Use":
+                return self._paced_action(intent, pace_uses, m.last_use_tick)
+            if verb in ("Say", "Broadcast"):
+                return self._paced_action(intent, pace_speech, m.last_speech_tick)
             m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
-            m.pending = d.intent
-            return [d.intent]
+            m.pending = intent
+            return [intent]
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
@@ -302,7 +334,34 @@ class Runner:
             m.path = m.path[queued:]
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
+        m.path_blockers = path_blockers(w, m, self.cfg.policy)
         return intents
+
+    def _paced_action(self, intent: dict, pace, last_tick: int | None) -> list[dict] | None:
+        """``intent`` behind the Waits its cooldown still owes, cut at the horizon.
+
+        None when the cooldown outlasts the horizon: nothing is sent this
+        round trip, and the trace says why.
+        """
+        w, m = self.world, self.mem
+        since = None if last_tick is None else max(1, w.tick - last_tick)
+        paced = trim_to_horizon(pace([intent], ticks_since_last=since), limit=self.queue_horizon_ticks)
+        while paced and paced[-1]["verb"] == "Wait":
+            paced.pop()
+        if not paced:
+            self.log(
+                "pace",
+                f"{_fmt_intent(intent)} held: cooldown outlasts the {self.queue_horizon_ticks}-tick horizon",
+                {"held": intent, "ticks_since_last": since, "horizon": self.queue_horizon_ticks},
+            )
+            return None
+        if len(paced) == 1:
+            m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+            m.pending = paced[0]
+        else:
+            m.pending_intents, m.pending_queue, m.pending_next_index = paced, None, 0
+            m.pending = None
+        return paced
 
     def apply_intent_results(self, results: list[dict]) -> bool:
         """Fold intent results since the last call. True if the last one rejected."""
@@ -357,6 +416,10 @@ class Runner:
                     m.need_position, m.path = True, []
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True
+            if intent and intent.get("verb") == "Use":
+                m.last_use_tick = int(result.get("tick", w.tick))
+            if intent and intent.get("verb") in ("Say", "Broadcast"):
+                m.last_speech_tick = int(result.get("tick", w.tick))
             if m.pending is not None and index == 0:
                 m.pending = None
             return False
@@ -381,9 +444,10 @@ class Runner:
             if kind == "Died":
                 m.need_self = m.need_position = True
                 m.path, m.last_step_tick = [], None
+                m.last_use_tick = m.last_speech_tick = None
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
-                m.held_queue = None
+                m.held_queue, m.resend_held_queue = None, False
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})

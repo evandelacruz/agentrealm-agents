@@ -36,6 +36,8 @@ class Memory:
     queue_sent_tick: int = 0  # tick the last multi-intent queue was answered at
     cancel_queue: bool = False  # send [] next tick: the held queue was planned from a stale position
     last_step_tick: int | None = None  # tick our last Step applied, to pace the next queue
+    last_use_tick: int | None = None  # tick our last Use applied (weapon cooldown, A1)
+    last_speech_tick: int | None = None  # tick our last Say/Broadcast applied (A1)
     blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
     alarm: bool = False  # Damaged or Attacked since the last entity read
     last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)
@@ -43,6 +45,7 @@ class Memory:
     queued_ticks: int = 0  # intents still queued after the last poll, one tick each
     hurt_last_poll: bool = False  # the last poll's events carried Damaged
     resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
+    path_blockers: set = field(default_factory=set)  # blocked cells the walk queue already crossed when sent (A43)
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
@@ -234,32 +237,43 @@ def _cell_on_path_blocked(w: WorldModel, avoid: set[Pos], p: Pos) -> bool:
 
 
 def _remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
-    """Tiles the held queue still tries to step onto, from tracked position."""
-    if w.pos is None:
-        return list(m.path)
-    if m.pending_intents is not None:
-        pos = w.pos
-        cells: list[Pos] = []
-        for i in range(m.pending_next_index, len(m.pending_intents)):
-            intent = m.pending_intents[i]
-            if intent.get("verb") != "Step":
-                continue
-            pos = step_landing(pos, intent["direction"])
-            cells.append(pos)
-        if cells:
-            return cells
-    return list(m.path)
+    """Tiles the held walk queue still steps onto, from tracked position.
+
+    Only the queue on the server counts: the plan past its horizon is
+    replanned when the queue runs out anyway.
+    """
+    if w.pos is None or m.pending_intents is None:
+        return []
+    pos = w.pos
+    cells: list[Pos] = []
+    for i in range(m.pending_next_index, len(m.pending_intents)):
+        intent = m.pending_intents[i]
+        if intent.get("verb") != "Step":
+            continue
+        pos = step_landing(pos, intent["direction"])
+        cells.append(pos)
+    return cells
+
+
+def path_blockers(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
+    """Cells the rest of the held walk queue steps onto that are not open now."""
+    cells = _remaining_walk_cells(w, m)
+    if not cells or not w.alive or policy.kind == "idle":
+        return set()
+    avoid = _plan_avoid(w, m, policy)
+    out = {p for p in cells[1:] if _cell_on_path_blocked(w, avoid, p)}
+    if not _step_open(w, avoid, cells[0]):
+        out.add(cells[0])
+    return out
 
 
 def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy) -> bool:
-    """True when the rest of a held walk queue no longer matches the map (A43)."""
-    cells = _remaining_walk_cells(w, m)
-    if not cells or w.pos is None or not w.alive or policy.kind == "idle":
-        return False
-    avoid = _plan_avoid(w, m, policy)
-    if not _step_open(w, avoid, cells[0]):
-        return True
-    return any(_cell_on_path_blocked(w, avoid, p) for p in cells[1:])
+    """True when the rest of a held walk queue no longer matches the map (A43).
+
+    A cell that was already blocked when the queue was sent does not count:
+    the replan could not avoid it, so resending would only send it again.
+    """
+    return bool(path_blockers(w, m, policy) - m.path_blockers)
 
 
 def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]) -> None:

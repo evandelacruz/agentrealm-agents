@@ -103,6 +103,8 @@ class WorldModel:
     movement: int = 1
     movement_speed: int = 2500  # thousandths of a block per second (GetSelf)
     alive: bool = True
+    placed: bool | None = None  # last get_self placed flag; None until read
+    asleep: bool = False
     lives: int = 0
     gems: int | None = None  # inventory counter from snapshots (A22)
     health: int | None = None
@@ -161,6 +163,10 @@ class WorldModel:
             self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
+        if "placed" in s:
+            self.placed = bool(s["placed"])
+        if "asleep" in s:
+            self.asleep = bool(s["asleep"])
         # Absent while nothing, or no weapon, is armed (B100).
         self.attack_range = _opt_int(s.get("attack_range"))
 
@@ -179,6 +185,7 @@ class WorldModel:
             self.map_level = None
         self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
+        self.placed = True
         if has_level:
             self.map_level = level
 
@@ -359,6 +366,10 @@ class WorldModel:
             self.lives = int(body["lives"])
         if "alive" in body:
             self.alive = bool(body["alive"])
+        if "placed" in body:
+            self.placed = bool(body["placed"])
+        if "asleep" in body:
+            self.asleep = bool(body["asleep"])
         if "position" in body:
             pos = body["position"]
             if pos is None:

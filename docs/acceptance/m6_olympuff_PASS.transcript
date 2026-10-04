@@ -1,0 +1,297 @@
+# A4 live M6 acceptance on Olympuff (2026-10-04). Character id redacted; no credentials.
+# Regenerate: AGENTREALM_API_KEY=… make smoke-m6-olympuff
+
+M6 smoke (A4): OlympuffWalker (***) on olympuff → 200 steps, base https://api.agentrealm.gg
+[OlympuffWalker] t=0 @? world    olympuff open 10Hz
+[OlympuffWalker] t=1 @? self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2 @76:400,611 position 
+[OlympuffWalker] t=2604449 @76:400,611 terrain  2601 cells, 2601 known
+[OlympuffWalker] t=2604451 @76:400,611 entities npc:270@384,595, npc:269@395,605, npc:280@396,606, npc:285@410,607, npc:287@411,607, npc:286@410,608, npc:292@393,609, npc:289@394,609, npc:288@410,609, npc:290@394,610, npc:291@394,611, npc:146@400,613, npc:145@399,615, npc:144@399,617, npc:143@403,617, supply:298@399,613, supply:299@401,613, supply:296@398,616, supply:295@399,616, supply:294@400,616, supply:291@403,616, supply:297@396,617, supply:293@398,617, supply:292@400,617, supply:290@402,617
+[OlympuffWalker] t=2604455 @76:400,611 tick     queue 10×Step 27×Wait (explore_area → (413, 586))
+[OlympuffWalker] t=2604456 @76:400,611 zone     @76:401,600 safe=False
+[OlympuffWalker] t=2604457 @76:400,611 zone     @76:402,599 safe=False
+[OlympuffWalker] t=2604459 @76:400,611 zone     @76:403,598 safe=False
+[OlympuffWalker] t=2604462 @76:400,611 zone     @76:403,597 safe=False
+[OlympuffWalker] t=2604465 @76:398,608 tick     — (queue held)
+[OlympuffWalker] t=2604466 @76:398,608 zone     @76:403,596 safe=False
+[OlympuffWalker] t=2604467 @76:398,608 zone     @76:404,595 safe=False
+[OlympuffWalker] t=2604469 @76:398,608 zone     @76:405,594 safe=False
+[OlympuffWalker] t=2604472 @76:398,608 zone     @76:406,593 safe=False
+[OlympuffWalker] t=2604473 @76:398,608 zone     @76:407,592 safe=False
+[OlympuffWalker] t=2604476 @76:398,608 zone     @76:408,591 safe=False
+[OlympuffWalker] t=2604479 @76:397,606 tick     — (queue held) | Attacked, Damaged 3 by npc
+[OlympuffWalker] t=2604480 @76:397,606 position 
+[OlympuffWalker] t=2604481 @76:397,606 entities npc:270@385,594, npc:269@396,605, npc:280@396,606, npc:285@410,607, npc:287@411,607, npc:286@410,608, npc:292@393,609, npc:289@394,609, npc:288@410,609, npc:291@393,610, npc:290@394,610, npc:146@400,613, npc:145@399,615, npc:144@399,617, npc:143@403,617, supply:298@399,613, supply:299@401,613, supply:296@398,616, supply:295@399,616, supply:294@400,616, supply:291@403,616, supply:297@396,617, supply:293@398,617, supply:292@400,617, supply:290@402,617
+[OlympuffWalker] t=2604485 @76:397,606 tick     queue 10×Step 27×Wait (explore_area → (413, 586)) | Attacked, Damaged 1 by npc
+[OlympuffWalker] t=2604486 @76:397,606 entities npc:270@385,594, npc:269@396,605, npc:280@396,606, npc:285@410,607, npc:287@411,607, npc:286@410,608, npc:292@393,609, npc:289@394,609, npc:288@410,609, npc:291@393,610, npc:290@394,610, npc:146@400,613, npc:145@399,615, npc:144@399,617, npc:143@403,617, supply:298@399,613, supply:299@401,613, supply:296@398,616, supply:295@399,616, supply:294@400,616, supply:291@403,616, supply:297@396,617, supply:293@398,617, supply:292@400,617, supply:290@402,617
+[OlympuffWalker] t=2604489 @76:397,605 tick     — (queue held) | Attacked, Damaged 3 by npc
+[OlympuffWalker] t=2604490 @76:397,605 entities npc:270@385,594, npc:269@396,605, npc:280@396,606, npc:285@410,607, npc:287@411,607, npc:286@410,608, npc:292@393,609, npc:289@394,609, npc:288@410,609, npc:291@393,610, npc:290@394,610, npc:146@400,613, npc:145@399,615, npc:144@399,617, npc:143@403,617, supply:298@399,613, supply:299@401,613, supply:296@398,616, supply:295@399,616, supply:294@400,616, supply:291@403,616, supply:297@396,617, supply:293@398,617, supply:292@400,617, supply:290@402,617
+[OlympuffWalker] t=2604493 @76:397,604 tick     — (queue held)
+[OlympuffWalker] t=2604494 @76:397,604 zone     @76:409,590 safe=False
+[OlympuffWalker] t=2604495 @76:397,604 zone     @76:410,589 safe=False
+[OlympuffWalker] t=2604497 @76:397,604 zone     @76:411,588 safe=False
+[OlympuffWalker] t=2604499 @76:397,604 zone     @76:412,587 safe=False
+[OlympuffWalker] t=2604501 @76:397,604 zone     @76:413,586 safe=False
+[OlympuffWalker] t=2604506 @76:400,601 tick     — (queue held)
+[OlympuffWalker] t=2604514 @76:403,598 tick     — (queue held)
+[OlympuffWalker] t=2604515 @76:403,598 terrain  2601 cells, 3378 known
+[OlympuffWalker] t=2604525 @76:403,596 tick     — (queue held)
+[OlympuffWalker] t=2604534 @76:403,596 tick     queue 10×Step 27×Wait (explore_area → (413, 586))
+[OlympuffWalker] t=2604539 @76:404,595 tick     — (queue held)
+[OlympuffWalker] t=2604540 @76:404,595 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2604551 @76:405,594 tick     — (queue held)
+[OlympuffWalker] t=2604559 @76:406,593 tick     — (queue held)
+[OlympuffWalker] t=2604565 @76:406,593 tick     — (queue held)
+[OlympuffWalker] t=2604578 @76:409,590 tick     — (queue held)
+[OlympuffWalker] t=2604585 @76:410,589 tick     — (queue held)
+[OlympuffWalker] t=2604592 @76:412,587 tick     — (queue held)
+[OlympuffWalker] t=2604596 @76:413,586 tick     — (queue held)
+[OlympuffWalker] t=2604601 @76:413,586 tick     queue 10×Step 28×Wait (explore_area → (420, 573))
+[OlympuffWalker] t=2604602 @76:413,586 zone     @76:418,575 safe=False
+[OlympuffWalker] t=2604603 @76:413,586 zone     @76:419,574 safe=False
+[OlympuffWalker] t=2604605 @76:413,586 zone     @76:420,573 safe=False
+[OlympuffWalker] t=2604609 @76:411,584 tick     — (queue held)
+[OlympuffWalker] t=2604610 @76:411,584 terrain  2601 cells, 4388 known
+[OlympuffWalker] t=2604617 @76:411,584 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2604621 @76:412,581 tick     — (queue held)
+[OlympuffWalker] t=2604631 @76:414,579 tick     — (queue held)
+[OlympuffWalker] t=2604636 @76:415,578 tick     — (queue held)
+[OlympuffWalker] t=2604640 @76:416,577 tick     — (queue held)
+[OlympuffWalker] t=2604646 @76:417,576 tick     — (queue held)
+[OlympuffWalker] t=2604653 @76:417,576 tick     queue 3×Step 6×Wait (explore_area → (420, 573))
+[OlympuffWalker] t=2604663 @76:419,574 tick     — (queue held)
+[OlympuffWalker] t=2604668 @76:420,573 tick     — (queue held)
+[OlympuffWalker] t=2604679 @76:420,573 tick     queue 10×Step 29×Wait (explore_area → (426, 559))
+[OlympuffWalker] t=2604680 @76:420,573 zone     @76:423,562 safe=False
+[OlympuffWalker] t=2604681 @76:420,573 zone     @76:424,561 safe=False
+[OlympuffWalker] t=2604684 @76:420,573 zone     @76:425,560 safe=False
+[OlympuffWalker] t=2604685 @76:420,573 zone     @76:426,559 safe=False
+[OlympuffWalker] t=2604690 @76:417,570 tick     — (queue held)
+[OlympuffWalker] t=2604691 @76:417,570 terrain  2601 cells, 5324 known
+[OlympuffWalker] t=2604696 @76:417,570 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2604701 @76:417,568 tick     — (queue held)
+[OlympuffWalker] t=2604706 @76:419,566 tick     — (queue held)
+[OlympuffWalker] t=2604712 @76:420,565 tick     — (queue held)
+[OlympuffWalker] t=2604719 @76:422,563 tick     — (queue held)
+[OlympuffWalker] t=2604729 @76:422,563 tick     queue 4×Step 11×Wait (explore_area → (426, 559))
+[OlympuffWalker] t=2604734 @76:423,562 tick     — (queue held)
+[OlympuffWalker] t=2604739 @76:424,561 tick     — (queue held)
+[OlympuffWalker] t=2604747 @76:425,560 tick     — (queue held)
+[OlympuffWalker] t=2604750 @76:426,559 tick     — (queue held)
+[OlympuffWalker] t=2604755 @76:426,559 tick     queue 10×Step 28×Wait (explore_area → (437, 545))
+[OlympuffWalker] t=2604756 @76:426,559 zone     @76:434,548 safe=False
+[OlympuffWalker] t=2604758 @76:426,559 zone     @76:435,547 safe=False
+[OlympuffWalker] t=2604759 @76:426,559 zone     @76:436,546 safe=False
+[OlympuffWalker] t=2604763 @76:425,557 tick     — (queue held)
+[OlympuffWalker] t=2604764 @76:425,557 terrain  2601 cells, 6291 known
+[OlympuffWalker] t=2604765 @76:425,557 zone     @76:437,545 safe=False
+[OlympuffWalker] t=2604774 @76:428,554 tick     — (queue held)
+[OlympuffWalker] t=2604777 @76:428,554 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2604782 @76:430,552 tick     — (queue held)
+[OlympuffWalker] t=2604792 @76:432,550 tick     — (queue held)
+[OlympuffWalker] t=2604794 @76:433,549 tick     — (queue held)
+[OlympuffWalker] t=2604805 @76:433,549 tick     queue 4×Step 11×Wait (explore_area → (437, 545))
+[OlympuffWalker] t=2604814 @76:435,547 tick     — (queue held)
+[OlympuffWalker] t=2604821 @76:437,545 tick     — (queue held)
+[OlympuffWalker] t=2604829 @76:437,545 tick     queue 10×Step 29×Wait (explore_area → (429, 532))
+[OlympuffWalker] t=2604830 @76:437,545 zone     @76:427,534 safe=False
+[OlympuffWalker] t=2604831 @76:437,545 zone     @76:428,533 safe=False
+[OlympuffWalker] t=2604834 @76:437,545 zone     @76:429,532 safe=False
+[OlympuffWalker] t=2604841 @76:434,542 tick     — (queue held)
+[OlympuffWalker] t=2604842 @76:434,542 terrain  2601 cells, 7380 known
+[OlympuffWalker] t=2604848 @76:432,540 tick     — (queue held)
+[OlympuffWalker] t=2604853 @76:431,539 tick     — (queue held)
+[OlympuffWalker] t=2604854 @76:431,539 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2604860 @76:429,537 tick     — (queue held)
+[OlympuffWalker] t=2604866 @76:428,536 tick     — (queue held)
+[OlympuffWalker] t=2604869 @76:427,535 tick     — (queue held)
+[OlympuffWalker] t=2604874 @76:427,535 tick     queue 3×Step 8×Wait (explore_area → (429, 532))
+[OlympuffWalker] t=2604880 @76:427,534 tick     — (queue held)
+[OlympuffWalker] t=2604886 @76:429,532 tick     — (queue held)
+[OlympuffWalker] t=2604893 @76:429,532 tick     queue 10×Step 29×Wait (explore_area → (434, 517))
+[OlympuffWalker] t=2604894 @76:429,532 zone     @76:430,521 safe=False
+[OlympuffWalker] t=2604895 @76:429,532 zone     @76:431,520 safe=False
+[OlympuffWalker] t=2604898 @76:429,532 zone     @76:432,519 safe=False
+[OlympuffWalker] t=2604901 @76:427,530 tick     — (queue held)
+[OlympuffWalker] t=2604902 @76:427,530 zone     @76:433,518 safe=False
+[OlympuffWalker] t=2604904 @76:427,530 zone     @76:434,517 safe=False
+[OlympuffWalker] t=2604912 @76:427,527 tick     — (queue held)
+[OlympuffWalker] t=2604913 @76:427,527 terrain  2601 cells, 8250 known
+[OlympuffWalker] t=2604921 @76:426,525 tick     — (queue held)
+[OlympuffWalker] t=2604928 @76:428,523 tick     — (queue held)
+[OlympuffWalker] t=2604933 @76:429,522 tick     — (queue held)
+[OlympuffWalker] t=2604934 @76:429,522 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2604942 @76:429,522 tick     queue 5×Step 14×Wait (explore_area → (434, 517))
+[OlympuffWalker] t=2604949 @76:431,520 tick     — (queue held)
+[OlympuffWalker] t=2604956 @76:432,519 tick     — (queue held)
+[OlympuffWalker] t=2604962 @76:434,517 tick     — (queue held)
+[OlympuffWalker] t=2604974 @76:434,517 tick     queue 10×Step 29×Wait (explore_area → (422, 502))
+[OlympuffWalker] t=2604975 @76:434,517 zone     @76:423,506 safe=False
+[OlympuffWalker] t=2604976 @76:434,517 zone     @76:422,505 safe=False
+[OlympuffWalker] t=2604977 @76:434,517 zone     error HTTP 429 rate_limited
+[OlympuffWalker] t=2604980 @76:434,517 tick     — (queue held)
+[OlympuffWalker] t=2604981 @76:434,517 zone     @76:421,504 safe=False
+[OlympuffWalker] t=2604982 @76:434,517 zone     @76:421,503 safe=False
+[OlympuffWalker] t=2604983 @76:434,517 zone     @76:422,502 safe=False
+[OlympuffWalker] t=2604994 @76:433,516 tick     — (queue held)
+[OlympuffWalker] t=2605003 @76:431,514 tick     — (queue held)
+[OlympuffWalker] t=2605004 @76:431,514 terrain  2601 cells, 8973 known
+[OlympuffWalker] t=2605010 @76:431,514 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2605013 @76:428,511 tick     — (queue held)
+[OlympuffWalker] t=2605024 @76:426,509 tick     — (queue held)
+[OlympuffWalker] t=2605029 @76:425,508 tick     — (queue held)
+[OlympuffWalker] t=2605033 @76:425,508 tick     — (queue held)
+[OlympuffWalker] t=2605035 @76:425,508 tick     — (queue held)
+[OlympuffWalker] t=2605036 @76:424,507 tick     — (queue held)
+[OlympuffWalker] t=2605047 @76:424,507 tick     queue 5×Step 12×Wait (explore_area → (422, 502))
+[OlympuffWalker] t=2605053 @76:422,505 tick     — (queue held)
+[OlympuffWalker] t=2605064 @76:421,503 tick     — (queue held)
+[OlympuffWalker] t=2605067 @76:422,502 tick     — (queue held)
+[OlympuffWalker] t=2605077 @76:422,502 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605078 @76:422,502 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605079 @76:422,502 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605080 @76:422,502 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605081 @76:422,502 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605082 @76:422,502 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2605083 @76:422,502 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605084 @76:422,502 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605085 @76:422,502 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605086 @76:422,502 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605176 @76:422,502 entities npc:263@399,482, npc:262@399,486, npc:264@400,509
+[OlympuffWalker] t=2605180 @76:422,502 tick     queue 10×Step 27×Wait (explore_area → (415, 489))
+[OlympuffWalker] t=2605181 @76:422,502 zone     @76:413,491 safe=False
+[OlympuffWalker] t=2605182 @76:422,502 zone     @76:414,490 safe=False
+[OlympuffWalker] t=2605184 @76:422,502 zone     @76:415,489 safe=False
+[OlympuffWalker] t=2605189 @76:419,499 tick     — (queue held)
+[OlympuffWalker] t=2605190 @76:419,499 terrain  2601 cells, 10078 known
+[OlympuffWalker] t=2605197 @76:417,497 tick     — (queue held)
+[OlympuffWalker] t=2605206 @76:415,495 tick     — (queue held)
+[OlympuffWalker] t=2605212 @76:414,494 tick     — (queue held)
+[OlympuffWalker] t=2605217 @76:414,494 tick     — (queue held)
+[OlympuffWalker] t=2605221 @76:414,494 tick     — (queue held)
+[OlympuffWalker] t=2605230 @76:413,493 tick     — (queue held)
+[OlympuffWalker] t=2605236 @76:413,493 tick     — (queue held)
+[OlympuffWalker] t=2605239 @76:412,492 tick     — (queue held)
+[OlympuffWalker] t=2605247 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605248 @76:412,492 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2605249 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605250 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605251 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605252 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605253 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605254 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605255 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605256 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605257 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605258 @76:412,492 tick     error HTTP 400 malformed_intent
+[OlympuffWalker] t=2605367 @76:412,492 entities npc:256@401,470, npc:263@399,482, npc:262@399,486, npc:160@393,503, npc:264@400,504, supply:2769@390,469, supply:538@409,469, supply:420@429,469, supply:334@394,503
+[OlympuffWalker] t=2605371 @76:412,492 tick     queue 3×Step 6×Wait (explore_area → (415, 489))
+[OlympuffWalker] t=2605377 @76:414,490 tick     — (queue held)
+[OlympuffWalker] t=2605381 @76:415,489 tick     — (queue held)
+[OlympuffWalker] t=2605389 @76:415,489 tick     queue 10×Step 29×Wait (explore_area → (403, 474))
+[OlympuffWalker] t=2605390 @76:415,489 zone     @76:404,478 safe=False
+[OlympuffWalker] t=2605392 @76:415,489 zone     @76:404,477 safe=False
+[OlympuffWalker] t=2605394 @76:415,489 zone     @76:405,476 safe=False
+[OlympuffWalker] t=2605395 @76:415,489 zone     @76:404,475 safe=False
+[OlympuffWalker] t=2605397 @76:415,489 zone     @76:403,474 safe=False
+[OlympuffWalker] t=2605402 @76:412,486 tick     — (queue held)
+[OlympuffWalker] t=2605403 @76:412,486 terrain  2601 cells, 11007 known
+[OlympuffWalker] t=2605410 @76:410,484 tick     — (queue held)
+[OlympuffWalker] t=2605423 @76:408,482 tick     — (queue held)
+[OlympuffWalker] t=2605431 @76:406,480 tick     — (queue held)
+[OlympuffWalker] t=2605433 @76:405,479 tick     — (queue held)
+[OlympuffWalker] t=2605435 @76:405,479 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2605444 @76:405,479 tick     queue 5×Step 14×Wait (explore_area → (403, 474))
+[OlympuffWalker] t=2605452 @76:404,477 tick     — (queue held)
+[OlympuffWalker] t=2605463 @76:403,474 tick     — (queue held)
+[OlympuffWalker] t=2605472 @76:403,474 tick     queue 10×Step 30×Wait (explore_area → (401, 461))
+[OlympuffWalker] t=2605473 @76:403,474 zone     @76:399,463 safe=False
+[OlympuffWalker] t=2605474 @76:403,474 zone     @76:400,462 safe=False
+[OlympuffWalker] t=2605476 @76:403,474 zone     @76:401,461 safe=False
+[OlympuffWalker] t=2605482 @76:404,472 tick     — (queue held)
+[OlympuffWalker] t=2605483 @76:404,472 terrain  2601 cells, 12017 known
+[OlympuffWalker] t=2605493 @76:402,469 tick     — (queue held) | Attacked, Damaged 1 by npc
+[OlympuffWalker] t=2605494 @76:402,469 entities npc:256@402,470, npc:262@394,480, npc:263@397,480, npc:264@400,480, supply:536@390,449, supply:537@409,449, supply:2769@390,469, supply:538@409,469
+[OlympuffWalker] t=2605497 @76:401,468 tick     — (queue held)
+[OlympuffWalker] t=2605503 @76:400,467 tick     — (queue held)
+[OlympuffWalker] t=2605510 @76:400,467 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2605514 @76:398,464 tick     — (queue held)
+[OlympuffWalker] t=2605522 @76:398,464 tick     queue 8×Step 22×Wait (heal_food → (390, 469))
+[OlympuffWalker] t=2605533 @76:395,464 tick     — (queue held)
+[OlympuffWalker] t=2605542 @76:393,466 tick     — (queue held)
+[OlympuffWalker] t=2605550 @76:392,467 tick     — (queue held)
+[OlympuffWalker] t=2605556 @76:392,467 tick     — (queue held)
+[OlympuffWalker] t=2605564 @76:391,468 tick     — (queue held)
+[OlympuffWalker] t=2605565 @76:391,468 terrain  2601 cells, 12832 known
+[OlympuffWalker] t=2605568 @76:390,469 tick     — (queue held) | SupplyTaken
+[OlympuffWalker] t=2605577 @76:390,469 tick     queue 10×Step 27×Wait (heal_food → (409, 469))
+[OlympuffWalker] t=2605578 @76:390,469 zone     @76:401,463 safe=False
+[OlympuffWalker] t=2605580 @76:390,469 zone     @76:402,464 safe=False
+[OlympuffWalker] t=2605582 @76:390,469 zone     @76:403,465 safe=False
+[OlympuffWalker] t=2605584 @76:390,469 zone     @76:404,466 safe=False
+[OlympuffWalker] t=2605585 @76:390,469 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2605589 @76:393,466 tick     — (queue held)
+[OlympuffWalker] t=2605590 @76:393,466 zone     @76:405,467 safe=False
+[OlympuffWalker] t=2605591 @76:393,466 zone     @76:406,467 safe=False
+[OlympuffWalker] t=2605593 @76:393,466 zone     @76:407,467 safe=False
+[OlympuffWalker] t=2605596 @76:393,466 zone     @76:408,468 safe=False
+[OlympuffWalker] t=2605599 @76:396,463 tick     — (queue held)
+[OlympuffWalker] t=2605600 @76:396,463 zone     @76:409,469 safe=False
+[OlympuffWalker] t=2605611 @76:399,462 tick     — (queue held)
+[OlympuffWalker] t=2605615 @76:400,462 tick     — (queue held)
+[OlympuffWalker] t=2605623 @76:400,462 tick     queue 9×Step 26×Wait (heal_food → (409, 469))
+[OlympuffWalker] t=2605631 @76:401,463 tick     — (queue held)
+[OlympuffWalker] t=2605640 @76:401,463 tick     — (queue held) | Attacked, Damaged 1 by npc
+[OlympuffWalker] t=2605641 @76:401,463 position 
+[OlympuffWalker] t=2605643 @76:401,463 entities npc:256@402,464, npc:262@394,480, npc:263@397,480, npc:264@400,480, supply:536@390,449, supply:537@409,449, supply:538@409,469
+[OlympuffWalker] t=2605646 @76:401,463 tick     queue 9×Step 24×Wait (heal_food → (409, 469))
+[OlympuffWalker] t=2605651 @76:402,462 tick     — (queue held)
+[OlympuffWalker] t=2605657 @76:404,464 tick     — (queue held)
+[OlympuffWalker] t=2605658 @76:404,464 terrain  2601 cells, 13088 known
+[OlympuffWalker] t=2605665 @76:404,464 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2605666 @76:406,465 tick     — (queue held)
+[OlympuffWalker] t=2605678 @76:408,468 tick     — (queue held)
+[OlympuffWalker] t=2605683 @76:409,469 tick     — (queue held) | SupplyTaken
+[OlympuffWalker] t=2605694 @76:409,469 tick     queue 10×Step 28×Wait (heal_food → (429, 449))
+[OlympuffWalker] t=2605695 @76:409,469 zone     @76:420,463 safe=False
+[OlympuffWalker] t=2605696 @76:409,469 zone     @76:421,462 safe=False
+[OlympuffWalker] t=2605699 @76:409,469 zone     @76:422,461 safe=False
+[OlympuffWalker] t=2605700 @76:409,469 zone     @76:423,460 safe=False
+[OlympuffWalker] t=2605702 @76:409,469 zone     @76:424,458 safe=False
+[OlympuffWalker] t=2605706 @76:412,466 tick     — (queue held)
+[OlympuffWalker] t=2605707 @76:412,466 zone     @76:424,459 safe=False
+[OlympuffWalker] t=2605708 @76:412,466 zone     @76:425,457 safe=False
+[OlympuffWalker] t=2605710 @76:412,466 zone     @76:426,455 safe=False
+[OlympuffWalker] t=2605713 @76:412,466 zone     @76:426,456 safe=False
+[OlympuffWalker] t=2605714 @76:412,466 zone     @76:427,454 safe=False
+[OlympuffWalker] t=2605718 @76:415,465 tick     — (queue held)
+[OlympuffWalker] t=2605719 @76:415,465 zone     @76:428,452 safe=False
+[OlympuffWalker] t=2605720 @76:415,465 zone     @76:428,453 safe=False
+[OlympuffWalker] t=2605722 @76:415,465 zone     @76:428,451 safe=False
+[OlympuffWalker] t=2605724 @76:415,465 zone     @76:428,450 safe=False
+[OlympuffWalker] t=2605726 @76:415,465 zone     @76:429,449 safe=False
+[OlympuffWalker] t=2605731 @76:418,464 tick     — (queue held)
+[OlympuffWalker] t=2605732 @76:418,464 terrain  2601 cells, 13474 known
+[OlympuffWalker] t=2605735 @76:419,463 tick     — (queue held)
+[OlympuffWalker] t=2605741 @76:419,463 tick     queue 10×Step 27×Wait (heal_food → (429, 469))
+[OlympuffWalker] t=2605742 @76:419,463 zone     @76:429,469 safe=False
+[OlympuffWalker] t=2605752 @76:422,463 tick     — (queue held)
+[OlympuffWalker] t=2605755 @76:422,463 self     lives=6 alive=True placed=True perception=25
+[OlympuffWalker] t=2605761 @76:423,465 tick     — (queue held)
+[OlympuffWalker] t=2605768 @76:425,466 tick     — (queue held)
+[OlympuffWalker] t=2605775 @76:427,467 tick     — (queue held)
+[OlympuffWalker] t=2605779 @76:428,468 tick     — (queue held)
+[OlympuffWalker] t=2605784 @76:428,468 tick     Take(420) (take food berry)
+[OlympuffWalker] t=2605786 @76:428,468 tick     — (queue held) | SupplyTaken
+[OlympuffWalker] t=2605791 @76:428,468 tick     queue 10×Step 27×Wait (heal_food → (429, 449))
+[OlympuffWalker] t=2605797 @76:427,466 tick     — (queue held)
+[OlympuffWalker] t=2605807 @76:428,464 tick     — (queue held)
+[OlympuffWalker] t=2605812 @76:427,463 tick     — (queue held)
+finished in 136.9s
+steps applied: 200 (target 200)
+movement_cooldown rejections: 0
+calm windows: 889, calm tick POSTs: 163 (18.3% of calm windows)
+calm API calls (reads included): 274 (30.8% of calm windows)
+urgent windows: 12
+other rejections: block_occupied, block_occupied
+PASS: M6 acceptance criteria met

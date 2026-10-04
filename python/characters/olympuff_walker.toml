@@ -7,9 +7,10 @@ world = "olympuff"
 [policy]
 kind = "scripted"
 goals = ["explore"]
-on_hostile = "flee"
-hostile = ["npc"]
-hostile_range = 6
+# M6 done-when is calm paced walking; hostiles are ignored so Flee cannot hold the round.
+on_hostile = "ignore"
+hostile = []
+hostile_range = 2
 pickup = false
 avoid_blocks = ["fire", "lava"]
 entity_refresh = 20

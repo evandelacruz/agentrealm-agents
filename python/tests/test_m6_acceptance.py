@@ -299,6 +299,19 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertEqual(self.smoke.ensure_character(client, cfg), 9)
         client.create_character.assert_called_once_with("olympuff", cfg.name, cfg.avatar, cfg.model_agent)
 
+    def test_ensure_character_reuses_listing_when_create_fails(self):
+        from agentrealm_agent.client import ApiError
+
+        cfg = config.load(self.smoke.DEFAULT_CHARACTER)
+        client = mock.Mock()
+        client.create_character.side_effect = ApiError(409, "character_cap_reached")
+        client.list_characters.return_value = [
+            {"id": 4, "name": cfg.name, "world_code": "sandbox"},
+            {"id": 7, "name": cfg.name, "world_code": cfg.world},
+        ]
+        self.assertEqual(self.smoke.ensure_character(client, cfg), 7)
+        self.assertEqual(config.load_state(cfg)["character_id"], 7)
+
     def exit_code_for(self, metrics):
         with mock.patch.object(self.smoke, "Client"), \
                 mock.patch.object(self.smoke, "ensure_character", return_value=9), \

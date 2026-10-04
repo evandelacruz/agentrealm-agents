@@ -226,6 +226,8 @@ class SchedulerTest(unittest.TestCase):
         cases = [
             ("self first", dict(need_self=True), {}, "self"),
             ("then position", dict(need_self=False, need_position=True), {}, "position"),
+            ("tick to wake when asleep and off the map", dict(need_self=False, need_position=True),
+             dict(asleep=True, placed=False, pos=None), "tick"),
             ("terrain after moving half the perception range", dict(need_self=False, need_position=False),
              dict(terrain_center=(0, 0), pos=(2, 0), perception=3, entities_tick=10, tick=10), "terrain"),
             ("terrain on map change", dict(need_self=False, need_position=False),

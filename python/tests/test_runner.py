@@ -260,6 +260,48 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(intents, [{"verb": "Step", "direction": "right"}])
         self.assertEqual(r.mem.path, [(3, 0), (4, 0)])
 
+    def test_hostile_in_range_drops_the_held_queue_and_flees(self):
+        # Reflex 3 runs every round trip, not only once the queue drains.
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        self.assertIsNotNone(r.mem.held_queue)
+        r.world.entities = [Entity("npc", 9, (2, 1))]  # off the path, within hostile_range
+        r.tick()
+        self.assertIsNotNone(fake.sent[1], "the flee replaces the held queue")
+        self.assertEqual(fake.sent[1][-1], {"verb": "Step", "direction": "down"})
+        self.assertEqual(r.mem.pending_queue, "q2")
+        self.assertTrue(r.mem.need_position, "results of the dropped queue are no longer read")
+
+    def test_supply_in_reach_drops_the_held_queue_and_takes(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=True))
+        r.tick()
+        r.world.entities = [Entity("supply", 5, (0, 1))]
+        r.tick()
+        self.assertEqual(fake.sent[1], [{"verb": "Take", "supply_id": 5}])
+        self.assertIsNone(r.mem.pending_intents)
+
+    def test_no_reflex_leaves_the_held_queue_and_plan_alone(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False, on_hostile="ignore"))
+        r.tick()
+        path, held = list(r.mem.path), r.mem.held_queue
+        r.world.entities = [Entity("npc", 9, (2, 1))]
+        r.tick()
+        self.assertIsNone(fake.sent[1])
+        self.assertEqual(r.mem.held_queue, held)
+        self.assertEqual(r.mem.path, path, "the held queue's steps are not planned twice")
+
 
 class NetworkTest(unittest.TestCase):
     def test_network_failure_is_retried_not_fatal(self):

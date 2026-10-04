@@ -18,13 +18,13 @@ Every brief MUST:
 
 ## Partial work
 
-**One milestone may take several PRs.** A work item too large for one reviewable PR ships as declared serial slices. The agent marks the ID:
+**Items are PR-sized.** One ID is normally one PR. If an item still turns out too large for one reviewable PR, it ships as declared serial slices, and the agent marks the ID:
 
 ```json
 {"state": "partial", "remaining": "<what is left>"}
 ```
 
-The next pass picks it back up carrying that note. Do not stretch one PR to cover a whole large ID, and do not treat one ID as one PR by rule.
+The next pass picks it back up carrying that note. Do not stretch one PR past a reviewable size to finish an ID.
 
 ## Template
 

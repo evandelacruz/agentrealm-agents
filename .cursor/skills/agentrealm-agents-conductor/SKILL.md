@@ -1,7 +1,7 @@
 ---
 name: agentrealm-agents-conductor
 description: >-
-  Play the agentrealm-agents build conductor: read the PLAN.md milestones, pick next ready work item
+  Play the agentrealm-agents build conductor: read the PLAN.md backlog, pick next ready work item
   IDs, spawn implementer cloud agents, watch open PRs for review comments and
   approved-PR nits, and stack merge-ready work. Use when the user asks to run a
   conductor pass, kick off next steps, or keep the build moving.
@@ -49,7 +49,7 @@ No ticketing system. PLAN.md is the backlog.
    - Open PRs: `npm --prefix tools/conductor run prs` (or `gh pr list`)
    - In-flight writers: `conductor:working` on a PR. `npm --prefix tools/conductor run status` lists Cursor cloud agents only; Claude Code fixers do not appear there. A Cursor agent `finished` should have released the lock. If the label remains, skip the PR and tell Evan; another worker may hold it.
 
-3. **Classify** milestone IDs as roughly `done` / `in_progress` / `ready` / `blocked`. Prefer under-claiming done.
+3. **Classify** backlog IDs as roughly `done` / `in_progress` / `ready` / `blocked`. Prefer under-claiming done.
 
 4. **Respect the design docs and `AGENTS.md`.**
    - Never invent stack, architecture, or dependencies. The agent stays an ordinary API client, standard library only.
@@ -63,7 +63,7 @@ No ticketing system. PLAN.md is the backlog.
 7. **If clear,** spawn 1–2 implementers for the smallest ready slice(s), each with an explicit scope. See [references/implementer-brief.md](references/implementer-brief.md) for the required brief shape.
 
    ```bash
-   npm --prefix tools/conductor run spawn -- --ids M4 --name "LLM planner" -- <<'EOF'
+   npm --prefix tools/conductor run spawn -- --ids A8 --name "Runtime directives" -- <<'EOF'
    <implementer brief>
    EOF
    ```
@@ -77,7 +77,7 @@ No ticketing system. PLAN.md is the backlog.
 
    ```bash
    npm --prefix tools/conductor run follow-up -- --agent bc-... --pr <url> -- <<'EOF'
-   Address unresolved PR review comments. Keep the same milestone IDs.
+   Address unresolved PR review comments. Keep the same backlog IDs.
    If you edit the PR description, keep the opening as a product sentence: one or two sentences in plain language about what someone running a reference agent, or the agent itself, can do now, and why it matters. Leave the mechanism out. The diff already shows the logic.
    Keep the PR ready for review (not draft); run `gh pr ready` if needed.
    Stop and ask if a comment requires an architecture or policy decision, a
@@ -114,7 +114,7 @@ Approval is not "ignore the rest of the thread." A reviewer who approves still l
 1. Read review bodies, issue comments, and threads, including anything marked nit, suggestion, or non-blocking.
 2. Triage what is worth doing now:
    - **Do now:** small nits, clarity renames, missing docs, test tighten-ups, obvious follow-ups inside the same slice.
-   - **Skip:** drive-by refactors, new features, stack inventions, or anything that should be its own milestone. Report these instead of spawning.
+   - **Skip:** drive-by refactors, new features, stack inventions, or anything that should be its own backlog item. Report these instead of spawning.
 3. If there is worthwhile polish and the PR does not have `conductor:working`, `follow-up --agent bc-… --pr <url>` on the agent that wrote the PR. The brief must say: only the listed items, do not reopen the slice, keep the PR ready, halt if a "nit" is actually an architecture question. The CLI claims `conductor:working`. If the label is already set, skip.
 4. **If that agent cannot take follow-up,** do not spawn a fresh agent for polish alone. It has to read the whole slice back in to reword a comment. Report the items as deferred.
 5. Do not let polish block spawning unrelated ready slices.

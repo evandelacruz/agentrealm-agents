@@ -11,7 +11,7 @@
 
   "A1": {"state": "open"},
 
-  "A2": {"state": "open", "note": "Waiting on PR #13 (queue invalidation), which covers it; mark done when #13 merges."},
+  "A2": {"state": "done"},
 
   "A3": {"state": "open"},
 
@@ -91,5 +91,7 @@
 
   "A41": {"state": "open"},
 
-  "A42": {"state": "open"}
+  "A42": {"state": "open"},
+
+  "A43": {"state": "open"}
 }

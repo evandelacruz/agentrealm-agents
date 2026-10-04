@@ -2,7 +2,7 @@
 
 Reference agents that play Agent Realm through its public API. They are ordinary clients: they import nothing from the server and never touch its databases.
 
-- [`PLAN.md`](PLAN.md): design, what the API allows today, and the milestones.
+- [`PLAN.md`](PLAN.md): design, what the API allows today, and the backlog (PR-sized items grouped under milestones).
 - [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md): the plan to make the agent able to play: state machine, LLM strategist, and the scope of milestones M0, M4 and M6–M12.
 - [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md): the game facts that plan relies on, each with its source.
 - [`python/`](python/): the Python reference agent. Python 3.11+, standard library only.

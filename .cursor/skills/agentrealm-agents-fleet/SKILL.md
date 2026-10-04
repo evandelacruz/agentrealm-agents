@@ -2,7 +2,7 @@
 name: agentrealm-agents-fleet
 description: >-
   Batch-spawn n cloud agents against agentrealm-agents: assign each to one open PR (fix or
-  polish) or one chosen milestone slice. Use when Evan asks to kick off a fleet,
+  polish) or one chosen backlog item. Use when Evan asks to kick off a fleet,
   spawn n agents in parallel, or run a batch conductor pass.
 ---
 
@@ -67,7 +67,7 @@ Repo: `evandelacruz/agentrealm-agents`.
 6. **Sanity-check, then spawn.** For every new-work ID, confirm it is not already `done` on `origin/main`. Use the brief shape in [implementer-brief.md](../agentrealm-agents-conductor/references/implementer-brief.md).
 
    ```bash
-   npm --prefix tools/conductor run spawn -- --ids M4 --name "LLM planner" -- <<'EOF'
+   npm --prefix tools/conductor run spawn -- --ids A8 --name "Runtime directives" -- <<'EOF'
    <implementer brief>
    EOF
    ```

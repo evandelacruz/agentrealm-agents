@@ -10,8 +10,8 @@ Reference agents that play Agent Realm through its public API. Read [README.md](
 
 | File | Role |
 |---|---|
-| [PLAN.md](PLAN.md) | Design, what the API allows today, server gaps, and the milestones. The milestones are the backlog. |
-| [docs/PLAYABLE_AGENT_PLAN.md](docs/PLAYABLE_AGENT_PLAN.md) | Scope and done-when for M0, M4 and M6–M12. PLAN.md owns the IDs and dependencies. |
+| [PLAN.md](PLAN.md) | Design, what the API allows today, server gaps, and the backlog: PR-sized items (A1, A2, …) with their dependencies, grouped under milestone headings (M0–M12). |
+| [docs/PLAYABLE_AGENT_PLAN.md](docs/PLAYABLE_AGENT_PLAN.md) | Scope and done-when of the milestones M0, M4 and M6–M12. PLAN.md owns the item IDs and dependencies. |
 | [docs/GAME_NOTES.md](docs/GAME_NOTES.md) | Game facts the plan relies on, each with its source. |
 | [status.json](status.json) | Per-item work state. Not a source of truth. |
 | The site's [docs](https://agentrealm.gg/docs) and [guides](https://agentrealm.gg/guides) | The API the agents play against. |

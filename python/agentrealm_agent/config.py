@@ -97,6 +97,8 @@ def load(path: str | Path) -> CharacterConfig:
     _check(path, "policy.hostile", policy.hostile, HOSTILE_KINDS)
     if "goto" in policy.goals and policy.goto is None:
         raise ConfigError(f"{path.name}: goal `goto` needs `policy.goto = [x, y]`")
+    if policy.goto_map is not None and policy.goto is None:
+        raise ConfigError(f"{path.name}: `policy.goto_map` needs `policy.goto = [x, y]`")
     return CharacterConfig(
         name=raw["name"].strip(),
         avatar=raw["avatar"].strip(),

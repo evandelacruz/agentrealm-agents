@@ -52,15 +52,15 @@ def known_prefix(path: list[Pos], view: MapView) -> list[Pos]:
 class _Grid:
     """One search's view of the cost grid, with per-search state precomputed."""
 
-    def __init__(self, w: WorldModel, goal: Pos, params: CostGridParams):
-        self.w, self.goal, self.params = w, goal, params
+    def __init__(self, w: WorldModel, goals: set[Pos], params: CostGridParams):
+        self.w, self.goals, self.params = w, goals, params
         self.occupied = w.occupied()
         self.hostiles: list[Entity] = [e for e in w.entities if e.kind in params.hostile_kinds]
         # Fog is unbounded, so the search is boxed to the known extent plus
-        # start and goal, with a one-tile fog ring: any detour beyond the box
+        # start and goals, with a one-tile fog ring: any detour beyond the box
         # crosses only fog and is no cheaper than walking the ring.
-        xs = [p[0] for p in w.view.tiles] + [w.pos[0], goal[0]]
-        ys = [p[1] for p in w.view.tiles] + [w.pos[1], goal[1]]
+        xs = [p[0] for p in w.view.tiles] + [w.pos[0]] + [g[0] for g in goals]
+        ys = [p[1] for p in w.view.tiles] + [w.pos[1]] + [g[1] for g in goals]
         self.box = (min(xs) - 1, min(ys) - 1, max(xs) + 1, max(ys) + 1)
 
     def in_box(self, p: Pos) -> bool:
@@ -75,7 +75,7 @@ class _Grid:
         block = self.w.view.tiles.get(p)
         if block is not None and block in DOORS:
             # Stepping onto a door warps, so a door is only ever the goal.
-            return KNOWN_WALKABLE if p == self.goal and params.allow_goal_door else None
+            return KNOWN_WALKABLE if p in self.goals and params.allow_goal_door else None
         if block is None:
             base = FOG
         elif block in WALKABLE:
@@ -101,7 +101,7 @@ def _search(w: WorldModel, goal: Pos, params: CostGridParams) -> tuple[list[Pos]
     start = w.pos
     if start == goal:
         return [], 0
-    grid = _Grid(w, goal, params)
+    grid = _Grid(w, {goal}, params)
     if grid.cost(goal) is None:
         return None
     frontier: list[tuple[int, int, Pos]] = [(chebyshev(start, goal) * KNOWN_WALKABLE, 0, start)]
@@ -110,10 +110,7 @@ def _search(w: WorldModel, goal: Pos, params: CostGridParams) -> tuple[list[Pos]
     while frontier:
         _, g, cur = heapq.heappop(frontier)
         if cur == goal:
-            out = [cur]
-            while out[-1] in came and came[out[-1]] != start:
-                out.append(came[out[-1]])
-            return out[::-1], g
+            return _unwind(came, start, cur), g
         if g > cost.get(cur, 10**9):
             continue
         for dx, dy in NEIGHBOURS:
@@ -129,6 +126,59 @@ def _search(w: WorldModel, goal: Pos, params: CostGridParams) -> tuple[list[Pos]
                 came[n] = cur
                 heapq.heappush(frontier, (ng + chebyshev(n, goal) * KNOWN_WALKABLE, ng, n))
     return None
+
+
+def _unwind(came: dict[Pos, Pos], start: Pos, end: Pos) -> list[Pos]:
+    out = [end]
+    while out[-1] in came and came[out[-1]] != start:
+        out.append(came[out[-1]])
+    return out[::-1]
+
+
+def cost_flood(
+    w: WorldModel, targets: set[Pos], params: CostGridParams | None = None
+) -> dict[Pos, tuple[list[Pos], int]]:
+    """Cheapest path and cost from ``w.pos`` to every reachable target, in one flood (A26).
+
+    Dijkstra over the same cost grid as ``cost_path``. A door target is
+    entered (with ``allow_goal_door``) but never walked through, since
+    stepping onto it warps. Paths exclude the start.
+    """
+    assert w.pos is not None
+    params = params or CostGridParams()
+    start = w.pos
+    out: dict[Pos, tuple[list[Pos], int]] = {}
+    if start in targets:
+        out[start] = ([], 0)
+    remaining = set(targets) - {start}
+    if not remaining:
+        return out
+    grid = _Grid(w, remaining, params)
+    frontier: list[tuple[int, Pos]] = [(0, start)]
+    came: dict[Pos, Pos] = {}
+    cost: dict[Pos, int] = {start: 0}
+    while frontier and remaining:
+        g, cur = heapq.heappop(frontier)
+        if g > cost.get(cur, 10**9):
+            continue
+        if cur in remaining:
+            remaining.discard(cur)
+            out[cur] = (_unwind(came, start, cur), g)
+            if w.view.tiles.get(cur) in DOORS:
+                continue
+        for dx, dy in NEIGHBOURS:
+            n = (cur[0] + dx, cur[1] + dy)
+            if not grid.in_box(n):
+                continue
+            sc = grid.cost(n)
+            if sc is None:
+                continue
+            ng = g + sc
+            if ng < cost.get(n, 10**9):
+                cost[n] = ng
+                came[n] = cur
+                heapq.heappush(frontier, (ng, n))
+    return out
 
 
 def cost_path(w: WorldModel, goal: Pos, params: CostGridParams | None = None) -> list[Pos] | None:

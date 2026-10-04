@@ -384,12 +384,10 @@ def _plan_goal(
         options = w.open_neighbours(w.pos, blocked)
         return [rng.choice(sorted(options))] if options else None
     if goal == "goto":
-        assert policy.goto is not None
+        # config.load guarantees goto is set when the goal is listed.
         dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
-        assert dest_map is not None
-        target = tuple(policy.goto)
         params = _grid(policy, blocked, costly, allow_goal_door=True)
-        return route_first_leg(w, knowledge, dest_map, target, params)
+        return route_first_leg(w, knowledge, dest_map, tuple(policy.goto), params) or None
     if goal == "doors":
         return doors_goal_path(w, knowledge, _grid(policy, blocked, costly, allow_goal_door=True))
     if goal == "explore":

@@ -1,124 +1,112 @@
-"""Cross-map routing over known door warps, then A* on each map (A26)."""
+"""Cross-map routing over known door warps, then A* on each map (A26).
+
+The graph's nodes are the start, the destination, every known door cell and
+every warp landing. Walking edges come from one cost-grid flood per node
+(``cost_flood``); a door cell with a recorded warp has one zero-cost edge to
+its landing. Stepping onto a door warps, so a door reached on foot is only
+ever left through its warp, and one whose warp is unknown is a dead end.
+"""
 
 from __future__ import annotations
 
 import heapq
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..knowledge_base import KnowledgeBase
 from ..knowledge_maps import door_warp_known, iter_doors, view_from_kb
-from ..world import DOORS, MapView, Pos, WorldModel, chebyshev
-from .planner import CostGridParams, _search, cost_path
+from ..world import DOORS, MapView, Pos, WorldModel
+from .planner import CostGridParams, cost_flood, cost_path, nearest_target
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class _State:
     map_id: int
     pos: Pos
+    on_door: bool = False  # reached a door on foot: the only way on is its warp
 
 
-def _segment_world(w: WorldModel, kb: KnowledgeBase, map_id: int, pos: Pos) -> WorldModel:
-    """A world model for cost-grid search on ``map_id`` at ``pos``."""
-    sw = WorldModel(w.character_id, map_id=map_id, pos=pos, perception=w.perception, movement=w.movement)
-    if map_id == w.map_id:
-        sw.maps = w.maps
-        sw.entities = w.entities
-    else:
-        sw.maps[map_id] = view_from_kb(kb, map_id)
-    return sw
+class _Graph:
+    """Per-replan cache of map views and warps, so each is built once."""
+
+    def __init__(self, w: WorldModel, kb: KnowledgeBase | None, params: CostGridParams):
+        self.w, self.kb = w, kb
+        # Door cells are flood targets, so they must be enterable.
+        self.here_params = replace(params, allow_goal_door=True)
+        # avoid/costly are cells on the current map; they mean nothing elsewhere.
+        self.away_params = replace(self.here_params, avoid=set(), costly=set())
+        self._views: dict[int, MapView] = {}
+        self._warps: dict[int, dict[Pos, _State]] = {}
+
+    def view(self, map_id: int) -> MapView:
+        if map_id not in self._views:
+            live = self.w.maps.get(map_id)
+            if live is not None:
+                self._views[map_id] = live
+            elif self.kb is not None:
+                self._views[map_id] = view_from_kb(self.kb, map_id)
+            else:
+                self._views[map_id] = MapView()
+        return self._views[map_id]
+
+    def warps(self, map_id: int) -> dict[Pos, _State]:
+        if map_id not in self._warps:
+            records = iter_doors(self.kb, map_id) if self.kb is not None else []
+            self._warps[map_id] = {
+                (int(d["x"]), int(d["y"])): _State(int(d["to_map_id"]), (int(d["to_x"]), int(d["to_y"])))
+                for d in records
+                if door_warp_known(d)
+            }
+        return self._warps[map_id]
+
+    def doors(self, map_id: int) -> set[Pos]:
+        seen = {p for p, b in self.view(map_id).tiles.items() if b in DOORS}
+        return seen | set(self.warps(map_id))
+
+    def flood(self, at: _State, targets: set[Pos]) -> dict[Pos, tuple[list[Pos], int]]:
+        here = at.map_id == self.w.map_id
+        sw = WorldModel(self.w.character_id, map_id=at.map_id, pos=at.pos, perception=self.w.perception)
+        sw.maps[at.map_id] = self.view(at.map_id)
+        if here:
+            sw.entities = self.w.entities
+        return cost_flood(sw, targets, self.here_params if here else self.away_params)
 
 
-def _path_cost(
-    w: WorldModel, kb: KnowledgeBase, map_id: int, start: Pos, goal: Pos, params: CostGridParams
-) -> tuple[list[Pos], int] | None:
-    if start == goal:
-        return [], 0
-    sw = _segment_world(w, kb, map_id, start)
-    return _search(sw, goal, params)
+def _route(w: WorldModel, kb: KnowledgeBase | None, dest_map: int, dest: Pos, params: CostGridParams) -> list[Pos] | None:
+    """First-leg path on the current map of the cheapest route to ``dest_map:dest``.
 
-
-def _landmarks(kb: KnowledgeBase, w: WorldModel, dest_map: int, dest: Pos) -> dict[int, set[Pos]]:
-    """Door cells and the destination on each map."""
-    out: dict[int, set[Pos]] = {}
-    seen_maps = {int(k) for k in kb.maps} | set(w.maps)
-    for map_id in seen_maps:
-        points: set[Pos] = set()
-        for d in iter_doors(kb, map_id):
-            points.add((int(d["x"]), int(d["y"])))
-        if map_id == w.map_id:
-            for p, block in w.view.tiles.items():
-                if block in DOORS:
-                    points.add(p)
-        if map_id == dest_map:
-            points.add(dest)
-        if points:
-            out[map_id] = points
-    if dest_map not in out:
-        out[dest_map] = {dest}
-    return out
-
-
-def _heuristic(state: _State, goal: _State) -> int:
-    if state.map_id != goal.map_id:
-        return 0
-    return chebyshev(state.pos, goal.pos)
-
-
-def _waypoint_route(
-    w: WorldModel,
-    kb: KnowledgeBase,
-    dest_map: int,
-    dest: Pos,
-    params: CostGridParams,
-) -> list[_State] | None:
-    """Shortest route over known door warps between maps."""
+    Dijkstra over the door graph. The start walks out even when it stands on
+    a door: that door did not warp us (or we just landed on it).
+    """
     assert w.map_id is not None and w.pos is not None
+    g = _Graph(w, kb, params)
     start = _State(w.map_id, w.pos)
-    goal = _State(dest_map, dest)
-    if start == goal:
-        return [start]
-
-    landmarks = _landmarks(kb, w, dest_map, dest)
-    doors_by_map: dict[int, dict[Pos, dict]] = {}
-    for map_id in landmarks:
-        doors_by_map[map_id] = {(int(d["x"]), int(d["y"])): d for d in iter_doors(kb, map_id)}
-
-    frontier: list[tuple[int, int, _State]] = [(0, 0, start)]
+    frontier: list[tuple[int, _State]] = [(0, start)]
     cost: dict[_State, int] = {start: 0}
     came: dict[_State, _State] = {}
-    seq = 0
+    first_leg: dict[_State, list[Pos]] = {}
     while frontier:
-        _, g, state = heapq.heappop(frontier)
-        if g > cost.get(state, 10**9):
+        c, state = heapq.heappop(frontier)
+        if c > cost.get(state, 10**9):
             continue
-        if state == goal:
-            out = [state]
-            while out[-1] in came:
-                out.append(came[out[-1]])
-            return out[::-1]
-        for target in landmarks.get(state.map_id, ()):
-            if target == state.pos:
-                continue
-            found = _path_cost(w, kb, state.map_id, state.pos, target, params)
-            if found is None:
-                continue
-            _, seg = found
-            nxt = _State(state.map_id, target)
-            ng = g + seg
-            if ng < cost.get(nxt, 10**9):
-                cost[nxt] = ng
-                came[nxt] = state
-                seq += 1
-                heapq.heappush(frontier, (ng + _heuristic(nxt, goal), ng, nxt))
-        door = doors_by_map.get(state.map_id, {}).get(state.pos)
-        if door and door_warp_known(door):
-            landing = _State(int(door["to_map_id"]), (int(door["to_x"]), int(door["to_y"])))
-            ng = g
-            if ng < cost.get(landing, 10**9):
-                cost[landing] = ng
-                came[landing] = state
-                seq += 1
-                heapq.heappush(frontier, (ng + _heuristic(landing, goal), ng, landing))
+        if (state.map_id, state.pos) == (dest_map, dest):
+            while came.get(state, start) != start:
+                state = came[state]
+            return first_leg.get(state, [])
+        if state.on_door:
+            landing = g.warps(state.map_id).get(state.pos)
+            if landing is not None and c < cost.get(landing, 10**9):
+                cost[landing], came[landing] = c, state
+                heapq.heappush(frontier, (c, landing))
+            continue
+        doors = g.doors(state.map_id)
+        targets = doors | ({dest} if state.map_id == dest_map else set())
+        for p, (path, seg) in g.flood(state, targets - {state.pos}).items():
+            nxt = _State(state.map_id, p, on_door=p in doors)
+            if c + seg < cost.get(nxt, 10**9):
+                cost[nxt], came[nxt] = c + seg, state
+                if state == start:
+                    first_leg[nxt] = path
+                heapq.heappush(frontier, (c + seg, nxt))
     return None
 
 
@@ -129,43 +117,28 @@ def route_first_leg(
     dest: Pos,
     params: CostGridParams,
 ) -> list[Pos] | None:
-    """Path on the current map toward ``dest_map:dest``, using the door graph when needed."""
+    """Path on the current map toward ``dest_map:dest``, through known door warps when needed.
+
+    None when no known route reaches it, so the goal yields like any
+    unreachable one. Without a knowledge base no warp is known, so only a
+    destination on the current map can be reached.
+    """
     if w.map_id is None or w.pos is None:
-        return None
-    if kb is None:
-        if w.map_id == dest_map:
-            return cost_path(w, dest, params)
         return None
     if w.map_id == dest_map:
         direct = cost_path(w, dest, params)
         if direct is not None:
             return direct
-    route = _waypoint_route(w, kb, dest_map, dest, params)
-    if route is None or len(route) < 2:
-        if w.map_id == dest_map:
-            return cost_path(w, dest, params)
-        return None
-    next_wp = route[1]
-    if next_wp.map_id != w.map_id:
-        return None
-    found = _path_cost(w, kb, w.map_id, w.pos, next_wp.pos, params)
-    return found[0] if found else None
+    return _route(w, kb, dest_map, dest, params)
 
 
-def unvisited_doors_on_map(kb: KnowledgeBase | None, w: WorldModel, map_id: int) -> set[Pos]:
-    """Doors whose warp destination is not recorded yet."""
-    if kb is None:
-        return set()
-    view = w.view if map_id == w.map_id else view_from_kb(kb, map_id)
-    by_pos = {(int(d["x"]), int(d["y"])): d for d in iter_doors(kb, map_id)}
-    out: set[Pos] = set()
-    for p, block in view.tiles.items():
-        if block not in DOORS:
-            continue
-        record = by_pos.get(p)
-        if record is None or not door_warp_known(record):
-            out.add(p)
-    return out
+def unvisited_doors_on_map(kb: KnowledgeBase | None, w: WorldModel) -> set[Pos]:
+    """Doors on the current map whose warp destination is not recorded yet."""
+    doors = {p for p, b in w.view.tiles.items() if b in DOORS}
+    if kb is None or w.map_id is None:
+        return doors
+    known = {(int(d["x"]), int(d["y"])) for d in iter_doors(kb, w.map_id) if door_warp_known(d)}
+    return doors - known
 
 
 def doors_goal_path(
@@ -173,14 +146,9 @@ def doors_goal_path(
     kb: KnowledgeBase | None,
     params: CostGridParams,
 ) -> list[Pos] | None:
-    """Walk toward an unvisited door first, else the nearest door on this map."""
-    assert w.map_id is not None
-    unvisited = unvisited_doors_on_map(kb, w, w.map_id)
-    doors = {p for p, b in w.view.tiles.items() if b in DOORS}
-    targets = unvisited or doors
-    if not targets:
+    """Walk toward the nearest unvisited door, else the nearest door on this map."""
+    if w.map_id is None or w.pos is None:
         return None
-    from .planner import nearest_target
-
-    found = nearest_target(w, targets, params)
+    doors = {p for p, b in w.view.tiles.items() if b in DOORS}
+    found = nearest_target(w, unvisited_doors_on_map(kb, w), params) or nearest_target(w, doors, params)
     return found[1] if found and found[1] else None

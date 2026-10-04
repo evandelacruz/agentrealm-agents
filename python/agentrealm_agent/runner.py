@@ -13,7 +13,7 @@ from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import record_warp, sync_world_maps
+from .knowledge_maps import record_warp, sync_tiles, sync_world_maps
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
@@ -124,7 +124,39 @@ class Runner:
                 except ApiError as e:
                     not_before = self.on_error(call, e)
         finally:
+            if self.knowledge is not None:
+                # Tiles learned from tick deltas, which terrain reads did not merge.
+                sync_world_maps(self.knowledge, self.world)
             self.trace.close()
+
+    def note_warp_landing(self) -> None:
+        """After a door step, record where the position read says it landed (A26).
+
+        A read that still puts us on the door means it did not warp (locked,
+        or closed): nothing is recorded, so the graph never gets a self-loop.
+        """
+        w, m = self.world, self.mem
+        warp, m.warp_from = m.warp_from, None
+        if warp is None or self.knowledge is None or w.map_id is None or w.pos is None:
+            return
+        from_map, from_pos, block_type = warp
+        if (w.map_id, w.pos) != (from_map, from_pos):
+            record_warp(self.knowledge, from_map, from_pos, block_type, w.map_id, w.pos)
+
+    def sync_terrain(self, t: dict) -> None:
+        """Merge the cells of this terrain read's window into the knowledge base (A26)."""
+        if self.knowledge is None:
+            return
+        map_id = int(t["map_id"])
+        view = self.world.maps[map_id]
+        x0, y0 = int(t["x0"]), int(t["y0"])
+        tiles = {
+            (x, y): view.tiles[(x, y)]
+            for y in range(y0, y0 + int(t["height"]))
+            for x in range(x0, x0 + int(t["width"]))
+            if (x, y) in view.tiles
+        }
+        sync_tiles(self.knowledge, map_id, tiles)
 
     def read_world(self) -> dict | None:
         """The world read that sets the pace, retried like any other call."""
@@ -146,38 +178,15 @@ class Runner:
             self.log(call, f"lives={w.lives} alive={w.alive} placed={s.get('placed')} perception={w.perception}", {"self": s})
         elif call == "position":
             p = c.position(self.cid)
-            prev_map, prev_pos = w.map_id, w.pos
             w.apply_position(p)
-            if m.warp_from is not None and self.knowledge is not None:
-                fm, fp, block_type = m.warp_from
-                if w.map_id is not None and w.pos is not None:
-                    record_warp(self.knowledge, fm, fp, block_type, w.map_id, w.pos)
-                m.warp_from = None
-            elif (
-                self.knowledge is not None
-                and prev_map is not None
-                and prev_pos is not None
-                and w.map_id is not None
-                and w.pos is not None
-                and (prev_map, prev_pos) != (w.map_id, w.pos)
-                and w.view.tiles.get(prev_pos) in DOORS
-            ):
-                record_warp(
-                    self.knowledge,
-                    prev_map,
-                    prev_pos,
-                    w.view.tiles.get(prev_pos, "framed_door"),
-                    w.map_id,
-                    w.pos,
-                )
+            self.note_warp_landing()
             m.need_position, m.path = False, []
             self.log(call, "", {"position": p})
         elif call == "terrain":
             t = c.terrain(self.cid, w.map_id, *w.perception_rect())
             w.apply_terrain(t)
             w.tick = max(w.tick, int(t.get("tick", 0)))
-            if self.knowledge is not None:
-                sync_world_maps(self.knowledge, w)
+            self.sync_terrain(t)
             n = len(terrain_cells(t))
             self.note_held_path_stale()
             self.log(call, f"{n} cells, {len(w.view.tiles)} known", {"cells": n})
@@ -528,6 +537,7 @@ class Runner:
         m.pending_queue = None
         m.pending_next_index = 0
         m.path, m.need_position = [], True
+        m.warp_from = None  # a later Step was refused: the next read is not the door's landing
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
@@ -546,6 +556,7 @@ class Runner:
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
                 m.held_queue, m.resend_held_queue = None, False
+                m.warp_from = None
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})
@@ -558,6 +569,7 @@ class Runner:
         if e.code in ("not_on_map", "character_not_live"):
             # Waiting to be placed, or dead and waiting to respawn.
             self.mem.need_self = self.mem.need_position = True
+            self.mem.warp_from = None
             return time.time() + 1.0
         return time.time() + 1.0
 

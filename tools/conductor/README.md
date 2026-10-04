@@ -12,6 +12,8 @@ first-party Python SDK for Cursor cloud agents.
 
 ## Setup
 
+Requires Node 22+.
+
 ```bash
 export CURSOR_API_KEY=…   # https://cursor.com/dashboard/api
 npm --prefix tools/conductor install
@@ -22,10 +24,22 @@ npm --prefix tools/conductor install
 
 Open PR summaries include merge-conflict state (`merge:conflict` / `merge:ok`)
 and the writer lock (`lock:working` / `lock:none`). Review verdicts come from
-`conductor:approved` / `conductor:changes-requested` when GitHub's own
-`reviewDecision` is null. A review still running is the GitHub check
-`Cursor Automation: Saims Ref Agent Auto Code Review`. `follow-up` and `spawn --pr`
-refuse to start while that check is running. `prs` prints `review-check:running`.
+submitted reviews on the **current head** only, never from labels, per the
+conductor skill's **Review verdicts**: Cursor's latest `APPROVED` /
+`CHANGES_REQUESTED` review, and Claude Code's latest review body (posted as
+`COMMENTED` under Evan's account). Either at changes requested is
+`CHANGES_REQUESTED`; both approved is `APPROVED`; anything else is
+`review:none`. A review on an older head does not count. `conductor:working`
+is the only label with meaning.
+
+A review still running is the GitHub check
+`Cursor Automation: Saims Ref Agent Auto Code Review` (override with
+`CONDUCTOR_REVIEW_CHECK` if the automation is renamed). `follow-up` and
+`spawn --pr` refuse to start while that check is running. `prs` prints
+`review-check:running`.
+
+"Needs fixer follow-up" lists PRs with a merge conflict, red CI, changes
+requested, or unresolved threads without approval.
 
 `spawn --pr` and `follow-up` add `conductor:working` before the agent starts
 and refuse a PR that already has `conductor:working`. Implementers and
@@ -34,6 +48,12 @@ it. Do not delete the label so the command will accept the PR. Claude Code
 fixers use the same lock and do not appear in `status`. The prompt tells the
 agent that holds the lock to remove only `conductor:working` after the push.
 A spawn with no `--pr` tells the agent to add that label once the PR exists.
+
+The lock is released only when the command fails before the agent is sent its
+prompt. Once the agent is running, a failure (for example `--wait` losing the
+run) leaves the label on, because the agent is still writing. The claim is
+check-then-add, not atomic: two writers that start at the same moment can both
+claim it.
 
 ## Commands
 
@@ -77,8 +97,8 @@ Prompt text may be passed as trailing args or on stdin.
 
 ## Conductor skill
 
-Invoke `/agentrealm-conductor` (or ask for a conductor pass). The skill lives at
-`.cursor/skills/agentrealm-conductor/`.
+Invoke `/agentrealm-agents-conductor` (or ask for a conductor pass). The skill
+lives at `.cursor/skills/agentrealm-agents-conductor/`.
 
 Each pass watches open PRs for blocking review comments and also re-reads
 **approved but unmerged** PRs for nits and documentation asks worth doing

@@ -1,7 +1,9 @@
 export {
   acquireWorkingLock,
-  effectiveReviewDecision,
+  claudeBodyVerdict,
   hasMergeConflict,
+  headVerdict,
+  holdLock,
   listOpenPrs,
   releaseWorkingLock,
   reviewInProgress,
@@ -11,14 +13,16 @@ export {
   withWorkingLock,
   type OpenPr,
   type PrCommentSummary,
+  type ReviewNode,
+  type Verdict,
 } from "./gh.js";
 export { lockHeld, lockNote, pullRequestNumber } from "./lock.js";
 export { spawnImplementer, type SpawnOptions } from "./spawn.js";
 export { followUp, type FollowUpOptions } from "./follow-up.js";
 export { listCloudAgents } from "./status.js";
 export {
-  APPROVED_LABEL,
-  CHANGES_REQUESTED_LABEL,
+  CLAUDE_REVIEWER_LOGIN,
+  CURSOR_REVIEWER_LOGIN,
   REVIEW_CHECK_NAME,
   DEFAULT_ENV_NAME,
   DEFAULT_MODEL,

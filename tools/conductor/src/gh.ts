@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { APPROVED_LABEL, CHANGES_REQUESTED_LABEL, REVIEW_CHECK_NAME, WORKING_LABEL } from "./config.js";
+import { CLAUDE_REVIEWER_LOGIN, CURSOR_REVIEWER_LOGIN, REVIEW_CHECK_NAME, WORKING_LABEL } from "./config.js";
 import { lockHeld, pullRequestNumber } from "./lock.js";
 
 const execFileAsync = promisify(execFile);
@@ -12,7 +12,6 @@ export type OpenPr = {
   headRefName: string;
   headRefOid: string;
   isDraft: boolean;
-  reviewDecision: string | null;
   mergeable: string | null;
   mergeStateStatus: string | null;
   statusCheckRollup: Array<StatusCheckRollupItem> | null;
@@ -35,7 +34,8 @@ export type PrCommentSummary = {
   /** Head commit SHA — what a review is "at". Reviews name the commit they read. */
   headSha: string;
   isDraft: boolean;
-  reviewDecision: string | null;
+  /** Combined Cursor + Claude verdict on `headSha` only. See `headVerdict`. */
+  verdict: Verdict;
   mergeable: string | null;
   mergeStateStatus: string | null;
   hasMergeConflict: boolean;
@@ -75,7 +75,7 @@ export async function listOpenPrs(): Promise<OpenPr[]> {
     "--state",
     "open",
     "--json",
-    "number,title,url,headRefName,headRefOid,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup,labels",
+    "number,title,url,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,statusCheckRollup,labels",
     "--limit",
     "50",
   ]);
@@ -137,19 +137,80 @@ export function rollupOk(pr: Pick<OpenPr, "statusCheckRollup">): boolean | null 
   return checks.every(rollupItemSucceeded);
 }
 
+export type Verdict = "APPROVED" | "CHANGES_REQUESTED" | null;
+
+/** A submitted or pending review, oldest first, as the GraphQL `reviews` connection returns it. */
+export type ReviewNode = {
+  state: string;
+  body: string;
+  author: { login: string } | null;
+  commit: { oid: string } | null;
+};
+
+/** GraphQL drops the `[bot]` suffix that REST keeps. Match either. */
+function isAuthor(review: ReviewNode, login: string): boolean {
+  const author = review.author?.login ?? "";
+  return author === login || author === `${login}[bot]`;
+}
+
+const CONDITION = /\b(once|after|if|until|pending|assuming|but)\b/i;
+const BLOCKING =
+  /\b(?:not approving|do not merge|don't merge|treat [^.\n]* as blocking|requesting changes|changes requested|request changes|still blocking)\b|(?<!\bno |\bnon-)\bblocking issue|(?<![-\w])blocking\s*[:(]/i;
+const APPROVING =
+  /\b(no blocking issues|nothing blocking|good to merge|lgtm|approving|would approve|treat this as an approval)\b/i;
+
+/** Drop fenced code, inline code, and quoted lines: verdict words there are not the reviewer's. */
+function verdictText(body: string): string {
+  return body
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`]*`/g, "")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith(">"))
+    .join("\n");
+}
+
 /**
- * GitHub forbids approving your own PR, so agent reviews land as COMMENTED
- * and `reviewDecision` is permanently null here. Verdict labels stand in.
- * A real GitHub decision outranks the labels. `changes-requested` wins when
- * both labels are present.
+ * Claude reviews post under the repo owner's account, so GitHub records them
+ * as COMMENTED. The verdict is in the body: an unconditional approval is
+ * APPROVED; anything else is CHANGES_REQUESTED.
  */
-export function effectiveReviewDecision(
-  pr: Pick<PrCommentSummary, "reviewDecision" | "labels">,
-): string | null {
-  if (pr.reviewDecision !== null) return pr.reviewDecision;
-  const labels = new Set(pr.labels);
-  if (labels.has(CHANGES_REQUESTED_LABEL)) return "CHANGES_REQUESTED";
-  if (labels.has(APPROVED_LABEL)) return "APPROVED";
+export function claudeBodyVerdict(body: string): Exclude<Verdict, null> {
+  const text = verdictText(body);
+  if (BLOCKING.test(text)) return "CHANGES_REQUESTED";
+  const approval = text.match(new RegExp(`[^.\\n]*${APPROVING.source}[^.\\n]*`, "i"));
+  if (!approval || CONDITION.test(approval[0])) return "CHANGES_REQUESTED";
+  return "APPROVED";
+}
+
+/**
+ * The review verdict on the current head, per the fixer skill. Labels play
+ * no part. Cursor's verdict is its latest APPROVED / CHANGES_REQUESTED review;
+ * Claude's is its latest review with a body. A verdict on an older commit is
+ * no verdict. Either at changes requested wins; both approved is approved;
+ * anything else is still waiting on a review.
+ */
+export function headVerdict(reviews: ReviewNode[], headSha: string): Verdict {
+  const submitted = reviews.filter((r) => r.state !== "PENDING");
+  const cursor = submitted
+    .filter(
+      (r) =>
+        isAuthor(r, CURSOR_REVIEWER_LOGIN) &&
+        (r.state === "APPROVED" || r.state === "CHANGES_REQUESTED"),
+    )
+    .at(-1);
+  const claude = submitted
+    .filter((r) => isAuthor(r, CLAUDE_REVIEWER_LOGIN) && r.body.trim() !== "")
+    .at(-1);
+
+  const cursorVerdict: Verdict =
+    cursor && cursor.commit?.oid === headSha ? (cursor.state as Verdict) : null;
+  const claudeVerdict: Verdict =
+    claude && claude.commit?.oid === headSha ? claudeBodyVerdict(claude.body) : null;
+
+  if (cursorVerdict === "CHANGES_REQUESTED" || claudeVerdict === "CHANGES_REQUESTED") {
+    return "CHANGES_REQUESTED";
+  }
+  if (cursorVerdict === "APPROVED" && claudeVerdict === "APPROVED") return "APPROVED";
   return null;
 }
 
@@ -168,7 +229,7 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
           repository: {
             pullRequest: {
               reviewThreads: { nodes: Array<{ isResolved: boolean }> };
-              reviews: { nodes: Array<{ state: string; commit: { oid: string } | null }> };
+              reviews: { nodes: ReviewNode[] };
             };
           };
         };
@@ -176,7 +237,7 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
         "api",
         "graphql",
         "-f",
-        `query=query { repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${pr.number}) { reviewThreads(first: 100) { nodes { isResolved } } reviews(last: 50) { nodes { state commit { oid } } } } } }`,
+        `query=query { repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${pr.number}) { reviewThreads(first: 100) { nodes { isResolved } } reviews(last: 50) { nodes { state body author { login } commit { oid } } } } } }`,
       ]),
       ghJson<{ comments: unknown[] }>([
         "pr",
@@ -195,7 +256,7 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
       headRefName: pr.headRefName,
       headSha: pr.headRefOid,
       isDraft: pr.isDraft,
-      reviewDecision: pr.reviewDecision,
+      verdict: headVerdict(detail.reviews.nodes, pr.headRefOid),
       mergeable: pr.mergeable,
       mergeStateStatus: pr.mergeStateStatus,
       hasMergeConflict: hasMergeConflict(pr),
@@ -227,6 +288,9 @@ async function prLabelNames(prNumber: number): Promise<string[]> {
  * Never replaces the label set. Callers must not delete the label first to
  * bypass the refuse — Claude Code fixers use the same lock. A review still
  * running is a GitHub check, not a label.
+ *
+ * The claim is check-then-add, not atomic: two writers that start within the
+ * same moment can both see no label and both claim it.
  */
 export async function acquireWorkingLock(prRef: string): Promise<void> {
   const number = pullRequestNumber(prRef);
@@ -252,11 +316,6 @@ export async function releaseWorkingLock(prRef: string): Promise<void> {
   await ghText(["pr", "edit", String(number), "--remove-label", WORKING_LABEL]);
 }
 
-/**
- * Hold `conductor:working` for the duration of `body`. The label stays if
- * `body` succeeds — the agent removes it after the push. A failure before
- * that releases the label so the PR is not stuck.
- */
 async function assertReviewSettled(prRef: string): Promise<void> {
   const number = pullRequestNumber(prRef);
   const view = await ghJson<{ statusCheckRollup: OpenPr["statusCheckRollup"] }>([
@@ -273,19 +332,46 @@ async function assertReviewSettled(prRef: string): Promise<void> {
   }
 }
 
-export async function withWorkingLock<T>(prRef: string, body: () => Promise<T>): Promise<T> {
-  await assertReviewSettled(prRef);
-  await acquireWorkingLock(prRef);
+/**
+ * Run `body` with the lock held. `body` calls `started()` once the agent has
+ * been sent its prompt. A failure before that releases the lock so the PR is
+ * not stuck. A failure after it (for example `run.wait()` under `--wait`)
+ * keeps the lock: the cloud agent is still writing, and it removes the label
+ * after its push.
+ */
+export async function holdLock<T>(
+  release: () => Promise<void>,
+  body: (started: () => void) => Promise<T>,
+): Promise<T> {
+  let agentStarted = false;
   try {
-    return await body();
+    return await body(() => {
+      agentStarted = true;
+    });
   } catch (err) {
-    try {
-      await releaseWorkingLock(prRef);
-    } catch {
-      // The original error is the one to surface. The label may still be set.
+    if (!agentStarted) {
+      try {
+        await release();
+      } catch {
+        // The original error is the one to surface. The label may still be set.
+      }
     }
     throw err;
   }
+}
+
+/**
+ * Hold `conductor:working` for the duration of `body`. The label stays if
+ * `body` succeeds or fails after the agent starts — the agent removes it
+ * after the push. A failure before the agent starts releases the label.
+ */
+export async function withWorkingLock<T>(
+  prRef: string,
+  body: (started: () => void) => Promise<T>,
+): Promise<T> {
+  await assertReviewSettled(prRef);
+  await acquireWorkingLock(prRef);
+  return holdLock(() => releaseWorkingLock(prRef), body);
 }
 
 /**
@@ -294,7 +380,7 @@ export async function withWorkingLock<T>(prRef: string, body: () => Promise<T>):
  * treating them as reviewed would silently drop the PR out of the queue.
  */
 export function submittedReviewShas(
-  reviews: Array<{ state: string; commit: { oid: string } | null }>,
+  reviews: Array<Pick<ReviewNode, "state" | "commit">>,
 ): string[] {
   const shas = new Set<string>();
   for (const review of reviews) {

@@ -2,7 +2,7 @@
 import { flagBool, flagString, parseArgs, readPrompt } from "./args.js";
 import { DEFAULT_ENV_NAME, DEFAULT_MODEL, WORKING_LABEL, requireApiKey } from "./config.js";
 import { followUp } from "./follow-up.js";
-import { effectiveReviewDecision, summarizeOpenPrs } from "./gh.js";
+import { summarizeOpenPrs } from "./gh.js";
 import { spawnImplementer } from "./spawn.js";
 import { countRunningAgents, listCloudAgents } from "./status.js";
 
@@ -150,7 +150,7 @@ async function cmdPrs(): Promise<void> {
   for (const s of summaries) {
     const checks =
       s.checksOk === null ? "checks:?" : s.checksOk ? "checks:ok" : "checks:fail";
-    const review = effectiveReviewDecision(s) ?? "review:none";
+    const review = s.verdict ?? "review:none";
     const draft = s.isDraft ? "draft" : "ready";
     console.log(
       [
@@ -172,11 +172,11 @@ async function cmdPrs(): Promise<void> {
 
   const needsFix = summaries.filter((s) => {
     if (s.reviewInProgress) return false;
-    const decision = effectiveReviewDecision(s);
     return (
       s.hasMergeConflict ||
-      decision === "CHANGES_REQUESTED" ||
-      (s.unresolvedReviewThreads > 0 && decision !== "APPROVED")
+      s.checksOk === false ||
+      s.verdict === "CHANGES_REQUESTED" ||
+      (s.unresolvedReviewThreads > 0 && s.verdict !== "APPROVED")
     );
   });
   if (needsFix.length > 0) {
@@ -192,7 +192,7 @@ async function cmdPrs(): Promise<void> {
     (s) =>
       !s.reviewInProgress &&
       s.unresolvedReviewThreads > 0 &&
-      effectiveReviewDecision(s) === "APPROVED",
+      s.verdict === "APPROVED",
   );
   if (needsPolish.length > 0) {
     console.log("\nApproved with open threads — polish, not a fixer spawn:");
@@ -205,7 +205,7 @@ async function cmdPrs(): Promise<void> {
     (s) =>
       !s.isDraft &&
       s.unresolvedReviewThreads === 0 &&
-      effectiveReviewDecision(s) === "APPROVED" &&
+      s.verdict === "APPROVED" &&
       s.checksOk === true,
   );
   if (mergeReady.length > 0) {

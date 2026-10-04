@@ -80,7 +80,7 @@ export async function spawnImplementer(options: SpawnOptions): Promise<{
         autoCreatePR,
       };
 
-  const start = async () => {
+  const start = async (started: () => void = () => {}) => {
     const agent = await Agent.create({
       apiKey,
       name,
@@ -89,6 +89,8 @@ export async function spawnImplementer(options: SpawnOptions): Promise<{
     });
 
     const run = await agent.send(prompt);
+    // The agent is writing now. From here on a failure must not drop the lock.
+    started();
 
     if (options.wait) {
       const result = await run.wait();

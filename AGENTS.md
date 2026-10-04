@@ -26,7 +26,7 @@ There is no ticketing system. PLAN.md is the spec and the backlog.
 Decided. Do not cross without flagging prominently.
 
 - **An ordinary API client.** HTTP only. Imports nothing from the server and never touches its databases. Something the API does not give is a server gap: write it into PLAN.md **Server gaps**, never build a side door.
-- **Python 3.11+, standard library only.** The LLM planner (M4) is the one place a dependency may enter, and it stays optional.
+- **Python 3.11+, standard library only.** The LLM planner (M4) is the one place a dependency may enter, and it stays optional. The one exception is [`tools/conductor`](tools/conductor/README.md): ops tooling for building this repo, not part of an agent. It is Node 22+ and TypeScript on `@cursor/sdk`, and needs `CURSOR_API_KEY` for every command but `prs`.
 - **Obeys the invariants a client can see.** At most one intent per tick, no standing orders, and when there is no decision it sends nothing.
 - **Stays inside the call budget.** One request per character per tick, burst of 3, reads included (PLAN.md **What the API gives today**).
 
@@ -35,7 +35,7 @@ Decided. Do not cross without flagging prominently.
 - Cite milestone IDs (M4, M5, …) in commits and PR bodies.
 - Read the cited PLAN.md sections and this file before writing code.
 - Keep PLAN.md and README.md matching the code. A behavior change that leaves them describing the old one is not done.
-- Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`.
+- Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`. The `test` GitHub Actions workflow runs both on every PR.
 - Open PRs **ready for review, not draft**. If tooling defaults to draft, run `gh pr ready`.
 - **Never merge.** Evan merges, and so does the supervisor ([`.claude/skills/agentrealm-agents-supervisor/SKILL.md`](.claude/skills/agentrealm-agents-supervisor/SKILL.md)). No other agent does.
 - Do not add dependencies, or change moderation or the call budget or pacing, without flagging prominently.
@@ -47,6 +47,7 @@ Decided. Do not cross without flagging prominently.
 `conductor:working` is the writer lock for **implementers and fixers** (Cursor or Claude Code). Reviewers never take it.
 
 - Claim it when you start writing. Release it when you finish (after the push, PR ready) or if the spawn that claimed it failed before the agent started.
+- The claim is check-then-add, not atomic. Two writers that start at the same moment can both claim it.
 - Skip a PR that already has the label. Do not add a second writer. Do not delete a lock you did not claim in this session.
 - Cursor `status` listing an implementer as `finished` means that worker should already have released. If the label is still on the PR, another worker may hold it (Claude Code fixers use the same label and do not appear in that list) or the holder crashed. Leave the label and tell Evan. Do not treat "Cursor finished" as permission to clear it.
 

@@ -51,3 +51,5 @@ Or from `python/`:
 ```sh
 cd python && python3 -m unittest discover -s tests
 ```
+
+`make conductor-test` builds and tests [`tools/conductor`](tools/conductor/README.md) (Node 22+). CI runs both on every pull request.

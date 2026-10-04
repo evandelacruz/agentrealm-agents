@@ -90,6 +90,8 @@ def withdraw_all(chest_id: int) -> dict:
 class Decision:
     intent: dict | None
     reason: str
+    # Reflexes 2–4b: urgent enough to drop a queue still in flight (M6).
+    reflex: bool = False
 
 
 BLOCK_WINDOWS = 1  # decisions to keep off a tile after a step into it was rejected
@@ -132,7 +134,7 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
         safe = w.open_neighbours(here, blocked)
         if safe:
             m.path = []
-            return Decision(set_position(min(safe)), f"off {view.tiles.get(here)}")
+            return Decision(set_position(min(safe)), f"off {view.tiles.get(here)}", reflex=True)
         escape = hazards
     plan_avoid = blocked - escape
 
@@ -142,19 +144,19 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
         if policy.on_hostile == "fight":
             if target.kind == "character":
-                return Decision(use_on(target), f"fight {target.kind} {target.id}")
+                return Decision(use_on(target), f"fight {target.kind} {target.id}", reflex=True)
             # NPC targets have no Use target kind on the wire yet; fall through to flee.
         away = _flee_step(w, hostiles, blocked)
         if away is not None:
             m.path = []
-            return Decision(set_position(away), f"flee {target.kind} {target.id}")
+            return Decision(set_position(away), f"flee {target.kind} {target.id}", reflex=True)
 
     # 4. Supplies within reach.
     if policy.pickup:
         near = [e for e in w.entities if e.kind == "supply" and chebyshev(e.pos, here) <= 1]
         if near:
             s = min(near, key=lambda e: (chebyshev(e.pos, here), e.id))
-            return Decision(take(s), f"take {s.code or s.id}")
+            return Decision(take(s), f"take {s.code or s.id}", reflex=True)
 
     # 4b. Our death chest: go back for it and take everything out (B103).
     if policy.pickup and w.death_chest is not None and w.death_chest[0] == w.map_id:
@@ -162,7 +164,7 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
         if chebyshev(at, here) <= 1:
             contents = w.chest_contents.get(chest_id)
             if contents:
-                return Decision(withdraw_all(chest_id), f"recover from chest {chest_id}")
+                return Decision(withdraw_all(chest_id), f"recover from chest {chest_id}", reflex=True)
             if contents is None:
                 return Decision(None, f"open chest {chest_id}")
         elif m.goal != "chest" or not m.path or not _step_open(w, plan_avoid, m.path[0]):

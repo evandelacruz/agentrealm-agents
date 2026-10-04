@@ -10,7 +10,7 @@
   },
   "M6": {
     "state": "partial",
-    "remaining": "Wire attack and speech pacing (agentrealm_agent/executor/pacing.py) into the runner, re-send a held queue when a reflex fires (alarm, hostile, hazard), send snapshot_version on tick POST (the world model already applies versions and deltas, including health), consuming health in decisions, live Olympuff smoke test."
+    "remaining": "Wire attack and speech pacing (agentrealm_agent/executor/pacing.py) into the runner, re-send a held queue when a read or event makes the rest of its path wrong (BlockChanged, an entity on the path), send snapshot_version on tick POST (the world model already applies versions and deltas, including health), consuming health in decisions, live Olympuff smoke test."
   },
   "M7": {"state": "open"},
   "M8": {"state": "open"},

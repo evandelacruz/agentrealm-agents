@@ -19,6 +19,7 @@ from .executor import (
     queue_horizon_intents,
     step_landing,
     trim_to_horizon,
+    wait,
 )
 from .poll_cadence import calm_poll_interval
 from .world import DOORS, WorldModel, terrain_cells
@@ -150,8 +151,17 @@ class Runner:
             intents = []
             m.cancel_queue = False
         elif m.held_queue is not None:
-            d = Decision(None, "queue held")
+            # Reflexes still run every round trip. One that fires drops the
+            # held queue and its intent replaces it; anything else leaves the
+            # queue running and the plan as it was.
+            d = self.reflex_while_held()
             intents = None
+            if d is None:
+                d = Decision(None, "queue held")
+            else:
+                self.drop_held_queue()
+                # Something must replace the held queue, or it keeps running.
+                intents = self.intents_for(d) or [wait()]
         else:
             d = decide(w, m, self.cfg.policy, self.rng)
             intents = self.intents_for(d)
@@ -212,6 +222,29 @@ class Runner:
         # The intent resolves at this sim window's boundary. Do not call
         # again until it has closed, so the next submit lands in a new tick.
         return time.time() + int(r.get("window_remaining_ms", 0)) / 1000.0 + WINDOW_MARGIN
+
+    def reflex_while_held(self) -> Decision | None:
+        """A reflex (2–4b) that fires while a queue is held, else None.
+
+        Only a firing reflex may touch memory: the plan, the blocked tiles and
+        the rng stay as they were, so the held queue's steps are not planned twice.
+        """
+        m = self.mem
+        saved = (list(m.path), m.goal, dict(m.blocked), self.rng.getstate())
+        d = decide(self.world, m, self.cfg.policy, self.rng)
+        if d.reflex:
+            return d
+        m.path, m.goal, m.blocked = saved[0], saved[1], saved[2]
+        self.rng.setstate(saved[3])
+        return None
+
+    def drop_held_queue(self) -> None:
+        """Give up on the held queue. Its later results are no longer read, so
+        where it took us is unknown: re-read position."""
+        m = self.mem
+        m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+        m.pending, m.held_queue = None, None
+        m.need_position, m.path = True, []
 
     def intents_for(self, d: Decision) -> list[dict] | None:
         """Movement decisions become paced Step/Wait queues; others stay one intent."""

@@ -149,6 +149,14 @@ class RunnerCadenceTest(unittest.TestCase):
         self.assertTrue(any(call == "entities" for _, call in s.calls))
         self.assertTrue(all(b[0] > a[0] for a, b in zip(s.calls, s.calls[1:])), "one call per window")
 
+    def test_walking_polls_on_the_calm_cadence(self):
+        # A paced Step/Wait queue covers many ticks, so calm polls stay 4–10 apart.
+        s = self.run_windows(Policy(goals=["goto"], goto=(30, 0), pickup=False, entity_refresh=1000), 30)
+        polls = [t for t, call in s.calls if call == "tick"]
+        self.assertGreaterEqual(len(polls), 3)
+        gaps = [b - a for a, b in zip(polls, polls[1:])]
+        self.assertTrue(all(4 <= g <= 10 for g in gaps), gaps)
+
     def test_walking_polls_before_the_queue_runs_out(self):
         # A paced Step/Wait queue covers several ticks, so the calm gap opens,
         # but the next poll never lands after the queue has run out.

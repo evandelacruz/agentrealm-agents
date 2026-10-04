@@ -11,6 +11,7 @@ from agentrealm_agent.navigation import (
     NavSearchState,
     cost_path,
     known_prefix,
+    learn_step_rejection,
     macro_cell,
     nearest_target,
 )
@@ -41,14 +42,14 @@ class CostGridTest(unittest.TestCase):
     def test_hazard_cost_uses_occupy_damage(self):
         w = grid([".~.", "...", "..."], at=(0, 1))
         w.view.damage[(1, 0)] = 4
-        self.assertEqual(_Grid(w, (2, 1), CostGridParams()).cost((1, 0)), 1 + 4)
+        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 4)
         p = cost_path(w, (2, 1), CostGridParams())
         self.assertIsNotNone(p)
         self.assertNotIn((1, 0), p)
 
     def test_hazard_with_unnamed_damage_costs_a_costly_step(self):
         w = grid(["~"])
-        self.assertEqual(_Grid(w, (5, 5), CostGridParams()).cost((0, 0)), 1 + COSTLY_STEP)
+        self.assertEqual(_Grid(w, {(5, 5)}, CostGridParams()).cost((0, 0)), 1 + COSTLY_STEP)
 
     def test_zero_occupy_damage_is_kept(self):
         w = WorldModel(character_id=1, map_id=1, pos=(0, 0))
@@ -77,7 +78,7 @@ class CostGridTest(unittest.TestCase):
     def test_break_nominated_stays_impassable(self):
         w = grid(["..."])
         params = CostGridParams(break_nominated={(1, 0)})
-        self.assertIsNone(_Grid(w, (1, 0), params).cost((1, 0)))
+        self.assertIsNone(_Grid(w, {(1, 0)}, params).cost((1, 0)))
 
     def test_doors_are_entered_only_as_the_goal(self):
         # A door warps, so a path never crosses one on the way somewhere else.
@@ -114,7 +115,7 @@ def strip(length: int, at=(0, 0), perception=3) -> WorldModel:
 
 
 def corridor_of(w: WorldModel, goal, nav: NavSearchState, params=None, budget=10**6):
-    g = _Grid(w, goal, params or CostGridParams())
+    g = _Grid(w, {goal}, params or CostGridParams())
     return _coarse_search(g, _MacroCosts(g), nav, budget)
 
 
@@ -232,11 +233,11 @@ class TwoLevelBrainTest(unittest.TestCase):
         with mock.patch.object(planner, "COARSE_NODE_BUDGET", 2), mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
             d = decide(w, m, policy, random.Random(0))
             self.assertEqual((d.intent["x"], d.intent["y"]), (1, 0))
-            nav = m.nav["goto"]
+            nav = m.corridors["goto"]
             self.assertEqual(len(nav.closed), 2)
             w.pos, m.path = m.path[-1], []  # walked the plan out; replan
             decide(w, m, policy, random.Random(0))
-            self.assertIs(m.nav["goto"], nav)
+            self.assertIs(m.corridors["goto"], nav)
             self.assertEqual(len(nav.closed), 4)
 
     def test_chest_and_goto_keep_separate_searches(self):
@@ -246,11 +247,36 @@ class TwoLevelBrainTest(unittest.TestCase):
         policy = Policy(kind="scripted", goals=["goto"], goto=[0, 60], pickup=True)
         with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
             decide(w, m, policy, random.Random(0))
-            chest = m.nav["chest"]
+            chest = m.corridors["chest"]
             m.path, m.goal = [], ""
             decide(w, m, policy, random.Random(0))
-        self.assertIs(m.nav["chest"], chest)
+        self.assertIs(m.corridors["chest"], chest)
         self.assertEqual(chest.goal, (90, 0))
+
+    def test_rejected_step_drops_the_corridor_searches(self):
+        w = strip(100)
+        m = Memory()
+        policy = Policy(kind="scripted", goals=["goto"], goto=[90, 0])
+        with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
+            decide(w, m, policy, random.Random(0))
+        self.assertIn("goto", m.corridors)
+        learn_step_rejection(m, w, None, (1, 0), "not_traversable", w.tick)
+        self.assertEqual(m.corridors, {})
+
+    def test_corridor_search_starts_over_on_another_map(self):
+        w = strip(100)
+        m = Memory()
+        policy = Policy(kind="scripted", goals=["goto"], goto=[90, 0])
+        with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
+            decide(w, m, policy, random.Random(0))
+            first = m.corridors["goto"]
+            w2 = WorldModel(character_id=1, map_id=2, pos=(0, 0), perception=3)
+            w2.view.tiles.update(w.view.tiles)
+            w2.terrain_center, w2.terrain_map = (0, 0), 2
+            m.path, m.goal = [], ""
+            decide(w2, m, Policy(kind="scripted", goals=["goto"], goto=[90, 0], goto_map=2), random.Random(0))
+        self.assertIsNot(m.corridors["goto"], first)
+        self.assertEqual(m.corridors["goto"].map_id, 2)
 
 
 class KnownPrefixBrainTest(unittest.TestCase):

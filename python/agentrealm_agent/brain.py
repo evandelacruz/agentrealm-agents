@@ -12,8 +12,10 @@ from dataclasses import dataclass
 
 from .config import Policy
 from .executor.movement import step_landing
+from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import known_prefix
+from .navigation.rejection import navigation_avoid_costly
 from .pathing import step_open
 from .poll_cadence import gate_tick_call, is_urgent
 from .states import PlayContext, dispatch
@@ -27,7 +29,6 @@ __all__ = [
     "choose_call",
     "decide",
     "path_blockers",
-    "reject_step",
     "remaining_path_stale",
     "set_position",
     "take",
@@ -85,16 +86,6 @@ class Decision:
     reflex: bool = False
 
 
-BLOCK_WINDOWS = 1  # decisions to keep off a tile after a step into it was rejected
-
-
-def reject_step(m: Memory, p: Pos) -> None:
-    """Reflex 1: a rejected step clears the plan and keeps us off that tile."""
-    m.path, m.goal = [], ""
-    m.nav.clear()
-    m.blocked[p] = BLOCK_WINDOWS
-
-
 def decide(
     w: WorldModel,
     m: Memory,
@@ -102,21 +93,24 @@ def decide(
     rng: random.Random,
     *,
     never_attack: list[str] | None = None,
+    knowledge: KnowledgeBase | None = None,
 ) -> Decision:
     """Run the priority dispatcher (A5) and keep its first intent as a Decision."""
-    ctx = PlayContext(m, policy, rng, never_attack=never_attack or [])
+    ctx = PlayContext(m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
     outcome = dispatch(w, ctx)
     intent = outcome.intents[0] if outcome.intents else None
     return Decision(intent, outcome.reason, outcome.reflex)
 
 
-def walkable_prefix(w: WorldModel, m: Memory, policy: Policy, path: list[Pos]) -> list[Pos]:
+def walkable_prefix(
+    w: WorldModel, m: Memory, policy: Policy, path: list[Pos], knowledge: KnowledgeBase | None = None
+) -> list[Pos]:
     """The path's known prefix, cut before the first cell not open now (A12).
 
     The cost grid prices occupants instead of refusing them, so a plan may
     run through an NPC; the executor never queues a Step onto one.
     """
-    avoid = _plan_avoid(w, m, policy)
+    avoid = _plan_avoid(w, m, policy, knowledge)
     out: list[Pos] = []
     for p in known_prefix(path, w.view):
         if _cell_on_path_blocked(w, avoid, p):
@@ -125,10 +119,13 @@ def walkable_prefix(w: WorldModel, m: Memory, policy: Policy, path: list[Pos]) -
     return out
 
 
-def _plan_avoid(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
+def _plan_avoid(
+    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None
+) -> set[Pos]:
     """Tiles movement plans treat as impassable (hazards, rejections, escape)."""
+    nav_avoid, _ = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
     hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
-    blocked = set(m.blocked) | hazards
+    blocked = nav_avoid | hazards
     if w.pos is not None and w.pos in hazards and not w.open_neighbours(w.pos, blocked):
         return blocked - hazards
     return blocked
@@ -163,22 +160,22 @@ def _remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
     return cells
 
 
-def path_blockers(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
+def path_blockers(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> set[Pos]:
     """Cells the rest of the held walk queue steps onto that are not open now."""
     cells = _remaining_walk_cells(w, m)
     if not cells or not w.alive or policy.kind == "idle":
         return set()
-    avoid = _plan_avoid(w, m, policy)
+    avoid = _plan_avoid(w, m, policy, knowledge)
     out = {p for p in cells[1:] if _cell_on_path_blocked(w, avoid, p)}
     if not step_open(w, avoid, cells[0]):
         out.add(cells[0])
     return out
 
 
-def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy) -> bool:
+def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> bool:
     """True when the rest of a held walk queue no longer matches the map (A43).
 
     A cell that was already blocked when the queue was sent does not count:
     the replan could not avoid it, so resending would only send it again.
     """
-    return bool(path_blockers(w, m, policy) - m.path_blockers)
+    return bool(path_blockers(w, m, policy, knowledge) - m.path_blockers)

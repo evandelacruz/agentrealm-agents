@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..navigation.rejection import end_decision
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
 from .downed import DownedState
@@ -25,7 +26,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
 
     Higher-priority guards always win; the active state keeps running past
     its own guard until its ``done`` holds. Each call is one decision window:
-    it ages the tiles reflex 1 blocked.
+    it ages what Step rejections taught the map (A14).
     """
     m = ctx.memory
     try:
@@ -37,4 +38,4 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
         m.state = ""
         return StateOutcome(None, "no state")
     finally:
-        m.blocked = {p: n - 1 for p, n in m.blocked.items() if n > 1}
+        end_decision(m.nav, world.tick)

@@ -6,6 +6,7 @@ import unittest
 from agentrealm_agent.brain import Memory, choose_call, decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.navigation import cost_path
+from agentrealm_agent.navigation.rejection import NavMemory
 from agentrealm_agent.world import Entity, WorldModel, terrain_cells
 
 
@@ -121,11 +122,11 @@ class ReflexTest(unittest.TestCase):
         for name, pol in cases:
             with self.subTest(name):
                 w = world([".....", "....."])
-                m = Memory(blocked={(1, 0): 1})
+                m = Memory(nav=NavMemory(wait_tile=(w.map_id, (1, 0))))
                 d = decide(w, m, pol, random.Random(0))
-                if d.intent is not None:
-                    self.assertNotEqual((d.intent["x"], d.intent["y"]), (1, 0), d.reason)
-                self.assertEqual(m.blocked, {}, "the block lasts one decision")
+                self.assertIsNotNone(d.intent, d.reason)
+                self.assertNotEqual((d.intent["x"], d.intent["y"]), (1, 0), d.reason)
+                self.assertIsNone(m.nav.wait_tile, "the block lasts one decision")
 
     def test_plan_keeps_off_blocks_to_avoid(self):
         # avoid_blocks are walkable, so without this the plan walks into lava

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .navigation import NavSearchState
+from .navigation.rejection import NavMemory
 from .world import Pos
 
 
@@ -28,7 +29,7 @@ class Memory:
     last_step_tick: int | None = None  # tick our last Step applied, to pace the next queue
     last_use_tick: int | None = None  # tick our last Use applied (weapon cooldown, A1)
     last_speech_tick: int | None = None  # tick our last Say/Broadcast applied (A1)
-    blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
+    nav: NavMemory = field(default_factory=NavMemory)  # what Step rejections taught the map (A14)
     alarm: bool = False  # Damaged or Attacked since the last entity read
     last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)
     calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll
@@ -37,4 +38,5 @@ class Memory:
     resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
     path_blockers: set = field(default_factory=set)  # blocked cells the walk queue already crossed when sent (A43)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
-    nav: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
+    warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
+    corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)

@@ -5,11 +5,27 @@ import unittest
 
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
+from agentrealm_agent.item_table import InventorySupply
+from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.recover import recover_approach_target, recover_spot_safe
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
+
+
+def full_inventory(w: WorldModel, *, junk: str = "torch") -> None:
+    w.armed_code = "pocket_knife"
+    w.worn_codes = {}
+    w.held_supplies = [InventorySupply(i, junk) for i in range(1, 10)]
+    w.chest_supplies = []
+
+
+def priced(**prices) -> KnowledgeBase:
+    kb = KnowledgeBase("sandbox")
+    for code, gems in prices.items():
+        kb.items[code] = {"gem_price": gems}
+    return kb
 
 
 def world(rows: list[str], at=(0, 0), perception=5) -> WorldModel:
@@ -36,8 +52,8 @@ def died_at(w: WorldModel, x: int, y: int, *, map_id=7, chest_id=80) -> None:
     w.map_id, w.pos = 7, here
 
 
-def ctx(policy: Policy, m: Memory | None = None) -> PlayContext:
-    return PlayContext(m or Memory(), policy, random.Random(0))
+def ctx(policy: Policy, m: Memory | None = None, kb: KnowledgeBase | None = None) -> PlayContext:
+    return PlayContext(m or Memory(), policy, random.Random(0), knowledge=kb)
 
 
 class RecoverSafetyTest(unittest.TestCase):
@@ -116,6 +132,27 @@ class RecoverDispatchTest(unittest.TestCase):
         out = dispatch(w, ctx(scripted(goals=["hold"])))
         self.assertEqual(out.state, "Recover")
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 80}])
+
+    def test_full_pack_drops_junk_before_death_chest_withdraw(self):
+        w = world(["....."], at=(1, 0))
+        died_at(w, 0, 0)
+        apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
+        full_inventory(w)
+        w.chest_contents[80] = [InventorySupply(71, "bronze_sword")]
+        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
+        self.assertEqual(out.state, "Recover")
+        self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": 1}])
+
+    def test_full_pack_skips_death_chest_when_only_junk(self):
+        w = world(["....."], at=(1, 0))
+        died_at(w, 0, 0)
+        apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
+        full_inventory(w)
+        w.chest_contents[80] = [InventorySupply(71, "torch")]
+        out = dispatch(w, ctx(scripted(goals=["hold"])))
+        self.assertEqual(out.state, "Recover")
+        self.assertIn("chest not reachable", out.reason)
+        self.assertIsNone(out.intents)
 
     def test_adjacent_waits_to_see_unopened_chest(self):
         w = world(["....."], at=(1, 0))

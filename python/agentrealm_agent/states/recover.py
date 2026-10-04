@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from ..config import Policy
+from ..item_table import InventorySupply
+from ..knowledge_base import KnowledgeBase
+from ..loot import inventory_full, loot_score, worst_droppable
 from ..memory import Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
@@ -10,7 +13,8 @@ from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome, scripted_outcome
-from .intents import set_position, withdraw_all
+from .intents import drop, set_position, withdraw_all
+from .pickup import knowledge_items
 
 
 def _map_view(w: WorldModel, map_id: int):
@@ -38,6 +42,34 @@ def recover_spot_safe(w: WorldModel, map_id: int, chest_at: Pos) -> bool:
     return recover_approach_target(w, map_id, chest_at) is not None
 
 
+def _chest_supplies(contents: list) -> list[InventorySupply]:
+    out: list[InventorySupply] = []
+    for entry in contents:
+        if isinstance(entry, InventorySupply):
+            out.append(entry)
+        elif isinstance(entry, int):
+            out.append(InventorySupply(entry))
+    return out
+
+
+def death_chest_recover_intents(
+    w: WorldModel, chest_id: int, contents: list, items: dict
+) -> list[dict] | None:
+    """``WithdrawFromChest`` when there is room; ``Drop`` junk when full but worth it; else skip (A20)."""
+    supplies = _chest_supplies(contents)
+    if not supplies:
+        return None
+    if not inventory_full(w):
+        return [withdraw_all(chest_id)]
+    shed = worst_droppable(w, items)
+    if shed is None:
+        return None
+    best = max(loot_score(s.code, items) for s in supplies)
+    if best <= loot_score(shed.code, items):
+        return None
+    return [drop(shed.id)]
+
+
 def recover_outcome(
     w: WorldModel,
     m: Memory,
@@ -45,6 +77,7 @@ def recover_outcome(
     plan_avoid: set[Pos],
     plan_costly: set[Pos],
     *,
+    knowledge: KnowledgeBase | None = None,
     state: str = "Recover",
 ) -> StateOutcome | None:
     """Path to the death chest and withdraw when adjacent (A11, reflex 4b).
@@ -65,9 +98,16 @@ def recover_outcome(
     if chebyshev(at, here) <= 1:
         contents = w.chest_contents.get(chest_id)
         if contents:
-            return StateOutcome(
-                [withdraw_all(chest_id)], f"recover from chest {chest_id}", reflex=True, state=state
-            )
+            items = knowledge_items(knowledge)
+            intents = death_chest_recover_intents(w, chest_id, contents, items)
+            if intents is not None:
+                verb = intents[0]["verb"]
+                reason = (
+                    f"recover from chest {chest_id}"
+                    if verb == "WithdrawFromChest"
+                    else f"drop for chest {chest_id}"
+                )
+                return StateOutcome(intents, reason, reflex=True, state=state)
         if contents is None:
             return StateOutcome(None, f"open chest {chest_id}", state=state)
 
@@ -112,7 +152,9 @@ class RecoverState(State):
         )
         if reflex is not None:
             return reflex
-        out = recover_outcome(world, m, policy, plan_avoid, plan_costly, state=self.name)
+        out = recover_outcome(
+            world, m, policy, plan_avoid, plan_costly, knowledge=ctx.knowledge, state=self.name
+        )
         if out is not None:
             return out
         # No step toward the chest: fall back to Explore's goals this round.

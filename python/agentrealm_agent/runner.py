@@ -184,8 +184,10 @@ class Runner:
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
         rejected = self.apply_intent_results(r.get("intent_results") or [])
+        earlier = w.entities
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        w.learn_threat(events, earlier)
         self.on_events(events)
         if r.get("queue") and not rejected and not m.cancel_queue:
             # A rejection or a door already dropped our queue; an echoed server

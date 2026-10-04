@@ -11,6 +11,7 @@ from agentrealm_agent.brain import Decision, Memory, choose_call
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.runner import Runner
+from agentrealm_agent.threat import type_key_for_entity
 from agentrealm_agent.world import Entity, WorldModel
 
 
@@ -140,6 +141,22 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(r.mem.need_self and r.mem.need_position)
         self.assertIsNone(r.world.pos)
         self.assertEqual(r.world.recent_damage, [(11, 3)])
+        # npc 4 was never perceived: no type to file the hit under.
+        self.assertEqual(r.world.threat.by_type, {})
+
+    def test_damage_is_keyed_by_type_from_the_same_observation(self):
+        # The observation that first lists the attacker arrives with the
+        # Damaged event; the hit is filed under its type, not its id.
+        fake = FakeClient([{"tick": 12, "window_remaining_ms": 0, "events_by_tick": [
+            {"tick": 11, "events": [{"tick": 11, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 3}]}],
+            "observation": {"version": 2, "delta": {"entities": {"npcs": {"added": [
+                {"id": 4, "x": 1, "y": 0, "npc_type_code": "gristlewick"}]}}}}}])
+        r = self.runner(fake, Policy(goals=["hold"]))
+        r.tick()
+        npc = next(e for e in r.world.entities if e.kind == "npc" and e.id == 4)
+        self.assertEqual(type_key_for_entity(npc), ("npc", "gristlewick"))
+        self.assertEqual(r.world.threat.by_type, {("npc", "gristlewick"): 3})
+        self.assertEqual(r.world.threat.damage_per_hit(type_key_for_entity(npc)), 3)
 
     def test_a_step_sent_as_we_die_is_not_assumed(self):
         # Died forgets the position; the step sent that round trip has no

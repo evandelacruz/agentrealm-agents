@@ -190,7 +190,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 
 | ID | Item | Depends on |
 |---|---|---|
-| A17 | **Per-world knowledge base.** `python/.state/worlds/<world_code>.json`: load, save, sections, shared by the world's characters. | |
+| A17 | **Per-world knowledge base.** `python/.state/worlds/<world_code>.json`: load, save, sections, shared by the world's characters. Loaded once when `run` starts, saved once at exit; one `run` process per world. | |
 | A18 | **Item table.** Keyed by `supply_subtype_code`, filled from `Arm`, `Wear`, prices seen and capabilities. | A17 |
 | A19 | **Equip.** Score slots, swap when a carried item is better. | A5, A18 |
 | A20 | **Loot.** `Take`, `WithdrawFromChest`, `Drop` junk when full; hearts first. | A5 |

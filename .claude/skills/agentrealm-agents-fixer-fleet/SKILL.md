@@ -122,8 +122,8 @@ Reproduce locally, fix, confirm. Never skip or disable a test.
 - …
 
 Keep the same milestone IDs (<IDS>) and cite them in the commit. Do not
-expand the slice. Flag prominently if you add a dependency or touch the
-tick resolution path, migrations, moderation, or the call budget or pacing.
+expand the slice. Flag prominently if you add a dependency or touch
+moderation or the call budget or pacing.
 
 The blockers above are where to start, not the boundary of what is wrong.
 Read the whole diff yourself and keep the point of the change in view.
@@ -135,7 +135,7 @@ anything larger or arguable instead.
 Run make test before pushing, and make conductor-test if you touch
 tools/conductor.
 
-If a thread needs an architecture, payments, legal, or moderation decision,
+If a thread needs an architecture, legal, or moderation decision,
 a design decision PLAN.md does not settle, or a server change, say so on that thread, leave the label in place, stop, and report
 back. Check PLAN.md first; most questions are already answered.
 ```

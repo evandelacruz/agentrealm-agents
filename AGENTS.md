@@ -38,8 +38,8 @@ Decided. Do not cross without flagging prominently.
 - Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`.
 - Open PRs **ready for review, not draft**. If tooling defaults to draft, run `gh pr ready`.
 - **Never merge.** Evan merges, and so does the supervisor ([`.claude/skills/agentrealm-agents-supervisor/SKILL.md`](.claude/skills/agentrealm-agents-supervisor/SKILL.md)). No other agent does.
-- Do not add dependencies, or change the tick resolution path, migrations, moderation, or the call budget or pacing, without flagging prominently.
-- If blocked by an open architecture, payments, legal, or moderation question, an open design question, or a server gap, **halt and say why**. Do not invent. Check PLAN.md and the published docs first.
+- Do not add dependencies, or change moderation or the call budget or pacing, without flagging prominently.
+- If blocked by an open architecture, legal, or moderation question, an open design question, or a server gap, **halt and say why**. Do not invent. Check PLAN.md and the published docs first.
 - One milestone may take several PRs. Ship a reviewable slice, mark the ID `partial` with a `remaining` note in `status.json`, and let the next pass continue it.
 
 ## Writer lock

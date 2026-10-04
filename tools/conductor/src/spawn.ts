@@ -43,7 +43,7 @@ export function prependIds(prompt: string, ids: string[]): string {
     "Cite these IDs in commits and the PR body.",
     prOpeningRule,
     "Read AGENTS.md and the cited milestones in PLAN.md before coding.",
-    "If blocked by an open architecture, payments, legal, or moderation question, an open design question, or a server gap — halt and print why. Do not invent. Check PLAN.md and the published Agent Realm docs first.",
+    "If blocked by an open architecture, legal, or moderation question, an open design question, or a server gap — halt and print why. Do not invent. Check PLAN.md and the published Agent Realm docs first.",
     "",
   ].join("\n");
   return `${header}${prompt}`;

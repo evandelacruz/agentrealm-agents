@@ -21,7 +21,7 @@ test("prependIds cites IDs and the agentrealm-agents halt rule", () => {
   assert.match(out, /Leave the mechanism out/);
   assert.match(out, /diff already shows that/);
   assert.match(out, /Read AGENTS.md and the cited milestones in PLAN.md/);
-  assert.match(out, /payments, legal, or moderation/);
+  assert.match(out, /architecture, legal, or moderation/);
   assert.match(out, /open design question, or a server gap/);
   assert.match(out, /Check PLAN.md/);
   assert.match(out, /Scope: planner only\.$/);

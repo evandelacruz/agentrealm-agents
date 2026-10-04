@@ -406,7 +406,7 @@ class Plan:
 
     ``params`` holds the effective survival params for the strategist; the
     survival states read the directives' params (A9). ``current`` and ``goal_done`` only read;
-    ``advance`` and ``drop_current`` are the only calls that move the stack.
+    ``advance``, ``drop_current`` and ``finish_current`` are the only calls that move the stack.
     """
 
     goals: list[GoalOp]
@@ -445,24 +445,31 @@ class Plan:
         """The op at the top of the stack, or None when it is empty."""
         return self.goals[self.index] if self.index < len(self.goals) else None
 
-    def advance(self, world: WorldModel, memory: object | None = None) -> None:
+    def advance(self, world: WorldModel) -> None:
         """Apply ``set_param`` ops reached in order and pop finished goals."""
         while (op := self.current()) is not None:
             if op["op"] == "set_param":
                 self.params = apply_set_param(self.floor_params, self.params, op)
-                self._pop_current(memory)
+                self._pop_current()
                 continue
-            if not goal_done(op, world, self, memory=memory):
+            if not goal_done(op, world, self):
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
                 return
-            self._pop_current(memory)
+            self._pop_current()
 
     def drop_current(self, reason: str) -> None:
         op = self.current()
         if op is not None:
             log.warning("plan: dropped op %r: %s", op, reason)
-        self._pop_current(None)
+        self._pop_current()
+
+    def finish_current(self, reason: str) -> None:
+        """Pop an op whose state saw it finish (``fight_boss``, A38)."""
+        op = self.current()
+        if op is not None:
+            log.info("plan: finished op %r: %s", op, reason)
+        self._pop_current()
 
     def note_stalled(self, tick: int) -> bool:
         """Record that the current op found no path; True once it has stalled too long."""
@@ -470,10 +477,7 @@ class Plan:
             self.stalled_since_tick = tick
         return tick - self.stalled_since_tick >= PLAN_STALL_SECONDS * self.tick_hz
 
-    def _pop_current(self, memory: object | None = None) -> None:
-        op = self.current()
-        if op is not None and op["op"] == "fight_boss":
-            _clear_boss_memory(memory)
+    def _pop_current(self) -> None:
         self.index += 1
         self.wait_started_tick = None
         self.stalled_since_tick = None
@@ -532,34 +536,11 @@ def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:
     return {p for p in frontier if chebyshev(p, center) <= op["radius"]}
 
 
-def _fight_boss_done(world: WorldModel, memory: object | None) -> bool:
-    if memory is None:
-        return False
-    engaged = getattr(memory, "boss_engaged", False)
-    if not engaged:
-        return False
-    for ent in world.entities:
-        if ent.kind == "npc" and ent.health is not None:
-            return ent.health <= 0
-    return getattr(memory, "boss_start_health", None) is not None
-
-
-def _clear_boss_memory(memory: object | None) -> None:
-    if memory is None:
-        return
-    if hasattr(memory, "boss_engaged"):
-        memory.boss_engaged = False
-        memory.boss_door = None
-        memory.boss_start_health = None
-
-
-def goal_done(op: GoalOp, world: WorldModel, plan: Plan, *, memory: object | None = None) -> bool:
+def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
     """Whether ``op`` is finished. Reads only; ``Plan.advance`` pops it."""
     if world.pos is None:
         return False
     name = op["op"]
-    if name == "fight_boss":
-        return _fight_boss_done(world, memory)
     if name == "wait":
         if plan.wait_started_tick is None:
             return op["seconds"] == 0
@@ -580,7 +561,8 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan, *, memory: object | Non
             return world.view.tiles.get(world.pos) in DOORS
         if op["to"] == "town":
             return (world.map_id, world.pos) in world.respawn_anchors
-    # Ops whose states are not shipped never finish here; replan drops them.
+    # `fight_boss` finishes in Boss, which sees the defeat (A38). Ops whose
+    # states are not shipped never finish here; replan drops them.
     return False
 
 

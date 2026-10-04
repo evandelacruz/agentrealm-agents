@@ -13,7 +13,7 @@ from .flee import FleeState
 from .gather import GatherState
 from .heal import HealState
 from .idle import IdleState
-from .boss import BossState
+from .boss import BossState, sync_boss
 from .level import LevelState
 from .investigate import InvestigateState
 from .loot import LootState
@@ -54,10 +54,12 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     its own guard until its ``done`` holds. A state that runs (active or guard
     holds) but whose ``act`` sends no intent falls through to the next state (A44),
     unless it sets ``StateOutcome.wait``. Each call is one decision window:
-    it ages what Step rejections taught the map (A14).
+    it ages what Step rejections taught the map (A14), and starts, ends or
+    finishes the boss fight before any guard reads it (A38).
     """
     m = ctx.memory
     yielded: list[str] = []
+    sync_boss(world, m, ctx.plan)
     try:
         for state in STATES:
             active = state.name == m.state and not state.done(world, ctx)

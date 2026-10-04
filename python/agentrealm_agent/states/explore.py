@@ -59,7 +59,7 @@ def scripted_outcome(
         return reflex
 
     if plan is not None:
-        plan.advance(w, m)
+        plan.advance(w)
         op = plan.current()
         if op is not None and op["op"] == "wait":
             return StateOutcome(None, "plan wait", state=state)

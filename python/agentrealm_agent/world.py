@@ -64,6 +64,11 @@ class Entity:
     health: int | None = None  # bosses only on entity reads (Manual §9.3, A38)
     max_health: int | None = None
 
+    @property
+    def is_boss(self) -> bool:
+        """Only a boss NPC carries ``health`` on entity reads (API Reads; GAME_NOTES.md Combat)."""
+        return self.kind == "npc" and self.health is not None
+
 
 @dataclass
 class MapView:
@@ -142,8 +147,11 @@ class WorldModel:
     zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
     # Town and Respawned locations used to seed safe-tile probes.
     respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
-    # Boss fight clock from the round-trip snapshot (GAME_NOTES.md Levels and bosses).
+    # Boss fight clock, read only when a round trip carries it; the published
+    # docs name no such field (GAME_NOTES.md Levels and bosses, A38).
     boss_fight_end_tick: int | None = None
+    # Tick of the last `level_clear_ceremony` (a boss clear; API Round Trip).
+    level_clear_tick: int | None = None
 
     def record_respawn_anchor(self, map_id: int, pos: Pos) -> None:
         """Seeds safe-tile probes around a town or Respawned location (A7)."""
@@ -385,6 +393,12 @@ class WorldModel:
                 self.forget_position()
             else:
                 self.apply_position(pos)
+
+    def note_level_clear(self, ceremony: dict | None) -> None:
+        """Records a round trip's one-shot ``level_clear_ceremony`` (A38)."""
+        if ceremony:
+            self.level_clear_tick = self.tick
+
     def _apply_boss_fight_clock(self, body: dict, *, complete: bool) -> None:
         if complete or "boss_fight_end_tick" in body:
             self.boss_fight_end_tick = _opt_int(body.get("boss_fight_end_tick"))

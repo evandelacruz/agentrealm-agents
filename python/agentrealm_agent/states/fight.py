@@ -29,7 +29,7 @@ def fight_target(w: WorldModel, policy, never_attack: list[str]) -> Entity | Non
         e
         for e in w.entities
         if e.kind in policy.hostile
-        and not (e.kind == "npc" and e.health is not None)
+        and not e.is_boss  # Boss fights bosses (A38)
         and chebyshev(e.pos, here) <= policy.hostile_range
     ]
     if not hostiles:

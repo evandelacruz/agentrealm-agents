@@ -170,7 +170,7 @@ def plan_step(
     then ``policy.goals`` get the move. A ``wait`` decides the round with no move.
     """
     while True:
-        plan.advance(w, m)
+        plan.advance(w)
         op = plan.current()
         if op is None:
             return False

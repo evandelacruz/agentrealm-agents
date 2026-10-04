@@ -18,6 +18,14 @@ from .navigation import (
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
+def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
+    """Entities of a ``policy.hostile`` kind within ``policy.hostile_range``."""
+    here = w.pos
+    if here is None:
+        return []
+    return [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
+
+
 def flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:
     here = w.pos
     options = w.open_neighbours(here, blocked) + [here]

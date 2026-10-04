@@ -3,10 +3,12 @@
 from .base import PlayContext, State, StateOutcome
 from .dispatch import STATES, dispatch
 from .explore import ExploreState, scripted_outcome
+from .heal import HealState
 from .travel import TravelState
 
 __all__ = [
     "ExploreState",
+    "HealState",
     "TravelState",
     "PlayContext",
     "STATES",

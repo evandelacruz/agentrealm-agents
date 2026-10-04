@@ -17,13 +17,30 @@ def use_block(p: Pos) -> dict:
     return {"verb": "Use", "target": {"kind": "block", "x": p[0], "y": p[1]}}
 
 
-def take(e: Entity) -> dict:
-    return {"verb": "Take", "supply_id": e.id}
+def take(supply_id: int) -> dict:
+    return {"verb": "Take", "supply_id": supply_id}
 
 
 def withdraw_all(chest_id: int) -> dict:
     # No supply_ids: take everything that fits, lowest ids first (B117).
     return {"verb": "WithdrawFromChest", "chest_id": chest_id}
+
+
+def read_block(map_id: int, pos: Pos) -> dict:
+    return {"verb": "Read", "target": {"kind": "block", "map_id": map_id, "x": pos[0], "y": pos[1]}}
+
+
+def say_to(npc: Entity, text: str = "hello") -> dict:
+    return {"verb": "Say", "text": text, "target": {"kind": "npc", "npc_id": npc.id}}
+
+
+def drop(supply_id: int) -> dict:
+    return {"verb": "Drop", "supply_id": supply_id}
+
+
+def withdraw(chest_id: int, supply_ids: list[int]) -> dict:
+    # All or nothing: carry_capacity_full when one too many (API WithdrawFromChest).
+    return {"verb": "WithdrawFromChest", "chest_id": chest_id, "supply_ids": list(supply_ids)}
 
 
 def arm(supply_id: int) -> dict:

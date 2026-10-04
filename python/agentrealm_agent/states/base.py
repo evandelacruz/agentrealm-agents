@@ -11,6 +11,7 @@ from ..config import Policy
 from ..directives import PARAM_DEFAULTS, Directives, default_directives
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
+from ..plan import Plan
 from ..world import WorldModel
 
 
@@ -24,6 +25,7 @@ class PlayContext:
     never_attack: list[str] = field(default_factory=list)
     params: dict[str, float | int] = field(default_factory=lambda: dict(PARAM_DEFAULTS))
     knowledge: KnowledgeBase | None = None  # per-world door graph, terrain, locked doors (A26, A14)
+    plan: Plan | None = None  # validated goal stack (A34)
     directives: Directives = field(default_factory=default_directives)
 
 

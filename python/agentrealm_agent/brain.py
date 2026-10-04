@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from .config import Policy
 from .directives import Directives, default_directives
+from .plan import Plan
 from .executor.movement import step_landing
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -97,6 +98,7 @@ def decide(
     params: dict[str, float | int] | None = None,
     knowledge: KnowledgeBase | None = None,
     directives: Directives | None = None,
+    plan: Plan | None = None,
 ) -> Decision:
     """Run the priority dispatcher (A5) and keep its first intent as a Decision."""
     ctx = PlayContext(
@@ -106,6 +108,7 @@ def decide(
         never_attack=never_attack or [],
         knowledge=knowledge,
         directives=directives or default_directives(),
+        plan=plan,
     )
     if params is not None:
         ctx.params = params

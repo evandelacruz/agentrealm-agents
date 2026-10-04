@@ -17,6 +17,7 @@ class Memory:
 
     path: list[Pos] = field(default_factory=list)
     goal: str = ""
+    goal_op: dict | None = None  # the plan op m.path was set for, so a same-kind head swap replans (A34)
     state: str = ""  # active state (A5): kept until its done() holds or a higher guard fires
     need_position: bool = True
     need_self: bool = True
@@ -42,6 +43,7 @@ class Memory:
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
+    investigate_rejections: dict[str, int] = field(default_factory=dict)  # interest item key -> refused Read/Say count (A30)
     gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass", cell) Gather is walking toward (A22)
     gather_backoff_until: int = -1  # Gather yields to Explore until this tick (A22)
     travel_ops: list[TravelOp] = field(default_factory=list)  # parsed travel:* directives goals (A27)

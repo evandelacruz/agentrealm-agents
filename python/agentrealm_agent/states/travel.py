@@ -72,7 +72,14 @@ class TravelState(State):
 
 def _fallback(world: WorldModel, ctx: PlayContext, why: str) -> StateOutcome:
     out = scripted_outcome(
-        world, ctx.memory, ctx.policy, ctx.rng, never_attack=ctx.never_attack, knowledge=ctx.knowledge, state=TravelState.name
+        world,
+        ctx.memory,
+        ctx.policy,
+        ctx.rng,
+        never_attack=ctx.never_attack,
+        knowledge=ctx.knowledge,
+        plan=ctx.plan,
+        state=TravelState.name,
     )
     out.reason = f"{why}; {out.reason}"
     return out

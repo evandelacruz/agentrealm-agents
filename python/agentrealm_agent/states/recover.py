@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from ..config import Policy
+from ..item_table import InventorySupply
+from ..knowledge_base import KnowledgeBase
+from ..loot import carry_slots_used, loot_score, worst_droppable
 from ..memory import Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
@@ -10,7 +13,8 @@ from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome, scripted_outcome
-from .intents import set_position, withdraw_all
+from .intents import drop, set_position, withdraw, withdraw_all
+from .pickup import knowledge_items
 
 
 def _map_view(w: WorldModel, map_id: int):
@@ -38,6 +42,42 @@ def recover_spot_safe(w: WorldModel, map_id: int, chest_at: Pos) -> bool:
     return recover_approach_target(w, map_id, chest_at) is not None
 
 
+def _chest_supplies(contents: list) -> list[InventorySupply]:
+    out: list[InventorySupply] = []
+    for entry in contents:
+        if isinstance(entry, InventorySupply):
+            out.append(entry)
+        elif isinstance(entry, int):
+            out.append(InventorySupply(entry))
+    return out
+
+
+def death_chest_recover_intents(
+    w: WorldModel, chest_id: int, contents: list, items: dict
+) -> list[dict] | None:
+    """``WithdrawFromChest`` when there is room; ``Drop`` junk when full but worth it; else skip (A20).
+
+    When only some fit, withdraw the best by id: a bare withdraw takes the
+    lowest ids first (B117), which could be junk instead of what the drop was for.
+    """
+    supplies = _chest_supplies(contents)
+    if not supplies:
+        return None
+    room = w.carry_capacity - carry_slots_used(w)
+    if room >= len(supplies):
+        return [withdraw_all(chest_id)]
+    if room > 0:
+        best_first = sorted(supplies, key=lambda s: (-loot_score(s.code, items), s.id))
+        return [withdraw(chest_id, [s.id for s in best_first[:room]])]
+    shed = worst_droppable(w, items)
+    if shed is None:
+        return None
+    best = max(loot_score(s.code, items) for s in supplies)
+    if best <= loot_score(shed.code, items):
+        return None
+    return [drop(shed.id)]
+
+
 def recover_outcome(
     w: WorldModel,
     m: Memory,
@@ -45,6 +85,7 @@ def recover_outcome(
     plan_avoid: set[Pos],
     plan_costly: set[Pos],
     *,
+    knowledge: KnowledgeBase | None = None,
     state: str = "Recover",
 ) -> StateOutcome | None:
     """Path to the death chest and withdraw when adjacent (A11, reflex 4b).
@@ -65,9 +106,16 @@ def recover_outcome(
     if chebyshev(at, here) <= 1:
         contents = w.chest_contents.get(chest_id)
         if contents:
-            return StateOutcome(
-                [withdraw_all(chest_id)], f"recover from chest {chest_id}", reflex=True, state=state
-            )
+            items = knowledge_items(knowledge)
+            intents = death_chest_recover_intents(w, chest_id, contents, items)
+            if intents is not None:
+                verb = intents[0]["verb"]
+                reason = (
+                    f"recover from chest {chest_id}"
+                    if verb == "WithdrawFromChest"
+                    else f"drop for chest {chest_id}"
+                )
+                return StateOutcome(intents, reason, reflex=True, state=state)
         if contents is None:
             return StateOutcome(None, f"open chest {chest_id}", state=state)
 
@@ -85,6 +133,14 @@ def recover_outcome(
     if step is not None:
         return StateOutcome([set_position(step)], f"chest → {m.path[-1]}", state=state)
     return None
+
+
+def _skip_reason(w: WorldModel) -> str:
+    """Why Recover fell back to Explore: out of reach, or in reach with nothing worth taking."""
+    _, at, chest_id = w.death_chest
+    if w.pos is not None and chebyshev(at, w.pos) <= 1 and w.chest_contents.get(chest_id):
+        return f"chest {chest_id} not worth a slot"
+    return "chest not reachable"
 
 
 class RecoverState(State):
@@ -107,15 +163,19 @@ class RecoverState(State):
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         m, policy = ctx.memory, ctx.policy
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
-        reflex = reflex_outcome(world, policy, never_attack=ctx.never_attack, state=self.name)
+        reflex = reflex_outcome(
+            world, policy, never_attack=ctx.never_attack, state=self.name, knowledge=ctx.knowledge
+        )
         if reflex is not None:
             return reflex
-        out = recover_outcome(world, m, policy, plan_avoid, plan_costly, state=self.name)
+        out = recover_outcome(
+            world, m, policy, plan_avoid, plan_costly, knowledge=ctx.knowledge, state=self.name
+        )
         if out is not None:
             return out
         # No step toward the chest: fall back to Explore's goals this round.
         fallback = scripted_outcome(
-            world, m, policy, ctx.rng, never_attack=ctx.never_attack, knowledge=ctx.knowledge, state=self.name
+            world, m, policy, ctx.rng, never_attack=ctx.never_attack, knowledge=ctx.knowledge, plan=ctx.plan, state=self.name
         )
-        fallback.reason = f"chest not reachable; {fallback.reason}"
+        fallback.reason = f"{_skip_reason(world)}; {fallback.reason}"
         return fallback

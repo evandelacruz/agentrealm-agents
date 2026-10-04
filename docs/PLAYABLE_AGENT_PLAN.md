@@ -263,7 +263,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Gear and items
 
-- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, weapon damage, and lone-slot damage taken; capabilities wait on PLAN.md Server gaps.
+- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, and weapon damage; PLAN.md A18 says why damage taken per worn item and capabilities wait.
 - **Equip** scores each slot and swaps when a carried item beats the worn one. Consumables (potions, food) are kept for `Heal`.
 - **Budget.** Gems are kept through death and gear is not, so the plan spends gems on what most raises survival first (weapon, armor, potions), then on tools a clue asks for.
 - **Compose.** When any fragment is held, its `fragment` field names the whole and the missing slots. The plan tracks it as a goal, and `Solve` composes when the set is complete.
@@ -274,6 +274,7 @@ A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, sha
 
 - Revealed terrain per map, entrance marks, doors and where they lead, safe tiles, hunting grounds and ceilings, shops and prices.
 - Clues: the text of every sign, statue, scroll and helper line, with where it was found and when.
+- `read_cells`: `{"<map_id>": ["x,y", …]}`, readable cells whose `Read` applied, and `spoken_npcs`: NPC ids whose `Say` applied, so `Investigate` never repeats one (PLAN.md A30). Each grows by one entry per sign or NPC in the world.
 - Break attempts per (block, capability), and the result.
 - NPC type stats, item stats, compose results, and what each entrance turned out to need.
 - `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value (PLAN.md A18).
@@ -338,7 +339,7 @@ If you find a sign with numbers on it, try them as a code at the nearest locked 
 """                                                     # free text, passed to the strategist
 ```
 
-Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. `never_attack`, a `gather_gems` goal, and the survival `params` **Retreat** reads (A9) change behavior today, and `fight_margin` waits for **Fight** (A23); other goal ops and `instructions` wait for the M4 strategist.
+Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. `never_attack`, a `gather_gems` goal (**Gather**, A22), and the survival `params` **Retreat** reads (A9) change behavior today, and `fight_margin` waits for **Fight** (A23). `goals` replace the goal stack when present (A34); shorthand like `gather_gems:20` and `buy:torch` is parsed into typed ops. A reload with unchanged `goals` keeps the stack's progress. With no valid `goals`, the built-in plan mirrors the character's `policy.goals`. Until the states behind them ship, only `explore_area`, `travel` (`entrance`, `town`, `point`) and `wait` run from the stack; other ops are dropped and logged when they reach the top, and so is an op with no path for 30 seconds. **Gather** reads `gather_gems` from `goals` directly, so dropping it from the stack does not stop it. `wait` seconds convert at the world's `tick_rate_hz`. `instructions` are kept for the strategist (A35).
 
 Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
 

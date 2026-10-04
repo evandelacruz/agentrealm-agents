@@ -50,6 +50,13 @@ class DispatchPriorityTest(unittest.TestCase):
         self.assertEqual(out.state, "Downed")
         self.assertIsNone(out.intents)
 
+    def test_loot_beats_explore(self):
+        w = world(["..."], at=(1, 1))
+        w.entities = [Entity("supply", 8, (1, 2), "heart")]
+        out = dispatch(w, ctx(w))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.intents[0]["verb"], "Take")
+
     def test_explore_returns_intent_list(self):
         w = world(["....", "...."])
         for x in range(-1, 5):

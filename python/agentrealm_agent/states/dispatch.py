@@ -12,6 +12,8 @@ from .flee import FleeState
 from .gather import GatherState
 from .heal import HealState
 from .idle import IdleState
+from .investigate import InvestigateState
+from .loot import LootState
 from .recover import RecoverState
 from .retreat import RetreatState
 from .sync import SyncState
@@ -20,8 +22,8 @@ from .travel import TravelState
 # Priority order (PLAYABLE_AGENT_PLAN.md State machine). Sync and Downed are
 # both priority 0 and never both act: each only waits. Escape, Retreat and
 # Heal (A10) are priority 1; Fight (A23) slots in before Flee at 2; Recover
-# (A11) is priority 3, above Gather (A22) and Travel (A27) at 5. M8 economy
-# states slot above Explore.
+# (A11) and Loot (A20) are priority 3, in the plan's table order, above Gather
+# (A22) and Travel (A27) at 5. M8 economy states slot above Explore.
 STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
@@ -30,6 +32,8 @@ STATES: tuple[State, ...] = (
     HealState(),
     FleeState(),
     RecoverState(),
+    LootState(),
+    InvestigateState(),
     GatherState(),
     TravelState(),
     ExploreState(),

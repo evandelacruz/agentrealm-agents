@@ -101,7 +101,7 @@ def gather_outcome(
     piles = [e for e in w.entities if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and is_safe_ish(w, e.pos, policy)]
     if piles:
         s = min(piles, key=lambda e: (chebyshev(e.pos, here), e.id))
-        return StateOutcome([take(s)], f"take {s.code or s.id}", state=state)
+        return StateOutcome([take(s.id)], f"take {s.code or s.id}", state=state)
 
     if view.tiles.get(here) == "grass" and is_safe_ish(w, here, policy):
         return StateOutcome([use_block(here)], "cut grass", state=state)

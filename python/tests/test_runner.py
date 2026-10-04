@@ -152,8 +152,27 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(r.world.map_id)
 
 
+    def test_back_to_back_use_queues_honor_weapon_cooldown(self):
+        # A1: the next Use queue opens with Waits still owed after the last one.
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
+        self.assertEqual(r.intents_for(Decision(use, "test")), [use])
+        r.mem.last_use_tick = 10
+        r.world.tick = 11
+        second = r.intents_for(Decision(use, "test"))
+        self.assertEqual([i["verb"] for i in second], ["Wait"] * 9 + ["Use"])
+
+    def test_say_carries_speech_cooldown(self):
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        say = {"verb": "Say", "text": "hi", "target": {"kind": "character", "character_id": 3}}
+        self.assertEqual(r.intents_for(Decision(say, "test")), [say])
+        r.mem.last_speech_tick = 20
+        r.world.tick = 25
+        second = r.intents_for(Decision(say, "test"))
+        self.assertEqual([i["verb"] for i in second], ["Wait"] * 5 + ["Say"])
+
     def test_non_movement_intent_is_sent_alone(self):
-        # Only movement becomes a paced queue; a Take goes as one intent.
+        # Movement, Use, and Say become paced queues; a Take goes as one intent.
         fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
         r = self.runner(fake, Policy(goals=["hold"], pickup=True))
         r.world.entities = [Entity("supply", 5, (1, 0), "apple")]

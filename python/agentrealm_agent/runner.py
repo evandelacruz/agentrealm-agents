@@ -16,6 +16,8 @@ from .executor import (
     DEFAULT_TICK_RATE_HZ,
     QUEUE_HORIZON_INTENTS,
     build_paced_walk_queue,
+    pace_speech,
+    pace_uses,
     queue_horizon_intents,
     step_landing,
     trim_to_horizon,
@@ -247,14 +249,35 @@ class Runner:
         m.need_position, m.path = True, []
 
     def intents_for(self, d: Decision) -> list[dict] | None:
-        """Movement decisions become paced Step/Wait queues; others stay one intent."""
+        """Movement, Use, and Say/Broadcast become paced queues; others stay one intent."""
         w, m = self.world, self.mem
         if d.intent is None:
             return None
-        if d.intent.get("verb") != "SetPosition":
+        intent = d.intent
+        verb = intent.get("verb")
+        if verb != "SetPosition":
+            paced: list[dict] | None = None
+            if verb == "Use":
+                since = None if m.last_use_tick is None else max(1, w.tick - m.last_use_tick)
+                paced = trim_to_horizon(pace_uses([intent], ticks_since_last=since), limit=self.queue_horizon_ticks)
+            elif verb in ("Say", "Broadcast"):
+                since = None if m.last_speech_tick is None else max(1, w.tick - m.last_speech_tick)
+                paced = trim_to_horizon(pace_speech([intent], ticks_since_last=since), limit=self.queue_horizon_ticks)
+            if paced is not None:
+                while paced and paced[-1]["verb"] == "Wait":
+                    paced.pop()
+                if not any(i.get("verb") in ("Use", "Say", "Broadcast") for i in paced):
+                    return None
+                if len(paced) == 1:
+                    m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+                    m.pending = paced[0]
+                else:
+                    m.pending_intents, m.pending_queue, m.pending_next_index = paced, None, 0
+                    m.pending = None
+                return paced
             m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
-            m.pending = d.intent
-            return [d.intent]
+            m.pending = intent
+            return [intent]
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
@@ -338,6 +361,10 @@ class Runner:
                     m.need_position, m.path = True, []
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True
+            if intent and intent.get("verb") == "Use":
+                m.last_use_tick = int(result.get("tick", w.tick))
+            if intent and intent.get("verb") in ("Say", "Broadcast"):
+                m.last_speech_tick = int(result.get("tick", w.tick))
             if m.pending is not None and index == 0:
                 m.pending = None
             return False
@@ -362,6 +389,7 @@ class Runner:
             if kind == "Died":
                 m.need_self = m.need_position = True
                 m.path, m.last_step_tick = [], None
+                m.last_use_tick = m.last_speech_tick = None
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
                 m.held_queue = None

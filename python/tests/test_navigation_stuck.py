@@ -7,6 +7,8 @@ import random
 import unittest
 
 from agentrealm_agent.brain import Memory, decide
+from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
 from agentrealm_agent.navigation import CostGridParams
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation.planner import FOG
@@ -311,6 +313,79 @@ class LevelStuckTest(unittest.TestCase):
         self.assertNotIn(f"level → {sc.goal}", d.reason, "backed off: Level does not walk to it")
         self.assertTrue(nav_stuck.is_backed_off(m.nav_stuck, key, w.tick))
         self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
+
+
+def _cross_map_run(sc: grids.Scenario, door: tuple[int, int]) -> sim.CrossMapRun:
+    kb = KnowledgeBase.empty("sandbox")
+    w1 = WorldModel(character_id=1, map_id=1, pos=sc.start, perception=sc.perception)
+    for y, row in enumerate(sc.rows):
+        for x, g in enumerate(row):
+            w1.view.tiles[(x, y)] = grids.GLYPHS[g]
+    sync_map_from_view(kb, 1, w1.view)
+    landing = goal = (0, 0)
+    record_warp(kb, 1, door, "framed_door", 2, landing)
+    sync_map_from_view(kb, 2, sim.map2_view())
+    return sim.CrossMapRun(door, landing, goal, kb)
+
+
+class CrossMapStuckTest(unittest.TestCase):
+    def test_goto_map_abandons_door_leg_with_stuck_detection(self):
+        sc = grids.CROSS_MAP_HEDGE
+        cross = _cross_map_run(sc, (6, 3))
+        policy = sim.scripted(goals=["goto"], goto=(0, 0), goto_map=2)
+        r = sim.run(sc, policy, cross=cross)
+        self.assertEqual(r.outcome, "abandoned")
+        self.assertEqual(r.signal["reason"], "no_path")
+        key = nav_stuck.goal_key("goto", 2, (0, 0))
+        self.assertTrue(nav_stuck.is_backed_off(r.memory.nav_stuck, key, r.world.tick))
+        self.assertEqual(r.signal["goal"], "goto")
+
+    def test_goto_map_reaches_goal_through_door(self):
+        sc = grids.CROSS_MAP_OPEN
+        cross = _cross_map_run(sc, (5, 0))
+        policy = sim.scripted(goals=["goto"], goto=(0, 0), goto_map=2)
+        r = sim.run(sc, policy, cross=cross, max_decisions=80)
+        self.assertEqual(r.outcome, "reached")
+        self.assertEqual(r.world.map_id, 2)
+
+    def test_travel_point_cross_map_abandons_when_door_unreachable(self):
+        sc = grids.CROSS_MAP_HEDGE
+        cross = _cross_map_run(sc, (6, 3))
+        m = Memory()
+        m.travel_ops = [TravelOp("point", 0, 0, map_id=2)]
+        r = sim.run(sc, sim.scripted(goals=["hold"]), memory=m, cross=cross)
+        self.assertEqual(r.outcome, "abandoned")
+        self.assertEqual(r.signal["goal"], "travel:point")
+        key = nav_stuck.goal_key("travel:point", 2, (0, 0))
+        self.assertTrue(nav_stuck.is_backed_off(r.memory.nav_stuck, key, r.world.tick))
+
+
+class CrossMapTraceReplayTest(unittest.TestCase):
+    def test_trace_replays_cross_map_goto_stuck(self):
+        sc = grids.CROSS_MAP_HEDGE
+        cross = _cross_map_run(sc, (6, 3))
+        policy = sim.scripted(goals=["goto"], goto=(0, 0), goto_map=2)
+        recorded = sim.run(sc, policy, cross=cross)
+        self.assertEqual(recorded.outcome, "abandoned")
+        trace = json.loads(json.dumps(recorded.trace))
+
+        w = sim.world_for(sc, cross=cross)
+        m = Memory()
+        rng = random.Random(7)
+        map2 = sim.map2_view()
+        for row in trace:
+            w.tick = row["tick"]
+            w.map_id = row.get("map_id", 1)
+            self.assertEqual(list(w.pos), row["pos"], row)
+            d = decide(w, m, policy, rng, knowledge=cross.kb)
+            self.assertEqual((d.intent, d.reason), (row["intent"], row["reason"]), row)
+            if d.intent is not None:
+                self.assertEqual(
+                    sim.apply(w, m, sc, (d.intent["x"], d.intent["y"]), cross=cross, map2=map2),
+                    row["applied"],
+                    row,
+                )
+        self.assertEqual(m.nav_stuck.stuck_signals, recorded.memory.nav_stuck.stuck_signals)
 
 
 class TraceReplayTest(unittest.TestCase):

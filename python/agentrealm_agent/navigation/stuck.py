@@ -81,6 +81,7 @@ class NavAttempt:
     reasons: list[str] = field(default_factory=list)  # why each level failed, in order
     outline: set[Pos] = field(default_factory=set)
     blocking: set[str] = field(default_factory=set)
+    backoff_key: str | None = None  # cross-map legs: ultimate destination's key
 
 
 @dataclass
@@ -113,7 +114,14 @@ def filter_frontiers(stuck: NavStuckMemory, map_id: int | None, targets: set[Pos
     return {p for p in targets if not is_backed_off(stuck, goal_key("explore", map_id, p), tick)}
 
 
-def track(m: Memory, w: WorldModel, goal: str, target: Pos) -> NavAttempt | None:
+def track(
+    m: Memory,
+    w: WorldModel,
+    goal: str,
+    target: Pos,
+    *,
+    backoff_key: str | None = None,
+) -> NavAttempt | None:
     """The attempt for ``goal`` at ``target`` on this map, made active.
 
     An attempt keeps its level when a replan flips to another target and back,
@@ -131,6 +139,7 @@ def track(m: Memory, w: WorldModel, goal: str, target: Pos) -> NavAttempt | None
     elif stuck.active != key:
         att.goal = goal
         att.window_tick = w.tick  # only time spent pursuing it counts
+    att.backoff_key = backoff_key
     stuck.active = key
     return att
 
@@ -293,9 +302,10 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     if reason is not None:
         att.reasons.append(reason)
     stuck = m.nav_stuck
-    power = stuck.backoff_power.get(att.key, 0)
-    stuck.backoff_until[att.key] = w.tick + BACKOFF_BASE_TICKS * (2**power)
-    stuck.backoff_power[att.key] = power + 1
+    backoff = att.backoff_key or att.key
+    power = stuck.backoff_power.get(backoff, 0)
+    stuck.backoff_until[backoff] = w.tick + BACKOFF_BASE_TICKS * (2**power)
+    stuck.backoff_power[backoff] = power + 1
     stuck.stuck_signals.append(
         {
             "trigger": "stuck",

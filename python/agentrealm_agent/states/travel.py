@@ -7,7 +7,7 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import route_first_leg
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, guided_step, nav_search, next_step
+from ..pathing import grid_params, guided_step, nav_search
 from ..travel.ops import current_travel_op, set_travel_index
 from ..travel.resolve import ResolvedDestination, at_destination, resolve_travel
 from ..world import Pos, WorldModel
@@ -98,32 +98,28 @@ def _travel_step(
     """One step along the route to ``dest``, across maps through known doors (A26).
     None when no step can be planned.
 
-    On the destination's map, stuck detection and escalation drive the walk
-    and a destination given up on is backed off (A15); a leg toward a door to
-    another map is not tracked (escalation step 4 is M9).
+    Stuck detection and escalation drive each map leg, including the first leg
+    toward a known door on another map (A15); escalation step 4 is M9.
     """
     goal = f"travel:{dest.label}"
-    if dest.map_id == w.map_id:
-        plan = _same_map_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest)
-        step = guided_step(m, w, goal, dest.pos, plan_avoid, plan)
-        if step is None:
-            return None
-        note = nav_stuck.level_note(nav_stuck.active(m, w))
-        return StateOutcome([set_position(step)], f"{goal} → {dest.pos}{note}", state=TravelState.name)
-    if m.goal != goal or not next_step(w, plan_avoid, m.path):
+    plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest, goal)
+    leg_target = dest.pos
+    if dest.map_id != w.map_id:
         params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
-        found = route_first_leg(w, knowledge, dest.map_id, dest.pos, params)
-        if found and next_step(w, plan_avoid, found):
-            m.path, m.goal = found, goal
-        else:
-            m.path, m.goal = [], ""
-    step = next_step(w, plan_avoid, m.path) if m.goal == goal else None
+        leg_path = route_first_leg(w, knowledge, dest.map_id, dest.pos, params)
+        leg_target = leg_path[-1] if leg_path else dest.pos
+    kwargs = (
+        {"backoff_map": dest.map_id, "backoff_target": dest.pos} if dest.map_id != w.map_id else {}
+    )
+    step = guided_step(m, w, goal, leg_target, plan_avoid, plan, **kwargs)
     if step is None:
         return None
-    return StateOutcome([set_position(step)], f"{goal} → {dest.pos}", state=TravelState.name)
+    note = nav_stuck.level_note(nav_stuck.active(m, w))
+    label = m.path[-1] if m.path else leg_target
+    return StateOutcome([set_position(step)], f"{goal} → {label}{note}", state=TravelState.name)
 
 
-def _same_map_plan(
+def _route_plan(
     m: Memory,
     w: WorldModel,
     policy: Policy,
@@ -131,11 +127,13 @@ def _same_map_plan(
     plan_avoid: set[Pos],
     plan_costly: set[Pos],
     dest: ResolvedDestination,
+    goal: str,
 ):
-    """Plan to ``dest`` on this map, direct or through known doors (A26), at the attempt's fog price."""
+    """Plan the current map leg toward ``dest`` (A26), at the attempt's fog price."""
 
     def plan(att):
         params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
-        return route_first_leg(w, knowledge, dest.map_id, dest.pos, params, nav=nav_search(m, w, "travel", dest.pos))
+        nav = nav_search(m, w, goal, dest.pos) if dest.map_id == w.map_id else None
+        return route_first_leg(w, knowledge, dest.map_id, dest.pos, params, nav=nav)
 
     return plan

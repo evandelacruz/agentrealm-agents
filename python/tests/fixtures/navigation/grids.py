@@ -138,6 +138,29 @@ FOG_DEAD_END_CLOSED = Scenario(
 # Inside a level: the door is in sight across a wall whose far end is fog, so
 # Level plans round it; the wall runs the map's whole height, so the door is
 # abandoned once the fog clears.
+# Map 1: a hedge line blocks the door; map 2 holds the goal (cross-map stuck, A15).
+CROSS_MAP_HEDGE = Scenario(
+    "cross_map_hedge",
+    (
+        "..S....",
+        ".......",
+        "bbbbbbb",
+        ".....D.",
+    ),
+    perception=3,
+)
+
+# Map 1: open corridor to the door; map 2 is a short walk to G (cross-map reach, A15).
+CROSS_MAP_OPEN = Scenario(
+    "cross_map_open",
+    (
+        "S...D..",
+        ".......",
+        ".......",
+    ),
+    perception=3,
+)
+
 LEVEL_WALLED_DOOR = Scenario(
     "level_walled_door",
     (

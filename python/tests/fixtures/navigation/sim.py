@@ -15,13 +15,27 @@ from dataclasses import dataclass, field
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.interest_list import MAX_REJECTIONS, say_key
+from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.knowledge_maps import view_from_kb
 from agentrealm_agent.navigation import learn_step_rejection
 from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.world import WALKABLE, Entity, Pos, WorldModel, chebyshev
+from agentrealm_agent.world import DOORS, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
 
-from .grids import Scenario
+from .grids import GLYPHS, Scenario
 
 TICKS_PER_DECISION = 4  # one Step at 2.5 blocks/s and 10 ticks/s
+
+MAP2_ROWS = ("G.......",)
+
+
+@dataclass(frozen=True)
+class CrossMapRun:
+    """Door on map 1, goal on map 2, with a recorded warp in the knowledge base."""
+
+    door: Pos
+    landing: Pos
+    goal: Pos
+    kb: KnowledgeBase
 
 
 @dataclass
@@ -38,21 +52,37 @@ class Run:
         return sigs[0] if sigs else None
 
 
-def reveal(w: WorldModel, sc: Scenario) -> None:
+def map2_view() -> MapView:
+    view = MapView()
+    for y, row in enumerate(MAP2_ROWS):
+        for x, g in enumerate(row):
+            view.tiles[(x, y)] = GLYPHS[g]
+    return view
+
+
+def reveal(w: WorldModel, sc: Scenario, *, map2: MapView | None = None) -> None:
     """A terrain read: the perception square around us, from the true map."""
     x0, y0 = w.pos
     r = sc.perception
     for y in range(y0 - r, y0 + r + 1):
         for x in range(x0 - r, x0 + r + 1):
-            w.view.tiles[(x, y)] = sc.block((x, y))
+            if w.map_id == 1:
+                w.view.tiles[(x, y)] = sc.block((x, y))
+            elif map2 is not None:
+                block = map2.tiles.get((x, y))
+                if block is not None:
+                    w.view.tiles[(x, y)] = block
     w.terrain_center, w.terrain_map = w.pos, w.map_id
 
 
-def world_for(sc: Scenario) -> WorldModel:
+def world_for(sc: Scenario, *, cross: CrossMapRun | None = None) -> WorldModel:
     w = WorldModel(character_id=1, map_id=1, pos=sc.start, perception=sc.perception)
     w.map_level = sc.level
     w.entities = [Entity("npc", 100 + i, p, code="parked") for i, p in enumerate(sc.npcs)]
-    reveal(w, sc)
+    if cross is not None:
+        w.maps[1] = view_from_kb(cross.kb, 1)
+        w.maps[2] = view_from_kb(cross.kb, 2)
+    reveal(w, sc, map2=map2_view() if cross else None)
     return w
 
 
@@ -62,15 +92,37 @@ def scripted(**kw) -> Policy:
     return Policy(kind="scripted", **kw)
 
 
-def apply(w: WorldModel, m: Memory, sc: Scenario, cell: Pos) -> bool:
+def _tile(sc: Scenario, w: WorldModel, p: Pos, map2: MapView) -> str:
+    if w.map_id == 1:
+        return sc.block(p)
+    return map2.tiles.get(p, "wall")
+
+
+def apply(
+    w: WorldModel,
+    m: Memory,
+    sc: Scenario,
+    cell: Pos,
+    *,
+    cross: CrossMapRun | None = None,
+    map2: MapView | None = None,
+) -> bool:
     """Apply one Step toward ``cell`` as the runner would. True when it moved."""
-    occupied = any(e.pos == cell for e in w.entities)
-    if chebyshev(w.pos, cell) == 1 and sc.block(cell) in WALKABLE and not occupied:
+    map2 = map2 or map2_view()
+    occupied = any(e.pos == cell for e in w.entities if w.map_id == 1)
+    block = _tile(sc, w, cell, map2)
+    walkable = block in WALKABLE or block in DOORS
+    if chebyshev(w.pos, cell) == 1 and walkable and not occupied:
         w.pos = cell
         if m.path and m.path[0] == cell:
             m.path = m.path[1:]
         nav_stuck.on_step(m, w)
-        reveal(w, sc)
+        if cross is not None and w.map_id == 1 and cell == cross.door:
+            w.map_id = 2
+            w.pos = cross.landing
+            w.maps.setdefault(2, map2)
+            m.path, m.goal = [], ""
+        reveal(w, sc, map2=map2)
         return True
     nav_stuck.on_rejection(m)
     code = "block_occupied" if occupied else "not_traversable"
@@ -86,26 +138,31 @@ def run(
     memory: Memory | None = None,
     stop_on_signal: bool = True,
     seed: int = 7,
+    cross: CrossMapRun | None = None,
 ) -> Run:
     """Decide and apply until the goal is reached or given up on. A decision
     that sends nothing still lets the clock run."""
-    w = world_for(sc)
+    map2 = map2_view()
+    w = world_for(sc, cross=cross)
     m = memory or Memory()
+    done_map = 2 if cross is not None else 1
+    done_pos = cross.goal if cross is not None else sc.goal
     for e in w.entities:  # already greeted: a parked NPC is only an obstacle here
         m.investigate_rejections[say_key(e.id)] = MAX_REJECTIONS
     rng = random.Random(seed)
     trace: list[dict] = []
     moves = 0
+    knowledge = cross.kb if cross is not None else None
     for _ in range(max_decisions):
-        if w.pos == sc.goal:
+        if w.map_id == done_map and w.pos == done_pos:
             return Run("reached", moves, w, m, trace)
         if stop_on_signal and m.nav_stuck.stuck_signals:
             return Run("abandoned", moves, w, m, trace)
-        d = decide(w, m, policy, rng)
-        row = {"tick": w.tick, "pos": list(w.pos), "intent": d.intent, "reason": d.reason}
+        d = decide(w, m, policy, rng, knowledge=knowledge)
+        row = {"tick": w.tick, "pos": list(w.pos), "map_id": w.map_id, "intent": d.intent, "reason": d.reason}
         trace.append(row)
         if d.intent is not None and d.intent.get("verb") == "SetPosition":
-            row["applied"] = apply(w, m, sc, (d.intent["x"], d.intent["y"]))
+            row["applied"] = apply(w, m, sc, (d.intent["x"], d.intent["y"]), cross=cross, map2=map2)
             moves += row["applied"]
         w.tick += TICKS_PER_DECISION
     return Run("budget", moves, w, m, trace)

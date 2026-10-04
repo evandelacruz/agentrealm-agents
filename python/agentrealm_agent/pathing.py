@@ -109,9 +109,10 @@ def path_for_plan_op(
     blocked: set[Pos],
     costly: set[Pos],
     knowledge: KnowledgeBase | None,
-) -> tuple[list[Pos], str, Pos | None] | None:
+) -> tuple[list[Pos], str, Pos | None, str | None] | None:
     """A cost-grid path for an ``explore_area`` or ``travel`` op, its goal label,
-    and the target on this map stuck detection tracks (None across maps, A15).
+    and the cell on this map stuck detection tracks (the goal, or the door at
+    the end of a cross-map first leg).
 
     Targets given up on and still backed off are skipped (A15).
     """
@@ -124,7 +125,7 @@ def path_for_plan_op(
             if nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
                 return None
         found = nearest_target(w, targets, grid_params(policy, blocked, costly, m=m))
-        return (found[1], label, found[0]) if found and found[1] else None
+        return (found[1], label, found[0], None) if found and found[1] else None
     if op["op"] != "travel":
         return None
     params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m)
@@ -135,12 +136,14 @@ def path_for_plan_op(
             return None
         nav = nav_search(m, w, label, target) if dest_map == w.map_id else None
         path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
-        return (path, label, target if dest_map == w.map_id else None) if path else None
+        leg = _leg_target(path)
+        bkey = nav_stuck.goal_key(label, dest_map, target) if dest_map != w.map_id and leg is not None else None
+        return (path, label, leg, bkey) if path else None
     if op["to"] == "entrance":
         path = doors_goal_path(w, knowledge, params)
         if not path or nav_stuck.backed_off(m, label, w.map_id, path[-1], w.tick):
             return None
-        return path, label, path[-1]
+        return path, label, path[-1], None
     if op["to"] == "town":
         for map_id, pos in w.respawn_anchors:
             if map_id == w.map_id:
@@ -148,7 +151,9 @@ def path_for_plan_op(
                     continue
                 path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav_search(m, w, label, pos))
                 if path:
-                    return path, label, pos
+                    leg = _leg_target(path)
+                    bkey = nav_stuck.goal_key(label, map_id, pos) if map_id != w.map_id and leg is not None else None
+                    return path, label, leg, bkey
     return None
 
 
@@ -184,7 +189,7 @@ def plan_step(
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
         if found and next_step(w, blocked, found[0]):
             plan.stalled_since_tick = None
-            _store_path(m, w, found[1], found[0], found[2])
+            _store_path(m, w, found[1], found[0], found[2], backoff_key=found[3])
             m.goal_op = dict(op)
             return True
         if plan.note_stalled(w.tick):
@@ -215,14 +220,14 @@ def replan(
     m.path, m.goal, m.goal_op = [], "", None
     if plan is not None and plan_step(plan, w, m, policy, blocked, costly, knowledge):
         return None
-    missed: tuple[str, Pos, bool] | None = None
+    missed: tuple[str, Pos, bool, str | None] | None = None
     for goal in policy.goals:
-        found, target = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
+        found, target, backoff_key = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
         if next_step(w, blocked, found):
-            _store_path(m, w, goal, found, target)
+            _store_path(m, w, goal, found, target, backoff_key=backoff_key)
             return None
         if missed is None and target is not None and target != w.pos:
-            missed = (goal, target, bool(found))
+            missed = (goal, target, bool(found), backoff_key)
     return missed
 
 
@@ -250,10 +255,31 @@ def grid_params(
     return nav_stuck.planning_params(m, base) if m is not None else base
 
 
-def _store_path(m: Memory, w: WorldModel, goal: str, path: list[Pos], target: Pos | None) -> None:
-    """Keep ``path`` for ``goal``; a target on this map becomes the active stuck attempt (A15)."""
+def _leg_target(path: list[Pos] | None) -> Pos | None:
+    return path[-1] if path else None
+
+
+def _cross_map_leg(m: Memory, w: WorldModel, dest_map: int, dest: Pos) -> Pos | None:
+    """Door on this map for a cross-map ``goto``, including after routing fails (A15)."""
+    att = nav_stuck.active(m, w)
+    ultimate = nav_stuck.goal_key("goto", dest_map, dest)
+    if att is not None and att.goal == "goto" and att.backoff_key == ultimate:
+        return att.target
+    return None
+
+
+def _store_path(
+    m: Memory,
+    w: WorldModel,
+    goal: str,
+    path: list[Pos],
+    target: Pos | None,
+    *,
+    backoff_key: str | None = None,
+) -> None:
+    """Keep ``path`` for ``goal``; a leg target on this map becomes the active stuck attempt (A15)."""
     m.path, m.goal = path, goal
-    att = nav_stuck.track(m, w, goal, target) if target is not None else None
+    att = nav_stuck.track(m, w, goal, target, backoff_key=backoff_key) if target is not None else None
     if att is None:
         m.nav_stuck.active = None
     else:
@@ -326,18 +352,28 @@ def guided_step(
     target: Pos,
     avoid: set[Pos],
     plan: AttemptPlan,
+    *,
+    backoff_map: int | None = None,
+    backoff_target: Pos | None = None,
 ) -> Pos | None:
     """One move toward ``target`` on this map, with stuck detection and escalation (A15).
 
     Keeps the current path for ``goal`` while it has an open first step, else
     plans with ``plan``. None when we stand on the target, or it is backed off
     or was just given up on, so the caller yields the round.
+
+    For a cross-map leg, ``backoff_map`` and ``backoff_target`` name the
+    ultimate destination whose backoff ``give_up`` records (the leg target
+    stays ``target`` on the current map).
     """
-    if nav_stuck.backed_off(m, goal, w.map_id, target, w.tick):
+    bm = backoff_map if backoff_map is not None else w.map_id
+    bt = backoff_target if backoff_target is not None else target
+    if nav_stuck.backed_off(m, goal, bm, bt, w.tick):
         if m.goal == goal:
             m.path, m.goal = [], ""
         return None
-    att = nav_stuck.track(m, w, goal, target)
+    backoff_key = nav_stuck.goal_key(goal, bm, bt) if backoff_target is not None else None
+    att = nav_stuck.track(m, w, goal, target, backoff_key=backoff_key)
     if att is None:
         return None
     if w.pos == target:
@@ -382,33 +418,34 @@ def plan_goal(
     blocked: set[Pos],
     costly: set[Pos],
     knowledge: KnowledgeBase | None = None,
-) -> tuple[list[Pos] | None, Pos | None]:
-    """A path for one ``policy.goals`` entry, and its target on this map (None
-    across maps or when it has none). Targets backed off after a give-up are
-    skipped (A15)."""
+) -> tuple[list[Pos] | None, Pos | None, str | None]:
+    """A path for one ``policy.goals`` entry, its leg target on this map, and
+    an optional backoff key for a cross-map ultimate destination (A15)."""
     view = w.view
     if goal == "hold":
-        return None, None
+        return None, None, None
     if goal == "wander":
         options = w.open_neighbours(w.pos, blocked)
-        return ([rng.choice(sorted(options))] if options else None), None
+        return ([rng.choice(sorted(options))] if options else None), None, None
     if goal == "goto":
         # config.load guarantees goto is set when the goal is listed.
         dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
         target = tuple(policy.goto)
         if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
-            return None, None
+            return None, None, None
         params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m)
         nav = nav_search(m, w, "goto", target) if dest_map == w.map_id else None
         path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav) or None
-        return path, (target if dest_map == w.map_id else None)
+        leg = _leg_target(path) or (target if dest_map == w.map_id else _cross_map_leg(m, w, dest_map, target))
+        bkey = nav_stuck.goal_key("goto", dest_map, target) if dest_map != w.map_id and leg is not None else None
+        return path, leg, bkey
     if goal == "doors":
         path = doors_goal_path(w, knowledge, grid_params(policy, blocked, costly, allow_goal_door=True, m=m))
         if not path or nav_stuck.backed_off(m, "doors", w.map_id, path[-1], w.tick):
-            return None, None
-        return path, path[-1]
+            return None, None, None
+        return path, path[-1], None
     if goal == "explore":
         targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, view.frontier() - {w.pos}, w.tick)
         found = nearest_target(w, targets, grid_params(policy, blocked, costly, m=m))
-        return (found[1], found[0]) if found and found[1] else (None, None)
-    return None, None
+        return (found[1], found[0], None) if found and found[1] else (None, None, None)
+    return None, None, None

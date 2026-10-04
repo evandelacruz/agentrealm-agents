@@ -139,6 +139,7 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(r.mem.need_self and r.mem.need_position)
         self.assertIsNone(r.world.pos)
         self.assertEqual(r.world.recent_damage, [(11, 3)])
+        self.assertEqual(r.world.threat.damage_per_hit(("npc", "id:4")), 3)
 
     def test_a_step_sent_as_we_die_is_not_assumed(self):
         # Died forgets the position; the step sent that round trip has no

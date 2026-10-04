@@ -5,6 +5,8 @@ from __future__ import annotations
 import heapq
 from dataclasses import dataclass, field
 
+from .threat import ThreatTable, absorb_damaged
+
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
 # warp: never occupied, but stepping onto one warps.
 WALKABLE = {"grass", "dirt", "tile", "fire", "lava"}
@@ -92,6 +94,7 @@ class WorldModel:
     terrain_map: int | None = None
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
+    threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
     # leaves the world when its last supply is withdrawn (B116).
@@ -313,7 +316,9 @@ class WorldModel:
                 flat.append(ev)
                 kind = ev.get("kind")
                 if kind == "Damaged":
-                    self.recent_damage.append((int(ev.get("tick", group["tick"])), int(ev.get("amount", 0))))
+                    tick = int(ev.get("tick", group["tick"]))
+                    self.recent_damage.append((tick, int(ev.get("amount", 0))))
+                    absorb_damaged(self.threat, ev, self.entities)
                 elif kind == "BlockChanged" and ev.get("map_id") in self.maps:
                     self.maps[ev["map_id"]].tiles[(int(ev["x"]), int(ev["y"]))] = ev.get("block_type", "")
                 elif kind == "SupplyTaken":

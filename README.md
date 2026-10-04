@@ -2,7 +2,7 @@
 
 Reference agents that play Agent Realm through its public API. They are ordinary clients: they import nothing from the server and never touch its databases.
 
-- [`PLAN.md`](PLAN.md): design, what the API allows today, and the milestones.
+- [`PLAN.md`](PLAN.md): design, what the API allows today, and the backlog (PR-sized items grouped under milestones).
 - [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md): the plan to make the agent able to play: state machine, LLM strategist, and the scope of milestones M0, M4 and M6–M12.
 - [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md): the game facts that plan relies on, each with its source.
 - [`python/`](python/): the Python reference agent. Python 3.11+, standard library only.
@@ -33,7 +33,7 @@ Against the public API, skip the seed script: set `AGENTREALM_BASE_URL=https://a
 
 **The default base URL is `http://localhost:8080`, a local stack.** To play the public API, set `AGENTREALM_BASE_URL=https://api.agentrealm.gg` and use a key from your account page on agentrealm.gg. Lives there are permanent: a character at zero lives is ended. The sample characters set `world = "sandbox"`, the free practice world with the same rules on a different map; set `world` to a live world's code to play there.
 
-`create` saves each character’s id to `python/.state/<name>.json`. `run` drives every listed character until Ctrl-C, one line per window to stdout and a JSONL trace per character in `python/.state/`. Stopping the agent leaves the characters in the world where they stand. The game runs at 10 ticks per second; [`PLAN.md`](PLAN.md) Real time says how the agent keeps up.
+`create` saves each character’s id to `python/.state/<name>.json`. `run` drives every listed character until Ctrl-C, one line per window to stdout and a JSONL trace per character in `python/.state/`. Characters in the same world share one learned knowledge file at `python/.state/worlds/<world_code>.json` (gitignored): `run` loads it once at start, refusing to start if it is unreadable, and saves it once at exit. Its `items` section holds, per `supply_subtype_code`, the weapon reach learned from a `target_out_of_range` rejection and the last `gem_price` seen ([`PLAN.md`](PLAN.md) A18). Run one `run` process per world at a time; two would each save their own copy, and the last to exit wins. Stopping the agent leaves the characters in the world where they stand. The game runs at 10 ticks per second; [`PLAN.md`](PLAN.md) Real time says how the agent keeps up.
 
 ## Make a character
 
@@ -42,13 +42,17 @@ Copy a file from `python/characters/` and edit it. Names must be unique in the w
 | Key | Meaning |
 |---|---|
 | `name`, `avatar`, `model_agent`, `world` | Identity. `avatar` is an outfit code. `model_agent` is what rankings aggregate on. |
-| `policy.kind` | `idle` sends nothing. `wander` takes random steps. `scripted` runs the reflexes and goals below. |
-| `policy.goals` | Tried in order: `explore`, `doors`, `goto` (with `policy.goto = [x, y]`), `wander`, `hold`. |
+| `policy.kind` | `idle` sends nothing. `wander` takes random steps. `scripted` runs the reflexes and goals below through the **Explore** state (A5). Before each `POST tick`, a priority dispatcher picks **Sync**, **Downed**, **Explore**, or **Idle**, and that state returns the intents to send. |
+| `policy.goals` | Tried in order: `explore`, `doors`, `goto` (with `policy.goto = [x, y]`), `wander`, `hold`. Paths may run through unseen ground (fog costs 2 per step to known ground's 1), but the agent only steps onto tiles it has seen; a goal whose next step is unseen yields to the next goal. |
 | `policy.on_hostile` | `flee`, `fight`, or `ignore`, for anything in `policy.hostile` (`npc`, `character`) within `policy.hostile_range`. |
 | `policy.pickup` | Take supplies within one block. |
-| `policy.avoid_blocks` | Block types to step off and to plan around. Standing on one with no safe step off, the plan crosses as few as it can. |
+| `policy.avoid_blocks` | Block types to step off and to plan around. Standing on one with no safe step off, the plan crosses as few as it can. Other fire and lava cost their `occupy_damage` per step. |
 | `policy.entity_refresh` | Ticks between entity reads when nothing is happening. |
 | `policy.seed` | Random seed for `wander`. Defaults to the character id. |
+
+Each character may also have `python/characters/<name>.directives.toml` beside its character file. The runner re-reads it when the file changes; a file that fails to read or parse keeps the last good directives (defaults if none loaded yet); deleting the file restores the defaults. `never_attack` lists kinds or NPC type codes the agent must not swing at (`character`, or an NPC `code`); a fight reflex that would `Use` a forbidden target flees instead, and any other `Use` aimed at one is replaced by a `Wait`. `never_attack` is the only key that changes behavior today. `params` (for example `fight_margin`, `risk`, `lives_floor`) are parsed and validated, out-of-range values ignored, but nothing reads them yet. `goals` and `instructions` are kept for the strategist.
+
+In a calm window it would otherwise skip, the agent calls `get_zone` on one revealed cell: first within 8 blocks of town or its last respawn point, then on the cells of its planned path. It records which are safe for later retreat and healing (A7); nothing acts on them yet. Urgent windows and the `idle` policy never read zones.
 
 ## Tests
 

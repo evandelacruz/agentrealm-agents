@@ -70,6 +70,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 ## Zones
 
 - **Zone fields.** `get_zone` returns `brightness`, `safe`, and `strength_ceiling` for a hunting ground. A cell in no zone reads brightness 1, not safe (M §5.3).
+- **Zone reads need a revealed cell.** `get_zone` answers only for a cell the character has revealed (PLAN.md **What the API gives today**). The agent probes only revealed cells, and a cell whose read is refused with a 4xx is not probed again (A7). Unverified: the exact refusal code.
 - **Safe zones.** No damage of any kind lands there, and you can't attack or set a trap from inside one. Breaking blocks is allowed (M §11). Attacking a hostile from a safe tile was `not_allowed_in_safe_zone` (Obs 1836584).
 - **Safe zones work as a refuge.** A chest outside the safe zone can still be emptied from a safe tile next to it (Obs 1837572).
 - **Edges are sharp.** Town's gate tiles were safe; the tile one step outside was not (Obs).
@@ -202,7 +203,8 @@ Each has a test the agent or a hand session can run.
 | Hostile health per type (no NPC's health is served but a boss's) | Sum `NPCDamaged` on one NPC until its `NPCDied` |
 | Hostile stats (defense, range, speed) per type | Log `NPCDamaged` and our swings for the hit rate (gives defense); log `Damaged` and spacing for damage and cooldown; log first `Attacked` distance for range |
 | Does health regenerate out of combat? | Take a hit, retreat to town, read `health` every 10 s for 2 minutes |
-| Weapon damage and cooldown per subtype | Swing at a lone weak hostile from full health, with a retreat queued in the same request |
+| Weapon damage and cooldown per subtype | Swing at a lone weak hostile from full health, with a retreat queued in the same request. `NPCDamaged` is copied to every character that sees the block (API Events), so count only one on the block and tick our `Use` resolved |
+| How much damage each worn item saves | Take hits from one hostile type with and without the item worn and compare `Damaged` amounts; one hit can't be split between worn slots |
 | What each level's entrance needs | Walk to each minimap mark; read terrain (`locked`, block type), signs and helpers nearby. Stored in `.state/`, never committed |
 | Hunting ground locations and ceilings | `get_zone` on cells around town |
 | Boss fight time limits | Read on entry, or learn from the first attempt |

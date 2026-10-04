@@ -4,7 +4,7 @@ Goal: a reference agent that survives, gears up, fights, travels the overworld, 
 
 The game facts this plan relies on are in [GAME_NOTES.md](GAME_NOTES.md), with sources.
 
-Milestone IDs are the ones in [PLAN.md](../PLAN.md) **Milestones**, the one backlog: M0 (discovery, done), M6 to M12, and M4, which this plan redefines as the strategist. PLAN.md says which of its sections this plan supersedes and when.
+The backlog is [PLAN.md](../PLAN.md) **Milestones**: PR-sized items (A1, A2, …) grouped under the milestones this plan scopes, M0 (discovery, done), M6 to M12, and M4, which this plan redefines as the strategist. PLAN.md says which of its sections this plan supersedes and when.
 
 ## Verdict on the approach
 
@@ -39,8 +39,8 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 | API surface | Used today | Needed for |
 |---|---|---|
 | `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Not measured on a live world yet; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
-| Multi-intent queues | Movement only; every other intent is sent alone; a reflex that fires replaces a running queue | Freeing the request budget; queuing a retreat with an attack |
-| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health from complete snapshots, not yet used by any decision; no `snapshot_version`, so no deltas; entity layer still from separate reads | Perception, retreat |
+| Multi-intent queues | Movement, and `Use`/`Say`/`Broadcast` behind the `Wait`s their cooldown still owes; every other intent is sent alone; a reflex that fires replaces a running queue | Freeing the request budget; queuing a retreat with an attack |
+| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; health not yet used by any decision; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
 | `Use` on a block (attacks the NPC on it, or breaks the block) | No: flees from every NPC | Fighting, opening the way |
 | Priced supplies (`gem_price`) | No | Buying gear, potions, tools |
@@ -80,7 +80,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 - **Terrain reads.** With perception 25 the terrain window is 51×51, so terrain is read only on a map change or after moving about half the window.
 - **Deltas feed the model.** Health, inventory and entity changes are folded into the world model from them.
 
-Shipped so far: the runner sends movement as paced `Step`/`Wait` queues (`executor/movement.py`), cut at the world's horizon, and polls on the two cadences (`poll_cadence.py`); the calm gap never outlasts the intents still queued, and a reflex that fires (hazard, hostile, supply, chest) replaces the running queue. `python/agentrealm_agent/executor/pacing.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_intents`) and the next poll. The attack and speech accumulators are paced separately; there is no mixed-queue helper yet, and the runner does not use it yet.
+Shipped so far: the runner sends movement as paced `Step`/`Wait` queues (`executor/movement.py`), cut at the world's horizon, and polls on the two cadences (`poll_cadence.py`); the calm gap never outlasts the intents still queued, and a reflex that fires (hazard, hostile, supply, chest) replaces the running queue, and a read or event that makes the rest of the path wrong replaces it with a replanned walk after re-reading position (A43). Tick POSTs include the last applied observation version so responses can be deltas. `python/agentrealm_agent/executor/pacing.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_intents`) and the next poll. The attack and speech accumulators are paced separately in the runner; there is no mixed-queue helper yet.
 
 ### State machine
 
@@ -126,6 +126,12 @@ Paths are never straight lines. Bushes, trees, water, walls, fences, NPCs and ot
 | Near a hostile | A danger cost that falls off with distance, so routes keep away from hostiles |
 | NPC or character standing there | High but finite, and it expires: they move |
 | Known blocked, including every obstacle not nominated (a block never says whether it breaks or what breaks it), or marked unreachable | Impassable |
+
+The numbers in `navigation/planner.py` (A12), and why:
+- **Fog 2.** Twice a known step: the agent still aims into fog, but prefers ground it has seen when the detour is short.
+- **Occupant 50.** Worth a long detour, yet finite: people move, so a corridor with someone in it is a last resort, not a wall.
+- **Hostile danger 30, falling 5 per block, gone at radius 6.** A step next to a hostile is worth about a 25-block detour, and the cost reaches 0 at 6 blocks, so it bends routes near hostiles without repricing the whole map.
+- **Unnamed hazard 100 (`COSTLY_STEP`).** Fire or lava whose `occupy_damage` no read has named costs as much as a `costly` escape tile: assume the worst until a read names the damage, then charge 1 per point.
 
 - **Walk only the part of the path we have seen.** The executor walks the known prefix and replans when terrain reads reveal what lies ahead, or a step is rejected. Fog optimism is corrected by looking.
 - **Long trips are two-level.** A coarse search over 16×16-block squares (the API's cache-tile size, API Reads) picks the corridor; A* inside the perception window picks the steps. Each search has a node budget per tick, so a long route never stalls a tick.
@@ -227,7 +233,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 **Protecting health in the moment:**
 - **Never start a fight hurt.** `Fight` needs health above the expected damage of the whole group over the fight, plus a margin. Otherwise heal first.
-- **Retreat in time.** The threshold is set in hits, not percent: when the next `retreat_hits` (default 2) hits from what is attacking could kill, it leaves. A hit's size comes from the threat table, learned per hostile type from `Damaged` events (the API serves no hostile's damage). A type not yet measured is assumed to hit as hard as the hardest measured type, and before anything is measured, 2, the most a weak hostile dealt in M0. The steps away are already queued behind every attack (see Executor).
+- **Retreat in time.** The threshold is set in hits, not percent: when the next `retreat_hits` (default 2) hits from what is attacking could kill, it leaves. A hit's size comes from the threat table, learned per hostile type from `Damaged` events (the API serves no hostile's damage). A type not yet measured is assumed to hit as hard as the hardest measured type, and before anything is measured, 2, the most a weak hostile dealt in M0. A hit is filed under its source's type code, resolved against the entities perceived around that round trip; a hit from a source not perceived there, or with no type code, is not recorded rather than filed under its id. Trap and `occupy` damage is kept apart and never sets a hostile's default. The steps away are already queued behind every attack (see Executor).
 - **Drink mid-fight** only when retreating is impossible, such as a boss room or being cornered. Swapping in a potion costs a tick, drinking costs another, and re-arming the weapon a third, so the agent compares those three ticks of incoming damage with the heal.
 - **Step off damaging ground** at once (`Escape`). Fire and lava are crossed only when the route has no other way.
 - **Traps.** Wear goggles when they are owned and the area is trapped. Never walk on a seen armed trap.
@@ -257,7 +263,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Gear and items
 
-- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water).
+- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach and price only; PLAN.md A18 says why the rest waits.
 - **Equip** scores each slot and swaps when a carried item beats the worn one. Consumables (potions, food) are kept for `Heal`.
 - **Budget.** Gems are kept through death and gear is not, so the plan spends gems on what most raises survival first (weapon, armor, potions), then on tools a clue asks for.
 - **Compose.** When any fragment is held, its `fragment` field names the whole and the missing slots. The plan tracks it as a goal, and `Solve` composes when the set is complete.
@@ -270,6 +276,7 @@ A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, sha
 - Clues: the text of every sign, statue, scroll and helper line, with where it was found and when.
 - Break attempts per (block, capability), and the result.
 - NPC type stats, item stats, compose results, and what each entrance turned out to need.
+- `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value (PLAN.md A18).
 - Level progress: which levels are cleared, and the route and solution for each.
 
 This is what makes a second run better than the first, and it is what the strategist reads. None of it is committed.
@@ -331,7 +338,7 @@ If you find a sign with numbers on it, try them as a code at the nearest locked 
 """                                                     # free text, passed to the strategist
 ```
 
-Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist.
+Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. Until A9 and the M4 strategist land, only `never_attack` changes behavior; `params`, `goals`, and `instructions` are parsed and validated but not yet read.
 
 Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
 
@@ -348,7 +355,7 @@ A directives value out of range is ignored and logged, and the default stays.
 
 ## Milestones
 
-These are rows of PLAN.md **Milestones**, which owns the IDs and the dependencies; this table owns the scope and the done-when.
+These are the milestone groups. PLAN.md **Milestones** splits each into PR-sized items with their own IDs (A1, A2, …) and dependencies, and ends each with an acceptance item that runs the done-when below. This table owns the scope and the done-when.
 
 | ID | Milestone | Done when |
 |---|---|---|

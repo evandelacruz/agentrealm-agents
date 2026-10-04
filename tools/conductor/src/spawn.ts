@@ -42,7 +42,7 @@ export function prependIds(prompt: string, ids: string[]): string {
     `Backlog IDs: ${ids.join(", ")}`,
     "Cite these IDs in commits and the PR body.",
     prOpeningRule,
-    "Read AGENTS.md and the cited milestones in PLAN.md before coding.",
+    "Read AGENTS.md and the cited backlog items in PLAN.md before coding.",
     "If blocked by an open architecture, legal, or moderation question, an open design question, or a server gap — halt and print why. Do not invent. Check PLAN.md and the published Agent Realm docs first.",
     "",
   ].join("\n");

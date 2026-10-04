@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import heapq
 from dataclasses import dataclass, field
+
+from .item_table import loadout_from_inventory
+from .threat import ThreatTable, absorb_damaged, damage_amount
 
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
 # warp: never occupied, but stepping onto one warps.
@@ -32,8 +34,15 @@ def terrain_cells(t: dict) -> dict:
 
 Pos = tuple[int, int]
 
-# Extra cost of a step onto a `costly` tile: worth a long detour to avoid one.
-COSTLY_STEP = 100
+
+@dataclass(frozen=True)
+class ZoneFact:
+    """A get_zone answer for one cell (A7)."""
+
+    safe: bool
+    brightness: float = 1.0
+    strength_ceiling: int | None = None
+
 
 NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
 
@@ -55,9 +64,15 @@ class MapView:
     """What this character has seen of one map. Missing tiles are unknown."""
 
     tiles: dict[Pos, str] = field(default_factory=dict)
+    # occupy_damage named by terrain reads (Manual §9.2 legend), 0 included.
+    damage: dict[Pos, int] = field(default_factory=dict)
 
     def walkable(self, p: Pos) -> bool:
         return self.tiles.get(p) in WALKABLE
+
+    def occupy_damage(self, p: Pos) -> int | None:
+        """The tile's occupy_damage, or None when no read has named it."""
+        return self.damage.get(p)
 
     def frontier(self) -> set[Pos]:
         """Known walkable tiles that touch an unknown one."""
@@ -84,6 +99,9 @@ class WorldModel:
     lives: int = 0
     health: int | None = None
     max_health: int | None = None
+    attack_range: int | None = None  # armed weapon reach from get_self (B100)
+    armed_code: str | None = None
+    worn_codes: dict[str, str] = field(default_factory=dict)
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -92,6 +110,7 @@ class WorldModel:
     terrain_map: int | None = None
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
+    threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
     # leaves the world when its last supply is withdrawn (B116).
@@ -99,6 +118,19 @@ class WorldModel:
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[int]] = field(default_factory=dict)
+    # Zone facts from get_zone (A7): map_id -> cell -> fact. Safe tiles derive
+    # from these (zone_discovery.safe_tiles).
+    zones: dict[int, dict[Pos, ZoneFact]] = field(default_factory=dict)
+    # Cells whose get_zone read failed, never probed again (A7).
+    zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
+    # Town and Respawned locations used to seed safe-tile probes.
+    respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
+
+    def record_respawn_anchor(self, map_id: int, pos: Pos) -> None:
+        """Seeds safe-tile probes around a town or Respawned location (A7)."""
+        anchor = (map_id, pos)
+        if anchor not in self.respawn_anchors:
+            self.respawn_anchors.append(anchor)
 
     @property
     def view(self) -> MapView:
@@ -114,6 +146,8 @@ class WorldModel:
             self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
+        # Absent while nothing, or no weapon, is armed (B100).
+        self.attack_range = _opt_int(s.get("attack_range"))
 
     def apply_position(self, p: dict) -> None:
         map_id = int(p["map_id"])
@@ -149,6 +183,7 @@ class WorldModel:
                 view.tiles.setdefault((x, y), VOID)
         for (x, y), cell in terrain_cells(t).items():
             view.tiles[(x, y)] = cell["block_type"]
+            _set_damage(view, (x, y), cell)
         self.terrain_center = self.pos
         self.terrain_map = self.map_id
 
@@ -226,17 +261,23 @@ class WorldModel:
         for cell in patch.get("changed") or []:
             map_id = int(cell["map_id"])
             p = (int(cell["x"]), int(cell["y"]))
-            self.maps.setdefault(map_id, MapView()).tiles[p] = cell.get("block_type", "")
+            v = self.maps.setdefault(map_id, MapView())
+            v.tiles[p] = cell.get("block_type", "")
+            _set_damage(v, p, cell)
         for cell in patch.get("removed") or []:
             map_id = int(cell["map_id"])
             p = (int(cell["x"]), int(cell["y"]))
-            self.maps.setdefault(map_id, MapView()).tiles.pop(p, None)
+            v = self.maps.setdefault(map_id, MapView())
+            v.tiles.pop(p, None)
+            v.damage.pop(p, None)
 
     def _apply_snapshot_terrain(self, terrain: dict) -> None:
         for cell in terrain.get("cells") or []:
             map_id = int(cell["map_id"])
             p = (int(cell["x"]), int(cell["y"]))
-            self.maps.setdefault(map_id, MapView()).tiles[p] = cell.get("block_type", "")
+            v = self.maps.setdefault(map_id, MapView())
+            v.tiles[p] = cell.get("block_type", "")
+            _set_damage(v, p, cell)
 
     def _chest_contents_from_entities(self, entities: dict) -> dict[int, list[int]]:
         return {
@@ -278,9 +319,16 @@ class WorldModel:
             else:
                 self.apply_position(pos)
 
+    def _apply_inventory(self, inv: dict | None) -> None:
+        if inv is None:
+            return
+        self.armed_code, self.worn_codes = loadout_from_inventory(inv)
+
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
         self._apply_vitals(snap, complete=True)
+        if "inventory" in snap:
+            self._apply_inventory(snap.get("inventory"))
         if "entities" in snap:
             entities = snap["entities"] or {}
             self.entities = self._entities_from_payload(entities)
@@ -294,6 +342,8 @@ class WorldModel:
     def _apply_delta_body(self, delta: dict) -> None:
         self._apply_body_scalars(delta)
         self._apply_vitals(delta, complete=False)
+        if "inventory" in delta:
+            self._apply_inventory(delta.get("inventory"))
         if "entities" in delta:
             self._apply_entity_delta(delta["entities"])
             self.entities_tick = self.tick
@@ -313,16 +363,39 @@ class WorldModel:
                 flat.append(ev)
                 kind = ev.get("kind")
                 if kind == "Damaged":
-                    self.recent_damage.append((int(ev.get("tick", group["tick"])), int(ev.get("amount", 0))))
+                    amount = damage_amount(ev)
+                    if amount is not None:
+                        self.recent_damage.append((int(ev.get("tick", group["tick"])), amount))
                 elif kind == "BlockChanged" and ev.get("map_id") in self.maps:
-                    self.maps[ev["map_id"]].tiles[(int(ev["x"]), int(ev["y"]))] = ev.get("block_type", "")
+                    v = self.maps[ev["map_id"]]
+                    p = (int(ev["x"]), int(ev["y"]))
+                    v.tiles[p] = ev.get("block_type", "")
+                    v.damage.pop(p, None)
                 elif kind == "SupplyTaken":
                     self.entities = [x for x in self.entities if not (x.kind == "supply" and x.id == ev.get("supply_id"))]
                 elif kind == "Died":
                     self.forget_position()
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
+                elif kind == "Respawned":
+                    try:
+                        self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))
+                    except (KeyError, TypeError, ValueError):
+                        pass  # no location on the event: nothing to anchor probes to
         return flat
+
+    def learn_threat(self, events: list[dict], earlier: list[Entity]) -> None:
+        """Folds this round trip's Damaged events into the threat table (A6).
+
+        Call after apply_observation, so a source first listed in the same
+        response resolves to its type. A source that left view in that
+        response is looked up in earlier, the entities before it. There is
+        no entity list per event tick, so a source seen in neither is not
+        recorded.
+        """
+        for ev in events:
+            if ev.get("kind") == "Damaged":
+                absorb_damaged(self.threat, ev, self.entities, earlier)
 
     def apply_observation(self, obs: dict | None) -> None:
         """Folds a tick observation into the model (Manual §7.2).
@@ -369,77 +442,14 @@ class WorldModel:
         occ = self.occupied() | avoid
         return [n for n in self.neighbours(p) if self.view.walkable(n) and n not in occ]
 
-    def path(
-        self, goal: Pos, allow_goal_door: bool = False, avoid: set[Pos] = frozenset(), costly: set[Pos] = frozenset()
-    ) -> list[Pos] | None:
-        """A* over known walkable tiles, Chebyshev steps. Excludes the start.
 
-        Occupied tiles and avoid are never entered; a step onto a costly tile
-        costs COSTLY_STEP more, so the path crosses as few as it can. With
-        allow_goal_door, the goal may be a door: the last step lands on it and
-        warps.
-        """
-        assert self.pos is not None
-        start = self.pos
-        if start == goal:
-            return []
-        view = self.view
-        occ = self.occupied() | avoid
-
-        def passable(p: Pos) -> bool:
-            if p == goal and allow_goal_door and view.tiles.get(p) in DOORS and p not in avoid:
-                return True
-            return view.walkable(p) and p not in occ
-
-        if not passable(goal):
-            return None
-        frontier = [(chebyshev(start, goal), 0, start)]
-        came: dict[Pos, Pos] = {}
-        cost = {start: 0}
-        while frontier:
-            _, g, cur = heapq.heappop(frontier)
-            if cur == goal:
-                out = [cur]
-                while out[-1] in came and came[out[-1]] != start:
-                    out.append(came[out[-1]])
-                return out[::-1]
-            if g > cost.get(cur, 10**9):
-                continue
-            for n in self.neighbours(cur):
-                if not passable(n):
-                    continue
-                ng = g + self.step_cost(n, costly)
-                if ng < cost.get(n, 10**9):
-                    cost[n] = ng
-                    came[n] = cur
-                    heapq.heappush(frontier, (ng + chebyshev(n, goal), ng, n))
-        return None
-
-    def step_cost(self, p: Pos, costly: set[Pos]) -> int:
-        return 1 + COSTLY_STEP if p in costly else 1
-
-    def nearest(
-        self, targets: set[Pos], allow_goal_door: bool = False, avoid: set[Pos] = frozenset(),
-        costly: set[Pos] = frozenset(),
-    ) -> tuple[Pos, list[Pos]] | None:
-        """The closest target by path cost, with its path.
-
-        Tries targets in straight-line order and stops once no remaining target
-        can beat the best path found.
-        """
-        assert self.pos is not None
-        best: tuple[Pos, list[Pos]] | None = None
-        best_cost = 0
-        for t in sorted(targets, key=lambda t: chebyshev(self.pos, t)):
-            if best is not None and chebyshev(self.pos, t) >= best_cost:
-                break
-            p = self.path(t, allow_goal_door, avoid, costly)
-            if p is None:
-                continue
-            c = sum(self.step_cost(q, costly) for q in p)
-            if best is None or c < best_cost:
-                best, best_cost = (t, p), c
-        return best
+def _set_damage(view: MapView, p: Pos, cell: dict) -> None:
+    """Record a cell's occupy_damage; 0 is a value, absence forgets it."""
+    dmg = cell.get("occupy_damage")
+    if dmg is not None:
+        view.damage[p] = int(dmg)
+    else:
+        view.damage.pop(p, None)
 
 
 def _opt_int(v) -> int | None:

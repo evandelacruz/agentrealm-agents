@@ -287,9 +287,7 @@ class RecoverStuckTest(unittest.TestCase):
         died_at(w, 1, 1)
         apply_zone(w, 7, 1, 1, {"safe": True, "brightness": 1})
         c = ctx(sim.scripted(goals=["hold"], pickup=True))
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Recover")
-        self.assertIn("chest not reachable", out.reason)
+        self.assertIsNone(dispatch(w, c).intents, "Recover yields; hold sends nothing")
         sig = c.memory.nav_stuck.stuck_signals[0]
         self.assertEqual((sig["goal"], sig["reason"]), ("chest", "no_path"))
         dispatch(w, c)

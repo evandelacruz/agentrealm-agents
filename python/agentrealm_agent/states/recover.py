@@ -118,7 +118,7 @@ def recover_outcome(
                 )
                 return StateOutcome(intents, reason, reflex=True, state=state)
         if contents is None:
-            return StateOutcome(None, f"open chest {chest_id}", state=state)
+            return StateOutcome(None, f"open chest {chest_id}", state=state, wait=True)
 
     def plan(att):
         params = grid_params(policy, plan_avoid, plan_costly, m=m)

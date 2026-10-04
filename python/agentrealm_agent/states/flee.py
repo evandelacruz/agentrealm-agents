@@ -63,12 +63,12 @@ class FleeState(State):
         w, m, policy = world, ctx.memory, ctx.policy
         hostiles = hostiles_in_range(w, policy)
         if not hostiles or w.pos is None:
-            return StateOutcome(None, "no hostiles", state=self.name)
+            return StateOutcome(None, "no hostiles", state=self.name, wait=True)
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, w.pos), e.id))
         blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
         safes = safe_tiles(w, w.map_id) if w.map_id is not None else set()
         away = _toward_safety(w, hostiles, blocked, safes) if safes else flee_step(w, hostiles, blocked)
         if away is None:
-            return StateOutcome(None, "nowhere to flee", state=self.name)
+            return StateOutcome(None, "nowhere to flee", state=self.name, wait=True)
         m.path = []
         return StateOutcome([set_position(away)], f"flee {target.kind} {target.id}", reflex=True, state=self.name)

@@ -271,19 +271,24 @@ class GatherDispatchTest(unittest.TestCase):
     def test_unreachable_target_backs_off_to_explore(self):
         # Grass walled off: Gather finds no path, backs off, and dispatch
         # falls through to Explore in the same window (A44).
-        w = grid(["######", "#..#g#", "######"], at=(1, 1))
-        safe(w, (4, 1))
+        w = grid(["....###", "....#g#", "....###"], at=(1, 1))
+        safe(w, (5, 1))
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
-        self.assertNotEqual(out.state, "Gather", "Gather must fall through when it sends no intent (A44)")
-        self.assertGreater(c.memory.gather_backoff_until, w.tick)
+        self.assertEqual(out.state, "Explore")
+        self.assertIsNotNone(out.intents)
+        self.assertEqual([y.split(":")[0] for y in out.yielded], ["Gather"])
+        backoff = c.memory.gather_backoff_until
+        self.assertGreater(backoff, w.tick)
+        # Backing off: Gather does not claim the round at all.
         out = dispatch(w, c)
-        self.assertNotEqual(out.state, "Gather")
-        w.tick = c.memory.gather_backoff_until
-        before = c.memory.gather_backoff_until
-        dispatch(w, c)
-        self.assertGreater(c.memory.gather_backoff_until, before - 1)
-
+        self.assertEqual((out.state, out.yielded), ("Explore", []))
+        # Backoff over: Gather claims the round again, fails again, backs off again.
+        w.tick = backoff
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Explore")
+        self.assertEqual([y.split(":")[0] for y in out.yielded], ["Gather"])
+        self.assertGreater(c.memory.gather_backoff_until, backoff)
 
 if __name__ == "__main__":
     unittest.main()

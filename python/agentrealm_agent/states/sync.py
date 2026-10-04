@@ -14,7 +14,7 @@ class SyncState(State):
         return world.pos is None
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        return StateOutcome(None, "sync", state=self.name)
+        return StateOutcome(None, "sync", state=self.name, wait=True)
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)

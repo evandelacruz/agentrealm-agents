@@ -150,8 +150,11 @@ class RecoverDispatchTest(unittest.TestCase):
         full_inventory(w)
         w.chest_contents[80] = [InventorySupply(71, "torch")]
         out = dispatch(w, ctx(scripted(goals=["hold"])))
+        # Recover yields and Explore (goal "hold") has nothing to send either.
         self.assertEqual(out.state, "")
         self.assertIsNone(out.intents)
+        self.assertTrue(out.yielded[0].startswith("Recover:"))
+        self.assertIn("chest 80 not worth a slot", out.reason)
 
     def test_after_drop_withdraws_best_not_lowest_id(self):
         w = world(["....."], at=(1, 0))

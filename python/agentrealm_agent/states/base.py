@@ -39,6 +39,12 @@ class StateOutcome:
     state: str = ""
     # Already paced (A23 **Fight**): the runner sends it as is.
     paced: bool = False
+    # Intentional wait (A44): no intent, but the state still holds the round,
+    # so dispatch does not fall through to lower states.
+    wait: bool = False
+    # "State: reason" of each higher state that claimed the round, sent no
+    # intent and fell through (A44 diagnostics).
+    yielded: list[str] = field(default_factory=list)
 
 
 class State(ABC):

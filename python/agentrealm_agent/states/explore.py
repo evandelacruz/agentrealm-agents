@@ -10,7 +10,7 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..plan import Plan
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import flee_step, next_step, replan
+from ..pathing import flee_step, hostiles_in_range, next_step, replan
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position, take, use_on
@@ -110,7 +110,7 @@ def reflex_outcome(
             p = min(safe)
             return StateOutcome([set_position(p)], f"off {view.tiles.get(here)}", reflex=True, state=state)
 
-    hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
+    hostiles = hostiles_in_range(w, policy)
     if hostiles and policy.on_hostile != "ignore":
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
         if policy.on_hostile == "fight":

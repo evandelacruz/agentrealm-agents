@@ -27,6 +27,7 @@ from agentrealm_agent.plan import (
     validate_goal_op,
 )
 from agentrealm_agent.runner import Runner
+from agentrealm_agent.states.explore import scripted_outcome
 from agentrealm_agent.world import WorldModel
 from tests.test_cost_grid import grid
 from tests.test_runner import FakeClient
@@ -247,6 +248,24 @@ class GoalDoneTest(unittest.TestCase):
         self.assertIsNone(plan.current())
 
 
+class ScriptedOutcomeTest(unittest.TestCase):
+    def test_plan_wait_holds_without_moving(self):
+        w = open_world()
+        w.tick = 7
+        plan = Plan([{"op": "wait", "seconds": 1}], dict(PARAM_DEFAULTS), tick_hz=10)
+        m = Memory()
+        out = scripted_outcome(w, m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
+                               never_attack=[], plan=plan)
+        self.assertIsNone(out.intents)
+        self.assertEqual(out.reason, "plan wait")
+        self.assertEqual((plan.wait_started_tick, m.path), (7, []))
+        w.tick = 17
+        out = scripted_outcome(w, m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
+                               never_attack=[], plan=plan)
+        self.assertIsNone(plan.current(), "wait done after its seconds")
+        self.assertIsNotNone(out.intents, "falls back to policy goals")
+
+
 class PathForPlanOpTest(unittest.TestCase):
     def test_explore_area_paths_to_frontier_in_the_area(self):
         op = {"op": "explore_area", "x": 3, "y": 0, "radius": 1}
@@ -313,6 +332,19 @@ class RunnerPlanTest(unittest.TestCase):
         self.assertIsNone(r.reflex_while_held())
         self.assertEqual(r.plan.index, 0)
         self.assertIsNone(r.plan.stalled_since_tick)
+
+    def test_reflex_probe_restores_params_and_wait_clock(self):
+        r = self.runner("", ["explore"])
+        r.world.tick = 40
+        floor = dict(PARAM_DEFAULTS)
+        r.plan = Plan([{"op": "set_param", "name": "curiosity", "value": 0.0}, {"op": "wait", "seconds": 5}],
+                      dict(floor), floor_params=floor)
+        self.assertIsNone(r.reflex_while_held())
+        self.assertEqual((r.plan.index, r.plan.params), (0, floor))
+        self.assertIsNone(r.plan.wait_started_tick)
+        r._decide(r.world, r.mem, plan=r.plan)
+        self.assertEqual((r.plan.index, r.plan.params["curiosity"]), (1, 0.0), "the real window does advance")
+        self.assertEqual(r.plan.wait_started_tick, 40)
 
 
 if __name__ == "__main__":

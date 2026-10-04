@@ -391,6 +391,29 @@ class Plan:
     stalled_since_tick: int | None = None  # first tick the current op found no path
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
 
+    def snapshot(self) -> tuple:
+        """The stack's progress, for :meth:`restore` after a side-effect-free probe."""
+        return (
+            self.index,
+            list(self.goals),
+            dict(self.params),
+            dict(self.floor_params),
+            self.wait_started_tick,
+            self.stalled_since_tick,
+        )
+
+    def restore(self, saved: tuple) -> None:
+        """Put back progress taken by :meth:`snapshot`."""
+        (
+            self.index,
+            goals,
+            params,
+            floor_params,
+            self.wait_started_tick,
+            self.stalled_since_tick,
+        ) = saved
+        self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
+
     def current(self) -> GoalOp | None:
         """The op at the top of the stack, or None when it is empty."""
         return self.goals[self.index] if self.index < len(self.goals) else None

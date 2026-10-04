@@ -30,6 +30,7 @@ from .executor import (
     wait,
 )
 from .poll_cadence import calm_poll_interval
+from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
 from .zone_discovery import apply_town, apply_zone, zone_failed
 
@@ -85,6 +86,7 @@ class Runner:
         self.directives = DirectivesWatch(cfg.directives_path)
         self.directives.ensure_loaded()
         self.plan = self._build_plan()
+        self._level_timer = LevelTimer()
 
     def _build_plan(self) -> Plan:
         d = self.directives.directives
@@ -147,6 +149,10 @@ class Runner:
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
         apply_town(self.world, world.get("town"))
+        town = world.get("town") or {}
+        if town.get("map_id") is not None:
+            # The town is on the overworld, so leaving its map enters a level (A41).
+            self._level_timer.overworld = int(town["map_id"])
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:
@@ -225,6 +231,7 @@ class Runner:
         elif call == "position":
             p = c.position(self.cid)
             w.apply_position(p)
+            self._level_timer.note_map(w.map_id, w.tick, time.time())
             self.note_warp_landing()
             m.need_position, m.path = False, []
             self.log(call, "", {"position": p})
@@ -349,17 +356,25 @@ class Runner:
             detail += " | " + ", ".join(_fmt_event(e) for e in events)
         if r.get("events_dropped"):
             detail += f" | dropped {r['events_dropped']}"
-        self.log(
-            "tick",
-            detail,
-            {
-                "intents": intents,
-                "reason": d.reason,
-                "held_queue": m.held_queue,
-                "events": events,
-                "dropped": r.get("events_dropped", 0),
-            },
+        now = time.time()
+        record = {
+            "intents": intents,
+            "reason": d.reason,
+            "held_queue": m.held_queue,
+            "events": events,
+            "dropped": r.get("events_dropped", 0),
+        }
+        record.update(
+            tick_trace_extras(
+                tick_response=r,
+                gems=w.gems,
+                level_timer=self._level_timer,
+                tick=w.tick,
+                now=now,
+            )
         )
+        self._level_timer.note_map(w.map_id, w.tick, now)
+        self.log("tick", detail, record)
         # The intent resolves at this sim window's boundary. Do not call
         # again until it has closed, so the next submit lands in a new tick.
         return time.time() + int(r.get("window_remaining_ms", 0)) / 1000.0 + WINDOW_MARGIN
@@ -370,12 +385,17 @@ class Runner:
         Only a firing reflex may touch the path and the rng; they stay as they
         were otherwise, so the held queue's steps are not planned twice. The
         navigation learnings always stay as they were: this probe is not the
-        decision window that ages them (A14). The goal stack is not passed at
-        all: reflexes never read it, and the probe must not pop or drop its ops.
+        decision window that ages them (A14). The goal stack always stays as it
+        was too: reflexes never consume its ops, so the probe must not advance,
+        pop, or drop them (A34).
         """
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate())
-        d = self._decide(self.world, m)
+        saved_plan = self.plan.snapshot()
+        try:
+            d = self._decide(self.world, m, plan=self.plan)
+        finally:
+            self.plan.restore(saved_plan)
         m.nav = saved[2]
         if d.reflex:
             return d
@@ -420,7 +440,7 @@ class Runner:
         blocked = self.directives.directives.never_attack
         if not blocked:
             return intents
-        if not any(use_blocked_by_never_attack(i, self.world.entities, blocked) for i in intents):
+        if not any(use_blocked_by_never_attack(i, self.world.entities, blocked, self.world.character_id) for i in intents):
             return intents
         m = self.mem
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0

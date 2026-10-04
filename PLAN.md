@@ -268,6 +268,15 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A41 | **Run metrics.** Levels cleared, deaths, kills, gems, time per level, from the trace. | A5 |
 | A42 | **Comparison across commits.** A regression shows up as a number. | A41 |
 
+**M13: Make it yours.** The point of this repo is that people build their own agents for Agent Realm, and that it is easy and fun. A newcomer should get a character playing in minutes, understand how the agent thinks in one sitting, and add their own idea without reading the whole codebase. Done when someone new can follow the README from clone to a running character, then add a working state of their own using only the guide.
+
+| ID | Item | Depends on |
+|---|---|---|
+| A50 | **README for newcomers.** Short: what this is, quick start on agentrealm.gg, "how the agent thinks" in about ten lines (dispatcher, states, reflexes, plan), and "make it yours" pointing at the guide and the starter. Move per-state detail into PLAN.md or a docs page; the README links to it. | |
+| A51 | **Write-your-own-state guide.** `docs/MAKE_IT_YOURS.md`: how a state works (`guard`, `act`, `StateOutcome`, `wait`, fall-through), where it goes in the dispatcher, how to read the world model and knowledge base, how to send intents within the call budget, how to test it, and how to tune an existing state with directives. Ships with a tiny worked example state (about 30 lines, such as greeting every NPC once) and its test. | A44 |
+| A52 | **Starter agent.** One small, readable file that plays on its own (sync, walk, flee, explore) and that people copy and grow, beside the full reference agent. Runnable with one command from the README; covered by a test. | A50 |
+| A53 | **Hackability pass.** Read the code as a newcomer: clear names, a short docstring on each state saying what it does and when it runs, no dead code. Fix what gets in the way of extending it, without changing behavior. | A51 |
+
 **Fight** (A23) swings at NPCs and characters when the win estimate clears `fight_margin`, using `Use` on the NPC by id (the server finds its block on the tick the swing runs, A45), with retreat steps queued behind the attack. Out of weapon reach it steps closer; with no open step closer it lets go and **Flee** runs.
 
 The playable plan's strategist (M4) replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the remaining one-intent queues in **Real time**; until then those sections describe the shipped agent. Since A5, `states.dispatch` picks the intents; `brain.decide` stays only as a shim over it that keeps the first intent as a `Decision`, until the runner sends a state's whole queue. The call budget is unchanged: one request per character per tick, burst 3.

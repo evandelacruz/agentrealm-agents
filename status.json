@@ -97,5 +97,13 @@
 
   "A44": {"state": "done"},
 
-  "A45": {"state": "done"}
+  "A45": {"state": "done"},
+
+  "A50": {"state": "open"},
+
+  "A51": {"state": "open"},
+
+  "A52": {"state": "open"},
+
+  "A53": {"state": "open"}
 }

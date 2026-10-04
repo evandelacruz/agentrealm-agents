@@ -53,5 +53,9 @@ def arm(supply_id: int) -> dict:
     return {"verb": "Arm", "supply_id": supply_id}
 
 
+def compose(supply_ids: list[int]) -> dict:
+    return {"verb": "Compose", "supply_ids": list(supply_ids)}
+
+
 def use_self(character_id: int) -> dict:
     return {"verb": "Use", "target": {"kind": "character", "character_id": character_id}}

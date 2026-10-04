@@ -6,21 +6,27 @@ from ..navigation.rejection import end_decision
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
 from .downed import DownedState
+from .escape import EscapeState
 from .explore import ExploreState
+from .flee import FleeState
 from .gather import GatherState
 from .heal import HealState
 from .idle import IdleState
 from .recover import RecoverState
+from .retreat import RetreatState
 from .sync import SyncState
 
 # Priority order (PLAYABLE_AGENT_PLAN.md State machine). Sync and Downed are
-# both priority 0 and never both act: each only waits. Heal (A10) is priority 1,
-# Recover (A11) priority 3, above Gather; Retreat (A9) slots in at 1 later. M8
-# economy states slot above Explore.
+# both priority 0 and never both act: each only waits. Escape, Retreat and
+# Heal (A10) are priority 1; Fight (A23) slots in before Flee at 2; Recover
+# (A11) is priority 3, above Gather. M8 economy states slot above Explore.
 STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
+    EscapeState(),
+    RetreatState(),
     HealState(),
+    FleeState(),
     RecoverState(),
     GatherState(),
     ExploreState(),

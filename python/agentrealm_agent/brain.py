@@ -94,6 +94,7 @@ def decide(
     rng: random.Random,
     *,
     never_attack: list[str] | None = None,
+    params: dict[str, float | int] | None = None,
     knowledge: KnowledgeBase | None = None,
     directives: Directives | None = None,
 ) -> Decision:
@@ -106,6 +107,8 @@ def decide(
         knowledge=knowledge,
         directives=directives or default_directives(),
     )
+    if params is not None:
+        ctx.params = params
     outcome = dispatch(w, ctx)
     intent = outcome.intents[0] if outcome.intents else None
     return Decision(intent, outcome.reason, outcome.reflex)

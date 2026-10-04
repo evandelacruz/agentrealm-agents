@@ -91,8 +91,8 @@ def gather_outcome(
         return StateOutcome(None, "position unknown", state=state)
     view = w.view
 
-    blocked, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    reflex = reflex_outcome(w, m, policy, blocked, never_attack=never_attack, state=state)
+    _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
+    reflex = reflex_outcome(w, policy, never_attack=never_attack, state=state)
     if reflex is not None:
         if not m.path and m.goal == GOAL:
             m.goal, m.gather_target = "", None

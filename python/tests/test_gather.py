@@ -193,22 +193,20 @@ class GatherPathingTest(unittest.TestCase):
 
 
 class GatherReflexTest(unittest.TestCase):
-    def test_flees_a_hostile(self):
+    def test_flee_outranks_gather(self):
         w = grid(["ggggg"], at=(2, 0))
-        safe(w, (2, 0))
+        safe(w, (0, 0))
         w.entities = [Entity("npc", 4, (3, 0))]
         m = Memory(path=[(1, 0)], goal="gather", gather_target=("grass", (0, 0)))
-        out = outcome(w, m, on_hostile="flee", hostile=["npc"], hostile_range=2)
-        self.assertTrue(out.reflex)
-        self.assertTrue(out.reason.startswith("flee"))
-        self.assertEqual((m.path, m.goal, m.gather_target), ([], "", None))
+        out = dispatch(w, ctx(w, ["gather_gems:3"], m, on_hostile="flee", hostile=["npc"], hostile_range=2))
+        self.assertEqual(out.state, "Flee")
+        self.assertEqual(m.path, [])
 
-    def test_steps_off_a_hazard(self):
+    def test_escape_outranks_gather(self):
         w = grid([".lg"], at=(1, 0))
         safe(w, (2, 0))
-        out = outcome(w, avoid_blocks=["lava"])
-        self.assertTrue(out.reflex)
-        self.assertEqual(out.reason, "off lava")
+        out = dispatch(w, ctx(w, ["gather_gems:3"], avoid_blocks=["lava"]))
+        self.assertEqual(out.state, "Escape")
 
     def test_fights_a_character_like_explore(self):
         w = grid(["ggg"], at=(1, 0))

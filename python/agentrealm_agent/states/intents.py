@@ -26,9 +26,5 @@ def read_block(map_id: int, pos: Pos) -> dict:
     return {"verb": "Read", "target": {"kind": "block", "map_id": map_id, "x": pos[0], "y": pos[1]}}
 
 
-def read_supply(supply_id: int) -> dict:
-    return {"verb": "Read", "target": {"kind": "supply", "supply_id": supply_id}}
-
-
 def say_to(npc: Entity, text: str = "hello") -> dict:
     return {"verb": "Say", "text": text, "target": {"kind": "npc", "npc_id": npc.id}}

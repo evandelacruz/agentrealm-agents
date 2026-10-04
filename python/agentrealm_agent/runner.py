@@ -31,7 +31,8 @@ from .executor import (
 from .poll_cadence import calm_poll_interval
 from .world import DOORS, WorldModel, terrain_cells
 from .curiosity import record_curiosity_queue
-from .investigation import mark_cell_read, mark_npc_spoken, mark_supply_read
+from .interest_list import read_key, say_key
+from .investigation import mark_cell_read, mark_npc_spoken
 from .zone_discovery import apply_town, apply_zone, zone_failed
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
@@ -120,13 +121,7 @@ class Runner:
                         f"reloaded never_attack={self.directives.directives.never_attack}",
                         {"directives": {"params": self.directives.directives.params, "never_attack": self.directives.directives.never_attack}},
                     )
-                call = choose_call(
-                    self.world,
-                    self.mem,
-                    self.cfg.policy,
-                    knowledge=self.knowledge,
-                    directives=self.directives.directives,
-                )
+                call = choose_call(self.world, self.mem, self.cfg.policy)
                 if call == "skip":
                     self.mem.windows_since_self += 1
                     continue
@@ -283,7 +278,7 @@ class Runner:
             )
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
-            self._note_curiosity_queue(intents)
+        self._note_curiosity_queue(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))
         if intents:
@@ -563,6 +558,7 @@ class Runner:
                 rej.get("code"),
                 int(result.get("tick", w.tick)),
             )
+        self._note_investigation(intent, result)
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None
@@ -574,35 +570,37 @@ class Runner:
         return True
 
     def _note_curiosity_queue(self, intents: list[dict] | None) -> None:
+        """Charge an Investigate movement queue to the curiosity budget.
+
+        Every intent in a paced walk queue (Step or Wait) covers one tick, so
+        the whole queue is charged. Reads and speech from where the agent
+        stands send no Step and are free (PLAYABLE_AGENT_PLAN Curiosity).
+        """
         if self.mem.state != "Investigate" or not intents:
             return
-        steps = sum(1 for i in intents if i.get("verb") == "Step")
-        if steps:
-            record_curiosity_queue(self.mem, self.world.tick, steps)
+        if any(i.get("verb") == "Step" for i in intents):
+            record_curiosity_queue(self.mem, self.world.tick, len(intents))
 
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
-        if not intent or result.get("outcome") != "applied":
+        """Remember an applied Read/Say in the knowledge base; count a refused one."""
+        if not intent or intent.get("verb") not in ("Read", "Say"):
             return
-        kb = self.knowledge
-        w = self.world
-        verb = intent.get("verb")
-        if verb == "Read":
-            target = intent.get("target") or {}
-            kind = target.get("kind")
-            if kind == "block" and w.map_id is not None:
-                x, y = target.get("x"), target.get("y")
-                if x is not None and y is not None:
-                    mark_cell_read(kb, int(target.get("map_id", w.map_id)), (int(x), int(y)))
-            elif kind == "supply":
-                sid = target.get("supply_id")
-                if sid is not None:
-                    mark_supply_read(kb, int(sid))
-        elif verb in ("Say", "Broadcast"):
-            target = intent.get("target") or {}
-            if target.get("kind") == "npc":
-                nid = target.get("npc_id")
-                if nid is not None:
-                    mark_npc_spoken(kb, int(nid))
+        target = intent.get("target") or {}
+        applied = result.get("outcome") == "applied"
+        if target.get("kind") == "block" and None not in (target.get("map_id"), target.get("x"), target.get("y")):
+            map_id, pos = int(target["map_id"]), (int(target["x"]), int(target["y"]))
+            key = read_key(map_id, pos)
+            if applied:
+                mark_cell_read(self.knowledge, map_id, pos)
+        elif target.get("kind") == "npc" and target.get("npc_id") is not None:
+            key = say_key(int(target["npc_id"]))
+            if applied:
+                mark_npc_spoken(self.knowledge, int(target["npc_id"]))
+        else:
+            return
+        if result.get("outcome") == "rejected":
+            rejections = self.mem.investigate_rejections
+            rejections[key] = rejections.get(key, 0) + 1
 
     def _with_item_table(self, fn) -> None:
         kb = self.knowledge

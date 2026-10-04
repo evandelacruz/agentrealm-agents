@@ -128,8 +128,6 @@ class WorldModel:
     zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
     # Town and Respawned locations used to seed safe-tile probes.
     respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
-    # Carried scroll supplies (id, subtype code) from inventory snapshots.
-    held_scrolls: list[tuple[int, str]] = field(default_factory=list)
 
     def record_respawn_anchor(self, map_id: int, pos: Pos) -> None:
         """Seeds safe-tile probes around a town or Respawned location (A7)."""
@@ -190,7 +188,8 @@ class WorldModel:
             p = (x, y)
             view.tiles[p] = cell["block_type"]
             _set_damage(view, p, cell)
-            _set_readable(view, p, cell)
+            # A full read: a cell whose legend entry lacks the flag is not readable.
+            _set_readable(view, p, cell, full=True)
         self.terrain_center = self.pos
         self.terrain_map = self.map_id
 
@@ -333,18 +332,6 @@ class WorldModel:
         if inv is None:
             return
         self.armed_code, self.worn_codes = loadout_from_inventory(inv)
-        held: list[tuple[int, str]] = []
-        for entry in inv.get("held") or []:
-            if not isinstance(entry, dict):
-                continue
-            code = entry.get("supply_subtype_code")
-            sid = entry.get("id")
-            if isinstance(code, str) and "scroll" in code.lower() and sid is not None:
-                try:
-                    held.append((int(sid), code))
-                except (TypeError, ValueError):
-                    pass
-        self.held_scrolls = held
 
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
@@ -476,10 +463,10 @@ def _set_damage(view: MapView, p: Pos, cell: dict) -> None:
         view.damage.pop(p, None)
 
 
-def _set_readable(view: MapView, p: Pos, cell: dict) -> None:
+def _set_readable(view: MapView, p: Pos, cell: dict, *, full: bool = False) -> None:
     if cell.get("readable"):
         view.readable[p] = True
-    elif "readable" in cell:
+    elif full or "readable" in cell:
         view.readable.pop(p, None)
 
 

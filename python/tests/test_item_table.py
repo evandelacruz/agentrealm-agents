@@ -45,7 +45,7 @@ class MergeTest(unittest.TestCase):
     def test_unknown_facts_are_not_stored(self):
         items: dict = {}
         it.merge_item(items, "bronze_sword", weapon_damage=3, capabilities=["cut"], attack_range=1)
-        self.assertEqual(items, {"bronze_sword": {"attack_range": 1}})
+        self.assertEqual(items, {"bronze_sword": {"attack_range": 1, "weapon_damage": 3}})
 
     def test_free_supply_makes_no_row(self):
         items: dict = {}
@@ -75,6 +75,35 @@ class EntitiesTest(unittest.TestCase):
             },
         )
         self.assertEqual(items, {"potion": {"gem_price": 5}, "mallet": {"gem_price": 20}})
+
+
+class CombatFactsTest(unittest.TestCase):
+    def test_npc_damaged_requires_matching_use(self):
+        items: dict = {}
+        uses = [it.AppliedUse(tick=11, map_id=1, x=3, y=4)]
+        events = [{"tick": 11, "kind": "NPCDamaged", "npc_id": 9, "amount": 4, "map_id": 1, "x": 3, "y": 4}]
+        it.absorb_npc_damaged(items, events, uses, default_map_id=1, armed_code="bronze_sword")
+        self.assertEqual(items, {"bronze_sword": {"weapon_damage": 4}})
+        items.clear()
+        it.absorb_npc_damaged(items, events, [], default_map_id=1, armed_code="bronze_sword")
+        self.assertEqual(items, {})
+        it.absorb_npc_damaged(items, events, uses, default_map_id=1, armed_code="bronze_sword")
+        self.assertEqual(items, {"bronze_sword": {"weapon_damage": 4}})
+        uses_wrong_block = [it.AppliedUse(tick=11, map_id=1, x=0, y=0)]
+        items.clear()
+        it.absorb_npc_damaged(items, events, uses_wrong_block, default_map_id=1, armed_code="bronze_sword")
+        self.assertEqual(items, {})
+
+    def test_damaged_worn_only_with_one_slot(self):
+        items: dict = {}
+        hit = [{"tick": 11, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 3}]
+        it.absorb_damaged_worn(items, hit, {"body": "bronze_mail"})
+        self.assertEqual(items, {"bronze_mail": {"damage_taken": 3}})
+        items.clear()
+        it.absorb_damaged_worn(
+            items, hit, {"body": "bronze_mail", "head": "iron_helm"}
+        )
+        self.assertEqual(items, {})
 
 
 class RejectionTest(unittest.TestCase):
@@ -238,6 +267,46 @@ class RunnerItemLearningTest(unittest.TestCase):
         r._learn_items_from_tick({"version": 2, "complete": True, "snapshot": {"entities": {"supplies": []}}})
         r._learn_items_from_entities({"supplies": [{"id": 1, "supply_subtype_code": "potion", "gem_price": 5}]})
         self.assertIsNone(r._reach_seen)
+
+    def test_weapon_damage_from_matched_npc_damaged(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._runner(kb)
+        r.world.map_id = 1
+        r.world.armed_code = "pocket_knife"
+        use = {"verb": "Use", "target": {"kind": "block", "x": 2, "y": 1}}
+        self._queue(r, [use])
+        r.apply_intent_results([{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}])
+        events = [
+            {
+                "tick": 11,
+                "kind": "NPCDamaged",
+                "npc_id": 5,
+                "amount": 2,
+                "map_id": 1,
+                "x": 2,
+                "y": 1,
+            }
+        ]
+        inv = self._inv("pocket_knife")
+        obs = {"version": 2, "delta": {"inventory": inv}}
+        r.world.apply_observation(obs)
+        r._learn_items_from_tick(obs, events)
+        self.assertEqual(kb.items, {"pocket_knife": {"weapon_damage": 2}})
+
+    def test_damage_taken_with_one_worn_piece(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._runner(kb)
+        inv = {
+            "gems": 0,
+            "armed": {"id": 9, "supply_subtype_code": "pocket_knife"},
+            "worn": {"body": {"id": 10, "supply_subtype_code": "bronze_mail"}},
+            "held": [],
+            "chest": [],
+        }
+        r.world.apply_observation({"version": 1, "complete": True, "snapshot": {"inventory": inv}})
+        events = [{"tick": 11, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 5}]
+        r._learn_items_from_tick(None, events)
+        self.assertEqual(kb.items, {"bronze_mail": {"damage_taken": 5}})
 
 
 if __name__ == "__main__":

@@ -13,7 +13,15 @@ from .navigation.rejection import copy_nav, learn_step_rejection, on_block_chang
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
-from .item_table import absorb_attack_range, absorb_entities_payload, rejection_attack_range
+from .item_table import (
+    AppliedUse,
+    absorb_attack_range,
+    absorb_damaged_worn,
+    absorb_entities_payload,
+    absorb_npc_damaged,
+    rejection_attack_range,
+    use_target_block,
+)
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_warp, sync_tiles, sync_world_maps
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
@@ -78,6 +86,7 @@ class Runner:
         self.out = out
         self.knowledge = knowledge
         self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
+        self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
         self.world = WorldModel(character_id)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
@@ -362,7 +371,7 @@ class Runner:
         w.apply_observation(r.get("observation"))
         self._sync_loadout()
         w.learn_threat(events, earlier)
-        self._learn_items_from_tick(r.get("observation"))
+        self._learn_items_from_tick(r.get("observation"), events)
         self.on_events(events)
         self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
@@ -588,6 +597,7 @@ class Runner:
     def apply_intent_results(self, results: list[dict]) -> bool:
         """Fold intent results since the last call. True if the last one rejected."""
         w, m = self.world, self.mem
+        self._applied_uses = []
         if not results:
             return False
         rejected = False
@@ -645,6 +655,18 @@ class Runner:
                     m.held_queue, m.cancel_queue = None, True
             if intent and intent.get("verb") == "Use":
                 m.last_use_tick = int(result.get("tick", w.tick))
+                block = use_target_block(
+                    intent, map_id=w.map_id, self_pos=w.pos, entities=w.entities
+                )
+                if block is not None:
+                    self._applied_uses.append(
+                        AppliedUse(
+                            tick=int(result.get("tick", w.tick)),
+                            map_id=w.map_id,
+                            x=block[0],
+                            y=block[1],
+                        )
+                    )
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
             if m.pending is not None and index == 0:
@@ -691,9 +713,11 @@ class Runner:
         if intent and intent.get("verb") == "Use":
             self._reach_seen = rejection_attack_range(result)
 
-    def _learn_items_from_tick(self, obs: dict | None) -> None:
+    def _learn_items_from_tick(self, obs: dict | None, events: list[dict] | None = None) -> None:
         w = self.world
         reach, self._reach_seen = self._reach_seen, None
+        uses, self._applied_uses = self._applied_uses, []
+        events = events or []
 
         def learn(items: dict) -> None:
             if obs and not obs.get("unchanged"):
@@ -701,6 +725,14 @@ class Runner:
                 if isinstance(body, dict) and "entities" in body:
                     absorb_entities_payload(items, body.get("entities"))
             absorb_attack_range(items, w.armed_code, reach)
+            absorb_npc_damaged(
+                items,
+                events,
+                uses,
+                default_map_id=w.map_id,
+                armed_code=w.armed_code,
+            )
+            absorb_damaged_worn(items, events, w.worn_codes)
 
         self._with_item_table(learn)
 

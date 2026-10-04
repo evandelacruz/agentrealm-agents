@@ -7,9 +7,13 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   subtype armed in the same response's observation. Overwritten.
 - ``gem_price``: from supplies on entity reads and snapshot entities (API
   Reads, Snapshots). Overwritten, since prices are tuned in play.
+- ``weapon_damage``: from ``NPCDamaged`` on the same block and tick as an
+  applied ``Use``, filed under the subtype armed after that response's
+  observation (API Events).
+- ``damage_taken``: from a ``Damaged`` event when exactly one worn slot is
+  filled, filed under that subtype (one hit cannot be split across slots).
 
-Weapon damage, damage taken while worn, and capabilities are not stored yet:
-see PLAN.md A18 for why.
+Capabilities are not stored yet: see PLAN.md A18 and Server gaps.
 """
 
 from __future__ import annotations
@@ -17,11 +21,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .threat import damage_amount
+
+Pos = tuple[int, int]
+
 
 @dataclass(frozen=True)
 class HeldSupply:
     supply_id: int
     code: str
+
+
+@dataclass(frozen=True)
+class AppliedUse:
+    """An applied ``Use`` intent, for matching block-anchored combat events."""
+
+    tick: int
+    map_id: int | None
+    x: int
+    y: int
 
 
 def _supply_code(entry: Any) -> str | None:
@@ -91,7 +109,7 @@ def merge_item(items: dict[str, dict[str, Any]], code: str | None, **facts: Any)
     if not code:
         return
     kept: dict[str, int] = {}
-    for key in ("attack_range", "gem_price"):
+    for key in ("attack_range", "gem_price", "weapon_damage", "damage_taken"):
         n = _positive_int(facts.get(key))
         if n is not None:
             kept[key] = n
@@ -139,3 +157,100 @@ def absorb_attack_range(
 ) -> None:
     if armed_code and attack_range is not None:
         merge_item(items, armed_code, attack_range=attack_range)
+
+
+def use_target_block(
+    intent: dict,
+    *,
+    map_id: int | None,
+    self_pos: Pos | None,
+    entities: list[Any],
+) -> Pos | None:
+    """Block a ``Use`` resolves against, or None when it cannot be named."""
+    target = intent.get("target")
+    if not isinstance(target, dict):
+        return None
+    kind = target.get("kind")
+    if kind == "block":
+        try:
+            return (int(target["x"]), int(target["y"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+    if kind == "character":
+        try:
+            cid = int(target["character_id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        for e in entities:
+            if e.kind == "character" and e.id == cid:
+                return e.pos
+        return None
+    return None
+
+
+def _event_block(ev: dict, default_map_id: int | None) -> tuple[int | None, int, int] | None:
+    try:
+        x, y = int(ev["x"]), int(ev["y"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    raw_map = ev.get("map_id", default_map_id)
+    try:
+        mid = int(raw_map) if raw_map is not None else None
+    except (TypeError, ValueError):
+        mid = default_map_id
+    return mid, x, y
+
+
+def _same_block(
+    use: AppliedUse, tick: int, map_id: int | None, x: int, y: int, default_map_id: int | None
+) -> bool:
+    if use.tick != tick:
+        return False
+    if use.x != x or use.y != y:
+        return False
+    use_map = use.map_id if use.map_id is not None else default_map_id
+    ev_map = map_id if map_id is not None else default_map_id
+    return use_map == ev_map
+
+
+def absorb_npc_damaged(
+    items: dict[str, dict[str, Any]],
+    events: list[dict],
+    applied_uses: list[AppliedUse],
+    *,
+    default_map_id: int | None,
+    armed_code: str | None,
+) -> None:
+    """Record weapon damage when our ``Use`` and ``NPCDamaged`` share block and tick."""
+    if not armed_code or not applied_uses:
+        return
+    for ev in events:
+        if ev.get("kind") != "NPCDamaged":
+            continue
+        amount = damage_amount(ev)
+        if amount is None:
+            continue
+        block = _event_block(ev, default_map_id)
+        if block is None:
+            continue
+        mid, x, y = block
+        tick = int(ev.get("tick", 0))
+        if not any(_same_block(u, tick, mid, x, y, default_map_id) for u in applied_uses):
+            continue
+        merge_item(items, armed_code, weapon_damage=amount)
+
+
+def absorb_damaged_worn(
+    items: dict[str, dict[str, Any]], events: list[dict], worn_codes: dict[str, str]
+) -> None:
+    """Record damage taken on the sole worn item when a hit cannot be split."""
+    if len(worn_codes) != 1:
+        return
+    code = next(iter(worn_codes.values()))
+    for ev in events:
+        if ev.get("kind") != "Damaged":
+            continue
+        amount = damage_amount(ev)
+        if amount is None:
+            continue
+        merge_item(items, code, damage_taken=amount)

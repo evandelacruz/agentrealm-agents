@@ -10,7 +10,7 @@
   },
   "M6": {
     "state": "partial",
-    "remaining": "Wire the executor into the runner: paced Step/Wait queues from movement_speed and queue horizon trim, the 4–10 tick calm gap once multi-intent queues land (calm waits today only while the last poll sent nothing), health dropping from snapshot deltas in the urgent cadence, snapshot deltas and health on the world model, live Olympuff smoke test."
+    "remaining": "Wire the executor into the runner (send the paced Step/Wait queues from movement_speed, trim to the queue horizon), the 4–10 tick calm gap once multi-intent queues land (calm waits today only while the last poll sent nothing), snapshot deltas (snapshot_version) on the world model, consuming health in decisions and urgent cadence (health drops), live Olympuff smoke test. Health and max_health are folded from complete snapshots only."
   },
   "M7": {"state": "open"},
   "M8": {"state": "open"},

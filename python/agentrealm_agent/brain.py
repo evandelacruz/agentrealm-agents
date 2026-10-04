@@ -11,6 +11,8 @@ import random
 from dataclasses import dataclass
 
 from .config import Policy
+from .directives import Directives, default_directives
+from .interest_list import next_interest_zone_probe
 from .executor.movement import step_landing
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -42,7 +44,14 @@ SELF_REFRESH = 60  # windows between self reads when nothing forces one
 
 # Scheduler.
 
-def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
+def choose_call(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    *,
+    knowledge: KnowledgeBase | None = None,
+    directives: Directives | None = None,
+) -> str:
     """One of: self, position, terrain, entities, zone, tick, skip.
 
     skip spends nothing this window: calm, and the last poll's queue still
@@ -66,13 +75,21 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
         return "terrain"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
         return "entities"
-    return _tick_zone_or_skip(w, m, policy)
+    return _tick_zone_or_skip(w, m, policy, knowledge=knowledge, directives=directives)
 
 
-def _tick_zone_or_skip(w: WorldModel, m: Memory, policy: Policy) -> str:
+def _tick_zone_or_skip(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    *,
+    knowledge: KnowledgeBase | None = None,
+    directives: Directives | None = None,
+) -> str:
+    d = directives or default_directives()
     call = gate_tick_call(w, m, policy)
     if call == "skip" and not is_urgent(w, m, policy):
-        m.zone_probe = next_zone_probe(w, m)
+        m.zone_probe = next_interest_zone_probe(w, knowledge, policy, m, d) or next_zone_probe(w, m)
         if m.zone_probe is not None:
             return "zone"
     return call
@@ -94,9 +111,17 @@ def decide(
     *,
     never_attack: list[str] | None = None,
     knowledge: KnowledgeBase | None = None,
+    directives: Directives | None = None,
 ) -> Decision:
     """Run the priority dispatcher (A5) and keep its first intent as a Decision."""
-    ctx = PlayContext(m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
+    ctx = PlayContext(
+        m,
+        policy,
+        rng,
+        never_attack=never_attack or [],
+        knowledge=knowledge,
+        directives=directives or default_directives(),
+    )
     outcome = dispatch(w, ctx)
     intent = outcome.intents[0] if outcome.intents else None
     return Decision(intent, outcome.reason, outcome.reflex)

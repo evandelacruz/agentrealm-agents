@@ -8,6 +8,7 @@ from .base import PlayContext, State, StateOutcome
 from .downed import DownedState
 from .explore import ExploreState
 from .idle import IdleState
+from .investigate import InvestigateState
 from .sync import SyncState
 
 # Priority order (PLAYABLE_AGENT_PLAN.md State machine). Sync and Downed are
@@ -16,6 +17,7 @@ from .sync import SyncState
 STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
+    InvestigateState(),
     ExploreState(),
     IdleState(),
 )

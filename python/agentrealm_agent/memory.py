@@ -40,3 +40,4 @@ class Memory:
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
+    curiosity_segments: list[tuple[int, int]] = field(default_factory=list)  # (start_tick, length) for Investigate/Break queues (A30)

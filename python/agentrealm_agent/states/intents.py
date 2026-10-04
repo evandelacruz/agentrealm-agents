@@ -20,3 +20,15 @@ def take(e: Entity) -> dict:
 def withdraw_all(chest_id: int) -> dict:
     # No supply_ids: take everything that fits, lowest ids first (B117).
     return {"verb": "WithdrawFromChest", "chest_id": chest_id}
+
+
+def read_block(map_id: int, pos: Pos) -> dict:
+    return {"verb": "Read", "target": {"kind": "block", "map_id": map_id, "x": pos[0], "y": pos[1]}}
+
+
+def read_supply(supply_id: int) -> dict:
+    return {"verb": "Read", "target": {"kind": "supply", "supply_id": supply_id}}
+
+
+def say_to(npc: Entity, text: str = "hello") -> dict:
+    return {"verb": "Say", "text": text, "target": {"kind": "npc", "npc_id": npc.id}}

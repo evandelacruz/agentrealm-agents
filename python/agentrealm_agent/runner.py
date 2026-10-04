@@ -30,6 +30,8 @@ from .executor import (
 )
 from .poll_cadence import calm_poll_interval
 from .world import DOORS, WorldModel, terrain_cells
+from .curiosity import record_curiosity_queue
+from .investigation import mark_cell_read, mark_npc_spoken, mark_supply_read
 from .zone_discovery import apply_town, apply_zone, zone_failed
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
@@ -118,7 +120,13 @@ class Runner:
                         f"reloaded never_attack={self.directives.directives.never_attack}",
                         {"directives": {"params": self.directives.directives.params, "never_attack": self.directives.directives.never_attack}},
                     )
-                call = choose_call(self.world, self.mem, self.cfg.policy)
+                call = choose_call(
+                    self.world,
+                    self.mem,
+                    self.cfg.policy,
+                    knowledge=self.knowledge,
+                    directives=self.directives.directives,
+                )
                 if call == "skip":
                     self.mem.windows_since_self += 1
                     continue
@@ -252,6 +260,7 @@ class Runner:
                     self.rng,
                     never_attack=self.directives.directives.never_attack,
                     knowledge=self.knowledge,
+                    directives=self.directives.directives,
                 )
                 intents = self._apply_never_attack(self.intents_for(d))
                 if intents:
@@ -270,9 +279,11 @@ class Runner:
                 self.rng,
                 never_attack=self.directives.directives.never_attack,
                 knowledge=self.knowledge,
+                directives=self.directives.directives,
             )
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
+            self._note_curiosity_queue(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))
         if intents:
@@ -352,6 +363,7 @@ class Runner:
             self.rng,
             never_attack=self.directives.directives.never_attack,
             knowledge=self.knowledge,
+            directives=self.directives.directives,
         )
         m.nav = saved[2]
         if d.reflex:
@@ -537,6 +549,7 @@ class Runner:
                 m.last_use_tick = int(result.get("tick", w.tick))
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
+            self._note_investigation(intent, result)
             if m.pending is not None and index == 0:
                 m.pending = None
             return False
@@ -559,6 +572,37 @@ class Runner:
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
+
+    def _note_curiosity_queue(self, intents: list[dict] | None) -> None:
+        if self.mem.state != "Investigate" or not intents:
+            return
+        steps = sum(1 for i in intents if i.get("verb") == "Step")
+        if steps:
+            record_curiosity_queue(self.mem, self.world.tick, steps)
+
+    def _note_investigation(self, intent: dict | None, result: dict) -> None:
+        if not intent or result.get("outcome") != "applied":
+            return
+        kb = self.knowledge
+        w = self.world
+        verb = intent.get("verb")
+        if verb == "Read":
+            target = intent.get("target") or {}
+            kind = target.get("kind")
+            if kind == "block" and w.map_id is not None:
+                x, y = target.get("x"), target.get("y")
+                if x is not None and y is not None:
+                    mark_cell_read(kb, int(target.get("map_id", w.map_id)), (int(x), int(y)))
+            elif kind == "supply":
+                sid = target.get("supply_id")
+                if sid is not None:
+                    mark_supply_read(kb, int(sid))
+        elif verb in ("Say", "Broadcast"):
+            target = intent.get("target") or {}
+            if target.get("kind") == "npc":
+                nid = target.get("npc_id")
+                if nid is not None:
+                    mark_npc_spoken(kb, int(nid))
 
     def _with_item_table(self, fn) -> None:
         kb = self.knowledge

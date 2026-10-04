@@ -197,7 +197,9 @@ class Runner:
 
     def _learn_shops_from_entities(self, payload: dict) -> None:
         """A cell holding a supply with a ``gem_price`` is where it can be
-        bought (GAME_NOTES Buying); ``travel:shop`` heads for one (A27)."""
+        bought: a priced supply "spends those gems when picked up" (manual
+        §11, https://agentrealm.gg/docs/manual#11-game-rules). ``travel:shop``
+        heads for one (A27)."""
         if self.knowledge is None or self.world.map_id is None:
             return
         for s in payload.get("supplies") or []:

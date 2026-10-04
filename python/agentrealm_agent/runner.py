@@ -58,8 +58,9 @@ from .zone_discovery import apply_town, apply_zone, zone_failed
 WINDOW_MARGIN = 0.05
 # Ticks past a queue's own length to wait for its results before giving up.
 QUEUE_RESULT_SLACK = 2
-# Applied verbs that can change what is worn (PLAYABLE_AGENT_PLAN Gear); Drop
-# may take a worn supply, which is not documented either way.
+# Applied verbs that can change what is worn: Wear(supplyId) and Remove(slot)
+# (agentrealm.gg/docs/manual, Intent reference). Drop may take a worn supply,
+# which is not documented either way.
 LOADOUT_VERBS = ("Wear", "Remove", "Drop")
 
 
@@ -99,7 +100,8 @@ class Runner:
         self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
         self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
-        self._removed_code: str | None = None  # A18: lone worn subtype before the worn slots emptied
+        self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
+        self._removed_map: int | None = None  # A18: map the character was on when it was taken off
         self.world = WorldModel(character_id)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
@@ -802,11 +804,17 @@ class Runner:
         # hits are skipped and only the removed item is remembered (A18).
         worn_changed = worn_before != w.worn_codes or bool(verbs)
         if worn_before != w.worn_codes:
-            lone = len(worn_before) == 1 and not w.worn_codes and len(verbs) <= 1
+            # Only a lone item taken off by our own Remove is credited with the
+            # bare hits after it; gear lost any other way (death) is not.
+            lone = len(worn_before) == 1 and not w.worn_codes and verbs == ["Remove"]
             self._removed_code = next(iter(worn_before.values())) if lone else None
+            self._removed_map = w.map_id
         elif any(v != "Drop" for v in verbs):
             # Something was worn or removed and the slots ended where they began:
             # which item was last worn alone is no longer known.
+            self._removed_code = None
+        if self._removed_map != w.map_id:
+            # The baseline holds only until the next loadout change, death or map change.
             self._removed_code = None
 
         def learn(items: dict) -> None:
@@ -843,6 +851,7 @@ class Runner:
                 m.pending_next_index = 0
                 m.held_queue, m.resend_held_queue = None, False
                 m.warp_from = None
+                self._removed_code = None
         # WorldModel.apply_events already parsed BlockChanged (A14).
         for map_id, p in w.changed_blocks:
             on_block_changed(m, map_id, p)

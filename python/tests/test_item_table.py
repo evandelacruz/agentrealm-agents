@@ -497,6 +497,7 @@ class RunnerItemLearningTest(unittest.TestCase):
         r.world.entities = [Entity("npc", 4, (2, 1), "rat")]
         worn = dict(r.world.worn_codes)
         self._wear(r, {})
+        r._loadout_verbs = ["Remove"]
         # The response that removed the mail: its hit is skipped.
         r._learn_items_from_tick(None, self._rat_hit(9, tick=11), [], worn)
         # The next response, bare the whole time: the baseline goes to the mail only.
@@ -508,6 +509,52 @@ class RunnerItemLearningTest(unittest.TestCase):
                 "bronze_helm": {"damage_taken": {"rat": 1}},
             },
         )
+
+    def _remove_mail(self, kb):
+        r = self._runner(kb)
+        kb.items["bronze_mail"] = {"damage_taken": {"rat": 2}}
+        r.world.map_id = 1
+        r.world.entities = [Entity("npc", 4, (2, 1), "rat")]
+        self._wear(r, {})
+        r._loadout_verbs = ["Remove"]
+        r._learn_items_from_tick(None, [], [], {"body": "bronze_mail"})
+        return r
+
+    def test_no_baseline_when_the_item_was_lost_without_remove(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._runner(kb)
+        kb.items["bronze_mail"] = {"damage_taken": {"rat": 2}}
+        r.world.entities = [Entity("npc", 4, (2, 1), "rat")]
+        self._wear(r, {})
+        r._learn_items_from_tick(None, [], [], {"body": "bronze_mail"})
+        r._learn_items_from_tick(None, self._rat_hit(5, tick=12), [], {})
+        self.assertEqual(kb.items, {"bronze_mail": {"damage_taken": {"rat": 2}}})
+
+    def test_baseline_ends_at_the_next_loadout_change(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._remove_mail(kb)
+        self._wear(r, self.HELM)
+        r._learn_items_from_tick(None, [], [], {})
+        self._wear(r, {})
+        r._learn_items_from_tick(None, [], [], {"head": "bronze_helm"})
+        r._learn_items_from_tick(None, self._rat_hit(5, tick=12), [], {})
+        self.assertEqual(kb.items, {"bronze_mail": {"damage_taken": {"rat": 2}}})
+
+    def test_baseline_ends_at_death(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._remove_mail(kb)
+        r.on_events([{"tick": 12, "kind": "Died"}])
+        r._learn_items_from_tick(None, self._rat_hit(5, tick=13), [], {})
+        self.assertEqual(kb.items, {"bronze_mail": {"damage_taken": {"rat": 2}}})
+
+    def test_baseline_ends_at_a_map_change(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._remove_mail(kb)
+        r.world.map_id = 2
+        r._learn_items_from_tick(None, self._rat_hit(5, tick=12), [], {})
+        r.world.map_id = 1
+        r._learn_items_from_tick(None, self._rat_hit(5, tick=13), [], {})
+        self.assertEqual(kb.items, {"bronze_mail": {"damage_taken": {"rat": 2}}})
 
     def test_no_baseline_after_two_items_were_removed(self):
         kb = KnowledgeBase.empty("sandbox")

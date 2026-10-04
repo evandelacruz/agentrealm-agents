@@ -97,13 +97,13 @@ class WorldModel:
     movement_speed: int = 2500  # thousandths of a block per second (GetSelf)
     alive: bool = True
     lives: int = 0
+    gems: int | None = None  # inventory counter from snapshots (A22)
     health: int | None = None
     max_health: int | None = None
     attack_range: int | None = None  # armed weapon reach from get_self (B100)
     armed_code: str | None = None
     worn_codes: dict[str, str] = field(default_factory=dict)
     held: list[HeldSupply] = field(default_factory=list)  # inventory held[] (A10)
-    gems: int | None = None
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)

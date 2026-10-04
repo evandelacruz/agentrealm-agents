@@ -241,7 +241,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 
 | ID | Item | Depends on |
 |---|---|---|
-| A34 | **Plan schema and goal stack.** Op table, field validation, param limits; states consume goals; the built-in plan with no model. | A5, A8 |
+| A34 | **Plan schema and goal stack.** Op table, field validation, param limits; states consume goals; the built-in plan with no model. Shipped so far: `plan_goals.py` reads `gather_gems[:count]` for Gather (A22); the op table, validation, limits and other ops remain. | A5, A8 |
 | A35 | **Strategist thread.** Optional LLM dependency, triggers, rate and cost limits, trace logging. | A32, A34 |
 | A36 | **M4 acceptance.** M4 done-when. | A33, A35 |
 

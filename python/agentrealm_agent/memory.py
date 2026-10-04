@@ -42,6 +42,8 @@ class Memory:
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
+    gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass", cell) Gather is walking toward (A22)
+    gather_backoff_until: int = -1  # Gather yields to Explore until this tick (A22)
     travel_ops: list[TravelOp] = field(default_factory=list)  # parsed travel:* directives goals (A27)
     travel_index: int = 0
     strength: StrengthBracket = field(default_factory=StrengthBracket)

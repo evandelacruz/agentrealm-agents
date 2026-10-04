@@ -219,7 +219,7 @@ A boost comes from a clue that mentions its type or surroundings ("rings hollow"
 
 Health is the resource every other decision spends, and lives are the budget behind it. On a live world, at zero lives the character is ended, permanently: `character_ended` on every intent (M §11). The agent tracks both and acts to keep them up.
 
-**What it tracks.** `health` and `max_health` arrive in every round trip's observation while awake (the current agent records them but no decision reads them yet). `lives` is in the snapshot too. Each `Damaged` event is logged with its source, so the agent knows what is hurting it and how fast.
+**What it tracks.** `health` and `max_health` arrive in every round trip's observation while awake (`Heal`, A10, reads them). `lives` is in the snapshot too. Each `Damaged` event is logged with its source, so the agent knows what is hurting it and how fast.
 
 **Lives set how bold it is.** A single risk level, from cautious to bold, follows the lives left. It scales:
 - the fight margin;

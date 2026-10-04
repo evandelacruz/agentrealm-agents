@@ -43,6 +43,10 @@ class Memory:
     # Heal (A10): strategist buy ops; Shop (A21) consumes them later.
     buy_signals: list[dict] = field(default_factory=list)
     buy_signals_seen: set[tuple[str, str]] = field(default_factory=set)
-    heal_regen_start_tick: int | None = None
-    heal_regen_start_health: int | None = None
-    heal_regen_measured: str | None = None  # pending yes/no before flush to knowledge base
+    # Safe-zone regen sample: (start tick, start health, last tick seen). Only a
+    # "yes" is saved to the knowledge base; a "no" holds for this run only.
+    heal_regen_sample: tuple[int, int, int] | None = None
+    heal_regen_absent: bool = False
+    heal_wait: tuple[int, int] | None = None  # (tick, health) Heal began sending nothing, reset when health rises
+    heal_backoff_until: int = -1  # Heal yields to Explore until this tick
+    heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent

@@ -32,11 +32,6 @@ def _supply_code(entry: Any) -> str | None:
     return None
 
 
-def supply_code(entry: Any) -> str | None:
-    """Public alias for parsing a supply entry's subtype code."""
-    return _supply_code(entry)
-
-
 def _positive_int(v: Any) -> int | None:
     if isinstance(v, bool):
         return None

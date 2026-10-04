@@ -194,7 +194,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. It records safe tiles; **Heal** (A10) and later retreat/recover act on them. A failed zone read drops that cell from probing. | |
 | A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
 | A9 | **Retreat, Flee and Escape.** `retreat_hits` and the `risk`/`lives_floor` formula; retreat to a known safe tile. | A5, A6, A7, A8 |
-| A10 | **Heal.** Food in reach, carried potion, measured safe-zone regeneration, else wait in town and raise `buy`. | A5, A7 |
+| A10 | **Heal.** Food in reach, carried potion, measured safe-zone regeneration, else wait in town and raise `buy`. Ground food is walked to on a cost path or `Take`n; carried food, then a carried potion, is `Arm` + `Use` self. Whether apples and berries heal on pickup or only carried and `Use`d is unmeasured (GAME_NOTES open measurements), so both are tried and their heal amounts are not learned. **Not done here:** the weapon is not re-armed after a drink, so the character stays unarmed until A24. Each `Take` or `Use` of one supply is sent at most 3 times, since a rejection is not read back. Only a measured "yes" for safe-zone regen is saved to the knowledge base; a "no" (200 ticks in a safe zone with no health back) holds for that run. Any wait with no health back for 600 ticks, or no reachable known safe tile, yields to Explore for 300 ticks. The `buy` ops land in `Memory.buy_signals`, which nothing reads until A21. | A5, A7 |
 | A11 | **Recover.** Walk to the death chest only when the spot is safe. | A5, A7 |
 | A12 | **Cost-grid planner.** The cost table (fog, hazards, hostile danger, expiring occupants, break costs inert), walking the known prefix. | |
 | A13 | **Two-level search.** Coarse 16×16 corridor search and A* in the perception window, each with a node budget per tick. | A12 |
@@ -210,10 +210,10 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A18 | **Item table.** `items` in the knowledge base, keyed by `supply_subtype_code`. A row holds only served facts, each a positive integer that overwrites the last: `attack_range` from a `Use` rejected `target_out_of_range` (it carries the reach judged by, B100), filed under the subtype armed in that same response's observation (`get_self`'s `attack_range` names no subtype and can trail an `Arm`, so it is not used); `gem_price` from supplies on entity reads and snapshot entities. Not stored yet: weapon damage (`NPCDamaged` reaches everyone who sees the block, so a hit is ours only when matched to our `Use`), damage taken per worn item (a `Damaged` hit can't be split between worn slots), and capabilities (not served; Server gaps). | A17 |
 | A19 | **Equip.** Score slots, swap when a carried item is better. | A5, A18 |
 | A20 | **Loot.** `Take`, `WithdrawFromChest`, `Drop` junk when full; hearts first. | A5 |
-| A21 | **Shop.** Buy in-sight priced supplies the plan wants; restock to `potion_reserve`. | A5, A18 |
+| A21 | **Shop.** Buy in-sight priced supplies the plan wants; restock to `potion_reserve`. Consumes Heal's `buy` ops (`Memory.buy_signals`, A10). | A5, A18 |
 | A22 | **Gather.** Gems from grass, bushes and gem piles in safe-ish ground. | A5 |
 | A23 | **Fight.** Group-aware win estimate, `never_attack`, retreat queued behind attacks, conservative until measured, never from a safe zone. | A5, A6, A8, A9 |
-| A24 | **Healing from food and potions.** `Arm` + `Use` self; heal amounts learned per type. | A10, A20 |
+| A24 | **Healing from food and potions.** `Arm` + `Use` self; heal amounts learned per type; re-`Arm` the weapon after a drink (A10 leaves it unarmed). | A10, A20 |
 | A25 | **M8 acceptance.** M8 done-when. | A16, A19, A21, A22, A23, A24 |
 
 **M9: Navigation and knowledge.**

@@ -10,7 +10,7 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import flee_step, grid_params, nav_search, next_step, replan
+from ..pathing import flee_step, grid_params, hostiles_in_range, nav_search, next_step, replan
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position, take, use_on, withdraw_all
@@ -68,7 +68,7 @@ def scripted_outcome(
     plan_avoid = blocked - escape
     plan_costly = escape | nav_costly
 
-    hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
+    hostiles = hostiles_in_range(w, policy)
     if hostiles and policy.on_hostile != "ignore":
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
         if policy.on_hostile == "fight":

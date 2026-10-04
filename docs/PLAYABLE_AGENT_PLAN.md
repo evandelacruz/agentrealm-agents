@@ -87,12 +87,12 @@ States are checked in priority order each tick. The first whose guard holds runs
 | 0 | `Sync` | Unplaced, position unknown, after a warp | Reads self and position, waits for placement |
 | 0 | `Downed` | `Died` | Waits for `Respawned`, then queues `Recover` |
 | 1 | `Escape` | Standing on damage, or trapped | Steps off; crosses as little hazard as possible |
-| 1 | `Retreat` | Health below the retreat threshold, or the threat outclasses us | Goes to the nearest known safe tile, then `Heal` |
-| 1 | `Heal` | Hurt and no hostile in range | Eats nearby food, else drinks a potion (`Arm` + `Use` self), else waits in a safe zone |
+| 1 | `Retreat` | The next two expected hits could kill, or the threat outclasses us | Goes to the nearest known safe tile, then `Heal` (see Health and lives) |
+| 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Eats nearby food, else drinks a potion from the reserve (`Arm` + `Use` self), else rests in a safe zone |
 | 2 | `Fight` | A hostile is in range and the win estimate clears the margin, counting every hostile within 2 blocks of it | Closes to `attack_range`, `Use` on the NPC's block, with the retreat queued behind |
 | 2 | `Flee` | A hostile is in range and we would lose | Opens distance toward safety; safe zones stop all damage |
 | 3 | `Recover` | Our death chest is on a reachable map | Walks next to it (a safe tile next to it is enough), `WithdrawFromChest` |
-| 3 | `Equip` | Carrying something better than what is worn or armed | `Arm`, `Wear`, `Remove` |
+| 3 | `Equip` | Carrying something better than what is worn or armed | `Arm`, `Wear`, `Remove`; armor scored by damage it would have saved |
 | 3 | `Loot` | A worthwhile free supply or chest is near enough | Walks, `Take` or `WithdrawFromChest`, `Drop` junk when full |
 | 3 | `Shop` | The plan wants an item that is in sight with a `gem_price` we can pay | Walks onto it or `Take`s it |
 | 4 | `Investigate` | The interest list has an item within the curiosity budget (see Curiosity) | `Read`, `Say`, `get_zone`, walk to look; stores text as a clue |
@@ -204,6 +204,40 @@ A boost comes from a clue that mentions its type or surroundings ("rings hollow"
 
 **Where the results go.** Every line read or heard goes to the clue list with its place, and fires the strategist's `clue` trigger. The strategist turns clues into goals. With no LLM, simple rules still apply: a clue naming a direction biases `Explore` that way, and a clue naming a capability raises that capability's priority on nearby odd blocks.
 
+### Health and lives
+
+Health is the resource every other decision spends, and lives are the budget behind it. On a live world, at zero lives the character is gone for good. The agent tracks both and acts to keep them up.
+
+**What it tracks.** `health` and `max_health` arrive in every round trip's observation while awake (the current agent ignores them). `lives` is in the snapshot too. Each `Damaged` event is logged with its source, so the agent knows what is hurting it and how fast.
+
+**Lives set how bold it is.** A single risk level, from cautious to bold, follows the lives left. It scales:
+- the fight margin;
+- the retreat threshold;
+- whether it engages a hostile type it hasn't measured;
+- whether it enters a level at all.
+
+Below a floor, 3 lives by default, it stops fighting anything but measured weak hostiles and goes no further than the edge of explored ground. The `lives_floor` and `risk` directives set these.
+
+**Protecting health in the moment:**
+- **Never start a fight hurt.** `Fight` needs health above the expected damage of the whole group over the fight, plus a margin. Otherwise heal first.
+- **Retreat in time.** The threshold is set in hits, not percent: when the next two hits from what is attacking could kill, it leaves. The steps away are already queued behind every attack (see Executor).
+- **Drink mid-fight** only when retreating is impossible, such as a boss room or being cornered. Swapping in a potion costs a tick, drinking costs another, and re-arming the weapon a third, so the agent compares those three ticks of incoming damage with the heal.
+- **Step off damaging ground** at once (`Escape`). Fire and lava are crossed only when the route has no other way.
+- **Traps.** Wear goggles when they are owned and the area is trapped. Never walk on a seen armed trap.
+- **Never stand around exposed.** `Sleep` in a safe zone when the run ends, since an awake, unattended character keeps taking hits. Idle waits happen in safe zones.
+
+**Healing:**
+- **Food first, it's free.** Food lying in sight is eaten when the amount missing is at least what it heals, and is remembered as a source. How much each type heals is learned from the `health` change.
+- **Potions are a reserve.** The agent keeps N potions (the `potion_reserve` directive, default 2). Below that, `Shop` buys more before any trip away from town. A potion is drunk out of combat only when no food is near and the next goal needs the health.
+- **Safe zones.** Health returning in a safe zone has not been observed yet. Milestone 2 measures it. If it returns, resting in town is the free fallback.
+
+**Raising health and protection over time:**
+- **Armor first.** Defense counts twice: it lowers the chance to be hit and the damage of each hit. `Equip` scores armor by the damage it would have saved against the threats in the item and threat tables, and the gem budget puts armor and potions ahead of curiosity spending.
+- **Max health rises on a level's first clear** (`level_clear_ceremony.max_health_gain`), so clearing levels is also how the agent grows. Any other permanent gain is a supply consumed for it, and the agent uses such a supply as soon as it finds one.
+- **Extra lives** are auto-consumed supplies. Any seen within reach becomes a top-priority `Loot` goal.
+
+**After a death.** `Recover` runs only when the chest's spot is safe enough at full health: no group of hostiles still there, and not deep in fog. Otherwise the agent re-equips from town and gets the chest later, or writes it off. Every death is logged with its cause and the decision that led to it, and it tightens the risk level for that hostile type.
+
 ### Combat
 
 - **Our side.** Reach is `attack_range` from `get_self`, refreshed after `Arm`; a `target_out_of_range` result also reports reach and distance. Our hit chance is published: d20 + attack ≥ 10 + target defense. Our damage per hit is learned from `NPCDamaged`.
@@ -274,8 +308,8 @@ Structured keys take effect on the next tick with no model involved. Free text o
 |---|---|---|
 | 0 | **Discovery.** Docs read, hand play through MCP, [GAME_NOTES.md](GAME_NOTES.md) written. | Done: every unknown above has an answer or a measurement to take |
 | 1 | **Executor.** `Step`/`Wait` pacing, multi-intent queues, two poll cadences, deltas and complete snapshots, health tracking. A live smoke test against Olympuff. | A character walks 200 blocks with no `movement_cooldown` rejections, using under a quarter of its request budget while calm |
-| 2 | **State machine and survival.** Replace `brain.decide` with prioritised states: `Sync`, `Downed`, `Escape`, `Retreat`, `Heal`, `Flee`, `Recover`, `Explore`. Cost-grid planner, rejection learning, stuck detection and escalation steps 1, 3 and 5. Trace replay tests and the navigation fixtures. | Survives an hour in the overworld, retreating to safety and recovering its chest on its own; reaches a point 150 blocks away through fog and obstacles, or gives up with a reason, never loops |
-| 3 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight` with group-aware win estimates and the retreat queued; learned threat and item tables. | Earns gems, buys a bronze kit and potions, and kills lone weak hostiles without dying |
+| 2 | **State machine and survival.** Replace `brain.decide` with prioritised states: `Sync`, `Downed`, `Escape`, `Retreat`, `Heal`, `Flee`, `Recover`, `Explore`. Cost-grid planner, rejection learning, stuck detection and escalation steps 1, 3 and 5. Trace replay tests and the navigation fixtures. | Survives an hour in the overworld, retreating before the next two hits could kill, healing from food, and recovering its chest only when the spot is safe; it measures whether health returns in safe zones; reaches a point 150 blocks away through fog and obstacles, or gives up with a reason, never loops |
+| 3 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight` with group-aware win estimates and the retreat queued; learned threat and item tables. | Earns gems, buys armor, a weapon and a potion reserve, and kills lone weak hostiles without dying; never starts a fight below its health floor |
 | 4 | **Navigation and knowledge.** Per-world knowledge base, overworld `Travel` to entrance marks and back to town, door graph and cross-map routing, per-block break memory, `Break` (escalation steps 2 and 4). | Visits every entrance mark within its strength, records what each needs, and returns to town |
 | 5 | **Curiosity and clues.** Interest list, odd-block detector, `Investigate` and `Break` under the curiosity budget, clue capture with place and time, no-LLM clue rules. | Every readable cell and NPC within 25 blocks of its route has been read or spoken to; it finds and opens an odd block in a test map, and never spends a tool twice on the same block |
 | 6 | **Strategist and directives.** LLM planner thread, plan schema, directives file, trace logging. | Given clues from a test world, it plans the right `buy`/`travel`/`break_block` operations and the state machine carries them out |
@@ -292,4 +326,5 @@ Milestones 1 and 2 come first whatever else changes. Milestones 3 to 7 now have 
 - **Spoilers.** Real-world clue text must never reach the repo, the tests or the PR text. Fixtures use invented worlds; the knowledge base stays in gitignored `.state/`.
 - **Getting stuck.** Fog, regrowing blocks and NPCs in corridors will trap a naive walker. The Navigation section makes "stuck" a detected state with fixed escalation and a give-up, never a silent loop.
 - **LLM cost and latency.** Strict triggers and a budget cap; the agent must play acceptably with the strategist off.
+- **Lives are finite.** The risk level follows the lives left, and a floor stops fights and deep exploration near the end. Losing a life is logged as a decision to review, not just a counter going down.
 - **Learned stats are noisy early.** Keep conservative defaults (flee more, fight less) until the tables have samples.

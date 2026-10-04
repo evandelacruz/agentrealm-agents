@@ -211,6 +211,17 @@ def use_target_block(intent: dict, entities: list[Any]) -> Pos | None:
             return (int(target["x"]), int(target["y"]))
         except (KeyError, TypeError, ValueError):
             return None
+    if kind == "npc":
+        # Where we last saw it: the server swings at the block it stands on that
+        # tick, so a move since our read can leave the hit unmatched.
+        try:
+            nid = int(target["npc_id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        for e in entities:
+            if e.kind == "npc" and e.id == nid:
+                return e.pos
+        return None
     if kind == "character":
         try:
             cid = int(target["character_id"])
@@ -227,6 +238,21 @@ def npc_type_on_block(block: Pos, entities: list[Any]) -> str:
     """``npc_type_code`` of the one NPC seen on ``block``, else empty."""
     codes = [e.code for e in entities if e.kind == "npc" and e.pos == block]
     return codes[0] if len(codes) == 1 and codes[0] else ""
+
+
+def use_npc_type(intent: dict, block: Pos, entities: list[Any]) -> str:
+    """``npc_type_code`` a ``Use`` on ``block`` hit, else empty.
+
+    An npc-target Use is attributed only when the one NPC seen on the block is
+    that target (A45); any other NPC there leaves the hit unattributed.
+    """
+    target = intent.get("target")
+    if not isinstance(target, dict) or target.get("kind") != "npc":
+        return npc_type_on_block(block, entities)
+    npcs = [e for e in entities if e.kind == "npc" and e.pos == block]
+    if len(npcs) != 1 or npcs[0].id != target.get("npc_id") or not npcs[0].code:
+        return ""
+    return npcs[0].code
 
 
 def _event_place(ev: dict, default_map_id: int | None) -> tuple[int, int | None, int, int] | None:

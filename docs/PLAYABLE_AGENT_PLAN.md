@@ -42,7 +42,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 | Multi-intent queues | Movement, and `Use`/`Say`/`Broadcast` behind the `Wait`s their cooldown still owes; every other intent is sent alone; a reflex that fires replaces a running queue | Freeing the request budget; queuing a retreat with an attack |
 | Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; **Retreat** (A9) reads health with the threat table; **Heal** (A10) uses them when hurt and out of combat; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
-| `Use` on a block (attacks the NPC on it, or breaks the block) | No: flees from every NPC | Fighting, opening the way |
+| `Use` on a block or an NPC by id (attacks the NPC, or breaks the block) | No: flees from every NPC | Fighting, opening the way |
 | Priced supplies (`gem_price`) | No | Buying gear, potions, tools |
 | `Read` (signs, statues, scrolls), `Say` to an NPC | No | Clues |
 | `Compose`, fragment slots | No | Composite keys |
@@ -93,7 +93,7 @@ States are checked in priority order once per round trip: after each `POST tick`
 | 1 | `Escape` | Standing on damage, or trapped | Steps off; crosses as little hazard as possible |
 | 1 | `Retreat` | The next `retreat_hits` expected hits could kill (per-type damage from the threat table), or the threat outclasses us | Goes to the nearest known safe tile, then `Heal` (see Health and lives) |
 | 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Food in reach: walk onto it or `Take` it; food eaten on pickup heals there, carried food is then `Arm` + `Use` self. Else a carried potion: `Arm` + `Use` self, then re-`Arm` the weapon (A24; until then A10 leaves it unarmed). Else, only if safe-zone regeneration has been measured, rests in a safe zone. Else goes to town and waits in the safe zone for the next goal to need less, raising a `buy` for potions (`Shop`, M8) |
-| 2 | `Fight` | A hostile is in range, it is not of a kind in `never_attack`, and the win estimate clears the margin, counting every hostile within 2 blocks of it | Closes to `attack_range`, `Use` on the NPC's block, with the retreat queued behind |
+| 2 | `Fight` | A hostile is in range, it is not of a kind in `never_attack`, and the win estimate clears the margin, counting every hostile within 2 blocks of it | Closes to `attack_range`, `Use` on the NPC by id (its block on the tick the swing runs), with the retreat queued behind |
 | 2 | `Flee` | A hostile is in range and we would lose | Opens distance toward safety; safe zones stop all damage |
 | 3 | `Recover` | Our death chest is on a reachable map | Walks next to it (a safe tile next to it is enough), `WithdrawFromChest` |
 | 3 | `Equip` | Carrying something better than what is worn or armed | `Arm`, `Wear`, `Remove`; armor scored by damage it would have saved |

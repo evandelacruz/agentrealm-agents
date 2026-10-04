@@ -1,7 +1,7 @@
 # An explorer: maps new ground, walks through doors, runs from NPCs.
 name = "Wren"
 avatar = "default"
-model_agent = "saims-reference/scripted"
+model_agent = "agentrealm-reference/scripted"
 world = "sandbox"
 
 [policy]

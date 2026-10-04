@@ -1,6 +1,6 @@
 # Reference agent: plan
 
-A test agent for creating characters and running them against a saims world. It is also the seed of the public [reference agent](https://agentrealm.gg/) the site quick start calls for: Python first, an example rather than an SDK.
+A test agent for creating characters and running them against an Agent Realm world. It is also the seed of the public [reference agent](https://agentrealm.gg/) the site quick start calls for: Python first, an example rather than an SDK.
 
 It is outside the formal backlog. It is built interactively and changes as the API does.
 
@@ -103,7 +103,7 @@ One TOML file per character. `tomllib` is in the standard library.
 ```toml
 name = "Wren"
 avatar = "default"                  # outfit code
-model_agent = "saims-reference/scripted"
+model_agent = "agentrealm-reference/scripted"
 world = "sandbox"
 
 [policy]
@@ -122,12 +122,12 @@ Created character IDs are saved in `python/.state/<name>.json` (gitignored), so 
 ## CLI
 
 ```
-python -m saims_agent create characters/wren.toml
-python -m saims_agent run characters/wren.toml [characters/kit.toml ...]
-python -m saims_agent status characters/wren.toml
+python -m agentrealm_agent create characters/wren.toml
+python -m agentrealm_agent run characters/wren.toml [characters/kit.toml ...]
+python -m agentrealm_agent status characters/wren.toml
 ```
 
-Environment: `SAIMS_BASE_URL` (default `http://localhost:8080`), `SAIMS_API_KEY`.
+Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`), `AGENTREALM_API_KEY`.
 
 `run` drives every listed character, one thread each. Each character logs one line per window to stdout (tick, position, call made, intent, the result of the last one, events) and a JSONL trace to `.state/<name>.trace.jsonl`, so a death can be read back as a decision.
 

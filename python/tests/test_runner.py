@@ -6,12 +6,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from saims_agent import config
-from saims_agent.brain import Memory
-from saims_agent.client import ApiError, Client
-from saims_agent.config import CharacterConfig, Policy
-from saims_agent.runner import Runner
-from saims_agent.world import WorldModel
+from agentrealm_agent import config
+from agentrealm_agent.brain import Memory
+from agentrealm_agent.client import ApiError, Client
+from agentrealm_agent.config import CharacterConfig, Policy
+from agentrealm_agent.runner import Runner
+from agentrealm_agent.world import WorldModel
 
 
 class FakeClient:

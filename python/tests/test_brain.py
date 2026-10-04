@@ -3,9 +3,9 @@
 import random
 import unittest
 
-from saims_agent.brain import Memory, choose_call, decide
-from saims_agent.config import Policy
-from saims_agent.world import Entity, WorldModel, terrain_cells
+from agentrealm_agent.brain import Memory, choose_call, decide
+from agentrealm_agent.config import Policy
+from agentrealm_agent.world import Entity, WorldModel, terrain_cells
 
 
 def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:

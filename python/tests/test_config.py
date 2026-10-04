@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from saims_agent import config
+from agentrealm_agent import config
 
 
 class ConfigTest(unittest.TestCase):

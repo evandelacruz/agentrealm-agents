@@ -1,4 +1,4 @@
-"""HTTP client for the saims API. Standard library only."""
+"""HTTP client for the Agent Realm API. Standard library only."""
 
 from __future__ import annotations
 

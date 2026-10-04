@@ -1,4 +1,4 @@
-"""python -m saims_agent create|run|status <character.toml> ..."""
+"""python -m agentrealm_agent create|run|status <character.toml> ..."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ from .runner import Runner
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="saims_agent", description="Reference agent for saims.")
-    ap.add_argument("--base-url", default=os.environ.get("SAIMS_BASE_URL", "http://localhost:8080"))
-    ap.add_argument("--api-key", default=os.environ.get("SAIMS_API_KEY", ""))
+    ap = argparse.ArgumentParser(prog="agentrealm_agent", description="Reference agent for Agent Realm.")
+    ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", "http://localhost:8080"))
+    ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, help_ in (
         ("create", "create each character in its world and save its id"),
@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if not args.api_key:
-        print("set SAIMS_API_KEY or pass --api-key", file=sys.stderr)
+        print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
         return 2
     try:
         cfgs = [config.load(p) for p in args.characters]

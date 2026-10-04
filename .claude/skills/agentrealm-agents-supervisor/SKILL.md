@@ -62,7 +62,7 @@ First match wins:
 | `idle = 0`, `open < 10`, and not `backlog left` | Nothing. Tell Evan that backlog work is exhausted. |
 | otherwise | Nothing. |
 
-`backlog left` is true when at least one PLAN.md **Milestones** ID is **ready**: its `status.json` state on `main` is not `done`, its note does not start with "Waiting on", every ID in its **Depends on** column is `done`, and no open pull request already covers it (cites the ID in its title or body). Check it fresh every pass (`git show origin/main:status.json` and `git show origin/main:PLAN.md` after `git fetch origin main`). It matches the Cursor fleet's backlog rule, so the Cursor fleet never launches with nothing to pick. Fixers keep running either way.
+`backlog left` is true when at least one PLAN.md **Milestones** item ID is **ready**: its `status.json` state on `main` is not `done`, its note does not start with "Waiting on", every ID in its **Depends on** column is `done`, and no open pull request already covers it (cites the ID in its title or body). Check it fresh every pass (`git show origin/main:status.json` and `git show origin/main:PLAN.md` after `git fetch origin main`). It matches the Cursor fleet's backlog rule, so the Cursor fleet never launches with nothing to pick. Fixers keep running either way.
 
 Never both in one pass. A pull request the fixer fleet has not locked yet still counts as idle, so the Cursor fleet cannot fire over it.
 

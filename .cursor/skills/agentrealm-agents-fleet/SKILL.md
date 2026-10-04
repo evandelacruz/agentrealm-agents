@@ -86,7 +86,7 @@ Repo: `evandelacruz/agentrealm-agents`.
 
 **Read `note` and `remaining`.** Skip items whose note starts with "Waiting on" or says blocked. Those are Evan's to resolve, not an implementer's. Skip umbrella items, whose work lives in their child IDs.
 
-**Milestones.** Choose work from PLAN.md **Milestones**: any ID whose `status.json` state is not `done`, minus the items the rule above skips and any an open pull request already covers (cites the ID in its title or body). If no ready work is left for a slot, leave it empty. If every slot is empty, spawn nothing and say that ready backlog work is exhausted.
+**Ready items.** Choose work from PLAN.md **Milestones**: any item ID whose `status.json` state is not `done` and whose **Depends on** IDs are all `done`, minus the items the rule above skips and any an open pull request already covers (cites the ID in its title or body). If no ready work is left for a slot, leave it empty. If every slot is empty, spawn nothing and say that ready backlog work is exhausted.
 
 **One reviewable PR per agent.** Split a large item with an explicit scope and leave it `partial`.
 

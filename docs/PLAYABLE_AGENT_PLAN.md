@@ -4,7 +4,7 @@ Goal: a reference agent that survives, gears up, fights, travels the overworld, 
 
 The game facts this plan relies on are in [GAME_NOTES.md](GAME_NOTES.md), with sources.
 
-Milestone IDs are the ones in [PLAN.md](../PLAN.md) **Milestones**, the one backlog: M0 (discovery, done), M6 to M12, and M4, which this plan redefines as the strategist. PLAN.md says which of its sections this plan supersedes and when.
+The backlog is [PLAN.md](../PLAN.md) **Milestones**: PR-sized items (A1, A2, …) grouped under the milestones this plan scopes, M0 (discovery, done), M6 to M12, and M4, which this plan redefines as the strategist. PLAN.md says which of its sections this plan supersedes and when.
 
 ## Verdict on the approach
 

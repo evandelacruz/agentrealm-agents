@@ -6,11 +6,11 @@ The required shape of every spawn and follow-up prompt. A brief missing any of t
 
 Every brief MUST:
 
-- **Cite exact milestone IDs** from PLAN.md **Milestones**.
+- **Cite exact backlog item IDs** (A1, A2, …) from PLAN.md **Milestones**.
 - **State the scope:** what *this* PR covers, when the ID is larger than one PR.
-- Tell the agent to read [`AGENTS.md`](../../../../AGENTS.md) and the PLAN.md sections the milestone touches before writing code.
+- Tell the agent to read [`AGENTS.md`](../../../../AGENTS.md) and the PLAN.md sections the item touches, and the docs/PLAYABLE_AGENT_PLAN.md section for its milestone, before writing code.
 - Say: reference the IDs in commits and the PR body.
-- Say: the PR description opens with a product sentence. The first text is one or two sentences in plain language: what someone running a reference agent, or the agent itself, can do now, and why it matters. Write it the way a product person would. Leave the mechanism out (no functions, files, types, or a walk through the logic) because the diff already shows that. Milestone IDs and the rest of the detail come after that sentence.
+- Say: the PR description opens with a product sentence. The first text is one or two sentences in plain language: what someone running a reference agent, or the agent itself, can do now, and why it matters. Write it the way a product person would. Leave the mechanism out (no functions, files, types, or a walk through the logic) because the diff already shows that. Item IDs and the rest of the detail come after that sentence.
 - Say: **open the PR ready for review, not draft.** If tooling defaults to draft, mark it ready before finishing. If a draft already exists, run `gh pr ready`.
 - Say: if blocked by an open architecture, legal, or moderation question, an open design question, or a server gap, **halt and print why**. Do not invent. Check PLAN.md and the published docs first.
 - Say: do not add dependencies or change moderation or the call budget or pacing without flagging prominently.
@@ -29,7 +29,7 @@ The next pass picks it back up carrying that note. Do not stretch one PR past a 
 ## Template
 
 ```
-Implement <IDS> from PLAN.md Milestones.
+Implement backlog item <IDS> from PLAN.md Milestones.
 
 Scope for this PR: <what this PR covers and what it explicitly does not>
 
@@ -40,7 +40,7 @@ Read first:
 
 Rules:
 - Reference <IDS> in commits and the PR body.
-- The PR description opens with a product sentence. The first text is one or two sentences in plain language: what someone running a reference agent, or the agent itself, can do now, and why it matters. Write it the way a product person would. Leave the mechanism out (no functions, files, types, or a walk through the logic) because the diff already shows that. Milestone IDs and the rest of the detail come after that sentence. For example: "A scripted character now walks back to the chest it dropped when it died."
+- The PR description opens with a product sentence. The first text is one or two sentences in plain language: what someone running a reference agent, or the agent itself, can do now, and why it matters. Write it the way a product person would. Leave the mechanism out (no functions, files, types, or a walk through the logic) because the diff already shows that. Item IDs and the rest of the detail come after that sentence. For example: "A scripted character now walks back to the chest it dropped when it died."
 - Open the PR ready for review, not draft.
 - Do not add dependencies without flagging prominently.
 - Do not change moderation or the call budget or pacing
@@ -61,7 +61,7 @@ Rules:
 ## Follow-up template
 
 ```
-Address unresolved PR review comments on #<n>. Keep the same milestone IDs.
+Address unresolved PR review comments on #<n>. Keep the same item IDs.
 If you edit the PR description, keep the opening as a product sentence: one or two sentences in plain language about what someone running a reference agent, or the agent itself, can do now, and why it matters. Leave the mechanism out. The diff already shows the logic.
 Keep the PR ready for review, not draft; run `gh pr ready` if needed.
 Do not reopen the slice or expand scope.

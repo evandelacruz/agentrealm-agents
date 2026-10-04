@@ -152,13 +152,13 @@ Regenerate rather than hand-edit anything generated: `npm --prefix tools/conduct
 
 Pull the real output before theorizing. Reproduce locally, fix, confirm. Never skip, disable, or quarantine a test to get green. If a test is flaky and you can make it robust inside this slice, do that; otherwise say so and stop.
 
-**Review threads.** Make the changes they ask for. Keep the same milestone IDs and do not expand the slice. Anything you leave alone gets a reply, per **Commenting** above. Check PLAN.md before deciding a thread needs Evan; most questions are already answered there.
+**Review threads.** Make the changes they ask for. Keep the same backlog item IDs and do not expand the slice. Anything you leave alone gets a reply, per **Commenting** above. Check PLAN.md before deciding a thread needs Evan; most questions are already answered there.
 
 **Your own pass.** Then read the diff yourself. What you were handed is where to start, not the boundary of what is wrong. A reviewer catches what it catches; you are the one person with the whole change in front of you.
 
 Read all of it, not only the lines the threads point at, and ask:
 
-- Does it match PLAN.md? Read the sections the milestone IDs point to and check the behavior itself (scheduler order, reflex order, call budget, rejection handling), not just what the threads mention. The body describes intent; PLAN.md is the spec.
+- Does it match PLAN.md? Read the PLAN.md item and the PLAYABLE_AGENT_PLAN.md milestone section its IDs point to and check the behavior itself (scheduler order, reflex order, call budget, rejection handling), not just what the threads mention. The body describes intent; PLAN.md is the spec.
 - Do PLAN.md and README.md still describe what the code does? A behavior change that leaves them describing the old one is a finding.
 - Does it do what the pull request body claims? Those drift apart more often than either is wrong.
 - Did a changed function leave a caller behind that still assumes the old behavior? Check both directions: callers, callees, the trace, the saved state in `.state/`.
@@ -171,7 +171,7 @@ Read all of it, not only the lines the threads point at, and ask:
 ## Push
 
 - Run `make test`, and `make conductor-test` if you touched `tools/conductor`.
-- Cite the pull request's existing milestone IDs in the commit message.
+- Cite the pull request's existing backlog item IDs in the commit message.
 - Flag prominently in the commit if you added a dependency or touched the moderation, or the call budget or pacing.
 
 ```bash

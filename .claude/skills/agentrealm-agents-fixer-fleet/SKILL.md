@@ -121,13 +121,13 @@ Reproduce locally, fix, confirm. Never skip or disable a test.
 - <path>:<line>: <what it asks, one line>
 - …
 
-Keep the same milestone IDs (<IDS>) and cite them in the commit. Do not
+Keep the same backlog item IDs (<IDS>) and cite them in the commit. Do not
 expand the slice. Flag prominently if you add a dependency or touch
 moderation or the call budget or pacing.
 
 The blockers above are where to start, not the boundary of what is wrong.
 Read the whole diff yourself and keep the point of the change in view.
-Check its behavior against the PLAN.md sections its milestone IDs point
+Check its behavior against the PLAN.md sections its item IDs point
 to, not only against the threads. Fix what you find only when it is in
 this slice, clearly wrong, and small; say so in the commit. Comment on
 anything larger or arguable instead.

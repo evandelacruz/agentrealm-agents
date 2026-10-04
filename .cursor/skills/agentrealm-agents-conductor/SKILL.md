@@ -58,7 +58,7 @@ No ticketing system. PLAN.md is the backlog.
 
 5. **If anything is ambiguous,** check PLAN.md and the published docs first. If nothing covers it, stop and ask Evan in this chat. Do not guess on architecture, legal, or moderation policy, or at design, and do not work around a server gap: record it in PLAN.md **Server gaps**.
 
-6. **Pick from the milestones.** Open-PR fixes still come first. New work comes from PLAN.md **Milestones**: an ID whose `status.json` state is not `done`, whose **Depends on** IDs are all `done`, whose note does not start with "Waiting on", and that no open pull request already covers (cites the ID in its title or body).
+6. **Pick from the backlog.** Open-PR fixes still come first. New work comes from PLAN.md **Milestones**: an item ID whose `status.json` state is not `done`, whose **Depends on** IDs are all `done`, whose note does not start with "Waiting on", and that no open pull request already covers (cites the ID in its title or body).
 
 7. **If clear,** spawn 1–2 implementers for the smallest ready slice(s), each with an explicit scope. See [references/implementer-brief.md](references/implementer-brief.md) for the required brief shape.
 

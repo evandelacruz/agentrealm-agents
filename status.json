@@ -51,7 +51,7 @@
 
   "A21": {"state": "open"},
 
-  "A22": {"state": "done"},
+  "A22": {"state": "partial", "remaining": "Gem piles: set the pile supply code in states/gather.py once observed (GAME_NOTES.md Open questions); pile targeting is off until then."},
 
   "A23": {"state": "open"},
 

@@ -3,49 +3,62 @@
 from __future__ import annotations
 
 from ..config import Policy
-from ..directives import attack_forbidden
+from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
-from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import flee_step, grid_params, next_step
+from ..navigation import cost_path, nearest_target
+from ..pathing import grid_params, next_step
 from ..plan_goals import gather_gems_goal
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
+from .explore import ExploreState
 from .gather_safe import is_safe_ish
-from .intents import set_position, take, use_block, use_on
+from .intents import set_position, take, use_block
+from .reflexes import safety_reflex
 
 GATHER_BLOCKS = frozenset({"grass", "bush"})
-GEM_PILE_CODES = frozenset({"gem", "gem_pile"})
+# The supply code a gem pile carries is not published (GAME_NOTES.md open
+# questions), so pile targeting stays off until it is observed. Gem caches
+# (gem_cache_5/7/10) are a different drop and are not piles.
+UNKNOWN_GEM_PILE_CODES: frozenset[str] = frozenset()
+# Bushes are not walkable, so they are cut from a neighbouring cell: the
+# pocket knife's range is 1 (GAME_NOTES.md Olympuff starting kit).
+BUSH_REACH = 1
+GOAL = "gather"
 
 
 class GatherState(State):
     name = "Gather"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
-        return _wants_gather(world, ctx) and world.alive and world.pos is not None and ctx.policy.kind == "scripted"
+        return ctx.policy.kind == "scripted" and world.alive and world.pos is not None and _wants_gather(world, ctx)
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
-        return not _wants_gather(world, ctx)
+        return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        return gather_outcome(world, ctx.memory, ctx.policy, never_attack=ctx.never_attack, knowledge=ctx.knowledge)
+        out = gather_outcome(world, ctx.memory, ctx.policy, never_attack=ctx.never_attack, knowledge=ctx.knowledge)
+        if out.intents is None and world.pos is not None:
+            # Nothing to gather in reach: yield this window to Explore so the
+            # character finds new ground instead of standing still.
+            ctx.memory.state = ExploreState.name
+            return ExploreState().act(world, ctx)
+        return out
 
 
 def _wants_gather(world: WorldModel, ctx: PlayContext) -> bool:
+    """A ``gather_gems`` goal is set and the gem counter is known and below it.
+
+    Gather waits for a snapshot to report ``gems``: with the counter unknown
+    it cannot tell whether the goal is already met.
+    """
     goal = gather_gems_goal(ctx.directives)
-    if goal is None:
+    if goal is None or world.gems is None:
         return False
-    gems = world.gems
-    if gems is not None and gems >= goal.count:
-        return False
-    return True
-
-
-def _attack_range(w: WorldModel) -> int:
-    return max(1, w.attack_range or 1)
+    return world.gems < goal.count
 
 
 def is_gem_pile(e: Entity) -> bool:
-    return e.kind == "supply" and e.code in GEM_PILE_CODES
+    return e.kind == "supply" and e.code in UNKNOWN_GEM_PILE_CODES
 
 
 def gather_outcome(
@@ -54,48 +67,23 @@ def gather_outcome(
     policy: Policy,
     *,
     never_attack: list[str],
-    knowledge=None,
+    knowledge: KnowledgeBase | None = None,
     state: str = "Gather",
 ) -> StateOutcome:
     here = w.pos
     if here is None:
         return StateOutcome(None, "position unknown", state=state)
     view = w.view
-    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
-    hazards = {p for p, b in view.tiles.items() if b in policy.avoid_blocks}
-    blocked = nav_avoid | hazards
-    escape: set[Pos] = set()
-    if here in hazards:
-        safe = w.open_neighbours(here, blocked)
-        if safe:
-            m.path, m.gather_block = [], None
-            p = min(safe)
-            return StateOutcome([set_position(p)], f"off {view.tiles.get(here)}", reflex=True, state=state)
-        escape = hazards
-    plan_avoid = blocked - escape
-    plan_costly = escape | nav_costly
 
-    hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
-    if hostiles and policy.on_hostile != "ignore":
-        target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
-        if policy.on_hostile == "fight":
-            if target.kind == "character" and not attack_forbidden(target, never_attack):
-                return StateOutcome(
-                    [use_on(target)], f"fight {target.kind} {target.id}", reflex=True, state=state
-                )
-        away = flee_step(w, hostiles, blocked)
-        if away is not None:
-            m.path, m.gather_block = [], None
-            return StateOutcome(
-                [set_position(away)], f"flee {target.kind} {target.id}", reflex=True, state=state
-            )
+    reflex, plan_avoid, plan_costly = safety_reflex(
+        w, m, policy, never_attack=never_attack, knowledge=knowledge, state=state
+    )
+    if reflex is not None:
+        if not m.path and m.goal == GOAL:
+            m.goal, m.gather_target = "", None
+        return reflex
 
-    reach = _attack_range(w)
-    piles = [
-        e
-        for e in w.entities
-        if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and is_safe_ish(w, e.pos, policy)
-    ]
+    piles = [e for e in w.entities if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and is_safe_ish(w, e.pos, policy)]
     if piles:
         s = min(piles, key=lambda e: (chebyshev(e.pos, here), e.id))
         return StateOutcome([take(s)], f"take {s.code or s.id}", reflex=True, state=state)
@@ -104,37 +92,42 @@ def gather_outcome(
         return StateOutcome([use_block(here)], "cut grass", state=state)
 
     bushes = [
-        p
-        for p in view.tiles
-        if view.tiles[p] == "bush" and chebyshev(p, here) <= reach and is_safe_ish(w, p, policy)
+        p for p in view.tiles if view.tiles[p] == "bush" and chebyshev(p, here) <= BUSH_REACH and is_safe_ish(w, p, policy)
     ]
     if bushes:
         p = min(bushes, key=lambda pos: (chebyshev(pos, here), pos))
         return StateOutcome([use_block(p)], "cut bush", state=state)
 
-    if m.gather_block is not None and not _still_want_block(w, m.gather_block, policy):
-        m.gather_block = None
-        m.path = []
-
-    step = next_step(w, plan_avoid, m.path)
+    # Follow only a path Gather planned, toward a target that still qualifies.
+    if m.goal == GOAL and not _still_wanted(w, m.gather_target, policy):
+        m.path, m.goal, m.gather_target = [], "", None
+    step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is None:
-        _replan_gather(w, m, policy, plan_avoid, plan_costly, knowledge)
-        step = next_step(w, plan_avoid, m.path)
+        _replan_gather(w, m, policy, plan_avoid, plan_costly)
+        step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is not None:
         return StateOutcome([set_position(step)], f"gather → {m.path[-1]}", state=state)
 
     return StateOutcome(None, "no gather target", state=state)
 
 
-def _still_want_block(w: WorldModel, block: Pos, policy: Policy) -> bool:
-    kind = w.view.tiles.get(block)
-    return kind in GATHER_BLOCKS and is_safe_ish(w, block, policy)
+def _still_wanted(w: WorldModel, target: tuple[str, Pos] | None, policy: Policy) -> bool:
+    if target is None:
+        return False
+    kind, pos = target
+    if kind == "pile":
+        return any(is_gem_pile(e) and e.pos == pos for e in w.entities) and is_safe_ish(w, pos, policy)
+    return w.view.tiles.get(pos) == kind and is_safe_ish(w, pos, policy)
 
 
-def _replan_gather(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos], costly: set[Pos], knowledge) -> None:
-    from ..navigation import cost_path, nearest_target
+def _replan_gather(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos], costly: set[Pos]) -> None:
+    """Plan to the nearest pile, then bush, then grass; leave ``m.path`` alone if none.
 
-    m.path, m.gather_block = [], None
+    A failed plan keeps another state's path, so a window that yields to
+    Explore does not throw away Explore's route.
+    """
+    if m.goal == GOAL:
+        m.path, m.goal, m.gather_target = [], "", None
     params = grid_params(policy, blocked, costly)
     here = w.pos
     assert here is not None
@@ -144,27 +137,24 @@ def _replan_gather(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos], 
         target = min(piles, key=lambda e: (chebyshev(e.pos, here), e.id)).pos
         path = cost_path(w, target, params)
         if next_step(w, blocked, path):
-            m.path, m.gather_block = path, target
+            m.path, m.goal, m.gather_target = path, GOAL, ("pile", target)
             return
 
-    bush_stands: set[Pos] = set()
     bush_at: dict[Pos, Pos] = {}
     for p, block in w.view.tiles.items():
         if block != "bush" or not is_safe_ish(w, p, policy):
             continue
         for stand in w.neighbours(p):
             if w.view.walkable(stand) and stand not in w.occupied():
-                bush_stands.add(stand)
-                bush_at[stand] = p
-    if bush_stands:
-        found = nearest_target(w, bush_stands, params)
+                bush_at.setdefault(stand, p)
+    if bush_at:
+        found = nearest_target(w, set(bush_at), params)
         if found and next_step(w, blocked, found[1]):
-            m.path, m.gather_block = found[1], bush_at[found[0]]
+            m.path, m.goal, m.gather_target = found[1], GOAL, ("bush", bush_at[found[0]])
             return
 
     grass = {p for p, block in w.view.tiles.items() if block == "grass" and is_safe_ish(w, p, policy)}
     if grass:
         found = nearest_target(w, grass, params)
         if found and next_step(w, blocked, found[1]):
-            m.path, m.gather_block = found[1], found[0]
-            return
+            m.path, m.goal, m.gather_target = found[1], GOAL, ("grass", found[0])

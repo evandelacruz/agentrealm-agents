@@ -342,8 +342,6 @@ Structured keys take effect on the next round trip with no model involved. Free 
 
 Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
 
-Until the strategist lands, `gather_gems` on the directives goal stack is the only goal op the state machine reads; other ops and `params` are parsed and validated but not yet consumed.
-
 | Param | Default | Range | Strategist may | Meaning |
 |---|---|---|---|---|
 | `fight_margin` | 1.5 | ≥ 1 | raise | Our ticks-to-win must beat theirs by this factor |

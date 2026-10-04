@@ -211,4 +211,5 @@ Each has a test the agent or a hand session can run.
 | Boss fight time limits | Read on entry, or learn from the first attempt |
 | How ground food other than the golden cap heals (apples, berries): on pickup, or carried and `Use`d on self | `Take` one while hurt and read `health`; if unchanged, `Arm` + `Use` self |
 | Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
+| What supply code does a gem pile carry? The manual describes authored piles (M §16) but names no code; only gem caches (`gem_cache_5/7/10`) are named | Read entities beside a pile in town and record its `code`; Gather (A22) targets piles once it is known |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |

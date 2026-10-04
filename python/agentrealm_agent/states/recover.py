@@ -117,7 +117,7 @@ class RecoverState(State):
             return out
         # No step toward the chest: fall back to Explore's goals this round.
         fallback = scripted_outcome(
-            world, m, policy, ctx.rng, never_attack=ctx.never_attack, knowledge=ctx.knowledge, state=self.name
+            world, m, policy, ctx.rng, never_attack=ctx.never_attack, knowledge=ctx.knowledge, plan=ctx.plan, state=self.name
         )
         fallback.reason = f"chest not reachable; {fallback.reason}"
         return fallback

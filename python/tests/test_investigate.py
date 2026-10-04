@@ -89,7 +89,7 @@ class InvestigateStateTest(unittest.TestCase):
         w.entities = [Entity("npc", 4, (2, 2), "helper")]
         d = decide(w, Memory(), Policy(kind="scripted", hostile=[]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
         self.assertEqual(d.intent["verb"], "Say")
-        self.assertEqual(d.intent["target"], {"kind": "npc", "npc_id": 4})
+        self.assertEqual(d.intent.get("npc_id"), 4)
 
     def test_act_has_no_side_effects(self):
         w = world(["...", ".S.", "..."], at=(0, 1))

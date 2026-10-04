@@ -32,7 +32,8 @@ def read_block(_map_id: int, pos: Pos) -> dict:
 
 
 def say_to(npc: Entity, text: str = "hello") -> dict:
-    return {"verb": "Say", "text": text, "target": {"kind": "npc", "npc_id": npc.id}}
+    # Say names npc_id or character_id on the intent body (docs/API Speech).
+    return {"verb": "Say", "text": text, "npc_id": npc.id}
 
 
 def drop(supply_id: int) -> dict:

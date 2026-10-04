@@ -739,10 +739,15 @@ class Runner:
             key = read_key(map_id, pos)
             if applied:
                 mark_cell_read(self.knowledge, map_id, pos)
-        elif target.get("kind") == "npc" and target.get("npc_id") is not None:
-            key = say_key(int(target["npc_id"]))
+        elif intent.get("verb") == "Say":
+            raw_npc = intent.get("npc_id")
+            if raw_npc is None and target.get("kind") == "npc":
+                raw_npc = target.get("npc_id")
+            if raw_npc is None:
+                return
+            key = say_key(int(raw_npc))
             if applied:
-                mark_npc_spoken(self.knowledge, int(target["npc_id"]))
+                mark_npc_spoken(self.knowledge, int(raw_npc))
         else:
             return
         if result.get("outcome") == "rejected":

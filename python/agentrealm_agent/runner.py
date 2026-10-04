@@ -136,6 +136,7 @@ class Runner:
             never_attack=self.directives.directives.never_attack,
             params=self.directives.directives.params,
             knowledge=self.knowledge,
+            directives=self.directives.directives,
             plan=plan,
         )
 

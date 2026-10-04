@@ -1,11 +1,17 @@
 """A20: Loot state: Take, WithdrawFromChest, Drop junk when full; hearts first."""
 
 import random
+import tempfile
+import threading
 import unittest
+from pathlib import Path
 from unittest import mock
 
+from agentrealm_agent import config
+
 from agentrealm_agent.brain import Memory, decide
-from agentrealm_agent.config import Policy
+from agentrealm_agent.brain import Decision
+from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.loot import (
@@ -15,6 +21,7 @@ from agentrealm_agent.loot import (
     learn_loot_rejection,
     worst_droppable,
 )
+from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.world import Entity, WorldModel
@@ -139,6 +146,21 @@ class StallTest(unittest.TestCase):
         out = dispatch(w, ctx(scripted(goals=["hold"])))
         self.assertNotEqual(out.state, "Loot")
 
+    def test_unreachable_supply_lets_explore_send(self):
+        # Boxed in with room to move; the apple is outside the box.
+        w = world(["######", "#..#.#", "######"], at=(1, 1))
+        w.entities = [Entity("supply", 8, (4, 1), "apple")]
+        out = dispatch(w, ctx(scripted(goals=["wander"])))
+        self.assertEqual(out.state, "Explore")
+        self.assertIsNotNone(out.intents, out.reason)
+
+    def test_chest_with_unread_contents_is_not_a_target(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [Entity("chest", 50, (2, 1))]
+        out = dispatch(w, ctx(scripted(goals=["hold"])))
+        self.assertNotEqual(out.state, "Loot")
+        self.assertIsNone(out.intents)
+
     def test_loot_never_claims_a_round_without_an_intent(self):
         cases = []
         w = world(["....", "...."], at=(1, 1))
@@ -184,6 +206,14 @@ class ChestTest(unittest.TestCase):
         self.assertNotEqual(out.state, "Loot")
         self.assertIsNone(out.intents)
 
+    def test_walks_to_a_chest_in_sight(self):
+        w = world(["....", "...."], at=(0, 0))
+        w.entities = [Entity("chest", 50, (3, 0))]
+        w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
+        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
+
     def test_empty_chest_is_not_a_target(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("chest", 50, (2, 1))]
@@ -200,6 +230,16 @@ class ChestTest(unittest.TestCase):
         out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
         self.assertNotIn(out.state, ("Loot", "Recover"))
         self.assertIsNone(out.intents)
+
+    def test_ground_chest_beside_the_death_chest_is_still_looted(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.death_chest = (7, (2, 1), 50)
+        w.entities = [Entity("chest", 50, (2, 1)), Entity("chest", 51, (0, 1))]
+        w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
+        w.chest_contents[51] = [InventorySupply(72, "apple")]
+        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 51, "supply_ids": [72]}])
 
 
 class LootHostileTest(unittest.TestCase):
@@ -249,6 +289,15 @@ class RejectionTest(unittest.TestCase):
         self.assertIn(1, w.undroppable)
         self.assertEqual(worst_droppable(w, {}).id, 2)
 
+    def test_refused_drop_moves_on_to_the_next_junk(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        full_inventory(w)
+        w.entities = [Entity("supply", 99, (1, 2), "bronze_sword")]
+        c = ctx(kb=priced(bronze_sword=15))
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Drop", "supply_id": 1}])
+        learn_loot_rejection(w, {"verb": "Drop", "supply_id": 1}, "not_transferable")
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Drop", "supply_id": 2}])
+
     def test_carry_capacity_full_lowers_capacity_to_what_is_carried(self):
         w = world(["..."], at=(1, 0))
         w.armed_code = "pocket_knife"
@@ -267,6 +316,38 @@ class RejectionTest(unittest.TestCase):
         w.carry_capacity = 4
         w.apply_events([{"tick": 5, "events": [{"kind": "Respawned", "map_id": 1, "x": 2, "y": 3}]}])
         self.assertEqual(w.carry_capacity, DEFAULT_CARRY_CAPACITY)
+
+
+class RunnerRejectionTest(unittest.TestCase):
+    """The runner feeds each rejected intent to learn_loot_rejection."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        cfg = CharacterConfig("T", "default", "test", "sandbox", scripted(goals=["hold"]), Path("t.toml"))
+        self.r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
+        self.addCleanup(self.r.trace.close)
+        self.r.world = world(["..."], at=(1, 0))
+        self.r.mem = Memory(need_self=False, need_position=False)
+
+    def reject(self, intent: dict, code: str) -> None:
+        self.r.intents_for(Decision(intent, "test"))
+        rejection = {"category": "state", "code": code, "retryability": "permanent"}
+        self.assertTrue(self.r.on_result({"tick": 30, "outcome": "rejected", "rejection": rejection}, 0))
+
+    def test_drop_not_transferable_reaches_the_world(self):
+        full_inventory(self.r.world)
+        self.reject({"verb": "Drop", "supply_id": 1}, "not_transferable")
+        self.assertEqual(self.r.world.undroppable, {1})
+
+    def test_withdraw_carry_capacity_full_reaches_the_world(self):
+        self.r.world.armed_code = "pocket_knife"
+        self.r.world.held_supplies = [InventorySupply(i, "torch") for i in range(1, 4)]
+        self.reject({"verb": "WithdrawFromChest", "chest_id": 50, "supply_ids": [71]}, "carry_capacity_full")
+        self.assertEqual(self.r.world.carry_capacity, 4)
 
 
 if __name__ == "__main__":

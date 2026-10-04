@@ -61,23 +61,28 @@ def full_inventory(w: WorldModel, *, junk: str = "torch") -> None:
 
 
 class LootPriorityTest(unittest.TestCase):
-    def test_life_codes_unknown_so_no_counter_supply(self):
+    def test_gem_is_a_counter_supply(self):
+        self.assertTrue(is_counter_supply("gem"))
         self.assertFalse(is_counter_supply("heart"))
-        self.assertFalse(is_counter_supply("gem"))
+
+    def test_gem_beats_sword(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [Entity("supply", 2, (1, 2), "bronze_sword"), Entity("supply", 3, (2, 1), "gem")]
+        d = decide(w, Memory(), scripted(), random.Random(0), knowledge=priced(bronze_sword=15))
+        self.assertEqual(d.intent, {"verb": "Take", "supply_id": 3})
 
     def test_heart_beats_sword_once_the_life_code_is_known(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 2, (1, 2), "bronze_sword"), Entity("supply", 3, (2, 1), "heart")]
-        with mock.patch("agentrealm_agent.loot.UNKNOWN_LIFE_SUPPLY_CODES", frozenset({"heart"})):
+        with mock.patch("agentrealm_agent.loot.LIFE_SUPPLY_CODES", frozenset({"heart"})):
             d = decide(w, Memory(), scripted(), random.Random(0), knowledge=priced(bronze_sword=15))
         self.assertEqual(d.intent, {"verb": "Take", "supply_id": 3})
 
     def test_counter_supply_taken_with_a_full_pack(self):
         w = world(["...", "...", "..."], at=(1, 1))
         full_inventory(w)
-        w.entities = [Entity("supply", 3, (2, 1), "heart")]
-        with mock.patch("agentrealm_agent.loot.UNKNOWN_LIFE_SUPPLY_CODES", frozenset({"heart"})):
-            out = dispatch(w, ctx())
+        w.entities = [Entity("supply", 3, (2, 1), "gem")]
+        out = dispatch(w, ctx())
         self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 3}])
 
     def test_priced_supply_is_shop_not_loot(self):

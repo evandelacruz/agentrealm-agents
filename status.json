@@ -47,7 +47,7 @@
 
   "A19": {"state": "open"},
 
-  "A20": {"state": "partial", "remaining": "Hearts and gems first, off until their supply codes are known; Drop of stowed supplies and larger-chest capacity are undocumented (GAME_NOTES open questions)."},
+  "A20": {"state": "partial", "remaining": "Hearts first until a life's ground supply_subtype_code is known; stowed Drop and middle_chest carry capacity (GAME_NOTES open questions). Gems-first uses code gem."},
 
   "A21": {"state": "open"},
 

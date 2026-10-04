@@ -30,7 +30,7 @@ The runner paces one call per wall-clock window (`epoch / tick interval`). That 
 
 ## Real time
 
-Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; the agent sends movement as a paced `Step`/`Wait` queue and every other intent as a one-intent queue (M6). A reflex that fires while a queue runs replaces it (see **Reflexes**). It does not yet send a new queue when a read or event makes the rest of a running path wrong; that is the rest of M6. `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
+Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; the agent sends movement as a paced `Step`/`Wait` queue, `Use` and `Say`/`Broadcast` through the attack and speech pacers, and most other intents as a one-intent queue (M6). A reflex that fires while a queue runs replaces it (see **Reflexes**). It does not yet send a new queue when a read or event makes the rest of a running path wrong; that is the rest of M6. `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
 
 ## Architecture
 
@@ -159,7 +159,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
 | M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. The agent's default base URL is the local stack. | M1 |
 
-**M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2), applying snapshot versions, deltas and health in the world model, and tick POSTs that carry the last applied observation version (A3). Not yet: the runner does not pace `Use`/`Say` through `executor/pacing.py` (A1).
+**M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, `Use` and `Say`/`Broadcast` through `executor/pacing.py` with cooldowns carried across queues (A1), multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2), applying snapshot versions, deltas and health in the world model, and tick POSTs that carry the last applied observation version (A3).
 
 | ID | Item | Depends on |
 |---|---|---|

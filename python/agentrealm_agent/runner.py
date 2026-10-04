@@ -17,6 +17,8 @@ from .executor import (
     DEFAULT_TICK_RATE_HZ,
     QUEUE_HORIZON_INTENTS,
     build_paced_walk_queue,
+    pace_speech,
+    pace_uses,
     queue_horizon_intents,
     step_landing,
     trim_to_horizon,
@@ -257,14 +259,20 @@ class Runner:
         m.need_position, m.path = True, []
 
     def intents_for(self, d: Decision) -> list[dict] | None:
-        """Movement decisions become paced Step/Wait queues; others stay one intent."""
+        """Movement, Use, and Say/Broadcast become paced queues; others stay one intent."""
         w, m = self.world, self.mem
         if d.intent is None:
             return None
-        if d.intent.get("verb") != "SetPosition":
+        intent = d.intent
+        verb = intent.get("verb")
+        if verb != "SetPosition":
+            if verb == "Use":
+                return self._paced_action(intent, pace_uses, m.last_use_tick)
+            if verb in ("Say", "Broadcast"):
+                return self._paced_action(intent, pace_speech, m.last_speech_tick)
             m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
-            m.pending = d.intent
-            return [d.intent]
+            m.pending = intent
+            return [intent]
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
@@ -294,6 +302,32 @@ class Runner:
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
         return intents
+
+    def _paced_action(self, intent: dict, pace, last_tick: int | None) -> list[dict] | None:
+        """``intent`` behind the Waits its cooldown still owes, cut at the horizon.
+
+        None when the cooldown outlasts the horizon: nothing is sent this
+        round trip, and the trace says why.
+        """
+        w, m = self.world, self.mem
+        since = None if last_tick is None else max(1, w.tick - last_tick)
+        paced = trim_to_horizon(pace([intent], ticks_since_last=since), limit=self.queue_horizon_ticks)
+        while paced and paced[-1]["verb"] == "Wait":
+            paced.pop()
+        if not paced:
+            self.log(
+                "pace",
+                f"{_fmt_intent(intent)} held: cooldown outlasts the {self.queue_horizon_ticks}-tick horizon",
+                {"held": intent, "ticks_since_last": since, "horizon": self.queue_horizon_ticks},
+            )
+            return None
+        if len(paced) == 1:
+            m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+            m.pending = paced[0]
+        else:
+            m.pending_intents, m.pending_queue, m.pending_next_index = paced, None, 0
+            m.pending = None
+        return paced
 
     def apply_intent_results(self, results: list[dict]) -> bool:
         """Fold intent results since the last call. True if the last one rejected."""
@@ -348,6 +382,10 @@ class Runner:
                     m.need_position, m.path = True, []
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True
+            if intent and intent.get("verb") == "Use":
+                m.last_use_tick = int(result.get("tick", w.tick))
+            if intent and intent.get("verb") in ("Say", "Broadcast"):
+                m.last_speech_tick = int(result.get("tick", w.tick))
             if m.pending is not None and index == 0:
                 m.pending = None
             return False
@@ -372,6 +410,7 @@ class Runner:
             if kind == "Died":
                 m.need_self = m.need_position = True
                 m.path, m.last_step_tick = [], None
+                m.last_use_tick = m.last_speech_tick = None
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
                 m.held_queue = None

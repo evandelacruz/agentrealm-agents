@@ -1,8 +1,8 @@
 """Paced multi-intent queues for real-time play (M6).
 
 Types, limits and paced Step/Wait queue building (``movement``), used by the
-runner, and attack and speech pacing (``pacing``), which the runner does not
-use yet.
+runner, and attack and speech pacing (``pacing``), used for ``Use`` and
+``Say``/``Broadcast`` in the runner.
 """
 
 from .constants import (

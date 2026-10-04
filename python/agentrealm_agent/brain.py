@@ -35,6 +35,8 @@ class Memory:
     queue_sent_tick: int = 0  # tick the last multi-intent queue was answered at
     cancel_queue: bool = False  # send [] next tick: the held queue was planned from a stale position
     last_step_tick: int | None = None  # tick our last Step applied, to pace the next queue
+    last_use_tick: int | None = None  # tick our last Use applied (weapon cooldown, A1)
+    last_speech_tick: int | None = None  # tick our last Say/Broadcast applied (A1)
     blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
     alarm: bool = False  # Damaged or Attacked since the last entity read
     last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)

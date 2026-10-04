@@ -10,7 +10,7 @@
   },
   "M6": {
     "state": "partial",
-    "remaining": "Queue invalidation is wired into the runner: paths go as paced Step/Wait queues (build_paced_walk_queue) cut at the queue horizon, re-sent only when a result, event or read makes the rest wrong. Still to do: use the attack and speech pacing (executor/pacing.py) in the runner, calm vs threatened poll cadences, snapshot deltas (snapshot_version) on the world model, consuming health in decisions, live Olympuff smoke test. Health and max_health are folded from complete snapshots only."
+    "remaining": "Paths go out as paced Step/Wait queues (build_paced_walk_queue) cut at the queue horizon, polled on the calm/threatened cadences, and re-sent only when a result, event, read or reflex makes the rest wrong. Still to do: use the attack and speech pacing (executor/pacing.py) in the runner, snapshot deltas (snapshot_version) on the world model, consuming health in decisions, live Olympuff smoke test. Health and max_health are folded from complete snapshots only."
   },
   "M7": {"state": "open"},
   "M8": {"state": "open"},

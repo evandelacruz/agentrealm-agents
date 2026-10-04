@@ -66,7 +66,6 @@ class QueueInvalidationTest(unittest.TestCase):
             for x in range(5):
                 w.view.tiles[(x, y)] = "dirt"
         r.world, r.mem = w, Memory(need_self=False, need_position=False)
-        r.tick_rate_hz = 10
         r.executor.tick_rate_hz = 10
         return r
 
@@ -155,6 +154,48 @@ class QueueInvalidationTest(unittest.TestCase):
         r.tick()
         self.assertIsNone(fake.sent[1], "replaced once, then nothing to send")
 
+    def test_hostile_in_range_drops_the_queue_and_flees(self):
+        # Reflex 3 runs every round trip, not only once the queue drains.
+        pol = Policy(goals=["goto"], goto=(4, 0), pickup=False)
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.world_and_runner(fake, pol)
+        r.tick()
+        self.assertTrue(r.executor.active)
+        r.world.entities = [Entity("npc", 9, (2, 1))]  # off the path, within hostile_range
+        r.tick()
+        self.assertIsNotNone(fake.sent[1], "the flee replaces the held queue")
+        self.assertEqual(fake.sent[1][-1], {"verb": "Step", "direction": "down"})
+        self.assertEqual(r.executor.in_flight.queue_id, "q2")
+        self.assertTrue(r.mem.need_position, "results of the dropped queue are no longer read")
+
+    def test_supply_in_reach_drops_the_queue_and_takes(self):
+        pol = Policy(goals=["goto"], goto=(4, 0), pickup=True)
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.world_and_runner(fake, pol)
+        r.tick()
+        r.world.entities = [Entity("supply", 5, (0, 1))]
+        r.tick()
+        self.assertEqual(fake.sent[1], [{"verb": "Take", "supply_id": 5}])
+
+    def test_hostile_ignored_leaves_the_queue_running(self):
+        pol = Policy(goals=["goto"], goto=(4, 0), pickup=False, on_hostile="ignore")
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.world_and_runner(fake, pol)
+        r.tick()
+        r.world.entities = [Entity("npc", 9, (2, 1))]
+        r.tick()
+        self.assertIsNone(fake.sent[1])
+        self.assertTrue(r.executor.active)
+
     def test_results_for_the_queue_just_sent_are_applied(self):
         pol = Policy(goals=["goto"], goto=(4, 0), pickup=False)
         fake = FakeClient([
@@ -217,7 +258,6 @@ class ExecutorTest(unittest.TestCase):
     def test_damage_drops_and_replaces(self):
         ev = [{"tick": 11, "kind": "Damaged", "amount": 2}]
         self.assertTrue(self.ex.invalidate_from_events(ev, self.w, self.m))
-        self.assertTrue(self.m.alarm)
         self.assertTrue(self.m.need_position)
         self.assertEqual(self.m.path, [])
         self.assertEqual(self.ex.tick_payload(None), [wait()])
@@ -225,7 +265,6 @@ class ExecutorTest(unittest.TestCase):
     def test_attacked_drops(self):
         ev = [{"tick": 11, "kind": "Attacked"}]
         self.assertTrue(self.ex.invalidate_from_events(ev, self.w, self.m))
-        self.assertTrue(self.m.alarm)
         self.assertFalse(self.ex.active)
 
     def test_death_drops_without_a_replacing_queue(self):

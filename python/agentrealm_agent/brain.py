@@ -10,6 +10,7 @@ import random
 from dataclasses import dataclass, field
 
 from .config import Policy
+from .poll_cadence import gate_tick_call
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60  # windows between self reads when nothing forces one
@@ -28,21 +29,31 @@ class Memory:
     windows_since_self: int = 0
     blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
     alarm: bool = False  # Damaged or Attacked since the last entity read
+    last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)
+    calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll
+    queued_ticks: int = 0  # intents still in flight after the last poll, one tick each
+    hurt_last_poll: bool = False  # the last poll's events carried Damaged
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
-    """One of: self, position, terrain, entities, tick."""
+    """One of: self, position, terrain, entities, tick, skip.
+
+    skip spends nothing this window: calm, and the last poll's queue still
+    covers it (poll_cadence, M6). Urgent windows still take the reads above
+    tick, because entities come only from reads until snapshot deltas fold
+    them in (M6 remaining).
+    """
     if m.need_self or m.windows_since_self >= SELF_REFRESH:
         return "self"
     if m.need_position or w.pos is None:
         return "position"
     if policy.kind in ("idle",):
-        return "tick"
+        return gate_tick_call(w, m, policy)
     if w.terrain_map != w.map_id or w.terrain_center is None or chebyshev(w.terrain_center, w.pos) > w.perception // 2:
         return "terrain"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
         return "entities"
-    return "tick"
+    return gate_tick_call(w, m, policy)
 
 
 # Intents.
@@ -68,6 +79,8 @@ def withdraw_all(chest_id: int) -> dict:
 class Decision:
     intent: dict | None
     reason: str
+    # Reflexes 2–4b: urgent enough to drop a queue still in flight (M6).
+    reflex: bool = False
 
 
 BLOCK_WINDOWS = 1  # decisions to keep off a tile after a step into it was rejected
@@ -110,7 +123,7 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
         safe = w.open_neighbours(here, blocked)
         if safe:
             m.path = []
-            return Decision(set_position(min(safe)), f"off {view.tiles.get(here)}")
+            return Decision(set_position(min(safe)), f"off {view.tiles.get(here)}", reflex=True)
         escape = hazards
     plan_avoid = blocked - escape
 
@@ -120,19 +133,19 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
         if policy.on_hostile == "fight":
             if target.kind == "character":
-                return Decision(use_on(target), f"fight {target.kind} {target.id}")
+                return Decision(use_on(target), f"fight {target.kind} {target.id}", reflex=True)
             # NPC targets have no Use target kind on the wire yet; fall through to flee.
         away = _flee_step(w, hostiles, blocked)
         if away is not None:
             m.path = []
-            return Decision(set_position(away), f"flee {target.kind} {target.id}")
+            return Decision(set_position(away), f"flee {target.kind} {target.id}", reflex=True)
 
     # 4. Supplies within reach.
     if policy.pickup:
         near = [e for e in w.entities if e.kind == "supply" and chebyshev(e.pos, here) <= 1]
         if near:
             s = min(near, key=lambda e: (chebyshev(e.pos, here), e.id))
-            return Decision(take(s), f"take {s.code or s.id}")
+            return Decision(take(s), f"take {s.code or s.id}", reflex=True)
 
     # 4b. Our death chest: go back for it and take everything out (B103).
     if policy.pickup and w.death_chest is not None and w.death_chest[0] == w.map_id:
@@ -140,7 +153,7 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
         if chebyshev(at, here) <= 1:
             contents = w.chest_contents.get(chest_id)
             if contents:
-                return Decision(withdraw_all(chest_id), f"recover from chest {chest_id}")
+                return Decision(withdraw_all(chest_id), f"recover from chest {chest_id}", reflex=True)
             if contents is None:
                 return Decision(None, f"open chest {chest_id}")
         elif m.goal != "chest" or not m.path or not _step_open(w, plan_avoid, m.path[0]):

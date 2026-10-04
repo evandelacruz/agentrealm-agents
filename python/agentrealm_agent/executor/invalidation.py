@@ -241,6 +241,11 @@ class Executor:
         self.replace_held = self.replace_held or replace
         self.invalidate(clear_flight=True)
 
+    def preempt(self, m: Memory) -> None:
+        """A reflex fired: drop the in-flight queue so the reflex's intent replaces it."""
+        if self.active:
+            self._drop_remainder(m)
+
     def invalidate_from_events(self, events: list[dict], w: WorldModel, m: Memory) -> bool:
         if not self.active:
             return False
@@ -249,7 +254,6 @@ class Executor:
             died = "Died" in kinds
             # A death leaves nothing queued to replace.
             self._drop_remainder(m, replace=not died)
-            m.alarm = m.alarm or bool(kinds & {"Damaged", "Attacked"})
             if died:
                 m.need_self = True
             return True

@@ -12,6 +12,7 @@ from .brain import Decision, Memory, choose_call, decide
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .executor import Executor
+from .poll_cadence import calm_poll_interval
 from .world import WorldModel, terrain_cells
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
@@ -48,7 +49,6 @@ class Runner:
         self.rng = random.Random(seed)
         self.pacer = Pacer(1.0)
         self.executor = Executor()
-        self.tick_rate_hz = 10
         cfg.trace_path.parent.mkdir(parents=True, exist_ok=True)
         self.trace = open(cfg.trace_path, "a", buffering=1)
 
@@ -64,7 +64,6 @@ class Runner:
             self.trace.close()
             return
         hz = max(1, int(world.get("tick_rate_hz", 1)))
-        self.tick_rate_hz = hz
         self.executor.tick_rate_hz = hz
         self.pacer = Pacer(1.0 / hz)
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
@@ -73,7 +72,15 @@ class Runner:
             while not self.stop.is_set():
                 self.pacer.wait_next_window(not_before)
                 not_before = 0.0
+                # A window is one sim tick. Count it here: a skipped window
+                # sends nothing, so no response would move the clock, and the
+                # calm gap and entity_refresh would never come due. Responses
+                # carry the server's tick and correct it.
+                self.world.tick += 1
                 call = choose_call(self.world, self.mem, self.cfg.policy)
+                if call == "skip":
+                    self.mem.windows_since_self += 1
+                    continue
                 try:
                     not_before = self.step(call)
                 except ApiError as e:
@@ -125,10 +132,14 @@ class Runner:
 
     def tick(self) -> float:
         w, m, ex = self.world, self.mem, self.executor
+        # Reflexes run every round trip. One that fires drops the held queue and
+        # its intent replaces it; anything else leaves a live queue running.
+        d: Decision = decide(w, m, self.cfg.policy, self.rng)
         if ex.active:
-            d = Decision(None, "queue in flight")
-        else:
-            d = decide(w, m, self.cfg.policy, self.rng)
+            if d.reflex:
+                ex.preempt(m)
+            else:
+                d = Decision(None, "queue in flight")
         fresh = ex.build_from_decision(d.intent, m.path, w)
         payload = ex.tick_payload(fresh)
         r = self.client.tick(self.cid, payload)
@@ -142,6 +153,12 @@ class Runner:
         ex.invalidate_from_events(events, w, m)
         ex.invalidate_if_stale(w, m)
         self.on_events(events)
+        m.last_poll_tick = w.tick
+        m.calm_poll_interval = calm_poll_interval(w.tick, w.character_id)
+        # The calm gap must not outlast what the server still runs for us.
+        f = ex.in_flight
+        m.queued_ticks = 0 if f is None or not ex.active else len(f.intents) - f.next_index
+        m.hurt_last_poll = any(e.get("kind") == "Damaged" for e in events)
         submitted = payload
         detail = f"{_fmt_intents(submitted)} ({d.reason})"
         last = self._last_result(r.get("intent_results") or [])

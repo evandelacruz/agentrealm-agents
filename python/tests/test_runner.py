@@ -55,7 +55,6 @@ class RunnerTest(unittest.TestCase):
             for x in range(5):
                 w.view.tiles[(x, y)] = "dirt"
         r.world, r.mem = w, Memory(need_self=False, need_position=False)
-        r.tick_rate_hz = 10
         r.executor.tick_rate_hz = 10
         return r
 

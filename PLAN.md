@@ -30,7 +30,7 @@ The runner paces one call per wall-clock window (`epoch / tick interval`). That 
 
 ## Real time
 
-Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; a path goes out as one `Step`, `Wait`×n, … queue paced by `movement_speed`, cut after the last `Step` that fits the horizon, and the next queue opens with the `Wait`s still owed; every other intent goes alone. While it runs the agent only polls; it sends a new queue when a result is rejected or unknown, an event or read makes the rest of the path wrong, or survival events arrive. A dropped queue the server may still hold is replaced, by a lone `Wait` if there is nothing else to do (M6). `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
+Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; a path goes out as one `Step`, `Wait`×n, … queue paced by `movement_speed`, cut after the last `Step` that fits the horizon, and the next queue opens with the `Wait`s still owed; every other intent goes alone. While it runs the agent polls and runs the reflexes each round trip; it sends a new queue when a reflex fires (its intent replaces the queue), or when a result is rejected or unknown, an event or read makes the rest of the path wrong, or survival events arrive. A dropped queue the server may still hold is replaced, by a lone `Wait` if there is nothing else to do (M6). `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
 
 ## Architecture
 
@@ -57,15 +57,17 @@ Checked top to bottom:
 3. Entities are older than the character's `entity_refresh` ticks, or a `Damaged`/`Attacked` event just arrived → read entities.
 4. Otherwise → `POST tick` with the chosen intent, or with none.
 
+`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the queue still in flight runs out (one tick per intent left). A window it skips sends nothing. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
+
 Self is re-read after `Died`, and every 60 windows otherwise.
 
 Position is tracked locally from results: an applied `Step` moves us to the block it enters. A rejection of the first step puts us back where we stood when the queue was sent, and the server discards the rest of the queue. A queue the client drops itself forces a position read, since its later results are no longer read; a `Step` onto a door with more queued behind it drops the rest. A rejection, a door, or a death sends us back to step 1.
 
 `Attacked`, `Damaged`, and `Died` on a queue are always ours: they carry no `subject_id` there.
 
-### Reflexes: every window, no model
+### Reflexes: every round trip, no model
 
-The first rule that matches picks the intent:
+The first rule that matches picks the intent. They run on every `POST tick`, also while a movement queue is in flight: rules 2–4b drop that queue and send their intent in its place; rule 5 leaves a live queue running.
 
 1. Previous intent rejected → clear the path. The next decision keeps off that block, in the replan too.
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.

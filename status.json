@@ -51,7 +51,7 @@
 
   "A21": {"state": "open"},
 
-  "A22": {"state": "partial", "remaining": "Gem piles: set the pile supply code in states/gather.py once observed (GAME_NOTES.md Open questions); pile targeting is off until then."},
+  "A22": {"state": "done"},
 
   "A23": {"state": "done"},
 
@@ -67,7 +67,7 @@
 
   "A29": {"state": "open"},
 
-  "A30": {"state": "partial", "remaining": "Door and entrance looks (walk to an unvisited door or entrance mark and record what it needs; fits A27) and scroll reads (needs a sourced way to tell a scroll supply, GAME_NOTES open questions)."},
+  "A30": {"state": "partial", "remaining": "Scroll reads (needs a sourced way to tell a scroll supply, GAME_NOTES open questions), the curiosity cap (A32), and door and entrance looks on other maps (with the cap)."},
 
   "A31": {"state": "open"},
 

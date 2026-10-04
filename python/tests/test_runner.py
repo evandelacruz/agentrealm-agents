@@ -25,10 +25,10 @@ class FakeClient:
     def __init__(self, ticks: list[dict], queue_ids: bool = True):
         self.ticks = list(ticks)
         self.queue_ids = queue_ids
-        self.sent: list[list[dict] | None] = []
+        self.sent: list[tuple[list[dict] | None, int | None]] = []
 
-    def tick(self, cid, intents):
-        self.sent.append(intents)
+    def tick(self, cid, intents, *, snapshot_version=None):
+        self.sent.append((intents, snapshot_version))
         r = dict(self.ticks.pop(0))
         if intents is not None and self.queue_ids:
             r["queue_id"] = f"q{len(self.sent)}"
@@ -70,19 +70,20 @@ class RunnerTest(unittest.TestCase):
         ])
         r = self.runner(fake, pol)
         r.tick()
-        self.assertEqual(fake.sent[0][0], {"verb": "Step", "direction": "right"})
-        self.assertGreater(len(fake.sent[0]), 1, "paced multi-intent queue")
+        intents0, _ = fake.sent[0]
+        self.assertEqual(intents0[0], {"verb": "Step", "direction": "right"})
+        self.assertGreater(len(intents0), 1, "paced multi-intent queue")
         self.assertEqual(r.world.pos, (0, 0), "movement resolves from results, not assumed")
 
         r.tick()  # queue held; rejection for the first Step arrives
-        self.assertIsNone(fake.sent[1])
+        self.assertIsNone(fake.sent[1][0])
         self.assertEqual(r.world.pos, (0, 0))
         self.assertTrue(r.mem.need_position)
 
         r.world.apply_position({"map_id": 7, "x": 0, "y": 0})
         r.mem.need_position = False
         r.tick()
-        self.assertNotEqual(fake.sent[2], fake.sent[0], "replan avoids the rejected step")
+        self.assertNotEqual(fake.sent[2][0], fake.sent[0][0], "replan avoids the rejected step")
 
     def test_a_result_for_another_queue_is_not_applied(self):
         # docs/API.md Intent Results: a result names its queue_id and index, so
@@ -113,7 +114,7 @@ class RunnerTest(unittest.TestCase):
                                   queue_ids=queue_ids)
                 r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
                 r.tick()
-                self.assertGreater(len(fake.sent[0]), 1)
+                self.assertGreater(len(fake.sent[0][0]), 1)
                 self.assertEqual(r.mem.pending_queue, "q1" if queue_ids else None)
                 self.assertFalse(r.mem.need_position)
                 self.assertEqual(r.mem.blocked, {})
@@ -126,7 +127,7 @@ class RunnerTest(unittest.TestCase):
         fake = FakeClient([{"tick": 12, "window_remaining_ms": 0}])
         r = self.runner(fake, Policy(goals=["hold"]))
         r.tick()
-        self.assertEqual(fake.sent, [None])
+        self.assertEqual(fake.sent, [(None, None)])
 
     def test_queue_events_about_us_carry_no_subject(self):
         # docs/API.md, Events: Attacked, Damaged, and Died on a queue happen to
@@ -164,7 +165,7 @@ class RunnerTest(unittest.TestCase):
             {"tick": 11, "events": [{"tick": 11, "kind": "Died", "cause": "npc"}]}]}])
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.tick()
-        self.assertIsNotNone(fake.sent[0])
+        self.assertIsNotNone(fake.sent[0][0])
         self.assertIsNone(r.world.pos)
         self.assertIsNone(r.world.map_id)
 
@@ -175,7 +176,7 @@ class RunnerTest(unittest.TestCase):
         r = self.runner(fake, Policy(goals=["hold"], pickup=True))
         r.world.entities = [Entity("supply", 5, (1, 0), "apple")]
         r.tick()
-        self.assertEqual(fake.sent, [[{"verb": "Take", "supply_id": 5}]])
+        self.assertEqual(fake.sent[0][0], [{"verb": "Take", "supply_id": 5}])
         self.assertEqual(r.mem.pending, {"verb": "Take", "supply_id": 5})
         self.assertIsNone(r.mem.held_queue)
 
@@ -186,7 +187,7 @@ class RunnerTest(unittest.TestCase):
         fake = FakeClient(ticks)
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.tick()
-        n = len(fake.sent[0])
+        n = len(fake.sent[0][0])
         for _ in range(n + 3):
             r.tick()
         self.assertIsNone(r.mem.held_queue)
@@ -197,7 +198,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(r.mem.last_step_tick)
         self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "position")
         r.tick()
-        self.assertIsNotNone(fake.sent[-1], "a fresh decision was sent")
+        self.assertIsNotNone(fake.sent[-1][0], "a fresh decision was sent")
 
     def test_stepping_onto_a_door_cancels_the_rest_of_the_queue(self):
         # A door moves us, so the queued Steps behind it must not run.
@@ -209,15 +210,15 @@ class RunnerTest(unittest.TestCase):
         ])
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.tick()
-        self.assertGreater(len(fake.sent[0]), 1)
-        first = fake.sent[0][0]["direction"]
+        self.assertGreater(len(fake.sent[0][0]), 1)
+        first = fake.sent[0][0][0]["direction"]
         landing = {"right": (1, 0), "down_right": (1, 1)}[first]
         r.world.view.tiles[landing] = "framed_door"  # revealed after planning
         r.tick()
         self.assertTrue(r.mem.need_position)
         self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "tick")
         r.tick()
-        self.assertEqual(fake.sent[2], [], "the held queue is replaced with nothing")
+        self.assertEqual(fake.sent[2][0], [], "the held queue is replaced with nothing")
         self.assertFalse(r.mem.cancel_queue)
         self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "position")
 
@@ -233,12 +234,12 @@ class RunnerTest(unittest.TestCase):
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.queue_horizon_ticks = 5
         r.tick()
-        self.assertEqual([i["verb"] for i in fake.sent[0]], ["Step", "Wait", "Wait", "Wait", "Step"])
+        self.assertEqual([i["verb"] for i in fake.sent[0][0]], ["Step", "Wait", "Wait", "Wait", "Step"])
         r.tick()
-        self.assertIsNone(fake.sent[1])
+        self.assertIsNone(fake.sent[1][0])
         self.assertEqual(r.mem.last_step_tick, 15)
         r.tick()
-        self.assertEqual([i["verb"] for i in fake.sent[2]], ["Wait", "Wait", "Wait", "Step"])
+        self.assertEqual([i["verb"] for i in fake.sent[2][0]], ["Wait", "Wait", "Wait", "Step"])
 
     def test_an_echoed_queue_does_not_restore_a_dropped_hold(self):
         # A rejection or a door drops our queue; a non-empty `queue` on that
@@ -262,12 +263,12 @@ class RunnerTest(unittest.TestCase):
         ])
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.tick()
-        landing = {"right": (1, 0), "down_right": (1, 1)}[fake.sent[0][0]["direction"]]
+        landing = {"right": (1, 0), "down_right": (1, 1)}[fake.sent[0][0][0]["direction"]]
         r.world.view.tiles[landing] = "framed_door"
         r.tick()
         self.assertIsNone(r.mem.held_queue)
         r.tick()
-        self.assertEqual(fake.sent[2], [])
+        self.assertEqual(fake.sent[2][0], [])
 
     def test_single_step_fallback_keeps_the_path(self):
         # A target off the path's head is one Step; the path is not trimmed.
@@ -288,8 +289,8 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNotNone(r.mem.held_queue)
         r.world.entities = [Entity("npc", 9, (2, 1))]  # off the path, within hostile_range
         r.tick()
-        self.assertIsNotNone(fake.sent[1], "the flee replaces the held queue")
-        self.assertEqual(fake.sent[1][-1], {"verb": "Step", "direction": "down"})
+        self.assertIsNotNone(fake.sent[1][0], "the flee replaces the held queue")
+        self.assertEqual(fake.sent[1][0][-1], {"verb": "Step", "direction": "down"})
         self.assertEqual(r.mem.pending_queue, "q2")
         self.assertTrue(r.mem.need_position, "results of the dropped queue are no longer read")
 
@@ -302,8 +303,20 @@ class RunnerTest(unittest.TestCase):
         r.tick()
         r.world.entities = [Entity("supply", 5, (0, 1))]
         r.tick()
-        self.assertEqual(fake.sent[1], [{"verb": "Take", "supply_id": 5}])
+        self.assertEqual(fake.sent[1][0], [{"verb": "Take", "supply_id": 5}])
         self.assertIsNone(r.mem.pending_intents)
+
+    def test_tick_posts_last_applied_snapshot_version(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0, "observation": {"version": 7, "unchanged": True}},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["hold"]))
+        r.world.snapshot_version = 5
+        r.tick()
+        self.assertEqual(fake.sent[0][1], 5)
+        r.tick()
+        self.assertEqual(fake.sent[1][1], 7)
 
     def test_no_reflex_leaves_the_held_queue_and_plan_alone(self):
         fake = FakeClient([
@@ -315,7 +328,7 @@ class RunnerTest(unittest.TestCase):
         path, held = list(r.mem.path), r.mem.held_queue
         r.world.entities = [Entity("npc", 9, (2, 1))]
         r.tick()
-        self.assertIsNone(fake.sent[1])
+        self.assertIsNone(fake.sent[1][0])
         self.assertEqual(r.mem.held_queue, held)
         self.assertEqual(r.mem.path, path, "the held queue's steps are not planned twice")
 

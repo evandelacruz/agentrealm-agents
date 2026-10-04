@@ -20,7 +20,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 | `GET /characters/{id}/world` | Tick rate, sandbox flag, status. |
 | `GET /characters/{id}/terrain-tiles?map_id&x0&y0&width&height` | Block types inside perception, plus revealed ground, as a grid: `rows` of `legend` symbols, `?` for clouds. |
 | `GET /characters/{id}/entity-tiles?…` | Characters, NPCs, supplies inside perception. |
-| `POST /characters/{id}/tick` `{"intents": [{...}]}` | Replaces the character's queue with an ordered list (`[]` clears it; no `intents` leaves it running). Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
+| `POST /characters/{id}/tick` `{"intents": [{...}], "snapshot_version": N}` | Replaces the character's queue with an ordered list (`[]` clears it; no `intents` leaves it running). Optional `snapshot_version` is the observation version last applied; the server answers with a delta when it still matches. Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
 
 Auth is `Authorization: Bearer <key>`.
 
@@ -73,7 +73,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
 3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
 4. Supply underfoot or adjacent and `pickup = true` → `Take`.
-4b. Our last death dropped a chest on this map and `pickup = true` → walk to it; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; this agent sends no `snapshot_version`, so every round trip carries a complete snapshot with the chest's `contents`.
+4b. Our last death dropped a chest on this map and `pickup = true` → walk to it; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
 5. Plan has a next step → walk the path as a paced `Step` queue (see **Scheduler**).
 6. Otherwise → nothing.
 
@@ -159,7 +159,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
 | M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. The agent's default base URL is the local stack. | M1 |
 
-**M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2), and applying snapshot versions, deltas and health in the world model. Not yet: the runner does not send `snapshot_version` (A3) or pace `Use`/`Say` through `executor/pacing.py` (A1).
+**M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2), applying snapshot versions, deltas and health in the world model, and tick POSTs that carry the last applied observation version (A3). Not yet: the runner does not pace `Use`/`Say` through `executor/pacing.py` (A1).
 
 | ID | Item | Depends on |
 |---|---|---|

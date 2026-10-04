@@ -23,8 +23,10 @@ sys.path.insert(0, str(PYTHON))
 from agentrealm_agent import config  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
+from agentrealm_agent.investigation import mark_cell_read, mark_npc_spoken  # noqa: E402
 from agentrealm_agent.m6_acceptance import M6AcceptanceMetrics, TARGET_STEPS  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
+from agentrealm_agent.world import WorldModel  # noqa: E402
 
 DEFAULT_CHARACTER = PYTHON / "characters" / "olympuff_walker.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
@@ -55,6 +57,35 @@ def ensure_character(client: Client, cfg: config.CharacterConfig) -> int:
     return cid
 
 
+def seed_investigate_quiet(client: Client, cid: int, knowledge: KnowledgeBase) -> None:
+    """Mark readable cells and visible NPCs as already handled so M6 measures walking.
+
+    Investigate ``Read``/``Say`` intents are one-intent queues; they shrink the
+    calm poll gap to one tick and inflate calm POST tick share (A4 done-when).
+    """
+    w = WorldModel(character_id=cid)
+    self_body = client.self_(cid)
+    w.apply_self(self_body)
+    if not self_body.get("placed"):
+        return
+    try:
+        w.apply_position(client.position(cid))
+    except ApiError:
+        return
+    if w.map_id is None or w.pos is None:
+        return
+    terrain = client.terrain(cid, w.map_id, *w.perception_rect())
+    w.apply_terrain(terrain)
+    entities = client.entities(cid, w.map_id, *w.perception_rect())
+    w.apply_entities(entities)
+    for pos, readable in w.view.readable.items():
+        if readable:
+            mark_cell_read(knowledge, w.map_id, pos)
+    for ent in w.entities:
+        if ent.kind == "npc":
+            mark_npc_spoken(knowledge, ent.id)
+
+
 def run_smoke(
     client: Client,
     cfg: config.CharacterConfig,
@@ -66,6 +97,7 @@ def run_smoke(
     stop = threading.Event()
     metrics = M6AcceptanceMetrics(target_steps=target_steps, stop=stop)
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
+    seed_investigate_quiet(client, cid, knowledge)
 
     def out(line: str) -> None:
         print(line, flush=True)

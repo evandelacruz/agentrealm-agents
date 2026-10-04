@@ -114,6 +114,8 @@ def learn_step_rejection(
             nav.impassable.add(cell)
             # A loadout change reopens the cell (A27: StrengthBracket.reset).
             m.strength.note_over(cell, record_strength_closed(kb, w, landing))
+        case "not_enough_gems":
+            nav.impassable.add(cell)
         case _:
             # A code this table does not handle (or none): keep off the cell for
             # one decision, as reflex 1 did before A14, and learn nothing more.

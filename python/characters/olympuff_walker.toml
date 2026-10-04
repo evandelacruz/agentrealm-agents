@@ -7,7 +7,7 @@ world = "olympuff"
 [policy]
 kind = "scripted"
 goals = ["explore"]
-on_hostile = "flee"
+on_hostile = "ignore"
 hostile = ["npc"]
 hostile_range = 6
 pickup = false

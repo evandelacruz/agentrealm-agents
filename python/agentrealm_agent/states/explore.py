@@ -87,11 +87,17 @@ def scripted_outcome(
 
 
 def _missed_step(
-    w: WorldModel, m: Memory, avoid: set[Pos], target_plan, goal: str, target: Pos, routed: bool
+    w: WorldModel,
+    m: Memory,
+    avoid: set[Pos],
+    target_plan,
+    goal: str,
+    leg: nav_stuck.Leg,
+    routed: bool,
 ) -> Pos | None:
     """No goal got a step. A goal on this map with no route at all is stuck at
     once; one whose route starts on a taken cell waits out its window (A15)."""
-    att = nav_stuck.track(m, w, goal, target)
+    att = nav_stuck.track(m, w, goal, leg)
     if att is None:
         return None
     if att.level == nav_stuck.REVEAL:

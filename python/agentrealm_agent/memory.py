@@ -73,3 +73,4 @@ class Memory:
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
     # Boss (A38): the fight under way, or None. Set and cleared only by states/boss.sync_boss.
     boss: BossFight | None = None
+    solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)

@@ -31,11 +31,9 @@ class LootState(State):
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        m, policy = ctx.memory, ctx.policy
-        blocked, _, _ = plan_sets(world, m, policy, ctx.knowledge)
-        # Reflexes 2–4 first (off a hazard, fight or flee, pickup in reach).
+        # Reflexes 3–4 first (fight, pickup in reach); Escape and Flee outrank Loot.
         reflex = reflex_outcome(
-            world, m, policy, blocked, never_attack=ctx.never_attack, state=self.name, knowledge=ctx.knowledge
+            world, ctx.policy, never_attack=ctx.never_attack, state=self.name, knowledge=ctx.knowledge
         )
         if reflex is not None:
             return reflex

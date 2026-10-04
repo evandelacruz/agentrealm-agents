@@ -29,7 +29,8 @@ from .executor import (
     trim_to_horizon,
     wait,
 )
-from .poll_cadence import calm_poll_interval
+from .m6_acceptance import M6AcceptanceMetrics
+from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
 from .zone_discovery import apply_town, apply_zone, zone_failed
@@ -66,6 +67,7 @@ class Runner:
         stop: threading.Event,
         out=print,
         knowledge: KnowledgeBase | None = None,
+        acceptance: M6AcceptanceMetrics | None = None,
     ):
         self.cfg = cfg
         self.client = client
@@ -81,10 +83,14 @@ class Runner:
         self.pacer = Pacer(1.0)
         self.tick_hz = DEFAULT_TICK_RATE_HZ
         self.queue_horizon_ticks = QUEUE_HORIZON_INTENTS
+        # The latest tick a server response reported. w.tick also counts
+        # windows locally and can run ahead of it; cooldowns count from this.
+        self.server_tick: int | None = None
         cfg.trace_path.parent.mkdir(parents=True, exist_ok=True)
         self.trace = open(cfg.trace_path, "a", buffering=1)
         self.directives = DirectivesWatch(cfg.directives_path)
         self.directives.ensure_loaded()
+        self.acceptance = acceptance
         self._level_timer = LevelTimer()
 
     def log(self, call: str, detail: str, record: dict) -> None:
@@ -126,13 +132,16 @@ class Runner:
                         {"directives": {"params": self.directives.directives.params, "never_attack": self.directives.directives.never_attack}},
                     )
                 call = choose_call(self.world, self.mem, self.cfg.policy)
+                urgent = self.acceptance is not None and is_urgent(self.world, self.mem, self.cfg.policy)
                 if call == "skip":
                     self.mem.windows_since_self += 1
-                    continue
-                try:
-                    not_before = self.step(call)
-                except ApiError as e:
-                    not_before = self.on_error(call, e)
+                else:
+                    try:
+                        not_before = self.step(call)
+                    except ApiError as e:
+                        not_before = self.on_error(call, e)
+                if self.acceptance is not None:
+                    self.acceptance.on_window(urgent=urgent)
         finally:
             if self.knowledge is not None:
                 # Tiles learned from tick deltas, which terrain reads did not merge.
@@ -196,7 +205,7 @@ class Runner:
         elif call == "terrain":
             t = c.terrain(self.cid, w.map_id, *w.perception_rect())
             w.apply_terrain(t)
-            w.tick = max(w.tick, int(t.get("tick", 0)))
+            self.heard_tick(t.get("tick"))
             self.sync_terrain(t)
             n = len(terrain_cells(t))
             self.note_held_path_stale()
@@ -204,7 +213,7 @@ class Runner:
         elif call == "entities":
             e = c.entities(self.cid, w.map_id, *w.perception_rect())
             w.apply_entities(e)
-            w.tick = max(w.tick, int(e.get("tick", 0)))
+            self.heard_tick(e.get("tick"))
             m.alarm = False
             self._learn_items_from_entities(e)
             self.note_held_path_stale()
@@ -225,7 +234,7 @@ class Runner:
                     zone_failed(w, map_id, (x, y))
                 raise
             fact = apply_zone(w, map_id, x, y, z)
-            w.tick = max(w.tick, int(z.get("tick", 0)))
+            self.heard_tick(z.get("tick"))
             self.log(call, f"@{map_id}:{x},{y} safe={fact.safe}", {"zone": z})
         else:
             return self.tick()
@@ -259,6 +268,7 @@ class Runner:
                     self.cfg.policy,
                     self.rng,
                     never_attack=self.directives.directives.never_attack,
+                    params=self.directives.directives.params,
                     knowledge=self.knowledge,
                 )
                 intents = self._apply_never_attack(self.intents_for(d))
@@ -277,12 +287,15 @@ class Runner:
                 self.cfg.policy,
                 self.rng,
                 never_attack=self.directives.directives.never_attack,
+                params=self.directives.directives.params,
                 knowledge=self.knowledge,
             )
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))
+        if "tick" in r:
+            self.server_tick = w.tick
         if intents:
             m.queue_sent_tick = w.tick
             if qid := r.get("queue_id"):
@@ -367,6 +380,7 @@ class Runner:
             self.cfg.policy,
             self.rng,
             never_attack=self.directives.directives.never_attack,
+            params=self.directives.directives.params,
             knowledge=self.knowledge,
         )
         m.nav = saved[2]
@@ -441,10 +455,10 @@ class Runner:
         prefix = walkable_prefix(w, m, self.cfg.policy, m.path, self.knowledge)
         on_path = bool(prefix) and prefix[0] == target
         cells = list(prefix) if on_path else [target]
-        # Ticks since the last applied Step, counted to the latest tick we
-        # know of: the first intent runs no earlier, so the owed Waits are
-        # never too few and the first Step never draws movement_cooldown.
-        since = None if m.last_step_tick is None else max(1, w.tick - m.last_step_tick)
+        # Ticks since the last applied Step, counted to the latest tick the
+        # server reported: the first intent runs no earlier, so the owed Waits
+        # are never too few and the first Step never draws movement_cooldown.
+        since = self.ticks_since(m.last_step_tick)
         intents = build_paced_walk_queue(
             w.pos,
             cells,
@@ -467,6 +481,26 @@ class Runner:
         m.path_blockers = path_blockers(w, m, self.cfg.policy, self.knowledge)
         return intents
 
+    def heard_tick(self, tick) -> None:
+        """A read's tick: the server clock moved at least this far."""
+        if tick is None:
+            return
+        tick = int(tick)
+        self.world.tick = max(self.world.tick, tick)
+        self.server_tick = tick if self.server_tick is None else max(self.server_tick, tick)
+
+    def ticks_since(self, last_tick: int | None) -> int | None:
+        """Ticks from ``last_tick`` to the latest server-reported tick, at least 1.
+
+        Not to w.tick: the windows counted locally since the last response can
+        run ahead of the server clock, and counting them would owe too few
+        Waits. Before any response, w.tick is all there is.
+        """
+        if last_tick is None:
+            return None
+        now = self.world.tick if self.server_tick is None else min(self.world.tick, self.server_tick)
+        return max(1, now - last_tick)
+
     def _paced_action(self, intent: dict, pace, last_tick: int | None) -> list[dict] | None:
         """``intent`` behind the Waits its cooldown still owes, cut at the horizon.
 
@@ -474,7 +508,7 @@ class Runner:
         round trip, and the trace says why.
         """
         w, m = self.world, self.mem
-        since = None if last_tick is None else max(1, w.tick - last_tick)
+        since = self.ticks_since(last_tick)
         paced = trim_to_horizon(pace([intent], ticks_since_last=since), limit=self.queue_horizon_ticks)
         while paced and paced[-1]["verb"] == "Wait":
             paced.pop()
@@ -542,6 +576,8 @@ class Runner:
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
+                if self.acceptance is not None:
+                    self.acceptance.on_step_applied()
                 if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:
                     # A door moves us; the Steps still queued behind this one
                     # would walk from the wrong place.
@@ -567,6 +603,9 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
+        if self.acceptance is not None:
+            code = (result.get("rejection") or {}).get("code", "?")
+            self.acceptance.on_rejection(code, verb=(intent or {}).get("verb"))
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None

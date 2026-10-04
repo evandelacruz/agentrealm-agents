@@ -243,11 +243,12 @@ class ChestTest(unittest.TestCase):
 
 
 class LootHostileTest(unittest.TestCase):
-    def test_flee_reflex_runs_before_a_pickup(self):
+    def test_flee_runs_before_a_pickup(self):
+        # Fleeing is the Flee state (A9), which outranks Loot.
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 8, (1, 2), "apple"), Entity("npc", 5, (2, 1))]
         out = dispatch(w, ctx())
-        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.state, "Flee")
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
         self.assertTrue(out.reason.startswith("flee"), out.reason)
 

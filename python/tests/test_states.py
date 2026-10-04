@@ -143,8 +143,8 @@ class HysteresisTest(unittest.TestCase):
 class DecideShimTest(unittest.TestCase):
     def test_decide_keeps_the_first_intent_reason_and_reflex(self):
         w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("npc", 5, (2, 1))]
-        pol = Policy(kind="scripted")
+        w.entities = [Entity("supply", 8, (1, 2))]
+        pol = Policy(kind="scripted", pickup=True)
         out = scripted_outcome(w, Memory(), pol, random.Random(0), never_attack=[])
         d = decide(w, Memory(), pol, random.Random(0))
         self.assertTrue(out.reflex)

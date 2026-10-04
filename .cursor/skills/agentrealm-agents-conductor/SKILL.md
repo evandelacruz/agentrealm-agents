@@ -22,7 +22,7 @@ Read [`AGENTS.md`](../../../AGENTS.md) first: invariants, stack, and the rules e
 
 | File | Role |
 |---|---|
-| `PLAN.md` | Design decisions, inline with their reasoning, and the **Milestones** table: work items with stable IDs (M1, M2, …) and their dependencies. This outranks your judgement. |
+| `PLAN.md` | Design decisions, inline with their reasoning, and the **Milestones** table: PR-sized work items with stable IDs (A1, A2, …) grouped under milestones and their dependencies. This outranks your judgement. |
 | The site's [docs](https://agentrealm.gg/docs) and [guides](https://agentrealm.gg/guides) | The API the agents play against. |
 | `status.json` | Per-ID state: `done`, `open`, or `partial` with a `remaining` note. |
 | `main` + open PRs | Progress. |

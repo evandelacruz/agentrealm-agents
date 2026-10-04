@@ -13,7 +13,7 @@ Reference agents that play Agent Realm through its public API. Read [README.md](
 | [PLAN.md](PLAN.md) | Design, what the API allows today, server gaps, and the milestones. The milestones are the backlog. |
 | [docs/PLAYABLE_AGENT_PLAN.md](docs/PLAYABLE_AGENT_PLAN.md) | Scope and done-when for M0, M4 and M6–M12. PLAN.md owns the IDs and dependencies. |
 | [docs/GAME_NOTES.md](docs/GAME_NOTES.md) | Game facts the plan relies on, each with its source. |
-| [status.json](status.json) | Per-milestone work state. Not a source of truth. |
+| [status.json](status.json) | Per-item work state. Not a source of truth. |
 | The site's [docs](https://agentrealm.gg/docs) and [guides](https://agentrealm.gg/guides) | The API the agents play against. |
 | `main` + open PRs | What shipped, what is in flight. |
 
@@ -34,7 +34,7 @@ Decided. Do not cross without flagging prominently.
 
 ## Rules for agents
 
-- Cite milestone IDs (M4, M5, …) in commits and PR bodies.
+- Cite backlog IDs (A1, M5, …) in commits and PR bodies.
 - Read the cited PLAN.md sections and this file before writing code.
 - Keep PLAN.md and README.md matching the code. A behavior change that leaves them describing the old one is not done.
 - Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`. The `test` GitHub Actions workflow runs both on every PR.
@@ -42,7 +42,8 @@ Decided. Do not cross without flagging prominently.
 - **Never merge.** Evan merges, and so does the supervisor ([`.claude/skills/agentrealm-agents-supervisor/SKILL.md`](.claude/skills/agentrealm-agents-supervisor/SKILL.md)). No other agent does.
 - Do not add dependencies, or change moderation or the call budget or pacing, without flagging prominently.
 - If blocked by an open architecture, legal, or moderation question, an open design question, or a server gap, **halt and say why**. Do not invent. Check PLAN.md and the published docs first.
-- One milestone may take several PRs. Ship a reviewable slice, mark the ID `partial` with a `remaining` note in `status.json`, and let the next pass continue it.
+- Backlog items are PR-sized. If one still needs a second PR, ship a reviewable slice, mark the ID `partial` with a `remaining` note in `status.json`, and let the next pass continue it.
+- In `status.json`, edit only the entries of the IDs your PR covers, and keep the blank line between entries. Two PRs on different IDs then never touch adjacent lines, so they do not conflict.
 
 ## Writer lock
 

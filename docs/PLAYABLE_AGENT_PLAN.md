@@ -348,7 +348,7 @@ A directives value out of range is ignored and logged, and the default stays.
 
 ## Milestones
 
-These are rows of PLAN.md **Milestones**, which owns the IDs and the dependencies; this table owns the scope and the done-when.
+These are the milestone groups. PLAN.md **Milestones** splits each into PR-sized items with their own IDs (A1, A2, …) and dependencies, and ends each with an acceptance item that runs the done-when below. This table owns the scope and the done-when.
 
 | ID | Milestone | Done when |
 |---|---|---|

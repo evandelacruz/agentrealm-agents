@@ -49,8 +49,9 @@ Rules:
 - If blocked by an open architecture, legal, or moderation question,
   an open design question, or a server gap, halt and print why.
   Check PLAN.md first; most questions are already answered.
-- If this scope does not finish <IDS>, set status to
-  {"state":"partial","remaining":"..."} in status.json.
+- In status.json edit only the <IDS> entries, keeping the blank line
+  between entries. If this scope does not finish <IDS>, set
+  {"state":"partial","remaining":"..."}; when it does, set {"state":"done"}.
 - The conductor prompt carries the conductor:working rule. Follow it.
   Remove only that label after the push, and only on the PR this session
   holds. Never replace the label set. Never clear conductor:working on

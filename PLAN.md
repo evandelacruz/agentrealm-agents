@@ -145,27 +145,105 @@ Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local sta
 
 ## Milestones
 
-These are the backlog. Each has a stable ID; cite it in commits and PR bodies. Per-ID state lives in [`status.json`](status.json), which is not a source of truth: where it disagrees with this file, status is wrong.
+This table is the backlog. Each row is one PR-sized item with a stable ID; IDs are never reused. Cite the ID in commits and PR bodies. Per-ID state lives in [`status.json`](status.json), which is not a source of truth: where it disagrees with this file, status is wrong. An item is ready when its state is not `done`, every ID in **Depends on** is `done`, its note does not start with "Waiting on", and no open pull request already covers it.
 
-| ID | Milestone | Depends on |
+Items are grouped into milestones (M0–M12). A milestone is a heading, not a work item: it is done when all its items are. The scope and done-when of M4 and M6–M12 are in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) **Milestones**, with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). Each milestone ends with an acceptance item that runs its done-when.
+
+**Built (M0–M3, M5).**
+
+| ID | Item | Depends on |
 |---|---|---|
 | M0 | **Discovery.** Docs read, hand play through MCP, [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) written. | |
 | M1 | **Client and loop.** HTTP client, call scheduler, wall-clock pacing, 429/503 handling, `create`/`run`/`status`, `idle` and `wander`. | |
 | M2 | **World model and pathing.** Tile and entity cache per map, local position tracking, A*, `explore`, `doors`, `goto`. | M1 |
 | M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
-| M4 | **Strategist and directives.** The LLM planner: optional dependency, off-tick, emits typed plan operations, never intents. Plus the runtime directives file. Specified in the playable plan. | M9 |
 | M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. The agent's default base URL is the local stack. | M1 |
-| M6 | **Executor.** `Step`/`Wait` paced multi-intent queues, two poll cadences, snapshot deltas, health tracking. | M3 |
-| M7 | **State machine and survival.** Prioritised states replace `brain.decide`; cost-grid navigation, stuck detection. | M6 |
-| M8 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight`; learned item table. | M7 |
-| M9 | **Navigation and knowledge.** Per-world knowledge base, `Travel`, door graph, `Break` and break memory. | M8 |
-| M10 | **Curiosity and clues.** Interest list, odd-block detector, `Investigate`, clue capture. | M9 |
-| M11 | **Levels.** `Level`, `Boss`, `Solve`. | M4, M10 |
-| M12 | **Evaluation.** Metrics per run, compared across commits. | M7 |
 
-M1–M3 are built, and M0 is done. Fighting an NPC falls back to fleeing: the agent aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it.
+**M6: Executor.** Paced `Step`/`Wait` movement, multi-intent queues, the two poll cadences, snapshot versions and deltas, and health folding are merged.
 
-M0 and M4, M6–M12 are specified in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md), with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). M4 there replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the remaining one-intent queues in **Real time**; until then those sections describe the shipped agent. The call budget is unchanged: one request per character per tick, burst 3.
+| ID | Item | Depends on |
+|---|---|---|
+| A1 | **Attack and speech pacing in the runner.** The runner sends `Use` and `Say` through `executor/pacing.py`, carrying cooldowns across queues. | |
+| A2 | **Reflexes drop the held queue.** An alarm, hostile or hazard reflex replaces the held server queue on the next round trip. | |
+| A3 | **Send `snapshot_version`.** Tick POSTs carry the last applied version so the server answers with deltas. | |
+| A4 | **M6 acceptance.** Live smoke test against Olympuff: M6 done-when. | A1, A2, A3 |
+
+**M7: State machine and survival.**
+
+| ID | Item | Depends on |
+|---|---|---|
+| A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. | A1, A2 |
+| A6 | **Threat table.** Damage per hit per hostile type from `Damaged`; the unmeasured default. | |
+| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. | |
+| A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
+| A9 | **Retreat, Flee and Escape.** `retreat_hits` and the `risk`/`lives_floor` formula; retreat to a known safe tile. | A5, A6, A7, A8 |
+| A10 | **Heal.** Food in reach, carried potion, measured safe-zone regeneration, else wait in town and raise `buy`. | A5, A7 |
+| A11 | **Recover.** Walk to the death chest only when the spot is safe. | A5, A7 |
+| A12 | **Cost-grid planner.** The cost table (fog, hazards, hostile danger, expiring occupants, break costs inert), walking the known prefix. | |
+| A13 | **Two-level search.** Coarse 16×16 corridor search and A* in the perception window, each with a node budget per tick. | A12 |
+| A14 | **Rejection learning.** What each rejection code teaches the map. | A12 |
+| A15 | **Stuck detection and escalation.** Steps 1, 3 and 5, backoff, frontier drop; the navigation fixtures and trace replay tests. | A5, A12, A14 |
+| A16 | **M7 acceptance.** M7 done-when. | A4, A9, A10, A11, A13, A15 |
+
+**M8: Gear, economy and combat.**
+
+| ID | Item | Depends on |
+|---|---|---|
+| A17 | **Per-world knowledge base.** `python/.state/worlds/<world_code>.json`: load, save, sections, shared by the world's characters. | |
+| A18 | **Item table.** Keyed by `supply_subtype_code`, filled from `Arm`, `Wear`, prices seen and capabilities. | A17 |
+| A19 | **Equip.** Score slots, swap when a carried item is better. | A5, A18 |
+| A20 | **Loot.** `Take`, `WithdrawFromChest`, `Drop` junk when full; hearts first. | A5 |
+| A21 | **Shop.** Buy in-sight priced supplies the plan wants; restock to `potion_reserve`. | A5, A18 |
+| A22 | **Gather.** Gems from grass, bushes and gem piles in safe-ish ground. | A5 |
+| A23 | **Fight.** Group-aware win estimate, `never_attack`, retreat queued behind attacks, conservative until measured, never from a safe zone. | A5, A6, A8, A9 |
+| A24 | **Healing from food and potions.** `Arm` + `Use` self; heal amounts learned per type. | A10, A20 |
+| A25 | **M8 acceptance.** M8 done-when. | A16, A19, A21, A22, A23, A24 |
+
+**M9: Navigation and knowledge.**
+
+| ID | Item | Depends on |
+|---|---|---|
+| A26 | **Door graph and cross-map routing.** Warps recorded in the knowledge base; route over the graph, then A* on each map. | A12, A17 |
+| A27 | **Travel.** To entrance marks, town, hunting grounds and shops; strength bracketed by `over_strength_ceiling`. | A5, A26 |
+| A28 | **Break and break memory.** Per (block, capability); break costs go live; escalation steps 2 and 4; `Escape` through blocks. | A5, A15, A17 |
+| A29 | **M9 acceptance.** M9 done-when. | A25, A27, A28 |
+
+**M10: Curiosity and clues.**
+
+| ID | Item | Depends on |
+|---|---|---|
+| A30 | **Interest list and Investigate.** `Read`, `Say`, `get_zone`, walk to look; the curiosity budget. | A5, A17 |
+| A31 | **Odd-block detector.** Nominates blocks for `Break`. | A28 |
+| A32 | **Clue capture and no-LLM clue rules.** Text with place and time; direction and capability biases. | A30 |
+| A33 | **M10 acceptance.** M10 done-when. | A29, A31, A32 |
+
+**M4: Strategist.** Its directives file is A8.
+
+| ID | Item | Depends on |
+|---|---|---|
+| A34 | **Plan schema and goal stack.** Op table, field validation, param limits; states consume goals; the built-in plan with no model. | A5, A8 |
+| A35 | **Strategist thread.** Optional LLM dependency, triggers, rate and cost limits, trace logging. | A32, A34 |
+| A36 | **M4 acceptance.** M4 done-when. | A33, A35 |
+
+**M11: Levels.**
+
+| ID | Item | Depends on |
+|---|---|---|
+| A37 | **Level.** Walk rooms toward unexplored doors. | A23, A27 |
+| A38 | **Boss.** Plan preconditions, the clock, progress from boss `health`. | A37 |
+| A39 | **Solve.** `Compose`, keys at doors, `use_block`. | A34, A37 |
+| A40 | **M11 acceptance.** M11 done-when. | A36, A38, A39 |
+
+**M12: Evaluation.**
+
+| ID | Item | Depends on |
+|---|---|---|
+| A41 | **Run metrics.** Levels cleared, deaths, kills, gems, time per level, from the trace. | A5 |
+| A42 | **Comparison across commits.** A regression shows up as a number. | A41 |
+
+Today the agent falls back to fleeing from every NPC: it aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it (A23 adds `Fight`).
+
+The playable plan's strategist (M4) replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the remaining one-intent queues in **Real time**; until then those sections describe the shipped agent. The call budget is unchanged: one request per character per tick, burst 3.
 
 ## Tests
 

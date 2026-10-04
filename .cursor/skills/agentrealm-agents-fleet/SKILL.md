@@ -80,7 +80,7 @@ Repo: `evandelacruz/agentrealm-agents`.
 
 ## Choosing backlog work
 
-**Default is one ID per agent.** Milestones are deliberately large and get sliced into PRs at code time, so a single agent takes one slice of one milestone, not several.
+**One ID per agent, one agent per ID.** Backlog items are PR-sized, so an agent takes one item. Never put two slots on the same ID in a batch; if fewer IDs are ready than slots, leave the extra slots empty rather than splitting an item. Milestones (M6, M7, …) are headings, not items: never assign one.
 
 **Hard gates first.** Respect stated dependencies. Prefer work that unlocks other items over parallel leaf work when both are ready.
 

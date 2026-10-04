@@ -18,7 +18,7 @@ from .config import Policy
 from .world import WorldModel, chebyshev
 
 if TYPE_CHECKING:
-    from .brain import Memory
+    from .memory import Memory
 
 THREAT_NEAR_BLOCKS = 3
 CALM_POLL_MIN = 4

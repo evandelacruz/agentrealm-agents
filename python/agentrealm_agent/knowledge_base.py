@@ -1,7 +1,7 @@
 """Per-world knowledge base under python/.state/worlds/<world_code>.json.
 
 Shared by every character run from this checkout that plays the same world.
-Later milestones fill the sections; A18 owns the item table (not stored here).
+Sections are filled over later milestones; A18 owns ``items``.
 
 `run` loads each world's file once at start and saves it once at exit. All
 characters of a world share the one in-memory object; anything that changes
@@ -34,6 +34,7 @@ SECTION_KEYS = (
     "clues",
     "breaks",
     "npc_types",
+    "items",
     "entrances",
     "levels",
     "compose",
@@ -56,7 +57,7 @@ def _check_world_code(world_code: str) -> None:
 
 @dataclass
 class KnowledgeBase:
-    """Sections match docs/PLAYABLE_AGENT_PLAN.md **Knowledge base** (item stats are A18)."""
+    """Sections match docs/PLAYABLE_AGENT_PLAN.md **Knowledge base**."""
 
     world_code: str
     schema_version: int = SCHEMA_VERSION
@@ -64,6 +65,7 @@ class KnowledgeBase:
     clues: list[dict[str, Any]] = field(default_factory=list)
     breaks: dict[str, dict[str, Any]] = field(default_factory=dict)
     npc_types: dict[str, dict[str, Any]] = field(default_factory=dict)
+    items: dict[str, dict[str, Any]] = field(default_factory=dict)
     entrances: dict[str, dict[str, Any]] = field(default_factory=dict)
     levels: dict[str, dict[str, Any]] = field(default_factory=dict)
     compose: list[dict[str, Any]] = field(default_factory=list)

@@ -153,7 +153,7 @@ python -m agentrealm_agent metrics characters/wren.toml
 python -m agentrealm_agent compare-metrics baseline.json candidate.json
 ```
 
-Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local stack; the public API is `https://api.agentrealm.gg`, where lives are permanent), `AGENTREALM_API_KEY`. After `make up` in the game repo, run [`scripts/seed_local_stack.py`](scripts/seed_local_stack.py) with `AGENTREALM_STACK_DIR` pointing at that compose project so the front tier logs yield a verification token; it mints the first key and writes `export` lines to `python/.state/local.env` (mode 0600, git-ignored). Re-running reuses that key. `--probe` also waits until sandbox `create` succeeds, at the cost of a character that holds one of the account's two sandbox slots for 24 hours (Manual §13).
+Environment: `AGENTREALM_API_KEY` (from the account page on agentrealm.gg) and `AGENTREALM_BASE_URL` (default `https://api.agentrealm.gg`, the public API; lives there are permanent).
 
 `run` drives every listed character, one thread each. Each character logs one line per window to stdout (tick, position, call made, intent, the result of the last one, events) and a JSONL trace to `.state/<name>.trace.jsonl`, so a death can be read back as a decision. `metrics` reads the last run from that trace (the trace is appended to; each run starts with a `world` record) and prints levels cleared, deaths, kills, gems, time per level, and how many lines it could not parse. Time per level runs from leaving the overworld (the town's map) to the level's `level_clear_ceremony`, across every map of the level; a run that starts inside a level has no time for it (A41). `compare-metrics` subtracts a baseline from a candidate and prints the deltas, so a regression shows up as a number (A42). Each side is a trace (`.jsonl`), a metrics snapshot (`.json`), a captured `metrics` line for one character (a capture with several lines is refused), or a character file whose trace is read. A delta is `null` when either side has no value: `gems` never seen, or a level timed in only one run (cleared in one and not the other, or entered mid-level), which would otherwise read as a slowdown or speedup of the whole level time.
 
@@ -161,8 +161,6 @@ Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local sta
 
 | Gap | Effect on the agent | Where it lands |
 |---|---|---|
-| Sandbox content loads on the sim's first start; the `default` outfit is seeded | Create works with avatar `default` once the sim has started; before that it answers `world_not_ready`. | B13, B39 |
-| No character delete and no read-only sandbox readiness signal | The seed script can confirm the sandbox map is loaded only by creating a probe character, which then holds one of the account's two sandbox slots until it ends, so the probe is opt-in (M5). | None |
 | No hostile's reach is served | `hostile_range` is a guess in the character file. | None |
 | No NPC's health or damage is served, except a boss's health | Hostile health and damage per type are learned from `NPCDamaged`, `NPCDied` and `Damaged`, with conservative defaults until measured ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) Combat). | None |
 | No supply's capabilities (cut, chop, smash, burn, blast, light, water) are served on any read | The item table stores none. They come from the manual's per-class rules ([`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) Movement and blocks) or from break results (A28). | None |
@@ -175,7 +173,7 @@ This table is the backlog. Each row is one PR-sized item with a stable ID; IDs a
 
 Items are grouped into milestones (M0–M12). A milestone is a heading, not a work item: it is done when all its items are. The scope and done-when of M4 and M6–M12 are in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) **Milestones**, with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). Each milestone ends with an acceptance item that runs its done-when.
 
-**Built (M0–M3, M5).**
+**Built (M0–M3). M5 is retired.**
 
 | ID | Item | Depends on |
 |---|---|---|
@@ -183,7 +181,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | M1 | **Client and loop.** HTTP client, call scheduler, wall-clock pacing, 429/503 handling, `create`/`run`/`status`, `idle` and `wander`. | |
 | M2 | **World model and pathing.** Tile and entity cache per map, local position tracking, A*, `explore`, `doors`, `goto`. | M1 |
 | M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
-| M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. The agent's default base URL is the local stack. | M1 |
+| M5 | **Retired.** Was a local-stack seed script. The agents target the public API at agentrealm.gg; there is no local stack for users of this repo. | M1 |
 
 **M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, `Use` and `Say`/`Broadcast` through `executor/pacing.py` with cooldowns carried across queues (A1), multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2) and on path changes (A43), applying snapshot versions, deltas and health in the world model, and tick POSTs that carry the last applied observation version (A3). The live Olympuff acceptance script [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py) runs the done-when (A4); A4 stays open until a live PASS is recorded.
 

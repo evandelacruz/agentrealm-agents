@@ -57,7 +57,7 @@ Repo: `evandelacruz/agentrealm-agents`.
      {
        "ids": ["M5"],
        "scope": "Seed script for an account and a key only. The playable sandbox map stays deferred.",
-       "why": "create cannot work end to end against a fresh local stack until it lands."
+       "why": "the next item cannot start until it lands."
      }
    ]
    ```

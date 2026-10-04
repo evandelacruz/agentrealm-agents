@@ -12,14 +12,12 @@ The site’s [Agent guides](https://agentrealm.gg/guides) and [docs](https://age
 
 ## Quick start
 
-With the [game stack](https://agentrealm.gg/docs/manual#13-running-the-stack-locally) running (`make up` in that repo, front tier on port 8080):
+You need an account on [agentrealm.gg](https://agentrealm.gg) and an API key from your account page. The agents play the public API at `https://api.agentrealm.gg`, the default base URL; there is nothing to host.
 
 ```sh
 git clone https://github.com/evandelacruz/agentrealm-agents.git
 cd agentrealm-agents
-export AGENTREALM_STACK_DIR=/path/to/agentrealm   # compose project root, for signup logs
-python3 scripts/seed_local_stack.py               # account + API key; re-runs reuse the key
-source python/.state/local.env                    # export lines, mode 0600, git-ignored
+export AGENTREALM_API_KEY=...   # from your account page on agentrealm.gg
 
 cd python
 python3 -m agentrealm_agent create characters/wren.toml
@@ -29,9 +27,7 @@ python3 -m agentrealm_agent metrics characters/wren.toml
 python3 -m agentrealm_agent compare-metrics /tmp/wren.baseline.metrics /tmp/wren.candidate.metrics
 ```
 
-Against the public API, skip the seed script: set `AGENTREALM_BASE_URL=https://api.agentrealm.gg` and an API key from your account page.
-
-**The default base URL is `http://localhost:8080`, a local stack.** To play the public API, set `AGENTREALM_BASE_URL=https://api.agentrealm.gg` and use a key from your account page on agentrealm.gg. Lives there are permanent: a character at zero lives is ended. The sample characters set `world = "sandbox"`, the free practice world with the same rules on a different map; set `world` to a live world's code to play there.
+Lives are permanent: a character at zero lives is ended. The sample characters set `world = "sandbox"`, the free practice world with the same rules on a different map; set `world` to a live world's code to play there. `AGENTREALM_BASE_URL` overrides the API address.
 
 `create` saves each character’s id to `python/.state/<name>.json`. `run` drives every listed character until Ctrl-C, one line per window to stdout and a JSONL trace per character in `python/.state/`. `metrics` summarizes the last run in that trace (deaths, kills, gems, levels cleared, time per level; [`PLAN.md`](PLAN.md) A41); the trace keeps every run, and each starts at its `world` record. To compare two runs or two commits, save `metrics` output for one character from each (or keep the trace paths) and run `compare-metrics`; it prints candidate-minus-baseline deltas ([`PLAN.md`](PLAN.md) A42). A positive `deaths` delta means the candidate died more; a positive `time_per_level` delta means it took longer on a level both runs cleared. A level cleared in only one run has a `null` delta, as does `gems` when either run never saw a value. Characters in the same world share one learned knowledge file at `python/.state/worlds/<world_code>.json` (gitignored): `run` loads it once at start, refusing to start if it is unreadable, and saves it once at exit. Its `items` section holds, per `supply_subtype_code`, weapon reach from a `target_out_of_range` rejection, shop prices seen, and `weapon_damage`: per `npc_type_code`, the largest single hit we have seen this weapon land on that NPC type, counted only when the hit can only be ours. Damage is rolled and depends on the target's defense, so it is a lower bound on the weapon's best hit against that type, not the weapon's damage stat ([`PLAN.md`](PLAN.md) A18). Its `entrances` section holds one row per minimap entrance mark, keyed `"<map_id>:<x>,<y>"`, with what a look found there (`looked`, `block_type`, `locked`, `needs`); a file from before map-keyed rows is rekeyed once at load ([`PLAN.md`](PLAN.md) A30).
 

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from .config import Policy
 from .executor.movement import step_landing
+from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import known_prefix
 from .pathing import step_open
@@ -101,9 +102,10 @@ def decide(
     rng: random.Random,
     *,
     never_attack: list[str] | None = None,
+    knowledge: KnowledgeBase | None = None,
 ) -> Decision:
     """Run the priority dispatcher (A5) and keep its first intent as a Decision."""
-    ctx = PlayContext(m, policy, rng, never_attack=never_attack or [])
+    ctx = PlayContext(m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
     outcome = dispatch(w, ctx)
     intent = outcome.intents[0] if outcome.intents else None
     return Decision(intent, outcome.reason, outcome.reflex)

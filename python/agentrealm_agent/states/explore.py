@@ -6,6 +6,7 @@ import random
 
 from ..config import Policy
 from ..directives import attack_forbidden
+from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
 from ..pathing import flee_step, grid_params, next_step, replan
@@ -25,7 +26,13 @@ class ExploreState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         return scripted_outcome(
-            world, ctx.memory, ctx.policy, ctx.rng, never_attack=ctx.never_attack, state=self.name
+            world,
+            ctx.memory,
+            ctx.policy,
+            ctx.rng,
+            never_attack=ctx.never_attack,
+            knowledge=ctx.knowledge,
+            state=self.name,
         )
 
 
@@ -36,6 +43,7 @@ def scripted_outcome(
     rng: random.Random,
     *,
     never_attack: list[str],
+    knowledge: KnowledgeBase | None = None,
     state: str = "Explore",
 ) -> StateOutcome:
     """Reflex list then plan (PLAN.md). M7 test seam: list[Intent] in the outcome."""
@@ -94,7 +102,7 @@ def scripted_outcome(
 
     step = next_step(w, plan_avoid, m.path)
     if step is None:
-        replan(w, m, policy, rng, plan_avoid, escape)
+        replan(w, m, policy, rng, plan_avoid, escape, knowledge)
         step = next_step(w, plan_avoid, m.path)
     if step is not None:
         return StateOutcome([set_position(step)], f"{m.goal} → {m.path[-1]}", state=state)

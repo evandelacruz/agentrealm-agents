@@ -19,6 +19,7 @@ class ConfigTest(unittest.TestCase):
             ('hostile_range = 1.5', "policy.hostile_range"),
             ('pickup = "yes"', "policy.pickup"),
             ('seed = "abc"', "policy.seed"),
+            ('goto = [1, 2]\ngoto_map = "2"', "policy.goto_map"),
         ]
         for body, key in cases:
             with self.subTest(key), tempfile.TemporaryDirectory() as tmp:

@@ -32,14 +32,14 @@ class CostGridTest(unittest.TestCase):
     def test_hazard_cost_uses_occupy_damage(self):
         w = grid([".~.", "...", "..."], at=(0, 1))
         w.view.damage[(1, 0)] = 4
-        self.assertEqual(_Grid(w, (2, 1), CostGridParams()).cost((1, 0)), 1 + 4)
+        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 4)
         p = cost_path(w, (2, 1), CostGridParams())
         self.assertIsNotNone(p)
         self.assertNotIn((1, 0), p)
 
     def test_hazard_with_unnamed_damage_costs_a_costly_step(self):
         w = grid(["~"])
-        self.assertEqual(_Grid(w, (5, 5), CostGridParams()).cost((0, 0)), 1 + COSTLY_STEP)
+        self.assertEqual(_Grid(w, {(5, 5)}, CostGridParams()).cost((0, 0)), 1 + COSTLY_STEP)
 
     def test_zero_occupy_damage_is_kept(self):
         w = WorldModel(character_id=1, map_id=1, pos=(0, 0))
@@ -68,7 +68,7 @@ class CostGridTest(unittest.TestCase):
     def test_break_nominated_stays_impassable(self):
         w = grid(["..."])
         params = CostGridParams(break_nominated={(1, 0)})
-        self.assertIsNone(_Grid(w, (1, 0), params).cost((1, 0)))
+        self.assertIsNone(_Grid(w, {(1, 0)}, params).cost((1, 0)))
 
     def test_doors_are_entered_only_as_the_goal(self):
         # A door warps, so a path never crosses one on the way somewhere else.

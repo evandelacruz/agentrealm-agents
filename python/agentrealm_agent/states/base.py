@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from ..client import Intent
 from ..config import Policy
+from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..world import WorldModel
 
@@ -20,6 +21,7 @@ class PlayContext:
     policy: Policy
     rng: random.Random
     never_attack: list[str] = field(default_factory=list)
+    knowledge: KnowledgeBase | None = None  # per-world door graph and terrain (A26)
 
 
 @dataclass

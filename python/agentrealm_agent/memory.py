@@ -36,3 +36,4 @@ class Memory:
     resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
     path_blockers: set = field(default_factory=set)  # blocked cells the walk queue already crossed when sent (A43)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
+    warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)

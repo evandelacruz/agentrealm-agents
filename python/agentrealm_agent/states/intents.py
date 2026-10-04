@@ -13,8 +13,12 @@ def use_on(e: Entity) -> dict:
     return {"verb": "Use", "target": {"kind": "character", "character_id": e.id}}
 
 
-def take(e: Entity) -> dict:
-    return {"verb": "Take", "supply_id": e.id}
+def use_block(p: Pos) -> dict:
+    return {"verb": "Use", "target": {"kind": "block", "x": p[0], "y": p[1]}}
+
+
+def take(supply_id: int) -> dict:
+    return {"verb": "Take", "supply_id": supply_id}
 
 
 def withdraw_all(chest_id: int) -> dict:
@@ -28,6 +32,15 @@ def read_block(map_id: int, pos: Pos) -> dict:
 
 def say_to(npc: Entity, text: str = "hello") -> dict:
     return {"verb": "Say", "text": text, "target": {"kind": "npc", "npc_id": npc.id}}
+
+
+def drop(supply_id: int) -> dict:
+    return {"verb": "Drop", "supply_id": supply_id}
+
+
+def withdraw(chest_id: int, supply_ids: list[int]) -> dict:
+    # All or nothing: carry_capacity_full when one too many (API WithdrawFromChest).
+    return {"verb": "WithdrawFromChest", "chest_id": chest_id, "supply_ids": list(supply_ids)}
 
 
 def arm(supply_id: int) -> dict:

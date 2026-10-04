@@ -15,6 +15,16 @@ from .navigation import (
     nearest_target,
     route_first_leg,
 )
+from .plan import (
+    EXPLORE_ANYWHERE,
+    EXPLORE_PATH_OPS,
+    OP_STATE,
+    PLAN_STALL_SECONDS,
+    TRAVEL_PATHED,
+    GoalOp,
+    Plan,
+    explore_targets,
+)
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -57,6 +67,115 @@ def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos |
     return None
 
 
+def plan_op_goal(op: GoalOp) -> str:
+    """The ``Memory.goal`` label a path for ``op`` carries, or "" when no path serves it (A34)."""
+    if op["op"] == "explore_area":
+        return "explore_area"
+    if op["op"] == "travel" and op["to"] in ("point", "entrance", "town"):
+        return {"point": "plan_travel", "entrance": "plan_entrance", "town": "plan_town"}[op["to"]]
+    return ""
+
+
+def path_owned_by_plan(plan: Plan | None, m: Memory, policy_goals: list[str] | tuple[str, ...] = ()) -> bool:
+    """False when ``m.path`` was set for something other than the plan's head op.
+
+    A path left by a ``policy.goals`` round, from before a ``goals`` reload, or
+    for an earlier op of the same kind with another target must not keep
+    driving movement once the stack's head is a different op (A34).
+
+    While the head is stalled (no path yet), ``policy.goals`` have the move,
+    so a path ``replan`` set from one of them is kept until it goes stale
+    rather than re-rolled every window.
+    """
+    op = plan.current() if plan is not None else None
+    if op is None:
+        return True
+    if m.goal == "":
+        return False
+    if plan.stalled_since_tick is not None and m.goal_op is None and m.goal in policy_goals:
+        return True
+    return m.goal == plan_op_goal(op) and m.goal_op == op
+
+
+def path_for_plan_op(
+    op: GoalOp,
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None,
+) -> tuple[list[Pos], str] | None:
+    """A cost-grid path for an ``explore_area`` or ``travel`` op, and its goal label (A34)."""
+    if op["op"] == "explore_area":
+        targets = explore_targets(op, w)
+        center = (op["x"], op["y"])
+        if not targets and op["radius"] < EXPLORE_ANYWHERE and chebyshev(w.pos, center) > op["radius"]:
+            targets = {center}
+        found = nearest_target(w, targets, grid_params(policy, blocked, costly))
+        return (found[1], plan_op_goal(op)) if found and found[1] else None
+    if op["op"] != "travel":
+        return None
+    params = grid_params(policy, blocked, costly, allow_goal_door=True)
+    if op["to"] == "point":
+        target = (op["x"], op["y"])
+        dest_map = op.get("map_id", w.map_id)
+        nav = nav_search(m, w, "plan_goto", target) if dest_map == w.map_id else None
+        path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
+        return (path, plan_op_goal(op)) if path else None
+    if op["to"] == "entrance":
+        path = doors_goal_path(w, knowledge, params)
+        return (path, plan_op_goal(op)) if path else None
+    if op["to"] == "town":
+        for map_id, pos in w.respawn_anchors:
+            if map_id == w.map_id:
+                path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav_search(m, w, "plan_town", pos))
+                if path:
+                    return path, plan_op_goal(op)
+    return None
+
+
+def plan_step(
+    plan: Plan,
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None,
+) -> bool:
+    """Set ``m.path`` from the plan's current op. True when the plan decided the round.
+
+    Ops no shipped state can run, and ``travel`` to a destination with no
+    path yet, are dropped and logged. An op that finds no path for
+    ``PLAN_STALL_SECONDS`` is dropped too, so the stack never stalls; until
+    then ``policy.goals`` get the move. A ``wait`` decides the round with no move.
+    """
+    while True:
+        plan.advance(w)
+        op = plan.current()
+        if op is None:
+            return False
+        if op["op"] not in EXPLORE_PATH_OPS:
+            plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet")
+            continue
+        if op["op"] == "wait":
+            return True
+        if op["op"] == "travel" and op["to"] not in TRAVEL_PATHED:
+            plan.drop_current(f"no path to a {op['to']} yet")
+            continue
+        found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
+        if found and next_step(w, blocked, found[0]):
+            plan.stalled_since_tick = None
+            m.path, m.goal = found
+            m.goal_op = dict(op)
+            return True
+        if plan.note_stalled(w.tick):
+            plan.drop_current(f"no path for {PLAN_STALL_SECONDS}s")
+            continue
+        return False
+
+
 def replan(
     w: WorldModel,
     m: Memory,
@@ -65,13 +184,17 @@ def replan(
     blocked: set[Pos],
     costly: set[Pos],
     knowledge: KnowledgeBase | None = None,
+    plan: Plan | None = None,
 ) -> None:
     """Take the first goal whose path starts on a seen, open step.
 
     A path whose first step lies in fog is skipped like an unreachable goal,
     so a later goal (explore, say) gets the move while terrain reads catch up.
+    When a plan is active, its current op is tried before ``policy.goals``.
     """
-    m.path, m.goal = [], ""
+    m.path, m.goal, m.goal_op = [], "", None
+    if plan is not None and plan_step(plan, w, m, policy, blocked, costly, knowledge):
+        return
     for goal in policy.goals:
         found = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
         if next_step(w, blocked, found):

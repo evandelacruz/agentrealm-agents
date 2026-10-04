@@ -7,6 +7,7 @@ from unittest import mock
 
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
+from agentrealm_agent.directives import default_directives
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation.rejection import NavMemory
 from agentrealm_agent.states import STATES, PlayContext, State, StateOutcome, dispatch, scripted_outcome
@@ -26,7 +27,12 @@ def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
 
 
 def ctx(w: WorldModel, m: Memory | None = None, **policy_kw) -> PlayContext:
-    return PlayContext(m or Memory(), Policy(kind="scripted", **policy_kw), random.Random(0))
+    return PlayContext(
+        m or Memory(),
+        Policy(kind="scripted", **policy_kw),
+        random.Random(0),
+        directives=default_directives(),
+    )
 
 
 class DispatchPriorityTest(unittest.TestCase):
@@ -43,6 +49,13 @@ class DispatchPriorityTest(unittest.TestCase):
         out = dispatch(w, ctx(w))
         self.assertEqual(out.state, "Downed")
         self.assertIsNone(out.intents)
+
+    def test_loot_beats_explore(self):
+        w = world(["..."], at=(1, 1))
+        w.entities = [Entity("supply", 8, (1, 2), "heart")]
+        out = dispatch(w, ctx(w))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.intents[0]["verb"], "Take")
 
     def test_explore_returns_intent_list(self):
         w = world(["....", "...."])

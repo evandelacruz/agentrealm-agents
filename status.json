@@ -47,11 +47,11 @@
 
   "A19": {"state": "open"},
 
-  "A20": {"state": "open"},
+  "A20": {"state": "partial", "remaining": "Hearts and gems first, off until their supply codes are known; Drop of stowed supplies and larger-chest capacity are undocumented (GAME_NOTES open questions)."},
 
   "A21": {"state": "open"},
 
-  "A22": {"state": "open"},
+  "A22": {"state": "partial", "remaining": "Gem piles: set the pile supply code in states/gather.py once observed (GAME_NOTES.md Open questions); pile targeting is off until then."},
 
   "A23": {"state": "open"},
 
@@ -61,7 +61,7 @@
 
   "A26": {"state": "done"},
 
-  "A27": {"state": "open"},
+  "A27": {"state": "done"},
 
   "A28": {"state": "open"},
 
@@ -75,7 +75,7 @@
 
   "A33": {"state": "open"},
 
-  "A34": {"state": "open"},
+  "A34": {"state": "done"},
 
   "A35": {"state": "open"},
 

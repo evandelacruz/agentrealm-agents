@@ -13,9 +13,14 @@ from .navigation.rejection import copy_nav, learn_step_rejection, on_block_chang
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
+from .plan import Plan
 from .item_table import absorb_attack_range, absorb_entities_payload, rejection_attack_range
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import record_warp, sync_tiles, sync_world_maps
+from .knowledge_maps import record_hunting_zone, record_warp, sync_tiles, sync_world_maps
+from .loot import learn_loot_rejection
+from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
+from .travel.ops import refresh_travel_stack
+from .travel.strength import loadout_key
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
@@ -92,7 +97,58 @@ class Runner:
         self.directives = DirectivesWatch(cfg.directives_path)
         self.directives.ensure_loaded()
         self.acceptance = acceptance
+        self.plan = self._build_plan()
         self._level_timer = LevelTimer()
+
+    def _build_plan(self) -> Plan:
+        d = self.directives.directives
+        plan = Plan.from_directives(directive_goals=d.goals, directive_params=d.params)
+        if plan is None:
+            plan = Plan.from_policy(self.cfg.policy, d.params)
+        plan.tick_hz = self.tick_hz
+        return plan
+
+    def reload_directives(self, old_goals: list[str]) -> None:
+        """Apply reloaded directives to the plan (A34).
+
+        Changed ``goals`` rebuild the stack from the top and drop the current
+        path, so the new head replans at once. Otherwise the stack keeps its
+        progress and only the params reset to the file's values. **Travel**
+        (A27) keeps its own ``travel:*`` queue, refreshed from the same goals.
+        """
+        d = self.directives.directives
+        refresh_travel_stack(self.mem, d.goals)
+        if d.goals != old_goals:
+            self.plan = self._build_plan()
+            self.mem.path, self.mem.goal, self.mem.goal_op = [], "", None
+        else:
+            self.plan.floor_params, self.plan.params = dict(d.params), dict(d.params)
+        self.log(
+            "directives",
+            f"reloaded never_attack={d.never_attack} goals={len(d.goals)}",
+            {
+                "directives": {
+                    "params": d.params,
+                    "never_attack": d.never_attack,
+                    "goals": d.goals,
+                    "plan_index": self.plan.index,
+                    "plan_len": len(self.plan.goals),
+                }
+            },
+        )
+
+    def _decide(self, w, m, *, plan: Plan | None = None):
+        return decide(
+            w,
+            m,
+            self.cfg.policy,
+            self.rng,
+            never_attack=self.directives.directives.never_attack,
+            params=self.directives.directives.params,
+            knowledge=self.knowledge,
+            directives=self.directives.directives,
+            plan=plan,
+        )
 
     def log(self, call: str, detail: str, record: dict) -> None:
         w = self.world
@@ -106,7 +162,7 @@ class Runner:
             self.trace.close()
             return
         hz = max(1, int(world.get("tick_rate_hz", 1)))
-        self.tick_hz = hz
+        self.tick_hz = self.plan.tick_hz = hz
         horizon_s = max(1, int(world.get("queue_horizon_seconds", DEFAULT_QUEUE_HORIZON_SECONDS)))
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
@@ -115,6 +171,10 @@ class Runner:
         if town.get("map_id") is not None:
             # The town is on the overworld, so leaving its map enters a level (A41).
             self._level_timer.overworld = int(town["map_id"])
+        if self.knowledge is not None:
+            sync_town(self.knowledge, world.get("town"))
+            self._sync_minimap()
+        refresh_travel_stack(self.mem, self.directives.directives.goals)
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:
@@ -126,12 +186,9 @@ class Runner:
                 # calm gap and entity_refresh would never come due. Responses
                 # carry the server's tick and correct it.
                 self.world.tick += 1
+                old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():
-                    self.log(
-                        "directives",
-                        f"reloaded never_attack={self.directives.directives.never_attack}",
-                        {"directives": {"params": self.directives.directives.params, "never_attack": self.directives.directives.never_attack}},
-                    )
+                    self.reload_directives(old_goals)
                 call = choose_call(self.world, self.mem, self.cfg.policy)
                 urgent = self.acceptance is not None and is_urgent(self.world, self.mem, self.cfg.policy)
                 if call == "skip":
@@ -178,6 +235,50 @@ class Runner:
         }
         sync_tiles(self.knowledge, map_id, tiles)
 
+    def _sync_minimap(self) -> None:
+        """Entrance marks into the knowledge base (A27). Read once at startup:
+        marks on maps revealed later are learned on the next run (PLAN.md A27)."""
+        if self.knowledge is None:
+            return
+        try:
+            body = self.client.minimap(self.cid)
+        except ApiError as e:
+            self.log("minimap", f"failed: {e}", {"error": str(e)})
+            return
+        sync_entrances(self.knowledge, body)
+
+    def _sync_loadout(self) -> None:
+        """A loadout change resets the strength bracket and reopens the
+        cells it closed (PLAYABLE_AGENT_PLAN Combat, A27)."""
+        key = loadout_key(self.world)
+        if key != self.mem.loadout_key:
+            self.mem.loadout_key = key
+            self.mem.nav.impassable -= self.mem.strength.reset()
+
+    def _learn_shops_from_entities(self, payload: dict) -> None:
+        """A cell holding a supply with a ``gem_price`` is where it can be
+        bought: a priced supply "spends those gems when picked up" (manual
+        §11, https://agentrealm.gg/docs/manual#11-game-rules). ``travel:shop``
+        heads for one (A27)."""
+        if self.knowledge is None or self.world.map_id is None:
+            return
+        for s in payload.get("supplies") or []:
+            if not isinstance(s, dict):
+                continue
+            price = s.get("gem_price")
+            if price is None or isinstance(price, bool):
+                continue
+            try:
+                if int(price) <= 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            try:
+                pos = (int(s["x"]), int(s["y"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            record_shop_cell(self.knowledge, self.world.map_id, pos)
+
     def read_world(self) -> dict | None:
         """The world read that sets the pace, retried like any other call."""
         while not self.stop.is_set():
@@ -217,6 +318,7 @@ class Runner:
             self.heard_tick(e.get("tick"))
             m.alarm = False
             self._learn_items_from_entities(e)
+            self._learn_shops_from_entities(e)
             self.note_held_path_stale()
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
@@ -235,6 +337,8 @@ class Runner:
                     zone_failed(w, map_id, (x, y))
                 raise
             fact = apply_zone(w, map_id, x, y, z)
+            if self.knowledge is not None and fact.strength_ceiling is not None:
+                record_hunting_zone(self.knowledge, map_id, (x, y), fact.strength_ceiling)
             self.heard_tick(z.get("tick"))
             self.log(call, f"@{map_id}:{x},{y} safe={fact.safe}", {"zone": z})
         else:
@@ -263,15 +367,7 @@ class Runner:
                 # reads it before this poll), so the new walk starts from
                 # where we are. With no walk to send, stop the old queue.
                 self.clear_held_tracking()
-                d = decide(
-                    w,
-                    m,
-                    self.cfg.policy,
-                    self.rng,
-                    never_attack=self.directives.directives.never_attack,
-                    params=self.directives.directives.params,
-                    knowledge=self.knowledge,
-                )
+                d = self._decide(w, m, plan=self.plan)
                 intents = self._apply_never_attack(self.intents_for(d))
                 if intents:
                     d = Decision(d.intent, "path stale, resend")
@@ -282,15 +378,7 @@ class Runner:
                 intents = None
         else:
             m.resend_held_queue = False
-            d = decide(
-                w,
-                m,
-                self.cfg.policy,
-                self.rng,
-                never_attack=self.directives.directives.never_attack,
-                params=self.directives.directives.params,
-                knowledge=self.knowledge,
-            )
+            d = self._decide(w, m, plan=self.plan)
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
@@ -305,6 +393,7 @@ class Runner:
         earlier = w.entities
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        self._sync_loadout()
         w.learn_threat(events, earlier)
         self._learn_items_from_tick(r.get("observation"))
         self.on_events(events)
@@ -368,26 +457,24 @@ class Runner:
     def reflex_while_held(self) -> Decision | None:
         """A reflex (2–4b) that fires while a queue is held, else None.
 
-        Only a firing reflex may touch the plan and the rng; they stay as they
+        Only a firing reflex may touch the path and the rng; they stay as they
         were otherwise, so the held queue's steps are not planned twice. The
         navigation learnings always stay as they were: this probe is not the
-        decision window that ages them (A14).
+        decision window that ages them (A14). The goal stack always stays as it
+        was too: reflexes never consume its ops, so the probe must not advance,
+        pop, or drop them (A34).
         """
         m = self.mem
-        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate())
-        d = decide(
-            self.world,
-            m,
-            self.cfg.policy,
-            self.rng,
-            never_attack=self.directives.directives.never_attack,
-            params=self.directives.directives.params,
-            knowledge=self.knowledge,
-        )
+        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op)
+        saved_plan = self.plan.snapshot()
+        try:
+            d = self._decide(self.world, m, plan=self.plan)
+        finally:
+            self.plan.restore(saved_plan)
         m.nav = saved[2]
         if d.reflex:
             return d
-        m.path, m.goal = saved[0], saved[1]
+        m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
         self.rng.setstate(saved[3])
         return None
 
@@ -604,6 +691,7 @@ class Runner:
                 rej.get("code"),
                 int(result.get("tick", w.tick)),
             )
+        learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
         if self.acceptance is not None:
             code = (result.get("rejection") or {}).get("code", "?")
             self.acceptance.on_rejection(code, verb=(intent or {}).get("verb"))
@@ -741,6 +829,8 @@ def _fmt_intent(i: dict | None) -> str:
         return f"Take({i['supply_id']})"
     if verb == "WithdrawFromChest":
         return f"WithdrawFromChest({i['chest_id']}:{','.join(map(str, i.get('supply_ids', ['all'])))})"
+    if verb == "Drop":
+        return f"Drop({i['supply_id']})"
     return verb
 
 

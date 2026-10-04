@@ -102,6 +102,9 @@ class Client:
             query={"map_id": map_id, "x": x, "y": y},
         )
 
+    def minimap(self, cid: int) -> dict:
+        return self._call("GET", f"/characters/{cid}/minimap")
+
     # The round trip.
 
     def tick(

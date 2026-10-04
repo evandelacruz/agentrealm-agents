@@ -8,11 +8,13 @@ from ..config import Policy
 from ..directives import attack_forbidden
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
+from ..plan import Plan
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import next_step, replan
+from ..pathing import next_step, path_owned_by_plan, replan
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
-from .intents import set_position, take, use_on
+from .intents import set_position, use_on
+from .pickup import pickup_outcome
 
 
 class ExploreState(State):
@@ -32,6 +34,7 @@ class ExploreState(State):
             ctx.rng,
             never_attack=ctx.never_attack,
             knowledge=ctx.knowledge,
+            plan=ctx.plan,
             state=self.name,
         )
 
@@ -44,19 +47,26 @@ def scripted_outcome(
     *,
     never_attack: list[str],
     knowledge: KnowledgeBase | None = None,
+    plan: Plan | None = None,
     state: str = "Explore",
 ) -> StateOutcome:
     """Reflex list then plan (PLAN.md). M7 test seam: list[Intent] in the outcome."""
     if w.pos is None:
         return StateOutcome(None, "position unknown", state=state)
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    reflex = reflex_outcome(w, policy, never_attack=never_attack, state=state)
+    reflex = reflex_outcome(w, policy, never_attack=never_attack, state=state, knowledge=knowledge)
     if reflex is not None:
         return reflex
 
-    step = next_step(w, plan_avoid, m.path)
+    if plan is not None:
+        plan.advance(w)
+        op = plan.current()
+        if op is not None and op["op"] == "wait":
+            return StateOutcome(None, "plan wait", state=state)
+
+    step = next_step(w, plan_avoid, m.path) if path_owned_by_plan(plan, m, policy.goals) else None
     if step is None:
-        replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge)
+        replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge, plan=plan)
         step = next_step(w, plan_avoid, m.path)
     if step is not None:
         return StateOutcome([set_position(step)], f"{m.goal} → {m.path[-1]}", state=state)
@@ -86,8 +96,9 @@ def reflex_outcome(
     *,
     never_attack: list[str],
     state: str,
+    knowledge: KnowledgeBase | None = None,
 ) -> StateOutcome | None:
-    """Reflexes 3–4 (PLAN.md): fight a character, take a supply.
+    """Reflexes 3–4 (PLAN.md): fight a character, the pickup rule of A20.
 
     Stepping off a hazard is **Escape** and fleeing is **Flee** (A9); both
     outrank every state that calls this.
@@ -100,10 +111,7 @@ def reflex_outcome(
         return StateOutcome([use_on(target)], f"fight {target.kind} {target.id}", reflex=True, state=state)
 
     if policy.pickup:
-        near = [e for e in w.entities if e.kind == "supply" and chebyshev(e.pos, here) <= 1]
-        if near:
-            s = min(near, key=lambda e: (chebyshev(e.pos, here), e.id))
-            return StateOutcome([take(s)], f"take {s.code or s.id}", reflex=True, state=state)
+        return pickup_outcome(w, knowledge, state=state)
     return None
 
 

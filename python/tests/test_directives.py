@@ -1,6 +1,7 @@
 """Runtime directives (A8): params, reload, never_attack."""
 
 import os
+import random
 import tempfile
 import time
 import unittest
@@ -121,7 +122,7 @@ class NeverAttackTest(unittest.TestCase):
                 w.view.tiles[(x, y)] = "dirt"
         w.entities = [Entity("character", 5, (2, 1))]
         pol = Policy(kind="scripted", on_hostile="fight", hostile=["character"], hostile_range=2)
-        d = decide(w, Memory(), pol, __import__("random").Random(0), never_attack=["character"])
+        d = decide(w, Memory(), pol, random.Random(0), never_attack=["character"])
         self.assertIsNotNone(d.intent)
         self.assertEqual(d.intent["verb"], "SetPosition", d.reason)
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """A4: Live M6 acceptance on Olympuff (docs/PLAYABLE_AGENT_PLAN.md M6 done-when).
 
-Walks until 200 Steps apply with no movement_cooldown rejections and calm
-windows spend under a quarter of the call budget. Requires network access,
+Walks until 200 Steps apply with no movement_cooldown rejections and
+POST tick goes out in under a quarter of calm windows. Requires network access,
 AGENTREALM_API_KEY, and AGENTREALM_BASE_URL (default https://api.agentrealm.gg).
 Lives on live worlds are permanent; this uses a dedicated character name.
 """

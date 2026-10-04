@@ -95,8 +95,8 @@ States are checked in priority order each tick. The first whose guard holds runs
 | 3 | `Equip` | Carrying something better than what is worn or armed | `Arm`, `Wear`, `Remove` |
 | 3 | `Loot` | A worthwhile free supply or chest is near enough | Walks, `Take` or `WithdrawFromChest`, `Drop` junk when full |
 | 3 | `Shop` | The plan wants an item that is in sight with a `gem_price` we can pay | Walks onto it or `Take`s it |
-| 4 | `Investigate` | An unread readable cell, an unread scroll, or a helper not yet spoken to, near the route | `Read`, `Say`; stores the text as a clue |
-| 4 | `Break` | The plan names a block to open, or an "odd block out" is near | Arms the matching capability, `Use` on the block, records the result per block |
+| 4 | `Investigate` | The interest list has an item within the curiosity budget (see Curiosity) | `Read`, `Say`, `get_zone`, walk to look; stores text as a clue |
+| 4 | `Break` | The plan names a block to open, or the odd-block detector scores a nearby block high enough | Arms the matching capability, `Use` on the block, records the result per block |
 | 4 | `Solve` | The plan holds an action to try (compose, a key at a door, a tool at a block) | Carries out the plan operation and checks the result |
 | 5 | `Gather` | The plan needs gems | Cuts grass and bushes and visits gem piles in safe-ish ground |
 | 5 | `Level` | Inside a level | Walks the rooms toward the unexplored doors, using `Fight`/`Break`/`Investigate` as they apply |
@@ -165,6 +165,44 @@ An opening we cut or burned is open only until it grows back (about 60 s for a b
 - a corridor that is a dead end once fog is revealed.
 
 Each asserts the goal is reached, or abandoned with the right reason, within a move budget.
+
+### Curiosity
+
+Progress in this game is hidden behind things a player has to poke at. Helpers drop hints only when spoken to. Signs and statues carry text. Breakable "odd blocks" hide gems, doors and secrets. Nothing announces itself (M §16). So the agent needs a drive to investigate, not just a reflex for whatever it passes.
+
+**Interest list.** Every terrain and entity read adds to it, and the knowledge base remembers what has been done, so nothing is investigated twice.
+
+| Thing | Action | Notes |
+|---|---|---|
+| Unread `readable` cell (sign, statue, plinth) | `Read` | From up to 25 blocks away, no walk needed. Free: no speech cost, one per tick |
+| Unread scroll, carried or in sight | `Read` | |
+| NPC id never spoken to | `Say` once | Works from 25 blocks. A helper replies with its line; a hostile stays silent, which also tells us it is not a helper. Spaced 1 s apart |
+| Supply type never seen | Walk over or `Take`, if free and safe | Fills the item table |
+| Odd block out | Try each capability we hold, cheapest first | Detector below |
+| Cell with unusual art, or a statue facing differently from its neighbours | Investigate the cells around it | Art is a public picture and authors use it as a clue (M §9.2) |
+| Unvisited door or entrance mark | Walk to it, look | A locked or hidden door gets recorded with what it seems to need |
+| Unknown zone | `get_zone` once | Finds safe zones and hunting grounds |
+
+**Odd-block detector.** This is the manual's motif: one rock in a garden, one bush in a wheat field, one tree in a maze (M §16). A block is odd when:
+- its type is rare in its 7×7 neighbourhood (one or two of it);
+- most of the surrounding cells are a single different type or art;
+- it is breakable in principle: bush, tree, rock, mountain or wall, not water or a door.
+
+A boost comes from a clue that mentions its type or surroundings ("rings hollow", "behind it"). The detector over-reports on purpose. The knowledge base records each try, so a false positive costs a few ticks once.
+
+**Trying a block.**
+- Weapons first, since they are free and not used up: a sword cuts and chops, a mallet smashes.
+- Then tools, which are used up: matches (5 gems), then bombs (expensive). A tool is spent only if the block scores high or a clue points at it.
+- Every outcome is stored per block: `applied_no_effect` with which capability, or what it turned into and what dropped.
+- A capability we lack, on a high-scoring block, becomes a `buy` suggestion for the strategist.
+
+**Budget, so curiosity doesn't get it killed or stalled.**
+- Each item scores value × novelty ÷ (distance + danger + consumable cost).
+- `Investigate` and `Break` run only when survival and the current goal allow, and get a capped share of time. A directive param `curiosity`, default 0.2, sets that share.
+- Reading and speaking from where the agent stands are nearly free, so they always happen. Detours are what the budget limits.
+- Above the cap, items wait for idle moments, or for the strategist to promote one.
+
+**Where the results go.** Every line read or heard goes to the clue list with its place, and fires the strategist's `clue` trigger. The strategist turns clues into goals. With no LLM, simple rules still apply: a clue naming a direction biases `Explore` that way, and a clue naming a capability raises that capability's priority on nearby odd blocks.
 
 ### Combat
 
@@ -239,7 +277,7 @@ Structured keys take effect on the next tick with no model involved. Free text o
 | 2 | **State machine and survival.** Replace `brain.decide` with prioritised states: `Sync`, `Downed`, `Escape`, `Retreat`, `Heal`, `Flee`, `Recover`, `Explore`. Cost-grid planner, rejection learning, stuck detection and escalation steps 1, 3 and 5. Trace replay tests and the navigation fixtures. | Survives an hour in the overworld, retreating to safety and recovering its chest on its own; reaches a point 150 blocks away through fog and obstacles, or gives up with a reason, never loops |
 | 3 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight` with group-aware win estimates and the retreat queued; learned threat and item tables. | Earns gems, buys a bronze kit and potions, and kills lone weak hostiles without dying |
 | 4 | **Navigation and knowledge.** Per-world knowledge base, overworld `Travel` to entrance marks and back to town, door graph and cross-map routing, per-block break memory, `Break` (escalation steps 2 and 4). | Visits every entrance mark within its strength, records what each needs, and returns to town |
-| 5 | **Clues.** `Investigate`: `Read` every readable cell and scroll, `Say` to every helper, clue capture with place and time. | Every sign, statue and helper line near its route is in the knowledge base |
+| 5 | **Curiosity and clues.** Interest list, odd-block detector, `Investigate` and `Break` under the curiosity budget, clue capture with place and time, no-LLM clue rules. | Every readable cell and NPC within 25 blocks of its route has been read or spoken to; it finds and opens an odd block in a test map, and never spends a tool twice on the same block |
 | 6 | **Strategist and directives.** LLM planner thread, plan schema, directives file, trace logging. | Given clues from a test world, it plans the right `buy`/`travel`/`break_block` operations and the state machine carries them out |
 | 7 | **Levels.** `Level`, `Boss`, `Solve` (`Compose`, keys at doors). Boss preconditions from the plan; boss progress from its `health`. | Clears the easiest open level unattended, then uses what it learned to attempt the next |
 | 8 | **Evaluation.** Metrics per run (levels cleared, deaths, kills, gems, time per level), compared across commits. | A regression shows up as a number |

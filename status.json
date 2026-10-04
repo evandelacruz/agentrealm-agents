@@ -5,7 +5,10 @@
   "M3": {"state": "done"},
   "M4": {"state": "open"},
   "M5": {"state": "open"},
-  "M6": {"state": "open"},
+  "M6": {
+    "state": "partial",
+    "remaining": "Step/Wait pacing polish, two poll cadences, snapshot deltas, health tracking, Olympuff smoke test"
+  },
   "M7": {"state": "open"},
   "M8": {"state": "open"},
   "M9": {"state": "open"},

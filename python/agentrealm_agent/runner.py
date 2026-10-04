@@ -275,17 +275,13 @@ class Runner:
         return rejected
 
     def _result_is_ours(self, res: dict) -> bool:
+        # Only the queue_id our own submit was answered with: a result for any
+        # other queue (an earlier one we gave up on) is never adopted.
         m = self.mem
         qid = res.get("queue_id")
-        if m.pending_queue is not None:
-            return qid == m.pending_queue
-        if m.pending_intents is not None and qid is not None:
-            m.pending_queue = qid
-            return True
-        if m.pending is not None and qid is not None:
-            m.pending_queue = qid
-            return res.get("index", 0) == 0
-        return False
+        if qid is None or qid != m.pending_queue:
+            return False
+        return m.pending_intents is not None or res.get("index", 0) == 0
 
     def _intent_at(self, index: int) -> dict | None:
         m = self.mem

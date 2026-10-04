@@ -21,14 +21,15 @@ class FakeClient:
     answers with the request's id (docs/API.md Round Trip).
     """
 
-    def __init__(self, ticks: list[dict]):
+    def __init__(self, ticks: list[dict], queue_ids: bool = True):
         self.ticks = list(ticks)
+        self.queue_ids = queue_ids
         self.sent: list[list[dict] | None] = []
 
     def tick(self, cid, intents):
         self.sent.append(intents)
         r = dict(self.ticks.pop(0))
-        if intents is not None:
+        if intents is not None and self.queue_ids:
             r["queue_id"] = f"q{len(self.sent)}"
         return r
 
@@ -99,6 +100,24 @@ class RunnerTest(unittest.TestCase):
         r.tick()
         self.assertFalse(r.mem.need_position)
         self.assertEqual(r.world.pos, (1, 0))
+
+    def test_a_stale_queue_result_beside_a_new_submit_is_not_adopted(self):
+        # Only the queue_id our own submit was answered with is ours. A late
+        # result for an earlier queue, arriving on the response to a new
+        # submit, is not applied, whether or not that response names a queue.
+        stale = rejected("q0", "block_occupied", "occupied", 9)
+        for queue_ids in (True, False):
+            with self.subTest(queue_ids=queue_ids):
+                fake = FakeClient([{"tick": 10, "window_remaining_ms": 0, "intent_results": [stale]}],
+                                  queue_ids=queue_ids)
+                r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+                r.tick()
+                self.assertGreater(len(fake.sent[0]), 1)
+                self.assertEqual(r.mem.pending_queue, "q1" if queue_ids else None)
+                self.assertFalse(r.mem.need_position)
+                self.assertEqual(r.mem.blocked, {})
+                self.assertIsNotNone(r.mem.pending_intents, "our queue is still awaited")
+                self.assertEqual(r.mem.pending_next_index, 0)
 
     def test_nothing_to_do_leaves_the_queue_as_it_is(self):
         # docs/API.md Intent Queue: a request without intents leaves the held

@@ -88,7 +88,7 @@ def recover_outcome(
 
 
 class RecoverState(State):
-    """Priority 3: above Explore. Reflexes 2–4 still run first (PLAN.md)."""
+    """Priority 3: above Explore. Escape, Retreat and Flee outrank it; the fight and pickup reflexes still run first (PLAN.md)."""
 
     name = "Recover"
 
@@ -106,8 +106,8 @@ class RecoverState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         m, policy = ctx.memory, ctx.policy
-        blocked, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
-        reflex = reflex_outcome(world, m, policy, blocked, never_attack=ctx.never_attack, state=self.name)
+        _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
+        reflex = reflex_outcome(world, policy, never_attack=ctx.never_attack, state=self.name)
         if reflex is not None:
             return reflex
         out = recover_outcome(world, m, policy, plan_avoid, plan_costly, state=self.name)

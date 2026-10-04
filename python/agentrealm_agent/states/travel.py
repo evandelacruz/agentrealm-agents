@@ -60,8 +60,8 @@ class TravelState(State):
             return _fallback(world, ctx, "travel: arrived")
         index, dest = target
         set_travel_index(m, index)
-        blocked, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
-        reflex = reflex_outcome(world, m, policy, blocked, never_attack=ctx.never_attack, state=self.name)
+        _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
+        reflex = reflex_outcome(world, policy, never_attack=ctx.never_attack, state=self.name)
         if reflex is not None:
             return reflex
         out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly)

@@ -43,7 +43,7 @@
 
   "A17": {"state": "done"},
 
-  "A18": {"state": "done"},
+  "A18": {"state": "partial", "remaining": "Weapon damage per subtype from NPCDamaged matched to our own Use (block and tick), damage saved per worn item, and capabilities once they can be sourced (not served; PLAN.md Server gaps, A28 break results)."},
 
   "A19": {"state": "open"},
 

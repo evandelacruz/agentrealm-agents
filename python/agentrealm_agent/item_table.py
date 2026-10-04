@@ -1,24 +1,25 @@
 """Learned stats per ``supply_subtype_code`` (A18, M8).
 
-Filled from play: weapon reach and damage after ``Arm``, damage taken while
-an item is ``Wear`` ed, ``gem_price`` on supplies seen, and break/light/water
-capabilities named on supply payloads.
+A row holds only facts the API serves for that subtype (PLAN.md A18):
+
+- ``attack_range``: from a ``Use`` rejected ``target_out_of_range``, which
+  carries the reach the sim judged by (API Use, B100). Filed under the
+  subtype armed in the same response's observation. Overwritten.
+- ``gem_price``: from supplies on entity reads and snapshot entities (API
+  Reads, Snapshots). Overwritten, since prices are tuned in play.
+
+Weapon damage, damage taken while worn, and capabilities are not stored yet:
+see PLAN.md A18 for why.
 """
 
 from __future__ import annotations
 
 from typing import Any, Iterable
 
-CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast", "light", "water"})
-
 
 def _supply_code(entry: Any) -> str | None:
-    if entry is None:
-        return None
-    if isinstance(entry, str):
-        return entry or None
     if isinstance(entry, dict):
-        code = entry.get("supply_subtype_code") or entry.get("code")
+        code = entry.get("supply_subtype_code")
         if isinstance(code, str) and code:
             return code
     return None
@@ -34,18 +35,12 @@ def _positive_int(v: Any) -> int | None:
     return n if n > 0 else None
 
 
-def capabilities_from_supply(entry: dict) -> list[str]:
-    caps = entry.get("capabilities")
-    if isinstance(caps, list):
-        return sorted({c for c in caps if isinstance(c, str) and c in CAPABILITIES})
-    one = entry.get("capability")
-    if isinstance(one, str) and one in CAPABILITIES:
-        return [one]
-    return sorted(c for c in CAPABILITIES if entry.get(c))
-
-
 def loadout_from_inventory(inv: dict | None) -> tuple[str | None, dict[str, str]]:
-    """Armed subtype and worn slot -> subtype from a snapshot inventory."""
+    """Armed subtype and worn slot -> subtype from a snapshot ``inventory``.
+
+    Each supply there is an ``id`` and ``supply_subtype_code``; ``worn`` is
+    keyed by slot (API Snapshots).
+    """
     if not inv:
         return None, {}
     armed = _supply_code(inv.get("armed"))
@@ -59,66 +54,25 @@ def loadout_from_inventory(inv: dict | None) -> tuple[str | None, dict[str, str]
     return armed, worn
 
 
-def _merge_capabilities(entry: dict[str, Any], caps: Iterable[str]) -> None:
-    merged = set(entry.get("capabilities") or []) | {c for c in caps if c in CAPABILITIES}
-    if merged:
-        entry["capabilities"] = sorted(merged)
-
-
 def merge_item(items: dict[str, dict[str, Any]], code: str | None, **facts: Any) -> None:
-    """Merge observed facts into the per-world item table (in place)."""
+    """Merge observed facts into the per-world item table (in place).
+
+    Invalid or missing values are ignored, and a row is created only when at
+    least one fact is kept.
+    """
     if not code:
         return
-    row = items.setdefault(code, {})
-    for key, value in facts.items():
-        if value is None:
-            continue
-        if key == "capabilities":
-            _merge_capabilities(row, value if isinstance(value, Iterable) and not isinstance(value, str) else [value])
-        elif key == "attack_range":
-            n = _positive_int(value)
-            if n is not None:
-                row["attack_range"] = n
-        elif key == "weapon_damage":
-            n = _positive_int(value)
-            if n is not None:
-                row["weapon_damage"] = max(row.get("weapon_damage", 0), n)
-        elif key == "damage_taken":
-            n = _positive_int(value)
-            if n is not None:
-                row["damage_taken"] = max(row.get("damage_taken", 0), n)
-        elif key == "gem_price":
-            n = _positive_int(value)
-            if n is not None:
-                row["gem_price"] = n
+    kept: dict[str, int] = {}
+    for key in ("attack_range", "gem_price"):
+        n = _positive_int(facts.get(key))
+        if n is not None:
+            kept[key] = n
+    if kept:
+        items.setdefault(code, {}).update(kept)
 
 
 def absorb_supply_entry(items: dict[str, dict[str, Any]], entry: dict) -> None:
-    code = _supply_code(entry)
-    if not code:
-        return
-    price = _positive_int(entry.get("gem_price"))
-    caps = capabilities_from_supply(entry)
-    merge_item(items, code, gem_price=price, capabilities=caps or None)
-
-
-def absorb_inventory(items: dict[str, dict[str, Any]], inv: dict | None) -> None:
-    if not inv:
-        return
-    armed = inv.get("armed")
-    if isinstance(armed, dict):
-        absorb_supply_entry(items, armed)
-    worn = inv.get("worn")
-    if isinstance(worn, dict):
-        for entry in worn.values():
-            if isinstance(entry, dict):
-                absorb_supply_entry(items, entry)
-    for key in ("held", "chest"):
-        bag = inv.get(key)
-        if isinstance(bag, list):
-            for entry in bag:
-                if isinstance(entry, dict):
-                    absorb_supply_entry(items, entry)
+    merge_item(items, _supply_code(entry), gem_price=entry.get("gem_price"))
 
 
 def _entity_kind_entries(entities: dict, kind: str) -> Iterable[dict]:
@@ -135,46 +89,24 @@ def _entity_kind_entries(entities: dict, kind: str) -> Iterable[dict]:
 
 
 def absorb_entities_payload(items: dict[str, dict[str, Any]], entities: dict | None) -> None:
+    """Prices from supplies in an entity read, a snapshot, or a delta patch."""
     if not entities:
         return
     for s in _entity_kind_entries(entities, "supplies"):
         absorb_supply_entry(items, s)
-    for ch in _entity_kind_entries(entities, "chests"):
-        for entry in ch.get("contents") or []:
-            if isinstance(entry, dict):
-                absorb_supply_entry(items, entry)
 
 
-def absorb_npc_damaged(items: dict[str, dict[str, Any]], armed_code: str | None, ev: dict) -> None:
-    if not armed_code or ev.get("kind") != "NPCDamaged":
-        return
-    amount = _positive_int(ev.get("amount"))
-    if amount is not None:
-        merge_item(items, armed_code, weapon_damage=amount)
+def rejection_attack_range(result: dict) -> int | None:
+    """Reach carried by a ``target_out_of_range`` rejection, else None."""
+    if result.get("outcome") != "rejected":
+        return None
+    rej = result.get("rejection") or {}
+    if rej.get("code") != "target_out_of_range":
+        return None
+    return _positive_int(rej.get("attack_range"))
 
 
-def absorb_damaged_while_worn(
-    items: dict[str, dict[str, Any]], worn_codes: dict[str, str], ev: dict
-) -> None:
-    if ev.get("kind") != "Damaged":
-        return
-    amount = _positive_int(ev.get("amount"))
-    if amount is None or not worn_codes:
-        return
-    for code in worn_codes.values():
-        merge_item(items, code, damage_taken=amount)
-
-
-def absorb_rejection_attack_range(
-    items: dict[str, dict[str, Any]], armed_code: str | None, result: dict
-) -> None:
-    if not armed_code or result.get("outcome") == "rejected":
-        rej = result.get("rejection") or {}
-        if rej.get("code") == "target_out_of_range":
-            merge_item(items, armed_code, attack_range=_positive_int(rej.get("attack_range")))
-
-
-def absorb_self_attack_range(
+def absorb_attack_range(
     items: dict[str, dict[str, Any]], armed_code: str | None, attack_range: int | None
 ) -> None:
     if armed_code and attack_range is not None:

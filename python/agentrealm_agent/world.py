@@ -146,8 +146,8 @@ class WorldModel:
             self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
-        if "attack_range" in s:
-            self.attack_range = _opt_int(s.get("attack_range"))
+        # Absent while nothing, or no weapon, is armed (B100).
+        self.attack_range = _opt_int(s.get("attack_range"))
 
     def apply_position(self, p: dict) -> None:
         map_id = int(p["map_id"])

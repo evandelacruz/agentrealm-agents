@@ -144,6 +144,7 @@ Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local sta
 | No character delete and no read-only sandbox readiness signal | The seed script can confirm the sandbox map is loaded only by creating a probe character, which then holds one of the account's two sandbox slots until it ends, so the probe is opt-in (M5). | None |
 | No hostile's reach is served | `hostile_range` is a guess in the character file. | None |
 | No NPC's health or damage is served, except a boss's health | Hostile health and damage per type are learned from `NPCDamaged`, `NPCDied` and `Damaged`, with conservative defaults until measured ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) Combat). | None |
+| No supply's capabilities (cut, chop, smash, burn, blast, light, water) are served on any read | The item table stores none. They come from the manual's per-class rules ([`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) Movement and blocks) or from break results (A28). | None |
 | Our own strength is served only on the owner watch sheet, not on a character route | The agent brackets its strength from `over_strength_ceiling` rejections and does not read the watch sheet, which sits outside the character call budget. | None |
 
 ## Milestones
@@ -194,7 +195,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | ID | Item | Depends on |
 |---|---|---|
 | A17 | **Per-world knowledge base.** `python/.state/worlds/<world_code>.json`: load, save, sections, shared by the world's characters. Loaded once when `run` starts, saved once at exit; one `run` process per world. | |
-| A18 | **Item table.** Keyed by `supply_subtype_code`, filled from `Arm`, `Wear`, prices seen and capabilities. | A17 |
+| A18 | **Item table.** `items` in the knowledge base, keyed by `supply_subtype_code`. A row holds only served facts, each a positive integer that overwrites the last: `attack_range` from a `Use` rejected `target_out_of_range` (it carries the reach judged by, B100), filed under the subtype armed in that same response's observation (`get_self`'s `attack_range` names no subtype and can trail an `Arm`, so it is not used); `gem_price` from supplies on entity reads and snapshot entities. Not stored yet: weapon damage (`NPCDamaged` reaches everyone who sees the block, so a hit is ours only when matched to our `Use`), damage taken per worn item (a `Damaged` hit can't be split between worn slots), and capabilities (not served; Server gaps). | A17 |
 | A19 | **Equip.** Score slots, swap when a carried item is better. | A5, A18 |
 | A20 | **Loot.** `Take`, `WithdrawFromChest`, `Drop` junk when full; hearts first. | A5 |
 | A21 | **Shop.** Buy in-sight priced supplies the plan wants; restock to `potion_reserve`. | A5, A18 |

@@ -29,3 +29,11 @@ def drop(supply_id: int) -> dict:
 def withdraw(chest_id: int, supply_ids: list[int]) -> dict:
     # All or nothing: carry_capacity_full when one too many (API WithdrawFromChest).
     return {"verb": "WithdrawFromChest", "chest_id": chest_id, "supply_ids": list(supply_ids)}
+
+
+def arm(supply_id: int) -> dict:
+    return {"verb": "Arm", "supply_id": supply_id}
+
+
+def use_self(character_id: int) -> dict:
+    return {"verb": "Use", "target": {"kind": "character", "character_id": character_id}}

@@ -7,17 +7,20 @@ from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
 from .downed import DownedState
 from .explore import ExploreState
+from .heal import HealState
 from .idle import IdleState
 from .loot import LootState
 from .recover import RecoverState
 from .sync import SyncState
 
 # Priority order (PLAYABLE_AGENT_PLAN.md State machine). Sync and Downed are
-# both priority 0 and never both act: each only waits. A9–A10 slot above Explore
-# later; Recover (A11) and Loot (A20) are priority 3, in the plan's table order.
+# both priority 0 and never both act: each only waits. Heal (A10) is priority 1;
+# Recover (A11) and Loot (A20) are priority 3, in the plan's table order. Retreat
+# (A9) slots in at 1 later.
 STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
+    HealState(),
     RecoverState(),
     LootState(),
     ExploreState(),

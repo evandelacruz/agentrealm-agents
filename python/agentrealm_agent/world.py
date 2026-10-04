@@ -103,12 +103,13 @@ class WorldModel:
     attack_range: int | None = None  # armed weapon reach from get_self (B100)
     armed_code: str | None = None
     worn_codes: dict[str, str] = field(default_factory=dict)
-    held_supplies: list[InventorySupply] = field(default_factory=list)
+    held_supplies: list[InventorySupply] = field(default_factory=list)  # inventory held[] (A10, A20)
     chest_supplies: list[InventorySupply] = field(default_factory=list)
     # Lowered by a carry_capacity_full rejection; back to the default on respawn,
     # which brings a new 10-slot chest (Manual §11; loot.learn_loot_rejection).
     carry_capacity: int = DEFAULT_CARRY_CAPACITY
     undroppable: set[int] = field(default_factory=set)  # supply ids Drop refused not_transferable
+    gems: int | None = None
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -345,6 +346,10 @@ class WorldModel:
     def _apply_inventory(self, inv: dict | None) -> None:
         if inv is None:
             return
+        if "gems" in inv:
+            gems = _opt_int(inv.get("gems"))
+            if gems is not None and gems >= 0:
+                self.gems = gems
         self.held_supplies, self.chest_supplies, self.armed_code, self.worn_codes = carried_from_inventory(inv)
 
     def _apply_snapshot_body(self, snap: dict) -> None:

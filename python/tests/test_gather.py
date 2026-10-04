@@ -120,6 +120,12 @@ class GatherActTest(unittest.TestCase):
         w.entities = [Entity("supply", 9, (2, 0), "gem_cache_5")]
         self.assertIsNone(outcome(w, pickup=False).intents)
 
+    def test_priced_gem_supply_is_shop_stock_not_a_pile(self):
+        w = grid(["...", "..."], at=(1, 0))
+        safe(w, (1, 0), (2, 0))
+        w.entities = [Entity("supply", 9, (2, 0), "gem", gem_price=3)]
+        self.assertIsNone(outcome(w, pickup=False).intents)
+
     def test_takes_gem_pile_in_range(self):
         w = grid(["g.g"], at=(1, 0))
         safe(w, (1, 0))

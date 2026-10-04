@@ -16,6 +16,7 @@ from .intents import set_position, take, use_block
 
 # Authored gem piles spawn as ground supplies (Obs, GAME_NOTES.md Gems).
 # Gem caches (gem_cache_5/7/10) are a different drop and are not piles.
+# A priced supply with the same code is shop stock: taking it is a purchase.
 GEM_PILE_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
 # Bushes are not walkable, so they are cut from a neighbouring cell: the
 # pocket knife's range is 1 (GAME_NOTES.md Olympuff starting kit).
@@ -73,7 +74,12 @@ def _has_target(world: WorldModel, policy: Policy) -> bool:
 
 
 def is_gem_pile(e: Entity) -> bool:
-    return e.kind == "supply" and e.code in GEM_PILE_SUPPLY_CODES
+    """A free ground gem: an authored pile, or one a grass or bush drop left."""
+    return (
+        e.kind == "supply"
+        and e.code in GEM_PILE_SUPPLY_CODES
+        and e.gem_price is None
+    )
 
 
 def gather_outcome(

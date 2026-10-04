@@ -136,17 +136,23 @@ def use_blocked_by_never_attack(intent: dict, entities: list[Entity], never_atta
 
 @dataclass
 class DirectivesWatch:
-    """Re-read the directives file when its mtime changes."""
+    """Re-read the directives file when its mtime changes.
+
+    A file that fails to read or parse keeps the last good directives
+    (defaults on first load) and is retried on the next call.
+    """
 
     path: Path
     directives: Directives = field(default_factory=default_directives)
     _mtime: float | None = field(default=None, repr=False)
+    _bad_mtime: float | None = field(default=None, repr=False)
 
     def maybe_reload(self) -> bool:
         """Load when the file is new or changed. Returns True when directives updated."""
         try:
             st = self.path.stat()
         except FileNotFoundError:
+            self._bad_mtime = None
             if self._mtime is None:
                 return False
             self._mtime = None
@@ -155,8 +161,15 @@ class DirectivesWatch:
         mtime = st.st_mtime
         if self._mtime == mtime:
             return False
-        self._mtime = mtime
-        self.directives = load_directives(self.path)
+        try:
+            loaded = load_directives(self.path)
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            if self._bad_mtime != mtime:
+                log.warning("%s: %s; keeping the last good directives", self.path.name, e)
+                self._bad_mtime = mtime
+            return False
+        self._mtime, self._bad_mtime = mtime, None
+        self.directives = loaded
         return True
 
     def ensure_loaded(self) -> None:

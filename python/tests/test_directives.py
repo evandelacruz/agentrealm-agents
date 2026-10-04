@@ -59,6 +59,31 @@ class ReloadTest(unittest.TestCase):
             self.assertEqual(watch.directives.never_attack, ["goblin"])
 
 
+    def test_a_broken_file_keeps_the_last_good_directives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "wren.directives.toml"
+            watch = DirectivesWatch(p)
+            p.write_text('never_attack = ["character"]\n')
+            self.assertTrue(watch.maybe_reload())
+            p.write_text('never_attack = ["character"\n')
+            os.utime(p, (time.time() + 5, time.time() + 5))
+            with self.assertLogs("agentrealm_agent.directives", "WARNING"):
+                self.assertFalse(watch.maybe_reload())
+            self.assertEqual(watch.directives.never_attack, ["character"])
+            p.write_text('never_attack = ["goblin"]\n')
+            self.assertTrue(watch.maybe_reload())
+            self.assertEqual(watch.directives.never_attack, ["goblin"])
+
+    def test_a_broken_file_on_first_load_gives_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "wren.directives.toml"
+            p.write_text("params = {\n")
+            watch = DirectivesWatch(p)
+            with self.assertLogs("agentrealm_agent.directives", "WARNING"):
+                watch.ensure_loaded()
+            self.assertEqual(watch.directives, default_directives())
+
+
 class NeverAttackTest(unittest.TestCase):
     def test_blocks_character_fight_reflex(self):
         w = WorldModel(character_id=1, map_id=1, pos=(1, 1), perception=3)

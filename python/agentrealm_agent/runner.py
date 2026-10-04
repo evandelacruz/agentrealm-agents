@@ -175,7 +175,7 @@ class Runner:
             d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
-        r = self.client.tick(self.cid, intents)
+        r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))
         if intents:
             m.queue_sent_tick = w.tick
@@ -257,6 +257,11 @@ class Runner:
         m.need_position, m.path = True, []
 
     def _apply_never_attack(self, intents: list[dict] | None) -> list[dict] | None:
+        """Executor guard: drop any Use aimed at a never_attack target.
+
+        If that empties the submit, send a Wait instead of nothing, so the
+        server queue is replaced rather than left running.
+        """
         if not intents:
             return intents
         blocked = self.directives.directives.never_attack
@@ -264,7 +269,8 @@ class Runner:
             return intents
         out = [i for i in intents if not use_blocked_by_never_attack(i, self.world.entities, blocked)]
         if not out:
-            return None
+            self.mem.pending = None
+            return [wait()]
         return out
 
     def intents_for(self, d: Decision) -> list[dict] | None:

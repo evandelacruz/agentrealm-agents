@@ -48,7 +48,7 @@ Copy a file from `python/characters/` and edit it. Names must be unique in the w
 | `policy.entity_refresh` | Ticks between entity reads when nothing is happening. |
 | `policy.seed` | Random seed for `wander`. Defaults to the character id. |
 
-Each character may also have `python/characters/<name>.directives.toml` beside its character file. The runner re-reads it when the file changes. `params` tune survival defaults (for example `fight_margin`, `risk`, `lives_floor`); values out of range are ignored. `never_attack` lists kinds or NPC type codes the agent must not swing at (`character`, or an NPC `code`); a fight reflex that would `Use` a forbidden target flees instead.
+Each character may also have `python/characters/<name>.directives.toml` beside its character file. The runner re-reads it when the file changes; a file that fails to read or parse keeps the last good directives (defaults if none loaded yet). `never_attack` lists kinds or NPC type codes the agent must not swing at (`character`, or an NPC `code`); a fight reflex that would `Use` a forbidden target flees instead, and any other `Use` aimed at one is replaced by a `Wait`. `never_attack` is the only key that changes behavior today. `params` (for example `fight_margin`, `risk`, `lives_floor`) are parsed and validated, out-of-range values ignored, but nothing reads them yet. `goals` and `instructions` are kept for the strategist.
 
 ## Tests
 

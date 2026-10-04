@@ -186,6 +186,16 @@ class UseTargetBlockTest(unittest.TestCase):
         self.assertEqual(it.use_target_block(use, [Entity("character", 7, (1, 1)), Entity("npc", 7, (5, 6))]), (5, 6))
         self.assertIsNone(it.use_target_block(use, []))
 
+    def test_npc_use_attributed_only_to_its_target(self):
+        # A45: another NPC on the block the target was seen on is not the hit.
+        use = {"verb": "Use", "target": {"kind": "npc", "npc_id": 7}}
+        goblin, rat = Entity("npc", 7, (5, 6), "goblin"), Entity("npc", 8, (5, 6), "rat")
+        self.assertEqual(it.use_npc_type(use, (5, 6), [goblin]), "goblin")
+        self.assertEqual(it.use_npc_type(use, (5, 6), [Entity("npc", 8, (5, 6), "rat")]), "")
+        self.assertEqual(it.use_npc_type(use, (5, 6), [goblin, rat]), "")
+        block = {"verb": "Use", "target": {"kind": "block", "x": 5, "y": 6}}
+        self.assertEqual(it.use_npc_type(block, (5, 6), [rat]), "rat")
+
     def test_npc_type_only_for_one_npc_on_the_block(self):
         rat = Entity("npc", 1, (2, 1), "rat")
         self.assertEqual(it.npc_type_on_block((2, 1), [rat, Entity("character", 2, (2, 1))]), "rat")

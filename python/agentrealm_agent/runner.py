@@ -22,8 +22,8 @@ from .item_table import (
     absorb_attack_range,
     absorb_entities_payload,
     absorb_npc_damaged,
-    npc_type_on_block,
     rejection_attack_range,
+    use_npc_type,
     use_target_block,
 )
 from .knowledge_base import KnowledgeBase
@@ -698,7 +698,7 @@ class Runner:
                 m.last_use_tick = int(result.get("tick", w.tick))
                 block = use_target_block(intent, w.entities)
                 if block is not None:
-                    npc_type = npc_type_on_block(block, w.entities)
+                    npc_type = use_npc_type(intent, block, w.entities)
                     others = any(e.kind == "character" for e in w.entities)
                     self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type, others))
             if intent and intent.get("verb") in ("Say", "Broadcast"):

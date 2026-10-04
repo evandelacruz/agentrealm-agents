@@ -147,7 +147,14 @@ class NeverAttackTest(unittest.TestCase):
         ents = [Entity("npc", 9, (2, 1), code="goblin"), Entity("npc", 4, (3, 1), code="rat")]
         self.assertTrue(use_blocked_by_never_attack(intent, ents, ["goblin"]))
         self.assertFalse(use_blocked_by_never_attack(intent, ents, ["rat"]))
-        self.assertFalse(use_blocked_by_never_attack(intent, [], ["goblin"]))
+        self.assertFalse(use_blocked_by_never_attack(intent, ents, []))
+
+    def test_executor_drops_npc_use_on_an_unknown_npc_id(self):
+        # Fails closed: the server finds the NPC at run time, so an id missing
+        # from the entity list may be a forbidden type (A45).
+        intent = {"verb": "Use", "target": {"kind": "npc", "npc_id": 9}}
+        self.assertTrue(use_blocked_by_never_attack(intent, [], ["goblin"]))
+        self.assertTrue(use_blocked_by_never_attack(intent, [Entity("npc", 4, (3, 1), code="rat")], ["goblin"]))
 
     def test_executor_keeps_self_use(self):
         # Heal's Use on itself is eating or drinking, not an attack (A10).

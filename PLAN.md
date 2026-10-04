@@ -26,6 +26,8 @@ It is outside the formal backlog. It is built interactively and changes as the A
 
 Auth is `Authorization: Bearer <key>`.
 
+A `Use` target `{"kind": "npc", "npc_id": N}` names the block that NPC stands on when the `Use` runs ([API rules § Use](https://agentrealm.gg/docs/api)). It ships in server release 1.11 (saims B126); **Fight**'s NPC swings depend on it (A45).
+
 **One request per character per tick, with a burst of 3, on every character route.** Reads count. The limiter is a token bucket refilled on the front's tick interval ([Manual §7.4](https://agentrealm.gg/docs/manual#74-rate-limits)). So the agent runs a call budget: each tick it spends its call on the read it most needs or on the tick submit. The round trip carries the observation (B15). This agent reads ground chest contents and its own `health` / `max_health` from it; **Retreat** (A9) uses health with the threat table and directive params, and **Heal** (A10) uses it when hurt and out of combat. Each `Damaged` event also updates a threat table, after the same response's observation is applied: max damage per hit per hostile type, keyed by the source's type code, with an unmeasured default until something is measured (A6). A hit whose source is not among the entities perceived before or after that response, or has no type code, is not recorded. Trap and `occupy` damage is recorded under its own keys but never raises the default for an unmeasured hostile. **Fight** (A23) will add the full win estimate and margins. Terrain and entity reads still compete with intents for the same budget.
 
 The runner paces one call per wall-clock window (`epoch / tick interval`). That is stricter than the bucket requires: safe, but slower than it could be.
@@ -164,6 +166,7 @@ Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local sta
 | No hostile's reach is served | `hostile_range` is a guess in the character file. | None |
 | No NPC's health or damage is served, except a boss's health | Hostile health and damage per type are learned from `NPCDamaged`, `NPCDied` and `Damaged`, with conservative defaults until measured ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) Combat). | None |
 | No supply's capabilities (cut, chop, smash, burn, blast, light, water) are served on any read | The item table stores none. They come from the manual's per-class rules ([`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) Movement and blocks) or from break results (A28). | None |
+| `Use` on an NPC by id ships in server release 1.11 | **Fight** aims every NPC swing by id (A45), so against a server older than 1.11 it cannot land a hit on an NPC. | B126 |
 | Our own strength is served only on the owner watch sheet, not on a character route | The agent brackets its strength from `over_strength_ceiling` rejections and does not read the watch sheet, which sits outside the character call budget. | None |
 
 ## Milestones
@@ -221,9 +224,9 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A21 | **Shop.** Buy in-sight priced supplies the plan wants; restock to `potion_reserve`. Consumes Heal's `buy` ops (`Memory.buy_signals`, A10). | A5, A18 |
 | A22 | **Gather.** Gems from grass, bushes and gem piles in safe-ish ground. | A5 |
 | A23 | **Fight.** Group-aware win estimate, `never_attack`, retreat queued behind attacks, conservative until measured, never from a safe zone. Gates Fight on A9's estimate (`survival.would_lose`): a fight it says we lose goes to **Flee**, and the "threat outclasses us" **Retreat** trigger lands with it. | A5, A6, A8, A9 |
-| A45 | **Use on an NPC by id.** Fight's swings target `{"kind": "npc", "npc_id": N}` (`states/intents.use_npc`), so the server swings at the block the NPC stands on the tick the `Use` runs (B126) and a queued swing follows an NPC that moved after the plan. An NPC out of sight, dead or unknown that tick is `target_out_of_range`, which drops the rest of the queue and re-plans like any rejection. `never_attack` checks the target NPC's type by id. The item table matches `NPCDamaged` against the block the NPC was last seen on, so a hit after it moved is left unattributed, never misfiled. No `direction` target is used: the agent never aims a `Use` at a neighbour meant relative to where it will stand. | A23 |
 | A24 | **Healing from food and potions.** `Arm` + `Use` self; heal amounts learned per type; re-`Arm` the weapon after a drink (A10 leaves it unarmed). | A10, A20 |
 | A25 | **M8 acceptance.** M8 done-when. | A16, A19, A21, A22, A23, A24 |
+| A45 | **Use on an NPC by id.** Fight's swings target `{"kind": "npc", "npc_id": N}` (`states/intents.use_npc`), so the server swings at the block the NPC stands on the tick the `Use` runs (server release 1.11, saims B126; [API rules § Use](https://agentrealm.gg/docs/api)) and a queued swing follows an NPC that moved after the plan. An NPC out of sight, dead or unknown that tick is `target_out_of_range`, which drops the rest of the queue and re-plans like any rejection. The item table matches `NPCDamaged` against the block the NPC was last seen on and files the hit only when the one NPC seen there is the target, so a hit after it moved, or on another NPC on that block, is left unattributed. `never_attack` checks the target NPC's type by id and fails closed: with it set, an npc id not in the entity list drops the swing. No `direction` target is used: the agent never aims a `Use` at a neighbour meant relative to where it will stand. | A23 |
 
 **M9: Navigation and knowledge.**
 

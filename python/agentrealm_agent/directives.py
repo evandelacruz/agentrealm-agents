@@ -145,7 +145,8 @@ def use_blocked_by_never_attack(
         for e in entities:
             if e.kind == "npc" and e.id == nid:
                 return attack_forbidden(e, never_attack)
-        return False
+        # The server finds the NPC at run time; one we cannot name may be forbidden.
+        return True
     if kind == "block":
         x, y = target.get("x"), target.get("y")
         if x is None or y is None:

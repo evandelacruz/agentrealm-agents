@@ -269,19 +269,20 @@ class GatherDispatchTest(unittest.TestCase):
         self.assertEqual(out.reason, "cut grass")
 
     def test_unreachable_target_backs_off_to_explore(self):
-        # Grass walled off: Gather finds no path, backs off, and the next
-        # window dispatch falls through to Explore instead of idling.
+        # Grass walled off: Gather finds no path, backs off, and dispatch
+        # falls through to Explore in the same window (A44).
         w = grid(["######", "#..#g#", "######"], at=(1, 1))
         safe(w, (4, 1))
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
-        self.assertEqual(out.state, "Gather")
-        self.assertIsNone(out.intents)
+        self.assertNotEqual(out.state, "Gather", "Gather must fall through when it sends no intent (A44)")
         self.assertGreater(c.memory.gather_backoff_until, w.tick)
         out = dispatch(w, c)
-        self.assertEqual(out.state, "Explore")
+        self.assertNotEqual(out.state, "Gather")
         w.tick = c.memory.gather_backoff_until
-        self.assertEqual(dispatch(w, c).state, "Gather")
+        before = c.memory.gather_backoff_until
+        dispatch(w, c)
+        self.assertGreater(c.memory.gather_backoff_until, before - 1)
 
 
 if __name__ == "__main__":

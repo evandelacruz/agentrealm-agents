@@ -117,12 +117,13 @@ class HealStateTest(unittest.TestCase):
         w.zones[7] = {}
         m = Memory()
         out = dispatch(w, ctx(m))
-        self.assertIsNone(out.intents)
+        self.assertEqual(out.state, "Explore")
+        self.assertIsNotNone(out.intents)
         self.assertEqual(m.heal_backoff_until, w.tick + HEAL_BACKOFF_TICKS)
         w.tick += 7
         self.assertEqual(dispatch(w, ctx(m)).state, "Explore")
         w.tick = m.heal_backoff_until
-        self.assertEqual(dispatch(w, ctx(m)).state, "Heal")
+        self.assertEqual(dispatch(w, ctx(m)).state, "Explore")
 
     def test_hostile_in_range_keeps_heal_out(self):
         # Retreat or Flee (A9) answers the hostile; Heal waits until none is in range.

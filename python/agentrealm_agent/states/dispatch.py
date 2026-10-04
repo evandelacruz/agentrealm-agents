@@ -43,20 +43,50 @@ STATES: tuple[State, ...] = (
 )
 
 
+def _sends_intent(outcome: StateOutcome) -> bool:
+    return bool(outcome.intents)
+
+
+def _falls_through(state: State, outcome: StateOutcome, ctx: PlayContext) -> bool:
+    """True when a guard claim with no intent should yield to lower states (A44)."""
+    if _sends_intent(outcome):
+        return False
+    if state.name in ("Sync", "Downed", "Idle", "Flee"):
+        return False
+    if state.name == "Heal":
+        return "yield to Explore" in outcome.reason
+    if state.name == "Recover" and outcome.reason.startswith("open chest"):
+        return False
+    return True
+
+
 def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     """Run the first state that is active and not done, or whose guard holds.
 
     Higher-priority guards always win; the active state keeps running past
-    its own guard until its ``done`` holds. Each call is one decision window:
+    its own guard until its ``done`` holds. When a state's ``guard`` holds
+    but ``act`` sends no intent, dispatch falls through to the next state
+    (A44) so the agent cannot freeze. Each call is one decision window:
     it ages what Step rejections taught the map (A14).
     """
     m = ctx.memory
     try:
         for state in STATES:
             active = state.name == m.state and not state.done(world, ctx)
-            if active or state.guard(world, ctx):
+            if not (active or state.guard(world, ctx)):
+                continue
+            outcome = state.act(world, ctx)
+            if _sends_intent(outcome):
                 m.state = state.name
-                return state.act(world, ctx)
+                return outcome
+            # Hysteresis: an active state whose guard released still owns the round.
+            if active and not state.guard(world, ctx):
+                m.state = state.name
+                return outcome
+            if _falls_through(state, outcome, ctx):
+                continue
+            m.state = state.name
+            return outcome
         m.state = ""
         return StateOutcome(None, "no state")
     finally:

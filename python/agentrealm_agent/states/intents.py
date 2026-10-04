@@ -26,8 +26,9 @@ def withdraw_all(chest_id: int) -> dict:
     return {"verb": "WithdrawFromChest", "chest_id": chest_id}
 
 
-def read_block(map_id: int, pos: Pos) -> dict:
-    return {"verb": "Read", "target": {"kind": "block", "map_id": map_id, "x": pos[0], "y": pos[1]}}
+def read_block(_map_id: int, pos: Pos) -> dict:
+    """Read a sign on the character's map (tick API block target is x/y only)."""
+    return {"verb": "Read", "target": {"kind": "block", "x": pos[0], "y": pos[1]}}
 
 
 def say_to(npc: Entity, text: str = "hello") -> dict:

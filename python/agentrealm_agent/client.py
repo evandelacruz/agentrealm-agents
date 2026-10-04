@@ -78,6 +78,13 @@ class Client:
             {"name": name, "avatar": avatar, "model_agent": model_agent},
         )
 
+    def list_characters(self) -> list[dict]:
+        """Account characters (Manual §4)."""
+        body = self._call("GET", "/characters")
+        if isinstance(body, dict):
+            body = body.get("characters", [])
+        return [c for c in body or [] if isinstance(c, dict)]
+
     def self_(self, cid: int) -> dict:
         return self._call("GET", f"/characters/{cid}/self")
 

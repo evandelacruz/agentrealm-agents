@@ -30,13 +30,29 @@ DEFAULT_CHARACTER = PYTHON / "characters" / "olympuff_walker.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
 
 
+def _find_character_id(client: Client, cfg: config.CharacterConfig) -> int | None:
+    for row in client.list_characters():
+        if row.get("name") == cfg.name and row.get("world_code") == cfg.world:
+            return int(row["id"])
+    return None
+
+
 def ensure_character(client: Client, cfg: config.CharacterConfig) -> int:
     state = config.load_state(cfg)
     if state is not None:
         return int(state["character_id"])
-    created = client.create_character(cfg.world, cfg.name, cfg.avatar, cfg.model_agent)
-    config.save_state(cfg, {"character_id": created["id"], "world": cfg.world})
-    return int(created["id"])
+    try:
+        created = client.create_character(cfg.world, cfg.name, cfg.avatar, cfg.model_agent)
+        cid = int(created["id"])
+    except ApiError as e:
+        if e.status != 409 or e.code not in ("name_taken", "identity_reuse"):
+            raise
+        found = _find_character_id(client, cfg)
+        if found is None:
+            raise
+        cid = found
+    config.save_state(cfg, {"character_id": cid, "world": cfg.world})
+    return cid
 
 
 def run_smoke(

@@ -731,8 +731,11 @@ class Runner:
             return
         target = intent.get("target") or {}
         applied = result.get("outcome") == "applied"
-        if target.get("kind") == "block" and None not in (target.get("map_id"), target.get("x"), target.get("y")):
-            map_id, pos = int(target["map_id"]), (int(target["x"]), int(target["y"]))
+        if target.get("kind") == "block" and target.get("x") is not None and target.get("y") is not None:
+            raw_map = target.get("map_id", self.world.map_id)
+            if raw_map is None:
+                return
+            map_id, pos = int(raw_map), (int(target["x"]), int(target["y"]))
             key = read_key(map_id, pos)
             if applied:
                 mark_cell_read(self.knowledge, map_id, pos)

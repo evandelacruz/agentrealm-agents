@@ -414,6 +414,7 @@ class Runner:
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        w.note_level_clear(r.get("level_clear_ceremony"))
         self._sync_loadout()
         w.learn_threat(events, earlier)
         self._learn_items_from_tick(r.get("observation"), events, earlier, worn_before)
@@ -487,13 +488,14 @@ class Runner:
         pop, or drop them (A34).
         """
         m = self.mem
-        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op)
+        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op, m.boss)
         saved_stuck = copy.deepcopy(m.nav_stuck)
         saved_plan = self.plan.snapshot()
         try:
             d = self._decide(self.world, m, plan=self.plan)
         finally:
             self.plan.restore(saved_plan)
+            m.boss = saved[5]  # boss memory belongs to the stack (A38)
         m.nav = saved[2]
         m.nav_stuck = saved_stuck
         if d.reflex:

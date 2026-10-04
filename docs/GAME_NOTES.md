@@ -101,7 +101,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Hostiles stay near their spawn.** The pair stood just outside town for over 30 minutes, moving at most one block, and never followed into the safe zone (Obs).
 - **Lesson.** Several hostiles close together are one fight, not several. Never step next to a group with 10 health. Count every hostile within two blocks of the target before engaging (Obs).
 - **Combat events.** `NPCDamaged` shows damage dealt; a miss emits nothing. `NPCDied` marks a kill (M §8).
-- **Bosses** are the only NPCs with `health`/`max_health` on entity reads (M §9.3).
+- **Bosses** are the only NPCs with `health`/`max_health` on entity reads: "A boss NPC also includes its current `health` and `max_health` … no character, hostile, or helper carries health" (M §9.3; API Reads). The agent identifies a boss by that field (A38).
 - **Healing.** Potions and food heal (M §16). A new character starts at 10 health. Regeneration out of combat has not been observed.
 - **Never wake or idle next to a hostile.** An unattended character keeps taking hits (Guide).
 
@@ -194,7 +194,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   - health refills, and max health rises on the first clear;
   - you are moved outside the level that tick;
   - `levels_cleared` updates in the snapshot
-  (M §7.2; API Round Trip).
+  (M §7.2; API Round Trip). The agent takes the ceremony as the boss's defeat (A38).
 - **Inside a level** you can't `Sleep` (M §11).
 - **Clearing all `level_count` levels** transcends the character, which ends it (M §11).
 
@@ -204,6 +204,7 @@ Each has a test the agent or a hand session can run.
 
 | Question | How to find out |
 |---|---|
+| Is the boss fight clock served, and under what field? The docs say only that the time limit sets health to 0 (M §11). The agent reads `boss_fight_end_tick` if a round trip carries it (A38) | Enter a boss room and log the round trip and `get_self` each tick until the fight ends |
 | Hostile health per type (no NPC's health is served but a boss's) | Sum `NPCDamaged` on one NPC until its `NPCDied` |
 | Hostile stats (defense, range, speed) per type | Log `NPCDamaged` and our swings for the hit rate (gives defense); log `Damaged` and spacing for damage and cooldown; log first `Attacked` distance for range |
 | Does health regenerate out of combat? | Take a hit, retreat to town, read `health` every 10 s for 2 minutes |

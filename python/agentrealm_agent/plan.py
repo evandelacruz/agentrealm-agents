@@ -45,6 +45,7 @@ OP_STATE: dict[str, str | None] = {
 # Ops the shipped Explore pathing can drive today. Every other op is dropped
 # with a log line when it reaches the top of the stack (A34 slice).
 EXPLORE_PATH_OPS = frozenset({"explore_area", "travel", "wait"})
+BOSS_PLAN_OPS = frozenset({"fight_boss"})
 SOLVE_OPS = frozenset({"compose", "use_block"})
 # `travel` destinations with a path today; `hunting_ground` and `shop` wait on A20/Shop.
 TRAVEL_PATHED = frozenset({"entrance", "town", "point"})
@@ -197,7 +198,23 @@ def _validate_enter_level(op: dict[str, Any]) -> bool:
 
 
 def _validate_fight_boss(op: dict[str, Any]) -> bool:
-    return _validate_enter_level(op)
+    if not _require_fields(op, ("x", "y")) or not all(_is_int(op[k]) for k in ("x", "y")):
+        return False
+    if "min_health" in op and (not _is_int(op["min_health"]) or op["min_health"] < 0):
+        _drop("bad min_health", op)
+        return False
+    if "min_potions" in op and (not _is_int(op["min_potions"]) or op["min_potions"] < 0):
+        _drop("bad min_potions", op)
+        return False
+    if "armed" in op and not _is_str(op["armed"]):
+        _drop("bad armed", op)
+        return False
+    if "worn" in op:
+        worn = op["worn"]
+        if not isinstance(worn, list) or not worn or not all(_is_str(c) for c in worn):
+            _drop("bad worn", op)
+            return False
+    return True
 
 
 def _validate_avoid(op: dict[str, Any]) -> bool:
@@ -391,7 +408,7 @@ class Plan:
 
     ``params`` holds the effective survival params for the strategist; the
     survival states read the directives' params (A9). ``current`` and ``goal_done`` only read;
-    ``advance`` and ``drop_current`` are the only calls that move the stack.
+    ``advance``, ``drop_current`` and ``finish_current`` are the only calls that move the stack.
     """
 
     goals: list[GoalOp]
@@ -452,6 +469,13 @@ class Plan:
         op = self.current()
         if op is not None:
             log.warning("plan: dropped op %r: %s", op, reason)
+        self._pop_current()
+
+    def finish_current(self, reason: str) -> None:
+        """Pop an op whose state saw it finish (``fight_boss``, A38)."""
+        op = self.current()
+        if op is not None:
+            log.info("plan: finished op %r: %s", op, reason)
         self._pop_current()
 
     def note_stalled(self, tick: int) -> bool:
@@ -555,7 +579,8 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         # does not lose the change.
         tile = world.view.tiles.get((op["x"], op["y"]))
         return plan.use_block_before is not None and tile is not None and tile != plan.use_block_before
-    # Ops whose states are not shipped never finish here; replan drops them.
+    # `fight_boss` finishes in Boss, which sees the defeat (A38). Ops whose
+    # states are not shipped never finish here; replan drops them.
     return False
 
 

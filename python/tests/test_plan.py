@@ -49,6 +49,11 @@ class ValidateOpTest(unittest.TestCase):
     def test_drops_bad_break_capability(self):
         self.assertIsNone(validate_goal_op({"op": "break_block", "x": 0, "y": 0, "capability": "magic"}))
 
+    def test_fight_boss_preconditions(self):
+        op = validate_goal_op({"op": "fight_boss", "x": 1, "y": 2, "min_potions": 1})
+        self.assertEqual(op, {"op": "fight_boss", "x": 1, "y": 2, "min_potions": 1})
+        self.assertIsNone(validate_goal_op({"op": "fight_boss", "x": 1, "y": 2, "min_health": -1}))
+
     def test_say_needs_one_npc_field(self):
         self.assertIsNone(validate_goal_op({"op": "say", "text": "hi"}))
         self.assertIsNotNone(validate_goal_op({"op": "say", "npc_type": "guard", "text": "hi"}))

@@ -145,7 +145,7 @@ The numbers in `navigation/planner.py` (A12), and why:
 | `conflict_lost` | Retry next move |
 | `door_locked` | Door needs a key; recorded in the knowledge base, not retried |
 | `over_strength_ceiling` | Zone closed to us at this strength |
-| `would_strand` | Step to land first |
+| `would_strand` | Nothing beyond the one-decision wait any other code gets; the server refuses the move that would strand us |
 
 An opening we cut or burned is open only until it grows back (about 60 s for a bush). It is planned through with that deadline, never as permanent.
 

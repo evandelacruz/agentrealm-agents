@@ -117,8 +117,8 @@ def learn_step_rejection(
         case _:
             # A code this table does not handle (or none): keep off the cell for
             # one decision, as reflex 1 did before A14, and learn nothing more.
-            # would_strand lands here until Evan picks its landing target
-            # (PLAN.md A14: GAME_NOTES ties it to water, which WorldModel lacks).
+            # would_strand lands here by design (PLAN.md A14): the server refuses
+            # the move that would strand us, so there is no landing to plan.
             nav.wait_tile = cell
 
 

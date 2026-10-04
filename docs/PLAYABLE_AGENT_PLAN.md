@@ -263,7 +263,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Gear and items
 
-- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, and weapon damage; PLAN.md A18 says why damage taken per worn item and capabilities wait.
+- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, and the largest hit seen per NPC type; PLAN.md A18 says why damage taken per worn item and capabilities wait.
 - **Equip** scores each slot and swaps when a carried item beats the worn one. Consumables (potions, food) are kept for `Heal`.
 - **Budget.** Gems are kept through death and gear is not, so the plan spends gems on what most raises survival first (weapon, armor, potions), then on tools a clue asks for.
 - **Compose.** When any fragment is held, its `fragment` field names the whole and the missing slots. The plan tracks it as a goal, and `Solve` composes when the set is complete.

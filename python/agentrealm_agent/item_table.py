@@ -7,9 +7,13 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   subtype armed in the same response's observation. Overwritten.
 - ``gem_price``: from supplies on entity reads and snapshot entities (API
   Reads, Snapshots). Overwritten, since prices are tuned in play.
-- ``weapon_damage``: from the one ``NPCDamaged`` on the block and tick an
-  applied ``Use`` resolved, when no other character is in sight, filed under
-  the subtype armed after that response's observation (API Events).
+- ``weapon_damage``: ``{npc_type_code: max hit}``, the largest ``NPCDamaged``
+  amount seen against that NPC type, from the one ``NPCDamaged`` on the block
+  and tick an applied ``Use`` resolved, when no other character is in sight,
+  filed under the subtype armed after that response's observation (API
+  Events). Damage is rolled and the target's defense lowers it (docs/
+  GAME_NOTES.md Combat), so one hit is a sample, not the weapon's stat; the
+  max is kept per NPC type and only ever rises.
 
 Damage taken per worn item and capabilities are not stored: see PLAN.md A18.
 """
@@ -40,12 +44,17 @@ class InventorySupply:
 
 @dataclass(frozen=True)
 class AppliedUse:
-    """An applied ``Use`` intent, for matching block-anchored combat events."""
+    """An applied ``Use`` intent, for matching block-anchored combat events.
+
+    ``npc_type`` is the NPC we saw on the target block when the ``Use``
+    applied, or empty when there was not exactly one.
+    """
 
     tick: int
     map_id: int | None
     x: int
     y: int
+    npc_type: str = ""
 
 
 def _supply_code(entry: Any) -> str | None:
@@ -121,12 +130,29 @@ def merge_item(items: dict[str, dict[str, Any]], code: str | None, **facts: Any)
     if not code:
         return
     kept: dict[str, int] = {}
-    for key in ("attack_range", "gem_price", "weapon_damage"):
+    for key in ("attack_range", "gem_price"):
         n = _positive_int(facts.get(key))
         if n is not None:
             kept[key] = n
     if kept:
         items.setdefault(code, {}).update(kept)
+
+
+def merge_weapon_hit(items: dict[str, dict[str, Any]], code: str | None, npc_type: str, amount: Any) -> None:
+    """Raise ``weapon_damage[npc_type]`` under ``code`` to ``amount`` if larger.
+
+    A missing or invalid code, NPC type, or amount is ignored.
+    """
+    n = _positive_int(amount)
+    if not code or not npc_type or n is None:
+        return
+    row = items.setdefault(code, {})
+    per_type = row.get("weapon_damage")
+    if not isinstance(per_type, dict):
+        per_type = row["weapon_damage"] = {}
+    old = _positive_int(per_type.get(npc_type))
+    if old is None or n > old:
+        per_type[npc_type] = n
 
 
 def absorb_supply_entry(items: dict[str, dict[str, Any]], entry: dict) -> None:
@@ -194,6 +220,12 @@ def use_target_block(intent: dict, entities: list[Any]) -> Pos | None:
     return None
 
 
+def npc_type_on_block(block: Pos, entities: list[Any]) -> str:
+    """``npc_type_code`` of the one NPC seen on ``block``, else empty."""
+    codes = [e.code for e in entities if e.kind == "npc" and e.pos == block]
+    return codes[0] if len(codes) == 1 and codes[0] else ""
+
+
 def _event_place(ev: dict, default_map_id: int | None) -> tuple[int, int | None, int, int] | None:
     """``(tick, map_id, x, y)`` of a block-anchored event, or None when malformed."""
     try:
@@ -214,16 +246,18 @@ def absorb_npc_damaged(
     armed_code: str | None,
     others_in_sight: bool,
 ) -> None:
-    """Record weapon damage from the one ``NPCDamaged`` our ``Use`` can own.
+    """Record the hit from the one ``NPCDamaged`` our ``Use`` can own.
 
     ``NPCDamaged`` is copied to every character that sees the block (API
     Events) and a miss emits nothing, so a hit is ours only when no other
     character could have struck: none in sight, and exactly one ``NPCDamaged``
-    on the block and tick our ``Use`` resolved (docs/GAME_NOTES.md).
+    on the block and tick our ``Use`` resolved (docs/GAME_NOTES.md). It is
+    kept as the max per NPC type seen on that block (``merge_weapon_hit``); a
+    ``Use`` with no single NPC type on its block records nothing.
     """
     if not armed_code or not applied_uses or others_in_sight:
         return
-    hits: dict[AppliedUse, list[int]] = {u: [] for u in applied_uses}
+    hits: dict[AppliedUse, list[int | None]] = {u: [] for u in applied_uses if u.npc_type}
     for ev in events:
         if ev.get("kind") != "NPCDamaged":
             continue
@@ -231,9 +265,9 @@ def absorb_npc_damaged(
         if place is None:
             continue
         tick, mid, x, y = place
-        for u in applied_uses:
+        for u in hits:
             if (u.tick, u.map_id, u.x, u.y) == (tick, mid, x, y):
                 hits[u].append(damage_amount(ev))
-    for amounts in hits.values():
-        if len(amounts) == 1 and amounts[0] is not None:
-            merge_item(items, armed_code, weapon_damage=amounts[0])
+    for u, amounts in hits.items():
+        if len(amounts) == 1:
+            merge_weapon_hit(items, armed_code, u.npc_type, amounts[0])

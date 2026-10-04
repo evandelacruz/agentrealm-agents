@@ -45,7 +45,26 @@ class MergeTest(unittest.TestCase):
     def test_unknown_facts_are_not_stored(self):
         items: dict = {}
         it.merge_item(items, "bronze_sword", weapon_damage=3, damage_taken=2, capabilities=["cut"], attack_range=1)
-        self.assertEqual(items, {"bronze_sword": {"attack_range": 1, "weapon_damage": 3}})
+        self.assertEqual(items, {"bronze_sword": {"attack_range": 1}})
+
+    def test_weapon_hit_keeps_the_max_per_npc_type(self):
+        items: dict = {"bronze_sword": {"attack_range": 1}}
+        for npc_type, amount in (("rat", 3), ("rat", 1), ("rat", 5), ("wolf", 2)):
+            it.merge_weapon_hit(items, "bronze_sword", npc_type, amount)
+        self.assertEqual(items, {"bronze_sword": {"attack_range": 1, "weapon_damage": {"rat": 5, "wolf": 2}}})
+
+    def test_weapon_hit_ignores_invalid_input(self):
+        items: dict = {}
+        for code, npc_type, amount in (
+            (None, "rat", 3),
+            ("bronze_sword", "", 3),
+            ("bronze_sword", "rat", None),
+            ("bronze_sword", "rat", "four"),
+            ("bronze_sword", "rat", 0),
+            ("bronze_sword", "rat", True),
+        ):
+            it.merge_weapon_hit(items, code, npc_type, amount)
+        self.assertEqual(items, {})
 
     def test_free_supply_makes_no_row(self):
         items: dict = {}
@@ -82,7 +101,7 @@ def _npc_damaged(tick=11, amount=4, x=3, y=4, map_id=1, npc_id=9):
 
 
 class WeaponDamageTest(unittest.TestCase):
-    USE = it.AppliedUse(tick=11, map_id=1, x=3, y=4)
+    USE = it.AppliedUse(tick=11, map_id=1, x=3, y=4, npc_type="rat")
 
     def absorb(self, events, uses=(USE,), others_in_sight=False):
         items: dict = {}
@@ -92,12 +111,12 @@ class WeaponDamageTest(unittest.TestCase):
         return items
 
     def test_one_hit_on_our_block_and_tick(self):
-        self.assertEqual(self.absorb([_npc_damaged()]), {"bronze_sword": {"weapon_damage": 4}})
+        self.assertEqual(self.absorb([_npc_damaged()]), {"bronze_sword": {"weapon_damage": {"rat": 4}}})
 
     def test_event_map_id_defaults_to_ours(self):
         ev = _npc_damaged()
         del ev["map_id"]
-        self.assertEqual(self.absorb([ev]), {"bronze_sword": {"weapon_damage": 4}})
+        self.assertEqual(self.absorb([ev]), {"bronze_sword": {"weapon_damage": {"rat": 4}}})
 
     def test_no_use_records_nothing(self):
         self.assertEqual(self.absorb([_npc_damaged()], uses=()), {})
@@ -122,6 +141,23 @@ class WeaponDamageTest(unittest.TestCase):
         del ev["tick"]
         self.assertEqual(self.absorb([ev]), {})
 
+    def test_bad_amount_records_nothing(self):
+        for amount in ("four", None, 0, -2, True, [4]):
+            with self.subTest(amount=amount):
+                self.assertEqual(self.absorb([_npc_damaged(amount=amount)]), {})
+
+    def test_use_with_no_npc_type_records_nothing(self):
+        use = it.AppliedUse(tick=11, map_id=1, x=3, y=4)
+        self.assertEqual(self.absorb([_npc_damaged()], uses=(use,)), {})
+
+    def test_hits_on_two_types_are_kept_apart(self):
+        wolf = it.AppliedUse(tick=12, map_id=1, x=5, y=4, npc_type="wolf")
+        events = [_npc_damaged(amount=4), _npc_damaged(tick=12, amount=6, x=5)]
+        self.assertEqual(
+            self.absorb(events, uses=(self.USE, wolf)),
+            {"bronze_sword": {"weapon_damage": {"rat": 4, "wolf": 6}}},
+        )
+
     def test_damaged_is_not_weapon_damage(self):
         hit = {"tick": 11, "kind": "Damaged", "source_kind": "trap", "source_id": 4, "amount": 3}
         self.assertEqual(self.absorb([hit]), {})
@@ -140,6 +176,13 @@ class UseTargetBlockTest(unittest.TestCase):
     def test_character_out_of_sight_has_no_block(self):
         use = {"verb": "Use", "target": {"kind": "character", "character_id": 7}}
         self.assertIsNone(it.use_target_block(use, []))
+
+    def test_npc_type_only_for_one_npc_on_the_block(self):
+        rat = Entity("npc", 1, (2, 1), "rat")
+        self.assertEqual(it.npc_type_on_block((2, 1), [rat, Entity("character", 2, (2, 1))]), "rat")
+        self.assertEqual(it.npc_type_on_block((2, 1), [rat, Entity("npc", 3, (2, 1), "wolf")]), "")
+        self.assertEqual(it.npc_type_on_block((2, 1), [Entity("npc", 1, (2, 1))]), "")
+        self.assertEqual(it.npc_type_on_block((3, 1), [rat]), "")
 
 
 class RejectionTest(unittest.TestCase):
@@ -309,6 +352,7 @@ class RunnerItemLearningTest(unittest.TestCase):
         r = self._runner(kb)
         r.world.map_id = 1
         r.world.armed_code = "pocket_knife"
+        r.world.entities = [Entity("npc", 5, (2, 1), "rat")]
         use = {"verb": "Use", "target": {"kind": "block", "x": 2, "y": 1}}
         self._queue(r, [use])
         r.apply_intent_results([{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}])
@@ -327,7 +371,7 @@ class RunnerItemLearningTest(unittest.TestCase):
         obs = {"version": 2, "delta": {"inventory": inv}}
         r.world.apply_observation(obs)
         r._learn_items_from_tick(obs, events)
-        self.assertEqual(kb.items, {"pocket_knife": {"weapon_damage": 2}})
+        self.assertEqual(kb.items, {"pocket_knife": {"weapon_damage": {"rat": 2}}})
 
     def test_damage_taken_is_not_stored(self):
         kb = KnowledgeBase.empty("sandbox")
@@ -349,11 +393,12 @@ class RunnerItemLearningTest(unittest.TestCase):
         r = self._runner(kb)
         r.world.map_id = 1
         r.world.armed_code = "pocket_knife"
-        r.world.entities = [Entity("character", 99, (2, 2))]
+        r.world.entities = [Entity("npc", 5, (2, 1), "rat"), Entity("character", 99, (2, 2))]
         self._queue(r, [{"verb": "Use", "target": {"kind": "block", "x": 2, "y": 1}}])
         r.apply_intent_results([{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}])
         r._learn_items_from_tick(None, [_npc_damaged(amount=2, x=2, y=1)])
         self.assertEqual(kb.items, {})
+
 
 if __name__ == "__main__":
     unittest.main()

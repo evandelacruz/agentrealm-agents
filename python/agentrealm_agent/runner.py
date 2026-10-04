@@ -19,6 +19,7 @@ from .item_table import (
     absorb_attack_range,
     absorb_entities_payload,
     absorb_npc_damaged,
+    npc_type_on_block,
     rejection_attack_range,
     use_target_block,
 )
@@ -690,7 +691,8 @@ class Runner:
                 m.last_use_tick = int(result.get("tick", w.tick))
                 block = use_target_block(intent, w.entities)
                 if block is not None:
-                    self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block))
+                    npc_type = npc_type_on_block(block, w.entities)
+                    self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type))
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
             self._note_investigation(intent, result)

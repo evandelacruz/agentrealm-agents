@@ -9,6 +9,7 @@ import threading
 
 from . import config
 from .client import ApiError, Client
+from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
 from .runner import Runner
 
 
@@ -85,6 +86,15 @@ def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
         return 2
     stop = threading.Event()
     lock = threading.Lock()
+    world_knowledge: dict[str, KnowledgeBase] = {}
+    world_locks: dict[str, threading.Lock] = {}
+
+    def knowledge_for(world: str) -> KnowledgeBase:
+        with lock:
+            if world not in world_knowledge:
+                world_knowledge[world] = load_knowledge(world)
+                world_locks[world] = threading.Lock()
+            return world_knowledge[world]
 
     def out(line: str) -> None:
         with lock:
@@ -92,7 +102,7 @@ def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
 
     def drive(cfg: config.CharacterConfig, cid: int) -> None:
         try:
-            Runner(cfg, client, cid, stop, out).run()
+            Runner(cfg, client, cid, stop, out, knowledge=knowledge_for(cfg.world)).run()
         except ApiError as e:
             out(f"[{cfg.name}] stopped: {e}")
         except Exception as e:  # keep the other characters running
@@ -108,6 +118,10 @@ def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
     except KeyboardInterrupt:
         stop.set()
         out("stopping; characters stay in the world where they stand")
+    finally:
+        for world, base in world_knowledge.items():
+            with world_locks[world]:
+                save_knowledge(base)
     return 0
 
 

@@ -1,0 +1,130 @@
+"""Per-world knowledge base under python/.state/worlds/<world_code>.json.
+
+Shared by every character run from this checkout that plays the same world.
+Later milestones fill the sections; A18 owns the item table (not stored here).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .config import STATE_DIR
+
+WORLDS_DIR = STATE_DIR / "worlds"
+SCHEMA_VERSION = 1
+
+# World codes come from the API; keep paths safe.
+_WORLD_CODE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+SECTION_KEYS = (
+    "maps",
+    "clues",
+    "breaks",
+    "npc_types",
+    "entrances",
+    "levels",
+    "compose",
+)
+
+
+class KnowledgeBaseError(ValueError):
+    pass
+
+
+def world_path(world_code: str) -> Path:
+    _check_world_code(world_code)
+    return WORLDS_DIR / f"{world_code}.json"
+
+
+def _check_world_code(world_code: str) -> None:
+    if not isinstance(world_code, str) or not _WORLD_CODE.match(world_code):
+        raise KnowledgeBaseError(f"invalid world code: {world_code!r}")
+
+
+@dataclass
+class KnowledgeBase:
+    """Sections match docs/PLAYABLE_AGENT_PLAN.md **Knowledge base** (item stats are A18)."""
+
+    world_code: str
+    schema_version: int = SCHEMA_VERSION
+    maps: dict[str, Any] = field(default_factory=dict)
+    clues: list[dict[str, Any]] = field(default_factory=list)
+    breaks: dict[str, dict[str, Any]] = field(default_factory=dict)
+    npc_types: dict[str, dict[str, Any]] = field(default_factory=dict)
+    entrances: dict[str, dict[str, Any]] = field(default_factory=dict)
+    levels: dict[str, dict[str, Any]] = field(default_factory=dict)
+    compose: list[dict[str, Any]] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "schema_version": self.schema_version,
+            "world_code": self.world_code,
+        }
+        for key in SECTION_KEYS:
+            out[key] = getattr(self, key)
+        out.update(self.extra)
+        return out
+
+    @classmethod
+    def from_dict(cls, world_code: str, raw: dict[str, Any]) -> KnowledgeBase:
+        _check_world_code(world_code)
+        if not isinstance(raw, dict):
+            raise KnowledgeBaseError("knowledge base root must be a JSON object")
+        file_world = raw.get("world_code")
+        if file_world is not None and file_world != world_code:
+            raise KnowledgeBaseError(
+                f"world_code mismatch: file has {file_world!r}, expected {world_code!r}"
+            )
+        version = raw.get("schema_version", SCHEMA_VERSION)
+        if type(version) is not int:
+            raise KnowledgeBaseError("schema_version must be an integer")
+        if version > SCHEMA_VERSION:
+            raise KnowledgeBaseError(
+                f"unsupported schema_version {version} (agent supports {SCHEMA_VERSION})"
+            )
+        kb = cls(world_code=world_code, schema_version=version)
+        for key in SECTION_KEYS:
+            value = raw.get(key)
+            if value is None:
+                continue
+            if key == "clues" or key == "compose":
+                if not isinstance(value, list):
+                    raise KnowledgeBaseError(f"{key} must be a list")
+                setattr(kb, key, value)
+            else:
+                if not isinstance(value, dict):
+                    raise KnowledgeBaseError(f"{key} must be an object")
+                setattr(kb, key, value)
+        known = {"schema_version", "world_code", *SECTION_KEYS}
+        kb.extra = {k: v for k, v in raw.items() if k not in known}
+        return kb
+
+    @classmethod
+    def empty(cls, world_code: str) -> KnowledgeBase:
+        _check_world_code(world_code)
+        return cls(world_code=world_code)
+
+
+def load(world_code: str) -> KnowledgeBase:
+    path = world_path(world_code)
+    try:
+        raw = json.loads(path.read_text())
+    except FileNotFoundError:
+        return KnowledgeBase.empty(world_code)
+    except json.JSONDecodeError as e:
+        raise KnowledgeBaseError(f"{path}: invalid JSON: {e}") from e
+    return KnowledgeBase.from_dict(world_code, raw)
+
+
+def save(kb: KnowledgeBase) -> None:
+    path = world_path(kb.world_code)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(kb.to_dict(), indent=2) + "\n"
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(text)
+    tmp.replace(path)

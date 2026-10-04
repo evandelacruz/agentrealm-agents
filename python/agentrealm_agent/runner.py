@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from .brain import Decision, Memory, choose_call, decide, reject_step
 from .client import ApiError, Client
 from .config import CharacterConfig
+from .knowledge_base import KnowledgeBase
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
@@ -48,12 +49,21 @@ class Pacer:
 
 
 class Runner:
-    def __init__(self, cfg: CharacterConfig, client: Client, character_id: int, stop: threading.Event, out=print):
+    def __init__(
+        self,
+        cfg: CharacterConfig,
+        client: Client,
+        character_id: int,
+        stop: threading.Event,
+        out=print,
+        knowledge: KnowledgeBase | None = None,
+    ):
         self.cfg = cfg
         self.client = client
         self.cid = character_id
         self.stop = stop
         self.out = out
+        self.knowledge = knowledge
         self.world = WorldModel(character_id)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id

@@ -1,113 +1,86 @@
-"""M6 executor: queue invalidation with mocked tick results."""
+"""Executor queue limits and intent shapes (M6), no server."""
 
-import tempfile
-import threading
 import unittest
-from pathlib import Path
-from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.brain import Memory
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.executor import Executor, paced_set_positions
-from agentrealm_agent.runner import Runner
-from agentrealm_agent.world import Entity, WorldModel
-from tests.test_runner import FakeClient, rejected
+from agentrealm_agent.client import _tick_body
+from agentrealm_agent.executor import (
+    QUEUE_HORIZON_INTENTS,
+    queue_horizon_intents,
+    step,
+    trim_to_horizon,
+    wait,
+    within_horizon,
+)
 
-
-class PacedQueueTest(unittest.TestCase):
-    def test_four_ticks_between_moves_at_default_speed(self):
-        q = paced_set_positions([(1, 0), (2, 0)], tick_rate_hz=10, movement_speed=2500)
-        self.assertEqual([i.get("verb") for i in q], ["SetPosition", "Wait", "Wait", "Wait", "SetPosition"])
+H = QUEUE_HORIZON_INTENTS
 
 
-class QueueInvalidationTest(unittest.TestCase):
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
-        patch.start()
-        self.addCleanup(patch.stop)
+class HorizonTest(unittest.TestCase):
+    def test_default_horizon_is_forty_at_ten_hz(self):
+        self.assertEqual(QUEUE_HORIZON_INTENTS, 40)
+        self.assertEqual(queue_horizon_intents(), 40)
+        self.assertEqual(queue_horizon_intents(tick_rate_hz=10, horizon_seconds=4), 40)
 
-    def world_and_runner(self, fake: FakeClient, pol: Policy) -> Runner:
-        cfg = CharacterConfig("T", "default", "test", "sandbox", pol, Path("t.toml"))
-        r = Runner(cfg, fake, 1, threading.Event(), out=lambda _: None)
-        self.addCleanup(r.trace.close)
-        w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)
-        for y in range(2):
-            for x in range(5):
-                w.view.tiles[(x, y)] = "dirt"
-        r.world, r.mem = w, Memory(need_self=False, need_position=False)
-        r.tick_rate_hz = 10
-        r.executor.tick_rate_hz = 10
-        return r
+    def test_horizon_scales_with_world_clock(self):
+        self.assertEqual(queue_horizon_intents(tick_rate_hz=20, horizon_seconds=4), 80)
 
-    def test_block_occupied_discards_remainder_and_replans(self):
-        pol = Policy(goals=["goto"], goto=(4, 0), pickup=False)
-        fake = FakeClient([
-            {"tick": 10, "window_remaining_ms": 0},
-            {"tick": 11, "window_remaining_ms": 0,
-             "intent_results": [rejected("q1", "block_occupied", "occupied", 10)]},
-            {"tick": 13, "window_remaining_ms": 0},
-        ])
-        r = self.world_and_runner(fake, pol)
-        r.tick()
-        first = fake.sent[0]
-        self.assertGreater(len(first), 1, "multi-intent movement queue")
-        self.assertEqual(first[0], {"verb": "SetPosition", "x": 1, "y": 0})
+    def test_rejects_non_positive_or_non_int_inputs(self):
+        for bad in (0, -1, 2.5, True, None):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    queue_horizon_intents(tick_rate_hz=bad)
+                with self.assertRaises(ValueError):
+                    queue_horizon_intents(horizon_seconds=bad)
 
-        r.tick()
-        self.assertEqual(r.world.pos, (0, 0))
-        self.assertTrue(r.mem.need_position)
-        self.assertEqual(r.mem.path, [])
-        self.assertTrue(r.executor.invalidated)
 
-        r.world.apply_position({"map_id": 7, "x": 0, "y": 0})
-        r.mem.need_position = False
-        r.tick()
-        resend = fake.sent[2]
-        self.assertIsNotNone(resend)
-        self.assertNotEqual(resend[0], {"verb": "SetPosition", "x": 1, "y": 0})
+class TrimTest(unittest.TestCase):
+    def test_short_queue_unchanged(self):
+        q = [wait(), step("right")]
+        self.assertEqual(trim_to_horizon(q, limit=H), q)
+        self.assertTrue(within_horizon(q, limit=H))
 
-    def test_beyond_movement_range_clears_remainder(self):
-        ex = Executor(tick_rate_hz=10)
-        w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)
-        w.view.tiles[(1, 0)] = "dirt"
-        m = Memory()
-        m.path = [(1, 0), (2, 0)]
-        q = ex.build_movement_queue(m.path, w)
-        ex.note_sent(q, "q1", w.pos)
-        res = rejected("q1", "beyond_movement_range", "range", 11)
-        self.assertTrue(ex.ingest_results([res], w, m))
-        self.assertEqual(m.path, [])
-        self.assertTrue(ex.invalidated)
-        self.assertEqual(w.pos, (0, 0))
+    def test_exactly_at_horizon_fits(self):
+        q = [wait()] * 40
+        self.assertTrue(within_horizon(q, limit=H))
+        self.assertEqual(trim_to_horizon(q, limit=H), q)
 
-    def test_poll_leaves_queue_while_still_valid(self):
-        pol = Policy(goals=["goto"], goto=(2, 0), pickup=False)
-        fake = FakeClient([
-            {"tick": 10, "window_remaining_ms": 0},
-            {"tick": 11, "window_remaining_ms": 0,
-             "intent_results": [{"tick": 10, "queue_id": "q1", "index": 0, "outcome": "applied"}]},
-            {"tick": 12, "window_remaining_ms": 0},
-        ])
-        r = self.world_and_runner(fake, pol)
-        r.tick()
-        r.tick()
-        self.assertIsNone(fake.sent[1], "poll while queue runs")
-        self.assertTrue(r.executor.active or r.executor.in_flight is not None)
+    def test_one_over_horizon_is_cut(self):
+        q = [step("up")] * 40 + [wait()]
+        self.assertFalse(within_horizon(q, limit=H))
+        self.assertEqual(trim_to_horizon(q, limit=H), q[:40])
 
-    def test_entity_on_path_invalidates_without_waiting_for_rejection(self):
-        ex = Executor(tick_rate_hz=10)
-        w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)
-        w.view.tiles[(1, 0)] = w.view.tiles[(2, 0)] = "dirt"
-        m = Memory()
-        m.path = [(1, 0), (2, 0)]
-        q = ex.build_movement_queue(m.path, w)
-        ex.note_sent(q, "q1", w.pos)
-        w.entities = [Entity("npc", 9, (2, 0))]
-        self.assertTrue(ex.invalidate_if_stale(w, m))
-        self.assertEqual(m.path, [])
+    def test_long_queue_keeps_prefix(self):
+        q = [step("up"), step("down")] * 25
+        self.assertEqual(trim_to_horizon(q, limit=H), q[:40])
+
+    def test_zero_limit(self):
+        self.assertEqual(trim_to_horizon([wait()], limit=0), [])
+        self.assertTrue(within_horizon([], limit=0))
+        self.assertFalse(within_horizon([wait()], limit=0))
+
+    def test_rejects_negative_or_non_int_limit(self):
+        for bad in (-1, 1.5, True, None):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    trim_to_horizon([wait()], limit=bad)
+                with self.assertRaises(ValueError):
+                    within_horizon([wait()], limit=bad)
+
+    def test_trim_returns_copy(self):
+        q = [wait()]
+        trimmed = trim_to_horizon(q, limit=H)
+        self.assertEqual(trimmed, q)
+        self.assertIsNot(trimmed, q)
+
+
+class IntentShapeTest(unittest.TestCase):
+    def test_step_and_wait_match_tick_schema(self):
+        self.assertEqual(step("up_left"), {"verb": "Step", "direction": "up_left"})
+        self.assertEqual(wait(), {"verb": "Wait"})
+
+    def test_queue_goes_through_client_tick_body(self):
+        q = [step("right"), wait(), wait(), wait(), step("right")]
+        self.assertEqual(_tick_body(q, None), {"intents": q})
 
 
 if __name__ == "__main__":

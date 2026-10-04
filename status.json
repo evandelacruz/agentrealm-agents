@@ -7,7 +7,7 @@
   "M5": {"state": "open"},
   "M6": {
     "state": "partial",
-    "remaining": "Step/Wait pacing polish, two poll cadences, snapshot deltas, health tracking, Olympuff smoke test"
+    "remaining": "Queue invalidation is wired into the runner (SetPosition queues paced by movement_speed). Still to do: Step/Wait queues in place of SetPosition, calm vs threatened poll cadences, snapshot deltas and health on the world model, live Olympuff smoke test."
   },
   "M7": {"state": "open"},
   "M8": {"state": "open"},

@@ -30,7 +30,7 @@ The runner paces one call per wall-clock window (`epoch / tick interval`). That 
 
 ## Real time
 
-Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; the agent sends one-intent queues. With longer ones, the executor would keep a few seconds queued and send a new queue when a result or delta makes the old one wrong. `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
+Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; a path goes out as one queue of `SetPosition` steps paced with `Wait` by `movement_speed`, cut on a step boundary at the horizon. While it runs the agent only polls; it sends a new queue when a result is rejected or unknown, an event or read makes the rest of the path wrong, or survival events arrive. A dropped queue the server may still hold is replaced, by a lone `Wait` if there is nothing else to do (M6). `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
 
 ## Architecture
 
@@ -59,7 +59,7 @@ Checked top to bottom:
 
 Self is re-read after `Died`, and every 60 windows otherwise.
 
-Position is tracked locally: a submitted `SetPosition` moves us to the target at once, because its result only arrives with the next submit. A rejection puts us back where we stood before it, and the intent submitted in that same round trip was planned from the refused step, so it is not assumed. A rejection, a door, or a death sends us back to step 1.
+Position is tracked locally from results: an applied `SetPosition` moves us to its target. A rejection of the first step puts us back where we stood when the queue was sent, and the server discards the rest of the queue. A queue the client drops itself forces a position read, since its later results are no longer read. A rejection, a door, or a death sends us back to step 1.
 
 `Attacked`, `Damaged`, and `Died` on a queue are always ours: they carry no `subject_id` there.
 

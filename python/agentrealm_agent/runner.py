@@ -133,9 +133,10 @@ class Runner:
         payload = ex.tick_payload(fresh)
         r = self.client.tick(self.cid, payload)
         w.tick = int(r.get("tick", w.tick))
-        rejected = ex.ingest_results(r.get("intent_results") or [], w, m)
+        # Register the new queue first: this response may already carry its results.
         if payload is not None:
-            ex.note_sent(payload, r.get("queue_id"), w.pos)
+            ex.note_sent(payload, r.get("queue_id"), w.pos, m)
+        rejected = ex.ingest_results(r.get("intent_results") or [], w, m)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
         ex.invalidate_from_events(events, w, m)

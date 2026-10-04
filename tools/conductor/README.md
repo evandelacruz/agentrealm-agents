@@ -60,9 +60,9 @@ claim it.
 ```bash
 # Spawn an implementer (defaults to env evandelacruz/agentrealm-agents, auto-PR on)
 npm --prefix tools/conductor run spawn -- \
-  --ids M4 \
-  --name "LLM planner" \
-  -- "Implement M4 per PLAN.md …"
+  --ids A8 \
+  --name "Runtime directives" \
+  -- "Implement A8 per PLAN.md …"
 
 # Follow up on an existing agent. --pr claims conductor:working first.
 npm --prefix tools/conductor run follow-up -- --agent bc-… --pr https://github.com/evandelacruz/agentrealm-agents/pull/18 -- "Fix unresolved review comments"

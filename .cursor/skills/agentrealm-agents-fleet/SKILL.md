@@ -2,7 +2,7 @@
 name: agentrealm-agents-fleet
 description: >-
   Batch-spawn n cloud agents against agentrealm-agents: assign each to one open PR (fix or
-  polish) or one chosen milestone slice. Use when Evan asks to kick off a fleet,
+  polish) or one chosen backlog item. Use when Evan asks to kick off a fleet,
   spawn n agents in parallel, or run a batch conductor pass.
 ---
 
@@ -67,7 +67,7 @@ Repo: `evandelacruz/agentrealm-agents`.
 6. **Sanity-check, then spawn.** For every new-work ID, confirm it is not already `done` on `origin/main`. Use the brief shape in [implementer-brief.md](../agentrealm-agents-conductor/references/implementer-brief.md).
 
    ```bash
-   npm --prefix tools/conductor run spawn -- --ids M4 --name "LLM planner" -- <<'EOF'
+   npm --prefix tools/conductor run spawn -- --ids A8 --name "Runtime directives" -- <<'EOF'
    <implementer brief>
    EOF
    ```
@@ -80,13 +80,13 @@ Repo: `evandelacruz/agentrealm-agents`.
 
 ## Choosing backlog work
 
-**Default is one ID per agent.** Milestones are deliberately large and get sliced into PRs at code time, so a single agent takes one slice of one milestone, not several.
+**One ID per agent, one agent per ID.** Backlog items are PR-sized, so an agent takes one item. Never put two slots on the same ID in a batch; if fewer IDs are ready than slots, leave the extra slots empty rather than splitting an item. Milestones (M6, M7, …) are headings, not items: never assign one.
 
 **Hard gates first.** Respect stated dependencies. Prefer work that unlocks other items over parallel leaf work when both are ready.
 
 **Read `note` and `remaining`.** Skip items whose note starts with "Waiting on" or says blocked. Those are Evan's to resolve, not an implementer's. Skip umbrella items, whose work lives in their child IDs.
 
-**Milestones.** Choose work from PLAN.md **Milestones**: any ID whose `status.json` state is not `done`, minus the items the rule above skips and any an open pull request already covers (cites the ID in its title or body). If no ready work is left for a slot, leave it empty. If every slot is empty, spawn nothing and say that ready backlog work is exhausted.
+**Ready items.** Choose work from PLAN.md **Milestones**: any item ID whose `status.json` state is not `done` and whose **Depends on** IDs are all `done`, minus the items the rule above skips and any an open pull request already covers (cites the ID in its title or body). If no ready work is left for a slot, leave it empty. If every slot is empty, spawn nothing and say that ready backlog work is exhausted.
 
 **One reviewable PR per agent.** Split a large item with an explicit scope and leave it `partial`.
 

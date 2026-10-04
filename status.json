@@ -1,21 +1,97 @@
 {
   "M0": {"state": "done"},
+
   "M1": {"state": "done"},
+
   "M2": {"state": "done"},
+
   "M3": {"state": "done"},
-  "M4": {"state": "open"},
-  "M5": {
-    "state": "partial",
-    "remaining": "Run scripts/seed_local_stack.py --probe against a real local stack and confirm create works end to end; the readiness probe stays opt-in until the API offers a read-only sandbox readiness signal or a character delete (PLAN.md Server gaps)."
-  },
-  "M6": {
-    "state": "partial",
-    "remaining": "Wire attack and speech pacing (agentrealm_agent/executor/pacing.py) into the runner, re-send a held queue when a read or event makes the rest of its path wrong (BlockChanged, an entity on the path), send snapshot_version on tick POST (the world model already applies versions and deltas, including health), consuming health in decisions, live Olympuff smoke test."
-  },
-  "M7": {"state": "open"},
-  "M8": {"state": "open"},
-  "M9": {"state": "open"},
-  "M10": {"state": "open"},
-  "M11": {"state": "open"},
-  "M12": {"state": "open"}
+
+  "M5": {"state": "partial", "remaining": "Run scripts/seed_local_stack.py --probe against a real local stack and confirm create works end to end; the readiness probe stays opt-in until the API offers a read-only sandbox readiness signal or a character delete (PLAN.md Server gaps)."},
+
+  "A1": {"state": "open"},
+
+  "A2": {"state": "done"},
+
+  "A3": {"state": "open"},
+
+  "A4": {"state": "open"},
+
+  "A5": {"state": "open"},
+
+  "A6": {"state": "open"},
+
+  "A7": {"state": "open"},
+
+  "A8": {"state": "open"},
+
+  "A9": {"state": "open"},
+
+  "A10": {"state": "open"},
+
+  "A11": {"state": "open"},
+
+  "A12": {"state": "open"},
+
+  "A13": {"state": "open"},
+
+  "A14": {"state": "open"},
+
+  "A15": {"state": "open"},
+
+  "A16": {"state": "open"},
+
+  "A17": {"state": "open"},
+
+  "A18": {"state": "open"},
+
+  "A19": {"state": "open"},
+
+  "A20": {"state": "open"},
+
+  "A21": {"state": "open"},
+
+  "A22": {"state": "open"},
+
+  "A23": {"state": "open"},
+
+  "A24": {"state": "open"},
+
+  "A25": {"state": "open"},
+
+  "A26": {"state": "open"},
+
+  "A27": {"state": "open"},
+
+  "A28": {"state": "open"},
+
+  "A29": {"state": "open"},
+
+  "A30": {"state": "open"},
+
+  "A31": {"state": "open"},
+
+  "A32": {"state": "open"},
+
+  "A33": {"state": "open"},
+
+  "A34": {"state": "open"},
+
+  "A35": {"state": "open"},
+
+  "A36": {"state": "open"},
+
+  "A37": {"state": "open"},
+
+  "A38": {"state": "open"},
+
+  "A39": {"state": "open"},
+
+  "A40": {"state": "open"},
+
+  "A41": {"state": "open"},
+
+  "A42": {"state": "open"},
+
+  "A43": {"state": "open"}
 }

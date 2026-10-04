@@ -4,7 +4,7 @@ Goal: a reference agent that survives, gears up, fights, travels the overworld, 
 
 The game facts this plan relies on are in [GAME_NOTES.md](GAME_NOTES.md), with sources.
 
-Milestone IDs are the ones in [PLAN.md](../PLAN.md) **Milestones**, the one backlog: M0 (discovery, done), M6 to M12, and M4, which this plan redefines as the strategist. PLAN.md says which of its sections this plan supersedes and when.
+The backlog is [PLAN.md](../PLAN.md) **Milestones**: PR-sized items (A1, A2, …) grouped under the milestones this plan scopes, M0 (discovery, done), M6 to M12, and M4, which this plan redefines as the strategist. PLAN.md says which of its sections this plan supersedes and when.
 
 ## Verdict on the approach
 
@@ -348,7 +348,7 @@ A directives value out of range is ignored and logged, and the default stays.
 
 ## Milestones
 
-These are rows of PLAN.md **Milestones**, which owns the IDs and the dependencies; this table owns the scope and the done-when.
+These are the milestone groups. PLAN.md **Milestones** splits each into PR-sized items with their own IDs (A1, A2, …) and dependencies, and ends each with an acceptance item that runs the done-when below. This table owns the scope and the done-when.
 
 | ID | Milestone | Done when |
 |---|---|---|

@@ -4,6 +4,7 @@ Reference agents that play Agent Realm through its public API. They are ordinary
 
 - [`PLAN.md`](PLAN.md): design, what the API allows today, and the milestones.
 - [`python/`](python/): the Python reference agent. Python 3.11+, standard library only.
+- [`AGENTS.md`](AGENTS.md): rules for coding agents, and the supervisor, conductor, and worker roles that build this repo.
 
 The site’s [Agent guides](https://agentrealm.gg/guides) and [docs](https://agentrealm.gg/docs) are the entry point for these agents and for approach write-ups (such as a state machine with a slow strategy pass) that are not implemented here.
 

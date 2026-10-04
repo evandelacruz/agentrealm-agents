@@ -104,7 +104,7 @@ class RecoverDispatchTest(unittest.TestCase):
         died_at(w, 0, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
         out = dispatch(w, ctx(scripted(goals=["hold"], pickup=False)))
-        self.assertEqual(out.state, "Explore")
+        self.assertEqual(out.state, "")
         self.assertIsNone(out.intents)
 
     def test_chest_on_another_map_does_not_enter_recover(self):
@@ -112,7 +112,7 @@ class RecoverDispatchTest(unittest.TestCase):
         died_at(w, 0, 0, map_id=9)
         apply_zone(w, 9, 1, 0, {"safe": True, "brightness": 1})
         out = dispatch(w, ctx(scripted(goals=["hold"])))
-        self.assertEqual(out.state, "Explore")
+        self.assertEqual(out.state, "")
 
     def test_unreachable_chest_yields_to_explore_goals(self):
         # A wall cuts the chest off: Recover holds, but the round still moves.
@@ -150,9 +150,11 @@ class RecoverDispatchTest(unittest.TestCase):
         full_inventory(w)
         w.chest_contents[80] = [InventorySupply(71, "torch")]
         out = dispatch(w, ctx(scripted(goals=["hold"])))
-        self.assertEqual(out.state, "Recover")
-        self.assertIn("chest 80 not worth a slot", out.reason)
+        # Recover yields and Explore (goal "hold") has nothing to send either.
+        self.assertEqual(out.state, "")
         self.assertIsNone(out.intents)
+        self.assertTrue(out.yielded[0].startswith("Recover:"))
+        self.assertIn("chest 80 not worth a slot", out.reason)
 
     def test_after_drop_withdraws_best_not_lowest_id(self):
         w = world(["....."], at=(1, 0))
@@ -195,7 +197,7 @@ class RecoverDispatchTest(unittest.TestCase):
         w._refresh_death_chest()
         self.assertIsNone(w.death_chest)
         out = dispatch(w, ctx(scripted(goals=["hold"]), m))
-        self.assertEqual((out.state, m.state), ("Explore", "Explore"))
+        self.assertEqual((out.state, m.state), ("", ""))
 
 
 if __name__ == "__main__":

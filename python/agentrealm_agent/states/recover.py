@@ -117,7 +117,7 @@ def recover_outcome(
                 )
                 return StateOutcome(intents, reason, reflex=True, state=state)
         if contents is None:
-            return StateOutcome(None, f"open chest {chest_id}", state=state)
+            return StateOutcome(None, f"open chest {chest_id}", state=state, wait=True)
 
     if m.goal != "chest" or not next_step(w, plan_avoid, m.path):
         found = cost_path(

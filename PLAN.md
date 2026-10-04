@@ -194,7 +194,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 
 | ID | Item | Depends on |
 |---|---|---|
-| A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. A state that claims the round but sends no intent falls through to the next state; that rule lives in the dispatcher (A44), so states do not add their own fallbacks. | A1, A2 |
+| A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. A state that claims the round but sends no intent falls through to the next state; that rule lives in the dispatcher (A44), so states do not add their own fallbacks. A state that means to hold the round with nothing to send (Sync, Downed, Idle, a Flee or Heal wait, Recover opening the chest) returns `StateOutcome(..., wait=True)`. | A1, A2 |
 | A6 | **Threat table.** Damage per hit per hostile type from `Damaged`; the unmeasured default. | |
 | A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery records safe tiles; **Retreat** (A9) and **Heal** (A10) walk to them, and **Recover** (A11) walks to a death chest only from a known safe tile on or beside it. A failed zone read drops that cell from probing. | |
 | A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
@@ -206,7 +206,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A14 | **Rejection learning.** What each rejection code teaches the map (reflex 1 table): impassable, occupant cost for 30 ticks, locked doors and hunting closures in the knowledge base. `would_strand` is treated like any other code (reflex 1 table). | A12, A17 |
 | A15 | **Stuck detection and escalation.** Steps 1, 3 and 5, backoff, frontier drop; the navigation fixtures and trace replay tests. | A5, A12, A14 |
 | A16 | **M7 acceptance.** M7 done-when. | A4, A9, A10, A11, A13, A15, A44 |
-| A44 | **Dispatcher fall-through.** A state whose `guard` holds but whose `act` sends no intent yields the round to the next state, so a guard/act mismatch can never freeze the agent. The dispatcher enforces it once; a test drives each shipped state through that case. | A5 |
+| A44 | **Dispatcher fall-through.** A state whose `guard` holds but whose `act` sends no intent yields the round to the next state, so a guard/act mismatch can never freeze the agent. The dispatcher enforces it once; a test drives each shipped state through that case. The one exception is typed, never keyed on state names or reasons: an outcome with `wait=True` is an intentional wait and keeps the round. Each yielded `"State: reason"` is kept on the outcome's `yielded` list, and in the reason when no state sends anything. | A5 |
 
 **M8: Gear, economy and combat.** Loot (A20) is a partial: hearts and gems first wait on their supply codes (GAME_NOTES open questions).
 

@@ -49,17 +49,26 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     """Run the first state that is active and not done, or whose guard holds.
 
     Higher-priority guards always win; the active state keeps running past
-    its own guard until its ``done`` holds. Each call is one decision window:
+    its own guard until its ``done`` holds. A state that runs (active or guard
+    holds) but whose ``act`` sends no intent falls through to the next state (A44),
+    unless it sets ``StateOutcome.wait``. Each call is one decision window:
     it ages what Step rejections taught the map (A14).
     """
     m = ctx.memory
+    yielded: list[str] = []
     try:
         for state in STATES:
             active = state.name == m.state and not state.done(world, ctx)
-            if active or state.guard(world, ctx):
+            if not (active or state.guard(world, ctx)):
+                continue
+            outcome = state.act(world, ctx)
+            if outcome.intents or outcome.wait:
                 m.state = state.name
-                return state.act(world, ctx)
+                outcome.yielded = yielded
+                return outcome
+            yielded.append(f"{state.name}: {outcome.reason}")
         m.state = ""
-        return StateOutcome(None, "no state")
+        reason = f"no state ({'; '.join(yielded)})" if yielded else "no state"
+        return StateOutcome(None, reason, yielded=yielded)
     finally:
         end_decision(m.nav, world.tick)

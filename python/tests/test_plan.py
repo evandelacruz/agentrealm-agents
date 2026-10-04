@@ -337,6 +337,14 @@ class PathForPlanOpTest(unittest.TestCase):
         self.assertIsNone(path_for_plan_op({"op": "wait", "seconds": 1}, open_world(), Memory(),
                                            Policy(kind="scripted"), set(), set(), None))
 
+    def test_compose_goal_done_when_whole_held(self):
+        from agentrealm_agent.item_table import InventorySupply
+
+        op = {"op": "compose", "composes_into": "master_key"}
+        w = WorldModel(character_id=1, map_id=1, pos=(0, 0))
+        w.held_supplies = [InventorySupply(1, "master_key")]
+        self.assertTrue(goal_done(op, w, Plan([op], dict(PARAM_DEFAULTS))))
+
 
 class RunnerPlanTest(unittest.TestCase):
     def setUp(self):

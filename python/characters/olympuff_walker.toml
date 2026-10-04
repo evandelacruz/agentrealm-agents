@@ -1,0 +1,15 @@
+# A4 live M6 acceptance: long calm walking on Olympuff (scripts/smoke_m6_olympuff.py).
+name = "OlympuffWalker"
+avatar = "default"
+model_agent = "agentrealm-reference/scripted"
+world = "olympuff"
+
+[policy]
+kind = "scripted"
+goals = ["explore"]
+on_hostile = "flee"
+hostile = ["npc"]
+hostile_range = 4
+pickup = false
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 15

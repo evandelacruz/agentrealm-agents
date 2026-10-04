@@ -162,7 +162,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
 | M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. The agent's default base URL is the local stack. | M1 |
 
-**M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, `Use` and `Say`/`Broadcast` through `executor/pacing.py` with cooldowns carried across queues (A1), multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2) and on path changes (A43), applying snapshot versions, deltas and health in the world model, and tick POSTs that carry the last applied observation version (A3).
+**M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, `Use` and `Say`/`Broadcast` through `executor/pacing.py` with cooldowns carried across queues (A1), multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2) and on path changes (A43), applying snapshot versions, deltas and health in the world model, tick POSTs that carry the last applied observation version (A3), and the live Olympuff acceptance script [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py) (A4).
 
 | ID | Item | Depends on |
 |---|---|---|

@@ -25,7 +25,8 @@ from .executor import (
     trim_to_horizon,
     wait,
 )
-from .poll_cadence import calm_poll_interval
+from .m6_acceptance import M6AcceptanceMetrics
+from .poll_cadence import calm_poll_interval, is_urgent
 from .world import DOORS, WorldModel, terrain_cells
 from .zone_discovery import apply_town, apply_zone, zone_failed
 
@@ -61,6 +62,7 @@ class Runner:
         stop: threading.Event,
         out=print,
         knowledge: KnowledgeBase | None = None,
+        acceptance: M6AcceptanceMetrics | None = None,
     ):
         self.cfg = cfg
         self.client = client
@@ -79,6 +81,7 @@ class Runner:
         self.trace = open(cfg.trace_path, "a", buffering=1)
         self.directives = DirectivesWatch(cfg.directives_path)
         self.directives.ensure_loaded()
+        self.acceptance = acceptance
 
     def log(self, call: str, detail: str, record: dict) -> None:
         w = self.world
@@ -115,11 +118,26 @@ class Runner:
                         {"directives": {"params": self.directives.directives.params, "never_attack": self.directives.directives.never_attack}},
                     )
                 call = choose_call(self.world, self.mem, self.cfg.policy)
+                if self.acceptance is not None:
+                    self.acceptance.on_window(
+                        urgent=is_urgent(self.world, self.mem, self.cfg.policy),
+                        call=call,
+                    )
                 if call == "skip":
                     self.mem.windows_since_self += 1
+                    if (
+                        self.acceptance is not None
+                        and self.acceptance.reached_step_goal()
+                    ):
+                        self.stop.set()
                     continue
                 try:
                     not_before = self.step(call)
+                    if (
+                        self.acceptance is not None
+                        and self.acceptance.reached_step_goal()
+                    ):
+                        self.stop.set()
                 except ApiError as e:
                     not_before = self.on_error(call, e)
         finally:
@@ -460,6 +478,8 @@ class Runner:
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
+                if self.acceptance is not None:
+                    self.acceptance.on_step_applied()
                 if w.view.tiles.get(w.pos) in DOORS:
                     # A door moves us; the Steps still queued behind this one
                     # would walk from the wrong place.
@@ -475,6 +495,9 @@ class Runner:
             return False
         if intent and intent.get("verb") == "Step" and w.pos is not None:
             reject_step(m, step_landing(w.pos, intent["direction"]))
+        code = (result.get("rejection") or {}).get("code", "?")
+        if self.acceptance is not None:
+            self.acceptance.on_rejection(code)
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None

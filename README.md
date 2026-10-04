@@ -67,3 +67,16 @@ cd python && python3 -m unittest discover -s tests
 ```
 
 `make conductor-test` builds and tests [`tools/conductor`](tools/conductor/README.md) (Node 22+). CI runs both on every pull request.
+
+### M6 acceptance (live Olympuff, A4)
+
+After the executor slices on `main`, you can run the M6 done-when against the public API: 200 applied `Step`s, no `movement_cooldown` rejections, and calm windows spend under a quarter of the budget on `POST tick` (the 4–10 tick poll cadence; terrain and zone reads use spare windows). This uses a dedicated character (`python/characters/olympuff_walker.toml`); lives on live worlds are permanent.
+
+```sh
+export AGENTREALM_BASE_URL=https://api.agentrealm.gg
+export AGENTREALM_API_KEY=...   # from your account page
+make smoke-m6-olympuff
+# or: python3 scripts/smoke_m6_olympuff.py --timeout 3600
+```
+
+The script creates the character on first run (id in `python/.state/OlympuffWalker.json`), then drives `run` until the step count is met. It prints a short summary and exits non-zero on failure. Traces land in `python/.state/OlympuffWalker.trace.jsonl`.

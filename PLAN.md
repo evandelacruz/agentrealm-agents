@@ -166,6 +166,7 @@ Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local sta
 | No hostile's reach is served | `hostile_range` is a guess in the character file. | None |
 | No NPC's health or damage is served, except a boss's health | Hostile health and damage per type are learned from `NPCDamaged`, `NPCDied` and `Damaged`, with conservative defaults until measured ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) Combat). | None |
 | No supply's capabilities (cut, chop, smash, burn, blast, light, water) are served on any read | The item table stores none. They come from the manual's per-class rules ([`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) Movement and blocks) or from break results (A28). | None |
+| No capability read surface for the item table (A46) | Supplies on entity-tiles and in tick observations carry `supply_subtype_code` and may carry `gem_price`, but nothing names cut, chop, smash, burn, blast, light, or water for that subtype, so A18 records reach, prices, and weapon hits only and does not invent capability tags on `items` rows. | A18, A28 |
 | `Use` on an NPC by id ships in server release 1.11 | **Fight** aims every NPC swing by id (A45), so against a server older than 1.11 it cannot land a hit on an NPC. | B126 |
 | Our own strength is served only on the owner watch sheet, not on a character route | The agent brackets its strength from `over_strength_ceiling` rejections and does not read the watch sheet, which sits outside the character call budget. | None |
 
@@ -227,6 +228,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A24 | **Healing from food and potions.** `Arm` + `Use` self; heal amounts learned per type; re-`Arm` the weapon after a drink (A10 leaves it unarmed). | A10, A20 |
 | A25 | **M8 acceptance.** M8 done-when. | A16, A19, A21, A22, A23, A24 |
 | A45 | **Use on an NPC by id.** Fight's swings target `{"kind": "npc", "npc_id": N}` (`states/intents.use_npc`), so the server swings at the block the NPC stands on the tick the `Use` runs (server release 1.11, saims B126; [API rules § Use](https://agentrealm.gg/docs/api)) and a queued swing follows an NPC that moved after the plan. An NPC out of sight, dead or unknown that tick is `target_out_of_range`, which drops the rest of the queue and re-plans like any rejection. The item table matches `NPCDamaged` against the block the NPC was last seen on and files the hit only when the one NPC seen there is the target, so a hit after it moved, or on another NPC on that block, is left unattributed. `never_attack` checks the target NPC's type by id and fails closed: with it set, an npc id not in the entity list drops the swing. No `direction` target is used: the agent never aims a `Use` at a neighbour meant relative to where it will stand. | A23 |
+| A46 | **Item table capabilities.** When supply reads serve capability tags for a subtype, merge them onto that subtype's row in `items`. Blocked until the server gap above is closed; A18 does not guess. | A18 |
 
 **M9: Navigation and knowledge.**
 

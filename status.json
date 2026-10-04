@@ -4,8 +4,14 @@
   "M2": {"state": "done"},
   "M3": {"state": "done"},
   "M4": {"state": "open"},
-  "M5": {"state": "done"},
-  "M6": {"state": "open"},
+  "M5": {
+    "state": "partial",
+    "remaining": "Run scripts/seed_local_stack.py --probe against a real local stack and confirm create works end to end; the readiness probe stays opt-in until the API offers a read-only sandbox readiness signal or a character delete (PLAN.md Server gaps)."
+  },
+  "M6": {
+    "state": "partial",
+    "remaining": "Wire the executor into the runner: Step/Wait pacing from movement_speed, calm vs threatened poll cadences, snapshot deltas and health on the world model, live Olympuff smoke test."
+  },
   "M7": {"state": "open"},
   "M8": {"state": "open"},
   "M9": {"state": "open"},

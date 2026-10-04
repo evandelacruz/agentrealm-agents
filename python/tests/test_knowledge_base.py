@@ -1,11 +1,15 @@
 """Per-world knowledge base load/save and sections."""
 
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from types import SimpleNamespace
 from pathlib import Path
 from unittest import mock
 
+from agentrealm_agent import __main__ as cli
 from agentrealm_agent import knowledge_base as kb
 
 
@@ -93,6 +97,120 @@ class KnowledgeBaseTest(unittest.TestCase):
         kb.save(loaded)
         roundtrip = json.loads(path.read_text())
         self.assertEqual(roundtrip["future_section"], {"note": "keep"})
+
+    def _write(self, world: str, raw) -> None:
+        path = kb.world_path(world)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(raw if isinstance(raw, str) else json.dumps(raw))
+
+    def test_invalid_json(self) -> None:
+        self._write("sandbox", "{not json")
+        with self.assertRaisesRegex(kb.KnowledgeBaseError, "invalid JSON"):
+            kb.load("sandbox")
+
+    def test_root_not_object(self) -> None:
+        self._write("sandbox", [])
+        with self.assertRaisesRegex(kb.KnowledgeBaseError, "JSON object"):
+            kb.load("sandbox")
+
+    def test_wrong_typed_sections(self) -> None:
+        for key, bad in (("maps", []), ("clues", {}), ("compose", "x"), ("levels", 3)):
+            with self.subTest(key=key):
+                self._write("sandbox", {"schema_version": 1, key: bad})
+                with self.assertRaisesRegex(kb.KnowledgeBaseError, key):
+                    kb.load("sandbox")
+
+    def test_schema_version_too_new(self) -> None:
+        self._write("sandbox", {"schema_version": kb.SCHEMA_VERSION + 1})
+        with self.assertRaisesRegex(kb.KnowledgeBaseError, "unsupported"):
+            kb.load("sandbox")
+
+    def test_schema_version_not_int(self) -> None:
+        for bad in ("1", 1.0, True, None):
+            with self.subTest(bad=bad):
+                self._write("sandbox", {"schema_version": bad})
+                with self.assertRaisesRegex(kb.KnowledgeBaseError, "integer"):
+                    kb.load("sandbox")
+
+    def test_save_leaves_no_temp_files(self) -> None:
+        kb.save(kb.KnowledgeBase.empty("sandbox"))
+        kb.save(kb.KnowledgeBase.empty("sandbox"))
+        self.assertEqual([p.name for p in self.worlds.iterdir()], ["sandbox.json"])
+
+
+class RunWiringTest(unittest.TestCase):
+    """`run` loads one knowledge base per world, shares it, and saves it at exit."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.worlds = Path(self.tmp.name) / "worlds"
+        patch = mock.patch.object(kb, "WORLDS_DIR", self.worlds)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.seen: list[tuple[str, kb.KnowledgeBase]] = []
+        seen = self.seen
+
+        class FakeRunner:
+            def __init__(self, cfg, client, cid, stop, out, knowledge=None):
+                self.cfg, self.knowledge = cfg, knowledge
+
+            def run(self) -> None:
+                seen.append((self.cfg.name, self.knowledge))
+                with self.knowledge.lock:
+                    self.knowledge.clues.append({"kind": "sign", "text": self.cfg.name})
+
+        patch = mock.patch.object(cli, "Runner", FakeRunner)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _run(self, worlds: list[str]) -> tuple[int, str, str]:
+        ids = [(SimpleNamespace(name=f"c{i}", world=w), i) for i, w in enumerate(worlds)]
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(cli, "_ids", return_value=ids), redirect_stdout(out), redirect_stderr(err):
+            code = cli.run(mock.Mock(), [])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_one_base_per_world_saved_at_exit(self) -> None:
+        with mock.patch.object(cli, "load_knowledge", wraps=kb.load) as load:
+            code, _, _ = self._run(["sandbox", "sandbox", "olympuff"])
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(c.args[0] for c in load.call_args_list), ["olympuff", "sandbox"])
+        by_name = dict(self.seen)
+        self.assertIs(by_name["c0"], by_name["c1"])
+        self.assertIsNot(by_name["c0"], by_name["c2"])
+        self.assertEqual(sorted(c["text"] for c in kb.load("sandbox").clues), ["c0", "c1"])
+        self.assertEqual([c["text"] for c in kb.load("olympuff").clues], ["c2"])
+
+    def test_bad_file_stops_before_any_character_runs(self) -> None:
+        path = kb.world_path("sandbox")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json")
+        code, _, err = self._run(["sandbox"])
+        self.assertEqual(code, 2)
+        self.assertIn("invalid JSON", err)
+        self.assertEqual(self.seen, [])
+        self.assertEqual(path.read_text(), "{not json")
+
+    def test_bad_world_code_stops_before_any_character_runs(self) -> None:
+        code, _, err = self._run(["../escape"])
+        self.assertEqual(code, 2)
+        self.assertIn("invalid world code", err)
+        self.assertEqual(self.seen, [])
+
+    def test_save_error_is_reported_per_world(self) -> None:
+        real_save = kb.save
+
+        def save(base: kb.KnowledgeBase) -> None:
+            if base.world_code == "sandbox":
+                raise OSError("disk full")
+            real_save(base)
+
+        with mock.patch.object(cli, "save_knowledge", side_effect=save):
+            code, out, _ = self._run(["sandbox", "olympuff"])
+        self.assertEqual(code, 0)
+        self.assertIn("knowledge base sandbox: not saved: disk full", out)
+        self.assertEqual(len(kb.load("olympuff").clues), 1)
 
 
 if __name__ == "__main__":

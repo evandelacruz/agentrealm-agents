@@ -2,12 +2,21 @@
 
 Shared by every character run from this checkout that plays the same world.
 Later milestones fill the sections; A18 owns the item table (not stored here).
+
+`run` loads each world's file once at start and saves it once at exit. All
+characters of a world share the one in-memory object; anything that changes
+it holds `kb.lock`, and `save` takes the same lock. One `run` process per
+world at a time: two processes on the same world each save their own copy
+at exit, and the last save wins.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -59,6 +68,7 @@ class KnowledgeBase:
     levels: dict[str, dict[str, Any]] = field(default_factory=dict)
     compose: list[dict[str, Any]] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -124,7 +134,16 @@ def load(world_code: str) -> KnowledgeBase:
 def save(kb: KnowledgeBase) -> None:
     path = world_path(kb.world_code)
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(kb.to_dict(), indent=2) + "\n"
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
+    with kb.lock:
+        text = json.dumps(kb.to_dict(), indent=2) + "\n"
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

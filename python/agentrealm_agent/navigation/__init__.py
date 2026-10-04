@@ -14,6 +14,7 @@ from .planner import (
     nearest_target,
 )
 from .rejection import NavMemory, learn_step_rejection
+from .stuck import NavAttempt, NavStuckMemory, filter_frontiers
 
 __all__ = [
     "COARSE_NODE_BUDGET",
@@ -30,4 +31,7 @@ __all__ = [
     "macro_cell",
     "nearest_target",
     "route_first_leg",
+    "NavAttempt",
+    "NavStuckMemory",
+    "filter_frontiers",
 ]

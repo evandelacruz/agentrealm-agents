@@ -5,14 +5,16 @@ from __future__ import annotations
 from ..config import Policy
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
-from ..navigation import doors_goal_path, nearest_target
-from ..pathing import grid_params, next_step
+from ..navigation import cost_path, doors_goal_path, nearest_target
+from ..navigation import stuck as nav_stuck
+from ..pathing import grid_params, guided_step, nav_search, next_step
 from ..world import Pos, WorldModel
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome
 from .intents import set_position
 
-GOAL = "level"
+DOOR_GOAL, FRONTIER_GOAL = "level:door", "level:frontier"
+GOALS = (DOOR_GOAL, FRONTIER_GOAL)
 
 
 def inside_level(w: WorldModel) -> bool:
@@ -34,45 +36,65 @@ def level_outcome(
     knowledge: KnowledgeBase | None = None,
     state: str = "Level",
 ) -> StateOutcome:
-    """Doors first, then frontier tiles, with fight and pickup reflexes (PLAN.md)."""
+    """Doors first, then frontier tiles, with fight and pickup reflexes (PLAN.md).
+
+    Stuck detection and escalation drive the walk; a door or frontier given
+    up on is backed off for Level and Explore alike (A15).
+    """
     if w.pos is None:
         return StateOutcome(None, "position unknown", state=state)
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
     reflex = reflex_outcome(w, policy, never_attack=never_attack, state=state)
     if reflex is not None:
-        if m.goal == GOAL:
+        if m.goal in GOALS:
             m.path, m.goal = [], ""
         return reflex
 
-    step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
-    if step is None:
-        _replan_level(w, m, policy, plan_avoid, plan_costly, knowledge)
-        step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
-    if step is not None:
-        return StateOutcome([set_position(step)], f"level → {m.path[-1]}", state=state)
+    choice = _level_target(w, m, policy, plan_avoid, plan_costly, knowledge)
+    if choice is not None:
+        goal, target = choice
+
+        def plan(att):
+            params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
+            return cost_path(w, target, params, nav=nav_search(m, w, goal, target))
+
+        step = guided_step(m, w, goal, target, plan_avoid, plan)
+        if step is not None:
+            note = nav_stuck.level_note(nav_stuck.active(m, w))
+            return StateOutcome([set_position(step)], f"level → {target}{note}", state=state)
 
     return StateOutcome(None, "no level step", state=state)
 
 
-def _replan_level(
+def _level_target(
     w: WorldModel,
     m: Memory,
     policy: Policy,
     blocked: set[Pos],
     costly: set[Pos],
     knowledge: KnowledgeBase | None,
-) -> None:
-    if m.goal == GOAL:
+) -> tuple[str, Pos] | None:
+    """The door or frontier Level walks to, and its goal label.
+
+    The active Level attempt keeps its target while it escalates, so a walk
+    that has lost its path still climbs the ladder to a give-up (A15).
+    """
+    att = nav_stuck.active(m, w)
+    if att is not None and att.goal in GOALS:
+        if not nav_stuck.done(att, w):
+            return att.goal, att.target
+        nav_stuck.finish(m, att)
+    if m.goal in GOALS:
         m.path, m.goal = [], ""
-    params = grid_params(policy, blocked, costly, allow_goal_door=True)
-    path = doors_goal_path(w, knowledge, params)
-    if path and next_step(w, blocked, path):
-        m.path, m.goal = path, GOAL
-        return
-    targets = w.view.frontier() - {w.pos}
-    found = nearest_target(w, targets, grid_params(policy, blocked, costly))
+    # Doors and frontiers given up on stay out of the choice while backed off.
+    path = doors_goal_path(w, knowledge, grid_params(policy, blocked, costly, allow_goal_door=True, m=m))
+    if path and next_step(w, blocked, path) and not nav_stuck.backed_off(m, DOOR_GOAL, w.map_id, path[-1], w.tick):
+        return DOOR_GOAL, path[-1]
+    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
+    found = nearest_target(w, targets, grid_params(policy, blocked, costly, m=m))
     if found and next_step(w, blocked, found[1]):
-        m.path, m.goal = found[1], GOAL
+        return FRONTIER_GOAL, found[0]
+    return None
 
 
 class LevelState(State):

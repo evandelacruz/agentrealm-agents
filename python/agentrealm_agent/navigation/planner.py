@@ -45,6 +45,7 @@ class CostGridParams:
     break_nominated: set[Pos] = field(default_factory=set)  # inert until M9: impassable
     hostile_kinds: frozenset[str] = frozenset({"npc"})
     allow_goal_door: bool = False
+    fog_cost: int = FOG  # A15 step 1 raises this to prefer known ground
 
 
 @dataclass
@@ -119,7 +120,7 @@ class _Grid:
             # Stepping onto a door warps, so a door is only ever the goal.
             return KNOWN_WALKABLE if p in self.goals and params.allow_goal_door else None
         if block is None:
-            base = FOG
+            base = params.fog_cost
         elif block in WALKABLE:
             base = KNOWN_WALKABLE
         else:
@@ -172,7 +173,7 @@ class _MacroCosts:
         n = MACRO_SIZE * MACRO_SIZE
         special = self.cells.get(m, ())
         passable = n - len(special)
-        total = passable * FOG
+        total = passable * self.grid.params.fog_cost
         for p in special:
             c = self.grid.cost(p)
             if c is not None:

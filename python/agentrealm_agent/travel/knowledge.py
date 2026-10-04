@@ -44,6 +44,39 @@ def town_from_kb(kb: KnowledgeBase | None) -> tuple[int, Pos] | None:
         return None
 
 
+def entrance_key(map_id: int, p: Pos) -> str:
+    """``kb.entrances`` key: map and cell, so the same x,y on two maps stay apart."""
+    return f"{map_id}:{p[0]},{p[1]}"
+
+
+def iter_entrances(kb: KnowledgeBase | None) -> list[tuple[int, Pos, dict[str, Any]]]:
+    """Every entrance row as ``(map_id, pos, row)``; the row is the live dict."""
+    if kb is None:
+        return []
+    out: list[tuple[int, Pos, dict[str, Any]]] = []
+    with kb.lock:
+        for key, row in kb.entrances.items():
+            if not isinstance(row, dict):
+                continue
+            try:
+                mid, cell = key.split(":", 1)
+                x, y = (int(p) for p in cell.split(",", 1))
+                out.append((int(mid), (x, y), row))
+            except ValueError:
+                continue
+    return out
+
+
+def merge_entrance(kb: KnowledgeBase, map_id: int, p: Pos, patch: dict[str, Any]) -> bool:
+    """Merge ``patch`` into the entrance row at ``map_id:p``. False when there is none."""
+    with kb.lock:
+        row = kb.entrances.get(entrance_key(map_id, p))
+        if not isinstance(row, dict):
+            return False
+        row.update(patch)
+        return True
+
+
 def sync_entrances(kb: KnowledgeBase, minimap: dict) -> None:
     """Merge minimap entrance marks into ``kb.entrances`` (Manual minimap)."""
     with kb.lock:
@@ -61,8 +94,7 @@ def sync_entrances(kb: KnowledgeBase, minimap: dict) -> None:
                     x, y = int(ent["x"]), int(ent["y"])
                 except (KeyError, TypeError, ValueError):
                     continue
-                key = _cell_key((x, y))
-                row = kb.entrances.setdefault(key, {})
+                row = kb.entrances.setdefault(entrance_key(map_id, (x, y)), {})
                 row["map_id"] = map_id
                 row.setdefault("x", x)
                 row.setdefault("y", y)
@@ -129,18 +161,10 @@ def iter_shop_cells(kb: KnowledgeBase | None) -> list[tuple[int, Pos]]:
 
 
 def entrance_from_kb(kb: KnowledgeBase | None, map_id: int | None, x: int, y: int) -> tuple[int, Pos] | None:
-    if kb is None:
-        if map_id is None:
-            return None
-        return map_id, (x, y)
-    key = _cell_key((x, y))
-    with kb.lock:
-        row = kb.entrances.get(key)
-    if isinstance(row, dict) and "map_id" in row:
-        try:
-            return int(row["map_id"]), (int(row.get("x", x)), int(row.get("y", y)))
-        except (TypeError, ValueError):
-            pass
     if map_id is not None:
         return map_id, (x, y)
+    # No map given: take the one mark at x,y, if only one map has a mark there.
+    maps = {mid for mid, pos, _ in iter_entrances(kb) if pos == (x, y)}
+    if len(maps) == 1:
+        return maps.pop(), (x, y)
     return None

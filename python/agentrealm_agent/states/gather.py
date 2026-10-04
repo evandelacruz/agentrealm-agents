@@ -14,10 +14,10 @@ from .explore import plan_sets, reflex_outcome
 from .gather_safe import is_safe_ish
 from .intents import set_position, take, use_block
 
-# The supply code a gem pile carries is not published (GAME_NOTES.md open
-# questions), so pile targeting stays off until it is observed. Gem caches
-# (gem_cache_5/7/10) are a different drop and are not piles.
-UNKNOWN_GEM_PILE_CODES: frozenset[str] = frozenset()
+# Authored gem piles spawn as ground supplies (Obs, GAME_NOTES.md Gems).
+# Gem caches (gem_cache_5/7/10) are a different drop and are not piles.
+# A priced supply with the same code is shop stock: taking it is a purchase.
+GEM_PILE_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
 # Bushes are not walkable, so they are cut from a neighbouring cell: the
 # pocket knife's range is 1 (GAME_NOTES.md Olympuff starting kit).
 BUSH_REACH = 1
@@ -74,7 +74,12 @@ def _has_target(world: WorldModel, policy: Policy) -> bool:
 
 
 def is_gem_pile(e: Entity) -> bool:
-    return e.kind == "supply" and e.code in UNKNOWN_GEM_PILE_CODES
+    """A free ground gem: an authored pile, or one a grass or bush drop left."""
+    return (
+        e.kind == "supply"
+        and e.code in GEM_PILE_SUPPLY_CODES
+        and e.gem_price is None
+    )
 
 
 def gather_outcome(

@@ -175,31 +175,25 @@ class WorldModel:
         return flat
 
     def apply_observation(self, obs: dict | None) -> None:
-        """Folds a tick observation into the model: vitals and ground chest contents.
+        """Folds a complete tick snapshot into the model: vitals and ground chest contents.
 
-        Complete snapshots replace chest contents; deltas may patch vitals only
-        (docs/API.md Snapshots). This agent never sends snapshot_version, so
-        round trips usually carry a complete snapshot; delta handling is for
-        when snapshot_version lands and for tests.
+        This agent never sends snapshot_version, so every observation it gets
+        is complete (API Snapshots); anything else is ignored until deltas land.
         """
-        if not obs or obs.get("unchanged"):
+        if not obs or not obs.get("complete"):
             return
-        if obs.get("complete"):
-            self._apply_vitals_from_payload(obs.get("snapshot") or {})
-            self._apply_chest_snapshot(obs.get("snapshot") or {})
-            return
-        delta = obs.get("delta")
-        if delta is not None:
-            self._apply_vitals_from_payload(delta)
+        snap = obs.get("snapshot") or {}
+        self._apply_vitals(snap)
+        self._apply_chest_snapshot(snap)
 
-    def _apply_vitals_from_payload(self, payload: dict) -> None:
-        """Updates health from a snapshot or delta field set (API Snapshots)."""
-        if "health" in payload:
-            h = payload["health"]
-            self.health = None if h is None else int(h)
-        if "max_health" in payload:
-            mh = payload["max_health"]
-            self.max_health = None if mh is None else int(mh)
+    def _apply_vitals(self, snap: dict) -> None:
+        """Reads health and max health from a complete snapshot.
+
+        A complete snapshot is authoritative, so a field it omits (asleep)
+        clears the old value, and one that is not a number reads as unknown.
+        """
+        self.health = _opt_int(snap.get("health"))
+        self.max_health = _opt_int(snap.get("max_health"))
 
     def _apply_chest_snapshot(self, snap: dict) -> None:
         """Reads ground chest contents from a complete snapshot.
@@ -313,3 +307,12 @@ class WorldModel:
             if best is None or c < best_cost:
                 best, best_cost = (t, p), c
         return best
+
+
+def _opt_int(v) -> int | None:
+    if isinstance(v, bool):
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError, OverflowError):
+        return None

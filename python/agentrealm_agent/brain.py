@@ -93,10 +93,13 @@ def decide(
     rng: random.Random,
     *,
     never_attack: list[str] | None = None,
+    params: dict[str, float | int] | None = None,
     knowledge: KnowledgeBase | None = None,
 ) -> Decision:
     """Run the priority dispatcher (A5) and keep its first intent as a Decision."""
     ctx = PlayContext(m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
+    if params is not None:
+        ctx.params = params
     outcome = dispatch(w, ctx)
     intent = outcome.intents[0] if outcome.intents else None
     return Decision(intent, outcome.reason, outcome.reflex)

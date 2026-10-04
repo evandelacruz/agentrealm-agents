@@ -108,7 +108,7 @@ def _travel_step(
         if m.goal == goal:
             m.path, m.goal = [], ""
         return None
-    step = guided_step(m, w, goal, leg, plan_avoid, plan)
+    step = guided_step(m, w, goal, leg, plan_avoid, plan, knowledge)
     if step is None:
         return None
     note = nav_stuck.level_note(nav_stuck.active(m, w))
@@ -153,7 +153,9 @@ def _route_plan(
     routes: dict[int, list[Pos] | None] = {}
 
     def plan(att):
-        params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
+        params = grid_params(
+            policy, plan_avoid, plan_costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge
+        )
         if params.fog_cost not in routes:
             nav = nav_search(m, w, goal, dest.pos) if dest.map_id == w.map_id else None
             routes[params.fog_cost] = route_first_leg(w, knowledge, dest.map_id, dest.pos, params, nav=nav)

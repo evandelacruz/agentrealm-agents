@@ -20,6 +20,10 @@ from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import view_from_kb
 from agentrealm_agent.navigation import learn_step_rejection
 from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_agent.navigation.stuck import active as nav_active
+from agentrealm_agent.navigation.stuck import on_break_opened
+from agentrealm_agent.break_memory import capabilities_for_code, record_attempt
+from agentrealm_agent.item_table import use_target_block
 from agentrealm_agent.world import DOORS, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
 
 from .grids import GLYPHS, Scenario
@@ -93,10 +97,62 @@ def scripted(**kw) -> Policy:
     return Policy(kind="scripted", **kw)
 
 
-def _tile(sc: Scenario, w: WorldModel, p: Pos, map2: MapView) -> str:
+def _tile(sc: Scenario, w: WorldModel, p: Pos, map2: MapView, overlay: dict[Pos, str]) -> str:
+    if p in overlay:
+        return overlay[p]
     if w.map_id == 1:
         return sc.block(p)
     return map2.tiles.get(p, "wall")
+
+
+def apply_use(
+    w: WorldModel,
+    m: Memory,
+    sc: Scenario,
+    intent: dict,
+    overlay: dict[Pos, str],
+    *,
+    knowledge: KnowledgeBase | None = None,
+    map2: MapView | None = None,
+) -> bool:
+    block = use_target_block(intent, w.entities)
+    if block is None or w.map_id is None:
+        return False
+    cap = m.break_pending[1] if m.break_pending else None
+    armed = w.armed_code or ""
+    caps = capabilities_for_code(armed)
+    if cap and cap in caps:
+        use_cap = cap
+    elif "cut" in caps or "chop" in caps:
+        use_cap = "cut"
+    else:
+        use_cap = next(iter(caps), "")
+    tile = _tile(sc, w, block, map2 or map2_view(), overlay)
+    if tile == "bush" and use_cap in ("cut", "chop"):
+        overlay[block] = "dirt"
+        w.view.tiles[block] = "dirt"
+        record_attempt(
+            knowledge,
+            map_id=w.map_id,
+            pos=block,
+            capability=use_cap,
+            result="opened",
+            block_after="dirt",
+            tick=w.tick,
+        )
+        m.break_pending = None
+        on_break_opened(m, w, nav_active(m, w))
+        return True
+    record_attempt(
+        knowledge,
+        map_id=w.map_id,
+        pos=block,
+        capability=use_cap or "cut",
+        result="applied_no_effect",
+        tick=w.tick,
+    )
+    m.break_pending = None
+    return True
 
 
 def apply(
@@ -104,6 +160,7 @@ def apply(
     m: Memory,
     sc: Scenario,
     cell: Pos,
+    overlay: dict[Pos, str],
     *,
     cross: CrossMapRun | None = None,
     map2: MapView | None = None,
@@ -111,7 +168,7 @@ def apply(
     """Apply one Step toward ``cell`` as the runner would. True when it moved."""
     map2 = map2 or map2_view()
     occupied = any(e.pos == cell for e in w.entities if w.map_id == 1)
-    block = _tile(sc, w, cell, map2)
+    block = _tile(sc, w, cell, map2, overlay)
     walkable = block in WALKABLE or block in DOORS
     if chebyshev(w.pos, cell) == 1 and walkable and not occupied:
         w.pos = cell
@@ -150,11 +207,14 @@ def run(
     stop_on_signal: bool = True,
     seed: int = 7,
     cross: CrossMapRun | None = None,
+    armed_code: str | None = None,
 ) -> Run:
     """Decide and apply until the goal is reached or given up on. A decision
     that sends nothing still lets the clock run."""
     map2 = map2_view()
     w = world_for(sc, cross=cross)
+    if armed_code:
+        w.armed_code = armed_code
     m = memory or Memory()
     done_map = 2 if cross is not None else 1
     done_pos = cross.goal if cross is not None else sc.goal
@@ -163,6 +223,7 @@ def run(
     rng = random.Random(seed)
     trace: list[dict] = []
     moves = 0
+    overlay: dict[Pos, str] = {}
     for _ in range(max_decisions):
         if w.map_id == done_map and w.pos == done_pos:
             return Run("reached", moves, w, m, trace)
@@ -172,7 +233,9 @@ def run(
         row = {"tick": w.tick, "pos": list(w.pos), "map_id": w.map_id, "intent": d.intent, "reason": d.reason}
         trace.append(row)
         if d.intent is not None and d.intent.get("verb") == "SetPosition":
-            row["applied"] = apply(w, m, sc, (d.intent["x"], d.intent["y"]), cross=cross, map2=map2)
+            row["applied"] = apply(w, m, sc, (d.intent["x"], d.intent["y"]), overlay, cross=cross, map2=map2)
             moves += row["applied"]
+        elif d.intent is not None and d.intent.get("verb") == "Use":
+            row["applied"] = apply_use(w, m, sc, d.intent, overlay, knowledge=knowledge, map2=map2)
         w.tick += TICKS_PER_DECISION
     return Run("budget", moves, w, m, trace)

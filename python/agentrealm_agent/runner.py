@@ -9,8 +9,11 @@ import threading
 import time
 from dataclasses import dataclass
 
+from .break_memory import record_attempt
 from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
 from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
+from .navigation.stuck import active as nav_active
+from .navigation.stuck import on_break_opened
 from .navigation.stuck import on_rejection as nav_on_rejection
 from .navigation.stuck import on_step as nav_on_step
 from .client import ApiError, Client
@@ -419,6 +422,7 @@ class Runner:
         w.learn_threat(events, earlier)
         self._learn_items_from_tick(r.get("observation"), events, earlier, worn_before)
         self.on_events(events)
+        self._resolve_pending_break()
         self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
             # A rejection or a door already dropped our queue; an echoed server
@@ -713,6 +717,7 @@ class Runner:
                     npc_type = use_npc_type(intent, block, w.entities)
                     others = any(e.kind == "character" for e in w.entities)
                     self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type, others))
+                self._note_break_use(intent, result, block)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
@@ -837,6 +842,48 @@ class Runner:
                 absorb_damaged_worn(items, events, w.worn_codes, self._removed_code, w.entities, earlier_entities)
 
         self._with_item_table(learn)
+
+    def _note_break_use(self, intent: dict | None, result: dict, block) -> None:
+        m, w = self.mem, self.world
+        pending = m.break_pending
+        if pending is None or intent is None or intent.get("verb") != "Use" or block is None:
+            return
+        pos, cap = pending
+        if block != pos:
+            return
+        tick = int(result.get("tick", w.tick))
+        if result.get("outcome") == "applied_no_effect":
+            record_attempt(
+                self.knowledge,
+                map_id=w.map_id,
+                pos=pos,
+                capability=cap,
+                result="applied_no_effect",
+                tick=tick,
+            )
+            m.break_pending = None
+
+    def _resolve_pending_break(self) -> None:
+        m, w = self.mem, self.world
+        pending = m.break_pending
+        if pending is None or w.map_id is None:
+            return
+        pos, cap = pending
+        for map_id, p in w.changed_blocks:
+            if map_id == w.map_id and p == pos:
+                block_after = w.view.tiles.get(pos, "")
+                record_attempt(
+                    self.knowledge,
+                    map_id=w.map_id,
+                    pos=pos,
+                    capability=cap,
+                    result="opened",
+                    block_after=block_after,
+                    tick=w.tick,
+                )
+                m.break_pending = None
+                on_break_opened(m, w, nav_active(m, w))
+                return
 
     def on_events(self, events: list[dict]) -> None:
         w, m = self.world, self.mem

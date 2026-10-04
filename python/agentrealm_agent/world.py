@@ -89,7 +89,7 @@ class WorldModel:
     entities_tick: int = -10**9  # tick of the last entity read
     terrain_center: Pos | None = None  # where we stood at the last terrain read
     terrain_map: int | None = None
-    snapshot_version: str | None = None  # last applied observation version (Manual §7.1)
+    snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
@@ -113,7 +113,10 @@ class WorldModel:
         self.lives = int(s.get("lives", 0))
 
     def apply_position(self, p: dict) -> None:
-        self.map_id = int(p["map_id"])
+        map_id = int(p["map_id"])
+        if map_id != self.map_id:
+            self.snapshot_version = None  # entities no longer match its base
+        self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
 
     def perception_rect(self) -> tuple[int, int, int, int]:
@@ -141,6 +144,8 @@ class WorldModel:
     def apply_entities(self, e: dict) -> None:
         self.entities = self._entities_from_payload(e)
         self.entities_tick = int(e.get("tick", self.tick))
+        # A separate read replaced the state the next delta would apply to.
+        self.snapshot_version = None
 
     def _entities_from_payload(self, e: dict) -> list[Entity]:
         out: list[Entity] = []
@@ -238,46 +243,40 @@ class WorldModel:
         if gone or self.chest_contents.get(chest_id) == []:
             self.death_chest = None
 
-    def _apply_snapshot_body(self, snap: dict) -> None:
-        if "lives" in snap:
-            self.lives = int(snap["lives"])
-        if "alive" in snap:
-            self.alive = bool(snap["alive"])
-        if "health" in snap:
-            self.health = None if snap["health"] is None else int(snap["health"])
-        if "max_health" in snap:
-            self.max_health = None if snap["max_health"] is None else int(snap["max_health"])
-        if "position" in snap:
-            pos = snap["position"]
+    def _apply_body_scalars(self, body: dict) -> None:
+        """Fields a snapshot and a delta share: present means replace."""
+        if "lives" in body:
+            self.lives = int(body["lives"])
+        if "alive" in body:
+            self.alive = bool(body["alive"])
+        if "health" in body:
+            self.health = None if body["health"] is None else int(body["health"])
+        if "max_health" in body:
+            self.max_health = None if body["max_health"] is None else int(body["max_health"])
+        if "position" in body:
+            pos = body["position"]
             if pos is None:
                 self.forget_position()
             else:
                 self.apply_position(pos)
-        entities = snap.get("entities") or {}
-        self.entities = self._entities_from_payload(entities)
-        self.chest_contents = self._chest_contents_from_entities(entities)
+
+    def _apply_snapshot_body(self, snap: dict) -> None:
+        self._apply_body_scalars(snap)
+        if "entities" in snap:
+            entities = snap["entities"] or {}
+            self.entities = self._entities_from_payload(entities)
+            self.chest_contents = self._chest_contents_from_entities(entities)
+            self.entities_tick = self.tick
         terrain = snap.get("terrain")
         if terrain:
             self._apply_snapshot_terrain(terrain)
         self._refresh_death_chest()
 
     def _apply_delta_body(self, delta: dict) -> None:
-        if "lives" in delta:
-            self.lives = int(delta["lives"])
-        if "alive" in delta:
-            self.alive = bool(delta["alive"])
-        if "health" in delta:
-            self.health = None if delta["health"] is None else int(delta["health"])
-        if "max_health" in delta:
-            self.max_health = None if delta["max_health"] is None else int(delta["max_health"])
-        if "position" in delta:
-            pos = delta["position"]
-            if pos is None:
-                self.forget_position()
-            else:
-                self.apply_position(pos)
+        self._apply_body_scalars(delta)
         if "entities" in delta:
             self._apply_entity_delta(delta["entities"])
+            self.entities_tick = self.tick
         if "terrain" in delta:
             self._apply_terrain_delta(delta["terrain"])
         self._refresh_death_chest()
@@ -311,29 +310,28 @@ class WorldModel:
         Observations may be unchanged, a delta against the last applied
         version, or a complete snapshot when the client had no version or one
         too old. Entity patches merge by id; terrain patches update known
-        tiles; a complete snapshot replaces sight-scoped entities and may
-        refresh terrain cells listed in it.
+        tiles; a complete snapshot replaces only the parts it carries. A
+        separate entity read, losing our position, or a map change clears
+        snapshot_version, since the next delta's base no longer matches.
         """
         if not obs:
             return
         version = obs.get("version")
         if obs.get("unchanged"):
             if version is not None:
-                self.snapshot_version = str(version)
+                self.snapshot_version = int(version)
             return
         if obs.get("complete"):
             self._apply_snapshot_body(obs.get("snapshot") or {})
         elif "delta" in obs:
             self._apply_delta_body(obs["delta"])
-        elif obs.get("snapshot"):
-            # Legacy callers pass complete snapshots without the complete flag.
-            self._apply_snapshot_body(obs["snapshot"])
         if version is not None:
-            self.snapshot_version = str(version)
+            self.snapshot_version = int(version)
 
     def forget_position(self) -> None:
         self.pos = None
         self.map_id = None
+        self.snapshot_version = None
 
     # Queries.
 

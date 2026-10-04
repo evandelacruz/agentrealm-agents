@@ -8,10 +8,11 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .brain import Decision, Memory, choose_call, decide, reject_step
+from .brain import Decision, Memory, choose_call, decide
 from .client import ApiError, Client
 from .config import CharacterConfig
-from .world import DOORS, WorldModel, terrain_cells
+from .executor import Executor
+from .world import WorldModel, terrain_cells
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
@@ -46,6 +47,8 @@ class Runner:
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
         self.rng = random.Random(seed)
         self.pacer = Pacer(1.0)
+        self.executor = Executor()
+        self.tick_rate_hz = 10
         cfg.trace_path.parent.mkdir(parents=True, exist_ok=True)
         self.trace = open(cfg.trace_path, "a", buffering=1)
 
@@ -61,6 +64,8 @@ class Runner:
             self.trace.close()
             return
         hz = max(1, int(world.get("tick_rate_hz", 1)))
+        self.tick_rate_hz = hz
+        self.executor.tick_rate_hz = hz
         self.pacer = Pacer(1.0 / hz)
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
@@ -103,12 +108,14 @@ class Runner:
             t = c.terrain(self.cid, w.map_id, *w.perception_rect())
             w.apply_terrain(t)
             w.tick = max(w.tick, int(t.get("tick", 0)))
+            self.executor.invalidate_if_stale(w, m)
             n = len(terrain_cells(t))
             self.log(call, f"{n} cells, {len(w.view.tiles)} known", {"cells": n})
         elif call == "entities":
             e = c.entities(self.cid, w.map_id, *w.perception_rect())
             w.apply_entities(e)
             w.tick = max(w.tick, int(e.get("tick", 0)))
+            self.executor.invalidate_if_stale(w, m)
             m.alarm = False
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
@@ -117,80 +124,55 @@ class Runner:
         return 0.0
 
     def tick(self) -> float:
-        w, m = self.world, self.mem
-        d: Decision = decide(w, m, self.cfg.policy, self.rng)
-        # A one-entry queue: it replaces whatever is held and runs next tick
-        # (docs/API.md Intent Queue). With nothing to do, the held queue is
-        # left as it is.
-        r = self.client.tick(self.cid, None if d.intent is None else [d.intent])
+        w, m, ex = self.world, self.mem, self.executor
+        if ex.active:
+            d = Decision(None, "queue in flight")
+        else:
+            d = decide(w, m, self.cfg.policy, self.rng)
+        fresh = ex.build_from_decision(d.intent, m.path, w)
+        payload = ex.tick_payload(fresh)
+        r = self.client.tick(self.cid, payload)
         w.tick = int(r.get("tick", w.tick))
-        result = self.pending_result(r.get("intent_results") or [])
-        rejected = result is not None and self.on_result(result)
+        rejected = ex.ingest_results(r.get("intent_results") or [], w, m)
+        if payload is not None:
+            ex.note_sent(payload, r.get("queue_id"), w.pos)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        ex.invalidate_from_events(events, w, m)
+        ex.invalidate_if_stale(w, m)
         self.on_events(events)
-        submitted = d.intent
-        detail = f"{_fmt_intent(submitted)} ({d.reason})"
-        if result is not None:
-            detail += f" | last {_fmt_result(result)}"
+        submitted = payload
+        detail = f"{_fmt_intents(submitted)} ({d.reason})"
+        last = self._last_result(r.get("intent_results") or [])
+        if last is not None:
+            detail += f" | last {_fmt_result(last)}"
         if events:
             detail += " | " + ", ".join(_fmt_event(e) for e in events)
         if r.get("events_dropped"):
             detail += f" | dropped {r['events_dropped']}"
-        self.log("tick", detail, {"intents": None if submitted is None else [submitted], "reason": d.reason, "result": result, "events": events, "dropped": r.get("events_dropped", 0)})
-        if submitted is not None:
-            m.pending, m.pending_queue, m.undo = submitted, r.get("queue_id"), None
-            # A rejection in this response means `submitted` was planned from a
-            # step that never happened. Do not build on it: the position read the
-            # rejection forces lands after it resolves and says where we are.
-            # After a death there is no position to build on either.
-            if not rejected and w.pos is not None:
-                m.undo = w.pos
-                self.assume_applied(submitted)
-        # The intent resolves at this sim window's boundary. Do not call
-        # again until it has closed, so the next submit lands in a new tick.
+        self.log(
+            "tick",
+            detail,
+            {
+                "intents": submitted,
+                "reason": d.reason,
+                "result": last,
+                "events": events,
+                "dropped": r.get("events_dropped", 0),
+                "queue_invalidated": rejected or ex.invalidated,
+            },
+        )
         return time.time() + int(r.get("window_remaining_ms", 0)) / 1000.0 + WINDOW_MARGIN
 
-    def assume_applied(self, intent: dict) -> None:
-        """Moves the local model as if the intent lands; a rejection re-reads."""
-        w, m = self.world, self.mem
-        if intent.get("verb") != "SetPosition":
-            return
-        target = (intent["x"], intent["y"])
-        if m.path and m.path[0] == target:
-            m.path.pop(0)
-        if w.view.tiles.get(target) in DOORS:
-            m.need_position, m.path = True, []
-        else:
-            w.pos = target
-
-    def pending_result(self, results: list[dict]) -> dict | None:
-        """The result of the intent awaiting one, matched by queue_id and index."""
-        m = self.mem
-        if m.pending is None or m.pending_queue is None:
+    def _last_result(self, results: list[dict]) -> dict | None:
+        ex = self.executor
+        if ex.in_flight is None:
+            if ex.last_rejection is not None:
+                return ex.last_rejection
             return None
-        for res in results:
-            if res.get("queue_id") == m.pending_queue and res.get("index", 0) == 0:
-                return res
-        return None
-
-    def on_result(self, result: dict) -> bool:
-        """Applies the pending intent's result. True when it was rejected."""
-        w, m = self.world, self.mem
-        pending, m.pending, m.pending_queue = m.pending, None, None
-        undo, m.undo = m.undo, None
-        if pending is None or result.get("outcome") != "rejected":
-            return False
-        if pending.get("verb") == "SetPosition":
-            # assume_applied moved us; a rejected SetPosition does not enter the block.
-            if undo is not None:
-                w.pos = undo
-            reject_step(m, (pending["x"], pending["y"]))
-        m.path, m.need_position = [], True
-        # Branch on category, not code: codes are additive (docs/API.md).
-        if (result.get("rejection") or {}).get("category") == "state":
-            m.need_self = True
-        return True
+        qid = ex.in_flight.queue_id
+        ours = [r for r in results if r.get("queue_id") == qid]
+        return max(ours, key=lambda r: r.get("index", 0)) if ours else ex.last_rejection
 
     def on_events(self, events: list[dict]) -> None:
         w, m = self.world, self.mem
@@ -201,7 +183,7 @@ class Runner:
                 m.alarm = True
             if kind == "Died":
                 m.need_self = m.need_position = True
-                m.path, m.undo = [], None
+                m.path = []
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})
@@ -216,6 +198,15 @@ class Runner:
             self.mem.need_self = self.mem.need_position = True
             return time.time() + 1.0
         return time.time() + 1.0
+
+
+def _fmt_intents(intents: list[dict] | None) -> str:
+    if not intents:
+        return "—"
+    if len(intents) == 1:
+        return _fmt_intent(intents[0])
+    moves = sum(1 for i in intents if i.get("verb") == "SetPosition")
+    return f"queue×{len(intents)} ({moves} moves)"
 
 
 def _fmt_intent(i: dict | None) -> str:

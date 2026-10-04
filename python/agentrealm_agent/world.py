@@ -79,6 +79,7 @@ class WorldModel:
     pos: Pos | None = None
     perception: int = 1
     movement: int = 1
+    movement_speed: int = 2500  # mm/s; pacing uses tick_rate and this (API Movement)
     alive: bool = True
     lives: int = 0
     tick: int = 0
@@ -106,6 +107,7 @@ class WorldModel:
     def apply_self(self, s: dict) -> None:
         self.perception = max(1, int(s.get("perception_range", 1)))
         self.movement = max(1, int(s.get("movement_range", 1)))
+        self.movement_speed = max(1, int(s.get("movement_speed", 2500)))
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
 

@@ -55,6 +55,8 @@ class RunnerTest(unittest.TestCase):
             for x in range(5):
                 w.view.tiles[(x, y)] = "dirt"
         r.world, r.mem = w, Memory(need_self=False, need_position=False)
+        r.tick_rate_hz = 10
+        r.executor.tick_rate_hz = 10
         return r
 
     def test_rejected_step_rolls_back_and_is_not_resubmitted(self):
@@ -65,22 +67,21 @@ class RunnerTest(unittest.TestCase):
             {"tick": 10, "window_remaining_ms": 0},
             {"tick": 11, "window_remaining_ms": 0,
              "intent_results": [rejected("q1", "block_occupied", "occupied", 10)]},
-            {"tick": 13, "window_remaining_ms": 0,
-             "intent_results": [rejected("q2", "beyond_movement_range", "range", 11)]},
+            {"tick": 13, "window_remaining_ms": 0},
         ])
         r = self.runner(fake, pol)
         r.tick()
-        self.assertEqual(fake.sent[0], [{"verb": "SetPosition", "x": 1, "y": 0}], "a one-entry queue")
-        self.assertEqual(r.world.pos, (1, 0), "assumed applied")
+        self.assertEqual(fake.sent[0][0], {"verb": "SetPosition", "x": 1, "y": 0})
+        self.assertEqual(r.world.pos, (0, 0), "no move until a result lands")
 
-        r.tick()  # planned from (1, 0) before the rejection was known
+        r.tick()
         self.assertEqual(r.world.pos, (0, 0), "rolled back to before the rejected step")
         self.assertTrue(r.mem.need_position)
 
         r.world.apply_position({"map_id": 7, "x": 0, "y": 0})  # the forced position read
-        r.mem.need_position, r.mem.undo = False, None
+        r.mem.need_position = False
         r.tick()
-        self.assertNotEqual(fake.sent[2], [{"verb": "SetPosition", "x": 1, "y": 0}])
+        self.assertNotEqual(fake.sent[2][0], {"verb": "SetPosition", "x": 1, "y": 0})
 
     def test_a_result_for_another_queue_is_not_applied(self):
         # docs/API.md Intent Results: a result names its queue_id and index, so
@@ -94,7 +95,7 @@ class RunnerTest(unittest.TestCase):
         r.tick()
         r.tick()
         self.assertFalse(r.mem.need_position)
-        self.assertEqual(r.world.pos, (2, 0))
+        self.assertEqual(r.world.pos, (0, 0))
 
     def test_nothing_to_do_leaves_the_queue_as_it_is(self):
         # docs/API.md Intent Queue: a request without intents leaves the held
@@ -125,7 +126,7 @@ class RunnerTest(unittest.TestCase):
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.tick()
         self.assertIsNotNone(fake.sent[0])
-        self.assertIsNone(r.world.pos)
+        self.assertIsNone(r.world.pos, "Died clears position; queued moves are not assumed")
         self.assertIsNone(r.world.map_id)
 
 

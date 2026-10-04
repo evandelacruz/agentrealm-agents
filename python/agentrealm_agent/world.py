@@ -81,6 +81,8 @@ class WorldModel:
     movement: int = 1
     alive: bool = True
     lives: int = 0
+    health: int | None = None
+    max_health: int | None = None
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -173,18 +175,41 @@ class WorldModel:
         return flat
 
     def apply_observation(self, obs: dict | None) -> None:
+        """Folds a tick observation into the model: vitals and ground chest contents.
+
+        Complete snapshots replace chest contents; deltas may patch vitals only
+        (docs/API.md Snapshots). This agent never sends snapshot_version, so
+        round trips usually carry a complete snapshot; delta handling is for
+        when snapshot_version lands and for tests.
+        """
+        if not obs or obs.get("unchanged"):
+            return
+        if obs.get("complete"):
+            self._apply_vitals_from_payload(obs.get("snapshot") or {})
+            self._apply_chest_snapshot(obs.get("snapshot") or {})
+            return
+        delta = obs.get("delta")
+        if delta is not None:
+            self._apply_vitals_from_payload(delta)
+
+    def _apply_vitals_from_payload(self, payload: dict) -> None:
+        """Updates health from a snapshot or delta field set (API Snapshots)."""
+        if "health" in payload:
+            h = payload["health"]
+            self.health = None if h is None else int(h)
+        if "max_health" in payload:
+            mh = payload["max_health"]
+            self.max_health = None if mh is None else int(mh)
+
+    def _apply_chest_snapshot(self, snap: dict) -> None:
         """Reads ground chest contents from a complete snapshot.
 
-        This agent never sends snapshot_version, so every observation it gets
-        is complete (docs/API.md Snapshots). A chest within reach lists its
-        contents. A dropped chest leaves the world once emptied (B116), so our
-        death chest absent while its block is within reach was emptied, by us
-        or by someone first, and is no longer worth going back for; one seen
-        empty is not either.
+        A chest within reach lists its contents. A dropped chest leaves the
+        world once emptied (B116), so our death chest absent while its block
+        is within reach was emptied, by us or by someone first, and is no
+        longer worth going back for; one seen empty is not either.
         """
-        if not obs or not obs.get("complete"):
-            return
-        entities = (obs.get("snapshot") or {}).get("entities") or {}
+        entities = snap.get("entities") or {}
         self.chest_contents = {
             int(ch["id"]): [int(s["id"]) for s in ch["contents"]]
             for ch in entities.get("chests") or []

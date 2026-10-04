@@ -10,7 +10,7 @@ from ..pathing import grid_params, next_step
 from ..plan_goals import gather_gems_goal
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
-from .explore import ExploreState, plan_sets, reflex_outcome
+from .explore import plan_sets, reflex_outcome
 from .gather_safe import is_safe_ish
 from .intents import set_position, take, use_block
 
@@ -22,24 +22,33 @@ UNKNOWN_GEM_PILE_CODES: frozenset[str] = frozenset()
 # pocket knife's range is 1 (GAME_NOTES.md Olympuff starting kit).
 BUSH_REACH = 1
 GOAL = "gather"
+# Every visible target is unreachable this window: Gather stays out this long so
+# Explore can move the character toward ground with a reachable one.
+GATHER_BACKOFF_TICKS = 10
 
 
 class GatherState(State):
     name = "Gather"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
-        return ctx.policy.kind == "scripted" and world.alive and world.pos is not None and _wants_gather(world, ctx)
+        return (
+            ctx.policy.kind == "scripted"
+            and world.alive
+            and world.pos is not None
+            and world.tick >= ctx.memory.gather_backoff_until
+            and _wants_gather(world, ctx)
+            and _has_target(world, ctx.policy)
+        )
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         out = gather_outcome(world, ctx.memory, ctx.policy, never_attack=ctx.never_attack, knowledge=ctx.knowledge)
-        if out.intents is None and world.pos is not None:
-            # Nothing to gather in reach: yield this window to Explore so the
-            # character finds new ground instead of standing still.
-            ctx.memory.state = ExploreState.name
-            return ExploreState().act(world, ctx)
+        if out.intents is None:
+            # Targets are visible but none is reachable: back off so the guard
+            # fails and dispatch falls through to Explore next window.
+            ctx.memory.gather_backoff_until = world.tick + GATHER_BACKOFF_TICKS
         return out
 
 
@@ -53,6 +62,15 @@ def _wants_gather(world: WorldModel, ctx: PlayContext) -> bool:
     if goal is None or world.gems is None:
         return False
     return world.gems < goal.count
+
+
+def _has_target(world: WorldModel, policy: Policy) -> bool:
+    """A safe-ish gem pile, grass block or bush is in view."""
+    if any(is_gem_pile(e) and is_safe_ish(world, e.pos, policy) for e in world.entities):
+        return True
+    return any(
+        block in ("grass", "bush") and is_safe_ish(world, p, policy) for p, block in world.view.tiles.items()
+    )
 
 
 def is_gem_pile(e: Entity) -> bool:

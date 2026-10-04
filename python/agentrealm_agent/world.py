@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .item_table import loadout_from_inventory
+from .item_table import HeldSupply, held_from_inventory, loadout_from_inventory
 from .threat import ThreatTable, absorb_damaged, damage_amount
 
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
@@ -103,7 +103,7 @@ class WorldModel:
     attack_range: int | None = None  # armed weapon reach from get_self (B100)
     armed_code: str | None = None
     worn_codes: dict[str, str] = field(default_factory=dict)
-    gems: int | None = None
+    held: list[HeldSupply] = field(default_factory=list)  # inventory held[] (A10)
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -330,8 +330,7 @@ class WorldModel:
             if gems is not None and gems >= 0:
                 self.gems = gems
         self.armed_code, self.worn_codes = loadout_from_inventory(inv)
-        if "gems" in inv:
-            self.gems = _opt_int(inv.get("gems"))
+        self.held = held_from_inventory(inv)
 
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)

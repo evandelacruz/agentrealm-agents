@@ -14,7 +14,14 @@ see PLAN.md A18 for why.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Iterable
+
+
+@dataclass(frozen=True)
+class HeldSupply:
+    supply_id: int
+    code: str
 
 
 def _supply_code(entry: Any) -> str | None:
@@ -33,6 +40,27 @@ def _positive_int(v: Any) -> int | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return n if n > 0 else None
+
+
+def held_from_inventory(inv: dict | None) -> list[HeldSupply]:
+    if not inv:
+        return []
+    raw = inv.get("held")
+    if not isinstance(raw, list):
+        return []
+    out: list[HeldSupply] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        code = _supply_code(entry)
+        if not code:
+            continue
+        try:
+            sid = int(entry["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.append(HeldSupply(sid, code))
+    return out
 
 
 def loadout_from_inventory(inv: dict | None) -> tuple[str | None, dict[str, str]]:

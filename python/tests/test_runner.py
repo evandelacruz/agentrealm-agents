@@ -650,7 +650,6 @@ class NeverAttackRunnerTest(RunnerTest):
             r.tick()
         self.assertEqual(fake.sent[0][0], [{"verb": "Wait"}])
 
-
     def test_directives_reach_the_state_machine(self):
         # A22: the goal stack is read by Gather through decide's directives.
         fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
@@ -659,6 +658,7 @@ class NeverAttackRunnerTest(RunnerTest):
             r.tick()
         self.assertTrue(decide.called)
         self.assertEqual(decide.call_args.kwargs["directives"].goals, ["gather_gems:5"])
+
 
 class NetworkTest(unittest.TestCase):
     def test_network_failure_is_retried_not_fatal(self):

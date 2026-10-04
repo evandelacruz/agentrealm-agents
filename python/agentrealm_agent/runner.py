@@ -8,11 +8,11 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .brain import Decision, Memory, choose_call, decide, reject_step
-from .navigation import known_prefix
+from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_step, remaining_path_stale
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
+from .navigation import known_prefix
 from .knowledge_base import KnowledgeBase
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
@@ -154,12 +154,14 @@ class Runner:
             w.apply_terrain(t)
             w.tick = max(w.tick, int(t.get("tick", 0)))
             n = len(terrain_cells(t))
+            self.note_held_path_stale()
             self.log(call, f"{n} cells, {len(w.view.tiles)} known", {"cells": n})
         elif call == "entities":
             e = c.entities(self.cid, w.map_id, *w.perception_rect())
             w.apply_entities(e)
             w.tick = max(w.tick, int(e.get("tick", 0)))
             m.alarm = False
+            self.note_held_path_stale()
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
         elif call == "zone":
@@ -190,20 +192,32 @@ class Runner:
             # longer holds (a door moved us): replace it with nothing.
             d = Decision(None, "cancel queue")
             intents = []
-            m.cancel_queue = False
+            m.cancel_queue = m.resend_held_queue = False
         elif m.held_queue is not None:
             # Reflexes still run every round trip. One that fires drops the
-            # held queue and its intent replaces it; anything else leaves the
-            # queue running and the plan as it was.
+            # held queue and its intent replaces it. A stale path resends a
+            # fresh walk queue; anything else leaves the queue running.
             d = self.reflex_while_held()
-            intents = None
-            if d is None:
-                d = Decision(None, "queue held")
-            else:
+            if d is not None:
                 self.drop_held_queue()
                 # Something must replace the held queue, or it keeps running.
                 intents = self._apply_never_attack(self.intents_for(d)) or [wait()]
+            elif m.resend_held_queue:
+                # Position was re-read when the path went stale (choose_call
+                # reads it before this poll), so the new walk starts from
+                # where we are. With no walk to send, stop the old queue.
+                self.clear_held_tracking()
+                d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+                intents = self._apply_never_attack(self.intents_for(d))
+                if intents:
+                    d = Decision(d.intent, "path stale, resend")
+                else:
+                    d, intents = Decision(None, f"path stale, stop ({d.reason})"), []
+            else:
+                d = Decision(None, "queue held")
+                intents = None
         else:
+            m.resend_held_queue = False
             d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
@@ -219,6 +233,7 @@ class Runner:
         w.apply_observation(r.get("observation"))
         w.learn_threat(events, earlier)
         self.on_events(events)
+        self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
             # A rejection or a door already dropped our queue; an echoed server
             # queue on that same response must not bring the hold back.
@@ -282,13 +297,30 @@ class Runner:
         self.rng.setstate(saved[3])
         return None
 
-    def drop_held_queue(self) -> None:
-        """Give up on the held queue. Its later results are no longer read, so
-        where it took us is unknown: re-read position."""
+    def note_held_path_stale(self) -> None:
+        """Mark the held walk queue for replacement when its path went wrong.
+
+        Its results after the replacement are no longer read, so position is
+        re-read before the replan (A43).
+        """
+        m = self.mem
+        if m.held_queue is None or m.resend_held_queue:
+            return
+        if remaining_path_stale(self.world, m, self.cfg.policy):
+            m.resend_held_queue = m.need_position = True
+
+    def clear_held_tracking(self) -> None:
+        """Stop waiting on the held queue's results without forgetting position."""
         m = self.mem
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
         m.pending, m.held_queue = None, None
-        m.need_position, m.path = True, []
+        m.path, m.resend_held_queue = [], False
+
+    def drop_held_queue(self) -> None:
+        """Give up on the held queue. Its later results are no longer read, so
+        where it took us is unknown: re-read position."""
+        self.clear_held_tracking()
+        self.mem.need_position = True
 
     def _apply_never_attack(self, intents: list[dict] | None) -> list[dict] | None:
         """Executor guard: drop any Use aimed at a never_attack target.
@@ -353,6 +385,7 @@ class Runner:
             m.path = m.path[queued:]
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
+        m.path_blockers = path_blockers(w, m, self.cfg.policy)
         return intents
 
     def _paced_action(self, intent: dict, pace, last_tick: int | None) -> list[dict] | None:
@@ -465,7 +498,7 @@ class Runner:
                 m.last_use_tick = m.last_speech_tick = None
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
-                m.held_queue = None
+                m.held_queue, m.resend_held_queue = None, False
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})

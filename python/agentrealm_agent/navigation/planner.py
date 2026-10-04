@@ -96,11 +96,6 @@ class _Grid:
         return base
 
 
-def step_cost(w: WorldModel, p: Pos, params: CostGridParams, *, goal: Pos) -> int | None:
-    """Movement cost onto ``p`` for a search towards ``goal``, or ``None`` when impassable."""
-    return _Grid(w, goal, params).cost(p)
-
-
 def _search(w: WorldModel, goal: Pos, params: CostGridParams) -> tuple[list[Pos], int] | None:
     assert w.pos is not None
     start = w.pos

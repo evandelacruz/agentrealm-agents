@@ -10,6 +10,7 @@ from agentrealm_agent import config
 from agentrealm_agent.brain import Decision, Memory, choose_call, use_on
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.config import CharacterConfig, Policy
+from agentrealm_agent.executor import step_landing
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.threat import type_key_for_entity
 from agentrealm_agent.world import Entity, WorldModel
@@ -373,6 +374,163 @@ class RunnerTest(unittest.TestCase):
         r.tick()
         self.assertEqual(fake.sent[1][0], [{"verb": "Take", "supply_id": 5}])
         self.assertIsNone(r.mem.pending_intents)
+
+    def _walk_cells(self, start, intents):
+        pos, cells = start, []
+        for i in intents:
+            if i["verb"] == "Step":
+                pos = step_landing(pos, i["direction"])
+                cells.append(pos)
+        return cells
+
+    def _goto_held(self, fake, policy=None):
+        """A runner holding a paced walk from (0,0) to (4,0) along y=0."""
+        r = self.runner(fake, policy or Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        self.assertIn((2, 0), self._walk_cells((0, 0), fake.sent[0][0]))
+        self.assertIsNotNone(r.mem.held_queue)
+        return r
+
+    def _resend(self, r, fake, at=(0, 0)):
+        """Re-read position (the stale path asked for it), then poll."""
+        self.assertTrue(r.mem.resend_held_queue)
+        self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "position")
+        fake.position = lambda cid: {"map_id": 7, "x": at[0], "y": at[1]}
+        r.step("position")
+        r.tick()
+        return fake.sent[-1][0]
+
+    def test_block_changed_on_path_resends_the_held_queue(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0, "events_by_tick": [
+                {"tick": 11, "events": [
+                    {"kind": "BlockChanged", "map_id": 7, "x": 2, "y": 0, "block_type": "wall"},
+                ]},
+            ]},
+            {"tick": 12, "window_remaining_ms": 0},
+        ])
+        r = self._goto_held(fake)
+        r.tick()
+        self.assertIsNone(fake.sent[1][0], "BlockChanged marks stale; hold until resend")
+        resent = self._resend(r, fake)
+        self.assertEqual(resent[0]["verb"], "Step", "stale path replaces the held queue")
+        self.assertNotIn((2, 0), self._walk_cells((0, 0), resent))
+        self.assertFalse(r.mem.resend_held_queue)
+
+    def test_observation_entity_on_path_resends_the_held_queue(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0, "observation": {"version": 2, "delta": {"entities": {
+                "npcs": {"added": [{"id": 9, "x": 2, "y": 0, "npc_type_code": "rat"}]}}}}},
+            {"tick": 12, "window_remaining_ms": 0},
+        ])
+        r = self._goto_held(fake)
+        r.tick()
+        self.assertIsNone(fake.sent[1][0])
+        self.assertNotIn((2, 0), self._walk_cells((0, 0), self._resend(r, fake)))
+
+    def test_entities_read_on_path_resends_the_held_queue(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self._goto_held(fake)
+        fake.entities = lambda cid, map_id, *rect: {"tick": 10, "npcs": [{"id": 9, "x": 2, "y": 0}]}
+        r.step("entities")
+        self.assertNotIn((2, 0), self._walk_cells((0, 0), self._resend(r, fake)))
+
+    def test_terrain_read_on_path_resends_the_held_queue(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self._goto_held(fake)
+        fake.terrain = lambda cid, map_id, *rect: {
+            "tick": 10, "map_id": 7, "x0": 2, "y0": 0, "width": 1, "height": 1,
+            "rows": ["#"], "legend": {"#": {"block_type": "wall"}},
+        }
+        r.step("terrain")
+        self.assertNotIn((2, 0), self._walk_cells((0, 0), self._resend(r, fake)))
+
+    def test_resend_plans_from_the_reread_position_not_the_unread_results(self):
+        # The server walked two steps; only the first result has come back
+        # when a wall appears ahead. The new walk starts from the re-read
+        # position, and the old queue's late results are not applied.
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 13, "window_remaining_ms": 0,
+             "intent_results": [{"tick": 11, "queue_id": "q1", "index": 0, "outcome": "applied"}],
+             "events_by_tick": [{"tick": 13, "events": [
+                 {"kind": "BlockChanged", "map_id": 7, "x": 3, "y": 0, "block_type": "wall"}]}]},
+            {"tick": 15, "window_remaining_ms": 0,
+             "intent_results": [{"tick": 14, "queue_id": "q1", "index": 3, "outcome": "applied"}]},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.world.movement_speed = 10000  # one Step per tick at 10 Hz
+        r.tick_hz = 10
+        r.tick()
+        self.assertEqual([i["verb"] for i in fake.sent[0][0][:2]], ["Step", "Step"])
+        r.tick()
+        self.assertEqual(r.world.pos, (1, 0), "only the first result is in")
+        self.assertIsNotNone(r.mem.held_queue, "results still outstanding")
+        self.assertTrue(r.mem.need_position, "a stale path re-reads position before the replan")
+        resent = self._resend(r, fake, at=(2, 0))
+        cells = self._walk_cells((2, 0), resent)
+        self.assertNotIn((3, 0), cells)
+        self.assertEqual(cells[-1], (4, 0))
+        self.assertEqual(r.world.pos, (2, 0), "the old queue's late results are ignored")
+
+    def test_unavoidable_blocker_stops_the_queue_once_and_does_not_resend_again(self):
+        # A one-wide corridor: a wall read on it leaves no route (an NPC
+        # would not: the cost grid prices occupants, A12). The old queue is
+        # stopped with one empty submit; later polls do not resend.
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+            {"tick": 12, "window_remaining_ms": 0},
+            {"tick": 13, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        for x in range(-1, 6):
+            r.world.view.tiles[(x, -1)] = r.world.view.tiles[(x, 1)] = "wall"
+        r.tick()
+        fake.terrain = lambda cid, map_id, *rect: {
+            "tick": 10, "map_id": 7, "x0": 2, "y0": 0, "width": 1, "height": 1,
+            "rows": ["#"], "legend": {"#": {"block_type": "wall"}},
+        }
+        r.step("terrain")
+        self.assertEqual(self._resend(r, fake), [], "no route: the old queue is stopped")
+        for _ in range(2):
+            r.step("terrain")
+            r.tick()
+            self.assertIsNone(fake.sent[-1][0])
+        self.assertFalse(r.mem.resend_held_queue)
+
+    def test_blocker_already_on_the_queue_when_sent_does_not_resend(self):
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self._goto_held(fake)
+        r.mem.path_blockers = {(2, 0)}
+        r.world.entities = [Entity("npc", 9, (2, 0))]
+        r.note_held_path_stale()
+        self.assertFalse(r.mem.resend_held_queue)
+        r.world.entities = [Entity("npc", 9, (3, 0))]
+        r.note_held_path_stale()
+        self.assertTrue(r.mem.resend_held_queue, "a new blocker still counts")
+
+    def test_reflex_or_death_clears_a_pending_resend(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self._goto_held(fake)
+        r.world.entities = [Entity("npc", 9, (2, 0))]
+        r.note_held_path_stale()
+        r.drop_held_queue()
+        self.assertFalse(r.mem.resend_held_queue)
+        r.mem.resend_held_queue = True
+        r.on_events([{"kind": "Died"}])
+        self.assertFalse(r.mem.resend_held_queue)
 
     def test_tick_posts_last_applied_snapshot_version(self):
         fake = FakeClient([

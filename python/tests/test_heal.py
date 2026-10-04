@@ -124,10 +124,11 @@ class HealStateTest(unittest.TestCase):
         w.tick = m.heal_backoff_until
         self.assertEqual(dispatch(w, ctx(m)).state, "Heal")
 
-    def test_hostile_in_range_yields_to_explore(self):
+    def test_hostile_in_range_keeps_heal_out(self):
+        # Retreat or Flee (A9) answers the hostile; Heal waits until none is in range.
         w = grid()
         w.entities = [Entity("npc", 3, (2, 2), "slime")]
-        self.assertEqual(dispatch(w, ctx()).state, "Explore")
+        self.assertIn(dispatch(w, ctx()).state, ("Retreat", "Flee"))
 
     def test_full_health_yields_to_explore(self):
         w = grid()

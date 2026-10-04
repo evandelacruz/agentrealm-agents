@@ -8,18 +8,16 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import config, runner as runner_mod
-from agentrealm_agent.brain import Decision, choose_call, decide
+from agentrealm_agent.brain import choose_call, decide
 from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.curiosity import curiosity_ticks_used, detour_allowed, record_curiosity_queue
-from agentrealm_agent.directives import Directives
-from agentrealm_agent.interest_list import MAX_REJECTIONS, InterestItem, list_interest, pick_interest_tick, sight_range
+from agentrealm_agent.interest_list import MAX_REJECTIONS, list_interest, pick_interest_tick, sight_range
 from agentrealm_agent.investigation import cell_was_read, mark_cell_read, mark_npc_spoken, spoken_npc_ids
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.states.intents import read_block, set_position
+from agentrealm_agent.states.intents import read_block
 from agentrealm_agent.world import Entity, WorldModel, ZoneFact
 
 
@@ -76,19 +74,6 @@ class InterestListTest(unittest.TestCase):
         m = Memory(path=[(2, 1), (2, 2)])
         self.assertEqual(list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), m), [])
 
-    def test_detour_waits_for_budget_free_items_do_not(self):
-        w = world(["..."], at=(1, 0))
-        detour = InterestItem("read_block", "detour", False, "k")
-        free = InterestItem("read_block", "free", True, "f")
-        m = Memory()
-        record_curiosity_queue(m, 0, 150)
-        w.tick = 100
-        d = Directives(params={"curiosity": 0.2})
-        with mock.patch("agentrealm_agent.interest_list.list_interest", return_value=[detour]):
-            self.assertIsNone(pick_interest_tick(w, None, Policy(kind="scripted"), m, d), "150 > 0.2 * 600")
-            self.assertIs(pick_interest_tick(w, None, Policy(kind="scripted"), m, Directives(params={"curiosity": 0.5})), detour)
-        with mock.patch("agentrealm_agent.interest_list.list_interest", return_value=[free]):
-            self.assertIs(pick_interest_tick(w, None, Policy(kind="scripted"), m, d), free)
 
 
 class InvestigateStateTest(unittest.TestCase):
@@ -117,33 +102,13 @@ class InvestigateStateTest(unittest.TestCase):
         self.assertEqual(before, after, "only an applied result marks the knowledge base")
 
 
-class CuriosityBudgetTest(unittest.TestCase):
-    def test_segments_sum_in_window(self):
-        m = Memory()
-        record_curiosity_queue(m, 100, 50)
-        record_curiosity_queue(m, 200, 40)
-        self.assertEqual(curiosity_ticks_used(m, 250), 90)
-        self.assertEqual(curiosity_ticks_used(m, 740), 50, "only the part of a segment inside the window")
-        self.assertEqual(curiosity_ticks_used(m, 900), 0)
-
-    def test_record_drops_segments_outside_the_window(self):
-        m = Memory()
-        record_curiosity_queue(m, 0, 10)
-        record_curiosity_queue(m, 1000, 10)
-        self.assertEqual(m.curiosity_segments, [(1000, 10)])
-
-    def test_detour_allowed_tracks_param(self):
-        m = Memory()
-        record_curiosity_queue(m, 0, 150)
-        self.assertFalse(detour_allowed(m, 100, 0.2))
-        self.assertTrue(detour_allowed(m, 100, 1.0))
-
-
 class SightRangeTest(unittest.TestCase):
     def test_brightness_caps_sight(self):
         w = WorldModel(1, map_id=1, pos=(0, 0), perception=5)
         w.zones[1] = {(0, 0): ZoneFact(safe=False, brightness=0.5)}
-        self.assertLess(sight_range(w, 1, (0, 0)), 5)
+        self.assertEqual(sight_range(w, 1, (0, 0)), 3, "ceil(5 * 0.5)")
+        w.zones[1] = {(0, 0): ZoneFact(safe=False, brightness=0.6)}
+        self.assertEqual(sight_range(w, 1, (0, 0)), 3, "an exact product is not rounded up")
 
 
 class ReadableParsingTest(unittest.TestCase):
@@ -207,33 +172,13 @@ class RunnerInvestigationTest(unittest.TestCase):
         r = self.runner([])
         intent = read_block(7, (1, 1))
         for _ in range(MAX_REJECTIONS):
-            self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, Directives()).kind, "read_block")
+            self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem).kind, "read_block")
             r.mem.pending = intent
             self.assertTrue(r.on_result({"outcome": "rejected", "tick": 5,
                                          "rejection": {"category": "target", "code": "nothing_to_read"}}, 0))
         self.assertFalse(cell_was_read(r.knowledge, 7, (1, 1)))
-        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, Directives()),
+        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem),
                           "a refused read stops holding Investigate above Explore")
-
-    def test_investigate_walk_queue_is_charged(self):
-        r = self.runner([{"tick": 10, "window_remaining_ms": 0}])
-        r.mem.state = "Investigate"
-        r.mem.path = [(1, 0), (2, 0)]
-        with mock.patch.object(runner_mod, "decide", return_value=Decision(set_position((1, 0)), "detour")):
-            r.tick()
-        sent = r.client.tick.call_args[0][1]
-        self.assertTrue(any(i["verb"] == "Step" for i in sent))
-        self.assertEqual(curiosity_ticks_used(r.mem, 10), len(sent))
-
-    def test_free_read_and_other_states_are_not_charged(self):
-        for state, decision in (("Investigate", Decision(read_block(7, (1, 1)), "read")),
-                                ("Explore", Decision(set_position((1, 0)), "explore"))):
-            with self.subTest(state=state):
-                r = self.runner([{"tick": 10, "window_remaining_ms": 0}])
-                r.mem.state = state
-                with mock.patch.object(runner_mod, "decide", return_value=decision):
-                    r.tick()
-                self.assertEqual(r.mem.curiosity_segments, [])
 
 
 if __name__ == "__main__":

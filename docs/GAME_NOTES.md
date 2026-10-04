@@ -213,3 +213,15 @@ Each has a test the agent or a hand session can run.
 | Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
 | How to tell a scroll supply from others before reading it. Nothing sourced names scroll subtype codes, so `Investigate` reads no scrolls yet (PLAN.md A30) | Log `supply_subtype_code` of every supply seen; `Read` one of each once and keep the codes that do not answer `nothing_to_read` |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
+
+### Assumed until measured
+
+The win estimate (A9, gated on by **Fight** in A23) uses these until the questions above answer them.
+
+| Assumption | Value | Basis |
+|---|---|---|
+| Hostile attack interval | 15 ticks | The two weak hostiles in Combat |
+| Our attack interval | 10 ticks | None: weapon cooldown is unmeasured |
+| Our damage per hit | 1 | A bronze sword's landed swings did 1 and 2 (Combat); a new character's knife is unmeasured |
+| Health of a hostile type with no kill on record | 10 | A new character's health (PLAYABLE_AGENT_PLAN Combat) |
+| Our health when no observation has served it | 10 | A new character's health (Combat) |

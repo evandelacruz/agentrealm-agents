@@ -651,6 +651,14 @@ class NeverAttackRunnerTest(RunnerTest):
         self.assertEqual(fake.sent[0][0], [{"verb": "Wait"}])
 
 
+    def test_directive_params_reach_decide(self):
+        # Retreat and Flee read the directives' survival params (A9).
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self.runner_with_directives(fake, "params = { retreat_hits = 4 }\n")
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(None, "hold")) as dec:
+            r.tick()
+        self.assertEqual(dec.call_args.kwargs["params"]["retreat_hits"], 4)
+
 class NetworkTest(unittest.TestCase):
     def test_network_failure_is_retried_not_fatal(self):
         # A refused or reset connection is retryable like a 503: it must not end

@@ -8,12 +8,11 @@ the path). Scrolls, door and entrance looks are deferred (PLAN.md A30).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
 from .config import Policy
-from .curiosity import detour_allowed
-from .directives import Directives
 from .investigation import cell_was_read, spoken_npc_ids
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -29,7 +28,6 @@ MAX_REJECTIONS = 3
 class InterestItem:
     kind: Literal["read_block", "say"]
     reason: str
-    free: bool  # from where we stand: never charged to the curiosity budget
     key: str  # Memory.investigate_rejections key
     map_id: int | None = None
     pos: Pos | None = None
@@ -51,9 +49,12 @@ def _brightness_at(w: WorldModel, map_id: int, pos: Pos) -> float:
 
 
 def sight_range(w: WorldModel, map_id: int, at: Pos) -> int:
-    """Readable sight: perception × brightness at the stand, capped at perception."""
+    """Readable sight: perception × zone brightness at the stand, capped at perception.
+
+    GAME_NOTES Light (Guide, The world model). Carried light is not counted yet.
+    """
     bright = _brightness_at(w, map_id, at)
-    return max(1, min(w.perception, int(w.perception * bright + 0.999)))
+    return max(1, min(w.perception, math.ceil(w.perception * bright)))
 
 
 def in_sight(w: WorldModel, map_id: int, at: Pos, target: Pos) -> bool:
@@ -81,7 +82,7 @@ def _unread_blocks(w: WorldModel, kb: KnowledgeBase | None, m: Memory, map_id: i
         if _gave_up(m, key):
             continue
         out.append(
-            InterestItem("read_block", f"read sign @{p[0]},{p[1]}", True, key, map_id=map_id, pos=p,
+            InterestItem("read_block", f"read sign @{p[0]},{p[1]}", key, map_id=map_id, pos=p,
                          sort_key=(0, chebyshev(here, p), p))
         )
     return out
@@ -97,7 +98,7 @@ def _say_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, here: Pos) ->
         key = say_key(ent.id)
         if dist > SPEECH_RANGE or _gave_up(m, key):
             continue
-        out.append(InterestItem("say", f"say to npc {ent.id}", True, key, npc=ent, sort_key=(1, dist, ent.id)))
+        out.append(InterestItem("say", f"say to npc {ent.id}", key, npc=ent, sort_key=(1, dist, ent.id)))
     return out
 
 
@@ -110,20 +111,8 @@ def list_interest(w: WorldModel, kb: KnowledgeBase | None, policy: Policy, m: Me
     return items
 
 
-def pick_interest_tick(
-    w: WorldModel,
-    kb: KnowledgeBase | None,
-    policy: Policy,
-    m: Memory,
-    directives: Directives,
-) -> InterestItem | None:
-    """Top item: free ones always, detours only under the curiosity budget."""
-    allow_detour: bool | None = None
-    for it in list_interest(w, kb, policy, m):
-        if it.free:
-            return it
-        if allow_detour is None:
-            allow_detour = detour_allowed(m, w.tick, float(directives.params.get("curiosity", 0.2)))
-        if allow_detour:
-            return it
-    return None
+def pick_interest_tick(w: WorldModel, kb: KnowledgeBase | None, policy: Policy, m: Memory) -> InterestItem | None:
+    """Top item. Every A30 item is done from where the agent stands, so none is
+    charged to the curiosity budget; the cap arrives with A32."""
+    items = list_interest(w, kb, policy, m)
+    return items[0] if items else None

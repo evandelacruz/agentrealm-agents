@@ -18,8 +18,8 @@ With the [game stack](https://agentrealm.gg/docs/manual#13-running-the-stack-loc
 git clone https://github.com/evandelacruz/agentrealm-agents.git
 cd agentrealm-agents
 export AGENTREALM_STACK_DIR=/path/to/agentrealm   # compose project root, for signup logs
-python3 scripts/seed_local_stack.py               # account, API key, sandbox ready
-source python/.state/local.env                    # or copy the printed exports
+python3 scripts/seed_local_stack.py               # account + API key; re-runs reuse the key
+source python/.state/local.env                    # export lines, mode 0600, git-ignored
 
 cd python
 python3 -m agentrealm_agent create characters/wren.toml

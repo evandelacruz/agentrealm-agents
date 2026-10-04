@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Seed a local Agent Realm stack with a dev account, API key, and sandbox readiness.
+"""Seed a local Agent Realm stack with a dev account and API key.
+
+Re-running with the same --email reuses the key saved in the env file. With
+--probe it also waits until sandbox character create succeeds.
 
 Uses only the public HTTP API (Manual §4, §13) plus optional ``docker compose logs``
 to read the email-verification token when SMTP is not configured locally.
@@ -8,6 +11,8 @@ to read the email-verification token when SMTP is not configured locally.
 from __future__ import annotations
 
 import argparse
+import datetime
+import http.client
 import json
 import os
 import re
@@ -17,7 +22,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,6 +42,8 @@ class ApiError(Exception):
     body: Any = None
 
     def __str__(self) -> str:
+        if self.status == 0:
+            return f"network error: {self.code}"
         return f"HTTP {self.status} {self.code}"
 
 
@@ -73,6 +79,9 @@ class Http:
             except (ValueError, OSError):
                 pass
             raise ApiError(e.code, code or e.reason or "", parsed) from None
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
+            # Refused, reset, or timed out: status 0, as in agentrealm_agent.client.
+            raise ApiError(0, str(getattr(e, "reason", None) or e) or type(e).__name__) from None
         if not raw:
             return None
         try:
@@ -81,13 +90,21 @@ class Http:
             return raw.decode("utf-8", errors="replace").strip()
 
 
-def extract_verify_token(text: str) -> str | None:
-    """Pull the verification token from front-tier log lines."""
-    for pattern in VERIFY_TOKEN_PATTERNS:
-        m = pattern.search(text)
-        if m:
-            return m.group(1)
-    return None
+def extract_verify_token(text: str, email: str | None = None) -> str | None:
+    """Pull the newest verification token from front-tier log lines.
+
+    Prefers a line that names ``email``, then falls back to the last token seen,
+    so an older signup earlier in the window is never chosen over this one.
+    """
+    found: list[tuple[str, bool]] = []
+    for line in text.splitlines():
+        for pattern in VERIFY_TOKEN_PATTERNS:
+            for m in pattern.finditer(line):
+                found.append((m.group(1), bool(email) and email in line))
+    for token, names_email in reversed(found):
+        if names_email:
+            return token
+    return found[-1][0] if found else None
 
 
 def wait_for_health(http: Http, timeout_s: float) -> None:
@@ -107,7 +124,7 @@ def wait_for_health(http: Http, timeout_s: float) -> None:
     raise SystemExit(msg)
 
 
-def docker_compose_logs(stack_dir: str, service: str, since: str = "2m") -> str:
+def docker_compose_logs(stack_dir: str, service: str, since: str) -> str:
     cmd = ["docker", "compose", "logs", service, f"--since={since}", "--no-log-prefix"]
     try:
         proc = subprocess.run(
@@ -132,6 +149,8 @@ def resolve_verify_token(
     stack_dir: str | None,
     log_service: str,
     wait_s: float,
+    since: str,
+    email: str,
 ) -> str:
     if explicit:
         return explicit
@@ -142,8 +161,8 @@ def resolve_verify_token(
         )
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
-        text = docker_compose_logs(stack_dir, log_service)
-        token = extract_verify_token(text)
+        text = docker_compose_logs(stack_dir, log_service, since)
+        token = extract_verify_token(text, email)
         if token:
             return token
         time.sleep(2.0)
@@ -153,28 +172,45 @@ def resolve_verify_token(
     )
 
 
-def create_account(http: Http, email: str) -> dict:
+def create_account(http: Http, email: str) -> bool:
+    """Sign up ``email``. False when the account already exists."""
     try:
-        return http.request("POST", "/accounts", {"email": email})
+        http.request("POST", "/accounts", {"email": email})
     except ApiError as e:
         if e.status == 409 and e.code == "email_taken":
-            raise SystemExit(
-                f"account {email} already exists; set AGENTREALM_API_KEY to an existing key "
-                "or use a fresh --email"
-            ) from e
+            return False
         raise
+    return True
+
+
+def key_works(http: Http, api_key: str) -> bool:
+    try:
+        http.request("GET", "/accounts/me", bearer=api_key)
+    except ApiError as e:
+        if e.status in (401, 403):
+            return False
+        raise
+    return True
+
+
+def read_env_file(path: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("export "):
+                    line = line[len("export "):]
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    out[k.strip()] = v.strip()
+    except FileNotFoundError:
+        pass
+    return out
 
 
 def mint_first_key(http: Http, token: str) -> str:
-    try:
-        out = http.request("POST", "/accounts/me/first-api-key", {"token": token})
-    except ApiError as e:
-        if e.status == 409 and e.code == "key_already_exists":
-            raise SystemExit(
-                "this account already has an API key; set AGENTREALM_API_KEY to that secret "
-                "(secrets are shown only once at mint time)"
-            ) from e
-        raise
+    out = http.request("POST", "/accounts/me/first-api-key", {"token": token})
     secret = out.get("secret") if isinstance(out, dict) else None
     if not secret:
         raise SystemExit("first-api-key response missing secret")
@@ -182,7 +218,12 @@ def mint_first_key(http: Http, token: str) -> str:
 
 
 def wait_for_sandbox_create(http: Http, api_key: str, timeout_s: float) -> None:
-    """Poll character create until the sandbox sim has loaded its map."""
+    """Poll character create until the sandbox sim has loaded its map.
+
+    The API has no character delete and no read-only readiness signal, so the
+    probe character stays and holds one of the account's two sandbox slots until
+    it ends (PLAN.md Server gaps). That is why the probe is opt-in.
+    """
     deadline = time.monotonic() + timeout_s
     body = {
         "name": PROBE_NAME,
@@ -199,7 +240,7 @@ def wait_for_sandbox_create(http: Http, api_key: str, timeout_s: float) -> None:
             )
             return
         except ApiError as e:
-            if e.status == 409 and e.code in ("name_taken", "identity_reuse"):
+            if e.status == 409 and e.code == "name_taken" and probe_exists(http, api_key):
                 return
             if e.status == 409 and e.code == "world_not_ready":
                 time.sleep(2.0)
@@ -211,12 +252,36 @@ def wait_for_sandbox_create(http: Http, api_key: str, timeout_s: float) -> None:
     )
 
 
+def probe_exists(http: Http, api_key: str) -> bool:
+    """True when an earlier run's probe is already in the sandbox, so create worked then."""
+    chars = http.request("GET", "/characters", bearer=api_key)
+    if isinstance(chars, dict):
+        chars = chars.get("characters", [])
+    return any(
+        isinstance(c, dict) and c.get("name") == PROBE_NAME and c.get("world_code") == "sandbox"
+        for c in chars or []
+    )
+
+
 def write_env_file(path: str, base_url: str, api_key: str, email: str) -> None:
+    """Write sourceable ``export`` lines, readable only by the owner."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(f"AGENTREALM_BASE_URL={base_url}\n")
-        f.write(f"AGENTREALM_API_KEY={api_key}\n")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(f"# account {email}\n")
+        f.write(f"export AGENTREALM_BASE_URL={base_url}\n")
+        f.write(f"export AGENTREALM_API_KEY={api_key}\n")
+
+
+def default_env_path() -> str:
+    return os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "python", ".state", "local.env")
+    )
+
+
+def _utc_now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -240,59 +305,67 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--write-env",
         metavar="PATH",
-        default=os.environ.get("AGENTREALM_WRITE_ENV"),
-        help="write AGENTREALM_* lines to this file (default: unset; try python/.state/local.env)",
+        default=os.environ.get("AGENTREALM_WRITE_ENV") or default_env_path(),
+        help="file for the export lines, mode 0600 (default: python/.state/local.env)",
     )
     ap.add_argument(
         "--print-env",
         action="store_true",
-        help="print export lines for AGENTREALM_BASE_URL and AGENTREALM_API_KEY",
+        help="also print the export lines, API key included, to stdout",
     )
     ap.add_argument(
-        "--skip-probe",
+        "--probe",
         action="store_true",
-        help="do not POST a probe character to confirm sandbox readiness",
+        help=f"create a {PROBE_NAME} sandbox character to confirm create works; "
+        "it cannot be deleted and holds one of the account's two sandbox slots for 24h",
     )
     args = ap.parse_args(argv)
+    try:
+        return _seed(args)
+    except ApiError as e:
+        raise SystemExit(f"{e} from {args.base_url}") from None
 
+
+def _seed(args: argparse.Namespace) -> int:
     http = Http(args.base_url)
     wait_for_health(http, args.health_timeout)
 
     email = args.email
-    if email == DEFAULT_EMAIL and "@" in email:
-        # Allow parallel runs without colliding on the default address.
-        local, domain = email.split("@", 1)
-        email = f"{local}+{uuid.uuid4().hex[:8]}@{domain}"
-
-    create_account(http, email)
-
-    token = resolve_verify_token(
-        explicit=args.verify_token,
-        stack_dir=args.stack_dir,
-        log_service=args.log_service,
-        wait_s=args.token_wait,
-    )
-    api_key = mint_first_key(http, token)
-
-    if not args.skip_probe:
-        wait_for_sandbox_create(http, api_key, args.world_timeout)
-
     env_path = args.write_env
-    if env_path is None:
-        env_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "python", ".state", "local.env")
+    since = _utc_now()
+    if create_account(http, email):
+        token = resolve_verify_token(
+            explicit=args.verify_token,
+            stack_dir=args.stack_dir,
+            log_service=args.log_service,
+            wait_s=args.token_wait,
+            since=since,
+            email=email,
         )
+        api_key = mint_first_key(http, token)
+        write_env_file(env_path, args.base_url, api_key, email)
+        print(f"account {email} created; wrote {env_path}", file=sys.stderr)
+    else:
+        saved = read_env_file(env_path)
+        api_key = saved.get("AGENTREALM_API_KEY", "")
+        if (
+            not api_key
+            or saved.get("AGENTREALM_BASE_URL") != args.base_url
+            or not key_works(http, api_key)
+        ):
+            raise SystemExit(
+                f"account {email} already exists but {env_path} has no working key for "
+                f"{args.base_url}; restore that file or pass a fresh --email"
+            )
+        print(f"account {email} already seeded; reusing {env_path}", file=sys.stderr)
 
-    write_env_file(env_path, args.base_url, api_key, email)
+    if args.probe:
+        wait_for_sandbox_create(http, api_key, args.world_timeout)
+        print("sandbox create verified", file=sys.stderr)
 
     if args.print_env:
         print(f"export AGENTREALM_BASE_URL={args.base_url}")
         print(f"export AGENTREALM_API_KEY={api_key}")
-    else:
-        print(f"AGENTREALM_BASE_URL={args.base_url}")
-        print(f"AGENTREALM_API_KEY={api_key}")
-        print(f"# wrote {env_path}", file=sys.stderr)
-    print(f"account {email} ready; sandbox create verified", file=sys.stderr)
     return 0
 
 

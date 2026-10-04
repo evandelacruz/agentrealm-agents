@@ -1,9 +1,8 @@
 """Paced multi-intent queues for real-time play (M6).
 
-Types, limits, paced Step/Wait queue building (``movement``), attack and
-speech pacing (``pacing``), and the runner's queue invalidation
-(``invalidation``). The runner uses movement and invalidation; pacing is not
-wired in yet.
+Types, limits and paced Step/Wait queue building (``movement``), used by the
+runner, and attack and speech pacing (``pacing``), which the runner does not
+use yet.
 """
 
 from .constants import (
@@ -13,8 +12,7 @@ from .constants import (
     queue_horizon_intents,
 )
 from .intents import IntentQueue, StepDirection, StepIntent, WaitIntent, step, wait
-from .invalidation import Executor, InFlight
-from .movement import build_paced_walk_queue, direction_between, ticks_per_step
+from .movement import build_paced_walk_queue, direction_between, step_landing, ticks_per_step
 from .pacing import (
     DEFAULT_WEAPON_COOLDOWN_TICKS,
     SPEECH_INTERVAL_TICKS,
@@ -31,8 +29,6 @@ __all__ = [
     "DEFAULT_QUEUE_HORIZON_SECONDS",
     "DEFAULT_TICK_RATE_HZ",
     "DEFAULT_WEAPON_COOLDOWN_TICKS",
-    "Executor",
-    "InFlight",
     "IntentQueue",
     "QUEUE_HORIZON_INTENTS",
     "SPEECH_INTERVAL_TICKS",
@@ -46,6 +42,7 @@ __all__ = [
     "pace_uses",
     "queue_horizon_intents",
     "step",
+    "step_landing",
     "ticks_per_step",
     "trim_to_horizon",
     "uses_attack_cooldown",

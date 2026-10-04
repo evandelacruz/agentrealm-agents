@@ -1,4 +1,4 @@
-"""M6: health from complete tick snapshots (fixture payloads, no server)."""
+"""M6: health from tick snapshots and deltas (fixture payloads, no server)."""
 
 import unittest
 
@@ -36,9 +36,15 @@ class HealthObservationTest(unittest.TestCase):
         self.assertIsNone(w.health)
         self.assertIsNone(w.max_health)
 
-    def test_non_complete_observation_leaves_health(self):
+    def test_delta_replaces_only_vitals_it_carries(self):
         w = WorldModel(character_id=1, health=6, max_health=10)
         w.apply_observation({"version": "41", "delta": {"health": 2}})
+        self.assertEqual((w.health, w.max_health), (2, 10))
+        w.apply_observation({"version": "42", "delta": {"max_health": "lots"}})
+        self.assertEqual((w.health, w.max_health), (2, None))
+
+    def test_no_observation_leaves_health(self):
+        w = WorldModel(character_id=1, health=6, max_health=10)
         w.apply_observation(None)
         self.assertEqual((w.health, w.max_health), (6, 10))
 

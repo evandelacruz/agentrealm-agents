@@ -7,11 +7,11 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import config
-from agentrealm_agent.brain import Memory
+from agentrealm_agent.brain import Decision, Memory, choose_call
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.world import WorldModel
+from agentrealm_agent.world import Entity, WorldModel
 
 
 class FakeClient:
@@ -21,14 +21,15 @@ class FakeClient:
     answers with the request's id (docs/API.md Round Trip).
     """
 
-    def __init__(self, ticks: list[dict]):
+    def __init__(self, ticks: list[dict], queue_ids: bool = True):
         self.ticks = list(ticks)
+        self.queue_ids = queue_ids
         self.sent: list[list[dict] | None] = []
 
     def tick(self, cid, intents):
         self.sent.append(intents)
         r = dict(self.ticks.pop(0))
-        if intents is not None:
+        if intents is not None and self.queue_ids:
             r["queue_id"] = f"q{len(self.sent)}"
         return r
 
@@ -55,12 +56,10 @@ class RunnerTest(unittest.TestCase):
             for x in range(5):
                 w.view.tiles[(x, y)] = "dirt"
         r.world, r.mem = w, Memory(need_self=False, need_position=False)
-        r.executor.tick_rate_hz = 10
         return r
 
     def test_rejected_step_rolls_back_and_is_not_resubmitted(self):
-        # Reflex 1 (PLAN.md): a rejected Step does
-        # not enter the block, so the local model must not keep us there.
+        # Reflex 1 (PLAN.md): a rejected Step does not enter the block.
         pol = Policy(goals=["goto"], goto=(4, 0), pickup=False)
         fake = FakeClient([
             {"tick": 10, "window_remaining_ms": 0},
@@ -71,16 +70,18 @@ class RunnerTest(unittest.TestCase):
         r = self.runner(fake, pol)
         r.tick()
         self.assertEqual(fake.sent[0][0], {"verb": "Step", "direction": "right"})
-        self.assertEqual(r.world.pos, (0, 0), "no move until a result lands")
+        self.assertGreater(len(fake.sent[0]), 1, "paced multi-intent queue")
+        self.assertEqual(r.world.pos, (0, 0), "movement resolves from results, not assumed")
 
-        r.tick()
-        self.assertEqual(r.world.pos, (0, 0), "rolled back to before the rejected step")
+        r.tick()  # queue held; rejection for the first Step arrives
+        self.assertIsNone(fake.sent[1])
+        self.assertEqual(r.world.pos, (0, 0))
         self.assertTrue(r.mem.need_position)
 
-        r.world.apply_position({"map_id": 7, "x": 0, "y": 0})  # the forced position read
+        r.world.apply_position({"map_id": 7, "x": 0, "y": 0})
         r.mem.need_position = False
         r.tick()
-        self.assertNotEqual(fake.sent[2][0], {"verb": "Step", "direction": "right"})
+        self.assertNotEqual(fake.sent[2], fake.sent[0], "replan avoids the rejected step")
 
     def test_a_result_for_another_queue_is_not_applied(self):
         # docs/API.md Intent Results: a result names its queue_id and index, so
@@ -88,13 +89,35 @@ class RunnerTest(unittest.TestCase):
         fake = FakeClient([
             {"tick": 10, "window_remaining_ms": 0},
             {"tick": 11, "window_remaining_ms": 0,
+             "intent_results": [{"tick": 10, "queue_id": "q1", "index": 0, "outcome": "applied_no_effect"}]},
+            {"tick": 12, "window_remaining_ms": 0,
              "intent_results": [rejected("q0", "block_occupied", "occupied", 9)]},
         ])
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.tick()
         r.tick()
+        self.assertEqual(r.world.pos, (1, 0))
+        r.tick()
         self.assertFalse(r.mem.need_position)
-        self.assertEqual(r.world.pos, (0, 0))
+        self.assertEqual(r.world.pos, (1, 0))
+
+    def test_a_stale_queue_result_beside_a_new_submit_is_not_adopted(self):
+        # Only the queue_id our own submit was answered with is ours. A late
+        # result for an earlier queue, arriving on the response to a new
+        # submit, is not applied, whether or not that response names a queue.
+        stale = rejected("q0", "block_occupied", "occupied", 9)
+        for queue_ids in (True, False):
+            with self.subTest(queue_ids=queue_ids):
+                fake = FakeClient([{"tick": 10, "window_remaining_ms": 0, "intent_results": [stale]}],
+                                  queue_ids=queue_ids)
+                r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+                r.tick()
+                self.assertGreater(len(fake.sent[0]), 1)
+                self.assertEqual(r.mem.pending_queue, "q1" if queue_ids else None)
+                self.assertFalse(r.mem.need_position)
+                self.assertEqual(r.mem.blocked, {})
+                self.assertIsNotNone(r.mem.pending_intents, "our queue is still awaited")
+                self.assertEqual(r.mem.pending_next_index, 0)
 
     def test_nothing_to_do_leaves_the_queue_as_it_is(self):
         # docs/API.md Intent Queue: a request without intents leaves the held
@@ -125,8 +148,159 @@ class RunnerTest(unittest.TestCase):
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.tick()
         self.assertIsNotNone(fake.sent[0])
-        self.assertIsNone(r.world.pos, "Died clears position; queued moves are not assumed")
+        self.assertIsNone(r.world.pos)
         self.assertIsNone(r.world.map_id)
+
+
+    def test_non_movement_intent_is_sent_alone(self):
+        # Only movement becomes a paced queue; a Take goes as one intent.
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self.runner(fake, Policy(goals=["hold"], pickup=True))
+        r.world.entities = [Entity("supply", 5, (1, 0), "apple")]
+        r.tick()
+        self.assertEqual(fake.sent, [[{"verb": "Take", "supply_id": 5}]])
+        self.assertEqual(r.mem.pending, {"verb": "Take", "supply_id": 5})
+        self.assertIsNone(r.mem.held_queue)
+
+    def test_unmatched_results_do_not_hold_the_queue_forever(self):
+        # Results that never name our queue must not stall the character.
+        ticks = [{"tick": 10, "window_remaining_ms": 0}]
+        ticks += [{"tick": 11 + i, "window_remaining_ms": 0} for i in range(20)]
+        fake = FakeClient(ticks)
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        n = len(fake.sent[0])
+        for _ in range(n + 3):
+            r.tick()
+        self.assertIsNone(r.mem.held_queue)
+        self.assertIsNone(r.mem.pending_intents)
+        # We may have walked unseen: re-read position, drop the stale plan.
+        self.assertTrue(r.mem.need_position)
+        self.assertEqual(r.mem.path, [])
+        self.assertIsNone(r.mem.last_step_tick)
+        self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "position")
+        r.tick()
+        self.assertIsNotNone(fake.sent[-1], "a fresh decision was sent")
+
+    def test_stepping_onto_a_door_cancels_the_rest_of_the_queue(self):
+        # A door moves us, so the queued Steps behind it must not run.
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0,
+             "intent_results": [{"tick": 11, "queue_id": "q1", "index": 0, "outcome": "applied"}]},
+            {"tick": 12, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        self.assertGreater(len(fake.sent[0]), 1)
+        first = fake.sent[0][0]["direction"]
+        landing = {"right": (1, 0), "down_right": (1, 1)}[first]
+        r.world.view.tiles[landing] = "framed_door"  # revealed after planning
+        r.tick()
+        self.assertTrue(r.mem.need_position)
+        self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "tick")
+        r.tick()
+        self.assertEqual(fake.sent[2], [], "the held queue is replaced with nothing")
+        self.assertFalse(r.mem.cancel_queue)
+        self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "position")
+
+    def test_back_to_back_queues_keep_the_step_period(self):
+        # The next queue opens with the Waits still owed after the last Step,
+        # so its first Step never lands inside movement_cooldown.
+        applied = [{"tick": 11 + i, "queue_id": "q1", "index": i, "outcome": "applied"} for i in range(5)]
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 15, "window_remaining_ms": 0, "intent_results": applied},
+            {"tick": 16, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.queue_horizon_ticks = 5
+        r.tick()
+        self.assertEqual([i["verb"] for i in fake.sent[0]], ["Step", "Wait", "Wait", "Wait", "Step"])
+        r.tick()
+        self.assertIsNone(fake.sent[1])
+        self.assertEqual(r.mem.last_step_tick, 15)
+        r.tick()
+        self.assertEqual([i["verb"] for i in fake.sent[2]], ["Wait", "Wait", "Wait", "Step"])
+
+    def test_an_echoed_queue_does_not_restore_a_dropped_hold(self):
+        # A rejection or a door drops our queue; a non-empty `queue` on that
+        # same response must not put the hold back.
+        echo = {"queue_id": "q1", "next_index": 1}
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0, "queue": echo,
+             "intent_results": [rejected("q1", "block_occupied", "occupied", 11)]},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        r.tick()
+        self.assertIsNone(r.mem.held_queue)
+
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0, "queue": echo,
+             "intent_results": [{"tick": 11, "queue_id": "q1", "index": 0, "outcome": "applied"}]},
+            {"tick": 12, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        landing = {"right": (1, 0), "down_right": (1, 1)}[fake.sent[0][0]["direction"]]
+        r.world.view.tiles[landing] = "framed_door"
+        r.tick()
+        self.assertIsNone(r.mem.held_queue)
+        r.tick()
+        self.assertEqual(fake.sent[2], [])
+
+    def test_single_step_fallback_keeps_the_path(self):
+        # A target off the path's head is one Step; the path is not trimmed.
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r.mem.path = [(3, 0), (4, 0)]
+        intents = r.intents_for(Decision({"verb": "SetPosition", "x": 1, "y": 0}, "test"))
+        self.assertEqual(intents, [{"verb": "Step", "direction": "right"}])
+        self.assertEqual(r.mem.path, [(3, 0), (4, 0)])
+
+    def test_hostile_in_range_drops_the_held_queue_and_flees(self):
+        # Reflex 3 runs every round trip, not only once the queue drains.
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        self.assertIsNotNone(r.mem.held_queue)
+        r.world.entities = [Entity("npc", 9, (2, 1))]  # off the path, within hostile_range
+        r.tick()
+        self.assertIsNotNone(fake.sent[1], "the flee replaces the held queue")
+        self.assertEqual(fake.sent[1][-1], {"verb": "Step", "direction": "down"})
+        self.assertEqual(r.mem.pending_queue, "q2")
+        self.assertTrue(r.mem.need_position, "results of the dropped queue are no longer read")
+
+    def test_supply_in_reach_drops_the_held_queue_and_takes(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=True))
+        r.tick()
+        r.world.entities = [Entity("supply", 5, (0, 1))]
+        r.tick()
+        self.assertEqual(fake.sent[1], [{"verb": "Take", "supply_id": 5}])
+        self.assertIsNone(r.mem.pending_intents)
+
+    def test_no_reflex_leaves_the_held_queue_and_plan_alone(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False, on_hostile="ignore"))
+        r.tick()
+        path, held = list(r.mem.path), r.mem.held_queue
+        r.world.entities = [Entity("npc", 9, (2, 1))]
+        r.tick()
+        self.assertIsNone(fake.sent[1])
+        self.assertEqual(r.mem.held_queue, held)
+        self.assertEqual(r.mem.path, path, "the held queue's steps are not planned twice")
 
 
 class NetworkTest(unittest.TestCase):

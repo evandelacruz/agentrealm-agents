@@ -85,6 +85,7 @@ class FakeServer:
         self.stop = stop
         self.events_at = events_at or {}
         self.calls: list[tuple[int, str]] = []
+        self.sent: list[tuple[int, list[dict] | None]] = []
 
     def wait(self, not_before: float = 0.0) -> None:
         self.windows -= 1
@@ -97,6 +98,7 @@ class FakeServer:
 
     def tick(self, cid, intents):
         self.calls.append((self.tick_now, "tick"))
+        self.sent.append((self.tick_now, intents))
         ev = self.events_at.get(self.tick_now)
         r = {"tick": self.tick_now, "window_remaining_ms": 0, "queue_id": "q"}
         if ev:
@@ -154,6 +156,16 @@ class RunnerCadenceTest(unittest.TestCase):
         self.assertGreaterEqual(len(polls), 3)
         gaps = [b - a for a, b in zip(polls, polls[1:])]
         self.assertTrue(all(4 <= g <= 10 for g in gaps), gaps)
+
+    def test_walking_polls_before_the_queue_runs_out(self):
+        # A paced Step/Wait queue covers several ticks, so the calm gap opens,
+        # but the next poll never lands after the queue has run out.
+        s = self.run_windows(Policy(goals=["goto"], goto=(30, 0), pickup=False, entity_refresh=1000), 12)
+        (first, queue), (second, _) = s.sent[0], s.sent[1]
+        self.assertEqual(first, 101)
+        self.assertGreater(len(queue), 1)
+        self.assertGreater(second, first + 1, "no window is spent re-polling a running queue")
+        self.assertLessEqual(second, first + len(queue))
 
     def test_damage_switches_to_every_tick(self):
         hit = [{"tick": 0, "kind": "Damaged", "source_kind": "npc", "amount": 1}]

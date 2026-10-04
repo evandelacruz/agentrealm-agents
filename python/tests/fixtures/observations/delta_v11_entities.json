@@ -1,0 +1,14 @@
+{
+  "version": "11",
+  "delta": {
+    "entities": {
+      "npcs": {
+        "changed": [{"id": 301, "x": 14, "y": 9, "npc_type_code": "rat"}]
+      },
+      "supplies": {
+        "removed": [77],
+        "added": [{"id": 88, "x": 7, "y": 5, "supply_subtype_code": "gem"}]
+      }
+    }
+  }
+}

@@ -20,7 +20,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 | `GET /characters/{id}/world` | Tick rate, sandbox flag, status. |
 | `GET /characters/{id}/terrain-tiles?map_id&x0&y0&width&height` | Block types inside perception, plus revealed ground, as a grid: `rows` of `legend` symbols, `?` for clouds. |
 | `GET /characters/{id}/entity-tiles?…` | Characters, NPCs, supplies inside perception. |
-| `POST /characters/{id}/tick` `{"intents": [{...}]}` | Replaces the character's queue with an ordered list; no `intents` leaves the held queue running. Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
+| `POST /characters/{id}/tick` `{"intents": [{...}]}` | Replaces the character's queue with an ordered list (`[]` clears it; no `intents` leaves it running). Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
 
 Auth is `Authorization: Bearer <key>`.
 
@@ -30,7 +30,7 @@ The runner paces one call per wall-clock window (`epoch / tick interval`). That 
 
 ## Real time
 
-Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; a path goes out as one `Step`, `Wait`×n, … queue paced by `movement_speed`, cut after the last `Step` that fits the horizon, and the next queue opens with the `Wait`s still owed; every other intent goes alone. While it runs the agent polls and runs the reflexes each round trip; it sends a new queue when a reflex fires (its intent replaces the queue), or when a result is rejected or unknown, an event or read makes the rest of the path wrong, or survival events arrive. A dropped queue the server may still hold is replaced, by a lone `Wait` if there is nothing else to do (M6). `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
+Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; the agent sends movement as a paced `Step`/`Wait` queue and every other intent as a one-intent queue (M6). A reflex that fires while a queue runs replaces it (see **Reflexes**). It does not yet send a new queue when a read or event makes the rest of a running path wrong; that is the rest of M6. `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
 
 ## Architecture
 
@@ -55,13 +55,13 @@ Checked top to bottom:
 1. Position unknown, or a door or death may have moved us → read position.
 2. Terrain around us is stale (map changed, or we moved more than half the perception range since the last terrain read) → read terrain.
 3. Entities are older than the character's `entity_refresh` ticks, or a `Damaged`/`Attacked` event just arrived → read entities.
-4. Otherwise → `POST tick` with the chosen intent, or with none.
+4. Otherwise → `POST tick` with the chosen intent, or with none, when the cadence below says it is due; else send nothing this window.
 
-`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the queue still in flight runs out (one tick per intent left). A window it skips sends nothing. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
+`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the intents still queued run out. A paced movement queue opens the gap up to its length; a one-intent queue still brings the next poll a tick later. A window the gap skips sends nothing. The reads above outrank it, so a calm gap's spare windows go to stale terrain first, then stale entities. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
 
 Self is re-read after `Died`, and every 60 windows otherwise.
 
-Position is tracked locally from results: an applied `Step` moves us to the block it enters. A rejection of the first step puts us back where we stood when the queue was sent, and the server discards the rest of the queue. A queue the client drops itself forces a position read, since its later results are no longer read; a `Step` onto a door with more queued behind it drops the rest. A rejection, a door, or a death sends us back to step 1.
+Movement goes as a paced `Step`, `Wait`×n, … queue along the path, cut at the world's horizon, with no trailing `Wait`s (M6). The waits per step are the ticks per move at `movement_speed`, rounded up. The next queue opens with the `Wait`s still owed since the last applied `Step`, counted to the latest tick we know of, so it never draws `movement_cooldown`. Position follows each `Step` result as it arrives, not the submit. A result counts only if it names the `queue_id` our own submit was answered with; a late result for an earlier queue is ignored, never adopted, even when the submit's response named no queue. While that queue is still running, the window sends nothing unless a reflex below fires; the queue is dropped when a reflex fires (its intent replaces the queue, and since the dropped queue's later results are no longer read, position is re-read and the path forgotten), when a `Step` is rejected (a rejection discards the rest server-side), when a death clears it, or when its results have not come back a couple of ticks past its length (results that never name our queue must not stall the character; we may have walked unseen, so that drop also re-reads position and forgets the path and the last `Step` tick). A `Step` onto a door replaces the rest of the queue with `[]` on the very next call, before anything else is read, because the `Step`s behind it were planned from the wrong place. Once a rejection or a door has dropped the queue, a server `queue` echoed on that same response does not bring the hold back. A rejection, a door, a death, a firing reflex, or unmatched results send us back to step 1.
 
 `Attacked`, `Damaged`, and `Died` on a queue are always ours: they carry no `subject_id` there.
 
@@ -74,7 +74,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
 3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
 4. Supply underfoot or adjacent and `pickup = true` → `Take`.
 4b. Our last death dropped a chest on this map and `pickup = true` → walk to it; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; this agent sends no `snapshot_version`, so every round trip carries a complete snapshot with the chest's `contents`.
-5. Plan has a next step → walk the path as a paced `Step` queue (see **Real time**).
+5. Plan has a next step → walk the path as a paced `Step` queue (see **Scheduler**).
 6. Otherwise → nothing.
 
 "Hostile" and "in range" read from settings: the API serves no hostile's reach and no other character's health.

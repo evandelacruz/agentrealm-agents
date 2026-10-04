@@ -35,8 +35,6 @@ Pos = tuple[int, int]
 # Extra cost of a step onto a `costly` tile: worth a long detour to avoid one.
 COSTLY_STEP = 100
 
-DEFAULT_MOVEMENT_SPEED = 2500  # thousandths of a block per second (API Movement)
-
 NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
 
 
@@ -81,7 +79,7 @@ class WorldModel:
     pos: Pos | None = None
     perception: int = 1
     movement: int = 1
-    movement_speed: int = DEFAULT_MOVEMENT_SPEED  # thousandths of a block per second (GetSelf)
+    movement_speed: int = 2500  # thousandths of a block per second (GetSelf)
     alive: bool = True
     lives: int = 0
     health: int | None = None
@@ -92,6 +90,7 @@ class WorldModel:
     entities_tick: int = -10**9  # tick of the last entity read
     terrain_center: Pos | None = None  # where we stood at the last terrain read
     terrain_map: int | None = None
+    snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
@@ -111,12 +110,16 @@ class WorldModel:
     def apply_self(self, s: dict) -> None:
         self.perception = max(1, int(s.get("perception_range", 1)))
         self.movement = max(1, int(s.get("movement_range", 1)))
-        self.movement_speed = max(1, int(s.get("movement_speed", DEFAULT_MOVEMENT_SPEED)))
+        if "movement_speed" in s:
+            self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
 
     def apply_position(self, p: dict) -> None:
-        self.map_id = int(p["map_id"])
+        map_id = int(p["map_id"])
+        if map_id != self.map_id:
+            self.snapshot_version = None  # entities no longer match its base
+        self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
 
     def perception_rect(self) -> tuple[int, int, int, int]:
@@ -124,6 +127,14 @@ class WorldModel:
         assert self.pos is not None
         r = self.perception
         return self.pos[0] - r, self.pos[1] - r, 2 * r + 1, 2 * r + 1
+
+    def terrain_stale(self) -> bool:
+        """True when a terrain read is due (PLAYABLE_AGENT_PLAN Executor: Terrain reads)."""
+        if self.pos is None or self.map_id is None:
+            return False
+        if self.terrain_map != self.map_id or self.terrain_center is None:
+            return True
+        return chebyshev(self.terrain_center, self.pos) > self.perception // 2
 
     def apply_terrain(self, t: dict) -> None:
         """Records a terrain read of our perception window.
@@ -142,7 +153,13 @@ class WorldModel:
         self.terrain_map = self.map_id
 
     def apply_entities(self, e: dict) -> None:
-        out = []
+        self.entities = self._entities_from_payload(e)
+        self.entities_tick = int(e.get("tick", self.tick))
+        # A separate read replaced the state the next delta would apply to.
+        self.snapshot_version = None
+
+    def _entities_from_payload(self, e: dict) -> list[Entity]:
+        out: list[Entity] = []
         for c in e.get("characters") or []:
             if int(c["id"]) != self.character_id:
                 out.append(Entity("character", int(c["id"]), (int(c["x"]), int(c["y"])), c.get("outfit_code", "")))
@@ -152,8 +169,137 @@ class WorldModel:
             out.append(Entity("supply", int(s["id"]), (int(s["x"]), int(s["y"])), s.get("supply_subtype_code", "")))
         for ch in e.get("chests") or []:
             out.append(Entity("chest", int(ch["id"]), (int(ch["x"]), int(ch["y"]))))
-        self.entities = out
-        self.entities_tick = int(e.get("tick", self.tick))
+        return out
+
+    def _entity_key(self, ent: Entity) -> tuple[str, int]:
+        return ent.kind, ent.id
+
+    def _entity_from_entry(self, kind: str, entry: dict) -> Entity | None:
+        eid = int(entry["id"])
+        pos = (int(entry["x"]), int(entry["y"]))
+        if kind == "character":
+            if eid == self.character_id:
+                return None
+            return Entity("character", eid, pos, entry.get("outfit_code", ""))
+        if kind == "npc":
+            return Entity("npc", eid, pos, entry.get("npc_type_code", ""))
+        if kind == "supply":
+            return Entity("supply", eid, pos, entry.get("supply_subtype_code", ""))
+        if kind == "chest":
+            return Entity("chest", eid, pos)
+        return None
+
+    def _apply_entity_delta(self, patch: dict) -> None:
+        """Merges an observation entities patch (Manual §7.2)."""
+        by_key = {self._entity_key(e): e for e in self.entities}
+        kind_map = {
+            "characters": "character",
+            "npcs": "npc",
+            "supplies": "supply",
+            "chests": "chest",
+        }
+        for field, kind in kind_map.items():
+            part = patch.get(field)
+            if not part:
+                continue
+            for entry in part.get("added") or []:
+                ent = self._entity_from_entry(kind, entry)
+                if ent is not None:
+                    by_key[self._entity_key(ent)] = ent
+            for entry in part.get("changed") or []:
+                ent = self._entity_from_entry(kind, entry)
+                if ent is not None:
+                    by_key[self._entity_key(ent)] = ent
+            for eid in part.get("removed") or []:
+                by_key.pop((kind, int(eid)), None)
+            for entry in (part.get("added") or []) + (part.get("changed") or []):
+                if kind != "chest" or "contents" not in entry:
+                    continue
+                cid = int(entry["id"])
+                self.chest_contents[cid] = [int(s["id"]) for s in entry["contents"]]
+            for eid in part.get("removed") or []:
+                self.chest_contents.pop(int(eid), None)
+        self.entities = list(by_key.values())
+
+    def _apply_terrain_delta(self, patch: dict) -> None:
+        """Updates known tiles from an observation terrain patch."""
+        for cell in patch.get("changed") or []:
+            map_id = int(cell["map_id"])
+            p = (int(cell["x"]), int(cell["y"]))
+            self.maps.setdefault(map_id, MapView()).tiles[p] = cell.get("block_type", "")
+        for cell in patch.get("removed") or []:
+            map_id = int(cell["map_id"])
+            p = (int(cell["x"]), int(cell["y"]))
+            self.maps.setdefault(map_id, MapView()).tiles.pop(p, None)
+
+    def _apply_snapshot_terrain(self, terrain: dict) -> None:
+        for cell in terrain.get("cells") or []:
+            map_id = int(cell["map_id"])
+            p = (int(cell["x"]), int(cell["y"]))
+            self.maps.setdefault(map_id, MapView()).tiles[p] = cell.get("block_type", "")
+
+    def _chest_contents_from_entities(self, entities: dict) -> dict[int, list[int]]:
+        return {
+            int(ch["id"]): [int(s["id"]) for s in ch["contents"]]
+            for ch in entities.get("chests") or []
+            if "contents" in ch
+        }
+
+    def _refresh_death_chest(self) -> None:
+        if self.death_chest is None:
+            return
+        map_id, at, chest_id = self.death_chest
+        here = self.pos if self.map_id == map_id else None
+        gone = here is not None and chebyshev(at, here) <= 1 and chest_id not in self.chest_contents
+        if gone or self.chest_contents.get(chest_id) == []:
+            self.death_chest = None
+
+    def _apply_vitals(self, body: dict, complete: bool) -> None:
+        """Reads health and max health from a snapshot or a delta.
+
+        A complete snapshot is authoritative, so a field it omits (asleep)
+        clears the old value. A delta replaces only the fields it carries.
+        A value that is not a number reads as unknown.
+        """
+        for key in ("health", "max_health"):
+            if complete or key in body:
+                setattr(self, key, _opt_int(body.get(key)))
+
+    def _apply_body_scalars(self, body: dict) -> None:
+        """Fields a snapshot and a delta share: present means replace."""
+        if "lives" in body:
+            self.lives = int(body["lives"])
+        if "alive" in body:
+            self.alive = bool(body["alive"])
+        if "position" in body:
+            pos = body["position"]
+            if pos is None:
+                self.forget_position()
+            else:
+                self.apply_position(pos)
+
+    def _apply_snapshot_body(self, snap: dict) -> None:
+        self._apply_body_scalars(snap)
+        self._apply_vitals(snap, complete=True)
+        if "entities" in snap:
+            entities = snap["entities"] or {}
+            self.entities = self._entities_from_payload(entities)
+            self.chest_contents = self._chest_contents_from_entities(entities)
+            self.entities_tick = self.tick
+        terrain = snap.get("terrain")
+        if terrain:
+            self._apply_snapshot_terrain(terrain)
+        self._refresh_death_chest()
+
+    def _apply_delta_body(self, delta: dict) -> None:
+        self._apply_body_scalars(delta)
+        self._apply_vitals(delta, complete=False)
+        if "entities" in delta:
+            self._apply_entity_delta(delta["entities"])
+            self.entities_tick = self.tick
+        if "terrain" in delta:
+            self._apply_terrain_delta(delta["terrain"])
+        self._refresh_death_chest()
 
     def apply_events(self, events_by_tick: list[dict]) -> list[dict]:
         """Folds durable facts from events into the model and returns them flat.
@@ -179,50 +325,33 @@ class WorldModel:
         return flat
 
     def apply_observation(self, obs: dict | None) -> None:
-        """Folds a complete tick snapshot into the model: vitals and ground chest contents.
+        """Folds a tick observation into the model (Manual §7.2).
 
-        This agent never sends snapshot_version, so every observation it gets
-        is complete (API Snapshots); anything else is ignored until deltas land.
+        Observations may be unchanged, a delta against the last applied
+        version, or a complete snapshot when the client had no version or one
+        too old. Entity patches merge by id; terrain patches update known
+        tiles; a complete snapshot replaces only the parts it carries. A
+        separate entity read, losing our position, or a map change clears
+        snapshot_version, since the next delta's base no longer matches.
         """
-        if not obs or not obs.get("complete"):
+        if not obs:
             return
-        snap = obs.get("snapshot") or {}
-        self._apply_vitals(snap)
-        self._apply_chest_snapshot(snap)
-
-    def _apply_vitals(self, snap: dict) -> None:
-        """Reads health and max health from a complete snapshot.
-
-        A complete snapshot is authoritative, so a field it omits (asleep)
-        clears the old value, and one that is not a number reads as unknown.
-        """
-        self.health = _opt_int(snap.get("health"))
-        self.max_health = _opt_int(snap.get("max_health"))
-
-    def _apply_chest_snapshot(self, snap: dict) -> None:
-        """Reads ground chest contents from a complete snapshot.
-
-        A chest within reach lists its contents. A dropped chest leaves the
-        world once emptied (B116), so our death chest absent while its block
-        is within reach was emptied, by us or by someone first, and is no
-        longer worth going back for; one seen empty is not either.
-        """
-        entities = snap.get("entities") or {}
-        self.chest_contents = {
-            int(ch["id"]): [int(s["id"]) for s in ch["contents"]]
-            for ch in entities.get("chests") or []
-            if "contents" in ch
-        }
-        if self.death_chest is not None:
-            map_id, at, chest_id = self.death_chest
-            here = self.pos if self.map_id == map_id else None
-            gone = here is not None and chebyshev(at, here) <= 1 and chest_id not in self.chest_contents
-            if gone or self.chest_contents.get(chest_id) == []:
-                self.death_chest = None
+        version = obs.get("version")
+        if obs.get("unchanged"):
+            if version is not None:
+                self.snapshot_version = int(version)
+            return
+        if obs.get("complete"):
+            self._apply_snapshot_body(obs.get("snapshot") or {})
+        elif "delta" in obs:
+            self._apply_delta_body(obs["delta"])
+        if version is not None:
+            self.snapshot_version = int(version)
 
     def forget_position(self) -> None:
         self.pos = None
         self.map_id = None
+        self.snapshot_version = None
 
     # Queries.
 

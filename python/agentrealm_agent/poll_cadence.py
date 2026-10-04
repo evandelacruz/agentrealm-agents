@@ -4,9 +4,10 @@ Calm: poll every 4–10 ticks and leave the windows between to the reads the
 scheduler already prioritises. Urgent: poll every tick while a hostile is
 within 3 blocks or health is dropping (docs/PLAYABLE_AGENT_PLAN.md Executor).
 
-The calm gap never outlasts the queue still in flight: each intent left runs
-one tick, and the character must not stand idle after it. A lone intent still
-brings the next poll on the next tick.
+The calm gap never outlasts the queue the last poll sent: a queue of n
+intents runs n ticks, and the character must not stand idle after it. A paced
+movement queue opens the gap up to its length; a one-intent queue still brings
+the next poll a tick later.
 """
 
 from __future__ import annotations

@@ -5,6 +5,7 @@ from .dispatch import STATES, dispatch
 from .explore import ExploreState, scripted_outcome
 from .gather import GatherState, gather_outcome
 from .heal import HealState
+from .boss import BossState
 from .level import LevelState
 from .travel import TravelState
 
@@ -12,6 +13,7 @@ __all__ = [
     "ExploreState",
     "GatherState",
     "HealState",
+    "BossState",
     "LevelState",
     "TravelState",
     "PlayContext",

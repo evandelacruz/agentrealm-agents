@@ -13,6 +13,7 @@ from .flee import FleeState
 from .gather import GatherState
 from .heal import HealState
 from .idle import IdleState
+from .boss import BossState
 from .level import LevelState
 from .investigate import InvestigateState
 from .loot import LootState
@@ -25,7 +26,7 @@ from .travel import TravelState
 # both priority 0 and never both act: each only waits. Escape, Retreat and
 # Heal (A10) are priority 1; Fight (A23) slots in before Flee at 2; Recover
 # (A11) and Loot (A20) are priority 3, in the plan's table order, above Gather
-# (A22), Travel (A27) and Level (A37) at 5. M8 economy states slot above Explore.
+# (A22), Travel (A27), Boss (A38) and Level (A37) at 5. M8 economy states slot above Explore.
 STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
@@ -39,6 +40,7 @@ STATES: tuple[State, ...] = (
     InvestigateState(),
     GatherState(),
     TravelState(),
+    BossState(),
     LevelState(),
     ExploreState(),
     IdleState(),

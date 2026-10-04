@@ -61,6 +61,8 @@ class Entity:
     pos: Pos
     code: str = ""  # outfit, npc type, or supply subtype; empty for a chest
     gem_price: int | None = None  # shop supplies on entity reads (Manual §9.3)
+    health: int | None = None  # bosses only on entity reads (Manual §9.3, A38)
+    max_health: int | None = None
 
 
 @dataclass
@@ -140,6 +142,8 @@ class WorldModel:
     zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
     # Town and Respawned locations used to seed safe-tile probes.
     respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
+    # Boss fight clock from the round-trip snapshot (GAME_NOTES.md Levels and bosses).
+    boss_fight_end_tick: int | None = None
 
     def record_respawn_anchor(self, map_id: int, pos: Pos) -> None:
         """Seeds safe-tile probes around a town or Respawned location (A7)."""
@@ -228,7 +232,16 @@ class WorldModel:
             if int(c["id"]) != self.character_id:
                 out.append(Entity("character", int(c["id"]), (int(c["x"]), int(c["y"])), c.get("outfit_code", "")))
         for n in e.get("npcs") or []:
-            out.append(Entity("npc", int(n["id"]), (int(n["x"]), int(n["y"])), n.get("npc_type_code", "")))
+            out.append(
+                Entity(
+                    "npc",
+                    int(n["id"]),
+                    (int(n["x"]), int(n["y"])),
+                    n.get("npc_type_code", ""),
+                    health=_opt_int(n.get("health")),
+                    max_health=_opt_int(n.get("max_health")),
+                )
+            )
         for s in e.get("supplies") or []:
             price = _opt_int(s.get("gem_price"))
             out.append(
@@ -255,7 +268,14 @@ class WorldModel:
                 return None
             return Entity("character", eid, pos, entry.get("outfit_code", ""))
         if kind == "npc":
-            return Entity("npc", eid, pos, entry.get("npc_type_code", ""))
+            return Entity(
+                "npc",
+                eid,
+                pos,
+                entry.get("npc_type_code", ""),
+                health=_opt_int(entry.get("health")),
+                max_health=_opt_int(entry.get("max_health")),
+            )
         if kind == "supply":
             return Entity(
                 "supply",
@@ -365,6 +385,20 @@ class WorldModel:
                 self.forget_position()
             else:
                 self.apply_position(pos)
+    def _apply_boss_fight_clock(self, body: dict, *, complete: bool) -> None:
+        if complete or "boss_fight_end_tick" in body:
+            self.boss_fight_end_tick = _opt_int(body.get("boss_fight_end_tick"))
+
+    def in_boss_fight(self) -> bool:
+        """True while the served fight clock has not expired (A38)."""
+        end = self.boss_fight_end_tick
+        return end is not None and end > self.tick
+
+    def boss_fight_ticks_left(self) -> int | None:
+        end = self.boss_fight_end_tick
+        if end is None:
+            return None
+        return max(0, end - self.tick)
 
     def _apply_inventory(self, inv: dict | None) -> None:
         if inv is None:
@@ -378,6 +412,7 @@ class WorldModel:
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
         self._apply_vitals(snap, complete=True)
+        self._apply_boss_fight_clock(snap, complete=True)
         if "inventory" in snap:
             self._apply_inventory(snap.get("inventory"))
         if "entities" in snap:
@@ -393,6 +428,7 @@ class WorldModel:
     def _apply_delta_body(self, delta: dict) -> None:
         self._apply_body_scalars(delta)
         self._apply_vitals(delta, complete=False)
+        self._apply_boss_fight_clock(delta, complete=False)
         if "inventory" in delta:
             self._apply_inventory(delta.get("inventory"))
         if "entities" in delta:

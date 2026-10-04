@@ -38,6 +38,8 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
     policy = ctx.policy
     if policy.kind != "scripted" or not world.alive or world.pos is None:
         return False
+    if world.in_boss_fight() or ctx.memory.boss_engaged:
+        return False
     if policy.on_hostile == "ignore" or not hostiles_in_range(world, policy):
         return False
     if on_safe_tile(world):

@@ -44,6 +44,7 @@ OP_STATE: dict[str, str | None] = {
 # Ops the shipped Explore pathing can drive today. Every other op is dropped
 # with a log line when it reaches the top of the stack (A34 slice).
 EXPLORE_PATH_OPS = frozenset({"explore_area", "travel", "wait"})
+BOSS_PLAN_OPS = frozenset({"fight_boss"})
 # `travel` destinations with a path today; `hunting_ground` and `shop` wait on A20/Shop.
 TRAVEL_PATHED = frozenset({"entrance", "town", "point"})
 
@@ -195,7 +196,23 @@ def _validate_enter_level(op: dict[str, Any]) -> bool:
 
 
 def _validate_fight_boss(op: dict[str, Any]) -> bool:
-    return _validate_enter_level(op)
+    if not _require_fields(op, ("x", "y")) or not all(_is_int(op[k]) for k in ("x", "y")):
+        return False
+    if "min_health" in op and (not _is_int(op["min_health"]) or op["min_health"] < 0):
+        _drop("bad min_health", op)
+        return False
+    if "min_potions" in op and (not _is_int(op["min_potions"]) or op["min_potions"] < 0):
+        _drop("bad min_potions", op)
+        return False
+    if "armed" in op and not _is_str(op["armed"]):
+        _drop("bad armed", op)
+        return False
+    if "worn" in op:
+        worn = op["worn"]
+        if not isinstance(worn, list) or not worn or not all(_is_str(c) for c in worn):
+            _drop("bad worn", op)
+            return False
+    return True
 
 
 def _validate_avoid(op: dict[str, Any]) -> bool:
@@ -428,24 +445,24 @@ class Plan:
         """The op at the top of the stack, or None when it is empty."""
         return self.goals[self.index] if self.index < len(self.goals) else None
 
-    def advance(self, world: WorldModel) -> None:
+    def advance(self, world: WorldModel, memory: object | None = None) -> None:
         """Apply ``set_param`` ops reached in order and pop finished goals."""
         while (op := self.current()) is not None:
             if op["op"] == "set_param":
                 self.params = apply_set_param(self.floor_params, self.params, op)
-                self._pop_current()
+                self._pop_current(memory)
                 continue
-            if not goal_done(op, world, self):
+            if not goal_done(op, world, self, memory=memory):
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
                 return
-            self._pop_current()
+            self._pop_current(memory)
 
     def drop_current(self, reason: str) -> None:
         op = self.current()
         if op is not None:
             log.warning("plan: dropped op %r: %s", op, reason)
-        self._pop_current()
+        self._pop_current(None)
 
     def note_stalled(self, tick: int) -> bool:
         """Record that the current op found no path; True once it has stalled too long."""
@@ -453,7 +470,10 @@ class Plan:
             self.stalled_since_tick = tick
         return tick - self.stalled_since_tick >= PLAN_STALL_SECONDS * self.tick_hz
 
-    def _pop_current(self) -> None:
+    def _pop_current(self, memory: object | None = None) -> None:
+        op = self.current()
+        if op is not None and op["op"] == "fight_boss":
+            _clear_boss_memory(memory)
         self.index += 1
         self.wait_started_tick = None
         self.stalled_since_tick = None
@@ -512,11 +532,34 @@ def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:
     return {p for p in frontier if chebyshev(p, center) <= op["radius"]}
 
 
-def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
+def _fight_boss_done(world: WorldModel, memory: object | None) -> bool:
+    if memory is None:
+        return False
+    engaged = getattr(memory, "boss_engaged", False)
+    if not engaged:
+        return False
+    for ent in world.entities:
+        if ent.kind == "npc" and ent.health is not None:
+            return ent.health <= 0
+    return getattr(memory, "boss_start_health", None) is not None
+
+
+def _clear_boss_memory(memory: object | None) -> None:
+    if memory is None:
+        return
+    if hasattr(memory, "boss_engaged"):
+        memory.boss_engaged = False
+        memory.boss_door = None
+        memory.boss_start_health = None
+
+
+def goal_done(op: GoalOp, world: WorldModel, plan: Plan, *, memory: object | None = None) -> bool:
     """Whether ``op`` is finished. Reads only; ``Plan.advance`` pops it."""
     if world.pos is None:
         return False
     name = op["op"]
+    if name == "fight_boss":
+        return _fight_boss_done(world, memory)
     if name == "wait":
         if plan.wait_started_tick is None:
             return op["seconds"] == 0

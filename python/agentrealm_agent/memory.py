@@ -62,3 +62,7 @@ class Memory:
     heal_wait: tuple[int, int] | None = None  # (tick, health) Heal began sending nothing, reset when health rises
     heal_backoff_until: int = -1  # Heal yields to Explore until this tick
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
+    # Boss (A38): door we entered, whether the boss was engaged, last seen boss health.
+    boss_door: tuple[int, Pos] | None = None
+    boss_engaged: bool = False
+    boss_start_health: int | None = None

@@ -25,7 +25,13 @@ def fight_target(w: WorldModel, policy, never_attack: list[str]) -> Entity | Non
     here = w.pos
     if here is None or policy.on_hostile != "fight":
         return None
-    hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
+    hostiles = [
+        e
+        for e in w.entities
+        if e.kind in policy.hostile
+        and not (e.kind == "npc" and e.health is not None)
+        and chebyshev(e.pos, here) <= policy.hostile_range
+    ]
     if not hostiles:
         return None
     target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))

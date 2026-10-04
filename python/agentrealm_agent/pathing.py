@@ -20,6 +20,7 @@ from .navigation import (
 from .navigation import stuck as nav_stuck
 from .navigation.stuck import NavAttempt
 from .plan import (
+    BOSS_PLAN_OPS,
     EXPLORE_ANYWHERE,
     EXPLORE_PATH_OPS,
     OP_STATE,
@@ -169,11 +170,13 @@ def plan_step(
     then ``policy.goals`` get the move. A ``wait`` decides the round with no move.
     """
     while True:
-        plan.advance(w)
+        plan.advance(w, m)
         op = plan.current()
         if op is None:
             return False
         if op["op"] not in EXPLORE_PATH_OPS:
+            if op["op"] in BOSS_PLAN_OPS:
+                return False
             plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet")
             continue
         if op["op"] == "wait":

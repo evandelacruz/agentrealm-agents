@@ -11,7 +11,6 @@ from agentrealm_agent.executor import (
     wait,
     within_horizon,
 )
-from agentrealm_agent.executor.pacing import pace_steps, step_direction, ticks_per_move
 
 H = QUEUE_HORIZON_INTENTS
 
@@ -82,26 +81,6 @@ class IntentShapeTest(unittest.TestCase):
     def test_queue_goes_through_client_tick_body(self):
         q = [step("right"), wait(), wait(), wait(), step("right")]
         self.assertEqual(_tick_body(q, None), {"intents": q})
-
-
-class PacingTest(unittest.TestCase):
-    def test_ticks_per_move_default_pace(self):
-        self.assertEqual(ticks_per_move(10, 2500), 4)
-
-    def test_pace_path_inserts_waits(self):
-        intents, queued = pace_steps((0, 0), [(1, 0), (2, 0)], movement_speed=2500, tick_hz=10, horizon_ticks=40)
-        self.assertEqual(queued, [(1, 0), (2, 0)])
-        self.assertEqual(intents, [step("right"), wait(), wait(), wait(), step("right")])
-
-    def test_horizon_caps_steps_and_drops_trailing_waits(self):
-        intents, queued = pace_steps(
-            (0, 0), [(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)], movement_speed=2500, tick_hz=10, horizon_ticks=8
-        )
-        self.assertEqual(queued, [(1, 0), (2, 0)])
-        self.assertEqual(intents, [step("right"), wait(), wait(), wait(), step("right")])
-
-    def test_step_direction_diagonal(self):
-        self.assertEqual(step_direction((1, 1), (2, 0)), "up_right")
 
 
 if __name__ == "__main__":

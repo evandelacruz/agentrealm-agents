@@ -33,7 +33,7 @@ class Memory:
     held_queue: dict | None = None  # server queue {"queue_id", "next_index"} while not empty
     queue_sent_tick: int = 0  # tick the last multi-intent queue was answered at
     cancel_queue: bool = False  # send [] next tick: the held queue was planned from a stale position
-    undo: Pos | None = None  # where we stood before assuming `pending` moved us
+    last_step_tick: int | None = None  # tick our last Step applied, to pace the next queue
     blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
     alarm: bool = False  # Damaged or Attacked since the last entity read
 

@@ -78,7 +78,7 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(r.mem.need_position)
 
         r.world.apply_position({"map_id": 7, "x": 0, "y": 0})
-        r.mem.need_position, r.mem.undo = False, None
+        r.mem.need_position = False
         r.tick()
         self.assertNotEqual(fake.sent[2], fake.sent[0], "replan avoids the rejected step")
 
@@ -179,6 +179,54 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(fake.sent[2], [], "the held queue is replaced with nothing")
         self.assertFalse(r.mem.cancel_queue)
         self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "position")
+
+    def test_back_to_back_queues_keep_the_step_period(self):
+        # The next queue opens with the Waits still owed after the last Step,
+        # so its first Step never lands inside movement_cooldown.
+        applied = [{"tick": 11 + i, "queue_id": "q1", "index": i, "outcome": "applied"} for i in range(5)]
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 15, "window_remaining_ms": 0, "intent_results": applied},
+            {"tick": 16, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.queue_horizon_ticks = 5
+        r.tick()
+        self.assertEqual([i["verb"] for i in fake.sent[0]], ["Step", "Wait", "Wait", "Wait", "Step"])
+        r.tick()
+        self.assertIsNone(fake.sent[1])
+        self.assertEqual(r.mem.last_step_tick, 15)
+        r.tick()
+        self.assertEqual([i["verb"] for i in fake.sent[2]], ["Wait", "Wait", "Wait", "Step"])
+
+    def test_an_echoed_queue_does_not_restore_a_dropped_hold(self):
+        # A rejection or a door drops our queue; a non-empty `queue` on that
+        # same response must not put the hold back.
+        echo = {"queue_id": "q1", "next_index": 1}
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0, "queue": echo,
+             "intent_results": [rejected("q1", "block_occupied", "occupied", 11)]},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        r.tick()
+        self.assertIsNone(r.mem.held_queue)
+
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0, "queue": echo,
+             "intent_results": [{"tick": 11, "queue_id": "q1", "index": 0, "outcome": "applied"}]},
+            {"tick": 12, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        landing = {"right": (1, 0), "down_right": (1, 1)}[fake.sent[0][0]["direction"]]
+        r.world.view.tiles[landing] = "framed_door"
+        r.tick()
+        self.assertIsNone(r.mem.held_queue)
+        r.tick()
+        self.assertEqual(fake.sent[2], [])
 
     def test_single_step_fallback_keeps_the_path(self):
         # A target off the path's head is one Step; the path is not trimmed.

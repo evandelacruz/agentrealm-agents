@@ -38,9 +38,9 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 
 | API surface | Used today | Needed for |
 |---|---|---|
-| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | No: each plan step is one `SetPosition` in a one-intent queue, one per call window, and any rejection only clears the path (the tests exercise `block_occupied` and `beyond_movement_range`). Which codes the shipped loop draws on a live world is not measured; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
-| Multi-intent queues | No: always one intent | Freeing the request budget; queuing a retreat with an attack |
-| Snapshot deltas (`snapshot_version`), health in the observation | No: separate entity reads, health never tracked | Perception, retreat |
+| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Not measured on a live world yet; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
+| Multi-intent queues | Movement only; every other intent is sent alone, and a running queue is not yet re-sent when a reflex fires | Freeing the request budget; queuing a retreat with an attack |
+| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health from complete snapshots, not yet used by any decision; no `snapshot_version`, so no deltas; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
 | `Use` on a block (attacks the NPC on it, or breaks the block) | No: flees from every NPC | Fighting, opening the way |
 | Priced supplies (`gem_price`) | No | Buying gear, potions, tools |
@@ -211,7 +211,7 @@ A boost comes from a clue that mentions its type or surroundings ("rings hollow"
 
 Health is the resource every other decision spends, and lives are the budget behind it. On a live world, at zero lives the character is ended, permanently: `character_ended` on every intent (M §11). The agent tracks both and acts to keep them up.
 
-**What it tracks.** `health` and `max_health` arrive in every round trip's observation while awake (the current agent ignores them). `lives` is in the snapshot too. Each `Damaged` event is logged with its source, so the agent knows what is hurting it and how fast.
+**What it tracks.** `health` and `max_health` arrive in every round trip's observation while awake (the current agent records them but no decision reads them yet). `lives` is in the snapshot too. Each `Damaged` event is logged with its source, so the agent knows what is hurting it and how fast.
 
 **Lives set how bold it is.** A single risk level, from cautious to bold, follows the lives left. It scales:
 - the fight margin;

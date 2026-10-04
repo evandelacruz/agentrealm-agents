@@ -11,8 +11,15 @@ from dataclasses import dataclass
 from .brain import Decision, Memory, choose_call, decide, reject_step
 from .client import ApiError, Client
 from .config import CharacterConfig
-from .executor import DEFAULT_QUEUE_HORIZON_SECONDS, DEFAULT_TICK_RATE_HZ, QUEUE_HORIZON_INTENTS, queue_horizon_intents
-from .executor.pacing import movement_steps, pace_steps, step_landing
+from .executor import (
+    DEFAULT_QUEUE_HORIZON_SECONDS,
+    DEFAULT_TICK_RATE_HZ,
+    QUEUE_HORIZON_INTENTS,
+    build_paced_walk_queue,
+    queue_horizon_intents,
+    step_landing,
+    trim_to_horizon,
+)
 from .world import DOORS, WorldModel, terrain_cells
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
@@ -106,7 +113,7 @@ class Runner:
         elif call == "position":
             p = c.position(self.cid)
             w.apply_position(p)
-            m.need_position, m.path, m.undo = False, [], None
+            m.need_position, m.path = False, []
             self.log(call, "", {"position": p})
         elif call == "terrain":
             t = c.terrain(self.cid, w.map_id, *w.perception_rect())
@@ -149,7 +156,9 @@ class Runner:
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
         self.on_events(events)
-        if r.get("queue"):
+        if r.get("queue") and not rejected and not m.cancel_queue:
+            # A rejection or a door already dropped our queue; an echoed server
+            # queue on that same response must not bring the hold back.
             m.held_queue = r.get("queue")
         elif m.pending_intents is not None and m.pending_next_index < len(m.pending_intents):
             if w.tick > m.queue_sent_tick + len(m.pending_intents) + QUEUE_RESULT_SLACK:
@@ -177,15 +186,6 @@ class Runner:
                 "dropped": r.get("events_dropped", 0),
             },
         )
-        if (
-            intents is not None
-            and not rejected
-            and w.pos is not None
-            and len(intents) == 1
-            and intents[0].get("verb") != "Step"
-        ):
-            m.undo = w.pos
-            self.assume_applied(intents[0])
         # The intent resolves at this sim window's boundary. Do not call
         # again until it has closed, so the next submit lands in a new tick.
         return time.time() + int(r.get("window_remaining_ms", 0)) / 1000.0 + WINDOW_MARGIN
@@ -202,18 +202,29 @@ class Runner:
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
-        steps = movement_steps(m.path, target)
-        intents, queued = pace_steps(
+        on_path = bool(m.path) and m.path[0] == target
+        cells = list(m.path) if on_path else [target]
+        # Ticks since the last applied Step, counted to the latest tick we
+        # know of: the first intent runs no earlier, so the owed Waits are
+        # never too few and the first Step never draws movement_cooldown.
+        since = None if m.last_step_tick is None else max(1, w.tick - m.last_step_tick)
+        intents = build_paced_walk_queue(
             w.pos,
-            steps,
-            movement_speed=w.movement_speed,
-            tick_hz=self.tick_hz,
-            horizon_ticks=self.queue_horizon_ticks,
+            cells,
+            movement_speed_milli=w.movement_speed,
+            tick_rate_hz=self.tick_hz,
+            ticks_since_last_step=since,
         )
-        if not intents:
+        intents = trim_to_horizon(intents, limit=self.queue_horizon_ticks)
+        # Waits after the last Step that fits only idle: the next queue opens
+        # with whatever is still owed instead.
+        while intents and intents[-1]["verb"] == "Wait":
+            intents.pop()
+        queued = sum(1 for i in intents if i["verb"] == "Step")
+        if not queued:
             return None
-        if m.path and m.path[0] == target:
-            m.path = m.path[len(queued) :]
+        if on_path:
+            m.path = m.path[queued:]
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
         return intents
@@ -261,19 +272,6 @@ class Runner:
             return m.pending
         return None
 
-    def assume_applied(self, intent: dict) -> None:
-        """Moves the local model as if a non-movement intent lands; a rejection re-reads."""
-        w, m = self.world, self.mem
-        if intent.get("verb") != "SetPosition":
-            return
-        target = (intent["x"], intent["y"])
-        if m.path and m.path[0] == target:
-            m.path.pop(0)
-        if w.view.tiles.get(target) in DOORS:
-            m.need_position, m.path = True, []
-        else:
-            w.pos = target
-
     def on_result(self, result: dict, index: int) -> bool:
         """Applies one intent result. True when it was rejected."""
         w, m = self.world, self.mem
@@ -281,6 +279,7 @@ class Runner:
         if result.get("outcome") != "rejected":
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
+                m.last_step_tick = int(result.get("tick", w.tick))
                 if w.view.tiles.get(w.pos) in DOORS:
                     # A door moves us; the Steps still queued behind this one
                     # would walk from the wrong place.
@@ -292,15 +291,10 @@ class Runner:
             return False
         if intent and intent.get("verb") == "Step" and w.pos is not None:
             reject_step(m, step_landing(w.pos, intent["direction"]))
-        elif intent and intent.get("verb") == "SetPosition":
-            if m.undo is not None:
-                w.pos = m.undo
-            reject_step(m, (intent["x"], intent["y"]))
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None
         m.pending_next_index = 0
-        m.undo = None
         m.path, m.need_position = [], True
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
@@ -315,7 +309,7 @@ class Runner:
                 m.alarm = True
             if kind == "Died":
                 m.need_self = m.need_position = True
-                m.path, m.undo = [], None
+                m.path, m.last_step_tick = [], None
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
                 m.held_queue = None

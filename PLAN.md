@@ -79,7 +79,7 @@ The first rule that matches picks the intent:
 
 ### Plan: goal and path
 
-A goal plus an A* path over tiles this character has seen and knows are walkable. Unknown tiles are never pathed through. Occupied tiles and `avoid_blocks` are avoided, unless every way off an `avoid_blocks` tile crosses more of it. Movement is Chebyshev: diagonals cost the same as straight steps.
+A goal plus an A* path over tiles this character has seen and knows are walkable. Unknown tiles are never pathed through. Occupied tiles and `avoid_blocks` are avoided. Standing on an `avoid_blocks` tile with no safe step off, the plan may cross them, as few as it can. Movement is Chebyshev: diagonals cost the same as straight steps.
 
 | Goal | Target |
 |---|---|

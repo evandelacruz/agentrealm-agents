@@ -133,10 +133,14 @@ class ReflexTest(unittest.TestCase):
         d = decide(w, Memory(), scripted(goals=["goto"], goto=(2, 2), pickup=False), random.Random(0))
         self.assertNotEqual((d.intent["x"], d.intent["y"]), (1, 1), d.reason)
 
-    def test_surrounded_by_lava_the_plan_crosses_it(self):
-        w = world(["~~~~", "~~~.", "~~~."], at=(1, 1))
-        d = decide(w, Memory(), scripted(goals=["goto"], goto=(3, 2), pickup=False), random.Random(0))
-        self.assertEqual(d.intent["x"], 2, d.reason)
+    def test_surrounded_by_lava_the_plan_crosses_as_little_as_it_can(self):
+        # Straight east is 3 steps over 2 lava tiles; via the top row it is
+        # 4 steps over 1.
+        w = world([".....", "~~~~.", "~~~~.", "~~~~."], at=(1, 2))
+        m = Memory()
+        d = decide(w, m, scripted(goals=["goto"], goto=(4, 2), pickup=False), random.Random(0))
+        self.assertEqual((d.intent["x"], d.intent["y"]), (2, 1), d.reason)
+        self.assertEqual(m.path, [(2, 1), (3, 0), (4, 1), (4, 2)])
 
     def test_doors_goal_steps_onto_the_door(self):
         w = world(["..D"])

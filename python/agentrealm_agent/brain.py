@@ -44,6 +44,7 @@ class Memory:
     calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll
     queued_ticks: int = 0  # intents still queued after the last poll, one tick each
     hurt_last_poll: bool = False  # the last poll's events carried Damaged
+    zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
@@ -54,15 +55,19 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
     spare windows go to stale terrain first, then stale entities, then a
     pending ``get_zone`` when the gap would otherwise be skipped (A7). Urgent
     windows still take those reads, because entities come only from reads
-    until snapshot deltas fold them in (M6 remaining).
+    until snapshot deltas fold them in (M6 remaining), but never a zone read.
+    idle reads nothing past position, zones included: it only polls for events.
     """
+    m.zone_probe = None
     if m.cancel_queue:
         return "tick"  # stop the stale queue before reading anything
     if m.need_self or m.windows_since_self >= SELF_REFRESH:
         return "self"
     if m.need_position or w.pos is None:
         return "position"
-    if policy.kind not in ("idle",) and w.terrain_stale():
+    if policy.kind in ("idle",):
+        return gate_tick_call(w, m, policy)
+    if w.terrain_stale():
         return "terrain"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
         return "entities"
@@ -71,8 +76,10 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
 
 def _tick_zone_or_skip(w: WorldModel, m: Memory, policy: Policy) -> str:
     call = gate_tick_call(w, m, policy)
-    if call == "skip" and not is_urgent(w, m, policy) and next_zone_probe(w, m) is not None:
-        return "zone"
+    if call == "skip" and not is_urgent(w, m, policy):
+        m.zone_probe = next_zone_probe(w, m)
+        if m.zone_probe is not None:
+            return "zone"
     return call
 
 

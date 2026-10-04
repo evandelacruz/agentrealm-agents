@@ -7,10 +7,9 @@ have known safe tiles without spending urgent budget on zone reads.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .world import Pos, chebyshev
+from .world import Pos, ZoneFact, chebyshev
 
 if TYPE_CHECKING:
     from .brain import Memory
@@ -20,65 +19,50 @@ if TYPE_CHECKING:
 RESPAWN_PROBE_RADIUS = 8
 
 
-@dataclass(frozen=True)
-class ZoneFact:
-    safe: bool
-    brightness: float = 1.0
-    strength_ceiling: int | None = None
-
-
-def record_respawn_anchor(w: WorldModel, map_id: int, pos: Pos) -> None:
-    anchor = (map_id, pos)
-    if anchor not in w.respawn_anchors:
-        w.respawn_anchors.append(anchor)
-
-
 def apply_town(w: WorldModel, town: dict | None) -> None:
     if not town:
         return
-    record_respawn_anchor(w, int(town["map_id"]), (int(town["x"]), int(town["y"])))
+    try:
+        w.record_respawn_anchor(int(town["map_id"]), (int(town["x"]), int(town["y"])))
+    except (KeyError, TypeError, ValueError):
+        return
 
 
 def zone_probed(w: WorldModel, map_id: int, pos: Pos) -> bool:
-    return pos in w.zones.get(map_id, {})
+    """Read already, or the read failed: either way, not probed again."""
+    return pos in w.zones.get(map_id, {}) or (map_id, pos) in w.zone_failed
 
 
 def apply_zone(w: WorldModel, map_id: int, x: int, y: int, body: dict) -> ZoneFact:
     """Records a ``get_zone`` answer for a cell."""
-    pos = (x, y)
     fact = ZoneFact(
         safe=bool(body.get("safe")),
         brightness=float(body.get("brightness", 1)),
         strength_ceiling=_opt_int(body.get("strength_ceiling")),
     )
-    w.zones.setdefault(map_id, {})[pos] = fact
-    if fact.safe:
-        w.safe_tiles.setdefault(map_id, set()).add(pos)
+    w.zones.setdefault(map_id, {})[(x, y)] = fact
     return fact
 
 
-def safe_tiles(w: WorldModel, map_id: int | None = None) -> set[Pos]:
-    if map_id is None:
-        out: set[Pos] = set()
-        for tiles in w.safe_tiles.values():
-            out |= tiles
-        return out
-    return set(w.safe_tiles.get(map_id, ()))
+def zone_failed(w: WorldModel, map_id: int, pos: Pos) -> None:
+    """Records a failed ``get_zone`` (e.g. unrevealed cell) so it is not re-probed."""
+    w.zone_failed.add((map_id, pos))
 
 
-def nearest_known_safe(w: WorldModel) -> tuple[Pos, list[Pos]] | None:
-    """Nearest safe tile on the current map by path, with its path."""
-    if w.map_id is None or w.pos is None:
-        return None
-    targets = safe_tiles(w, w.map_id)
-    if not targets:
-        return None
-    found = w.nearest(targets)
-    return found
+def safe_tiles(w: WorldModel, map_id: int) -> set[Pos]:
+    """Known safe cells on a map. Discovery output only: no caller acts on it
+    yet; the survival states that walk to safety consume it later (PLAN.md A7)."""
+    return {pos for pos, fact in w.zones.get(map_id, {}).items() if fact.safe}
 
 
 def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:
-    """The next revealed cell that still needs a zone read, or None."""
+    """The next revealed cell that still needs a zone read, or None.
+
+    Cells within RESPAWN_PROBE_RADIUS of a respawn anchor come first, nearest
+    the anchor; then cells on the current path. Only revealed cells qualify,
+    since get_zone refuses an unrevealed one. Called once per spare window by
+    choose_call, which hands the pick to the runner in Memory.zone_probe.
+    """
     if w.pos is None:
         return None
     here = w.pos
@@ -109,13 +93,10 @@ def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:
         candidates.append((priority, sort_dist, map_id, pos))
 
     for map_id, anchor in w.respawn_anchors:
-        view = w.maps.get(map_id)
-        if view is None:
-            add(map_id, anchor, 0)
-            continue
-        for pos, _block in view.tiles.items():
-            if chebyshev(pos, anchor) <= RESPAWN_PROBE_RADIUS:
-                add(map_id, pos, 0)
+        # The ring around the anchor, not the whole map: bounded per window.
+        for dy in range(-RESPAWN_PROBE_RADIUS, RESPAWN_PROBE_RADIUS + 1):
+            for dx in range(-RESPAWN_PROBE_RADIUS, RESPAWN_PROBE_RADIUS + 1):
+                add(map_id, (anchor[0] + dx, anchor[1] + dy), 0)
 
     for step in m.path:
         if w.map_id is not None:

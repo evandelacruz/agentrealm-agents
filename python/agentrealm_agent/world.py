@@ -37,6 +37,17 @@ Pos = tuple[int, int]
 # Extra cost of a step onto a `costly` tile: worth a long detour to avoid one.
 COSTLY_STEP = 100
 
+
+
+@dataclass(frozen=True)
+class ZoneFact:
+    """A get_zone answer for one cell (A7)."""
+
+    safe: bool
+    brightness: float = 1.0
+    strength_ceiling: int | None = None
+
+
 NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
 
 
@@ -102,11 +113,19 @@ class WorldModel:
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[int]] = field(default_factory=dict)
-    # Zone facts from get_zone (A7): map_id -> cell -> fact; safe cells per map.
-    zones: dict[int, dict[Pos, object]] = field(default_factory=dict)
-    safe_tiles: dict[int, set[Pos]] = field(default_factory=dict)
+    # Zone facts from get_zone (A7): map_id -> cell -> fact. Safe tiles derive
+    # from these (zone_discovery.safe_tiles).
+    zones: dict[int, dict[Pos, ZoneFact]] = field(default_factory=dict)
+    # Cells whose get_zone read failed, never probed again (A7).
+    zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
     # Town and Respawned locations used to seed safe-tile probes.
     respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
+
+    def record_respawn_anchor(self, map_id: int, pos: Pos) -> None:
+        """Seeds safe-tile probes around a town or Respawned location (A7)."""
+        anchor = (map_id, pos)
+        if anchor not in self.respawn_anchors:
+            self.respawn_anchors.append(anchor)
 
     @property
     def view(self) -> MapView:
@@ -333,9 +352,10 @@ class WorldModel:
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
                 elif kind == "Respawned":
-                    from .zone_discovery import record_respawn_anchor
-
-                    record_respawn_anchor(self, int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))
+                    try:
+                        self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))
+                    except (KeyError, TypeError, ValueError):
+                        pass  # no location on the event: nothing to anchor probes to
         return flat
 
     def learn_threat(self, events: list[dict], earlier: list[Entity]) -> None:

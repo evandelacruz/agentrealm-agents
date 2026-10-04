@@ -5,10 +5,10 @@ from __future__ import annotations
 import random
 
 from ..brain import (
+    PlayContext,
     _flee_step,
     _grid,
     _next_step,
-    _plan_goal,
     _replan,
     set_position,
     take,
@@ -20,7 +20,6 @@ from ..directives import attack_forbidden
 from ..navigation import cost_path
 from ..world import WorldModel, chebyshev
 from .base import State, StateOutcome
-from ..brain import PlayContext
 
 
 class ExploreState(State):

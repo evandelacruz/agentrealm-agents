@@ -1,0 +1,14 @@
+{
+  "version": "5",
+  "complete": true,
+  "snapshot": {
+    "position": {"map_id": 7, "x": 0, "y": 0},
+    "entities": {"chests": [], "supplies": [], "npcs": [], "characters": []},
+    "terrain": {
+      "cells": [
+        {"map_id": 7, "x": 0, "y": 0, "block_type": "dirt"},
+        {"map_id": 7, "x": 1, "y": 0, "block_type": "grass"}
+      ]
+    }
+  }
+}

@@ -263,7 +263,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Gear and items
 
-- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, the largest weapon hit per NPC type, and—when loadout attribution is clear—`damage_taken`, `damage_without`, and `damage_saved` per NPC type for worn armor; capabilities wait on reads (PLAN.md A18).
+- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, the largest weapon hit per NPC type, and for armor worn alone `damage_taken`, `damage_without` (nothing worn, after that item came off) and `damage_saved` (their difference) per NPC type; capabilities wait on reads (PLAN.md A18).
 - **Equip** scores each slot and swaps when a carried item beats the worn one. Consumables (potions, food) are kept for `Heal`.
 - **Budget.** Gems are kept through death and gear is not, so the plan spends gems on what most raises survival first (weapon, armor, potions), then on tools a clue asks for.
 - **Compose.** When any fragment is held, its `fragment` field names the whole and the missing slots. The plan tracks it as a goal, and `Solve` composes when the set is complete.
@@ -277,7 +277,7 @@ A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, sha
 - `read_cells`: `{"<map_id>": ["x,y", …]}`, readable cells whose `Read` applied, and `spoken_npcs`: NPC ids whose `Say` applied, so `Investigate` never repeats one (PLAN.md A30). Each grows by one entry per sign or NPC in the world.
 - Break attempts per (block, capability), and the result.
 - NPC type stats, item stats, compose results, and what each entrance turned out to need.
-- `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value; `weapon_damage`, the max observed hit per `npc_type_code` from an `NPCDamaged` matched to our `Use`; and for worn armor, `damage_taken`, `damage_without`, and `damage_saved` per `npc_type_code` from `Damaged` when exactly one worn slot is filled or none are (PLAN.md A18).
+- `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value; `weapon_damage`, the max observed hit per `npc_type_code` from an `NPCDamaged` matched to our `Use`; and for armor, `damage_taken` (worn alone), `damage_without` (nothing worn, filed under the item that just came off) and `damage_saved` (their difference) per `npc_type_code` from `Damaged`, skipping any response whose worn loadout changed (PLAN.md A18).
 - Level progress: which levels are cleared, and the route and solution for each.
 
 This is what makes a second run better than the first, and it is what the strategist reads. None of it is committed.

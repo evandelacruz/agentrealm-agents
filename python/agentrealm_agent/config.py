@@ -21,6 +21,7 @@ class Policy:
     kind: str = "scripted"
     goals: list[str] = field(default_factory=lambda: ["explore"])
     goto: tuple[int, int] | None = None
+    goto_map: int | None = None  # when set, goto targets this map (A26)
     on_hostile: str = "flee"
     hostile: list[str] = field(default_factory=lambda: ["npc"])
     hostile_range: int = 2
@@ -82,6 +83,8 @@ def load(path: str | Path) -> CharacterConfig:
         raise ConfigError(f"{path.name}: `policy.pickup` must be true or false")
     if policy.seed is not None and type(policy.seed) is not int:
         raise ConfigError(f"{path.name}: `policy.seed` must be an integer")
+    if policy.goto_map is not None and type(policy.goto_map) is not int:
+        raise ConfigError(f"{path.name}: `policy.goto_map` must be an integer")
     if not isinstance(raw.get("world", "sandbox"), str):
         raise ConfigError(f"{path.name}: `world` must be a string")
     if policy.goto is not None:

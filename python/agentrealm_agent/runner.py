@@ -13,6 +13,7 @@ from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .knowledge_base import KnowledgeBase
+from .knowledge_maps import record_warp, sync_world_maps
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
@@ -145,13 +146,38 @@ class Runner:
             self.log(call, f"lives={w.lives} alive={w.alive} placed={s.get('placed')} perception={w.perception}", {"self": s})
         elif call == "position":
             p = c.position(self.cid)
+            prev_map, prev_pos = w.map_id, w.pos
             w.apply_position(p)
+            if m.warp_from is not None and self.knowledge is not None:
+                fm, fp, block_type = m.warp_from
+                if w.map_id is not None and w.pos is not None:
+                    record_warp(self.knowledge, fm, fp, block_type, w.map_id, w.pos)
+                m.warp_from = None
+            elif (
+                self.knowledge is not None
+                and prev_map is not None
+                and prev_pos is not None
+                and w.map_id is not None
+                and w.pos is not None
+                and (prev_map, prev_pos) != (w.map_id, w.pos)
+                and w.view.tiles.get(prev_pos) in DOORS
+            ):
+                record_warp(
+                    self.knowledge,
+                    prev_map,
+                    prev_pos,
+                    w.view.tiles.get(prev_pos, "framed_door"),
+                    w.map_id,
+                    w.pos,
+                )
             m.need_position, m.path = False, []
             self.log(call, "", {"position": p})
         elif call == "terrain":
             t = c.terrain(self.cid, w.map_id, *w.perception_rect())
             w.apply_terrain(t)
             w.tick = max(w.tick, int(t.get("tick", 0)))
+            if self.knowledge is not None:
+                sync_world_maps(self.knowledge, w)
             n = len(terrain_cells(t))
             self.note_held_path_stale()
             self.log(call, f"{n} cells, {len(w.view.tiles)} known", {"cells": n})
@@ -206,7 +232,14 @@ class Runner:
                 # reads it before this poll), so the new walk starts from
                 # where we are. With no walk to send, stop the old queue.
                 self.clear_held_tracking()
-                d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+                d = decide(
+                    w,
+                    m,
+                    self.cfg.policy,
+                    self.rng,
+                    never_attack=self.directives.directives.never_attack,
+                    knowledge=self.knowledge,
+                )
                 intents = self._apply_never_attack(self.intents_for(d))
                 if intents:
                     d = Decision(d.intent, "path stale, resend")
@@ -217,7 +250,14 @@ class Runner:
                 intents = None
         else:
             m.resend_held_queue = False
-            d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+            d = decide(
+                w,
+                m,
+                self.cfg.policy,
+                self.rng,
+                never_attack=self.directives.directives.never_attack,
+                knowledge=self.knowledge,
+            )
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
@@ -289,7 +329,14 @@ class Runner:
         """
         m = self.mem
         saved = (list(m.path), m.goal, dict(m.blocked), self.rng.getstate())
-        d = decide(self.world, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+        d = decide(
+            self.world,
+            m,
+            self.cfg.policy,
+            self.rng,
+            never_attack=self.directives.directives.never_attack,
+            knowledge=self.knowledge,
+        )
         if d.reflex:
             return d
         m.path, m.goal, m.blocked = saved[0], saved[1], saved[2]
@@ -460,9 +507,10 @@ class Runner:
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
-                if w.view.tiles.get(w.pos) in DOORS:
+                if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:
                     # A door moves us; the Steps still queued behind this one
                     # would walk from the wrong place.
+                    m.warp_from = (w.map_id, w.pos, w.view.tiles.get(w.pos, "framed_door"))
                     m.need_position, m.path = True, []
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True

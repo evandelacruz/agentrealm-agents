@@ -10,9 +10,10 @@ import random
 from dataclasses import dataclass, field
 
 from .config import Policy
+from .knowledge_base import KnowledgeBase
 from .directives import attack_forbidden
 from .executor.movement import step_landing
-from .navigation import CostGridParams, cost_path, known_prefix, nearest_target
+from .navigation import CostGridParams, cost_path, doors_goal_path, known_prefix, nearest_target, route_first_leg
 from .poll_cadence import gate_tick_call, is_urgent
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import next_zone_probe
@@ -50,6 +51,7 @@ class Memory:
     resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
     path_blockers: set = field(default_factory=set)  # blocked cells the walk queue already crossed when sent (A43)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
+    warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
@@ -131,18 +133,25 @@ def decide(
     rng: random.Random,
     *,
     never_attack: list[str] | None = None,
+    knowledge: KnowledgeBase | None = None,
 ) -> Decision:
     """The reflex list from PLAN.md. The first rule that matches wins.
 
     Each call is one decision window: it ages the tiles reflex 1 blocked.
     """
-    d = _decide(w, m, policy, rng, never_attack=never_attack or [])
+    d = _decide(w, m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
     m.blocked = {p: n - 1 for p, n in m.blocked.items() if n > 1}
     return d
 
 
 def _decide(
-    w: WorldModel, m: Memory, policy: Policy, rng: random.Random, *, never_attack: list[str]
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    rng: random.Random,
+    *,
+    never_attack: list[str],
+    knowledge: KnowledgeBase | None,
 ) -> Decision:
     if policy.kind == "idle" or w.pos is None or not w.alive:
         return Decision(None, "idle")
@@ -207,7 +216,7 @@ def _decide(
     # the next step is not open or not yet seen.
     step = _next_step(w, plan_avoid, m.path)
     if step is None:
-        _replan(w, m, policy, rng, plan_avoid, escape)
+        _replan(w, m, policy, rng, plan_avoid, escape, knowledge)
         step = _next_step(w, plan_avoid, m.path)
     if step is not None:
         return Decision(set_position(step), f"{m.goal} → {m.path[-1]}")
@@ -328,7 +337,15 @@ def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy) -> bool:
     return bool(path_blockers(w, m, policy) - m.path_blockers)
 
 
-def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]) -> None:
+def _replan(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    rng: random.Random,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None,
+) -> None:
     """Take the first goal whose path starts on a seen, open step.
 
     A path whose first step lies in fog is skipped like an unreachable goal,
@@ -336,7 +353,7 @@ def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocke
     """
     m.path, m.goal = [], ""
     for goal in policy.goals:
-        found = _plan_goal(goal, w, policy, rng, blocked, costly)
+        found = _plan_goal(goal, w, policy, rng, blocked, costly, knowledge)
         if _next_step(w, blocked, found):
             m.path, m.goal = found, goal
             return
@@ -352,7 +369,13 @@ def _grid(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_door: bo
 
 
 def _plan_goal(
-    goal: str, w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]
+    goal: str,
+    w: WorldModel,
+    policy: Policy,
+    rng: random.Random,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None,
 ) -> list[Pos] | None:
     view = w.view
     if goal == "hold":
@@ -361,12 +384,14 @@ def _plan_goal(
         options = w.open_neighbours(w.pos, blocked)
         return [rng.choice(sorted(options))] if options else None
     if goal == "goto":
+        assert policy.goto is not None
+        dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
+        assert dest_map is not None
         target = tuple(policy.goto)
-        return cost_path(w, target, _grid(policy, blocked, costly, allow_goal_door=True)) or None
+        params = _grid(policy, blocked, costly, allow_goal_door=True)
+        return route_first_leg(w, knowledge, dest_map, target, params)
     if goal == "doors":
-        doors = {p for p, b in view.tiles.items() if b in DOORS}
-        found = nearest_target(w, doors, _grid(policy, blocked, costly, allow_goal_door=True))
-        return found[1] if found and found[1] else None
+        return doors_goal_path(w, knowledge, _grid(policy, blocked, costly, allow_goal_door=True))
     if goal == "explore":
         targets = view.frontier() - {w.pos}
         found = nearest_target(w, targets, _grid(policy, blocked, costly))

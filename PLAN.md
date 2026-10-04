@@ -20,6 +20,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 | `GET /characters/{id}/world` | Tick rate, sandbox flag, status. |
 | `GET /characters/{id}/terrain-tiles?map_id&x0&y0&width&height` | Block types inside perception, plus revealed ground, as a grid: `rows` of `legend` symbols, `?` for clouds. |
 | `GET /characters/{id}/entity-tiles?…` | Characters, NPCs, supplies inside perception. |
+| `GET /characters/{id}/zone?map_id&x&y` | Zone at a revealed cell: `safe`, `brightness`, and a hunting ground's `strength_ceiling`. |
 | `POST /characters/{id}/tick` `{"intents": [{...}], "snapshot_version": N}` | Replaces the character's queue with an ordered list (`[]` clears it; no `intents` leaves it running). Optional `snapshot_version` is the observation version last applied; the server answers with a delta when it still matches. Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
 
 Auth is `Authorization: Bearer <key>`.
@@ -55,9 +56,9 @@ Checked top to bottom:
 1. Position unknown, or a door or death may have moved us → read position.
 2. Terrain around us is stale (map changed, or we moved more than half the perception range since the last terrain read) → read terrain.
 3. Entities are older than the character's `entity_refresh` ticks, or a `Damaged`/`Attacked` event just arrived → read entities.
-4. Otherwise → `POST tick` with the chosen intent, or with none, when the cadence below says it is due; else send nothing this window.
+4. Otherwise → `POST tick` with the chosen intent, or with none, when the cadence below says it is due; else a pending `get_zone` on a revealed cell around a respawn anchor or along the path (A7), or send nothing this window.
 
-`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the intents still queued run out. A paced movement queue opens the gap up to its length; a one-intent queue still brings the next poll a tick later. A window the gap skips sends nothing. The reads above outrank it, so a calm gap's spare windows go to stale terrain first, then stale entities. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
+`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the intents still queued run out. A paced movement queue opens the gap up to its length; a one-intent queue still brings the next poll a tick later. A window the gap skips sends nothing unless step 4 has a zone probe ready. The reads above outrank it, so a calm gap's spare windows go to stale terrain first, then stale entities, then safe-tile discovery. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
 
 Self is re-read after `Died`, and every 60 windows otherwise.
 
@@ -121,6 +122,8 @@ entity_refresh = 5                  # ticks between entity reads when calm
 
 Created character IDs are saved in `python/.state/<name>.json` (gitignored), so `run` finds the character again.
 
+A separate runtime file, `characters/<name>.directives.toml`, is re-read whenever it changes (A8). It carries survival `params` (defaults and ranges in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)), a hard `never_attack` list enforced in the reflexes and on tick submit, and optional strategist fields (`goals`, `instructions`) for later milestones. Only `never_attack` changes behavior so far; `params` are parsed and validated for the items that will read them (A9, A23). A file that fails to read or parse keeps the last good directives, or the defaults on first load; deleting the file restores the defaults.
+
 ## CLI
 
 ```
@@ -175,7 +178,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 |---|---|---|
 | A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. | A1, A2 |
 | A6 | **Threat table.** Damage per hit per hostile type from `Damaged`; the unmeasured default. | |
-| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. | |
+| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery only: it records safe tiles; acting on them is A9–A11. A failed zone read drops that cell from probing. | |
 | A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
 | A9 | **Retreat, Flee and Escape.** `retreat_hits` and the `risk`/`lives_floor` formula; retreat to a known safe tile. | A5, A6, A7, A8 |
 | A10 | **Heal.** Food in reach, carried potion, measured safe-zone regeneration, else wait in town and raise `buy`. | A5, A7 |

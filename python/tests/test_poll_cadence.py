@@ -109,6 +109,10 @@ class FakeServer:
         self.calls.append((self.tick_now, "entities"))
         return {"tick": self.tick_now}
 
+    def zone(self, cid, map_id, x, y):
+        self.calls.append((self.tick_now, "zone"))
+        return {"tick": self.tick_now, "safe": False, "brightness": 1}
+
 
 class RunnerCadenceTest(unittest.TestCase):
     """Runs Runner.run itself: only the fake server's clock moves."""

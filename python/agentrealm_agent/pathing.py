@@ -79,11 +79,12 @@ def plan_op_goal(op: GoalOp) -> str:
 def path_owned_by_plan(plan: Plan | None, m: Memory) -> bool:
     """False when ``m.path`` was set for something other than the plan's head op.
 
-    A path left by a ``policy.goals`` round, or from before a ``goals`` reload,
-    must not keep driving movement once the stack's head is a different op (A34).
+    A path left by a ``policy.goals`` round, from before a ``goals`` reload, or
+    for an earlier op of the same kind with another target must not keep
+    driving movement once the stack's head is a different op (A34).
     """
     op = plan.current() if plan is not None else None
-    return op is None or (m.goal != "" and m.goal == plan_op_goal(op))
+    return op is None or (m.goal != "" and m.goal == plan_op_goal(op) and m.goal_op == op)
 
 
 def path_for_plan_op(
@@ -157,6 +158,7 @@ def plan_step(
         if found and next_step(w, blocked, found[0]):
             plan.stalled_since_tick = None
             m.path, m.goal = found
+            m.goal_op = dict(op)
             return True
         if plan.note_stalled(w.tick):
             plan.drop_current(f"no path for {PLAN_STALL_SECONDS}s")
@@ -180,7 +182,7 @@ def replan(
     so a later goal (explore, say) gets the move while terrain reads catch up.
     When a plan is active, its current op is tried before ``policy.goals``.
     """
-    m.path, m.goal = [], ""
+    m.path, m.goal, m.goal_op = [], "", None
     if plan is not None and plan_step(plan, w, m, policy, blocked, costly, knowledge):
         return
     for goal in policy.goals:

@@ -105,12 +105,14 @@ class Runner:
     def reload_directives(self, old_goals: list[str]) -> None:
         """Apply reloaded directives to the plan (A34).
 
-        Changed ``goals`` rebuild the stack from the top. Otherwise the stack
-        keeps its progress and only the params reset to the file's values.
+        Changed ``goals`` rebuild the stack from the top and drop the current
+        path, so the new head replans at once. Otherwise the stack keeps its
+        progress and only the params reset to the file's values.
         """
         d = self.directives.directives
         if d.goals != old_goals:
             self.plan = self._build_plan()
+            self.mem.path, self.mem.goal, self.mem.goal_op = [], "", None
         else:
             self.plan.floor_params, self.plan.params = dict(d.params), dict(d.params)
         self.log(
@@ -403,7 +405,7 @@ class Runner:
         pop, or drop them (A34).
         """
         m = self.mem
-        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate())
+        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op)
         saved_plan = self.plan.snapshot()
         try:
             d = self._decide(self.world, m, plan=self.plan)
@@ -412,7 +414,7 @@ class Runner:
         m.nav = saved[2]
         if d.reflex:
             return d
-        m.path, m.goal = saved[0], saved[1]
+        m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
         self.rng.setstate(saved[3])
         return None
 

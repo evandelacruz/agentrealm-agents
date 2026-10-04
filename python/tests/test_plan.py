@@ -276,6 +276,18 @@ class ScriptedOutcomeTest(unittest.TestCase):
         self.assertEqual(m.path[-1], (0, 3))
         self.assertNotEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 0), "stale explore step not taken")
 
+    def test_same_kind_head_swap_replans(self):
+        w = open_world()
+        pol = Policy(kind="scripted")
+        old = Plan([{"op": "travel", "to": "point", "x": 3, "y": 0}], dict(PARAM_DEFAULTS))
+        m = Memory()
+        scripted_outcome(w, m, pol, random.Random(0), never_attack=[], plan=old)
+        self.assertEqual((m.goal, m.path[-1]), ("plan_travel", (3, 0)))
+        new = Plan([{"op": "travel", "to": "point", "x": 0, "y": 3}], dict(PARAM_DEFAULTS))
+        out = scripted_outcome(w, m, pol, random.Random(0), never_attack=[], plan=new)
+        self.assertEqual(m.path[-1], (0, 3), "path toward the old head's target is dropped")
+        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), m.path[0])
+
 
 class PathForPlanOpTest(unittest.TestCase):
     def test_explore_area_paths_to_frontier_in_the_area(self):
@@ -336,6 +348,15 @@ class RunnerPlanTest(unittest.TestCase):
         self.assertEqual(r.plan.params["risk"], 0.3)
         self.reload(r, 'goals = ["buy:lamp"]\n')
         self.assertEqual((r.plan.index, r.plan.goals), (0, [{"op": "buy", "code": "lamp"}]))
+
+    def test_goals_reload_drops_the_current_path(self):
+        r = self.runner('goals = ["buy:torch"]\n', ["explore"])
+        op = {"op": "travel", "to": "point", "x": 3, "y": 0}
+        r.mem.path, r.mem.goal, r.mem.goal_op = [(1, 0), (2, 0), (3, 0)], "plan_travel", op
+        self.reload(r, 'goals = ["buy:torch"]\nparams = { risk = 0.3 }\n')
+        self.assertEqual(r.mem.goal_op, op, "same goals: path kept")
+        self.reload(r, 'goals = ["buy:lamp"]\n')
+        self.assertEqual((r.mem.path, r.mem.goal, r.mem.goal_op), ([], "", None))
 
     def test_reflex_probe_leaves_the_plan_alone(self):
         r = self.runner("", ["explore"])

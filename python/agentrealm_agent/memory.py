@@ -15,6 +15,7 @@ class Memory:
 
     path: list[Pos] = field(default_factory=list)
     goal: str = ""
+    goal_op: dict | None = None  # the plan op m.path was set for, so a same-kind head swap replans (A34)
     state: str = ""  # active state (A5): kept until its done() holds or a higher guard fires
     need_position: bool = True
     need_self: bool = True

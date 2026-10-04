@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .item_table import HeldSupply
+from .item_table import InventorySupply
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import safe_tiles
 
@@ -60,9 +60,9 @@ def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
     return out
 
 
-def carried_heal(w: WorldModel, m: Memory) -> HeldSupply | None:
+def carried_heal(w: WorldModel, m: Memory) -> InventorySupply | None:
     """Carried food first, then a potion (PLAYABLE_AGENT_PLAN.md Heal row)."""
-    usable = [h for h in w.held if tries_left(m, "use", h.supply_id)]
+    usable = [h for h in w.held_supplies if tries_left(m, "use", h.id)]
     for codes in (FOOD_CODES, POTION_CODES):
         for h in usable:
             if h.code in codes:

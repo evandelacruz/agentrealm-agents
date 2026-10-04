@@ -16,6 +16,7 @@ from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .item_table import absorb_attack_range, absorb_entities_payload, rejection_attack_range
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_warp, sync_tiles, sync_world_maps
+from .loot import learn_loot_rejection
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.ops import refresh_travel_stack
 from .travel.strength import loadout_key
@@ -660,6 +661,7 @@ class Runner:
                 rej.get("code"),
                 int(result.get("tick", w.tick)),
             )
+        learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
         if self.acceptance is not None:
             code = (result.get("rejection") or {}).get("code", "?")
             self.acceptance.on_rejection(code, verb=(intent or {}).get("verb"))
@@ -775,6 +777,8 @@ def _fmt_intent(i: dict | None) -> str:
         return f"Take({i['supply_id']})"
     if verb == "WithdrawFromChest":
         return f"WithdrawFromChest({i['chest_id']}:{','.join(map(str, i.get('supply_ids', ['all'])))})"
+    if verb == "Drop":
+        return f"Drop({i['supply_id']})"
     return verb
 
 

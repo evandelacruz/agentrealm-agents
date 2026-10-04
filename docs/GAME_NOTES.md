@@ -108,7 +108,9 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 ## Items, slots and gear
 
 - **Slots.** One armed slot; `Arm` costs the tick. Five worn slots: `head`, `body`, `legs`, `feet` for armor, `accessory` for one accessory (M §6, §11).
-- **Carry capacity is the chest.** Everything held, worn and armed counts; `carry_capacity_full` when full. A new character's chest holds 10 (M §11).
+- **Carry capacity is the chest.** Everything held, worn and armed counts, and so does what is stowed in the carried chest; `carry_capacity_full` when full. A new character's chest holds 10, and a respawn brings a new, empty 10-slot chest (M §11). The snapshot's `inventory` is `gems`, `armed`, `worn` by slot, `held`, and `chest`, each supply an `id` and `supply_subtype_code`; it has no capacity field (API Snapshots).
+- **Take and withdraw.** `Take` reaches the supply's block or a neighbour, corners included. A ground chest's `contents` are served only within that same reach. `WithdrawFromChest` with `supply_ids` is all or nothing, `carry_capacity_full` for one too many; without them it takes everything that fits, ascending by id, and a chest with no room for even one is `carry_capacity_full` (M §6, §11; API).
+- **Drop** puts a carried supply on the ground under you. `Drop` and `DepositToChest` refuse a gem, a life, or a non-transferable supply (the starting kit) with `not_transferable`, permanent (M §6, §10.2, §11).
 - **`attack_range`** on `get_self` is the armed weapon's reach; 1 when the weapon authors none (M §5.3).
 - **Olympuff starting kit:** a non-transferable pocket knife (damage 2, range 1, cuts grass and bushes). It survives death and is re-armed on respawn (M §5.3, §11; Obs: Died dropped everything but the knife).
 - **Buying.** Walk onto, or `Take`, a supply with a `gem_price`. Without enough gems it is `not_enough_gems` (M §11).
@@ -124,7 +126,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   | `matches` | 5 |
   | `small_potion` | 10 |
 
-- **Gems and lives are counters.** Gems and hearts (extra lives) are consumed on pickup into counters (M §11). In Olympuff, cut grass and bushes drop gems and hearts (M §16).
+- **Gems and lives are counters.** Gems and hearts (extra lives) are consumed on pickup into counters and leave nothing in the chest, so they take no slot; lives cap at 20 ever gained (M §11; API). In Olympuff, cut grass and bushes drop gems and hearts (M §16).
 - **Food.** Olympuff's golden cap heals 6 and is eaten on pickup (M §16). Potions are drunk with `Arm` + `Use` on self; swapping what is armed costs a tick (API Use). Small potion +10, large +30 (M §16).
 - **Gear tiers:** bronze in town, iron at waystations, adamant at the Last Camp and from bosses (M §16).
 - **Gems come from** cutting grass and bushes (10% in ring 1, 15% farther), felling trees, gem piles that return on an interval, and gem caches. Field work earns about 3 gems a minute (M §16). Gems are kept on death.
@@ -211,6 +213,10 @@ Each has a test the agent or a hand session can run.
 | Boss fight time limits | Read on entry, or learn from the first attempt |
 | How ground food other than the golden cap heals (apples, berries): on pickup, or carried and `Use`d on self | `Take` one while hurt and read `health`; if unchanged, `Arm` + `Use` self |
 | Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
+| Which `supply_subtype_code` a life (heart) and a gem have on the ground. Until known, A20's hearts first is off | `Take` a heart or gem dropped by cut grass and log its code with the `lives` or `gems` change |
+| Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? A20 drops held only | `Drop` a stowed supply and read the result |
+| Is the armed supply also listed in `held`? A20 counts held, worn, armed and stowed separately | Compare `inventory` before and after an `Arm` |
+| Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full` | Carry one and fill until `carry_capacity_full` |
 | What supply code does a gem pile carry? The manual describes authored piles (M §16) but names no code; only gem caches (`gem_cache_5/7/10`) are named | Read entities beside a pile in town and record its `code`; Gather (A22) targets piles once it is known |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 

@@ -132,7 +132,7 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
     for food in food_in_sight(w, m)[:FOOD_CANDIDATES]:
         if chebyshev(food.pos, here) <= 1:
             note_try(m, "take", food.id)
-            return _out([take(food)], f"take food {food.code}")
+            return _out([take(food.id)], f"take food {food.code}")
         # Walking onto it also picks up food eaten on pickup (golden cap).
         if out := _walk_toward(w, m, policy, ctx, food.pos, goal="heal_food"):
             return out
@@ -148,7 +148,7 @@ def _act_carried(w: WorldModel, m: Memory) -> StateOutcome | None:
     item = carried_heal(w, m)
     if item is None:
         return None
-    note_try(m, "use", item.supply_id)
+    note_try(m, "use", item.id)
     if w.armed_code == item.code:
         return _out([use_self(w.character_id)], f"use {item.code}")
-    return _out([arm(item.supply_id), use_self(w.character_id)], f"arm and use {item.code}")
+    return _out([arm(item.id), use_self(w.character_id)], f"arm and use {item.code}")

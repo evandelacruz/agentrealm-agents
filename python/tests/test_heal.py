@@ -15,7 +15,7 @@ from agentrealm_agent.healing import (
     regen_known,
     save_regen_yes,
 )
-from agentrealm_agent.item_table import HeldSupply, held_from_inventory
+from agentrealm_agent.item_table import InventorySupply, carried_from_inventory
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import dispatch
@@ -49,15 +49,15 @@ class HealingHelpersTest(unittest.TestCase):
     def test_hurt(self):
         self.assertTrue(hurt(grid()))
 
-    def test_held_from_inventory(self):
+    def test_held_from_carried_inventory(self):
         inv = {"held": [{"id": 4, "supply_subtype_code": "small_potion"}, {"id": "x"}, "junk"]}
-        self.assertEqual(held_from_inventory(inv), [HeldSupply(4, "small_potion")])
+        self.assertEqual(carried_from_inventory(inv)[0], [InventorySupply(4, "small_potion")])
 
     def test_apply_observation_fills_held(self):
         w = WorldModel(character_id=9)
         inv = {"held": [{"id": 4, "supply_subtype_code": "apple"}], "armed": None}
         w.apply_observation({"complete": True, "snapshot": {"health": 5, "max_health": 10, "inventory": inv}})
-        self.assertEqual(w.held, [HeldSupply(4, "apple")])
+        self.assertEqual(w.held_supplies, [InventorySupply(4, "apple")])
 
     def test_only_yes_is_read_from_knowledge_base(self):
         kb = KnowledgeBase.empty("sandbox")
@@ -92,14 +92,14 @@ class HealStateTest(unittest.TestCase):
 
     def test_carried_food_before_potion(self):
         w = grid()
-        w.held = [HeldSupply(4, "small_potion"), HeldSupply(5, "berry")]
+        w.held_supplies = [InventorySupply(4, "small_potion"), InventorySupply(5, "berry")]
         out = dispatch(w, ctx())
         self.assertEqual(out.intents[0], {"verb": "Arm", "supply_id": 5})
         self.assertEqual(verbs(out), ["Arm", "Use"])
 
     def test_drinks_carried_potion_and_caps_rejected_use(self):
         w = grid()
-        w.held = [HeldSupply(4, "small_potion")]
+        w.held_supplies = [InventorySupply(4, "small_potion")]
         m = Memory()
         for _ in range(HEAL_MAX_TRIES):
             self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])

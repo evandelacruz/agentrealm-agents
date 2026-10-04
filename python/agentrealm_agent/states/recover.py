@@ -107,7 +107,9 @@ class RecoverState(State):
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         m, policy = ctx.memory, ctx.policy
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
-        reflex = reflex_outcome(world, policy, never_attack=ctx.never_attack, state=self.name)
+        reflex = reflex_outcome(
+            world, policy, never_attack=ctx.never_attack, state=self.name, knowledge=ctx.knowledge
+        )
         if reflex is not None:
             return reflex
         out = recover_outcome(world, m, policy, plan_avoid, plan_costly, state=self.name)

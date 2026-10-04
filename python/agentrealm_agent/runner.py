@@ -269,6 +269,7 @@ class Runner:
                     never_attack=self.directives.directives.never_attack,
                     params=self.directives.directives.params,
                     knowledge=self.knowledge,
+                    directives=self.directives.directives,
                 )
                 intents = self._apply_never_attack(self.intents_for(d))
                 if intents:
@@ -288,6 +289,7 @@ class Runner:
                 never_attack=self.directives.directives.never_attack,
                 params=self.directives.directives.params,
                 knowledge=self.knowledge,
+                directives=self.directives.directives,
             )
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
@@ -381,6 +383,7 @@ class Runner:
             never_attack=self.directives.directives.never_attack,
             params=self.directives.directives.params,
             knowledge=self.knowledge,
+            directives=self.directives.directives,
         )
         m.nav = saved[2]
         if d.reflex:

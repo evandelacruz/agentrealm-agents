@@ -40,6 +40,8 @@ class Memory:
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
+    gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass", cell) Gather is walking toward (A22)
+    gather_backoff_until: int = -1  # Gather yields to Explore until this tick (A22)
     # Heal (A10): strategist buy ops; Shop (A21) consumes them later.
     buy_signals: list[dict] = field(default_factory=list)
     buy_signals_seen: set[tuple[str, str]] = field(default_factory=set)

@@ -20,7 +20,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 | `GET /characters/{id}/world` | Tick rate, sandbox flag, status. |
 | `GET /characters/{id}/terrain-tiles?map_id&x0&y0&width&height` | Block types inside perception, plus revealed ground, as a grid: `rows` of `legend` symbols, `?` for clouds. |
 | `GET /characters/{id}/entity-tiles?…` | Characters, NPCs, supplies inside perception. |
-| `POST /characters/{id}/tick` `{"intents": [{...}]}` | Replaces the character's queue with a one-intent list. Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
+| `POST /characters/{id}/tick` `{"intents": [{...}]}` | Replaces the character's queue with an ordered list (`[]` clears it; no `intents` leaves it running). Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
 
 Auth is `Authorization: Bearer <key>`.
 
@@ -30,7 +30,7 @@ The runner paces one call per wall-clock window (`epoch / tick interval`). That 
 
 ## Real time
 
-Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; the agent sends one-intent queues. With longer ones, the executor would keep a few seconds queued and send a new queue when a result or delta makes the old one wrong. `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
+Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; the agent sends movement as a paced `Step`/`Wait` queue and every other intent as a one-intent queue (M6). It does not yet send a new queue when a delta makes the running one wrong; that is the rest of M6. `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
 
 ## Architecture
 
@@ -57,11 +57,11 @@ Checked top to bottom:
 3. Entities are older than the character's `entity_refresh` ticks, or a `Damaged`/`Attacked` event just arrived → read entities.
 4. Otherwise → `POST tick` with the chosen intent, or with none, when the cadence below says it is due; else send nothing this window.
 
-`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the last queue runs out. Today's queues hold one intent, so the calm gap opens only after a submit with none; a window it skips sends nothing. The reads above outrank it, so a calm gap's spare windows go to stale terrain first, then stale entities. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
+`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the intents still queued run out. A paced movement queue opens the gap up to its length; a one-intent queue still brings the next poll a tick later. A window the gap skips sends nothing. The reads above outrank it, so a calm gap's spare windows go to stale terrain first, then stale entities. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
 
 Self is re-read after `Died`, and every 60 windows otherwise.
 
-Position is tracked locally: a submitted `SetPosition` moves us to the target at once, because its result only arrives with the next submit. A rejection puts us back where we stood before it, and the intent submitted in that same round trip was planned from the refused step, so it is not assumed. A rejection, a door, or a death sends us back to step 1.
+Movement goes as a paced `Step`, `Wait`×n, … queue along the path, cut at the world's horizon, with no trailing `Wait`s (M6). The waits per step are the ticks per move at `movement_speed`, rounded up. The next queue opens with the `Wait`s still owed since the last applied `Step`, counted to the latest tick we know of, so it never draws `movement_cooldown`. Position follows each `Step` result as it arrives, not the submit. A result counts only if it names the `queue_id` our own submit was answered with; a late result for an earlier queue is ignored, never adopted, even when the submit's response named no queue. While that queue is still running, the window sends nothing and the reflexes below do not run; the queue is dropped when a `Step` is rejected (a rejection discards the rest server-side), when a death clears it, or when its results have not come back a couple of ticks past its length (results that never name our queue must not stall the character; we may have walked unseen, so that drop also re-reads position and forgets the path and the last `Step` tick). A `Step` onto a door replaces the rest of the queue with `[]` on the very next call, before anything else is read, because the `Step`s behind it were planned from the wrong place. Once a rejection or a door has dropped the queue, a server `queue` echoed on that same response does not bring the hold back. A rejection, a door, a death, or unmatched results send us back to step 1.
 
 `Attacked`, `Damaged`, and `Died` on a queue are always ours: they carry no `subject_id` there.
 
@@ -74,7 +74,7 @@ The first rule that matches picks the intent:
 3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
 4. Supply underfoot or adjacent and `pickup = true` → `Take`.
 4b. Our last death dropped a chest on this map and `pickup = true` → walk to it; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; this agent sends no `snapshot_version`, so every round trip carries a complete snapshot with the chest's `contents`.
-5. Plan has a next step → `SetPosition` there.
+5. Plan has a next step → walk the path as a paced `Step` queue (see **Scheduler**).
 6. Otherwise → nothing.
 
 "Hostile" and "in range" read from settings: the API serves no hostile's reach and no other character's health.
@@ -165,7 +165,7 @@ These are the backlog. Each has a stable ID; cite it in commits and PR bodies. P
 
 M1–M3 are built, and M0 is done. Fighting an NPC falls back to fleeing: the agent aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it.
 
-M0 and M4, M6–M12 are specified in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md), with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). M4 there replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the one-intent queues in **Real time**; until then those sections describe the shipped agent. The call budget is unchanged: one request per character per tick, burst 3.
+M0 and M4, M6–M12 are specified in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md), with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). M4 there replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the remaining one-intent queues in **Real time**; until then those sections describe the shipped agent. The call budget is unchanged: one request per character per tick, burst 3.
 
 ## Tests
 

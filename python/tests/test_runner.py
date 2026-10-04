@@ -7,11 +7,11 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import config
-from agentrealm_agent.brain import Memory
+from agentrealm_agent.brain import Decision, Memory, choose_call
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.world import WorldModel
+from agentrealm_agent.world import Entity, WorldModel
 
 
 class FakeClient:
@@ -131,6 +131,62 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNotNone(fake.sent[0])
         self.assertIsNone(r.world.pos)
         self.assertIsNone(r.world.map_id)
+
+
+    def test_non_movement_intent_is_sent_alone(self):
+        # Only movement becomes a paced queue; a Take goes as one intent.
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self.runner(fake, Policy(goals=["hold"], pickup=True))
+        r.world.entities = [Entity("supply", 5, (1, 0), "apple")]
+        r.tick()
+        self.assertEqual(fake.sent, [[{"verb": "Take", "supply_id": 5}]])
+        self.assertEqual(r.mem.pending, {"verb": "Take", "supply_id": 5})
+        self.assertIsNone(r.mem.held_queue)
+
+    def test_unmatched_results_do_not_hold_the_queue_forever(self):
+        # Results that never name our queue must not stall the character.
+        ticks = [{"tick": 10, "window_remaining_ms": 0}]
+        ticks += [{"tick": 11 + i, "window_remaining_ms": 0} for i in range(20)]
+        fake = FakeClient(ticks)
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        n = len(fake.sent[0])
+        for _ in range(n + 3):
+            r.tick()
+        self.assertIsNone(r.mem.held_queue)
+        self.assertIsNone(r.mem.pending_intents)
+        r.tick()
+        self.assertIsNotNone(fake.sent[-1], "a fresh decision was sent")
+
+    def test_stepping_onto_a_door_cancels_the_rest_of_the_queue(self):
+        # A door moves us, so the queued Steps behind it must not run.
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0,
+             "intent_results": [{"tick": 11, "queue_id": "q1", "index": 0, "outcome": "applied"}]},
+            {"tick": 12, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        self.assertGreater(len(fake.sent[0]), 1)
+        first = fake.sent[0][0]["direction"]
+        landing = {"right": (1, 0), "down_right": (1, 1)}[first]
+        r.world.view.tiles[landing] = "framed_door"  # revealed after planning
+        r.tick()
+        self.assertTrue(r.mem.need_position)
+        self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "tick")
+        r.tick()
+        self.assertEqual(fake.sent[2], [], "the held queue is replaced with nothing")
+        self.assertFalse(r.mem.cancel_queue)
+        self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "position")
+
+    def test_single_step_fallback_keeps_the_path(self):
+        # A target off the path's head is one Step; the path is not trimmed.
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r.mem.path = [(3, 0), (4, 0)]
+        intents = r.intents_for(Decision({"verb": "SetPosition", "x": 1, "y": 0}, "test"))
+        self.assertEqual(intents, [{"verb": "Step", "direction": "right"}])
+        self.assertEqual(r.mem.path, [(3, 0), (4, 0)])
 
 
 class NetworkTest(unittest.TestCase):

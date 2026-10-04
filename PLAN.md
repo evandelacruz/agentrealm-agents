@@ -59,7 +59,7 @@ Checked top to bottom:
 
 Self is re-read after `Died`, and every 60 windows otherwise.
 
-Position is tracked locally: a submitted `SetPosition` moves us to the target at once, because its result only arrives with the next submit. A rejection puts us back where we stood before it, and the intent submitted in that same round trip was planned from the refused step, so it is not assumed. A rejection, a door, or a death sends us back to step 1.
+Movement goes as a paced `Step`, `Wait`×n, … queue along the path, cut at the world's horizon (M6). Position follows each `Step` result as it arrives, not the submit. While that queue is still running, the window sends nothing and the reflexes below do not run; the queue is dropped when a `Step` is rejected (a rejection discards the rest server-side), when a death clears it, or when its results have not come back a couple of ticks past its length. A `Step` onto a door replaces the rest of the queue with an empty one before anything else is read. A rejection, a door, or a death sends us back to step 1.
 
 `Attacked`, `Damaged`, and `Died` on a queue are always ours: they carry no `subject_id` there.
 

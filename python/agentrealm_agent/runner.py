@@ -11,12 +11,15 @@ from dataclasses import dataclass
 from .brain import Decision, Memory, choose_call, decide, reject_step
 from .client import ApiError, Client
 from .config import CharacterConfig
-from .executor import DEFAULT_QUEUE_HORIZON_SECONDS, movement_steps, pace_steps, step_landing
+from .executor import DEFAULT_QUEUE_HORIZON_SECONDS, DEFAULT_TICK_RATE_HZ, QUEUE_HORIZON_INTENTS, queue_horizon_intents
+from .executor.pacing import movement_steps, pace_steps, step_landing
 from .world import DOORS, WorldModel, terrain_cells
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
 WINDOW_MARGIN = 0.05
+# Ticks past a queue's own length to wait for its results before giving up.
+QUEUE_RESULT_SLACK = 2
 
 
 @dataclass
@@ -47,8 +50,8 @@ class Runner:
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
         self.rng = random.Random(seed)
         self.pacer = Pacer(1.0)
-        self.tick_hz = 10
-        self.queue_horizon_ticks = DEFAULT_QUEUE_HORIZON_SECONDS * 10
+        self.tick_hz = DEFAULT_TICK_RATE_HZ
+        self.queue_horizon_ticks = QUEUE_HORIZON_INTENTS
         cfg.trace_path.parent.mkdir(parents=True, exist_ok=True)
         self.trace = open(cfg.trace_path, "a", buffering=1)
 
@@ -65,8 +68,8 @@ class Runner:
             return
         hz = max(1, int(world.get("tick_rate_hz", 1)))
         self.tick_hz = hz
-        horizon_s = int(world.get("queue_horizon_seconds", DEFAULT_QUEUE_HORIZON_SECONDS))
-        self.queue_horizon_ticks = max(1, horizon_s * hz)
+        horizon_s = max(1, int(world.get("queue_horizon_seconds", DEFAULT_QUEUE_HORIZON_SECONDS)))
+        self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
@@ -124,7 +127,13 @@ class Runner:
 
     def tick(self) -> float:
         w, m = self.world, self.mem
-        if m.held_queue is not None:
+        if m.cancel_queue:
+            # The rest of the server queue was planned from a position that no
+            # longer holds (a door moved us): replace it with nothing.
+            d = Decision(None, "cancel queue")
+            intents = []
+            m.cancel_queue = False
+        elif m.held_queue is not None:
             d = Decision(None, "queue held")
             intents = None
         else:
@@ -132,8 +141,10 @@ class Runner:
             intents = self.intents_for(d)
         r = self.client.tick(self.cid, intents)
         w.tick = int(r.get("tick", w.tick))
-        if intents is not None and (qid := r.get("queue_id")):
-            m.pending_queue = qid
+        if intents:
+            m.queue_sent_tick = w.tick
+            if qid := r.get("queue_id"):
+                m.pending_queue = qid
         rejected = self.apply_intent_results(r.get("intent_results") or [])
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
@@ -141,7 +152,13 @@ class Runner:
         if r.get("queue"):
             m.held_queue = r.get("queue")
         elif m.pending_intents is not None and m.pending_next_index < len(m.pending_intents):
-            m.held_queue = {"queue_id": m.pending_queue, "next_index": m.pending_next_index}
+            if w.tick > m.queue_sent_tick + len(m.pending_intents) + QUEUE_RESULT_SLACK:
+                # The queue has had time to run out and its results never
+                # matched: stop waiting on them rather than hold forever.
+                m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+                m.held_queue = None
+            else:
+                m.held_queue = {"queue_id": m.pending_queue, "next_index": m.pending_next_index}
         else:
             m.held_queue = None
         detail = f"{_fmt_submit(intents, d)} ({d.reason})"
@@ -175,13 +192,13 @@ class Runner:
 
     def intents_for(self, d: Decision) -> list[dict] | None:
         """Movement decisions become paced Step/Wait queues; others stay one intent."""
+        w, m = self.world, self.mem
         if d.intent is None:
             return None
         if d.intent.get("verb") != "SetPosition":
-            m.pending_intents, m.pending_next_index = None, 0
+            m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
             m.pending = d.intent
             return [d.intent]
-        w, m = self.world, self.mem
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
@@ -195,7 +212,8 @@ class Runner:
         )
         if not intents:
             return None
-        m.path = m.path[len(queued) :]
+        if m.path and m.path[0] == target:
+            m.path = m.path[len(queued) :]
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
         return intents
@@ -264,7 +282,11 @@ class Runner:
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 if w.view.tiles.get(w.pos) in DOORS:
+                    # A door moves us; the Steps still queued behind this one
+                    # would walk from the wrong place.
                     m.need_position, m.path = True, []
+                    m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+                    m.held_queue, m.cancel_queue = None, True
             if m.pending is not None and index == 0:
                 m.pending = None
             return False

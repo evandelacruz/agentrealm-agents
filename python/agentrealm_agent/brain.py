@@ -31,6 +31,8 @@ class Memory:
     pending_intents: list[dict] | None = None  # full queue last submitted with intents
     pending_next_index: int = 0  # next intent index still awaiting a result
     held_queue: dict | None = None  # server queue {"queue_id", "next_index"} while not empty
+    queue_sent_tick: int = 0  # tick the last multi-intent queue was answered at
+    cancel_queue: bool = False  # send [] next tick: the held queue was planned from a stale position
     undo: Pos | None = None  # where we stood before assuming `pending` moved us
     blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
     alarm: bool = False  # Damaged or Attacked since the last entity read
@@ -38,6 +40,8 @@ class Memory:
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
     """One of: self, position, terrain, entities, tick."""
+    if m.cancel_queue:
+        return "tick"  # stop the stale queue before reading anything
     if m.need_self or m.windows_since_self >= SELF_REFRESH:
         return "self"
     if m.need_position or w.pos is None:

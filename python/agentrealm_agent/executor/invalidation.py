@@ -16,6 +16,7 @@ from ..client import Intent
 from ..world import DOORS, Pos, WorldModel, chebyshev
 from .constants import DEFAULT_TICK_RATE_HZ, queue_horizon_intents
 from .intents import wait
+from .movement import ticks_per_step
 from .queue import trim_to_horizon
 
 DEFAULT_MOVEMENT_SPEED = 2500  # millimeters per second; 2.5 blocks/s at 10 Hz → 4 ticks per step
@@ -27,11 +28,11 @@ def set_position(p: Pos) -> Intent:
     return {"verb": "SetPosition", "x": p[0], "y": p[1]}
 
 
-def ticks_per_step(tick_rate_hz: int, movement_speed: int) -> int:
+def _gap(tick_rate_hz: int, movement_speed: int) -> int:
     """Move intents spaced by this many ticks (Wait count is one less)."""
-    hz = max(1, tick_rate_hz)
-    speed = max(1, movement_speed)
-    return max(1, (hz * 1000 + speed - 1) // speed)
+    return ticks_per_step(
+        tick_rate_hz=max(1, tick_rate_hz), movement_speed_milli=max(1, movement_speed)
+    )
 
 
 def paced_set_positions(
@@ -49,7 +50,7 @@ def paced_set_positions(
     """
     if not steps:
         return []
-    gap = ticks_per_step(tick_rate_hz, movement_speed)
+    gap = _gap(tick_rate_hz, movement_speed)
     limit = queue_horizon_intents(tick_rate_hz=max(1, tick_rate_hz))
     lead = min(max(0, lead_waits), gap - 1)
     out: list[Intent] = [wait() for _ in range(lead)]
@@ -128,7 +129,7 @@ class Executor:
         speed = getattr(w, "movement_speed", DEFAULT_MOVEMENT_SPEED)
         lead = 0
         if self.last_move_tick is not None:
-            gap = ticks_per_step(self.tick_rate_hz, speed)
+            gap = _gap(self.tick_rate_hz, speed)
             # The first intent runs no earlier than the tick after w.tick.
             lead = self.last_move_tick + gap - (w.tick + 1)
         return paced_set_positions(path, self.tick_rate_hz, speed, lead_waits=lead)

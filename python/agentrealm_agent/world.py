@@ -82,6 +82,8 @@ class WorldModel:
     movement_speed: int = 2500  # mm/s; pacing uses tick_rate and this (API Movement)
     alive: bool = True
     lives: int = 0
+    health: int | None = None
+    max_health: int | None = None
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -175,18 +177,35 @@ class WorldModel:
         return flat
 
     def apply_observation(self, obs: dict | None) -> None:
-        """Reads ground chest contents from a complete snapshot.
+        """Folds a complete tick snapshot into the model: vitals and ground chest contents.
 
         This agent never sends snapshot_version, so every observation it gets
-        is complete (docs/API.md Snapshots). A chest within reach lists its
-        contents. A dropped chest leaves the world once emptied (B116), so our
-        death chest absent while its block is within reach was emptied, by us
-        or by someone first, and is no longer worth going back for; one seen
-        empty is not either.
+        is complete (API Snapshots); anything else is ignored until deltas land.
         """
         if not obs or not obs.get("complete"):
             return
-        entities = (obs.get("snapshot") or {}).get("entities") or {}
+        snap = obs.get("snapshot") or {}
+        self._apply_vitals(snap)
+        self._apply_chest_snapshot(snap)
+
+    def _apply_vitals(self, snap: dict) -> None:
+        """Reads health and max health from a complete snapshot.
+
+        A complete snapshot is authoritative, so a field it omits (asleep)
+        clears the old value, and one that is not a number reads as unknown.
+        """
+        self.health = _opt_int(snap.get("health"))
+        self.max_health = _opt_int(snap.get("max_health"))
+
+    def _apply_chest_snapshot(self, snap: dict) -> None:
+        """Reads ground chest contents from a complete snapshot.
+
+        A chest within reach lists its contents. A dropped chest leaves the
+        world once emptied (B116), so our death chest absent while its block
+        is within reach was emptied, by us or by someone first, and is no
+        longer worth going back for; one seen empty is not either.
+        """
+        entities = snap.get("entities") or {}
         self.chest_contents = {
             int(ch["id"]): [int(s["id"]) for s in ch["contents"]]
             for ch in entities.get("chests") or []
@@ -290,3 +309,12 @@ class WorldModel:
             if best is None or c < best_cost:
                 best, best_cost = (t, p), c
         return best
+
+
+def _opt_int(v) -> int | None:
+    if isinstance(v, bool):
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError, OverflowError):
+        return None

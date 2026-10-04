@@ -94,7 +94,7 @@ Goals are tried in order; the first with a reachable target wins. Re-plan when a
 ### Planner: sets goals and settings
 
 - **scripted**: goals and settings come straight from the character file.
-- **llm** (M4): every N ticks, or when something new happens (new character seen, door found, goal exhausted, damage), it sends the model a summary of the world model and gets back goals, settings, and an optional `Say`/`Broadcast`. It runs off the tick loop. The loop keeps the old answer until a new one lands, so a slow model never costs a tick.
+- **llm** (M4, superseded by the strategist in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)): every N ticks, or when something new happens (new character seen, door found, goal exhausted, damage), it sends the model a summary of the world model and gets back goals, settings, and an optional `Say`/`Broadcast`. It runs off the tick loop. The loop keeps the old answer until a new one lands, so a slow model never costs a tick.
 
 ## Character file
 
@@ -127,7 +127,7 @@ python -m agentrealm_agent run characters/wren.toml [characters/kit.toml ...]
 python -m agentrealm_agent status characters/wren.toml
 ```
 
-Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`), `AGENTREALM_API_KEY`.
+Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local stack; the public API is `https://api.agentrealm.gg`, where lives are permanent), `AGENTREALM_API_KEY`.
 
 `run` drives every listed character, one thread each. Each character logs one line per window to stdout (tick, position, call made, intent, the result of the last one, events) and a JSONL trace to `.state/<name>.trace.jsonl`, so a death can be read back as a decision.
 
@@ -137,6 +137,8 @@ Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`), `AGENTREAL
 |---|---|---|
 | Sandbox content loads on the sim's first start; the `default` outfit is seeded | Create works with avatar `default` once the sim has started; before that it answers `world_not_ready`. | B13, B39 |
 | No hostile's reach is served | `hostile_range` is a guess in the character file. | None |
+| No NPC's health or damage is served, except a boss's health | Hostile health and damage per type are learned from `NPCDamaged`, `NPCDied` and `Damaged`, with conservative defaults until measured ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) Combat). | None |
+| Our own strength is served only on the owner watch sheet, not on a character route | The agent brackets its strength from `over_strength_ceiling` rejections and does not read the watch sheet, which sits outside the character call budget. | None |
 
 ## Milestones
 
@@ -144,13 +146,23 @@ These are the backlog. Each has a stable ID; cite it in commits and PR bodies. P
 
 | ID | Milestone | Depends on |
 |---|---|---|
+| M0 | **Discovery.** Docs read, hand play through MCP, [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) written. | |
 | M1 | **Client and loop.** HTTP client, call scheduler, wall-clock pacing, 429/503 handling, `create`/`run`/`status`, `idle` and `wander`. | |
 | M2 | **World model and pathing.** Tile and entity cache per map, local position tracking, A*, `explore`, `doors`, `goto`. | M1 |
 | M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
-| M4 | **LLM planner.** Optional dependency. Writes goals and settings off-tick. | M3 |
-| M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. | M1 |
+| M4 | **Strategist and directives.** The LLM planner: optional dependency, off-tick, emits typed plan operations, never intents. Plus the runtime directives file. Specified in the playable plan. | M9 |
+| M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. The agent's default base URL is the local stack. | M1 |
+| M6 | **Executor.** `Step`/`Wait` paced multi-intent queues, two poll cadences, snapshot deltas, health tracking. | M3 |
+| M7 | **State machine and survival.** Prioritised states replace `brain.decide`; cost-grid navigation, stuck detection. | M6 |
+| M8 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight`; learned item table. | M7 |
+| M9 | **Navigation and knowledge.** Per-world knowledge base, `Travel`, door graph, `Break` and break memory. | M8 |
+| M10 | **Curiosity and clues.** Interest list, odd-block detector, `Investigate`, clue capture. | M9 |
+| M11 | **Levels.** `Level`, `Boss`, `Solve`. | M4, M10 |
+| M12 | **Evaluation.** Metrics per run, compared across commits. | M7 |
 
-M1–M3 are built. Fighting an NPC falls back to fleeing: the agent aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it.
+M1–M3 are built, and M0 is done. Fighting an NPC falls back to fleeing: the agent aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it.
+
+M0 and M4, M6–M12 are specified in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md), with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). M4 there replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the one-intent queues in **Real time**; until then those sections describe the shipped agent. The call budget is unchanged: one request per character per tick, burst 3.
 
 ## Tests
 

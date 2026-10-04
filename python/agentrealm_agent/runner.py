@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from .brain import Decision, Memory, choose_call, decide, reject_step
 from .client import ApiError, Client
 from .config import CharacterConfig
+from .poll_cadence import calm_poll_interval
 from .world import DOORS, WorldModel, terrain_cells
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
@@ -68,11 +69,13 @@ class Runner:
             while not self.stop.is_set():
                 self.pacer.wait_next_window(not_before)
                 not_before = 0.0
+                # A window is one sim tick. Count it here: a skipped window
+                # sends nothing, so no response would move the clock, and the
+                # calm gap and entity_refresh would never come due. Responses
+                # carry the server's tick and correct it.
+                self.world.tick += 1
                 call = choose_call(self.world, self.mem, self.cfg.policy)
-                self.mem.windows_since_poll += 1
-                if call == "wait":
-                    # Spends nothing and traces nothing: the next call's line
-                    # shows the gap in its tick.
+                if call == "skip":
                     self.mem.windows_since_self += 1
                     continue
                 try:
@@ -130,12 +133,15 @@ class Runner:
         # left as it is.
         r = self.client.tick(self.cid, None if d.intent is None else [d.intent])
         w.tick = int(r.get("tick", w.tick))
-        m.windows_since_poll = 0
         result = self.pending_result(r.get("intent_results") or [])
         rejected = result is not None and self.on_result(result)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
         self.on_events(events)
+        m.last_poll_tick = w.tick
+        m.calm_poll_interval = calm_poll_interval(w.tick, w.character_id)
+        m.queued_ticks = 0 if d.intent is None else 1
+        m.hurt_last_poll = any(e.get("kind") == "Damaged" for e in events)
         submitted = d.intent
         detail = f"{_fmt_intent(submitted)} ({d.reason})"
         if result is not None:

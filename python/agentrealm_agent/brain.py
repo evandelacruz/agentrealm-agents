@@ -10,10 +10,10 @@ import random
 from dataclasses import dataclass, field
 
 from .config import Policy
+from .poll_cadence import gate_tick_call
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60  # windows between self reads when nothing forces one
-CALM_HOSTILE_RANGE = 3  # PLAYABLE_AGENT_PLAN Executor: two cadences
 
 
 # Scheduler.
@@ -27,46 +27,37 @@ class Memory:
     need_position: bool = True
     need_self: bool = True
     windows_since_self: int = 0
-    windows_since_poll: int = 10**9  # paced windows since the last POST tick (calm cadence)
     pending: dict | None = None  # the intent submitted last, awaiting its result
     pending_queue: str | None = None  # the queue_id `pending` was sent under
     undo: Pos | None = None  # where we stood before assuming `pending` moved us
     blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
     alarm: bool = False  # Damaged or Attacked since the last entity read
-
-
-def calm(w: WorldModel, m: Memory, policy: Policy) -> bool:
-    """Slow poll cadence while nothing is closing in (PLAYABLE_AGENT_PLAN Executor)."""
-    if m.alarm:
-        return False
-    for tick, _amount in w.recent_damage:
-        if w.tick - tick <= 1:
-            return False
-    if w.pos is not None:
-        for e in w.entities:
-            if e.kind in policy.hostile and chebyshev(e.pos, w.pos) <= CALM_HOSTILE_RANGE:
-                return False
-    return True
+    last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)
+    calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll
+    queued_ticks: int = 0  # intents the last poll sent, one tick each
+    hurt_last_poll: bool = False  # the last poll's events carried Damaged
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
-    """One of: self, position, terrain, entities, wait, tick."""
+    """One of: self, position, terrain, entities, tick, skip.
+
+    skip spends nothing this window: calm, and the last poll's queue still
+    covers it (poll_cadence, M6). The reads rank above tick, so a calm gap's
+    spare windows go to stale terrain first, then stale entities. Urgent
+    windows still take those reads, because entities come only from reads
+    until snapshot deltas fold them in (M6 remaining).
+    """
     if m.need_self or m.windows_since_self >= SELF_REFRESH:
         return "self"
     if m.need_position or w.pos is None:
         return "position"
     if policy.kind in ("idle",):
-        return "tick"
+        return gate_tick_call(w, m, policy)
     if w.terrain_stale():
         return "terrain"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
         return "entities"
-    # Counted in windows, not sim ticks: a wait sends nothing, so no response
-    # moves w.tick. Only while the last poll queued nothing: a one-intent queue
-    # runs one tick, and waiting after it would stall a held path.
-    if m.pending is None and calm(w, m, policy) and m.windows_since_poll < policy.entity_refresh:
-        return "wait"
-    return "tick"
+    return gate_tick_call(w, m, policy)
 
 
 # Intents.

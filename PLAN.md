@@ -84,7 +84,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
 3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
 4. Supply underfoot or adjacent and `pickup = true` → `Take`.
-4b. Our last death dropped a chest on this map and `pickup = true` → walk to it; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
+4b. Our last death dropped a chest on this map, `pickup = true`, and a tile on or next to it is known safe (A7) → the **Recover** state (A11) walks there; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
 5. Plan has a next step → walk the path as a paced `Step` queue (see **Scheduler**).
 6. Otherwise → nothing.
 
@@ -191,11 +191,11 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 |---|---|---|
 | A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. | A1, A2 |
 | A6 | **Threat table.** Damage per hit per hostile type from `Damaged`; the unmeasured default. | |
-| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery records safe tiles; **Recover** (A11) walks to a death chest only from a known safe tile beside it; retreat and heal still wait on A9–A10. A failed zone read drops that cell from probing. | |
+| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery records safe tiles; **Recover** (A11) walks to a death chest only from a known safe tile on or beside it; retreat and heal still wait on A9–A10. A failed zone read drops that cell from probing. | |
 | A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
 | A9 | **Retreat, Flee and Escape.** `retreat_hits` and the `risk`/`lives_floor` formula; retreat to a known safe tile. | A5, A6, A7, A8 |
 | A10 | **Heal.** Food in reach, carried potion, measured safe-zone regeneration, else wait in town and raise `buy`. | A5, A7 |
-| A11 | **Recover.** Walk to the death chest only when the spot is safe. | A5, A7 |
+| A11 | **Recover.** Walk to the death chest only when the spot is safe. Needs `pickup = true` and a known safe tile on or beside the chest on this map; reflexes 2–4 still run first, and with no plannable step the state falls back to Explore's goals for that round. Only the destination is checked: the route to it is not, which is A9's. | A5, A7 |
 | A12 | **Cost-grid planner.** The cost table (fog, hazards, hostile danger, expiring occupants, break costs inert), walking the known prefix. | |
 | A13 | **Two-level search.** Coarse 16×16 corridor search and A* in the perception window, each with a node budget per tick. | A12 |
 | A14 | **Rejection learning.** What each rejection code teaches the map (reflex 1 table): impassable, occupant cost for 30 ticks, locked doors and hunting closures in the knowledge base. `would_strand` waits on Evan's decision on the landing target (reflex 1 table). | A12, A17 |

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from ..config import Policy
-from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
-from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import grid_params, nav_search, next_step
 from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
+from .explore import plan_sets, reflex_outcome, scripted_outcome
 from .intents import set_position, withdraw_all
 
 
@@ -43,25 +42,25 @@ def recover_outcome(
     w: WorldModel,
     m: Memory,
     policy: Policy,
+    plan_avoid: set[Pos],
+    plan_costly: set[Pos],
     *,
-    knowledge: KnowledgeBase | None = None,
     state: str = "Recover",
-) -> StateOutcome:
-    """Path to the death chest and withdraw when adjacent (A11)."""
+) -> StateOutcome | None:
+    """Path to the death chest and withdraw when adjacent (A11, reflex 4b).
+
+    Only the destination is checked for safety; the route is not (A9's).
+    None when no step toward the chest can be planned, so the caller yields.
+    """
     here = w.pos
     if here is None or w.death_chest is None:
-        return StateOutcome(None, "no death chest", state=state)
+        return None
     map_id, at, chest_id = w.death_chest
     if map_id != w.map_id:
-        return StateOutcome(None, "death chest on another map", state=state)
+        return None
     target = recover_approach_target(w, map_id, at)
     if target is None:
-        return StateOutcome(None, "death chest spot not safe", state=state)
-
-    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
-    hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
-    plan_avoid = nav_avoid | hazards
-    plan_costly = nav_costly
+        return None
 
     if chebyshev(at, here) <= 1:
         contents = w.chest_contents.get(chest_id)
@@ -82,18 +81,20 @@ def recover_outcome(
         if next_step(w, plan_avoid, found):
             m.path, m.goal = found, "chest"
 
-    step = next_step(w, plan_avoid, m.path)
+    step = next_step(w, plan_avoid, m.path) if m.goal == "chest" else None
     if step is not None:
         return StateOutcome([set_position(step)], f"chest → {m.path[-1]}", state=state)
-
-    return StateOutcome(None, "chest not reachable", state=state)
+    return None
 
 
 class RecoverState(State):
+    """Priority 3: above Explore. Reflexes 2–4 still run first (PLAN.md)."""
+
     name = "Recover"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
-        if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
+        policy = ctx.policy
+        if policy.kind != "scripted" or not policy.pickup or not world.alive or world.pos is None:
             return False
         if world.death_chest is None or world.death_chest[0] != world.map_id:
             return False
@@ -104,6 +105,17 @@ class RecoverState(State):
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        return recover_outcome(
-            world, ctx.memory, ctx.policy, knowledge=ctx.knowledge, state=self.name
+        m, policy = ctx.memory, ctx.policy
+        blocked, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
+        reflex = reflex_outcome(world, m, policy, blocked, never_attack=ctx.never_attack, state=self.name)
+        if reflex is not None:
+            return reflex
+        out = recover_outcome(world, m, policy, plan_avoid, plan_costly, state=self.name)
+        if out is not None:
+            return out
+        # No step toward the chest: fall back to Explore's goals this round.
+        fallback = scripted_outcome(
+            world, m, policy, ctx.rng, never_attack=ctx.never_attack, knowledge=ctx.knowledge, state=self.name
         )
+        fallback.reason = f"chest not reachable; {fallback.reason}"
+        return fallback

@@ -47,25 +47,59 @@ def scripted_outcome(
     state: str = "Explore",
 ) -> StateOutcome:
     """Reflex list then plan (PLAN.md). M7 test seam: list[Intent] in the outcome."""
+    if w.pos is None:
+        return StateOutcome(None, "position unknown", state=state)
+    blocked, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
+    reflex = reflex_outcome(w, m, policy, blocked, never_attack=never_attack, state=state)
+    if reflex is not None:
+        return reflex
+
+    step = next_step(w, plan_avoid, m.path)
+    if step is None:
+        replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge)
+        step = next_step(w, plan_avoid, m.path)
+    if step is not None:
+        return StateOutcome([set_position(step)], f"{m.goal} → {m.path[-1]}", state=state)
+
+    return StateOutcome(None, "no goal reachable", state=state)
+
+
+def plan_sets(
+    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None
+) -> tuple[set[Pos], set[Pos], set[Pos]]:
+    """``blocked``, ``plan_avoid``, ``plan_costly`` for this decision.
+
+    Rejection learnings and ``avoid_blocks`` hazards stay out of every choice
+    (A14, reflex 1). Standing on a hazard with no way straight off, the plan may
+    cross hazards at a high price instead.
+    """
+    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
+    hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
+    blocked = nav_avoid | hazards
+    escape = hazards if w.pos in hazards else set()
+    return blocked, blocked - escape, escape | nav_costly
+
+
+def reflex_outcome(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    blocked: set[Pos],
+    *,
+    never_attack: list[str],
+    state: str,
+) -> StateOutcome | None:
+    """Reflexes 2–4 (PLAN.md): off a hazard, fight or flee, take a supply."""
     here = w.pos
     if here is None:
-        return StateOutcome(None, "position unknown", state=state)
+        return None
     view = w.view
-
-    # Rejection learnings stay out of every choice below (A14, reflex 1).
-    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
-    hazards = {p for p, b in view.tiles.items() if b in policy.avoid_blocks}
-    blocked = nav_avoid | hazards
-    escape: set[Pos] = set()
-    if here in hazards:
+    if view.tiles.get(here) in policy.avoid_blocks:
         safe = w.open_neighbours(here, blocked)
         if safe:
             m.path = []
             p = min(safe)
             return StateOutcome([set_position(p)], f"off {view.tiles.get(here)}", reflex=True, state=state)
-        escape = hazards
-    plan_avoid = blocked - escape
-    plan_costly = escape | nav_costly
 
     hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
     if hostiles and policy.on_hostile != "ignore":
@@ -87,12 +121,4 @@ def scripted_outcome(
         if near:
             s = min(near, key=lambda e: (chebyshev(e.pos, here), e.id))
             return StateOutcome([take(s)], f"take {s.code or s.id}", reflex=True, state=state)
-
-    step = next_step(w, plan_avoid, m.path)
-    if step is None:
-        replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge)
-        step = next_step(w, plan_avoid, m.path)
-    if step is not None:
-        return StateOutcome([set_position(step)], f"{m.goal} → {m.path[-1]}", state=state)
-
-    return StateOutcome(None, "no goal reachable", state=state)
+    return None

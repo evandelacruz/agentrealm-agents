@@ -10,7 +10,7 @@
   },
   "M6": {
     "state": "partial",
-    "remaining": "Re-send a held queue when a reflex fires (alarm, hostile, hazard), calm vs threatened poll cadences, snapshot deltas (snapshot_version) on the world model, consuming health in decisions, live Olympuff smoke test. Health and max_health are folded from complete snapshots only."
+    "remaining": "Wire attack and speech pacing (agentrealm_agent/executor/pacing.py) into the runner, re-send a held queue when a reflex fires (alarm, hostile, hazard), snapshot deltas (snapshot_version) on the world model, consuming health in decisions, live Olympuff smoke test. Health and max_health are folded from complete snapshots only."
   },
   "M7": {"state": "open"},
   "M8": {"state": "open"},

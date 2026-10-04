@@ -20,6 +20,7 @@ from .executor import (
     step_landing,
     trim_to_horizon,
 )
+from .poll_cadence import calm_poll_interval
 from .world import DOORS, WorldModel, terrain_cells
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
@@ -84,7 +85,15 @@ class Runner:
             while not self.stop.is_set():
                 self.pacer.wait_next_window(not_before)
                 not_before = 0.0
+                # A window is one sim tick. Count it here: a skipped window
+                # sends nothing, so no response would move the clock, and the
+                # calm gap and entity_refresh would never come due. Responses
+                # carry the server's tick and correct it.
+                self.world.tick += 1
                 call = choose_call(self.world, self.mem, self.cfg.policy)
+                if call == "skip":
+                    self.mem.windows_since_self += 1
+                    continue
                 try:
                     not_before = self.step(call)
                 except ApiError as e:
@@ -170,6 +179,17 @@ class Runner:
                 m.held_queue = {"queue_id": m.pending_queue, "next_index": m.pending_next_index}
         else:
             m.held_queue = None
+        m.last_poll_tick = w.tick
+        m.calm_poll_interval = calm_poll_interval(w.tick, w.character_id)
+        # One tick per intent still to run on the server: the calm gap never
+        # outlasts it, so the character does not stand idle after the queue.
+        if m.cancel_queue:
+            m.queued_ticks = 0
+        elif m.pending_intents is not None:
+            m.queued_ticks = len(m.pending_intents) - m.pending_next_index
+        else:
+            m.queued_ticks = 1 if intents else 0
+        m.hurt_last_poll = any(e.get("kind") == "Damaged" for e in events)
         detail = f"{_fmt_submit(intents, d)} ({d.reason})"
         if events:
             detail += " | " + ", ".join(_fmt_event(e) for e in events)

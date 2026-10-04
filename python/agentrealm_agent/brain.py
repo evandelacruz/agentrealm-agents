@@ -10,6 +10,7 @@ import random
 from dataclasses import dataclass, field
 
 from .config import Policy
+from .poll_cadence import gate_tick_call
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60  # windows between self reads when nothing forces one
@@ -36,10 +37,20 @@ class Memory:
     last_step_tick: int | None = None  # tick our last Step applied, to pace the next queue
     blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
     alarm: bool = False  # Damaged or Attacked since the last entity read
+    last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)
+    calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll
+    queued_ticks: int = 0  # intents still queued after the last poll, one tick each
+    hurt_last_poll: bool = False  # the last poll's events carried Damaged
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
-    """One of: self, position, terrain, entities, tick."""
+    """One of: self, position, terrain, entities, tick, skip.
+
+    skip spends nothing this window: calm, and the last poll's queue still
+    covers it (poll_cadence, M6). Urgent windows still take the reads above
+    tick, because entities come only from reads until snapshot deltas fold
+    them in (M6 remaining).
+    """
     if m.cancel_queue:
         return "tick"  # stop the stale queue before reading anything
     if m.need_self or m.windows_since_self >= SELF_REFRESH:
@@ -47,12 +58,12 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
     if m.need_position or w.pos is None:
         return "position"
     if policy.kind in ("idle",):
-        return "tick"
+        return gate_tick_call(w, m, policy)
     if w.terrain_map != w.map_id or w.terrain_center is None or chebyshev(w.terrain_center, w.pos) > w.perception // 2:
         return "terrain"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
         return "entities"
-    return "tick"
+    return gate_tick_call(w, m, policy)
 
 
 # Intents.

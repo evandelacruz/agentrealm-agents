@@ -50,7 +50,9 @@ def zone_failed(w: WorldModel, map_id: int, pos: Pos) -> None:
 
 
 def safe_tiles(w: WorldModel, map_id: int) -> set[Pos]:
-    """Known safe cells on a map (PLAN.md A7). **Heal** (A10) walks to them."""
+    """Known safe cells on a map (PLAN.md A7). **Heal** (A10) walks to them;
+    Recover reads it to pick a safe tile beside the death chest (A11); Retreat
+    will read it too (A9)."""
     return {pos for pos, fact in w.zones.get(map_id, {}).items() if fact.safe}
 
 

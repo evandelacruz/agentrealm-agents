@@ -103,6 +103,7 @@ class WorldModel:
     armed_code: str | None = None
     worn_codes: dict[str, str] = field(default_factory=dict)
     held: list[HeldSupply] = field(default_factory=list)  # inventory held[] (A10)
+    gems: int | None = None
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -324,6 +325,10 @@ class WorldModel:
     def _apply_inventory(self, inv: dict | None) -> None:
         if inv is None:
             return
+        if "gems" in inv:
+            gems = _opt_int(inv.get("gems"))
+            if gems is not None and gems >= 0:
+                self.gems = gems
         self.armed_code, self.worn_codes = loadout_from_inventory(inv)
         self.held = held_from_inventory(inv)
 

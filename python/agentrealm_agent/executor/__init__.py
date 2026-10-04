@@ -9,17 +9,17 @@ from .constants import (
     QUEUE_HORIZON_INTENTS,
     queue_horizon_intents,
 )
-from .intents import Intent, IntentQueue, StepDirection, step, wait
-from .queue import horizon_for_world, trim_to_horizon, within_horizon
+from .intents import IntentQueue, StepDirection, StepIntent, WaitIntent, step, wait
+from .queue import trim_to_horizon, within_horizon
 
 __all__ = [
     "DEFAULT_QUEUE_HORIZON_SECONDS",
     "DEFAULT_TICK_RATE_HZ",
-    "Intent",
     "IntentQueue",
     "QUEUE_HORIZON_INTENTS",
     "StepDirection",
-    "horizon_for_world",
+    "StepIntent",
+    "WaitIntent",
     "queue_horizon_intents",
     "step",
     "trim_to_horizon",

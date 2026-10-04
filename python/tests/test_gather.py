@@ -114,19 +114,17 @@ class GatherActTest(unittest.TestCase):
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
         self.assertEqual(m.gather_target, ("bush", (2, 0)))
 
-    def test_gem_piles_are_not_targeted_while_their_code_is_unknown(self):
+    def test_unlisted_supply_codes_are_not_treated_as_gem_piles(self):
         w = grid(["...", "..."], at=(1, 0))
         safe(w, (1, 0), (2, 0))
-        w.entities = [Entity("supply", 9, (2, 0), "gem")]
-        # pickup off: the generic supply reflex (reflex 4) is not Gather's pile logic.
+        w.entities = [Entity("supply", 9, (2, 0), "gem_cache_5")]
         self.assertIsNone(outcome(w, pickup=False).intents)
 
-    def test_takes_gem_pile_in_range_once_its_code_is_known(self):
+    def test_takes_gem_pile_in_range(self):
         w = grid(["g.g"], at=(1, 0))
         safe(w, (1, 0))
-        w.entities = [Entity("supply", 9, (2, 0), "gem_pile")]
-        with mock.patch.object(gather_mod, "UNKNOWN_GEM_PILE_CODES", frozenset({"gem_pile"})):
-            out = outcome(w, pickup=False)
+        w.entities = [Entity("supply", 9, (2, 0), "gem")]
+        out = outcome(w, pickup=False)
         self.assertEqual(out.intents[0]["verb"], "Take")
 
     def test_skips_grass_outside_safe_ish_ground(self):
@@ -154,23 +152,21 @@ class GatherPathingTest(unittest.TestCase):
     def test_walks_to_a_known_pile_first(self):
         w = grid(["g...."], at=(1, 0))
         safe(w, (0, 0), (4, 0))
-        w.entities = [Entity("supply", 9, (4, 0), "gem_pile")]
+        w.entities = [Entity("supply", 9, (4, 0), "gem")]
         m = Memory()
-        with mock.patch.object(gather_mod, "UNKNOWN_GEM_PILE_CODES", frozenset({"gem_pile"})):
-            outcome(w, m)
+        outcome(w, m)
         self.assertEqual(m.gather_target, ("pile", (4, 0)))
         self.assertEqual(m.path[-1], (4, 0))
 
     def test_pile_target_path_is_kept_between_ticks(self):
         w = grid(["......"], at=(0, 0))
         safe(w, (5, 0))
-        w.entities = [Entity("supply", 9, (5, 0), "gem_pile")]
+        w.entities = [Entity("supply", 9, (5, 0), "gem")]
         m = Memory()
-        with mock.patch.object(gather_mod, "UNKNOWN_GEM_PILE_CODES", frozenset({"gem_pile"})):
+        outcome(w, m)
+        path = list(m.path)
+        with mock.patch.object(gather_mod, "_replan_gather") as replan:
             outcome(w, m)
-            path = list(m.path)
-            with mock.patch.object(gather_mod, "_replan_gather") as replan:
-                outcome(w, m)
         replan.assert_not_called()
         self.assertEqual(m.path, path)
 

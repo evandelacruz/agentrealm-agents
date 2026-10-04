@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -134,44 +135,49 @@ def use_blocked_by_never_attack(intent: dict, entities: list[Entity], never_atta
     return False
 
 
+def _file_sig(st: os.stat_result) -> tuple[int, int, int]:
+    """What identifies one version of the file: mtime, size, inode."""
+    return (st.st_mtime_ns, st.st_size, st.st_ino)
+
+
 @dataclass
 class DirectivesWatch:
-    """Re-read the directives file when its mtime changes.
+    """Re-read the directives file when its mtime, size, or inode changes.
 
     A file that fails to read or parse keeps the last good directives
-    (defaults on first load) and is retried on the next call.
+    (defaults on first load) and is retried once any of those differ from
+    the failed version, even when the mtime matches the last good load.
     """
 
     path: Path
     directives: Directives = field(default_factory=default_directives)
-    _mtime: float | None = field(default=None, repr=False)
-    _bad_mtime: float | None = field(default=None, repr=False)
+    _sig: tuple[int, int, int] | None = field(default=None, repr=False)
+    _bad_sig: tuple[int, int, int] | None = field(default=None, repr=False)
 
     def maybe_reload(self) -> bool:
         """Load when the file is new or changed. Returns True when directives updated."""
         try:
             st = self.path.stat()
         except FileNotFoundError:
-            self._bad_mtime = None
-            if self._mtime is None:
+            self._bad_sig = None
+            if self._sig is None:
                 return False
-            self._mtime = None
+            self._sig = None
             self.directives = default_directives()
             return True
-        mtime = st.st_mtime
-        if self._mtime == mtime:
+        sig = _file_sig(st)
+        if sig == self._sig or sig == self._bad_sig:
             return False
         try:
             loaded = load_directives(self.path)
         except (OSError, tomllib.TOMLDecodeError) as e:
-            if self._bad_mtime != mtime:
-                log.warning("%s: %s; keeping the last good directives", self.path.name, e)
-                self._bad_mtime = mtime
+            log.warning("%s: %s; keeping the last good directives", self.path.name, e)
+            self._bad_sig = sig
             return False
-        self._mtime, self._bad_mtime = mtime, None
+        self._sig, self._bad_sig = sig, None
         self.directives = loaded
         return True
 
     def ensure_loaded(self) -> None:
-        if self._mtime is None and self.path.is_file():
+        if self._sig is None and self.path.is_file():
             self.maybe_reload()

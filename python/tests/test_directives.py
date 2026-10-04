@@ -44,35 +44,53 @@ class ParamTest(unittest.TestCase):
 
 
 class ReloadTest(unittest.TestCase):
+    @staticmethod
+    def _write(p: Path, text: str, mtime: float) -> None:
+        p.write_text(text)
+        os.utime(p, (mtime, mtime))
+
     def test_reload_on_mtime_change(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "wren.directives.toml"
             watch = DirectivesWatch(p)
             self.assertFalse(watch.maybe_reload())
-            p.write_text('never_attack = ["character"]\n')
+            self._write(p, 'never_attack = ["character"]\n', 1_000_000)
             self.assertTrue(watch.maybe_reload())
             self.assertEqual(watch.directives.never_attack, ["character"])
-            time.sleep(0.02)
-            p.write_text('never_attack = ["goblin"]\n')
-            os.utime(p, None)
+            self.assertFalse(watch.maybe_reload())
+            self._write(p, 'never_attack = ["goblin"]\n', 1_000_010)
             self.assertTrue(watch.maybe_reload())
             self.assertEqual(watch.directives.never_attack, ["goblin"])
-
 
     def test_a_broken_file_keeps_the_last_good_directives(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "wren.directives.toml"
             watch = DirectivesWatch(p)
-            p.write_text('never_attack = ["character"]\n')
+            self._write(p, 'never_attack = ["character"]\n', 1_000_000)
             self.assertTrue(watch.maybe_reload())
-            p.write_text('never_attack = ["character"\n')
-            os.utime(p, (time.time() + 5, time.time() + 5))
+            self._write(p, 'never_attack = ["character"\n', 1_000_010)
             with self.assertLogs("agentrealm_agent.directives", "WARNING"):
                 self.assertFalse(watch.maybe_reload())
             self.assertEqual(watch.directives.never_attack, ["character"])
-            p.write_text('never_attack = ["goblin"]\n')
+            self.assertFalse(watch.maybe_reload())
+            self._write(p, 'never_attack = ["goblin"]\n', 1_000_020)
             self.assertTrue(watch.maybe_reload())
             self.assertEqual(watch.directives.never_attack, ["goblin"])
+
+    def test_a_fixed_file_reloads_when_its_mtime_collides(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "wren.directives.toml"
+            watch = DirectivesWatch(p)
+            self._write(p, 'never_attack = ["character"]\n', 1_000_000)
+            self.assertTrue(watch.maybe_reload())
+            # Broken edit and its fix both land on the last good mtime.
+            self._write(p, 'never_attack = ["character", "goblin"\n', 1_000_000)
+            with self.assertLogs("agentrealm_agent.directives", "WARNING"):
+                self.assertFalse(watch.maybe_reload())
+            self.assertEqual(watch.directives.never_attack, ["character"])
+            self._write(p, 'never_attack = ["character", "goblin"]\n', 1_000_000)
+            self.assertTrue(watch.maybe_reload())
+            self.assertEqual(watch.directives.never_attack, ["character", "goblin"])
 
     def test_a_broken_file_on_first_load_gives_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:

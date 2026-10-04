@@ -40,3 +40,13 @@ class Memory:
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
+    # Heal (A10): strategist buy ops; Shop (A21) consumes them later.
+    buy_signals: list[dict] = field(default_factory=list)
+    buy_signals_seen: set[tuple[str, str]] = field(default_factory=set)
+    # Safe-zone regen sample: (start tick, start health, last tick seen). Only a
+    # "yes" is saved to the knowledge base; a "no" holds for this run only.
+    heal_regen_sample: tuple[int, int, int] | None = None
+    heal_regen_absent: bool = False
+    heal_wait: tuple[int, int] | None = None  # (tick, health) Heal began sending nothing, reset when health rises
+    heal_backoff_until: int = -1  # Heal yields to Explore until this tick
+    heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent

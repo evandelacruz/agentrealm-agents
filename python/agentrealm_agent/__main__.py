@@ -1,8 +1,9 @@
-"""python -m agentrealm_agent create|run|status <character.toml> ..."""
+"""python -m agentrealm_agent create|run|status|metrics <character.toml> ..."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import threading
@@ -11,6 +12,7 @@ import time
 from . import config
 from .client import ApiError, Client
 from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
+from .run_metrics import metrics_from_trace
 from .runner import Runner
 
 # How long `run` waits for the driver threads to stop before saving.
@@ -26,18 +28,21 @@ def main(argv: list[str] | None = None) -> int:
         ("create", "create each character in its world and save its id"),
         ("run", "drive each character until interrupted"),
         ("status", "print each character's self and position"),
+        ("metrics", "summarize run metrics from each character's trace"),
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("characters", nargs="+", help="character .toml files")
     args = ap.parse_args(argv)
 
-    if not args.api_key:
-        print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
-        return 2
     try:
         cfgs = [config.load(p) for p in args.characters]
     except (config.ConfigError, OSError) as e:
         print(e, file=sys.stderr)
+        return 2
+    if args.cmd == "metrics":
+        return metrics(cfgs)  # reads only the local trace; no key, no calls
+    if not args.api_key:
+        print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
         return 2
     client = Client(args.base_url, args.api_key)
     return {"create": create, "run": run, "status": status}[args.cmd](client, cfgs)
@@ -82,6 +87,19 @@ def status(client: Client, cfgs: list[config.CharacterConfig]) -> int:
         except ApiError as e:
             print(f"{cfg.name} ({cid}): {e}", file=sys.stderr)
     return 0
+
+
+def metrics(cfgs: list[config.CharacterConfig]) -> int:
+    failed = 0
+    for cfg in cfgs:
+        path = cfg.trace_path
+        if not path.is_file():
+            print(f"{cfg.name}: no trace at {path}", file=sys.stderr)
+            failed += 1
+            continue
+        summary = metrics_from_trace(path).to_dict()
+        print(f"{cfg.name}: {json.dumps(summary, sort_keys=True)}")
+    return 1 if failed else 0
 
 
 def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:

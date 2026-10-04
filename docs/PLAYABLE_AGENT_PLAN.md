@@ -40,7 +40,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 |---|---|---|
 | `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Not measured on a live world yet; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
 | Multi-intent queues | Movement, and `Use`/`Say`/`Broadcast` behind the `Wait`s their cooldown still owes; every other intent is sent alone; a reflex that fires replaces a running queue | Freeing the request budget; queuing a retreat with an attack |
-| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; **Retreat** (A9) reads health with the threat table; entity layer still from separate reads | Perception, retreat |
+| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; **Retreat** (A9) reads health with the threat table; **Heal** (A10) uses them when hurt and out of combat; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
 | `Use` on a block (attacks the NPC on it, or breaks the block) | No: flees from every NPC | Fighting, opening the way |
 | Priced supplies (`gem_price`) | No | Buying gear, potions, tools |
@@ -92,7 +92,7 @@ States are checked in priority order once per round trip: after each `POST tick`
 | 0 | `Downed` | `Died` | Waits for `Respawned`, then queues `Recover` |
 | 1 | `Escape` | Standing on damage, or trapped | Steps off; crosses as little hazard as possible |
 | 1 | `Retreat` | The next `retreat_hits` expected hits could kill (per-type damage from the threat table), or the threat outclasses us | Goes to the nearest known safe tile, then `Heal` (see Health and lives) |
-| 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Food in reach: walk onto it or `Take` it; food eaten on pickup heals there, carried food is then `Arm` + `Use` self. Else a carried potion: `Arm` + `Use` self, then re-`Arm` the weapon. Else, only if safe-zone regeneration has been measured, rests in a safe zone. Else goes to town and waits in the safe zone for the next goal to need less, raising a `buy` for potions (`Shop`, M8) |
+| 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Food in reach: walk onto it or `Take` it; food eaten on pickup heals there, carried food is then `Arm` + `Use` self. Else a carried potion: `Arm` + `Use` self, then re-`Arm` the weapon (A24; until then A10 leaves it unarmed). Else, only if safe-zone regeneration has been measured, rests in a safe zone. Else goes to town and waits in the safe zone for the next goal to need less, raising a `buy` for potions (`Shop`, M8) |
 | 2 | `Fight` | A hostile is in range, it is not of a kind in `never_attack`, and the win estimate clears the margin, counting every hostile within 2 blocks of it | Closes to `attack_range`, `Use` on the NPC's block, with the retreat queued behind |
 | 2 | `Flee` | A hostile is in range and we would lose | Opens distance toward safety; safe zones stop all damage |
 | 3 | `Recover` | Our death chest is on a reachable map | Walks next to it (a safe tile next to it is enough), `WithdrawFromChest` |
@@ -219,7 +219,7 @@ A boost comes from a clue that mentions its type or surroundings ("rings hollow"
 
 Health is the resource every other decision spends, and lives are the budget behind it. On a live world, at zero lives the character is ended, permanently: `character_ended` on every intent (M §11). The agent tracks both and acts to keep them up.
 
-**What it tracks.** `health` and `max_health` arrive in every round trip's observation while awake (the current agent records them but no decision reads them yet). `lives` is in the snapshot too. Each `Damaged` event is logged with its source, so the agent knows what is hurting it and how fast.
+**What it tracks.** `health` and `max_health` arrive in every round trip's observation while awake (`Heal`, A10, reads them). `lives` is in the snapshot too. Each `Damaged` event is logged with its source, so the agent knows what is hurting it and how fast.
 
 **Lives set how bold it is.** A single risk level, from cautious to bold, follows the lives left. It scales:
 - the fight margin;
@@ -242,7 +242,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 **Healing:**
 - **Food first, it's free.** Food lying in sight is picked up (walk onto it or `Take`) when the amount missing is at least what it heals, and is remembered as a source. Some food is eaten on pickup, like Olympuff's golden cap (M §16); carried food is eaten with `Arm` + `Use` self, the same call as a potion (API Use). Which kind each type is, and how much it heals, is learned from the `health` change.
 - **Potions are a reserve.** The agent keeps N potions (the `potion_reserve` directive, default 2). Below that, `Shop` buys more before any trip away from town. A potion is drunk out of combat only when no food is near and the next goal needs the health.
-- **Safe zones.** Health returning in a safe zone has not been observed yet. M7 measures it. If it returns, resting in town is the free fallback; if not, the fallback is potions and food, and an agent with neither waits in town and raises a `buy` (see `Heal`).
+- **Safe zones.** Health returning in a safe zone has not been observed yet. `Heal` (A10) measures it: a "yes" is saved to the knowledge base, a "no" (200 ticks in a safe zone with no health back) holds for that run. If it returns, resting in town is the free fallback; if not, the fallback is potions and food, and an agent with neither waits in town and raises a `buy` (see `Heal`).
 
 **Raising health and protection over time:**
 - **Armor first.** Defense counts twice: it lowers the chance to be hit and the damage of each hit. `Equip` scores armor by the damage it would have saved against the threats in the item and threat tables, and the gem budget puts armor and potions ahead of curiosity spending.

@@ -1,5 +1,6 @@
 """The loop's handling of round-trip results, events, and failures, with a fake server."""
 
+import json
 import tempfile
 import threading
 import unittest
@@ -570,6 +571,25 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(r.mem.held_queue, held)
         self.assertEqual(r.mem.path, path, "the held queue's steps are not planned twice")
 
+
+    def test_level_clear_ceremony_and_gems_reach_the_trace(self):
+        ceremony = {"level_number": 2, "max_health_gain": 5}
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 20, "window_remaining_ms": 0, "level_clear_ceremony": ceremony},
+        ])
+        r = self.runner(fake, Policy(goals=["wander"], pickup=False, on_hostile="ignore"))
+        r._level_timer.overworld = 1
+        r._level_timer.note_map(1, 0, 0.0)
+        r.world.gems = 6
+        r.tick()
+        r.world.tick = 20
+        r.tick()
+        last = json.loads(r.cfg.trace_path.read_text().splitlines()[-1])
+        self.assertEqual(last["gems"], 6)
+        self.assertEqual(last["level_clear_ceremony"], ceremony)
+        self.assertIn("level_duration_s", last)
+        self.assertIn("level_duration_ticks", last)
 
 class NeverAttackRunnerTest(RunnerTest):
     """The executor drops a Use on a never_attack target, whatever decided it (A8)."""

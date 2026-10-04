@@ -53,19 +53,15 @@ class MapView:
     """What this character has seen of one map. Missing tiles are unknown."""
 
     tiles: dict[Pos, str] = field(default_factory=dict)
-    # Non-zero occupy_damage from terrain reads (Manual §9.2 legend).
+    # occupy_damage named by terrain reads (Manual §9.2 legend), 0 included.
     damage: dict[Pos, int] = field(default_factory=dict)
 
     def walkable(self, p: Pos) -> bool:
         return self.tiles.get(p) in WALKABLE
 
-    def occupy_damage(self, p: Pos) -> int:
-        if p in self.damage:
-            return self.damage[p]
-        block = self.tiles.get(p)
-        if block in ("fire", "lava"):
-            return 8  # conservative default until a read names the value
-        return 0
+    def occupy_damage(self, p: Pos) -> int | None:
+        """The tile's occupy_damage, or None when no read has named it."""
+        return self.damage.get(p)
 
     def frontier(self) -> set[Pos]:
         """Known walkable tiles that touch an unknown one."""
@@ -158,11 +154,7 @@ class WorldModel:
                 view.tiles.setdefault((x, y), VOID)
         for (x, y), cell in terrain_cells(t).items():
             view.tiles[(x, y)] = cell["block_type"]
-            dmg = cell.get("occupy_damage")
-            if dmg:
-                view.damage[(x, y)] = int(dmg)
-            else:
-                view.damage.pop((x, y), None)
+            _set_damage(view, (x, y), cell)
         self.terrain_center = self.pos
         self.terrain_map = self.map_id
 
@@ -242,11 +234,7 @@ class WorldModel:
             p = (int(cell["x"]), int(cell["y"]))
             v = self.maps.setdefault(map_id, MapView())
             v.tiles[p] = cell.get("block_type", "")
-            dmg = cell.get("occupy_damage")
-            if dmg:
-                v.damage[p] = int(dmg)
-            else:
-                v.damage.pop(p, None)
+            _set_damage(v, p, cell)
         for cell in patch.get("removed") or []:
             map_id = int(cell["map_id"])
             p = (int(cell["x"]), int(cell["y"]))
@@ -260,10 +248,7 @@ class WorldModel:
             p = (int(cell["x"]), int(cell["y"]))
             v = self.maps.setdefault(map_id, MapView())
             v.tiles[p] = cell.get("block_type", "")
-            if "occupy_damage" in cell and cell["occupy_damage"]:
-                v.damage[p] = int(cell["occupy_damage"])
-            else:
-                v.damage.pop(p, None)
+            _set_damage(v, p, cell)
 
     def _chest_contents_from_entities(self, entities: dict) -> dict[int, list[int]]:
         return {
@@ -414,66 +399,14 @@ class WorldModel:
         occ = self.occupied() | avoid
         return [n for n in self.neighbours(p) if self.view.walkable(n) and n not in occ]
 
-    def _grid_params(
-        self,
-        avoid: set[Pos],
-        allow_goal_door: bool,
-        hostile_kinds: frozenset[str],
-        break_nominated: set[Pos],
-    ):
-        from .navigation.planner import CostGridParams
 
-        return CostGridParams(
-            avoid=set(avoid),
-            allow_goal_door=allow_goal_door,
-            hostile_kinds=hostile_kinds,
-            break_nominated=set(break_nominated),
-        )
-
-    def path(
-        self,
-        goal: Pos,
-        allow_goal_door: bool = False,
-        avoid: set[Pos] = frozenset(),
-        costly: set[Pos] = frozenset(),
-        *,
-        hostile_kinds: frozenset[str] = frozenset({"npc"}),
-        break_nominated: set[Pos] = frozenset(),
-    ) -> list[Pos] | None:
-        """A* over the M7 cost grid (A12). Excludes the start.
-
-        ``avoid`` is impassable. ``costly`` is ignored (hazards use
-        ``occupy_damage`` on the grid). With ``allow_goal_door``, the goal
-        may be a door tile.
-        """
-        del costly  # kept for callers until brain drops the parameter
-        from .navigation.planner import cost_path
-
-        return cost_path(
-            self,
-            goal,
-            self._grid_params(avoid, allow_goal_door, hostile_kinds, break_nominated),
-        )
-
-    def nearest(
-        self,
-        targets: set[Pos],
-        allow_goal_door: bool = False,
-        avoid: set[Pos] = frozenset(),
-        costly: set[Pos] = frozenset(),
-        *,
-        hostile_kinds: frozenset[str] = frozenset({"npc"}),
-        break_nominated: set[Pos] = frozenset(),
-    ) -> tuple[Pos, list[Pos]] | None:
-        """The closest target by cost-grid path cost, with its path."""
-        del costly
-        from .navigation.planner import nearest_target
-
-        return nearest_target(
-            self,
-            targets,
-            self._grid_params(avoid, allow_goal_door, hostile_kinds, break_nominated),
-        )
+def _set_damage(view: MapView, p: Pos, cell: dict) -> None:
+    """Record a cell's occupy_damage; 0 is a value, absence forgets it."""
+    dmg = cell.get("occupy_damage")
+    if dmg is not None:
+        view.damage[p] = int(dmg)
+    else:
+        view.damage.pop(p, None)
 
 
 def _opt_int(v) -> int | None:

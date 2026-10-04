@@ -5,6 +5,7 @@ import unittest
 
 from agentrealm_agent.brain import Memory, choose_call, decide
 from agentrealm_agent.config import Policy
+from agentrealm_agent.navigation import cost_path
 from agentrealm_agent.world import Entity, WorldModel, terrain_cells
 
 
@@ -32,15 +33,15 @@ class PathTest(unittest.TestCase):
             "...",
         ])
         # Straight-line distance is 2; the wall in the middle makes it 3.
-        self.assertEqual(len(w.path((2, 2))), 3)
+        self.assertEqual(len(cost_path(w, (2, 2))), 3)
         w.entities = [Entity("npc", 9, (1, 0))]
-        p = w.path((2, 0))
+        p = cost_path(w, (2, 0))
         self.assertNotIn((1, 0), p)
         self.assertNotIn((1, 1), p)
 
     def test_unknown_ground_is_pathed_as_fog(self):
         w = world(["..", ".."])
-        self.assertIsNotNone(w.path((5, 5)))
+        self.assertIsNotNone(cost_path(w, (5, 5)))
 
 
 class ExploreTest(unittest.TestCase):

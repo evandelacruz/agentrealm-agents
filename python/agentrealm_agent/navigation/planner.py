@@ -10,14 +10,21 @@ from dataclasses import dataclass, field
 
 from ..world import DOORS, NEIGHBOURS, VOID, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
 
-# Base step costs (PLAYABLE_AGENT_PLAN Navigation §1).
+# Base step costs (PLAYABLE_AGENT_PLAN Navigation §1). Every step costs at
+# least KNOWN_WALKABLE, so Chebyshev distance * KNOWN_WALKABLE is a lower
+# bound on path cost.
 KNOWN_WALKABLE = 1
 FOG = 2
 # High but finite: route around when a step is possible (occupants move).
 OCCUPANT = 50
-# Added at distance 0; falls off one per block of Chebyshev separation.
+# Added at distance 0; falls off 5 per block of Chebyshev separation and
+# stops at HOSTILE_DANGER_RADIUS.
 HOSTILE_DANGER = 30
 HOSTILE_DANGER_RADIUS = 6
+# Extra cost of a step onto a `costly` tile, or onto fire/lava whose
+# occupy_damage no read has named: worth a long detour to avoid one.
+COSTLY_STEP = 100
+HAZARDS = ("fire", "lava")
 
 
 @dataclass
@@ -25,90 +32,84 @@ class CostGridParams:
     """Per-search knobs for the cost grid."""
 
     avoid: set[Pos] = field(default_factory=set)  # impassable (rejected tiles, etc.)
+    costly: set[Pos] = field(default_factory=set)  # passable at COSTLY_STEP extra (escape off hazards)
     break_nominated: set[Pos] = field(default_factory=set)  # inert until M9: impassable
     hostile_kinds: frozenset[str] = frozenset({"npc"})
     allow_goal_door: bool = False
 
 
 def known_prefix(path: list[Pos], view: MapView) -> list[Pos]:
-    """The part of ``path`` that lies on ground we have already seen."""
+    """The leading part of ``path`` on walkable or door tiles we have seen."""
     out: list[Pos] = []
     for p in path:
         block = view.tiles.get(p)
-        if block is None:
+        if block is None or block == VOID or not (block in WALKABLE or block in DOORS):
             break
-        if block == VOID:
-            break
-        if block in WALKABLE or (block in DOORS):
-            out.append(p)
-            continue
-        break
+        out.append(p)
     return out
 
 
-def _hostiles(w: WorldModel, kinds: frozenset[str]) -> list[Entity]:
-    return [e for e in w.entities if e.kind in kinds]
+class _Grid:
+    """One search's view of the cost grid, with per-search state precomputed."""
 
+    def __init__(self, w: WorldModel, goal: Pos, params: CostGridParams):
+        self.w, self.goal, self.params = w, goal, params
+        self.occupied = w.occupied()
+        self.hostiles: list[Entity] = [e for e in w.entities if e.kind in params.hostile_kinds]
+        # Fog is unbounded, so the search is boxed to the known extent plus
+        # start and goal, with a one-tile fog ring: any detour beyond the box
+        # crosses only fog and is no cheaper than walking the ring.
+        xs = [p[0] for p in w.view.tiles] + [w.pos[0], goal[0]]
+        ys = [p[1] for p in w.view.tiles] + [w.pos[1], goal[1]]
+        self.box = (min(xs) - 1, min(ys) - 1, max(xs) + 1, max(ys) + 1)
 
-def _cell_state(view: MapView, p: Pos) -> str:
-    """``fog`` | ``void`` | ``walkable`` | ``door`` | ``blocked``."""
-    block = view.tiles.get(p)
-    if block is None:
-        return "fog"
-    if block == VOID:
-        return "void"
-    if block in DOORS:
-        return "door"
-    if block in WALKABLE:
-        return "walkable"
-    return "blocked"
+    def in_box(self, p: Pos) -> bool:
+        x0, y0, x1, y1 = self.box
+        return x0 <= p[0] <= x1 and y0 <= p[1] <= y1
 
-
-def step_cost(
-    w: WorldModel,
-    p: Pos,
-    params: CostGridParams,
-    *,
-    goal: Pos,
-    hostiles: list[Entity],
-) -> int | None:
-    """Movement cost onto ``p``, or ``None`` when impassable."""
-    if p in params.avoid or p in params.break_nominated:
-        return None
-    state = _cell_state(w.view, p)
-    if state == "void" or state == "blocked":
-        return None
-    if state == "door":
-        if p == goal and params.allow_goal_door:
-            return KNOWN_WALKABLE
-        return None
-    base = FOG if state == "fog" else KNOWN_WALKABLE
-    block = w.view.tiles.get(p)
-    if block in ("fire", "lava"):
-        base += w.view.occupy_damage(p)
-    for ent in w.entities:
-        if ent.kind in ("character", "npc") and ent.pos == p:
+    def cost(self, p: Pos) -> int | None:
+        """Movement cost onto ``p``, or ``None`` when impassable."""
+        params = self.params
+        if p in params.avoid or p in params.break_nominated:
+            return None
+        block = self.w.view.tiles.get(p)
+        if block is not None and block in DOORS:
+            # Stepping onto a door warps, so a door is only ever the goal.
+            return KNOWN_WALKABLE if p == self.goal and params.allow_goal_door else None
+        if block is None:
+            base = FOG
+        elif block in WALKABLE:
+            base = KNOWN_WALKABLE
+        else:
+            return None  # void, blocked, or an unknown type
+        if block in HAZARDS:
+            dmg = self.w.view.occupy_damage(p)
+            base += COSTLY_STEP if dmg is None else dmg
+        if p in params.costly:
+            base += COSTLY_STEP
+        if p in self.occupied:
             base += OCCUPANT
-            break
-    for h in hostiles:
-        d = chebyshev(p, h.pos)
-        if d < HOSTILE_DANGER_RADIUS:
-            base += max(0, HOSTILE_DANGER - d * 5)
-    return base
+        for h in self.hostiles:
+            d = chebyshev(p, h.pos)
+            if d < HOSTILE_DANGER_RADIUS:
+                base += max(0, HOSTILE_DANGER - d * 5)
+        return base
 
 
-def cost_path(w: WorldModel, goal: Pos, params: CostGridParams | None = None) -> list[Pos] | None:
-    """A* from ``w.pos`` to ``goal`` over the cost grid. Excludes the start."""
+def step_cost(w: WorldModel, p: Pos, params: CostGridParams, *, goal: Pos) -> int | None:
+    """Movement cost onto ``p`` for a search towards ``goal``, or ``None`` when impassable."""
+    return _Grid(w, goal, params).cost(p)
+
+
+def _search(w: WorldModel, goal: Pos, params: CostGridParams) -> tuple[list[Pos], int] | None:
     assert w.pos is not None
-    params = params or CostGridParams()
     start = w.pos
     if start == goal:
-        return []
-    hostiles = _hostiles(w, params.hostile_kinds)
-    if step_cost(w, goal, params, goal=goal, hostiles=hostiles) is None:
+        return [], 0
+    grid = _Grid(w, goal, params)
+    if grid.cost(goal) is None:
         return None
-
-    frontier: list[tuple[int, int, Pos]] = [(chebyshev(start, goal), 0, start)]
+    frontier: list[tuple[int, int, Pos]] = [(chebyshev(start, goal) * KNOWN_WALKABLE, 0, start)]
     came: dict[Pos, Pos] = {}
     cost: dict[Pos, int] = {start: 0}
     while frontier:
@@ -117,29 +118,38 @@ def cost_path(w: WorldModel, goal: Pos, params: CostGridParams | None = None) ->
             out = [cur]
             while out[-1] in came and came[out[-1]] != start:
                 out.append(came[out[-1]])
-            return out[::-1]
+            return out[::-1], g
         if g > cost.get(cur, 10**9):
             continue
         for dx, dy in NEIGHBOURS:
             n = (cur[0] + dx, cur[1] + dy)
-            sc = step_cost(w, n, params, goal=goal, hostiles=hostiles)
+            if not grid.in_box(n):
+                continue
+            sc = grid.cost(n)
             if sc is None:
                 continue
             ng = g + sc
             if ng < cost.get(n, 10**9):
                 cost[n] = ng
                 came[n] = cur
-                heapq.heappush(frontier, (ng + chebyshev(n, goal), ng, n))
+                heapq.heappush(frontier, (ng + chebyshev(n, goal) * KNOWN_WALKABLE, ng, n))
     return None
 
 
+def cost_path(w: WorldModel, goal: Pos, params: CostGridParams | None = None) -> list[Pos] | None:
+    """A* from ``w.pos`` to ``goal`` over the cost grid. Excludes the start."""
+    found = _search(w, goal, params or CostGridParams())
+    return found[0] if found else None
+
+
 def path_cost(w: WorldModel, path: list[Pos], params: CostGridParams | None = None) -> int:
-    """Sum of step costs along ``path`` (for nearest-target comparison)."""
-    params = params or CostGridParams()
-    hostiles = _hostiles(w, params.hostile_kinds)
+    """Sum of step costs along ``path``; 10**9 when a step is impassable."""
+    if not path:
+        return 0
+    grid = _Grid(w, path[-1], params or CostGridParams())
     total = 0
     for p in path:
-        sc = step_cost(w, p, params, goal=path[-1] if path else p, hostiles=hostiles)
+        sc = grid.cost(p)
         if sc is None:
             return 10**9
         total += sc
@@ -151,18 +161,23 @@ def nearest_target(
     targets: set[Pos],
     params: CostGridParams | None = None,
 ) -> tuple[Pos, list[Pos]] | None:
-    """Closest target by cost-grid path cost, with its path."""
+    """Closest target by cost-grid path cost, with its path.
+
+    Tries targets in straight-line order and stops once the lower bound on
+    the next target's cost (Chebyshev distance * KNOWN_WALKABLE) cannot beat
+    the best path cost found.
+    """
     assert w.pos is not None
     params = params or CostGridParams()
     best: tuple[Pos, list[Pos]] | None = None
     best_cost = 0
     for t in sorted(targets, key=lambda p: chebyshev(w.pos, p)):
-        if best is not None and chebyshev(w.pos, t) >= best_cost:
+        if best is not None and chebyshev(w.pos, t) * KNOWN_WALKABLE >= best_cost:
             break
-        p = cost_path(w, t, params)
-        if p is None:
+        found = _search(w, t, params)
+        if found is None:
             continue
-        c = path_cost(w, p, params)
+        p, c = found
         if best is None or c < best_cost:
             best, best_cost = (t, p), c
     return best

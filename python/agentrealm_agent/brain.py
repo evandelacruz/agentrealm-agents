@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from .config import Policy
 from .poll_cadence import gate_tick_call
-from .navigation import known_prefix
+from .navigation import CostGridParams, cost_path, known_prefix, nearest_target
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60  # windows between self reads when nothing forces one
@@ -170,22 +170,19 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
                 return Decision(withdraw_all(chest_id), f"recover from chest {chest_id}", reflex=True)
             if contents is None:
                 return Decision(None, f"open chest {chest_id}")
-        elif (
-            m.goal != "chest"
-            or not known_prefix(m.path, view)
-            or not _step_open(w, plan_avoid, known_prefix(m.path, view)[0])
-        ):
-            found = w.path(at, avoid=plan_avoid, costly=escape, hostile_kinds=frozenset(policy.hostile))
-            if found:
+        elif m.goal != "chest" or not _next_step(w, plan_avoid, m.path):
+            found = cost_path(w, at, _grid(policy, plan_avoid, escape))
+            if _next_step(w, plan_avoid, found):
                 m.path, m.goal = found, "chest"
 
-    # 5. Follow the plan; walk only the known prefix (A12).
-    prefix = known_prefix(m.path, view)
-    if not prefix or not _step_open(w, plan_avoid, prefix[0]):
+    # 5. Follow the plan, walking only its known prefix (A12). Replan when
+    # the next step is not open or not yet seen.
+    step = _next_step(w, plan_avoid, m.path)
+    if step is None:
         _replan(w, m, policy, rng, plan_avoid, escape)
-        prefix = known_prefix(m.path, view)
-    if prefix:
-        return Decision(set_position(prefix[0]), f"{m.goal} → {m.path[-1]}")
+        step = _next_step(w, plan_avoid, m.path)
+    if step is not None:
+        return Decision(set_position(step), f"{m.goal} → {m.path[-1]}")
 
     # 6. Nothing to do.
     return Decision(None, "no goal reachable")
@@ -221,24 +218,41 @@ def _step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:
     return w.view.walkable(p) and p not in w.occupied()
 
 
+def _next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos | None:
+    """The path's first step when it is seen and open, else None."""
+    prefix = known_prefix(path or [], w.view)
+    if prefix and _step_open(w, blocked, prefix[0]):
+        return prefix[0]
+    return None
+
+
 def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]) -> None:
+    """Take the first goal whose path starts on a seen, open step.
+
+    A path whose first step lies in fog is skipped like an unreachable goal,
+    so a later goal (explore, say) gets the move while terrain reads catch up.
+    """
     m.path, m.goal = [], ""
     for goal in policy.goals:
         found = _plan_goal(goal, w, policy, rng, blocked, costly)
-        if found:
+        if _next_step(w, blocked, found):
             m.path, m.goal = found, goal
             return
 
 
-def _grid_kw(policy: Policy) -> dict:
-    return {"hostile_kinds": frozenset(policy.hostile)}
+def _grid(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_door: bool = False) -> CostGridParams:
+    return CostGridParams(
+        avoid=set(avoid),
+        costly=set(costly),
+        hostile_kinds=frozenset(policy.hostile),
+        allow_goal_door=allow_goal_door,
+    )
 
 
 def _plan_goal(
     goal: str, w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]
 ) -> list[Pos] | None:
     view = w.view
-    kw = _grid_kw(policy)
     if goal == "hold":
         return None
     if goal == "wander":
@@ -246,13 +260,13 @@ def _plan_goal(
         return [rng.choice(sorted(options))] if options else None
     if goal == "goto":
         target = tuple(policy.goto)
-        return w.path(target, allow_goal_door=True, avoid=blocked, costly=costly, **kw) or None
+        return cost_path(w, target, _grid(policy, blocked, costly, allow_goal_door=True)) or None
     if goal == "doors":
         doors = {p for p, b in view.tiles.items() if b in DOORS}
-        found = w.nearest(doors, allow_goal_door=True, avoid=blocked, costly=costly, **kw)
+        found = nearest_target(w, doors, _grid(policy, blocked, costly, allow_goal_door=True))
         return found[1] if found and found[1] else None
     if goal == "explore":
         targets = view.frontier() - {w.pos}
-        found = w.nearest(targets, avoid=blocked, costly=costly, **kw)
+        found = nearest_target(w, targets, _grid(policy, blocked, costly))
         return found[1] if found and found[1] else None
     return None

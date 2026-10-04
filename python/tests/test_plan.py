@@ -67,6 +67,13 @@ class DirectivesGoalsTest(unittest.TestCase):
     def test_bad_shorthand_ignored(self):
         self.assertEqual(parse_directives_goals(["not-an-op"]), [])
 
+    def test_travel_goals_are_left_to_travel(self):
+        with self.assertNoLogs("agentrealm_agent.plan", level="WARNING"):
+            self.assertEqual(parse_directives_goals(["travel:town", "travel:point:3:4"]), [])
+            self.assertIsNone(Plan.from_directives(directive_goals=["travel:shop"], directive_params=dict(PARAM_DEFAULTS)))
+        plan = Plan.from_directives(directive_goals=["travel:town", "buy:torch"], directive_params=dict(PARAM_DEFAULTS))
+        self.assertEqual(plan.goals, [{"op": "buy", "code": "torch"}])
+
 
 class ParamLimitsTest(unittest.TestCase):
     def test_strategist_may_raise_fight_margin(self):
@@ -287,6 +294,24 @@ class ScriptedOutcomeTest(unittest.TestCase):
         out = scripted_outcome(w, m, pol, random.Random(0), never_attack=[], plan=new)
         self.assertEqual(m.path[-1], (0, 3), "path toward the old head's target is dropped")
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), m.path[0])
+
+
+    def test_stalled_head_keeps_the_wander_step(self):
+        w = open_world()
+        pol = Policy(kind="scripted", goals=["wander"])
+        plan = Plan([{"op": "travel", "to": "town", "x": 0, "y": 0}], dict(PARAM_DEFAULTS))
+        m = Memory()
+        rng = random.Random(0)
+        first = scripted_outcome(w, m, pol, rng, never_attack=[], plan=plan)
+        self.assertIsNotNone(plan.stalled_since_tick, "no town known: the head stalls")
+        self.assertEqual(m.goal, "wander")
+        steps = {(first.intents[0]["x"], first.intents[0]["y"])}
+        for tick in range(1, 6):
+            w.tick = tick
+            out = scripted_outcome(w, m, pol, rng, never_attack=[], plan=plan)
+            steps.add((out.intents[0]["x"], out.intents[0]["y"]))
+        self.assertEqual(len(steps), 1, "wander is not re-rolled while the head stalls")
+        self.assertEqual(plan.current()["to"], "town", "still within the stall window")
 
 
 class PathForPlanOpTest(unittest.TestCase):

@@ -76,15 +76,25 @@ def plan_op_goal(op: GoalOp) -> str:
     return ""
 
 
-def path_owned_by_plan(plan: Plan | None, m: Memory) -> bool:
+def path_owned_by_plan(plan: Plan | None, m: Memory, policy_goals: list[str] | tuple[str, ...] = ()) -> bool:
     """False when ``m.path`` was set for something other than the plan's head op.
 
     A path left by a ``policy.goals`` round, from before a ``goals`` reload, or
     for an earlier op of the same kind with another target must not keep
     driving movement once the stack's head is a different op (A34).
+
+    While the head is stalled (no path yet), ``policy.goals`` have the move,
+    so a path ``replan`` set from one of them is kept until it goes stale
+    rather than re-rolled every window.
     """
     op = plan.current() if plan is not None else None
-    return op is None or (m.goal != "" and m.goal == plan_op_goal(op) and m.goal_op == op)
+    if op is None:
+        return True
+    if m.goal == "":
+        return False
+    if plan.stalled_since_tick is not None and m.goal_op is None and m.goal in policy_goals:
+        return True
+    return m.goal == plan_op_goal(op) and m.goal_op == op
 
 
 def path_for_plan_op(

@@ -271,10 +271,20 @@ def validate_goal_op(raw: object) -> GoalOp | None:
     return op
 
 
+def is_travel_goal(text: str) -> bool:
+    """``travel:*`` entries belong to **Travel** (A27), which keeps its own
+    queue from directives ``goals``; the stack leaves them out so the two
+    never walk the same destination with different progress."""
+    return text.strip().startswith("travel:")
+
+
 def parse_directives_goal(text: str) -> GoalOp | None:
-    """Turn one directives shorthand string into a validated op."""
+    """Turn one directives shorthand string into a validated op.
+
+    ``travel:*`` entries return None without a log line: Travel reads them.
+    """
     text = text.strip()
-    if not text:
+    if not text or is_travel_goal(text):
         return None
     m = _SHORTHAND.match(text)
     if not m:
@@ -455,9 +465,10 @@ class Plan:
         directive_goals: list[str],
         directive_params: dict[str, float | int],
     ) -> Plan | None:
-        if not directive_goals:
+        stack_goals = [g for g in directive_goals if not is_travel_goal(g)]
+        if not stack_goals:
             return None
-        ops = parse_directives_goals(directive_goals)
+        ops = parse_directives_goals(stack_goals)
         if not ops:
             log.warning("plan: no valid directives goal in %r; using the built-in plan", directive_goals)
             return None

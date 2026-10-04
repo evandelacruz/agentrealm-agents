@@ -5,11 +5,13 @@ from .dispatch import STATES, dispatch
 from .explore import ExploreState, scripted_outcome
 from .gather import GatherState, gather_outcome
 from .heal import HealState
+from .travel import TravelState
 
 __all__ = [
     "ExploreState",
     "GatherState",
     "HealState",
+    "TravelState",
     "PlayContext",
     "STATES",
     "State",

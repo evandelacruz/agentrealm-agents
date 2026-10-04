@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..knowledge_maps import iter_doors, record_locked_door
+from ..knowledge_maps import iter_doors, record_hunting_zone, record_locked_door
 from ..world import DOORS, Pos
 
 if TYPE_CHECKING:
@@ -73,18 +73,15 @@ def end_decision(nav: NavMemory, tick: int) -> None:
     nav.occupant_until = {k: until for k, until in nav.occupant_until.items() if until > tick}
 
 
-def record_strength_closed(kb: KnowledgeBase | None, w: WorldModel, pos: Pos) -> None:
-    """Stores the closure for A27's strength bracket. Navigation keeps off the
-    cell through NavMemory.impassable; nothing reads this entry yet."""
-    if kb is None:
-        return
+def record_strength_closed(kb: KnowledgeBase | None, w: WorldModel, pos: Pos) -> int | None:
+    """Mark a hunting cell closed in the knowledge base. Returns its ceiling
+    when a ``get_zone`` read has served it, for A27's strength bracket."""
+    if w.map_id is None:
+        return None
     fact = w.zones.get(w.map_id, {}).get(pos)
-    entry: dict = {"closed": True}
-    if fact is not None and fact.strength_ceiling is not None:
-        entry["strength_ceiling"] = fact.strength_ceiling
-    with kb.lock:
-        hunting = kb.maps.setdefault(str(w.map_id), {}).setdefault("hunting", {})
-        hunting[f"{pos[0]},{pos[1]}"] = entry
+    ceiling = fact.strength_ceiling if fact is not None else None
+    record_hunting_zone(kb, w.map_id, pos, ceiling, closed=True)
+    return ceiling
 
 
 def learn_step_rejection(
@@ -115,7 +112,8 @@ def learn_step_rejection(
                 record_locked_door(kb, w.map_id, landing, block if block in DOORS else "framed_door")
         case "over_strength_ceiling":
             nav.impassable.add(cell)
-            record_strength_closed(kb, w, landing)
+            # A loadout change reopens the cell (A27: StrengthBracket.reset).
+            m.strength.note_over(cell, record_strength_closed(kb, w, landing))
         case _:
             # A code this table does not handle (or none): keep off the cell for
             # one decision, as reflex 1 did before A14, and learn nothing more.

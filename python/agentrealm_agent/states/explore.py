@@ -63,7 +63,7 @@ def scripted_outcome(
         if op is not None and op["op"] == "wait":
             return StateOutcome(None, "plan wait", state=state)
 
-    step = next_step(w, plan_avoid, m.path) if path_owned_by_plan(plan, m) else None
+    step = next_step(w, plan_avoid, m.path) if path_owned_by_plan(plan, m, policy.goals) else None
     if step is None:
         replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge, plan=plan)
         step = next_step(w, plan_avoid, m.path)

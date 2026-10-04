@@ -7,7 +7,7 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import route_first_leg
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, guided_step, nav_search
+from ..pathing import grid_params, guided_step, nav_search, next_step
 from ..travel.ops import current_travel_op, set_travel_index
 from ..travel.resolve import ResolvedDestination, at_destination, resolve_travel
 from ..world import Pos, WorldModel
@@ -103,20 +103,36 @@ def _travel_step(
     """
     goal = f"travel:{dest.label}"
     plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest, goal)
-    leg_target = dest.pos
-    if dest.map_id != w.map_id:
-        params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
-        leg_path = route_first_leg(w, knowledge, dest.map_id, dest.pos, params)
-        leg_target = leg_path[-1] if leg_path else dest.pos
-    kwargs = (
-        {"backoff_map": dest.map_id, "backoff_target": dest.pos} if dest.map_id != w.map_id else {}
-    )
-    step = guided_step(m, w, goal, leg_target, plan_avoid, plan, **kwargs)
+    leg = _travel_leg(m, w, goal, dest, plan_avoid, plan)
+    if leg is None:  # no known route to another map: yield, nothing to back off
+        if m.goal == goal:
+            m.path, m.goal = [], ""
+        return None
+    step = guided_step(m, w, goal, leg, plan_avoid, plan)
     if step is None:
         return None
     note = nav_stuck.level_note(nav_stuck.active(m, w))
-    label = m.path[-1] if m.path else leg_target
+    label = m.path[-1] if m.path else leg.target
     return StateOutcome([set_position(step)], f"{goal} → {label}{note}", state=TravelState.name)
+
+
+def _travel_leg(
+    m: Memory,
+    w: WorldModel,
+    goal: str,
+    dest: ResolvedDestination,
+    plan_avoid: set[Pos],
+    plan,
+) -> nav_stuck.Leg | None:
+    """What this map's leg toward ``dest`` tracks: ``dest`` itself on its own
+    map, else the door the route walks to (A15). A kept path to that door
+    needs no new route search."""
+    if dest.map_id == w.map_id:
+        return nav_stuck.Leg(dest.pos)
+    kept = nav_stuck.leg_toward(m, w, goal, dest.map_id, dest.pos, None)
+    if kept is not None and m.goal == goal and next_step(w, plan_avoid, m.path):
+        return kept
+    return nav_stuck.leg_toward(m, w, goal, dest.map_id, dest.pos, plan(None))
 
 
 def _route_plan(
@@ -129,11 +145,18 @@ def _route_plan(
     dest: ResolvedDestination,
     goal: str,
 ):
-    """Plan the current map leg toward ``dest`` (A26), at the attempt's fog price."""
+    """Plan the current map leg toward ``dest`` (A26), at the attempt's fog price.
+
+    Routes once per fog price this decision, so the leg lookup and
+    ``guided_step`` share one door-graph search.
+    """
+    routes: dict[int, list[Pos] | None] = {}
 
     def plan(att):
         params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
-        nav = nav_search(m, w, goal, dest.pos) if dest.map_id == w.map_id else None
-        return route_first_leg(w, knowledge, dest.map_id, dest.pos, params, nav=nav)
+        if params.fog_cost not in routes:
+            nav = nav_search(m, w, goal, dest.pos) if dest.map_id == w.map_id else None
+            routes[params.fog_cost] = route_first_leg(w, knowledge, dest.map_id, dest.pos, params, nav=nav)
+        return routes[params.fog_cost]
 
     return plan

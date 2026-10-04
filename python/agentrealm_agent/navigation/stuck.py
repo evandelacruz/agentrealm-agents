@@ -26,7 +26,7 @@ from __future__ import annotations
 import dataclasses
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from ..world import NEIGHBOURS, WALKABLE, Pos, WorldModel, chebyshev
 from .planner import CostGridParams
@@ -84,6 +84,14 @@ class NavAttempt:
     backoff_key: str | None = None  # cross-map legs: ultimate destination's key
 
 
+class Leg(NamedTuple):
+    """The cell on this map an attempt tracks. For a leg toward a door to
+    another map, ``backoff_key`` names the ultimate destination a give-up backs off."""
+
+    target: Pos
+    backoff_key: str | None = None
+
+
 @dataclass
 class NavStuckMemory:
     attempts: dict[str, NavAttempt] = field(default_factory=dict)
@@ -114,14 +122,7 @@ def filter_frontiers(stuck: NavStuckMemory, map_id: int | None, targets: set[Pos
     return {p for p in targets if not is_backed_off(stuck, goal_key("explore", map_id, p), tick)}
 
 
-def track(
-    m: Memory,
-    w: WorldModel,
-    goal: str,
-    target: Pos,
-    *,
-    backoff_key: str | None = None,
-) -> NavAttempt | None:
+def track(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt | None:
     """The attempt for ``goal`` at ``target`` on this map, made active.
 
     An attempt keeps its level when a replan flips to another target and back,
@@ -129,6 +130,7 @@ def track(
     """
     if w.map_id is None or w.pos is None:
         return None
+    target, backoff_key = target if isinstance(target, Leg) else Leg(target)
     stuck = m.nav_stuck
     key = goal_key(goal, w.map_id, target)
     att = stuck.attempts.get(key)
@@ -151,6 +153,27 @@ def active(m: Memory, w: WorldModel) -> NavAttempt | None:
     if att is None or att.map_id != w.map_id:
         return None
     return att
+
+
+def leg_toward(
+    m: Memory, w: WorldModel, goal: str, dest_map: int | None, dest: Pos, path: list[Pos] | None
+) -> Leg | None:
+    """What an attempt toward ``dest`` tracks on this map (A15).
+
+    On this map, ``dest`` itself. On another map, the door that ends ``path``
+    (the route's first leg); with no route found, the door this destination's
+    active attempt was already walking to, so a blocked leg keeps escalating.
+    None when no route was ever known: that yields without a backoff.
+    """
+    if dest_map == w.map_id:
+        return Leg(dest)
+    ultimate = goal_key(goal, dest_map, dest)
+    if path:
+        return Leg(path[-1], ultimate)
+    att = active(m, w)
+    if att is not None and att.goal == goal and att.backoff_key == ultimate:
+        return Leg(att.target, ultimate)
+    return None
 
 
 def finish(m: Memory, att: NavAttempt) -> None:

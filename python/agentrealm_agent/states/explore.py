@@ -92,13 +92,12 @@ def _missed_step(
     avoid: set[Pos],
     target_plan,
     goal: str,
-    target: Pos,
+    leg: nav_stuck.Leg,
     routed: bool,
-    backoff_key: str | None = None,
 ) -> Pos | None:
     """No goal got a step. A goal on this map with no route at all is stuck at
     once; one whose route starts on a taken cell waits out its window (A15)."""
-    att = nav_stuck.track(m, w, goal, target, backoff_key=backoff_key)
+    att = nav_stuck.track(m, w, goal, leg)
     if att is None:
         return None
     if att.level == nav_stuck.REVEAL:
@@ -114,10 +113,7 @@ def _escalated_step(w: WorldModel, m: Memory, avoid: set[Pos], target_plan) -> P
     the backoff keeps that target out of the new choice.
     """
     att = nav_stuck.active(m, w)
-    if att is None:
-        return None
-    # ``replan`` clears ``m.goal`` before it retries policy goals; keep escalating the active attempt.
-    if m.goal not in ("", att.goal):
+    if att is None or m.goal != att.goal:
         return None
     if nav_stuck.done(att, w):
         nav_stuck.finish(m, att)

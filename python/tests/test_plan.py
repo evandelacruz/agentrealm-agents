@@ -317,20 +317,20 @@ class ScriptedOutcomeTest(unittest.TestCase):
 class PathForPlanOpTest(unittest.TestCase):
     def test_explore_area_paths_to_frontier_in_the_area(self):
         op = {"op": "explore_area", "x": 3, "y": 0, "radius": 1}
-        path, label, _, _ = path_for_plan_op(op, open_world(), Memory(), Policy(kind="scripted"), set(), set(), None)
+        path, label, _ = path_for_plan_op(op, open_world(), Memory(), Policy(kind="scripted"), set(), set(), None)
         self.assertEqual(label, "explore_area")
         self.assertLessEqual(max(abs(path[-1][0] - 3), abs(path[-1][1])), 1)
 
     def test_travel_point_and_town(self):
         w = open_world()
         pol = Policy(kind="scripted")
-        path, label, _, _ = path_for_plan_op({"op": "travel", "to": "point", "x": 3, "y": 2}, w, Memory(), pol,
+        path, label, _ = path_for_plan_op({"op": "travel", "to": "point", "x": 3, "y": 2}, w, Memory(), pol,
                                        set(), set(), None)
         self.assertEqual((path[-1], label), ((3, 2), "plan_travel"))
         town = {"op": "travel", "to": "town", "x": 0, "y": 0}
         self.assertIsNone(path_for_plan_op(town, w, Memory(), pol, set(), set(), None), "no anchor known")
         w.respawn_anchors.append((1, (2, 2)))
-        path, label, _, _ = path_for_plan_op(town, w, Memory(), pol, set(), set(), None)
+        path, label, _ = path_for_plan_op(town, w, Memory(), pol, set(), set(), None)
         self.assertEqual((path[-1], label), ((2, 2), "plan_town"))
 
     def test_other_ops_have_no_path(self):

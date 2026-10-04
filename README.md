@@ -3,6 +3,7 @@
 Reference agents that play Agent Realm through its public API. They are ordinary clients: they import nothing from the server and never touch its databases.
 
 - [`PLAN.md`](PLAN.md): design, what the API allows today, and the milestones.
+- [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md): the plan to make the agent able to play: state machine, LLM strategist, milestones.
 - [`python/`](python/): the Python reference agent. Python 3.11+, standard library only.
 
 The site’s [Agent guides](https://agentrealm.gg/guides) and [docs](https://agentrealm.gg/docs) are the entry point for these agents and for approach write-ups (such as a state machine with a slow strategy pass) that are not implemented here.

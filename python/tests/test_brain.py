@@ -205,26 +205,31 @@ class TerrainStaleTest(unittest.TestCase):
 
 class SchedulerTest(unittest.TestCase):
     def test_call_choice(self):
-        pol = scripted(entity_refresh=5)
+        pol = scripted(entity_refresh=5, hostile=["npc"])
         cases = [
             ("self first", dict(need_self=True), {}, "self"),
             ("then position", dict(need_self=False, need_position=True), {}, "position"),
             ("terrain after moving half the perception range", dict(need_self=False, need_position=False),
              dict(terrain_center=(0, 0), pos=(2, 0), perception=3, entities_tick=10, tick=10), "terrain"),
-            ("terrain on map change", dict(need_self=False, need_position=False, last_poll_tick=10),
+            ("terrain on map change", dict(need_self=False, need_position=False, windows_since_poll=2),
              dict(terrain_center=(0, 0), terrain_map=7, map_id=8, pos=(0, 0), entities_tick=10, tick=10), "terrain"),
             ("entities when stale", dict(need_self=False, need_position=False),
              dict(entities_tick=0, tick=5), "entities"),
             ("entities on alarm", dict(need_self=False, need_position=False, alarm=True),
              dict(entities_tick=10, tick=10), "entities"),
-            ("calm defers tick between polls", dict(need_self=False, need_position=False, last_poll_tick=10),
+            ("calm defers tick between polls", dict(need_self=False, need_position=False, windows_since_poll=2),
              dict(entities_tick=10, tick=12), "wait"),
             ("calm spends a window on stale terrain before the next poll",
-             dict(need_self=False, need_position=False, last_poll_tick=10),
+             dict(need_self=False, need_position=False, windows_since_poll=2),
              dict(terrain_center=(0, 0), pos=(3, 0), perception=5, entities_tick=10, tick=12), "terrain"),
-            ("alarm polls every window", dict(need_self=False, need_position=False, alarm=True, last_poll_tick=10),
+            ("alarm polls every window", dict(need_self=False, need_position=False, alarm=True, windows_since_poll=2),
              dict(entities_tick=10, tick=11), "entities"),
-            ("otherwise tick", dict(need_self=False, need_position=False, last_poll_tick=0),
+            ("a step in flight polls the next window",
+             dict(need_self=False, need_position=False, windows_since_poll=1, pending={"verb": "SetPosition", "x": 1, "y": 0}),
+             dict(entities_tick=10, tick=11), "tick"),
+            ("a hostile within 3 blocks polls every window", dict(need_self=False, need_position=False, windows_since_poll=1),
+             dict(entities=[Entity("npc", 9, (3, 0))], entities_tick=10, tick=11), "tick"),
+            ("otherwise tick", dict(need_self=False, need_position=False, windows_since_poll=5),
              dict(entities_tick=10, tick=12), "tick"),
         ]
         for name, mem, wkw, want in cases:

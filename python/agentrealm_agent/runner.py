@@ -69,8 +69,11 @@ class Runner:
                 self.pacer.wait_next_window(not_before)
                 not_before = 0.0
                 call = choose_call(self.world, self.mem, self.cfg.policy)
+                self.mem.windows_since_poll += 1
                 if call == "wait":
-                    self.log("wait", "calm cadence", {})
+                    # Spends nothing and traces nothing: the next call's line
+                    # shows the gap in its tick.
+                    self.mem.windows_since_self += 1
                     continue
                 try:
                     not_before = self.step(call)
@@ -121,13 +124,13 @@ class Runner:
 
     def tick(self) -> float:
         w, m = self.world, self.mem
-        m.last_poll_tick = w.tick
         d: Decision = decide(w, m, self.cfg.policy, self.rng)
         # A one-entry queue: it replaces whatever is held and runs next tick
         # (docs/API.md Intent Queue). With nothing to do, the held queue is
         # left as it is.
         r = self.client.tick(self.cid, None if d.intent is None else [d.intent])
         w.tick = int(r.get("tick", w.tick))
+        m.windows_since_poll = 0
         result = self.pending_result(r.get("intent_results") or [])
         rejected = result is not None and self.on_result(result)
         events = w.apply_events(r.get("events_by_tick") or [])

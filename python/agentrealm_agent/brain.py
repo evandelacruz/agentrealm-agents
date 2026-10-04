@@ -27,7 +27,7 @@ class Memory:
     need_position: bool = True
     need_self: bool = True
     windows_since_self: int = 0
-    last_poll_tick: int = -10**9  # sim tick of the last POST tick (calm cadence)
+    windows_since_poll: int = 10**9  # paced windows since the last POST tick (calm cadence)
     pending: dict | None = None  # the intent submitted last, awaiting its result
     pending_queue: str | None = None  # the queue_id `pending` was sent under
     undo: Pos | None = None  # where we stood before assuming `pending` moved us
@@ -61,7 +61,10 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
         return "terrain"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
         return "entities"
-    if calm(w, m, policy) and w.tick - m.last_poll_tick < policy.entity_refresh:
+    # Counted in windows, not sim ticks: a wait sends nothing, so no response
+    # moves w.tick. Only while the last poll queued nothing: a one-intent queue
+    # runs one tick, and waiting after it would stall a held path.
+    if m.pending is None and calm(w, m, policy) and m.windows_since_poll < policy.entity_refresh:
         return "wait"
     return "tick"
 

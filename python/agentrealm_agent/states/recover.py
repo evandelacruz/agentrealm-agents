@@ -5,7 +5,7 @@ from __future__ import annotations
 from ..config import Policy
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase
-from ..loot import inventory_full, loot_score, worst_droppable
+from ..loot import carry_slots_used, loot_score, worst_droppable
 from ..memory import Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
@@ -13,7 +13,7 @@ from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome, scripted_outcome
-from .intents import drop, set_position, withdraw_all
+from .intents import drop, set_position, withdraw, withdraw_all
 from .pickup import knowledge_items
 
 
@@ -55,12 +55,20 @@ def _chest_supplies(contents: list) -> list[InventorySupply]:
 def death_chest_recover_intents(
     w: WorldModel, chest_id: int, contents: list, items: dict
 ) -> list[dict] | None:
-    """``WithdrawFromChest`` when there is room; ``Drop`` junk when full but worth it; else skip (A20)."""
+    """``WithdrawFromChest`` when there is room; ``Drop`` junk when full but worth it; else skip (A20).
+
+    When only some fit, withdraw the best by id: a bare withdraw takes the
+    lowest ids first (B117), which could be junk instead of what the drop was for.
+    """
     supplies = _chest_supplies(contents)
     if not supplies:
         return None
-    if not inventory_full(w):
+    room = w.carry_capacity - carry_slots_used(w)
+    if room >= len(supplies):
         return [withdraw_all(chest_id)]
+    if room > 0:
+        best_first = sorted(supplies, key=lambda s: (-loot_score(s.code, items), s.id))
+        return [withdraw(chest_id, [s.id for s in best_first[:room]])]
     shed = worst_droppable(w, items)
     if shed is None:
         return None
@@ -127,6 +135,14 @@ def recover_outcome(
     return None
 
 
+def _skip_reason(w: WorldModel) -> str:
+    """Why Recover fell back to Explore: out of reach, or in reach with nothing worth taking."""
+    _, at, chest_id = w.death_chest
+    if w.pos is not None and chebyshev(at, w.pos) <= 1 and w.chest_contents.get(chest_id):
+        return f"chest {chest_id} not worth a slot"
+    return "chest not reachable"
+
+
 class RecoverState(State):
     """Priority 3: above Explore. Escape, Retreat and Flee outrank it; the fight and pickup reflexes still run first (PLAN.md)."""
 
@@ -161,5 +177,5 @@ class RecoverState(State):
         fallback = scripted_outcome(
             world, m, policy, ctx.rng, never_attack=ctx.never_attack, knowledge=ctx.knowledge, plan=ctx.plan, state=self.name
         )
-        fallback.reason = f"chest not reachable; {fallback.reason}"
+        fallback.reason = f"{_skip_reason(world)}; {fallback.reason}"
         return fallback

@@ -151,8 +151,19 @@ class RecoverDispatchTest(unittest.TestCase):
         w.chest_contents[80] = [InventorySupply(71, "torch")]
         out = dispatch(w, ctx(scripted(goals=["hold"])))
         self.assertEqual(out.state, "Recover")
-        self.assertIn("chest not reachable", out.reason)
+        self.assertIn("chest 80 not worth a slot", out.reason)
         self.assertIsNone(out.intents)
+
+    def test_after_drop_withdraws_best_not_lowest_id(self):
+        w = world(["....."], at=(1, 0))
+        died_at(w, 0, 0)
+        apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
+        full_inventory(w)
+        w.held_supplies.pop(0)  # the Drop freed one slot
+        w.chest_contents[80] = [InventorySupply(71, "torch"), InventorySupply(72, "bronze_sword")]
+        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
+        self.assertEqual(out.state, "Recover")
+        self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 80, "supply_ids": [72]}])
 
     def test_adjacent_waits_to_see_unopened_chest(self):
         w = world(["....."], at=(1, 0))

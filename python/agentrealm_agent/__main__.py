@@ -1,8 +1,9 @@
-"""python -m agentrealm_agent create|run|status <character.toml> ..."""
+"""python -m agentrealm_agent create|run|status|metrics <character.toml> ..."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import threading
@@ -33,16 +34,18 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("characters", nargs="+", help="character .toml files")
     args = ap.parse_args(argv)
 
-    if not args.api_key and args.cmd != "metrics":
-        print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
-        return 2
     try:
         cfgs = [config.load(p) for p in args.characters]
     except (config.ConfigError, OSError) as e:
         print(e, file=sys.stderr)
         return 2
-    client = Client(args.base_url, args.api_key) if args.api_key else None
-    return {"create": create, "run": run, "status": status, "metrics": metrics}[args.cmd](client, cfgs)
+    if args.cmd == "metrics":
+        return metrics(cfgs)  # reads only the local trace; no key, no calls
+    if not args.api_key:
+        print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
+        return 2
+    client = Client(args.base_url, args.api_key)
+    return {"create": create, "run": run, "status": status}[args.cmd](client, cfgs)
 
 
 def create(client: Client, cfgs: list[config.CharacterConfig]) -> int:
@@ -86,9 +89,7 @@ def status(client: Client, cfgs: list[config.CharacterConfig]) -> int:
     return 0
 
 
-def metrics(_client: Client, cfgs: list[config.CharacterConfig]) -> int:
-    import json
-
+def metrics(cfgs: list[config.CharacterConfig]) -> int:
     failed = 0
     for cfg in cfgs:
         path = cfg.trace_path

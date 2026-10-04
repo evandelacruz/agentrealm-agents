@@ -103,7 +103,6 @@ class WorldModel:
     armed_code: str | None = None
     worn_codes: dict[str, str] = field(default_factory=dict)
     gems: int | None = None
-    levels_cleared: list[int] | None = None
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -331,17 +330,9 @@ class WorldModel:
                 self.gems = gems
         self.armed_code, self.worn_codes = loadout_from_inventory(inv)
 
-    def _apply_levels_cleared(self, body: dict, *, complete: bool) -> None:
-        if complete:
-            raw = body.get("levels_cleared")
-            self.levels_cleared = _levels_cleared(raw) if raw is not None else []
-        elif "levels_cleared" in body:
-            self.levels_cleared = _levels_cleared(body.get("levels_cleared")) or []
-
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
         self._apply_vitals(snap, complete=True)
-        self._apply_levels_cleared(snap, complete=True)
         if "inventory" in snap:
             self._apply_inventory(snap.get("inventory"))
         if "entities" in snap:
@@ -357,7 +348,6 @@ class WorldModel:
     def _apply_delta_body(self, delta: dict) -> None:
         self._apply_body_scalars(delta)
         self._apply_vitals(delta, complete=False)
-        self._apply_levels_cleared(delta, complete=False)
         if "inventory" in delta:
             self._apply_inventory(delta.get("inventory"))
         if "entities" in delta:
@@ -468,17 +458,6 @@ def _set_damage(view: MapView, p: Pos, cell: dict) -> None:
         view.damage[p] = int(dmg)
     else:
         view.damage.pop(p, None)
-
-
-def _levels_cleared(raw) -> list[int] | None:
-    if not isinstance(raw, list):
-        return None
-    out: list[int] = []
-    for item in raw:
-        n = _opt_int(item)
-        if n is not None:
-            out.append(n)
-    return out
 
 
 def _opt_int(v) -> int | None:

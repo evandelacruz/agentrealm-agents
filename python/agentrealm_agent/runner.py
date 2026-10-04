@@ -103,6 +103,10 @@ class Runner:
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
         apply_town(self.world, world.get("town"))
+        town = world.get("town") or {}
+        if town.get("map_id") is not None:
+            # The town is on the overworld, so leaving its map enters a level (A41).
+            self._level_timer.overworld = int(town["map_id"])
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:

@@ -148,19 +148,17 @@ class SnapshotObservationTest(unittest.TestCase):
         self.w.forget_position()
         self.assertIsNone(self.w.snapshot_version)
 
-    def test_inventory_gems_and_levels_cleared(self):
+    def test_inventory_gems(self):
         self.w.apply_observation(
             {
                 "version": "1",
                 "complete": True,
                 "snapshot": {
-                    "levels_cleared": [1, 3],
                     "inventory": {"gems": 7, "armed": None, "worn": {}, "held": [], "chest": []},
                 },
             }
         )
         self.assertEqual(self.w.gems, 7)
-        self.assertEqual(self.w.levels_cleared, [1, 3])
         self.w.apply_observation({"version": "2", "delta": {"inventory": {"gems": 9}}})
         self.assertEqual(self.w.gems, 9)
 

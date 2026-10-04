@@ -2,6 +2,10 @@
 
 Parses JSONL written by ``Runner`` and returns counts and timings for
 evaluation (M12): levels cleared, deaths, kills, gems, and time per level.
+
+The trace is append-only across runs. Metrics cover the last run only: each
+run starts with a ``world`` record, and everything before the last one is
+ignored.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ class RunMetrics:
     gems: int | None = None
     levels_cleared: int = 0
     time_per_level: dict[int, float] = field(default_factory=dict)
+    bad_lines: int = 0  # unparseable trace lines, e.g. one cut short by a kill
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -27,13 +32,24 @@ class RunMetrics:
             "gems": self.gems,
             "levels_cleared": self.levels_cleared,
             "time_per_level": {str(k): v for k, v in sorted(self.time_per_level.items())},
+            "bad_lines": self.bad_lines,
         }
 
 
 class LevelTimer:
-    """Wall-clock and tick span since the character last changed maps."""
+    """Wall-clock and tick span since the character entered the level it is in.
 
-    def __init__(self) -> None:
+    A level is a set of maps behind an entrance door on the overworld
+    (docs/GAME_NOTES.md Levels and bosses), so the span starts when the
+    character leaves the overworld (the town's map) and runs across every map
+    inside the level. Returning to the overworld or clearing a level ends it.
+    A run that starts inside a level has no span for that level. With the
+    overworld unknown, the span starts at the first map seen and after each
+    clear.
+    """
+
+    def __init__(self, overworld: int | None = None) -> None:
+        self.overworld = overworld
         self._map_id: int | None = None
         self._entered_t: float | None = None
         self._entered_tick: int | None = None
@@ -41,9 +57,12 @@ class LevelTimer:
     def note_map(self, map_id: int | None, tick: int, now: float) -> None:
         if map_id is None or map_id == self._map_id:
             return
-        self._map_id = map_id
-        self._entered_t = now
-        self._entered_tick = tick
+        prev, self._map_id = self._map_id, map_id
+        if map_id == self.overworld:
+            self.forget_span()
+        elif prev == self.overworld:
+            self._entered_t = now
+            self._entered_tick = tick
 
     def duration(self, now: float, tick: int) -> tuple[float | None, int | None]:
         if self._entered_t is None or self._entered_tick is None:
@@ -54,20 +73,48 @@ class LevelTimer:
         self._entered_t = None
         self._entered_tick = None
 
+    def cleared(self) -> None:
+        """The level was cleared and the character moved outside it.
 
-def iter_trace(path: Path) -> Iterable[dict[str, Any]]:
+        The map is forgotten too, so with the overworld known a stale read of
+        the level's map in the same tick does not start a new span.
+        """
+        self.forget_span()
+        self._map_id = None
+
+
+def iter_trace(path: Path, bad: list[int] | None = None) -> Iterable[dict[str, Any]]:
+    """Yields each record; a line that does not parse is skipped and counted in ``bad``."""
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
-            yield json.loads(line)
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                rec = None
+            if not isinstance(rec, dict):
+                if bad is not None:
+                    bad[0] += 1
+                continue
+            yield rec
+
+
+def last_run(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The records from the last run's ``world`` record on (all of them if none)."""
+    out: list[dict[str, Any]] = []
+    for rec in records:
+        if rec.get("call") == "world" and "world" in rec:
+            out = []
+        out.append(rec)
+    return out
 
 
 def compute_metrics(records: Iterable[dict[str, Any]]) -> RunMetrics:
     out = RunMetrics()
     cleared_levels: set[int] = set()
-    for rec in records:
+    for rec in last_run(records):
         for ev in rec.get("events") or []:
             kind = ev.get("kind")
             if kind == "Died":
@@ -87,7 +134,10 @@ def compute_metrics(records: Iterable[dict[str, Any]]) -> RunMetrics:
 
 
 def metrics_from_trace(path: Path) -> RunMetrics:
-    return compute_metrics(iter_trace(path))
+    bad = [0]
+    out = compute_metrics(iter_trace(path, bad))
+    out.bad_lines = bad[0]
+    return out
 
 
 def tick_trace_extras(
@@ -110,5 +160,5 @@ def tick_trace_extras(
             extra["level_duration_s"] = duration_s
         if duration_ticks is not None:
             extra["level_duration_ticks"] = duration_ticks
-        level_timer.forget_span()
+        level_timer.cleared()
     return extra

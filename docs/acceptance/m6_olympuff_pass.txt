@@ -1,0 +1,58 @@
+M6 acceptance (A4) — Olympuff live PASS
+Date (UTC): 2026-10-04
+World: olympuff
+Character: OlympuffWalker (dedicated acceptance; id 11 on the run account)
+Base URL: https://api.agentrealm.gg
+Command: python3 scripts/smoke_m6_olympuff.py
+
+--- summary ---
+finished in 136.5s
+steps applied: 200 (target 200)
+movement_cooldown rejections: 0
+calm windows: 541, calm tick POSTs: 114 (21.1% of calm windows)
+calm API calls (reads included): 448 (82.8% of calm windows)
+PASS: M6 acceptance criteria met
+
+--- log (first 15 lines) ---
+M6 smoke (A4): OlympuffWalker (11) on olympuff → 200 steps, base https://api.agentrealm.gg
+[OlympuffWalker] t=0 @? world    olympuff open 10Hz
+[OlympuffWalker] t=1 @? self     lives=10 alive=True placed=True perception=25
+[OlympuffWalker] t=2 @76:370,399 position 
+[OlympuffWalker] t=2596040 @76:370,399 terrain  2601 cells, 2601 known
+[OlympuffWalker] t=2596042 @76:370,399 entities character:6@391,385, npc:126@379,375, npc:240@369,400, npc:170@362,405, npc:171@363,405, npc:168@364,405, npc:164@362,406, npc:169@363,406, npc:166@362,407, npc:167@364,407, npc:165@364,408, supply:266@377,377, supply:267@378,377, supply:268@379,377, supply:2770@389,379, supply:2771@393,381, supply:2772@391,385, supply:934@350,390
+[OlympuffWalker] t=2596051 @76:370,399 tick     queue 10×Step 27×Wait (explore_area → (395, 379))
+[OlympuffWalker] t=2596059 @76:372,397 tick     — (queue held)
+[OlympuffWalker] t=2596070 @76:375,394 tick     — (queue held)
+[OlympuffWalker] t=2596071 @76:375,394 zone     @76:395,399 safe=True
+[OlympuffWalker] t=2596073 @76:375,394 zone     @76:395,400 safe=True
+[OlympuffWalker] t=2596076 @76:377,392 tick     — (queue held)
+[OlympuffWalker] t=2596077 @76:377,392 zone     @76:395,401 safe=True
+[OlympuffWalker] t=2596079 @76:377,392 zone     @76:395,402 safe=True
+[OlympuffWalker] t=2596081 @76:377,392 zone     @76:395,403 safe=True
+
+--- log (last 25 lines) ---
+[OlympuffWalker] t=2597269 @76:404,488 tick     — (queue held)
+[OlympuffWalker] t=2597272 @76:404,488 self     lives=10 alive=True placed=True perception=25
+[OlympuffWalker] t=2597281 @76:401,491 tick     — (queue held)
+[OlympuffWalker] t=2597286 @76:402,492 tick     — (queue held)
+[OlympuffWalker] t=2597292 @76:403,493 tick     — (queue held)
+[OlympuffWalker] t=2597294 @76:403,493 tick     — (queue held)
+[OlympuffWalker] t=2597294 @76:403,493 tick     — (queue held)
+[OlympuffWalker] t=2597302 @76:404,494 tick     — (queue held)
+[OlympuffWalker] t=2597307 @76:404,494 tick     queue 4×Step 11×Wait (explore_area → (408, 498))
+[OlympuffWalker] t=2597315 @76:406,496 tick     — (queue held)
+[OlympuffWalker] t=2597324 @76:408,498 tick     — (queue held)
+[OlympuffWalker] t=2597332 @76:408,498 tick     queue 10×Step 28×Wait (explore_area → (431, 502))
+[OlympuffWalker] t=2597333 @76:408,498 zone     @76:419,491 safe=False
+[OlympuffWalker] t=2597335 @76:408,498 zone     @76:420,492 safe=False
+[OlympuffWalker] t=2597337 @76:408,498 zone     @76:421,493 safe=False
+[OlympuffWalker] t=2597339 @76:408,498 zone     @76:422,494 safe=False
+[OlympuffWalker] t=2597341 @76:408,498 zone     @76:423,495 safe=False
+[OlympuffWalker] t=2597344 @76:411,495 tick     — (queue held)
+finished in 136.5s
+steps applied: 200 (target 200)
+movement_cooldown rejections: 0
+calm windows: 541, calm tick POSTs: 114 (21.1% of calm windows)
+calm API calls (reads included): 448 (82.8% of calm windows)
+urgent windows: 3
+PASS: M6 acceptance criteria met

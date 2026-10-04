@@ -185,6 +185,24 @@ class DeathChestTest(unittest.TestCase):
         self.assertEqual(w.death_chest, (7, (0, 0), 80))
 
 
+class TerrainStaleTest(unittest.TestCase):
+    def test_triggers(self):
+        w = world(["...."], at=(0, 0), perception=5)
+        self.assertFalse(w.terrain_stale(), "fresh after world() seeds terrain at pos")
+        w.terrain_center = (0, 0)
+        self.assertFalse(w.terrain_stale(), "still at the read center")
+        w.pos = (2, 0)
+        self.assertFalse(w.terrain_stale(), "half the window is perception // 2")
+        w.pos = (3, 0)
+        self.assertTrue(w.terrain_stale(), "past half the perception window")
+        w.pos = (0, 0)
+        w.map_id = 8
+        self.assertTrue(w.terrain_stale(), "map change")
+        w.map_id = 7
+        w.terrain_map = None
+        self.assertTrue(w.terrain_stale(), "never read on this map")
+
+
 class SchedulerTest(unittest.TestCase):
     def test_call_choice(self):
         pol = scripted(entity_refresh=5)
@@ -193,11 +211,20 @@ class SchedulerTest(unittest.TestCase):
             ("then position", dict(need_self=False, need_position=True), {}, "position"),
             ("terrain after moving half the perception range", dict(need_self=False, need_position=False),
              dict(terrain_center=(0, 0), pos=(2, 0), perception=3, entities_tick=10, tick=10), "terrain"),
+            ("terrain on map change", dict(need_self=False, need_position=False, last_poll_tick=10),
+             dict(terrain_center=(0, 0), terrain_map=7, map_id=8, pos=(0, 0), entities_tick=10, tick=10), "terrain"),
             ("entities when stale", dict(need_self=False, need_position=False),
              dict(entities_tick=0, tick=5), "entities"),
             ("entities on alarm", dict(need_self=False, need_position=False, alarm=True),
              dict(entities_tick=10, tick=10), "entities"),
-            ("otherwise tick", dict(need_self=False, need_position=False),
+            ("calm defers tick between polls", dict(need_self=False, need_position=False, last_poll_tick=10),
+             dict(entities_tick=10, tick=12), "wait"),
+            ("calm spends a window on stale terrain before the next poll",
+             dict(need_self=False, need_position=False, last_poll_tick=10),
+             dict(terrain_center=(0, 0), pos=(3, 0), perception=5, entities_tick=10, tick=12), "terrain"),
+            ("alarm polls every window", dict(need_self=False, need_position=False, alarm=True, last_poll_tick=10),
+             dict(entities_tick=10, tick=11), "entities"),
+            ("otherwise tick", dict(need_self=False, need_position=False, last_poll_tick=0),
              dict(entities_tick=10, tick=12), "tick"),
         ]
         for name, mem, wkw, want in cases:

@@ -13,6 +13,7 @@ from .config import Policy
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60  # windows between self reads when nothing forces one
+CALM_HOSTILE_RANGE = 3  # PLAYABLE_AGENT_PLAN Executor: two cadences
 
 
 # Scheduler.
@@ -26,6 +27,7 @@ class Memory:
     need_position: bool = True
     need_self: bool = True
     windows_since_self: int = 0
+    last_poll_tick: int = -10**9  # sim tick of the last POST tick (calm cadence)
     pending: dict | None = None  # the intent submitted last, awaiting its result
     pending_queue: str | None = None  # the queue_id `pending` was sent under
     undo: Pos | None = None  # where we stood before assuming `pending` moved us
@@ -33,18 +35,34 @@ class Memory:
     alarm: bool = False  # Damaged or Attacked since the last entity read
 
 
+def calm(w: WorldModel, m: Memory, policy: Policy) -> bool:
+    """Slow poll cadence while nothing is closing in (PLAYABLE_AGENT_PLAN Executor)."""
+    if m.alarm:
+        return False
+    for tick, _amount in w.recent_damage:
+        if w.tick - tick <= 1:
+            return False
+    if w.pos is not None:
+        for e in w.entities:
+            if e.kind in policy.hostile and chebyshev(e.pos, w.pos) <= CALM_HOSTILE_RANGE:
+                return False
+    return True
+
+
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
-    """One of: self, position, terrain, entities, tick."""
+    """One of: self, position, terrain, entities, wait, tick."""
     if m.need_self or m.windows_since_self >= SELF_REFRESH:
         return "self"
     if m.need_position or w.pos is None:
         return "position"
     if policy.kind in ("idle",):
         return "tick"
-    if w.terrain_map != w.map_id or w.terrain_center is None or chebyshev(w.terrain_center, w.pos) > w.perception // 2:
+    if w.terrain_stale():
         return "terrain"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
         return "entities"
+    if calm(w, m, policy) and w.tick - m.last_poll_tick < policy.entity_refresh:
+        return "wait"
     return "tick"
 
 

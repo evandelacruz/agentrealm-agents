@@ -119,6 +119,14 @@ class WorldModel:
         r = self.perception
         return self.pos[0] - r, self.pos[1] - r, 2 * r + 1, 2 * r + 1
 
+    def terrain_stale(self) -> bool:
+        """True when a terrain read is due (PLAYABLE_AGENT_PLAN Executor: Terrain reads)."""
+        if self.pos is None or self.map_id is None:
+            return False
+        if self.terrain_map != self.map_id or self.terrain_center is None:
+            return True
+        return chebyshev(self.terrain_center, self.pos) > self.perception // 2
+
     def apply_terrain(self, t: dict) -> None:
         """Records a terrain read of our perception window.
 

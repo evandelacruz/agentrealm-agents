@@ -69,6 +69,9 @@ class Runner:
                 self.pacer.wait_next_window(not_before)
                 not_before = 0.0
                 call = choose_call(self.world, self.mem, self.cfg.policy)
+                if call == "wait":
+                    self.log("wait", "calm cadence", {})
+                    continue
                 try:
                     not_before = self.step(call)
                 except ApiError as e:
@@ -118,6 +121,7 @@ class Runner:
 
     def tick(self) -> float:
         w, m = self.world, self.mem
+        m.last_poll_tick = w.tick
         d: Decision = decide(w, m, self.cfg.policy, self.rng)
         # A one-entry queue: it replaces whatever is held and runs next tick
         # (docs/API.md Intent Queue). With nothing to do, the held queue is

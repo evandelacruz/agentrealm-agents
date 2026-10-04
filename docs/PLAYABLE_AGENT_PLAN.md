@@ -101,11 +101,70 @@ States are checked in priority order each tick. The first whose guard holds runs
 | 5 | `Gather` | The plan needs gems | Cuts grass and bushes and visits gem piles in safe-ish ground |
 | 5 | `Level` | Inside a level | Walks the rooms toward the unexplored doors, using `Fight`/`Break`/`Investigate` as they apply |
 | 5 | `Boss` | At a boss door with the plan's preconditions met | Enters, fights within the clock; retreats out only if possible, else commits |
-| 5 | `Travel` | The plan names a destination (entrance, town, hunting ground, shop) | Long A* over revealed ground, through doors |
-| 5 | `Explore` | Nothing else | Frontier exploration, unvisited entrance marks first |
+| 5 | `Travel` | The plan names a destination (entrance, town, hunting ground, shop) | Cost-grid planner through fog, door graph across maps, stuck detection and escalation (see Navigation) |
+| 5 | `Explore` | Nothing else | Frontier exploration, unvisited entrance marks first; frontiers that turn out unreachable are dropped with a backoff |
 | 6 | `Idle` / `Sleep` | Stopping, or the plan says wait | Sends nothing, or `Sleep` at shutdown (not allowed inside a level) |
 
 Every state is a small class with `guard(world, plan) -> bool`, `act(world, plan) -> Queue | None` and `done(world) -> bool`. They are tested the way `brain.py` is tested today: a model in, an intent queue out.
+
+### Navigation and getting unstuck
+
+Paths are never straight lines. Bushes, trees, water, walls, fences, NPCs and other characters are in the way, and most of the map starts as fog. Today's `world.path` is A* over tiles already seen. It returns nothing when the goal is in fog or walled off, and it keeps off a rejected tile for only one decision. So the agent can go round obstacles it has seen, but it can't head for somewhere it hasn't seen, and nothing notices that it has stopped making progress. The fix comes in four parts.
+
+**1. One planner over a cost grid, not a walkable/blocked map.**
+
+| Cell | Cost |
+|---|---|
+| Known walkable | 1 |
+| Fog (never seen) | 2. Assumed open, so the agent can aim at an entrance 300 blocks into the fog |
+| A breakable obstacle we hold the capability for, not marked as failed in break memory | Break time plus 1, so a bush in a hedge line is a door, not a wall |
+| `fire`, `lava` | 1 plus a cost per point of `occupy_damage`; entered only when there is no other way |
+| Near a hostile | A danger cost that falls off with distance, so routes keep away from hostiles |
+| NPC or character standing there | High but finite, and it expires: they move |
+| Known blocked, or marked unreachable | Impassable |
+
+- **Walk only the part of the path we have seen.** The executor walks the known prefix and replans when terrain reads reveal what lies ahead, or a step is rejected. Fog optimism is corrected by looking.
+- **Long trips are two-level.** A coarse search over 16×16 blocks (the server's own tile size) picks the corridor; A* inside the perception window picks the steps. Each search has a node budget per tick, so a long route never stalls a tick.
+
+**2. Rejections teach the map, by code.**
+
+| Rejection | What the agent records |
+|---|---|
+| `not_traversable` | That cell is blocked until a `BlockChanged` says otherwise |
+| `block_occupied` | Cost on that cell for a few seconds; wait one move, then route round |
+| `conflict_lost` | Retry next move |
+| `door_locked` | Door needs a key; recorded in the knowledge base, not retried |
+| `over_strength_ceiling` | Zone closed to us at this strength |
+| `would_strand` | Step to land first |
+
+An opening we cut or burned is open only until it grows back (about 60 s for a bush). It is planned through with that deadline, never as permanent.
+
+**3. Stuck detection.** Progress is the remaining path cost to the goal, measured each move. The agent is stuck when any of these hold:
+- the remaining cost hasn't fallen in 20 moves or 30 s;
+- the same few cells keep being revisited (oscillation);
+- 3 moves in a row are rejected;
+- the planner finds no path, even with fog assumed open.
+
+**4. Escalation, in order, each step only if the one before fails:**
+1. Replan with the learned blocks, and with fog optimism lowered so known ground is preferred.
+2. Break through: if a breakable obstacle lies on the best blocked route and we hold the capability, `Break` it. A failed try is recorded per block and never repeated.
+3. Reveal: explore the frontier cells nearest the goal, following the wall of the obstacle (left-hand rule) for a bounded number of moves, to uncover a way round.
+4. Change the means: if the goal is enclosed on this map (water, cliffs, a locked door), record what seems to be needed (a raft, a key, a door from another map) and route through the door graph if one is known.
+5. Give up for now: mark the goal unreachable with an exponential backoff, pick the next goal, and raise the strategist's `stuck` trigger. The trigger carries the goal, the explored outline and the blocking cell types. The strategist may answer with a tool to buy or a different route.
+
+**Cross-map routing.** Doors are edges of a graph. Each warp records where it landed, unvisited doors are exploration targets, and a route is a search over the door graph, then A* on each map.
+
+**Escape.** If regrowth or a crowd closes the agent in, `Escape` breaks out with whatever capability it holds, or waits for the blocker to move. Waiting inside a safe zone costs nothing.
+
+**Tests.** Fixtures with:
+- a U-shaped trap: a local minimum that greedy moves fall into;
+- a maze;
+- a goal behind a hedge line, with and without the tool;
+- a goal enclosed by water;
+- an NPC parked in a one-wide corridor;
+- a corridor that is a dead end once fog is revealed.
+
+Each asserts the goal is reached, or abandoned with the right reason, within a move budget.
 
 ### Combat
 
@@ -177,9 +236,9 @@ Structured keys take effect on the next tick with no model involved. Free text o
 |---|---|---|
 | 0 | **Discovery.** Docs read, hand play through MCP, [GAME_NOTES.md](GAME_NOTES.md) written. | Done: every unknown above has an answer or a measurement to take |
 | 1 | **Executor.** `Step`/`Wait` pacing, multi-intent queues, two poll cadences, deltas and complete snapshots, health tracking. A live smoke test against Olympuff. | A character walks 200 blocks with no `movement_cooldown` rejections, using under a quarter of its request budget while calm |
-| 2 | **State machine and survival.** Replace `brain.decide` with prioritised states: `Sync`, `Downed`, `Escape`, `Retreat`, `Heal`, `Flee`, `Recover`, `Explore`. Trace replay tests. | Survives an hour in the overworld, retreating to safety and recovering its chest on its own |
+| 2 | **State machine and survival.** Replace `brain.decide` with prioritised states: `Sync`, `Downed`, `Escape`, `Retreat`, `Heal`, `Flee`, `Recover`, `Explore`. Cost-grid planner, rejection learning, stuck detection and escalation steps 1, 3 and 5. Trace replay tests and the navigation fixtures. | Survives an hour in the overworld, retreating to safety and recovering its chest on its own; reaches a point 150 blocks away through fog and obstacles, or gives up with a reason, never loops |
 | 3 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight` with group-aware win estimates and the retreat queued; learned threat and item tables. | Earns gems, buys a bronze kit and potions, and kills lone weak hostiles without dying |
-| 4 | **Navigation and knowledge.** Per-world knowledge base, overworld `Travel` to entrance marks and back to town, door graph, per-block break memory, `Break`. | Visits every entrance mark within its strength, records what each needs, and returns to town |
+| 4 | **Navigation and knowledge.** Per-world knowledge base, overworld `Travel` to entrance marks and back to town, door graph and cross-map routing, per-block break memory, `Break` (escalation steps 2 and 4). | Visits every entrance mark within its strength, records what each needs, and returns to town |
 | 5 | **Clues.** `Investigate`: `Read` every readable cell and scroll, `Say` to every helper, clue capture with place and time. | Every sign, statue and helper line near its route is in the knowledge base |
 | 6 | **Strategist and directives.** LLM planner thread, plan schema, directives file, trace logging. | Given clues from a test world, it plans the right `buy`/`travel`/`break_block` operations and the state machine carries them out |
 | 7 | **Levels.** `Level`, `Boss`, `Solve` (`Compose`, keys at doors). Boss preconditions from the plan; boss progress from its `health`. | Clears the easiest open level unattended, then uses what it learned to attempt the next |
@@ -193,5 +252,6 @@ Milestones 1 and 2 come first whatever else changes. Milestones 3 to 7 now have 
 - **Latency kills.** Hand play through MCP lost a life to a 4 s round trip. The executor must poll every tick while threatened; this is a milestone 1 requirement, not a tuning detail.
 - **Clue interpretation is the hard part.** Riddles and directions are written for people. Without the strategist the agent can still gear up, hunt and walk to entrances, but it will not know what a locked or hidden entrance wants. Keep the no-LLM path useful; accept that levels need the strategist.
 - **Spoilers.** Real-world clue text must never reach the repo, the tests or the PR text. Fixtures use invented worlds; the knowledge base stays in gitignored `.state/`.
+- **Getting stuck.** Fog, regrowing blocks and NPCs in corridors will trap a naive walker. The Navigation section makes "stuck" a detected state with fixed escalation and a give-up, never a silent loop.
 - **LLM cost and latency.** Strict triggers and a budget cap; the agent must play acceptably with the strategist off.
 - **Learned stats are noisy early.** Keep conservative defaults (flee more, fight less) until the tables have samples.

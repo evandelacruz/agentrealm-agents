@@ -80,7 +80,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 - **Terrain reads.** With perception 25 the terrain window is 51×51, so terrain is read only on a map change or after moving about half the window.
 - **Deltas feed the model.** Health, inventory and entity changes are folded into the world model from them.
 
-Shipped so far: the runner sends movement as paced `Step`/`Wait` queues (`executor/movement.py`), cut at the world's horizon, and polls on the two cadences (`poll_cadence.py`); the calm gap never outlasts the intents still queued, and a reflex that fires (hazard, hostile, supply, chest) replaces the running queue. `python/agentrealm_agent/executor/pacing.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_intents`) and the next poll. The attack and speech accumulators are paced separately; there is no mixed-queue helper yet, and the runner does not use it yet.
+Shipped so far: the runner sends movement as paced `Step`/`Wait` queues (`executor/movement.py`), cut at the world's horizon, and polls on the two cadences (`poll_cadence.py`); the calm gap never outlasts the intents still queued, a reflex that fires (hazard, hostile, supply, chest) replaces the running queue, and a read or event that makes the rest of the path wrong replaces it with a replanned walk (A43). `python/agentrealm_agent/executor/pacing.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_intents`) and the next poll. The attack and speech accumulators are paced separately; there is no mixed-queue helper yet, and the runner does not use it yet.
 
 ### State machine
 

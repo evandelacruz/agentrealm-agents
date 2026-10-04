@@ -288,6 +288,42 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(fake.sent[1], [{"verb": "Take", "supply_id": 5}])
         self.assertIsNone(r.mem.pending_intents)
 
+    def test_block_changed_on_path_resends_the_held_queue(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0, "events_by_tick": [
+                {"tick": 11, "events": [
+                    {"kind": "BlockChanged", "map_id": 7, "x": 2, "y": 0, "block_type": "wall"},
+                ]},
+            ]},
+            {"tick": 12, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        first = fake.sent[0]
+        self.assertIsNotNone(r.mem.held_queue)
+        r.tick()
+        self.assertIsNone(fake.sent[1], "BlockChanged marks stale; hold until resend")
+        self.assertTrue(r.mem.resend_held_queue)
+        r.tick()
+        self.assertIsNotNone(fake.sent[2], "stale path replaces the held queue")
+        self.assertNotEqual(fake.sent[2], first)
+
+    def test_entity_on_path_resends_the_held_queue(self):
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+            {"tick": 12, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        r.world.entities = [Entity("npc", 9, (2, 0))]
+        r.note_held_path_stale()
+        self.assertTrue(r.mem.resend_held_queue)
+        r.tick()
+        self.assertIsNotNone(fake.sent[1], "stale path replaces the held queue")
+        self.assertEqual(fake.sent[1][0]["verb"], "Step")
+
     def test_no_reflex_leaves_the_held_queue_and_plan_alone(self):
         fake = FakeClient([
             {"tick": 10, "window_remaining_ms": 0},

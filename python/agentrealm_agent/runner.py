@@ -8,7 +8,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .brain import Decision, Memory, choose_call, decide, reject_step
+from .brain import Decision, Memory, choose_call, decide, reject_step, remaining_path_stale
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .executor import (
@@ -130,12 +130,14 @@ class Runner:
             w.apply_terrain(t)
             w.tick = max(w.tick, int(t.get("tick", 0)))
             n = len(terrain_cells(t))
+            self.note_held_path_stale()
             self.log(call, f"{n} cells, {len(w.view.tiles)} known", {"cells": n})
         elif call == "entities":
             e = c.entities(self.cid, w.map_id, *w.perception_rect())
             w.apply_entities(e)
             w.tick = max(w.tick, int(e.get("tick", 0)))
             m.alarm = False
+            self.note_held_path_stale()
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
         else:
@@ -152,16 +154,21 @@ class Runner:
             m.cancel_queue = False
         elif m.held_queue is not None:
             # Reflexes still run every round trip. One that fires drops the
-            # held queue and its intent replaces it; anything else leaves the
-            # queue running and the plan as it was.
+            # held queue and its intent replaces it. A stale path resends a
+            # fresh walk queue; anything else leaves the queue running.
             d = self.reflex_while_held()
-            intents = None
-            if d is None:
-                d = Decision(None, "queue held")
-            else:
+            if d is not None:
                 self.drop_held_queue()
-                # Something must replace the held queue, or it keeps running.
                 intents = self.intents_for(d) or [wait()]
+            elif m.resend_held_queue:
+                m.resend_held_queue = False
+                self.clear_held_tracking()
+                d = decide(w, m, self.cfg.policy, self.rng)
+                intents = self.intents_for(d)
+                d = Decision(d.intent if intents else None, "path stale, resend" if intents else d.reason)
+            else:
+                d = Decision(None, "queue held")
+                intents = None
         else:
             d = decide(w, m, self.cfg.policy, self.rng)
             intents = self.intents_for(d)
@@ -175,6 +182,7 @@ class Runner:
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
         self.on_events(events)
+        self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
             # A rejection or a door already dropped our queue; an echoed server
             # queue on that same response must not bring the hold back.
@@ -238,13 +246,24 @@ class Runner:
         self.rng.setstate(saved[3])
         return None
 
-    def drop_held_queue(self) -> None:
-        """Give up on the held queue. Its later results are no longer read, so
-        where it took us is unknown: re-read position."""
+    def note_held_path_stale(self) -> None:
+        if self.mem.held_queue is None:
+            return
+        if remaining_path_stale(self.world, self.mem, self.cfg.policy):
+            self.mem.resend_held_queue = True
+
+    def clear_held_tracking(self) -> None:
+        """Stop waiting on the held queue's results without forgetting position."""
         m = self.mem
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
         m.pending, m.held_queue = None, None
-        m.need_position, m.path = True, []
+        m.path = []
+
+    def drop_held_queue(self) -> None:
+        """Give up on the held queue. Its later results are no longer read, so
+        where it took us is unknown: re-read position."""
+        self.clear_held_tracking()
+        self.mem.need_position = True
 
     def intents_for(self, d: Decision) -> list[dict] | None:
         """Movement decisions become paced Step/Wait queues; others stay one intent."""

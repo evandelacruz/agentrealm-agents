@@ -10,6 +10,7 @@ import random
 from dataclasses import dataclass, field
 
 from .config import Policy
+from .executor.movement import step_landing
 from .poll_cadence import gate_tick_call
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
@@ -41,6 +42,7 @@ class Memory:
     calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll
     queued_ticks: int = 0  # intents still queued after the last poll, one tick each
     hurt_last_poll: bool = False  # the last poll's events carried Damaged
+    resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
@@ -210,6 +212,54 @@ def _step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:
     if w.view.tiles.get(p) in DOORS:
         return True
     return w.view.walkable(p) and p not in w.occupied()
+
+
+def _plan_avoid(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
+    """Tiles movement plans treat as impassable (hazards, rejections, escape)."""
+    hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
+    blocked = set(m.blocked) | hazards
+    if w.pos is not None and w.pos in hazards and not w.open_neighbours(w.pos, blocked):
+        return blocked - hazards
+    return blocked
+
+
+def _cell_on_path_blocked(w: WorldModel, avoid: set[Pos], p: Pos) -> bool:
+    if p in avoid:
+        return True
+    if w.view.tiles.get(p) in DOORS:
+        return False
+    if not w.view.walkable(p):
+        return True
+    return p in w.occupied()
+
+
+def _remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
+    """Tiles the held queue still tries to step onto, from tracked position."""
+    if w.pos is None:
+        return list(m.path)
+    if m.pending_intents is not None:
+        pos = w.pos
+        cells: list[Pos] = []
+        for i in range(m.pending_next_index, len(m.pending_intents)):
+            intent = m.pending_intents[i]
+            if intent.get("verb") != "Step":
+                continue
+            pos = step_landing(pos, intent["direction"])
+            cells.append(pos)
+        if cells:
+            return cells
+    return list(m.path)
+
+
+def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy) -> bool:
+    """True when the rest of a held walk queue no longer matches the map (A43)."""
+    cells = _remaining_walk_cells(w, m)
+    if not cells or w.pos is None or not w.alive or policy.kind == "idle":
+        return False
+    avoid = _plan_avoid(w, m, policy)
+    if not _step_open(w, avoid, cells[0]):
+        return True
+    return any(_cell_on_path_blocked(w, avoid, p) for p in cells[1:])
 
 
 def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]) -> None:

@@ -10,6 +10,7 @@ export {
   rollupOk,
   submittedReviewShas,
   summarizeOpenPrs,
+  triagePrs,
   withWorkingLock,
   type OpenPr,
   type PrCommentSummary,

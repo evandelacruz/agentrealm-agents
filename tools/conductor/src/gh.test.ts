@@ -10,6 +10,7 @@ import {
   reviewInProgress,
   rollupOk,
   submittedReviewShas,
+  triagePrs,
 } from "./gh.js";
 
 test("reviewInProgress is only the auto code-review check while it is running", () => {
@@ -230,4 +231,59 @@ test("holdLock keeps the lock on success and surfaces the original error over a 
     ),
     /send failed/,
   );
+});
+
+function pr(overrides: Partial<Parameters<typeof triagePrs>[0][number]> & { n: number }) {
+  return {
+    isDraft: false,
+    verdict: "APPROVED" as const,
+    hasMergeConflict: false,
+    unresolvedReviewThreads: 0,
+    checksOk: true as boolean | null,
+    reviewInProgress: false,
+    ...overrides,
+  };
+}
+
+function numbers(list: Array<{ n: number }>): number[] {
+  return list.map((s) => s.n);
+}
+
+test("triagePrs sends an approved, green PR with a merge conflict only to the fixer list", () => {
+  const t = triagePrs([
+    pr({ n: 1, hasMergeConflict: true }),
+    pr({ n: 2, hasMergeConflict: true, unresolvedReviewThreads: 2 }),
+  ]);
+  assert.deepEqual(numbers(t.needsFix), [1, 2]);
+  assert.deepEqual(numbers(t.needsPolish), []);
+  assert.deepEqual(numbers(t.mergeReady), []);
+});
+
+test("triagePrs routes red CI, changes requested, and unapproved threads to the fixer list", () => {
+  const t = triagePrs([
+    pr({ n: 1, checksOk: false, unresolvedReviewThreads: 1 }),
+    pr({ n: 2, verdict: "CHANGES_REQUESTED" }),
+    pr({ n: 3, verdict: null, unresolvedReviewThreads: 1 }),
+  ]);
+  assert.deepEqual(numbers(t.needsFix), [1, 2, 3]);
+  assert.deepEqual(numbers(t.needsPolish), []);
+  assert.deepEqual(numbers(t.mergeReady), []);
+});
+
+test("triagePrs: approved with open threads is polish; approved, clean, green is merge-ready", () => {
+  const t = triagePrs([pr({ n: 1, unresolvedReviewThreads: 1 }), pr({ n: 2 })]);
+  assert.deepEqual(numbers(t.needsFix), []);
+  assert.deepEqual(numbers(t.needsPolish), [1]);
+  assert.deepEqual(numbers(t.mergeReady), [2]);
+});
+
+test("triagePrs leaves out PRs whose review check is still running", () => {
+  const t = triagePrs([
+    pr({ n: 1, reviewInProgress: true, hasMergeConflict: true }),
+    pr({ n: 2, reviewInProgress: true }),
+    pr({ n: 3, reviewInProgress: true, unresolvedReviewThreads: 1 }),
+  ]);
+  assert.deepEqual(numbers(t.needsFix), []);
+  assert.deepEqual(numbers(t.needsPolish), []);
+  assert.deepEqual(numbers(t.mergeReady), []);
 });

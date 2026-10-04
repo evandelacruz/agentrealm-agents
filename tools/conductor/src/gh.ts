@@ -214,6 +214,48 @@ export function headVerdict(reviews: ReviewNode[], headSha: string): Verdict {
   return null;
 }
 
+type TriageFields = Pick<
+  PrCommentSummary,
+  | "isDraft"
+  | "verdict"
+  | "hasMergeConflict"
+  | "unresolvedReviewThreads"
+  | "checksOk"
+  | "reviewInProgress"
+>;
+
+/**
+ * Sort open PRs for `prs`, per conductor skill step 8. A PR that needs a
+ * fixer (conflict, red CI, changes requested, or open threads without
+ * approval) appears only there — never also as polish or merge-ready. PRs
+ * whose review check is still running appear nowhere.
+ */
+export function triagePrs<T extends TriageFields>(
+  summaries: T[],
+): { needsFix: T[]; needsPolish: T[]; mergeReady: T[] } {
+  const settled = summaries.filter((s) => !s.reviewInProgress);
+  const blocked = (s: T) =>
+    s.hasMergeConflict ||
+    s.checksOk === false ||
+    s.verdict === "CHANGES_REQUESTED" ||
+    (s.unresolvedReviewThreads > 0 && s.verdict !== "APPROVED");
+  const needsFix = settled.filter(blocked);
+  const clear = settled.filter((s) => !blocked(s));
+  return {
+    needsFix,
+    // An open thread on an approved PR is a nit by the reviewer's own verdict,
+    // so it takes the skill's polish path — never a `--pr` fixer spawn.
+    needsPolish: clear.filter((s) => s.unresolvedReviewThreads > 0 && s.verdict === "APPROVED"),
+    mergeReady: clear.filter(
+      (s) =>
+        !s.isDraft &&
+        s.unresolvedReviewThreads === 0 &&
+        s.verdict === "APPROVED" &&
+        s.checksOk === true,
+    ),
+  };
+}
+
 export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
   const prs = await listOpenPrs();
   if (prs.length === 0) return [];

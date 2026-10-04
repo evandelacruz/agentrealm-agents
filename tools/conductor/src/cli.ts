@@ -2,7 +2,7 @@
 import { flagBool, flagString, parseArgs, readPrompt } from "./args.js";
 import { DEFAULT_ENV_NAME, DEFAULT_MODEL, WORKING_LABEL, requireApiKey } from "./config.js";
 import { followUp } from "./follow-up.js";
-import { summarizeOpenPrs } from "./gh.js";
+import { summarizeOpenPrs, triagePrs } from "./gh.js";
 import { spawnImplementer } from "./spawn.js";
 import { countRunningAgents, listCloudAgents } from "./status.js";
 
@@ -170,15 +170,7 @@ async function cmdPrs(): Promise<void> {
     );
   }
 
-  const needsFix = summaries.filter((s) => {
-    if (s.reviewInProgress) return false;
-    return (
-      s.hasMergeConflict ||
-      s.checksOk === false ||
-      s.verdict === "CHANGES_REQUESTED" ||
-      (s.unresolvedReviewThreads > 0 && s.verdict !== "APPROVED")
-    );
-  });
+  const { needsFix, needsPolish, mergeReady } = triagePrs(summaries);
   if (needsFix.length > 0) {
     console.log("\nNeeds fixer follow-up:");
     for (const s of needsFix) {
@@ -186,14 +178,6 @@ async function cmdPrs(): Promise<void> {
     }
   }
 
-  // An open thread on an approved PR is a nit by the reviewer's own verdict,
-  // so it takes the skill's polish path — never a `--pr` fixer spawn.
-  const needsPolish = summaries.filter(
-    (s) =>
-      !s.reviewInProgress &&
-      s.unresolvedReviewThreads > 0 &&
-      s.verdict === "APPROVED",
-  );
   if (needsPolish.length > 0) {
     console.log("\nApproved with open threads — polish, not a fixer spawn:");
     for (const s of needsPolish) {
@@ -201,13 +185,6 @@ async function cmdPrs(): Promise<void> {
     }
   }
 
-  const mergeReady = summaries.filter(
-    (s) =>
-      !s.isDraft &&
-      s.unresolvedReviewThreads === 0 &&
-      s.verdict === "APPROVED" &&
-      s.checksOk === true,
-  );
   if (mergeReady.length > 0) {
     // This filter cannot see the nits an approving reviewer left behind, so
     // the heading defers to the skill's polish pass rather than reading clean.

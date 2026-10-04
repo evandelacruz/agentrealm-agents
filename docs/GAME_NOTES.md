@@ -43,6 +43,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Some intents don't wait on the move accumulator.** `Arm`, `Read`, `Take`, `WithdrawFromChest` and `Use` ran on the tick right after a `Step`. Nine `Read`s in a row on consecutive ticks all applied (Obs).
 - **First rejection clears the rest of the queue** (M §7.6). One `not_traversable` step (a bush on the path) discarded 35 queued intents (Obs 1835532).
 - **Snapshot deltas only arrive against the current or the immediately previous version.** Anything older gets a complete snapshot (M §7.1). The version advances whenever anything in view changes, so a client polling every ~40 ticks while moving got a complete snapshot nearly every time (Obs). The executor must treat complete snapshots as normal, or poll every tick.
+- **Cache tiles.** Terrain and entity reads are versioned in 16×16-block cache tiles aligned to the map origin (API Reads).
 - **Snapshot shape.** `inventory` carries `armed`, `gems`, `held`, `worn` by slot, and `chest`. `levels_cleared` is absent while it is empty (API Snapshots; Obs).
 - **Hand play through MCP is too slow for combat.** Each MCP round trip took about 4 s of wall time (40–80 ticks), so Pippin's retreat landed after the death. A real executor must poll about every tick while threatened, and queue a retreat with every attack (Obs).
 
@@ -196,6 +197,7 @@ Each has a test the agent or a hand session can run.
 
 | Question | How to find out |
 |---|---|
+| Hostile health per type (no NPC's health is served but a boss's) | Sum `NPCDamaged` on one NPC until its `NPCDied` |
 | Hostile stats (defense, range, speed) per type | Log `NPCDamaged` and our swings for the hit rate (gives defense); log `Damaged` and spacing for damage and cooldown; log first `Attacked` distance for range |
 | Does health regenerate out of combat? | Take a hit, retreat to town, read `health` every 10 s for 2 minutes |
 | Weapon damage and cooldown per subtype | Swing at a lone weak hostile from full health, with a retreat queued in the same request |

@@ -38,7 +38,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 
 | API surface | Used today | Needed for |
 |---|---|---|
-| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | No: sends a move every window, so many are rejected `movement_cooldown` | Moving at all |
+| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | No: each plan step is one `SetPosition` in a one-intent queue, one per call window, and any rejection only clears the path (the tests exercise `block_occupied` and `beyond_movement_range`). Which codes the shipped loop draws on a live world is not measured; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
 | Multi-intent queues | No: always one intent | Freeing the request budget; queuing a retreat with an attack |
 | Snapshot deltas (`snapshot_version`), health in the observation | No: separate entity reads, health never tracked | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
@@ -221,6 +221,8 @@ Health is the resource every other decision spends, and lives are the budget beh
 
 Below a floor, 3 lives by default, it stops fighting anything but measured weak hostiles and goes no further than the edge of explored ground. The `lives_floor` and `risk` directives set these.
 
+**How `risk` combines with the other params.** The effective risk is `risk × min(1, (lives − lives_floor) / lives_floor)`, floored at 0, so it falls to 0 at the floor. The effective fight margin is `fight_margin × (1.5 − effective risk)`, and the effective retreat threshold is `retreat_hits + round(1 − 2 × effective risk)`, never below 1; at effective risk 0.5 both apply as set. Below effective risk 0.5 it never engages an unmeasured type, and at 0 it does not enter a level.
+
 **Protecting health in the moment:**
 - **Never start a fight hurt.** `Fight` needs health above the expected damage of the whole group over the fight, plus a margin. Otherwise heal first.
 - **Retreat in time.** The threshold is set in hits, not percent: when the next `retreat_hits` (default 2) hits from what is attacking could kill, it leaves. A hit's size comes from the threat table, learned per hostile type from `Damaged` events (the API serves no hostile's damage). A type not yet measured is assumed to hit as hard as the hardest measured type, and before anything is measured, 2, the most a weak hostile dealt in M0. The steps away are already queued behind every attack (see Executor).
@@ -245,9 +247,9 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 - **Our side.** Reach is `attack_range` from `get_self`, refreshed after `Arm`; a `target_out_of_range` result also reports reach and distance. Our hit chance is published: d20 + attack ≥ 10 + target defense. Our damage per hit is learned from `NPCDamaged`.
 - **Their side.** Damage per hit, interval and reach per NPC type are learned from `Damaged` and `Attacked` events and kept in the knowledge base. Hostile stats are never served.
-- **Win estimate.** Ticks for us to kill everything that will join, versus ticks for that group to kill us. Fight above a margin, flee below it. Directives can bias the margin. No NPC's health is served except a boss's (M §9.3), so a type's health is learned as the total `NPCDamaged` it took before `NPCDied`; until a type has a kill on record, its health is assumed to be the largest seen for any type, and it falls under "conservative until measured".
+- **Win estimate.** Ticks for us to kill everything that will join, versus ticks for that group to kill us. Fight above a margin, flee below it. Directives can bias the margin. No NPC's health is served except a boss's (M §9.3), so a type's health is learned as the total `NPCDamaged` it took before `NPCDied`; until a type has a kill on record, its health is assumed to be the largest measured for any type, and before any kill at all, 10 (a new character's health; an assumption, not a measurement). Either way the type falls under "conservative until measured".
 - **Conservative until measured.** At 10 health with no armor, the default is to fight only a lone hostile of a type already measured, or a new type from full health with an escape queued.
-- **Where to hunt.** Hunting grounds advertise a strength ceiling (`get_zone`); pick the highest ceiling at or above our strength that the win estimates say we can win in. Our strength is on the owner watch sheet, `GET /watch/characters/{id}/sheet`, which the character's own key may read and which spends the account's viewing bucket, not the character's call budget (M §5.5, §7.4). It is read after an `Equip` change and at most once a minute. If that read is refused, strength is bracketed by probing: an `over_strength_ceiling` rejection means our strength is above that ceiling, a successful entry that it is at or below. Fields near town are the next step up.
+- **Where to hunt.** Hunting grounds advertise a strength ceiling (`get_zone`); pick the highest ceiling at or above our strength that the win estimates say we can win in. Our strength is served only on the owner watch sheet (M §5.5), outside the character's routes, so the agent does not read it: that would be a request outside the character call budget (PLAN.md **Server gaps**). Strength is bracketed by probing instead: an `over_strength_ceiling` rejection means our strength is above that ceiling, a successful entry that it is at or below. The bracket is reset after an `Equip` change. Fields near town are the next step up.
 - **Never fight from a safe zone** (rejected: `not_allowed_in_safe_zone`, M §11; GAME_NOTES Zones). Use one to recover, and as a step-away escape when it is adjacent.
 - **Bosses.** A boss shows `health`/`max_health`, so progress is measurable. A fight is on a clock, one at a time, and the door may be contested. The `Boss` state needs explicit preconditions from the plan: health, potions, gear, and the means to reach the boss.
 
@@ -288,7 +290,9 @@ This is what makes a second run better than the first, and it is what the strate
    "notes": "The sign says the door is behind the burnt hedge."}
   ```
 
-  Top level has exactly three keys. `goals` replaces the goal stack, tried in order. `params` is applied at once, as the directives file's `params` are. `notes` is free text for the trace. Everything the agent should do, speech included, is a goal op; a `set_param` op changes a param only when the goal stack reaches it.
+  Top level has exactly three keys. `goals` replaces the goal stack, tried in order. `params` is applied at once, within the limits below. `notes` is free text for the trace. Everything the agent should do, speech included, is a goal op; a `set_param` op changes a param only when the goal stack reaches it, within the same limits.
+
+- **Param limits.** The strategist may only tighten survival params, never loosen them past the directives file's value (or the default when the file sets none): it may raise `fight_margin`, `retreat_hits`, `lives_floor` and `potion_reserve`, and lower `risk`. `curiosity` it may set anywhere in its range. A value that loosens a survival param, or is out of range (see the param table), is dropped and logged. Only the directives file loosens them.
 
 - **Operations** form a fixed set. Each maps onto a state and has fixed fields; every op may also carry `why` (free text, logged). An op with an unknown name, a missing field, or a field of the wrong type is dropped and logged.
 
@@ -329,14 +333,16 @@ Structured keys take effect on the next round trip with no model involved. Free 
 
 Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
 
-| Param | Default | Meaning |
-|---|---|---|
-| `fight_margin` | 1.5 | Our ticks-to-win must beat theirs by this factor |
-| `retreat_hits` | 2 | Retreat when this many expected hits could kill |
-| `curiosity` | 0.2 | Share of ticks `Investigate` and `Break` may use (see Curiosity) |
-| `lives_floor` | 3 | At or below this many lives, fight only measured weak hostiles and stay inside explored ground |
-| `risk` | 0.5 | 0 cautious to 1 bold; scales the fight margin, retreat threshold, untested types and level entry |
-| `potion_reserve` | 2 | Potions to keep; `Shop` restocks below it before leaving town |
+| Param | Default | Range | Strategist may | Meaning |
+|---|---|---|---|---|
+| `fight_margin` | 1.5 | ≥ 1 | raise | Our ticks-to-win must beat theirs by this factor |
+| `retreat_hits` | 2 | ≥ 1, integer | raise | Retreat when this many expected hits could kill |
+| `curiosity` | 0.2 | 0 to 1 | set | Share of ticks `Investigate` and `Break` may use (see Curiosity) |
+| `lives_floor` | 3 | ≥ 1, integer | raise | At or below this many lives, fight only measured weak hostiles and stay inside explored ground |
+| `risk` | 0.5 | 0 to 1 | lower | 0 cautious to 1 bold; scales the fight margin, retreat threshold, untested types and level entry (see Health and lives) |
+| `potion_reserve` | 2 | ≥ 0, integer | raise | Potions to keep; `Shop` restocks below it before leaving town |
+
+A directives value out of range is ignored and logged, and the default stays.
 
 ## Milestones
 
@@ -346,8 +352,8 @@ These are rows of PLAN.md **Milestones**, which owns the IDs and the dependencie
 |---|---|---|
 | M0 | **Discovery.** Docs read, hand play through MCP, [GAME_NOTES.md](GAME_NOTES.md) written. | Done: every unknown above has an answer or a measurement to take |
 | M6 | **Executor.** `Step`/`Wait` pacing, multi-intent queues, two poll cadences, deltas and complete snapshots, health tracking. A live smoke test against Olympuff. | A character walks 200 blocks with no `movement_cooldown` rejections, using under a quarter of its request budget while calm |
-| M7 | **State machine and survival.** Replace `brain.decide` with prioritised states: `Sync`, `Downed`, `Escape`, `Retreat`, `Heal`, `Flee`, `Recover`, `Explore`. Threat table (damage per hit per hostile type, from `Damaged`). Cost-grid planner with break costs inert, rejection learning, stuck detection and escalation steps 1, 3 and 5. Trace replay tests and the navigation fixtures. | Survives an hour in the overworld, retreating before the next `retreat_hits` hits could kill by its threat table, healing from carried potions, and recovering its chest only when the spot is safe; it measures whether health returns in safe zones; reaches a point 150 blocks away through fog and walkable detours, or gives up with a reason, never loops. A route that needs a block broken counts as a give-up with that reason |
-| M8 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight` with group-aware win estimates and the retreat queued; learned item table; healing from food. | Earns gems, buys armor, a weapon and a potion reserve, heals from food it picks up, and kills lone weak hostiles without dying; never starts a fight below its health floor |
+| M7 | **State machine and survival.** Replace `brain.decide` with prioritised states: `Sync`, `Downed`, `Escape`, `Retreat`, `Heal`, `Flee`, `Recover`, `Explore`. Threat table (damage per hit per hostile type, from `Damaged`). Safe-tile discovery: `get_zone` on cells around the respawn point and along the route, within the call budget, so `Retreat`, `Flee` and `Heal` have known safe tiles (the wider interest-list `get_zone` stays in M10). Cost-grid planner with break costs inert, rejection learning, stuck detection and escalation steps 1, 3 and 5. Trace replay tests and the navigation fixtures. | Survives an hour in the overworld, retreating to a known safe tile before the next `retreat_hits` hits could kill by its threat table, and recovering its chest only when the spot is safe; it measures whether health returns in safe zones and heals by `Heal`'s no-purchase fallbacks (a new character carries only its knife, so potions wait for `Shop` in M8); reaches a point 150 blocks away through fog and walkable detours, or gives up with a reason, never loops. A route that needs a block broken counts as a give-up with that reason |
+| M8 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight` with group-aware win estimates and the retreat queued; learned item table; healing from food. | Earns gems, buys armor, a weapon and a potion reserve, heals from food it picks up and from carried potions, and kills lone weak hostiles without dying; never starts a fight below its health floor |
 | M9 | **Navigation and knowledge.** Per-world knowledge base, overworld `Travel` to entrance marks and back to town, door graph and cross-map routing, break memory per (block, capability), `Break` (escalation steps 2 and 4; break costs go live in the grid). | Visits every entrance mark within its strength, records what each needs, and returns to town |
 | M10 | **Curiosity and clues.** Interest list, odd-block detector, `Investigate` and `Break` under the curiosity budget, clue capture with place and time, no-LLM clue rules. | Every readable cell that came into sight along its route has been read, and every NPC that came within 25 blocks spoken to; it finds and opens an odd block in a test map, and never tries the same capability twice on the same block |
 | M4 | **Strategist and directives.** LLM planner thread, plan schema, directives file, trace logging. | Given clues from a test world, it plans the right `buy`/`travel`/`break_block` operations and the state machine carries them out |

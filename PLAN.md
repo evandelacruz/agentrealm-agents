@@ -127,7 +127,7 @@ python -m agentrealm_agent run characters/wren.toml [characters/kit.toml ...]
 python -m agentrealm_agent status characters/wren.toml
 ```
 
-Environment: `AGENTREALM_API_KEY`, and optionally `AGENTREALM_BASE_URL` (default `https://api.agentrealm.gg`).
+Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local stack; the public API is `https://api.agentrealm.gg`, where lives are permanent), `AGENTREALM_API_KEY`.
 
 `run` drives every listed character, one thread each. Each character logs one line per window to stdout (tick, position, call made, intent, the result of the last one, events) and a JSONL trace to `.state/<name>.trace.jsonl`, so a death can be read back as a decision.
 
@@ -135,7 +135,10 @@ Environment: `AGENTREALM_API_KEY`, and optionally `AGENTREALM_BASE_URL` (default
 
 | Gap | Effect on the agent | Where it lands |
 |---|---|---|
+| Sandbox content loads on the sim's first start; the `default` outfit is seeded | Create works with avatar `default` once the sim has started; before that it answers `world_not_ready`. | B13, B39 |
 | No hostile's reach is served | `hostile_range` is a guess in the character file. | None |
+| No NPC's health or damage is served, except a boss's health | Hostile health and damage per type are learned from `NPCDamaged`, `NPCDied` and `Damaged`, with conservative defaults until measured ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) Combat). | None |
+| Our own strength is served only on the owner watch sheet, not on a character route | The agent brackets its strength from `over_strength_ceiling` rejections and does not read the watch sheet, which sits outside the character call budget. | None |
 
 ## Milestones
 
@@ -148,7 +151,7 @@ These are the backlog. Each has a stable ID; cite it in commits and PR bodies. P
 | M2 | **World model and pathing.** Tile and entity cache per map, local position tracking, A*, `explore`, `doors`, `goto`. | M1 |
 | M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
 | M4 | **Strategist and directives.** The LLM planner: optional dependency, off-tick, emits typed plan operations, never intents. Plus the runtime directives file. Specified in the playable plan. | M9 |
-| M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. Only for running against a local stack; the agent's default target is the public API. | M1 |
+| M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. The agent's default base URL is the local stack. | M1 |
 | M6 | **Executor.** `Step`/`Wait` paced multi-intent queues, two poll cadences, snapshot deltas, health tracking. | M3 |
 | M7 | **State machine and survival.** Prioritised states replace `brain.decide`; cost-grid navigation, stuck detection. | M6 |
 | M8 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight`; learned item table. | M7 |

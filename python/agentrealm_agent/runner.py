@@ -8,7 +8,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_step, remaining_path_stale
+from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_step, remaining_path_stale, walkable_prefix
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
@@ -358,8 +358,9 @@ class Runner:
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
-        on_path = bool(m.path) and m.path[0] == target
-        cells = list(m.path) if on_path else [target]
+        prefix = walkable_prefix(w, m, self.cfg.policy, m.path)
+        on_path = bool(prefix) and prefix[0] == target
+        cells = list(prefix) if on_path else [target]
         # Ticks since the last applied Step, counted to the latest tick we
         # know of: the first intent runs no earlier, so the owed Waits are
         # never too few and the first Step never draws movement_cooldown.

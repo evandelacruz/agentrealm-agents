@@ -41,10 +41,10 @@ Copy a file from `python/characters/` and edit it. Names must be unique in the w
 |---|---|
 | `name`, `avatar`, `model_agent`, `world` | Identity. `avatar` is an outfit code. `model_agent` is what rankings aggregate on. |
 | `policy.kind` | `idle` sends nothing. `wander` takes random steps. `scripted` runs the reflexes and goals below. |
-| `policy.goals` | Tried in order: `explore`, `doors`, `goto` (with `policy.goto = [x, y]`), `wander`, `hold`. |
+| `policy.goals` | Tried in order: `explore`, `doors`, `goto` (with `policy.goto = [x, y]`), `wander`, `hold`. Paths may run through unseen ground (fog costs 2 per step to known ground's 1), but the agent only steps onto tiles it has seen; a goal whose next step is unseen yields to the next goal. |
 | `policy.on_hostile` | `flee`, `fight`, or `ignore`, for anything in `policy.hostile` (`npc`, `character`) within `policy.hostile_range`. |
 | `policy.pickup` | Take supplies within one block. |
-| `policy.avoid_blocks` | Block types to step off and to plan around. Standing on one with no safe step off, the plan crosses as few as it can. |
+| `policy.avoid_blocks` | Block types to step off and to plan around. Standing on one with no safe step off, the plan crosses as few as it can. Other fire and lava cost their `occupy_damage` per step. |
 | `policy.entity_refresh` | Ticks between entity reads when nothing is happening. |
 | `policy.seed` | Random seed for `wander`. Defaults to the character id. |
 

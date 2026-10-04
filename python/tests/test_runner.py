@@ -347,6 +347,18 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(intents, [{"verb": "Step", "direction": "right"}])
         self.assertEqual(r.mem.path, [(3, 0), (4, 0)])
 
+    def test_walk_queue_stops_before_an_occupied_cell(self):
+        # A12: the cost grid prices an NPC at 50 so the plan may run through
+        # it; the queue must not Step onto it. The rest of the plan stays.
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r.world.entities = [Entity("npc", 9, (3, 0))]
+        r.mem.path = [(1, 0), (2, 0), (3, 0), (4, 0)]
+        intents = r.intents_for(Decision({"verb": "SetPosition", "x": 1, "y": 0}, "test"))
+        steps = [i for i in intents if i["verb"] == "Step"]
+        self.assertEqual(steps, [{"verb": "Step", "direction": "right"}] * 2)
+        self.assertEqual(r.mem.path, [(3, 0), (4, 0)])
+        self.assertEqual(r.mem.path_blockers, set(), "no blocker queued at send time")
+
     def test_hostile_in_range_drops_the_held_queue_and_flees(self):
         # Reflex 3 runs every round trip, not only once the queue drains.
         fake = FakeClient([
@@ -482,7 +494,8 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(r.world.pos, (2, 0), "the old queue's late results are ignored")
 
     def test_unavoidable_blocker_stops_the_queue_once_and_does_not_resend_again(self):
-        # A one-wide corridor: an NPC on it leaves no route. The old queue is
+        # A one-wide corridor: a wall read on it leaves no route (an NPC
+        # would not: the cost grid prices occupants, A12). The old queue is
         # stopped with one empty submit; later polls do not resend.
         fake = FakeClient([
             {"tick": 10, "window_remaining_ms": 0},
@@ -491,14 +504,17 @@ class RunnerTest(unittest.TestCase):
             {"tick": 13, "window_remaining_ms": 0},
         ])
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
-        for x in range(5):
-            r.world.view.tiles[(x, 1)] = "wall"
+        for x in range(-1, 6):
+            r.world.view.tiles[(x, -1)] = r.world.view.tiles[(x, 1)] = "wall"
         r.tick()
-        fake.entities = lambda cid, map_id, *rect: {"tick": 10, "npcs": [{"id": 9, "x": 2, "y": 0}]}
-        r.step("entities")
+        fake.terrain = lambda cid, map_id, *rect: {
+            "tick": 10, "map_id": 7, "x0": 2, "y0": 0, "width": 1, "height": 1,
+            "rows": ["#"], "legend": {"#": {"block_type": "wall"}},
+        }
+        r.step("terrain")
         self.assertEqual(self._resend(r, fake), [], "no route: the old queue is stopped")
         for _ in range(2):
-            r.step("entities")
+            r.step("terrain")
             r.tick()
             self.assertIsNone(fake.sent[-1][0])
         self.assertFalse(r.mem.resend_held_queue)

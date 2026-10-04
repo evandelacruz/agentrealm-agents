@@ -40,7 +40,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 |---|---|---|
 | `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Not measured on a live world yet; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
 | Multi-intent queues | Movement, and `Use`/`Say`/`Broadcast` behind the `Wait`s their cooldown still owes; every other intent is sent alone; a reflex that fires replaces a running queue | Freeing the request budget; queuing a retreat with an attack |
-| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; health not yet used by any decision; entity layer still from separate reads | Perception, retreat |
+| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; **Heal** (A10) uses them when hurt and out of combat; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
 | `Use` on a block (attacks the NPC on it, or breaks the block) | No: flees from every NPC | Fighting, opening the way |
 | Priced supplies (`gem_price`) | No | Buying gear, potions, tools |

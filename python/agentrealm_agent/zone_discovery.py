@@ -50,8 +50,7 @@ def zone_failed(w: WorldModel, map_id: int, pos: Pos) -> None:
 
 
 def safe_tiles(w: WorldModel, map_id: int) -> set[Pos]:
-    """Known safe cells on a map. Discovery output only: no caller acts on it
-    yet; the survival states that walk to safety consume it later (PLAN.md A7)."""
+    """Known safe cells on a map (PLAN.md A7). **Heal** (A10) walks to them."""
     return {pos for pos, fact in w.zones.get(map_id, {}).items() if fact.safe}
 
 

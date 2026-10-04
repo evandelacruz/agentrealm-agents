@@ -12,6 +12,14 @@ from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
+from .item_table import (
+    absorb_damaged_while_worn,
+    absorb_entities_payload,
+    absorb_inventory,
+    absorb_npc_damaged,
+    absorb_rejection_attack_range,
+    absorb_self_attack_range,
+)
 from .knowledge_base import KnowledgeBase
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
@@ -142,6 +150,7 @@ class Runner:
             s = c.self_(self.cid)
             w.apply_self(s)
             m.need_self, m.windows_since_self = False, 0
+            self._learn_items_from_self()
             self.log(call, f"lives={w.lives} alive={w.alive} placed={s.get('placed')} perception={w.perception}", {"self": s})
         elif call == "position":
             p = c.position(self.cid)
@@ -160,6 +169,7 @@ class Runner:
             w.apply_entities(e)
             w.tick = max(w.tick, int(e.get("tick", 0)))
             m.alarm = False
+            self._learn_items_from_entities(e)
             self.note_held_path_stale()
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
@@ -231,6 +241,7 @@ class Runner:
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
         w.learn_threat(events, earlier)
+        self._learn_items_from_tick(events, r.get("observation"))
         self.on_events(events)
         self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
@@ -427,7 +438,9 @@ class Runner:
             idx = int(res.get("index", 0))
             if m.pending_intents is not None and idx < m.pending_next_index:
                 continue
+            intent = self._intent_at(idx)
             if self.on_result(res, idx):
+                self._learn_items_from_result(res, intent)
                 rejected = True
                 break
             m.pending_next_index = idx + 1
@@ -472,6 +485,7 @@ class Runner:
                 m.last_speech_tick = int(result.get("tick", w.tick))
             if m.pending is not None and index == 0:
                 m.pending = None
+            self._learn_items_from_result(result, intent)
             return False
         if intent and intent.get("verb") == "Step" and w.pos is not None:
             reject_step(m, step_landing(w.pos, intent["direction"]))
@@ -483,6 +497,56 @@ class Runner:
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
+
+    def _with_item_table(self, fn) -> None:
+        kb = self.knowledge
+        if kb is None:
+            return
+        with kb.lock:
+            fn(kb.items)
+
+    def _learn_items_from_self(self) -> None:
+        w = self.world
+
+        def learn(items: dict) -> None:
+            absorb_self_attack_range(items, w.armed_code, w.attack_range)
+
+        self._with_item_table(learn)
+
+    def _learn_items_from_entities(self, payload: dict) -> None:
+        def learn(items: dict) -> None:
+            absorb_entities_payload(items, payload)
+
+        self._with_item_table(learn)
+
+    def _learn_items_from_tick(self, events: list[dict], obs: dict | None) -> None:
+        w = self.world
+
+        def learn(items: dict) -> None:
+            if obs and not obs.get("unchanged"):
+                body = obs.get("snapshot") if obs.get("complete") else obs.get("delta")
+                if isinstance(body, dict) and "inventory" in body:
+                    absorb_inventory(items, body.get("inventory"))
+                if isinstance(body, dict) and "entities" in body:
+                    absorb_entities_payload(items, body.get("entities"))
+            for ev in events:
+                absorb_npc_damaged(items, w.armed_code, ev)
+                absorb_damaged_while_worn(items, w.worn_codes, ev)
+
+        self._with_item_table(learn)
+
+    def _learn_items_from_result(self, result: dict, intent: dict | None) -> None:
+        if not intent:
+            return
+        w = self.world
+        verb = intent.get("verb")
+        if verb not in ("Arm", "Use"):
+            return
+
+        def learn(items: dict) -> None:
+            absorb_rejection_attack_range(items, w.armed_code, result)
+
+        self._with_item_table(learn)
 
     def on_events(self, events: list[dict]) -> None:
         w, m = self.world, self.mem

@@ -172,9 +172,12 @@ class Runner:
         elif m.pending_intents is not None and m.pending_next_index < len(m.pending_intents):
             if w.tick > m.queue_sent_tick + len(m.pending_intents) + QUEUE_RESULT_SLACK:
                 # The queue has had time to run out and its results never
-                # matched: stop waiting on them rather than hold forever.
+                # matched: stop waiting on them rather than hold forever. We
+                # may have walked without seeing it, so re-read position and
+                # forget the path and step clock planned from the old one.
                 m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                 m.held_queue = None
+                m.need_position, m.path, m.last_step_tick = True, [], None
             else:
                 m.held_queue = {"queue_id": m.pending_queue, "next_index": m.pending_next_index}
         else:

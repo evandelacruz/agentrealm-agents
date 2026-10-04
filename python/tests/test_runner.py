@@ -155,6 +155,11 @@ class RunnerTest(unittest.TestCase):
             r.tick()
         self.assertIsNone(r.mem.held_queue)
         self.assertIsNone(r.mem.pending_intents)
+        # We may have walked unseen: re-read position, drop the stale plan.
+        self.assertTrue(r.mem.need_position)
+        self.assertEqual(r.mem.path, [])
+        self.assertIsNone(r.mem.last_step_tick)
+        self.assertEqual(choose_call(r.world, r.mem, r.cfg.policy), "position")
         r.tick()
         self.assertIsNotNone(fake.sent[-1], "a fresh decision was sent")
 

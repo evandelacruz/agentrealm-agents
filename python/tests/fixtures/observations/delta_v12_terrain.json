@@ -1,0 +1,9 @@
+{
+  "version": "12",
+  "delta": {
+    "terrain": {
+      "changed": [{"map_id": 7, "x": 2, "y": 0, "block_type": "water"}],
+      "removed": [{"map_id": 7, "x": 3, "y": 0}]
+    }
+  }
+}

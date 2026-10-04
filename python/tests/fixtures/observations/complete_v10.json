@@ -1,0 +1,17 @@
+{
+  "version": "10",
+  "complete": true,
+  "snapshot": {
+    "lives": 5,
+    "alive": true,
+    "health": 8,
+    "max_health": 10,
+    "position": {"map_id": 7, "x": 5, "y": 5},
+    "entities": {
+      "characters": [],
+      "npcs": [{"id": 301, "x": 10, "y": 10, "npc_type_code": "rat"}],
+      "supplies": [{"id": 77, "x": 6, "y": 5, "supply_subtype_code": "apple"}],
+      "chests": [{"id": 80, "x": 0, "y": 0, "contents": [{"id": 1321, "supply_subtype_code": "bronze_sword"}]}]
+    }
+  }
+}

@@ -10,7 +10,7 @@
   },
   "M6": {
     "state": "partial",
-    "remaining": "Wire the executor into the runner (paced Step/Wait queues in agentrealm_agent/executor/movement.py and attack and speech pacing in executor/pacing.py exist but the runner does not use them yet): send the paced queues, trim to the queue horizon in the loop (which lengthens the calm poll gap), snapshot deltas (snapshot_version) on the world model, consuming health in decisions, live Olympuff smoke test. Health and max_health are folded from complete snapshots only."
+    "remaining": "Wire the executor into the runner (paced Step/Wait queues in agentrealm_agent/executor/movement.py and attack and speech pacing in executor/pacing.py exist but the runner does not use them yet): send the paced queues, trim to the queue horizon in the loop (which lengthens the calm poll gap), send snapshot_version on tick POST (the world model already applies versions and deltas, including health), consuming health in decisions, live Olympuff smoke test."
   },
   "M7": {"state": "open"},
   "M8": {"state": "open"},

@@ -1,0 +1,16 @@
+{
+  "version": "20",
+  "complete": true,
+  "snapshot": {
+    "lives": 4,
+    "alive": true,
+    "health": 10,
+    "max_health": 10,
+    "position": {"map_id": 7, "x": 5, "y": 5},
+    "entities": {
+      "npcs": [{"id": 400, "x": 1, "y": 1, "npc_type_code": "pest"}],
+      "supplies": [],
+      "chests": []
+    }
+  }
+}

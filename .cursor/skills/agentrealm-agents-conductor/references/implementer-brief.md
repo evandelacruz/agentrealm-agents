@@ -12,8 +12,8 @@ Every brief MUST:
 - Say: reference the IDs in commits and the PR body.
 - Say: the PR description opens with a product sentence. The first text is one or two sentences in plain language: what someone running a reference agent, or the agent itself, can do now, and why it matters. Write it the way a product person would. Leave the mechanism out (no functions, files, types, or a walk through the logic) because the diff already shows that. Milestone IDs and the rest of the detail come after that sentence.
 - Say: **open the PR ready for review, not draft.** If tooling defaults to draft, mark it ready before finishing. If a draft already exists, run `gh pr ready`.
-- Say: if blocked by an open design question or a server gap, **halt and print why**. Do not invent. Check PLAN.md and the published docs first.
-- Say: do not add dependencies or change the call budget or pacing without flagging prominently.
+- Say: if blocked by an open architecture, payments, legal, or moderation question, an open design question, or a server gap, **halt and print why**. Do not invent. Check PLAN.md and the published docs first.
+- Say: do not add dependencies or change the tick resolution path, migrations, moderation, or the call budget or pacing without flagging prominently.
 - Say: keep PLAN.md and README.md matching the code, and run `make test` before pushing.
 
 ## Partial work
@@ -43,9 +43,11 @@ Rules:
 - The PR description opens with a product sentence. The first text is one or two sentences in plain language: what someone running a reference agent, or the agent itself, can do now, and why it matters. Write it the way a product person would. Leave the mechanism out (no functions, files, types, or a walk through the logic) because the diff already shows that. Milestone IDs and the rest of the detail come after that sentence. For example: "A scripted character now walks back to the chest it dropped when it died."
 - Open the PR ready for review, not draft.
 - Do not add dependencies without flagging prominently.
-- Do not change the call budget or pacing without flagging.
+- Do not change the tick resolution path, migrations, moderation, or the call budget or pacing
+  without flagging.
 - Keep PLAN.md and README.md matching the code. Run make test before pushing.
-- If blocked by an open design question or a server gap, halt and print why.
+- If blocked by an open architecture, payments, legal, or moderation question,
+  an open design question, or a server gap, halt and print why.
   Check PLAN.md first; most questions are already answered.
 - If this scope does not finish <IDS>, set status to
   {"state":"partial","remaining":"..."} in status.json.
@@ -62,7 +64,8 @@ Address unresolved PR review comments on #<n>. Keep the same milestone IDs.
 If you edit the PR description, keep the opening as a product sentence: one or two sentences in plain language about what someone running a reference agent, or the agent itself, can do now, and why it matters. Leave the mechanism out. The diff already shows the logic.
 Keep the PR ready for review, not draft; run `gh pr ready` if needed.
 Do not reopen the slice or expand scope.
-Stop and ask if a comment requires a design decision or a server change, after
+Stop and ask if a comment requires an architecture or policy decision, a design
+decision, or a server change, after
 checking PLAN.md for an answer that already exists.
 ```
 

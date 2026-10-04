@@ -47,7 +47,7 @@ Comment on what you did **not** fix, so the next reviewer is not left guessing. 
 
 Never comment on what you *did* fix. The diff already says that, and a reply restating it is noise. If you fixed everything, you post nothing.
 
-A thread needing a design decision PLAN.md does not settle, or a server change, is the one case where you both comment and stop: say why on the thread, leave the lock in place, and tell Evan here.
+A thread needing an architecture, payments, legal, or moderation decision, a design decision PLAN.md does not settle, or a server change, is the one case where you both comment and stop: say why on the thread, leave the lock in place, and tell Evan here.
 
 Use `add_reply_to_pull_request_comment` with the thread's comment ID.
 
@@ -172,7 +172,7 @@ Read all of it, not only the lines the threads point at, and ask:
 
 - Run `make test`, and `make conductor-test` if you touched `tools/conductor`.
 - Cite the pull request's existing milestone IDs in the commit message.
-- Flag prominently in the commit if you added a dependency or changed the call budget or pacing.
+- Flag prominently in the commit if you added a dependency or touched the tick resolution path, migrations, moderation, or the call budget or pacing.
 
 ```bash
 git push -u origin <head ref>

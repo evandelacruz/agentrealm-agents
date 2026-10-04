@@ -56,7 +56,7 @@ No ticketing system. PLAN.md is the backlog.
    - Never auto-merge. Stack approved PRs for Evan.
    - Cap **2** implementers in flight unless Evan says otherwise.
 
-5. **If anything is ambiguous,** check PLAN.md and the published docs first. If nothing covers it, stop and ask Evan in this chat. Do not guess at design, and do not work around a server gap: record it in PLAN.md **Server gaps**.
+5. **If anything is ambiguous,** check PLAN.md and the published docs first. If nothing covers it, stop and ask Evan in this chat. Do not guess on architecture, payments, legal, or moderation policy, or at design, and do not work around a server gap: record it in PLAN.md **Server gaps**.
 
 6. **Pick from the milestones.** Open-PR fixes still come first. New work comes from PLAN.md **Milestones**: an ID whose `status.json` state is not `done`, whose **Depends on** IDs are all `done`, whose note does not start with "Waiting on", and that no open pull request already covers (cites the ID in its title or body).
 
@@ -80,7 +80,8 @@ No ticketing system. PLAN.md is the backlog.
    Address unresolved PR review comments. Keep the same milestone IDs.
    If you edit the PR description, keep the opening as a product sentence: one or two sentences in plain language about what someone running a reference agent, or the agent itself, can do now, and why it matters. Leave the mechanism out. The diff already shows the logic.
    Keep the PR ready for review (not draft); run `gh pr ready` if needed.
-   Stop and ask if a comment requires a design decision or a server change,
+   Stop and ask if a comment requires an architecture or policy decision, a
+   design decision, or a server change,
    after checking PLAN.md for an answer that already exists.
    EOF
    ```
@@ -122,7 +123,7 @@ Approval is not "ignore the rest of the thread." A reviewer who approves still l
 
 - **You never merge.** Evan merges, and so does the [agentrealm-agents supervisor](../../../.claude/skills/agentrealm-agents-supervisor/SKILL.md).
 - Flag PRs that are approved and CI-green as ready for Evan to merge, after checking polish. Mention deferred nits.
-- Treat a new dependency and changes to the call budget or pacing as human-merge surfaces even when review is green.
+- Treat migrations, payments, moderation, the tick resolution path, a new dependency, and changes to the call budget or pacing as human-merge surfaces even when review is green.
 
 ## Out of scope
 

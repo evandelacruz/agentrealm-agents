@@ -18,6 +18,7 @@ from .investigate import InvestigateState
 from .loot import LootState
 from .recover import RecoverState
 from .retreat import RetreatState
+from .solve import SolveState
 from .sync import SyncState
 from .travel import TravelState
 
@@ -37,6 +38,7 @@ STATES: tuple[State, ...] = (
     RecoverState(),
     LootState(),
     InvestigateState(),
+    SolveState(),
     GatherState(),
     TravelState(),
     LevelState(),

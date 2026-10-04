@@ -10,6 +10,7 @@ from typing import Any
 
 from .config import Policy
 from .directives import PARAM_DEFAULTS, _valid_param
+from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .world import DOORS, Pos, WorldModel, chebyshev
 
@@ -44,6 +45,7 @@ OP_STATE: dict[str, str | None] = {
 # Ops the shipped Explore pathing can drive today. Every other op is dropped
 # with a log line when it reaches the top of the stack (A34 slice).
 EXPLORE_PATH_OPS = frozenset({"explore_area", "travel", "wait"})
+SOLVE_OPS = frozenset({"compose", "use_block"})
 # `travel` destinations with a path today; `hunting_ground` and `shop` wait on A20/Shop.
 TRAVEL_PATHED = frozenset({"entrance", "town", "point"})
 
@@ -537,6 +539,17 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
             return world.view.tiles.get(world.pos) in DOORS
         if op["to"] == "town":
             return (world.map_id, world.pos) in world.respawn_anchors
+    if name == "compose":
+        return holds_whole(world.held_supplies, op["composes_into"])
+    if name == "use_block":
+        pos = (op["x"], op["y"])
+        if world.map_id is not None and (world.map_id, pos) in world.changed_blocks:
+            return True
+        tile = world.view.tiles.get(pos)
+        if tile is None:
+            return False
+        # A door that opened reads as walkable ground, not a door type.
+        return tile not in DOORS and tile not in ("", "dirt", "grass")
     # Ops whose states are not shipped never finish here; replan drops them.
     return False
 

@@ -6,6 +6,7 @@ from .explore import ExploreState, scripted_outcome
 from .gather import GatherState, gather_outcome
 from .heal import HealState
 from .level import LevelState
+from .solve import SolveState, solve_op
 from .travel import TravelState
 
 __all__ = [
@@ -13,7 +14,9 @@ __all__ = [
     "GatherState",
     "HealState",
     "LevelState",
+    "SolveState",
     "TravelState",
+    "solve_op",
     "PlayContext",
     "STATES",
     "State",

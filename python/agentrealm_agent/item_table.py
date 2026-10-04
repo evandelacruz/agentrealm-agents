@@ -33,6 +33,60 @@ Pos = tuple[int, int]
 DEFAULT_CARRY_CAPACITY = 10
 
 
+class FragmentMeta:
+    """``fragment`` metadata on a held fragment supply (API Snapshots)."""
+
+    __slots__ = ("composes_into", "piece_count", "slot", "missing_slots")
+
+    def __init__(
+        self,
+        *,
+        composes_into: str,
+        piece_count: int,
+        slot: int,
+        missing_slots: tuple[int, ...],
+    ) -> None:
+        self.composes_into = composes_into
+        self.piece_count = piece_count
+        self.slot = slot
+        self.missing_slots = missing_slots
+
+
+def parse_fragment(raw: Any) -> FragmentMeta | None:
+    if not isinstance(raw, dict):
+        return None
+    into = raw.get("composes_into")
+    if not isinstance(into, str) or not into:
+        return None
+    piece_count = _fragment_int(raw.get("piece_count"))
+    slot = _fragment_int(raw.get("slot"))
+    if piece_count is None or slot is None:
+        return None
+    missing_raw = raw.get("missing_slots")
+    missing: tuple[int, ...] = ()
+    if isinstance(missing_raw, list):
+        slots: list[int] = []
+        for item in missing_raw:
+            n = _fragment_int(item)
+            if n is None:
+                return None
+            slots.append(n)
+        missing = tuple(slots)
+    elif missing_raw is not None:
+        return None
+    return FragmentMeta(composes_into=into, piece_count=piece_count, slot=slot, missing_slots=missing)
+
+
+def _fragment_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return n if n > 0 else None
+
+
 @dataclass(frozen=True)
 class InventorySupply:
     """A supply's ``id`` and ``supply_subtype_code``, as the snapshot's
@@ -40,6 +94,7 @@ class InventorySupply:
 
     id: int
     code: str = ""
+    fragment: FragmentMeta | None = None
 
 
 @dataclass(frozen=True)
@@ -89,7 +144,7 @@ def supplies_from_list(raw: Any) -> list[InventorySupply]:
         sid = _positive_int(entry.get("id"))
         if sid is None:
             continue
-        out.append(InventorySupply(sid, _supply_code(entry) or ""))
+        out.append(InventorySupply(sid, _supply_code(entry) or "", parse_fragment(entry.get("fragment"))))
     return out
 
 

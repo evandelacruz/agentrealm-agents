@@ -27,6 +27,7 @@ from .plan import (
     TRAVEL_PATHED,
     GoalOp,
     Plan,
+    SOLVE_OPS,
     explore_targets,
 )
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
@@ -172,6 +173,8 @@ def plan_step(
         plan.advance(w)
         op = plan.current()
         if op is None:
+            return False
+        if op["op"] in SOLVE_OPS:
             return False
         if op["op"] not in EXPLORE_PATH_OPS:
             plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet")

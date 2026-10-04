@@ -167,7 +167,7 @@ class Runner:
         else:
             d = decide(w, m, self.cfg.policy, self.rng)
             intents = self.intents_for(d)
-        r = self.client.tick(self.cid, intents)
+        r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))
         if intents:
             m.queue_sent_tick = w.tick

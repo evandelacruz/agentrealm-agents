@@ -40,7 +40,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 |---|---|---|
 | `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Not measured on a live world yet; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
 | Multi-intent queues | Movement only; every other intent is sent alone; a reflex that fires replaces a running queue | Freeing the request budget; queuing a retreat with an attack |
-| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health from complete snapshots, not yet used by any decision; no `snapshot_version`, so no deltas; entity layer still from separate reads | Perception, retreat |
+| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; health not yet used by any decision; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
 | `Use` on a block (attacks the NPC on it, or breaks the block) | No: flees from every NPC | Fighting, opening the way |
 | Priced supplies (`gem_price`) | No | Buying gear, potions, tools |
@@ -80,7 +80,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 - **Terrain reads.** With perception 25 the terrain window is 51×51, so terrain is read only on a map change or after moving about half the window.
 - **Deltas feed the model.** Health, inventory and entity changes are folded into the world model from them.
 
-Shipped so far: the runner sends movement as paced `Step`/`Wait` queues (`executor/movement.py`), cut at the world's horizon, and polls on the two cadences (`poll_cadence.py`); the calm gap never outlasts the intents still queued, and a reflex that fires (hazard, hostile, supply, chest) replaces the running queue. `python/agentrealm_agent/executor/pacing.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_intents`) and the next poll. The attack and speech accumulators are paced separately in the runner; there is no mixed-queue helper yet.
+Shipped so far: the runner sends movement as paced `Step`/`Wait` queues (`executor/movement.py`), cut at the world's horizon, and polls on the two cadences (`poll_cadence.py`); the calm gap never outlasts the intents still queued, and a reflex that fires (hazard, hostile, supply, chest) replaces the running queue. Tick POSTs include the last applied observation version so responses can be deltas. `python/agentrealm_agent/executor/pacing.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_intents`) and the next poll. The attack and speech accumulators are paced separately in the runner; there is no mixed-queue helper yet.
 
 ### State machine
 

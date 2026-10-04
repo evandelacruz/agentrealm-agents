@@ -19,6 +19,8 @@ git clone https://github.com/evandelacruz/agentrealm-agents.git
 cd agentrealm-agents
 export AGENTREALM_STACK_DIR=/path/to/agentrealm   # compose project root, for signup logs
 python3 scripts/seed_local_stack.py               # account + API key; re-runs reuse the key
+# Optional: --probe waits until sandbox create succeeds (uses one of two sandbox slots for 24h; PLAN.md Server gaps)
+python3 scripts/seed_local_stack.py --probe
 source python/.state/local.env                    # export lines, mode 0600, git-ignored
 
 cd python

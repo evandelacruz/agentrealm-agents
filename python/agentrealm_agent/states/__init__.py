@@ -3,15 +3,18 @@
 from .base import PlayContext, State, StateOutcome
 from .dispatch import STATES, dispatch
 from .explore import ExploreState, scripted_outcome
+from .gather import GatherState, gather_outcome
 from .heal import HealState
 
 __all__ = [
     "ExploreState",
+    "GatherState",
     "HealState",
     "PlayContext",
     "STATES",
     "State",
     "StateOutcome",
     "dispatch",
+    "gather_outcome",
     "scripted_outcome",
 ]

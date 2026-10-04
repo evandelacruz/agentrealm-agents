@@ -98,6 +98,7 @@ class WorldModel:
     movement_speed: int = 2500  # thousandths of a block per second (GetSelf)
     alive: bool = True
     lives: int = 0
+    gems: int | None = None  # inventory counter from snapshots (A22)
     health: int | None = None
     max_health: int | None = None
     attack_range: int | None = None  # armed weapon reach from get_self (B100)
@@ -109,7 +110,6 @@ class WorldModel:
     # which brings a new 10-slot chest (Manual §11; loot.learn_loot_rejection).
     carry_capacity: int = DEFAULT_CARRY_CAPACITY
     undroppable: set[int] = field(default_factory=set)  # supply ids Drop refused not_transferable
-    gems: int | None = None
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)

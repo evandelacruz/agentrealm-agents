@@ -217,6 +217,7 @@ Each has a test the agent or a hand session can run.
 | Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? A20 drops held only | `Drop` a stowed supply and read the result |
 | Is the armed supply also listed in `held`? A20 counts held, worn, armed and stowed separately | Compare `inventory` before and after an `Arm` |
 | Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full` | Carry one and fill until `carry_capacity_full` |
+| What supply code does a gem pile carry? The manual describes authored piles (M §16) but names no code; only gem caches (`gem_cache_5/7/10`) are named | Read entities beside a pile in town and record its `code`; Gather (A22) targets piles once it is known |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 
 ### Assumed until measured

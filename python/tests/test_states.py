@@ -25,11 +25,8 @@ def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
     return w
 
 
-def ctx(w: WorldModel, m: Memory | None = None, params=None, **policy_kw) -> PlayContext:
-    kw = {}
-    if params is not None:
-        kw["params"] = params
-    return PlayContext(m or Memory(), Policy(kind="scripted", **policy_kw), random.Random(0), **kw)
+def ctx(w: WorldModel, m: Memory | None = None, **policy_kw) -> PlayContext:
+    return PlayContext(m or Memory(), Policy(kind="scripted", **policy_kw), random.Random(0))
 
 
 class DispatchPriorityTest(unittest.TestCase):
@@ -156,27 +153,18 @@ class DecideShimTest(unittest.TestCase):
 
     def test_decide_passes_never_attack_through(self):
         w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("character", 9, (2, 1), code="peer")]
-        w.health = 500
-        w.lives = 10
-        w.threat.record(("character", "peer"), 1)
+        w.entities = [Entity("character", 9, (2, 1))]
         pol = Policy(kind="scripted", on_hostile="fight", hostile=["character"])
-        self.assertEqual(
-            decide(w, Memory(), pol, random.Random(0), params={"risk": 1.0, "lives_floor": 1}).intent["verb"],
-            "Use",
-        )
+        self.assertEqual(decide(w, Memory(), pol, random.Random(0)).intent["verb"], "Use")
         d = decide(w, Memory(), pol, random.Random(0), never_attack=["character"])
         self.assertEqual(d.intent["verb"], "SetPosition")
 
     def test_fight_keeps_the_plan(self):
         w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("character", 9, (2, 1), code="peer")]
-        w.health = 500
-        w.lives = 10
-        w.threat.record(("character", "peer"), 1)
+        w.entities = [Entity("character", 9, (2, 1))]
         m = Memory(path=[(0, 0)], goal="explore")
         pol = Policy(kind="scripted", on_hostile="fight", hostile=["character"])
-        decide(w, m, pol, random.Random(0), params={"risk": 1.0, "lives_floor": 1})
+        decide(w, m, pol, random.Random(0))
         self.assertEqual(m.path, [(0, 0)])
 
 if __name__ == "__main__":

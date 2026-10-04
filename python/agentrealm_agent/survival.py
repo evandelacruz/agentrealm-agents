@@ -1,10 +1,10 @@
-"""Survival params and retreat thresholds (A9, PLAYABLE_AGENT_PLAN Health and lives)."""
+"""Survival params, retreat threshold and win estimate (A9, PLAYABLE_AGENT_PLAN Health and lives)."""
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
-from .directives import PARAM_DEFAULTS
 from .threat import ThreatTable, type_key_for_entity
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import safe_tiles
@@ -12,10 +12,13 @@ from .zone_discovery import safe_tiles
 if TYPE_CHECKING:
     from .config import Policy
 
-# Conservative combat timing when intervals are not yet learned (A9; A23 refines).
-ASSUMED_ATTACK_INTERVAL_TICKS = 10
-ASSUMED_ENEMY_HEALTH = 10  # assumption until a type is killed (PLAYABLE_AGENT_PLAN Combat)
-ASSUMED_OUR_DAMAGE_PER_HIT = 1
+# Stated assumptions until measured (GAME_NOTES.md Open questions, "Assumed
+# until measured"). Only the win estimate reads them; A23 refines it.
+HOSTILE_ATTACK_INTERVAL_TICKS = 15
+OUR_ATTACK_INTERVAL_TICKS = 10
+OUR_DAMAGE_PER_HIT = 1
+UNKILLED_HOSTILE_HEALTH = 10
+NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)
 
 
@@ -30,21 +33,12 @@ def effective_risk(risk: float, lives: int, lives_floor: int) -> float:
 
 
 def effective_retreat_hits(retreat_hits: int, eff_risk: float) -> int:
-    """``retreat_hits + round(1 − 2 × effective risk)``, never below 1."""
-    return max(1, int(retreat_hits) + round(1 - 2 * eff_risk))
+    """``retreat_hits + round(1 − 2 × effective risk)``, never below 1 (halves round up)."""
+    return max(1, int(retreat_hits) + math.floor(1 - 2 * eff_risk + 0.5))
 
 
 def effective_fight_margin(fight_margin: float, eff_risk: float) -> float:
     return fight_margin * (1.5 - eff_risk)
-
-
-def params_from(raw: dict[str, float | int] | None) -> dict[str, float | int]:
-    out = dict(PARAM_DEFAULTS)
-    if raw:
-        for k, v in raw.items():
-            if k in out:
-                out[k] = v
-    return out
 
 
 def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
@@ -108,10 +102,7 @@ def nearest_safe_goal(w: WorldModel) -> Pos | None:
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:
     if health <= 0 or not group:
         return float("inf")
-    dps = 0.0
-    for e in group:
-        dmg = threat.damage_per_hit(type_key_for_entity(e))
-        dps += dmg / ASSUMED_ATTACK_INTERVAL_TICKS
+    dps = sum(threat.damage_per_hit(type_key_for_entity(e)) for e in group) / HOSTILE_ATTACK_INTERVAL_TICKS
     if dps <= 0:
         return float("inf")
     return health / dps
@@ -120,20 +111,14 @@ def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> f
 def ticks_to_kill_them(group: list[Entity]) -> float:
     if not group:
         return float("inf")
-    total_health = len(group) * ASSUMED_ENEMY_HEALTH
-    our_dps = ASSUMED_OUR_DAMAGE_PER_HIT / ASSUMED_ATTACK_INTERVAL_TICKS
-    return total_health / our_dps
+    return len(group) * UNKILLED_HOSTILE_HEALTH / (OUR_DAMAGE_PER_HIT / OUR_ATTACK_INTERVAL_TICKS)
 
 
 def win_ratio(health: int | None, group: list[Entity], threat: ThreatTable) -> float:
     """Ticks for them to kill us, over ticks for us to kill them. Higher is better for us."""
     if health is None or not group:
         return float("inf")
-    them = ticks_to_kill_us(health, group, threat)
-    us = ticks_to_kill_them(group)
-    if us <= 0:
-        return 0.0
-    return them / us
+    return ticks_to_kill_us(health, group, threat) / ticks_to_kill_them(group)
 
 
 def has_unmeasured_type(w: WorldModel, group: list[Entity]) -> bool:
@@ -144,48 +129,38 @@ def has_unmeasured_type(w: WorldModel, group: list[Entity]) -> bool:
     return False
 
 
-def would_lose(
-    w: WorldModel,
-    policy: Policy,
-    params: dict[str, float | int],
-    *,
-    eff_risk: float | None = None,
-) -> bool:
-    """True when the win estimate is below the effective fight margin."""
+def would_lose(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:
+    """True when the win estimate is below the effective fight margin.
+
+    Nothing gates on it yet: **Fight** (A23) will, so that a fight the
+    estimate says we lose turns into **Flee**.
+    """
     group = combat_group(w, policy)
     if not group:
         return False
-    eff_risk = eff_risk if eff_risk is not None else effective_risk(
-        float(params["risk"]), w.lives, int(params["lives_floor"])
-    )
+    eff_risk = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
     if eff_risk < 0.5 and has_unmeasured_type(w, group):
         return True
     health = w.health if w.health is not None else w.max_health
     if health is None:
-        health = ASSUMED_ENEMY_HEALTH
+        health = NEW_CHARACTER_HEALTH
     margin = effective_fight_margin(float(params["fight_margin"]), eff_risk)
     return win_ratio(health, group, w.threat) <= margin
 
 
-def threat_outclasses(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:
-    """The fight group would beat us (PLAYABLE_AGENT_PLAN Retreat guard)."""
-    return would_lose(w, policy, params)
-
-
 def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:
-    """Low health for the retreat threshold, or the group outclasses us."""
-    if on_safe_tile(w):
+    """The next effective ``retreat_hits`` hits from the hostiles in range could kill.
+
+    A hit's size comes from what is attacking (the threat table), so with no
+    hostile in range there is nothing to retreat from. ``on_hostile = "ignore"``
+    never retreats. Retreating because the group outclasses us waits for
+    **Fight** (A23) and its win estimate.
+    """
+    if policy.on_hostile == "ignore" or on_safe_tile(w):
         return False
     group = combat_group(w, policy)
-    if not group and not hostiles_in_range(w, policy):
+    if not group:
         return False
-    p = params_from(params)
-    eff = effective_risk(float(p["risk"]), w.lives, int(p["lives_floor"]))
-    hits = effective_retreat_hits(int(p["retreat_hits"]), eff)
-    hit = max_hit_damage(group or hostiles_in_range(w, policy), w.threat)
-    health = w.health
-    if retreat_by_health(health, hits, hit):
-        return True
-    if group and policy.on_hostile != "ignore" and threat_outclasses(w, policy, p):
-        return True
-    return False
+    eff = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
+    hits = effective_retreat_hits(int(params["retreat_hits"]), eff)
+    return retreat_by_health(w.health, hits, max_hit_damage(group, w.threat))

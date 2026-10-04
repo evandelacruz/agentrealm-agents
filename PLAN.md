@@ -25,7 +25,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 
 Auth is `Authorization: Bearer <key>`.
 
-**One request per character per tick, with a burst of 3, on every character route.** Reads count. The limiter is a token bucket refilled on the front's tick interval ([Manual §7.4](https://agentrealm.gg/docs/manual#74-rate-limits)). So the agent runs a call budget: each tick it spends its call on the read it most needs or on the tick submit. The round trip carries the observation (B15). This agent reads ground chest contents and its own `health` / `max_health` from it; **Retreat** and **Flee** (A9) use health with the threat table and directive params. Each `Damaged` event also updates a threat table, after the same response's observation is applied: max damage per hit per hostile type, keyed by the source's type code, with an unmeasured default until something is measured (A6). A hit whose source is not among the entities perceived before or after that response, or has no type code, is not recorded. Trap and `occupy` damage is recorded under its own keys but never raises the default for an unmeasured hostile. **Fight** (A23) will add the full win estimate and margins. Terrain and entity reads still compete with intents for the same budget.
+**One request per character per tick, with a burst of 3, on every character route.** Reads count. The limiter is a token bucket refilled on the front's tick interval ([Manual §7.4](https://agentrealm.gg/docs/manual#74-rate-limits)). So the agent runs a call budget: each tick it spends its call on the read it most needs or on the tick submit. The round trip carries the observation (B15). This agent reads ground chest contents and its own `health` / `max_health` from it; **Retreat** (A9) uses health with the threat table and directive params. Each `Damaged` event also updates a threat table, after the same response's observation is applied: max damage per hit per hostile type, keyed by the source's type code, with an unmeasured default until something is measured (A6). A hit whose source is not among the entities perceived before or after that response, or has no type code, is not recorded. Trap and `occupy` damage is recorded under its own keys but never raises the default for an unmeasured hostile. **Fight** (A23) will add the full win estimate and margins. Terrain and entity reads still compete with intents for the same budget.
 
 The runner paces one call per wall-clock window (`epoch / tick interval`). That is stricter than the bucket requires: safe, but slower than it could be.
 
@@ -84,7 +84,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
 3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
 4. Supply underfoot or adjacent and `pickup = true` → `Take`.
-4b. Our last death dropped a chest on this map and `pickup = true` → walk to it; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
+4b. Our last death dropped a chest on this map, `pickup = true`, and a tile on or next to it is known safe (A7) → the **Recover** state (A11) walks there; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
 5. Plan has a next step → walk the path as a paced `Step` queue (see **Scheduler**).
 6. Otherwise → nothing.
 
@@ -134,7 +134,7 @@ entity_refresh = 5                  # ticks between entity reads when calm
 
 Created character IDs are saved in `python/.state/<name>.json` (gitignored), so `run` finds the character again.
 
-A separate runtime file, `characters/<name>.directives.toml`, is re-read whenever it changes (A8). It carries survival `params` (defaults and ranges in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)), a hard `never_attack` list enforced in the reflexes and on tick submit, and optional strategist fields (`goals`, `instructions`) for later milestones. `never_attack` and the survival `params` that **Retreat**, **Flee**, and **Escape** read (A9) change behavior today; `fight_margin` also feeds the flee win estimate until **Fight** (A23). A file that fails to read or parse keeps the last good directives, or the defaults on first load; deleting the file restores the defaults.
+A separate runtime file, `characters/<name>.directives.toml`, is re-read whenever it changes (A8). It carries survival `params` (defaults and ranges in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)), a hard `never_attack` list enforced in the reflexes and on tick submit, and optional strategist fields (`goals`, `instructions`) for later milestones. `never_attack` and the survival `params` **Retreat** reads (`retreat_hits`, `risk`, `lives_floor`, A9) change behavior today; `fight_margin` feeds only the win estimate **Fight** (A23) will gate on. A file that fails to read or parse keeps the last good directives, or the defaults on first load; deleting the file restores the defaults.
 
 ## CLI
 
@@ -191,11 +191,11 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 |---|---|---|
 | A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. | A1, A2 |
 | A6 | **Threat table.** Damage per hit per hostile type from `Damaged`; the unmeasured default. | |
-| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery only: it records safe tiles; acting on them is A9–A11. A failed zone read drops that cell from probing. | |
+| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery records safe tiles; **Recover** (A11) walks to a death chest only from a known safe tile on or beside it; retreat and heal still wait on A9–A10. A failed zone read drops that cell from probing. | |
 | A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
-| A9 | **Retreat, Flee and Escape.** `retreat_hits` and the `risk`/`lives_floor` formula; retreat to a known safe tile. | A5, A6, A7, A8 |
+| A9 | **Retreat, Flee and Escape.** `retreat_hits` and the `risk`/`lives_floor` formula; retreat to a known safe tile. **Retreat** fires only from health against a hostile in range (a hit's size comes from what is attacking). **Flee** honors `policy.on_hostile` as before, not the win estimate; the estimate ships here for A23, on the assumptions in GAME_NOTES.md Open questions. | A5, A6, A7, A8 |
 | A10 | **Heal.** Food in reach, carried potion, measured safe-zone regeneration, else wait in town and raise `buy`. | A5, A7 |
-| A11 | **Recover.** Walk to the death chest only when the spot is safe. | A5, A7 |
+| A11 | **Recover.** Walk to the death chest only when the spot is safe. Needs `pickup = true` and a known safe tile on or beside the chest on this map; reflexes 2–4 still run first, and with no plannable step the state falls back to Explore's goals for that round. Only the destination is checked: the route to it is not, which is A9's. | A5, A7 |
 | A12 | **Cost-grid planner.** The cost table (fog, hazards, hostile danger, expiring occupants, break costs inert), walking the known prefix. | |
 | A13 | **Two-level search.** Coarse 16×16 corridor search and A* in the perception window, each with a node budget per tick. | A12 |
 | A14 | **Rejection learning.** What each rejection code teaches the map (reflex 1 table): impassable, occupant cost for 30 ticks, locked doors and hunting closures in the knowledge base. `would_strand` waits on Evan's decision on the landing target (reflex 1 table). | A12, A17 |
@@ -212,7 +212,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A20 | **Loot.** `Take`, `WithdrawFromChest`, `Drop` junk when full; hearts first. | A5 |
 | A21 | **Shop.** Buy in-sight priced supplies the plan wants; restock to `potion_reserve`. | A5, A18 |
 | A22 | **Gather.** Gems from grass, bushes and gem piles in safe-ish ground. | A5 |
-| A23 | **Fight.** Group-aware win estimate, `never_attack`, retreat queued behind attacks, conservative until measured, never from a safe zone. | A5, A6, A8, A9 |
+| A23 | **Fight.** Group-aware win estimate, `never_attack`, retreat queued behind attacks, conservative until measured, never from a safe zone. Gates Fight on A9's estimate (`survival.would_lose`): a fight it says we lose goes to **Flee**, and the "threat outclasses us" **Retreat** trigger lands with it. | A5, A6, A8, A9 |
 | A24 | **Healing from food and potions.** `Arm` + `Use` self; heal amounts learned per type. | A10, A20 |
 | A25 | **M8 acceptance.** M8 done-when. | A16, A19, A21, A22, A23, A24 |
 

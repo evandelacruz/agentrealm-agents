@@ -8,6 +8,7 @@ from agentrealm_agent.config import Policy
 from agentrealm_agent.navigation import cost_path
 from agentrealm_agent.navigation.rejection import NavMemory
 from agentrealm_agent.world import Entity, WorldModel, terrain_cells
+from agentrealm_agent.zone_discovery import apply_zone
 
 
 def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
@@ -85,7 +86,7 @@ class ReflexTest(unittest.TestCase):
              ["...", "...", "..."], (1, 1), [Entity("npc", 5, (2, 1))], scripted(),
              "SetPosition", lambda i: i["x"] == 0),
             ("fight swings at a character in range",
-             ["...", "...", "..."], (1, 1), [Entity("character", 5, (2, 1), code="peer")],
+             ["...", "...", "..."], (1, 1), [Entity("character", 5, (2, 1))],
              scripted(on_hostile="fight", hostile=["character"], hostile_range=1),
              "Use", lambda i: i["target"] == {"kind": "character", "character_id": 5}),
             ("take a supply in reach before walking",
@@ -100,13 +101,7 @@ class ReflexTest(unittest.TestCase):
             with self.subTest(name):
                 w = world(rows, at=at)
                 w.entities = ents
-                params = None
-                if verb == "Use":
-                    w.health = 500
-                    w.lives = 10
-                    w.threat.record(("character", "peer"), 1)
-                    params = {"risk": 1.0, "lives_floor": 1, "fight_margin": 1.5, "retreat_hits": 2}
-                d = decide(w, Memory(), pol, random.Random(0), params=params)
+                d = decide(w, Memory(), pol, random.Random(0))
                 self.assertIsNotNone(d.intent, d.reason)
                 self.assertEqual(d.intent["verb"], verb, d.reason)
                 self.assertTrue(check(d.intent), d.intent)
@@ -164,6 +159,7 @@ class DeathChestTest(unittest.TestCase):
         w.apply_events([{"tick": 5, "events": [{"kind": "Died", "cause": "killed", "chest_id": 80, "map_id": 7, "x": 0, "y": 0}]}])
         self.assertEqual(w.death_chest, (7, (0, 0), 80))
         w.map_id, w.pos = 7, (4, 0)  # respawned along the strip
+        apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
 
         m = Memory()
         d = decide(w, m, scripted(goals=["hold"]), random.Random(0))

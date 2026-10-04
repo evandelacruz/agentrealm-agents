@@ -1,4 +1,4 @@
-"""Retreat: withdraw to a known safe tile when health or odds demand it (A9)."""
+"""Retreat: withdraw to a known safe tile before the next hits could kill (A9)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from ..pathing import grid_params, nav_search, next_step
 from ..survival import nearest_safe_goal, on_safe_tile, should_retreat
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
+from .explore import plan_sets
 from .intents import set_position
-from .survival_nav import plan_surfaces
 
 
 class RetreatState(State):
@@ -33,7 +33,7 @@ class RetreatState(State):
             return StateOutcome(None, "no safe tile known", state=self.name)
         if w.pos == goal:
             return StateOutcome(None, "at safe tile", state=self.name)
-        _, _, plan_avoid, plan_costly = plan_surfaces(w, m, policy, ctx.knowledge)
+        _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
         params = grid_params(policy, plan_avoid, plan_costly)
         if m.goal != "safe" or not m.path or m.path[-1] != goal:
             m.path = cost_path(w, goal, params, nav=nav_search(m, w, "safe", goal)) or []

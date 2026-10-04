@@ -97,12 +97,9 @@ def decide(
     knowledge: KnowledgeBase | None = None,
 ) -> Decision:
     """Run the priority dispatcher (A5) and keep its first intent as a Decision."""
-    from .directives import PARAM_DEFAULTS
-
-    p = dict(PARAM_DEFAULTS)
-    if params:
-        p.update({k: v for k, v in params.items() if k in p})
-    ctx = PlayContext(m, policy, rng, never_attack=never_attack or [], params=p, knowledge=knowledge)
+    ctx = PlayContext(m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
+    if params is not None:
+        ctx.params = params
     outcome = dispatch(w, ctx)
     intent = outcome.intents[0] if outcome.intents else None
     return Decision(intent, outcome.reason, outcome.reflex)

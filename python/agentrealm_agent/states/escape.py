@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from ..pathing import grid_params, nav_search, next_step, replan
+from ..pathing import next_step, replan
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
+from .explore import plan_sets
 from .intents import set_position
-from .survival_nav import plan_surfaces
 
 
 class EscapeState(State):
@@ -27,7 +27,7 @@ class EscapeState(State):
         w, m, policy = world, ctx.memory, ctx.policy
         here = w.pos
         assert here is not None
-        blocked, escape, plan_avoid, plan_costly = plan_surfaces(w, m, policy, ctx.knowledge)
+        blocked, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
         safe = w.open_neighbours(here, blocked)
         if safe:
             m.path, m.goal = [], ""
@@ -38,7 +38,7 @@ class EscapeState(State):
                 reflex=True,
                 state=self.name,
             )
-        # Surrounded: cross as little hazard as the cost grid allows (same as Explore did pre-A9).
+        # Surrounded: cross as little hazard as the cost grid allows (plan_sets prices hazards instead of blocking them).
         step = next_step(w, plan_avoid, m.path)
         if step is None:
             replan(w, m, policy, ctx.rng, plan_avoid, plan_costly, ctx.knowledge)

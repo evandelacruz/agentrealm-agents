@@ -93,9 +93,6 @@ def learn_step_rejection(
     tick: int,
 ) -> None:
     """Reflex 1 plus A14: drop the plan and teach the map from the code."""
-    from .stuck import on_rejection
-
-    on_rejection(m)
     m.path, m.goal = [], ""
     m.corridors.clear()  # the corridor searches priced the map before this lesson (A13)
     nav = m.nav

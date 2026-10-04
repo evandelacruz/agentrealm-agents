@@ -1,87 +1,133 @@
-"""Navigation scenario grids for stuck detection (A15)."""
+"""Navigation scenarios for stuck detection (A15, PLAYABLE_AGENT_PLAN Navigation **Tests**).
+
+Each scenario is the true map. The agent starts seeing only its perception
+square; ``sim.run`` reveals more as it moves, so the planner meets fog the way
+it does live. Outside the rows is wall: every map is bounded.
+
+Glyphs: ``.`` dirt, ``#`` wall, ``b`` bush, ``~`` water, ``S`` start,
+``G`` goal (dirt), ``N`` an NPC parked on dirt.
+"""
 
 from __future__ import annotations
 
-from agentrealm_agent.world import Entity, WorldModel
-from tests.test_cost_grid import grid
+from dataclasses import dataclass
+
+from agentrealm_agent.world import Pos
+
+GLYPHS = {".": "dirt", "#": "wall", "b": "bush", "~": "water", "S": "dirt", "G": "dirt", "N": "dirt"}
 
 
-def u_trap(at: tuple[int, int] = (1, 1)) -> WorldModel:
-    """A U-shaped basin: greedy descent can trap before finding the exit."""
-    rows = [
+@dataclass(frozen=True)
+class Scenario:
+    name: str
+    rows: tuple[str, ...]
+    perception: int = 2
+
+    def _find(self, glyph: str) -> list[Pos]:
+        return [(x, y) for y, row in enumerate(self.rows) for x, g in enumerate(row) if g == glyph]
+
+    @property
+    def start(self) -> Pos:
+        return self._find("S")[0]
+
+    @property
+    def goal(self) -> Pos:
+        return self._find("G")[0]
+
+    @property
+    def npcs(self) -> list[Pos]:
+        return self._find("N")
+
+    def block(self, p: Pos) -> str:
+        x, y = p
+        if 0 <= y < len(self.rows) and 0 <= x < len(self.rows[y]):
+            return GLYPHS[self.rows[y][x]]
+        return "wall"
+
+
+# Greedy moves toward G walk into the cup; the way out is back past S.
+U_TRAP = Scenario(
+    "u_trap",
+    (
+        "...........",
+        ".#######...",
+        ".......#...",
+        "...S...#.G.",
+        ".......#...",
+        ".#######...",
+        "...........",
+    ),
+)
+
+MAZE = Scenario(
+    "maze",
+    (
+        "S.#.......",
+        ".##.#####.",
+        "....#...#.",
+        "###.#.#.#.",
+        "....#.#...",
+        ".####.###.",
+        "......#G..",
+    ),
+)
+
+# A bush line across the whole map: no way round, and nothing to break it
+# with until M9 (A28), so the goal is abandoned.
+HEDGE_LINE = Scenario(
+    "hedge_line",
+    (
+        "..S.....",
+        "........",
+        "bbbbbbbb",
+        "........",
+        "....G...",
+    ),
+)
+
+# Water all round the goal. The ring is in sight from the start, so there is
+# no path even with fog open; the rest of the map is fog for reveal to walk.
+WATER_ENCLOSURE = Scenario(
+    "water_enclosure",
+    (
+        "............",
+        ".~~~........",
+        ".~G~S.......",
+        ".~~~........",
+        "............",
+        "............",
+        "............",
+    ),
+    perception=3,
+)
+
+# A one-wide corridor with an NPC parked in it, and no other way through.
+NPC_CORRIDOR = Scenario(
+    "npc_corridor",
+    (
         "#######",
-        "#.....#",
-        "#.###.#",
-        "#.#.#.#",
-        "#.....#",
+        "S..N..G",
         "#######",
-    ]
-    return grid(rows, at=at, perception=6)
+    ),
+)
 
+# The straight corridor toward G closes once its end is seen; the way round
+# is the long loop south.
+FOG_DEAD_END = Scenario(
+    "fog_dead_end",
+    (
+        "S.......#.G",
+        ".########.#",
+        ".########.#",
+        "...........",
+    ),
+)
 
-def simple_maze(at: tuple[int, int] = (0, 0)) -> WorldModel:
-    rows = [
-        "#########",
-        "#...#...#",
-        "#.#.#.#.#",
-        "#.#...#.#",
-        "#.#####.#",
-        "#.....#.#",
-        "#########",
-    ]
-    w = grid(rows, at=at, perception=5)
-    w.view.tiles[(7, 5)] = "dirt"
-    return w
-
-
-def hedge_line(at: tuple[int, int] = (0, 2)) -> WorldModel:
-    """Goal behind a hedge the agent cannot break yet (M9)."""
-    rows = [
-        "........",
-        "........",
-        "........",
-        "........",
-        "........",
-    ]
-    w = grid(rows, at=at, perception=8)
-    for x in range(8):
-        w.view.tiles[(x, 3)] = "bush"
-    return w
-
-
-def water_enclosure(at: tuple[int, int] = (2, 2)) -> WorldModel:
-    rows = [
-        ".....",
-        ".~~~.",
-        ".~G~.",
-        ".~~~.",
-        ".....",
-    ]
-    w = grid(rows, at=at, perception=5)
-    for x in range(5):
-        for y in range(5):
-            if rows[y][x] == "~":
-                w.view.tiles[(x, y)] = "water"
-            elif rows[y][x] == "G":
-                w.view.tiles[(x, y)] = "dirt"
-    return w
-
-
-def npc_corridor(at: tuple[int, int] = (0, 1)) -> WorldModel:
-    rows = [
-        "#####",
-        "#...#",
-        "#####",
-    ]
-    w = grid(rows, at=at, perception=4)
-    w.entities = [Entity("npc", 1, (2, 1))]
-    return w
-
-
-def fog_dead_end(at: tuple[int, int] = (0, 0)) -> WorldModel:
-    """Corridor that is open in fog but closes once revealed."""
-    w = WorldModel(character_id=1, map_id=1, pos=at, perception=3)
-    for x in range(6):
-        w.view.tiles[(x, 0)] = "dirt"
-    w.terrain_center, w.terrain_map = at, 1
-    return w
+# The same corridor with no way round: abandoned once the fog clears.
+FOG_DEAD_END_CLOSED = Scenario(
+    "fog_dead_end_closed",
+    (
+        "S.......#.G",
+        "###########",
+    ),
+)

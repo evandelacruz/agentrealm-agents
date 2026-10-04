@@ -97,6 +97,7 @@ class WorldModel:
     movement_speed: int = 2500  # thousandths of a block per second (GetSelf)
     alive: bool = True
     lives: int = 0
+    gems: int | None = None  # inventory counter from snapshots (A22)
     health: int | None = None
     max_health: int | None = None
     attack_range: int | None = None  # armed weapon reach from get_self (B100)
@@ -324,6 +325,8 @@ class WorldModel:
         if inv is None:
             return
         self.armed_code, self.worn_codes = loadout_from_inventory(inv)
+        if "gems" in inv:
+            self.gems = _opt_int(inv.get("gems"))
 
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)

@@ -338,9 +338,11 @@ If you find a sign with numbers on it, try them as a code at the nearest locked 
 """                                                     # free text, passed to the strategist
 ```
 
-Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. Until A9 and the M4 strategist land, only `never_attack` changes behavior; `params`, `goals`, and `instructions` are parsed and validated but not yet read.
+Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. `never_attack` and a `gather_gems` goal change behavior today; other goal ops, `params`, and `instructions` are parsed and validated but not yet read.
 
 Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
+
+Until the strategist lands, `gather_gems` on the directives goal stack is the only goal op the state machine reads; other ops and `params` are parsed and validated but not yet consumed.
 
 | Param | Default | Range | Strategist may | Meaning |
 |---|---|---|---|---|

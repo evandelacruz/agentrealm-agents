@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from ..client import Intent
 from ..config import Policy
+from ..directives import Directives, default_directives
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..world import WorldModel
@@ -22,6 +23,7 @@ class PlayContext:
     rng: random.Random
     never_attack: list[str] = field(default_factory=list)
     knowledge: KnowledgeBase | None = None  # per-world door graph, terrain, locked doors (A26, A14)
+    directives: Directives = field(default_factory=default_directives)
 
 
 @dataclass

@@ -13,6 +13,10 @@ def use_on(e: Entity) -> dict:
     return {"verb": "Use", "target": {"kind": "character", "character_id": e.id}}
 
 
+def use_block(p: Pos) -> dict:
+    return {"verb": "Use", "target": {"kind": "block", "x": p[0], "y": p[1]}}
+
+
 def take(e: Entity) -> dict:
     return {"verb": "Take", "supply_id": e.id}
 

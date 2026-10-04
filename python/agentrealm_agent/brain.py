@@ -1,58 +1,46 @@
-"""Deciding: which call to spend this window on, and which intent to send.
+"""Scheduler (choose_call) and the runner's adapter over the state machine (A5).
 
-Both are pure functions of the world model and the policy, so the same
-observations give the same choice and a trace reads back as a decision.
+Tick intents come from ``states.dispatch``; ``decide`` is a shim that maps its
+``list[Intent]`` outcome to a one-intent ``Decision`` until the runner sends
+whole queues (M6). Both paths are pure in the world model and policy.
 """
 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .config import Policy
-from .directives import attack_forbidden
 from .executor.movement import step_landing
 from .knowledge_base import KnowledgeBase
-from .navigation import CostGridParams, cost_path, known_prefix, nearest_target
-from .navigation.rejection import LAND_TRIES, NavMemory, end_decision, navigation_avoid_costly
+from .memory import Memory
+from .navigation import known_prefix
+from .navigation.rejection import navigation_avoid_costly
+from .pathing import step_open
 from .poll_cadence import gate_tick_call, is_urgent
-from .world import DOORS, Entity, Pos, WorldModel, chebyshev
+from .states import PlayContext, dispatch
+from .states.intents import set_position, take, use_on, withdraw_all
+from .world import DOORS, Pos, WorldModel
 from .zone_discovery import next_zone_probe
+
+__all__ = [
+    "Decision",
+    "Memory",
+    "choose_call",
+    "decide",
+    "path_blockers",
+    "remaining_path_stale",
+    "set_position",
+    "take",
+    "use_on",
+    "walkable_prefix",
+    "withdraw_all",
+]
 
 SELF_REFRESH = 60  # windows between self reads when nothing forces one
 
 
 # Scheduler.
-
-@dataclass
-class Memory:
-    """What the brain carries between windows besides the world model."""
-
-    path: list[Pos] = field(default_factory=list)
-    goal: str = ""
-    need_position: bool = True
-    need_self: bool = True
-    windows_since_self: int = 0
-    pending: dict | None = None  # last non-queue intent submitted, awaiting its result
-    pending_queue: str | None = None  # the queue_id movement or intent was sent under
-    pending_intents: list[dict] | None = None  # full queue last submitted with intents
-    pending_next_index: int = 0  # next intent index still awaiting a result
-    held_queue: dict | None = None  # server queue {"queue_id", "next_index"} while not empty
-    queue_sent_tick: int = 0  # tick the last multi-intent queue was answered at
-    cancel_queue: bool = False  # send [] next tick: the held queue was planned from a stale position
-    last_step_tick: int | None = None  # tick our last Step applied, to pace the next queue
-    last_use_tick: int | None = None  # tick our last Use applied (weapon cooldown, A1)
-    last_speech_tick: int | None = None  # tick our last Say/Broadcast applied (A1)
-    nav: NavMemory = field(default_factory=NavMemory)
-    alarm: bool = False  # Damaged or Attacked since the last entity read
-    last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)
-    calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll
-    queued_ticks: int = 0  # intents still queued after the last poll, one tick each
-    hurt_last_poll: bool = False  # the last poll's events carried Damaged
-    resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
-    path_blockers: set = field(default_factory=set)  # blocked cells the walk queue already crossed when sent (A43)
-    zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
-
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
     """One of: self, position, terrain, entities, zone, tick, skip.
@@ -90,25 +78,6 @@ def _tick_zone_or_skip(w: WorldModel, m: Memory, policy: Policy) -> str:
     return call
 
 
-# Intents.
-
-def set_position(p: Pos) -> dict:
-    return {"verb": "SetPosition", "x": p[0], "y": p[1]}
-
-
-def use_on(e: Entity) -> dict:
-    return {"verb": "Use", "target": {"kind": "character", "character_id": e.id}}
-
-
-def take(e: Entity) -> dict:
-    return {"verb": "Take", "supply_id": e.id}
-
-
-def withdraw_all(chest_id: int) -> dict:
-    # No supply_ids: take everything that fits, lowest ids first (B117).
-    return {"verb": "WithdrawFromChest", "chest_id": chest_id}
-
-
 @dataclass
 class Decision:
     intent: dict | None
@@ -126,140 +95,11 @@ def decide(
     never_attack: list[str] | None = None,
     knowledge: KnowledgeBase | None = None,
 ) -> Decision:
-    """The reflex list from PLAN.md. The first rule that matches wins."""
-    d = _decide(w, m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
-    end_decision(m.nav, w.tick)
-    return d
-
-
-def _decide(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    rng: random.Random,
-    *,
-    never_attack: list[str],
-    knowledge: KnowledgeBase | None,
-) -> Decision:
-    if policy.kind == "idle" or w.pos is None or not w.alive:
-        return Decision(None, "idle")
-    here = w.pos
-    view = w.view
-
-    # Rejection learnings stay out of every choice below (A14, reflex 1).
-    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
-    if policy.kind == "wander":
-        return _wander(w, nav_avoid, rng)
-
-    hazards = {p for p, b in view.tiles.items() if b in policy.avoid_blocks}
-    blocked = nav_avoid | hazards
-    # Plans keep off hazards, except when standing on one with no safe step
-    # off: then they may cross hazards, as few as they can, to get out.
-    escape: set[Pos] = set()
-    # 2. Standing on a block that hurts.
-    if here in hazards:
-        safe = w.open_neighbours(here, blocked)
-        if safe:
-            m.path = []
-            return Decision(set_position(min(safe)), f"off {view.tiles.get(here)}", reflex=True)
-        escape = hazards
-    plan_avoid = blocked - escape
-    plan_costly = escape | nav_costly
-
-    # 3. Hostiles.
-    hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
-    if hostiles and policy.on_hostile != "ignore":
-        target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
-        if policy.on_hostile == "fight":
-            if target.kind == "character" and not attack_forbidden(target, never_attack):
-                return Decision(use_on(target), f"fight {target.kind} {target.id}", reflex=True)
-            # NPC targets have no Use target kind on the wire yet; fall through to flee.
-            # never_attack on characters also falls through to flee.
-        away = _flee_step(w, hostiles, blocked)
-        if away is not None:
-            m.path = []
-            return Decision(set_position(away), f"flee {target.kind} {target.id}", reflex=True)
-
-    # would_strand (A14): step onto the landing cell before pickups and goals.
-    # Tried at most LAND_TRIES decisions, and dropped once it is not open.
-    if m.nav.prefer_land is not None:
-        land_map, land = m.nav.prefer_land
-        if land_map == w.map_id and m.nav.land_tries < LAND_TRIES and _step_open(w, plan_avoid, land):
-            m.nav.land_tries += 1
-            m.path, m.goal = [land], "land"
-            return Decision(set_position(land), "land first")
-        m.nav.prefer_land, m.nav.land_tries = None, 0
-
-    # 4. Supplies within reach.
-    if policy.pickup:
-        near = [e for e in w.entities if e.kind == "supply" and chebyshev(e.pos, here) <= 1]
-        if near:
-            s = min(near, key=lambda e: (chebyshev(e.pos, here), e.id))
-            return Decision(take(s), f"take {s.code or s.id}", reflex=True)
-
-    # 4b. Our death chest: go back for it and take everything out (B103).
-    if policy.pickup and w.death_chest is not None and w.death_chest[0] == w.map_id:
-        _, at, chest_id = w.death_chest
-        if chebyshev(at, here) <= 1:
-            contents = w.chest_contents.get(chest_id)
-            if contents:
-                return Decision(withdraw_all(chest_id), f"recover from chest {chest_id}", reflex=True)
-            if contents is None:
-                return Decision(None, f"open chest {chest_id}")
-        elif m.goal != "chest" or not _next_step(w, plan_avoid, m.path):
-            found = cost_path(w, at, _grid(policy, plan_avoid, plan_costly))
-            if _next_step(w, plan_avoid, found):
-                m.path, m.goal = found, "chest"
-
-    # 5. Follow the plan, walking only its known prefix (A12). Replan when
-    # the next step is not open or not yet seen.
-    step = _next_step(w, plan_avoid, m.path)
-    if step is None:
-        _replan(w, m, policy, rng, plan_avoid, plan_costly)
-        step = _next_step(w, plan_avoid, m.path)
-    if step is not None:
-        return Decision(set_position(step), f"{m.goal} → {m.path[-1]}")
-
-    # 6. Nothing to do.
-    return Decision(None, "no goal reachable")
-
-
-def _wander(w: WorldModel, avoid: set[Pos], rng: random.Random) -> Decision:
-    options = w.open_neighbours(w.pos, avoid)
-    if not options:
-        return Decision(None, "wander: boxed in")
-    return Decision(set_position(rng.choice(sorted(options))), "wander")
-
-
-def _flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:
-    here = w.pos
-    options = w.open_neighbours(here, blocked) + [here]
-
-    def safety(p: Pos) -> tuple[int, int]:
-        nearest = min(chebyshev(p, h.pos) for h in hostiles)
-        total = sum(chebyshev(p, h.pos) for h in hostiles)
-        return nearest, total
-
-    best = max(options, key=lambda p: (safety(p), p))
-    return None if best == here else best
-
-
-def _step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:
-    if chebyshev(w.pos, p) > w.movement:
-        return False
-    if p in blocked:
-        return False
-    if w.view.tiles.get(p) in DOORS:
-        return True
-    return w.view.walkable(p) and p not in w.occupied()
-
-
-def _next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos | None:
-    """The path's first step when it is seen and open, else None."""
-    prefix = known_prefix(path or [], w.view)
-    if prefix and _step_open(w, blocked, prefix[0]):
-        return prefix[0]
-    return None
+    """Run the priority dispatcher (A5) and keep its first intent as a Decision."""
+    ctx = PlayContext(m, policy, rng, never_attack=never_attack or [], knowledge=knowledge)
+    outcome = dispatch(w, ctx)
+    intent = outcome.intents[0] if outcome.intents else None
+    return Decision(intent, outcome.reason, outcome.reflex)
 
 
 def walkable_prefix(
@@ -327,7 +167,7 @@ def path_blockers(w: WorldModel, m: Memory, policy: Policy, knowledge: Knowledge
         return set()
     avoid = _plan_avoid(w, m, policy, knowledge)
     out = {p for p in cells[1:] if _cell_on_path_blocked(w, avoid, p)}
-    if not _step_open(w, avoid, cells[0]):
+    if not step_open(w, avoid, cells[0]):
         out.add(cells[0])
     return out
 
@@ -339,49 +179,3 @@ def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: Kn
     the replan could not avoid it, so resending would only send it again.
     """
     return bool(path_blockers(w, m, policy, knowledge) - m.path_blockers)
-
-
-def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]) -> None:
-    """Take the first goal whose path starts on a seen, open step.
-
-    A path whose first step lies in fog is skipped like an unreachable goal,
-    so a later goal (explore, say) gets the move while terrain reads catch up.
-    """
-    m.path, m.goal = [], ""
-    for goal in policy.goals:
-        found = _plan_goal(goal, w, policy, rng, blocked, costly)
-        if _next_step(w, blocked, found):
-            m.path, m.goal = found, goal
-            return
-
-
-def _grid(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_door: bool = False) -> CostGridParams:
-    return CostGridParams(
-        avoid=set(avoid),
-        costly=set(costly),
-        hostile_kinds=frozenset(policy.hostile),
-        allow_goal_door=allow_goal_door,
-    )
-
-
-def _plan_goal(
-    goal: str, w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]
-) -> list[Pos] | None:
-    view = w.view
-    if goal == "hold":
-        return None
-    if goal == "wander":
-        options = w.open_neighbours(w.pos, blocked)
-        return [rng.choice(sorted(options))] if options else None
-    if goal == "goto":
-        target = tuple(policy.goto)
-        return cost_path(w, target, _grid(policy, blocked, costly, allow_goal_door=True)) or None
-    if goal == "doors":
-        doors = {p for p, b in view.tiles.items() if b in DOORS}
-        found = nearest_target(w, doors, _grid(policy, blocked, costly, allow_goal_door=True))
-        return found[1] if found and found[1] else None
-    if goal == "explore":
-        targets = view.frontier() - {w.pos}
-        found = nearest_target(w, targets, _grid(policy, blocked, costly))
-        return found[1] if found and found[1] else None
-    return None

@@ -20,8 +20,6 @@ MapPos = tuple[int, Pos]
 
 # Occupant cost lasts a few seconds at 10 ticks/s (PLAYABLE_AGENT_PLAN §2).
 OCCUPANT_LEARN_TICKS = 30
-# Decisions the would_strand land step is tried before it is dropped.
-LAND_TRIES = 3
 
 
 @dataclass
@@ -30,9 +28,7 @@ class NavMemory:
 
     impassable: set[MapPos] = field(default_factory=set)
     occupant_until: dict[MapPos, int] = field(default_factory=dict)
-    wait_tile: MapPos | None = None  # block_occupied: keep off for one decision
-    prefer_land: MapPos | None = None  # would_strand: step here before other goals
-    land_tries: int = 0  # land steps sent for prefer_land
+    wait_tile: MapPos | None = None  # block_occupied or unhandled code: keep off for one decision
 
 
 def copy_nav(nav: NavMemory) -> NavMemory:
@@ -40,8 +36,6 @@ def copy_nav(nav: NavMemory) -> NavMemory:
         impassable=set(nav.impassable),
         occupant_until=dict(nav.occupant_until),
         wait_tile=nav.wait_tile,
-        prefer_land=nav.prefer_land,
-        land_tries=nav.land_tries,
     )
 
 
@@ -117,12 +111,6 @@ def learn_step_rejection(
     m.path, m.goal = [], ""
     nav = m.nav
     cell = (w.map_id, landing)
-    if nav.prefer_land == cell:
-        # The land step itself was refused: drop it rather than retry forever.
-        nav.prefer_land, nav.land_tries = None, 0
-        if code == "would_strand":
-            nav.wait_tile = cell
-            return
     match code:
         case "not_traversable":
             nav.impassable.add(cell)
@@ -138,19 +126,14 @@ def learn_step_rejection(
         case "over_strength_ceiling":
             nav.impassable.add(cell)
             record_strength_closed(kb, w, landing)
-        case "would_strand":
-            nav.prefer_land, nav.land_tries = cell, 0
         case _:
-            # A code this table does not know (or none): keep off the cell for
+            # A code this table does not handle (or none): keep off the cell for
             # one decision, as reflex 1 did before A14, and learn nothing more.
+            # would_strand lands here until Evan picks its landing target
+            # (PLAN.md A14: GAME_NOTES ties it to water, which WorldModel lacks).
             nav.wait_tile = cell
 
 
 def on_block_changed(m, map_id: int, pos: Pos) -> None:
     """A changed block may be passable again: forget the learned block."""
     m.nav.impassable.discard((map_id, pos))
-
-
-def clear_prefer_land_on_step(m, map_id: int, landed: Pos) -> None:
-    if m.nav.prefer_land == (map_id, landed):
-        m.nav.prefer_land, m.nav.land_tries = None, 0

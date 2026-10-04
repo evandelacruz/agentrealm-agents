@@ -13,7 +13,6 @@ from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.navigation import CostGridParams, cost_path
 from agentrealm_agent.navigation.rejection import (
-    LAND_TRIES,
     OCCUPANT_LEARN_TICKS,
     NavMemory,
     learn_step_rejection,
@@ -99,7 +98,8 @@ class RejectionLearningTest(unittest.TestCase):
         self.assertEqual(navigation_avoid_costly(m.nav, None, 1, 10), (set(), set()))
 
     def test_unknown_code_keeps_off_for_one_decision_only(self):
-        for code in ("some_new_code", None):
+        # would_strand is in this list until Evan picks its landing target (PLAN.md A14).
+        for code in ("some_new_code", "would_strand", None):
             with self.subTest(code=code):
                 w = grid(["...", "..."])
                 m = Memory()
@@ -130,58 +130,19 @@ class RejectionLearningTest(unittest.TestCase):
         self.assertIn((1, 0), navigation_avoid_costly(m.nav, self.kb, 1, 20)[0])
 
 
-class WouldStrandTest(unittest.TestCase):
-    def test_steps_to_land_before_goals(self):
-        w = grid(["..."], at=(0, 0))
-        m = Memory()
-        learn_step_rejection(m, w, None, (1, 0), "would_strand", 5)
-        d = decide(w, m, scripted(goals=["goto"], goto=(0, 0), pickup=True), random.Random(0))
-        self.assertEqual((target(d), d.reason), ((1, 0), "land first"))
-
-    def test_threat_reflexes_come_first(self):
-        w = grid([".....", "....."], at=(1, 0))
-        w.entities = [Entity("npc", 9, (0, 0))]
-        m = Memory(nav=NavMemory(prefer_land=(1, (2, 0))))
-        d = decide(w, m, scripted(goals=["hold"], on_hostile="flee", hostile=["npc"], hostile_range=2),
-                   random.Random(0))
-        self.assertTrue(d.reason.startswith("flee"), d.reason)
-        self.assertEqual(m.nav.prefer_land, (1, (2, 0)), "kept for after the threat")
-
-    def test_land_step_is_bounded(self):
-        w = grid(["..."], at=(0, 0))
-        m = Memory(nav=NavMemory(prefer_land=(1, (1, 0))))
-        pol = scripted(goals=["hold"])
-        for _ in range(LAND_TRIES):
-            self.assertEqual(decide(w, m, pol, random.Random(0)).reason, "land first")
-        self.assertNotEqual(decide(w, m, pol, random.Random(0)).reason, "land first")
-        self.assertIsNone(m.nav.prefer_land)
-
-    def test_dropped_when_not_open_or_refused_again(self):
-        w = grid([".#."], at=(0, 0))
-        m = Memory(nav=NavMemory(prefer_land=(1, (1, 0))))
-        decide(w, m, scripted(goals=["hold"]), random.Random(0))
-        self.assertIsNone(m.nav.prefer_land, "not open now")
-
-        w = grid(["..."], at=(0, 0))
-        m = Memory()
-        learn_step_rejection(m, w, None, (1, 0), "would_strand", 5)
-        learn_step_rejection(m, w, None, (1, 0), "would_strand", 6)
-        self.assertIsNone(m.nav.prefer_land, "a refused land step is not retried")
-        self.assertEqual(m.nav.wait_tile, (1, (1, 0)))
-
-
 class RunnerRejectionTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
-        patch.start()
-        self.addCleanup(patch.stop)
+        for mod, name in ((config, "STATE_DIR"), (kb_mod, "WORLDS_DIR")):
+            patch = mock.patch.object(mod, name, Path(tmp.name) / name)
+            patch.start()
+            self.addCleanup(patch.stop)
 
-    def runner(self, client) -> Runner:
+    def runner(self, client, knowledge=None) -> Runner:
         pol = Policy(goals=["goto"], goto=(4, 0), pickup=False)
         cfg = CharacterConfig("T", "default", "test", "sandbox", pol, Path("t.toml"))
-        r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None)
+        r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None, knowledge=knowledge)
         self.addCleanup(r.trace.close)
         w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)
         for y in range(2):
@@ -208,6 +169,38 @@ class RunnerRejectionTest(unittest.TestCase):
         r.tick()
         self.assertNotEqual(fake.sent[2][0][0], {"verb": "Step", "direction": "right"})
         self.assertEqual(r.mem.nav.impassable, set(), "BlockChanged on our map clears it")
+
+    def test_block_occupied_and_door_locked_reach_the_learnings(self):
+        kb = kb_mod.KnowledgeBase.empty("sandbox")
+        for code, check in (
+            ("block_occupied", lambda r: self.assertEqual(
+                r.mem.nav.occupant_until, {(7, (1, 0)): 10 + OCCUPANT_LEARN_TICKS})),
+            ("door_locked", lambda r: self.assertEqual(
+                kb.maps["7"]["doors"], [{"x": 1, "y": 0, "locked": True}])),
+        ):
+            with self.subTest(code=code):
+                fake = FakeClient([
+                    {"tick": 10, "window_remaining_ms": 0},
+                    {"tick": 11, "window_remaining_ms": 0,
+                     "intent_results": [rejected("q1", code, "terrain", 10)]},
+                ])
+                r = self.runner(fake, knowledge=kb)
+                r.tick()
+                r.tick()
+                check(r)
+
+    def test_reflex_probe_while_held_does_not_age_the_learnings(self):
+        r = self.runner(FakeClient([]))
+        r.world.entities = [Entity("npc", 9, (2, 0))]
+        r.cfg.policy.hostile, r.cfg.policy.hostile_range = ["npc"], 2
+        r.mem.nav.wait_tile = (7, (1, 1))
+        r.mem.nav.occupant_until[(7, (0, 1))] = 5
+        r.world.tick = 50
+        d = r.reflex_while_held()
+        self.assertIsNotNone(d)
+        self.assertTrue(d.reason.startswith("flee"), d.reason)
+        self.assertEqual(r.mem.nav.wait_tile, (7, (1, 1)))
+        self.assertEqual(r.mem.nav.occupant_until, {(7, (0, 1)): 5})
 
     def test_block_changed_on_another_map_keeps_the_block(self):
         other = {"tick": 12, "events": [{"kind": "BlockChanged", "map_id": 8, "x": 1, "y": 0,

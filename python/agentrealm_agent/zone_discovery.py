@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from .world import Pos, ZoneFact, chebyshev
 
 if TYPE_CHECKING:
-    from .brain import Memory
+    from .memory import Memory
     from .world import WorldModel
 
 # Chebyshev radius around each respawn anchor for the first pass of probes.

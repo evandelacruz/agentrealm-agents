@@ -17,7 +17,7 @@
 
   "A4": {"state": "open"},
 
-  "A5": {"state": "open"},
+  "A5": {"state": "done"},
 
   "A6": {"state": "done"},
 
@@ -35,7 +35,7 @@
 
   "A13": {"state": "open"},
 
-  "A14": {"state": "partial", "remaining": "The over_strength_ceiling closure written to the knowledge base `hunting` section is not read yet; A27 consumes it in the strength bracket (reset after an Equip change). This run keeps off the cell through the learned impassable set."},
+  "A14": {"state": "partial", "remaining": "would_strand handling: awaiting Evan's decision on the landing target (GAME_NOTES ties it to water, which the world model lacks)."},
 
   "A15": {"state": "open"},
 
@@ -43,7 +43,7 @@
 
   "A17": {"state": "done"},
 
-  "A18": {"state": "open"},
+  "A18": {"state": "partial", "remaining": "Weapon damage per subtype from NPCDamaged matched to our own Use (block and tick), damage saved per worn item, and capabilities once they can be sourced (not served; PLAN.md Server gaps, A28 break results)."},
 
   "A19": {"state": "open"},
 

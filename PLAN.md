@@ -80,7 +80,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
    | `conflict_lost` | Nothing; the next move may retry. |
    | `door_locked` | Impassable, and stored as a locked door under the map's `doors` in the knowledge base, which every character of the world then keeps off. |
    | `over_strength_ceiling` | Impassable until the loadout (armed or worn) changes, and stored under the map's `hunting` in the knowledge base with the zone's ceiling for A27's strength bracket. |
-   | `would_strand` | Not handled yet: treated as anything else below. Open question for Evan: the landing target. GAME_NOTES ties `would_strand` to water (unequipping the supply that keeps us on it), and the world model has no water yet, so the refused cell is not a landing. |
+   | `would_strand` | Treated as anything else below. The server refuses the move that would strand us (GAME_NOTES: unequipping the supply that keeps us on water), so the agent is never left stuck; it just tries something else next decision. |
    | anything else | Kept off for the next decision only. |
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
 3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → the **Fight** state (A23), not a reflex here.
@@ -194,7 +194,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 
 | ID | Item | Depends on |
 |---|---|---|
-| A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. | A1, A2 |
+| A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. A state that claims the round but sends no intent falls through to the next state; that rule lives in the dispatcher (A44), so states do not add their own fallbacks. | A1, A2 |
 | A6 | **Threat table.** Damage per hit per hostile type from `Damaged`; the unmeasured default. | |
 | A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery records safe tiles; **Retreat** (A9) and **Heal** (A10) walk to them, and **Recover** (A11) walks to a death chest only from a known safe tile on or beside it. A failed zone read drops that cell from probing. | |
 | A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
@@ -203,9 +203,10 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A11 | **Recover.** Walk to the death chest only when the spot is safe. Needs `pickup = true` and a known safe tile on or beside the chest on this map; reflexes 2–4 still run first, and with no plannable step the state falls back to Explore's goals for that round. Only the destination is checked: the route to it is not, which is A9's. | A5, A7 |
 | A12 | **Cost-grid planner.** The cost table (fog, hazards, hostile danger, expiring occupants, break costs inert), walking the known prefix. | |
 | A13 | **Two-level search.** Coarse 16×16 corridor search and A* in the perception window, each with a node budget per tick. | A12 |
-| A14 | **Rejection learning.** What each rejection code teaches the map (reflex 1 table): impassable, occupant cost for 30 ticks, locked doors and hunting closures in the knowledge base. `would_strand` waits on Evan's decision on the landing target (reflex 1 table). | A12, A17 |
+| A14 | **Rejection learning.** What each rejection code teaches the map (reflex 1 table): impassable, occupant cost for 30 ticks, locked doors and hunting closures in the knowledge base. `would_strand` is treated like any other code (reflex 1 table). | A12, A17 |
 | A15 | **Stuck detection and escalation.** Steps 1, 3 and 5, backoff, frontier drop; the navigation fixtures and trace replay tests. | A5, A12, A14 |
-| A16 | **M7 acceptance.** M7 done-when. | A4, A9, A10, A11, A13, A15 |
+| A16 | **M7 acceptance.** M7 done-when. | A4, A9, A10, A11, A13, A15, A44 |
+| A44 | **Dispatcher fall-through.** A state whose `guard` holds but whose `act` sends no intent yields the round to the next state, so a guard/act mismatch can never freeze the agent. The dispatcher enforces it once; a test drives each shipped state through that case. | A5 |
 
 **M8: Gear, economy and combat.** Loot (A20) is a partial: hearts and gems first wait on their supply codes (GAME_NOTES open questions).
 

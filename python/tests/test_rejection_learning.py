@@ -98,7 +98,7 @@ class RejectionLearningTest(unittest.TestCase):
         self.assertEqual(navigation_avoid_costly(m.nav, None, 1, 10), (set(), set()))
 
     def test_unknown_code_keeps_off_for_one_decision_only(self):
-        # would_strand is in this list until Evan picks its landing target (PLAN.md A14).
+        # would_strand is handled like any other code (PLAN.md A14, reflex 1 table).
         for code in ("some_new_code", "would_strand", None):
             with self.subTest(code=code):
                 w = grid(["...", "..."])

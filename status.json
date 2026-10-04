@@ -43,7 +43,7 @@
 
   "A17": {"state": "done"},
 
-  "A18": {"state": "partial", "remaining": "Damage saved per worn item (needs Damaged amounts from one attacker type with and without the item; docs/GAME_NOTES.md open questions), and capabilities once they can be sourced (not served on reads; PLAN.md Server gaps, A28 break results)."},
+  "A18": {"state": "partial", "remaining": "One live sandbox pair of Damaged amounts with and without a lone worn piece (GAME_NOTES.md Armor damage Obs: probe lacked gems/knife before hits landed), and capabilities once they can be sourced (not served on reads; PLAN.md Server gaps, A28 break results)."},
 
   "A19": {"state": "open"},
 

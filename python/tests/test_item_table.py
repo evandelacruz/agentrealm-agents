@@ -100,6 +100,37 @@ def _npc_damaged(tick=11, amount=4, x=3, y=4, map_id=1, npc_id=9):
     return {"tick": tick, "kind": "NPCDamaged", "npc_id": npc_id, "amount": amount, "map_id": map_id, "x": x, "y": y}
 
 
+class WornDamageTest(unittest.TestCase):
+    RAT = Entity("npc", 4, (2, 1), "rat")
+    HIT = {"tick": 11, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 3}
+
+    def test_one_worn_slot_records_damage_taken(self):
+        items: dict = {}
+        it.absorb_damaged_worn(items, [self.HIT], {"body": "bronze_mail"}, [self.RAT])
+        self.assertEqual(items, {"bronze_mail": {"damage_taken": {"rat": 3}}})
+
+    def test_two_worn_slots_record_nothing(self):
+        items: dict = {}
+        worn = {"body": "bronze_mail", "head": "bronze_helm"}
+        it.absorb_damaged_worn(items, [self.HIT], worn, [self.RAT])
+        self.assertEqual(items, {})
+
+    def test_unworn_baseline_and_saved(self):
+        items: dict = {"bronze_mail": {"damage_taken": {"rat": 2}}}
+        bare = {"tick": 12, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 5}
+        it.absorb_damaged_worn(items, [bare], {}, [self.RAT])
+        self.assertEqual(
+            items,
+            {
+                "bronze_mail": {
+                    "damage_taken": {"rat": 2},
+                    "damage_without": {"rat": 5},
+                    "damage_saved": {"rat": 3},
+                }
+            },
+        )
+
+
 class WeaponDamageTest(unittest.TestCase):
     USE = it.AppliedUse(tick=11, map_id=1, x=3, y=4, npc_type="rat")
 
@@ -392,7 +423,57 @@ class RunnerItemLearningTest(unittest.TestCase):
         r._learn_items_from_tick(obs, events)
         self.assertEqual(kb.items, {"pocket_knife": {"weapon_damage": {"rat": 2}}})
 
-    def test_damage_taken_is_not_stored(self):
+    def test_damage_taken_from_npc_with_one_worn_slot(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._runner(kb)
+        inv = {
+            "gems": 0,
+            "armed": None,
+            "worn": {"body": {"id": 10, "supply_subtype_code": "bronze_mail"}},
+            "held": [],
+            "chest": [],
+        }
+        r.world.apply_observation({"version": 1, "complete": True, "snapshot": {"inventory": inv}})
+        r.world.entities = [Entity("npc", 4, (2, 1), "rat")]
+        events = [{"tick": 11, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 2}]
+        r._learn_items_from_tick(None, events, [])
+        self.assertEqual(kb.items, {"bronze_mail": {"damage_taken": {"rat": 2}}})
+
+    def test_damage_taken_skipped_with_two_worn_slots(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._runner(kb)
+        inv = {
+            "gems": 0,
+            "armed": None,
+            "worn": {
+                "body": {"id": 10, "supply_subtype_code": "bronze_mail"},
+                "head": {"id": 11, "supply_subtype_code": "bronze_helm"},
+            },
+            "held": [],
+            "chest": [],
+        }
+        r.world.apply_observation({"version": 1, "complete": True, "snapshot": {"inventory": inv}})
+        r.world.entities = [Entity("npc", 4, (2, 1), "rat")]
+        events = [{"tick": 11, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 2}]
+        r._learn_items_from_tick(None, events, [])
+        self.assertEqual(kb.items, {})
+
+    def test_damage_saved_when_unworn_baseline_exists(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._runner(kb)
+        kb.items["bronze_mail"] = {"damage_taken": {"rat": 2}}
+        r.world.apply_observation(
+            {"version": 1, "complete": True, "snapshot": {"inventory": {"gems": 0, "armed": None, "worn": {}, "held": [], "chest": []}}}
+        )
+        r.world.entities = [Entity("npc", 4, (2, 1), "rat")]
+        events = [{"tick": 12, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 5}]
+        r._learn_items_from_tick(None, events, [])
+        self.assertEqual(
+            kb.items,
+            {"bronze_mail": {"damage_taken": {"rat": 2}, "damage_without": {"rat": 5}, "damage_saved": {"rat": 3}}},
+        )
+
+    def test_trap_damaged_does_not_fill_damage_taken(self):
         kb = KnowledgeBase.empty("sandbox")
         r = self._runner(kb)
         inv = {
@@ -404,7 +485,7 @@ class RunnerItemLearningTest(unittest.TestCase):
         }
         r.world.apply_observation({"version": 1, "complete": True, "snapshot": {"inventory": inv}})
         events = [{"tick": 11, "kind": "Damaged", "source_kind": "trap", "source_id": 4, "amount": 5}]
-        r._learn_items_from_tick(None, events)
+        r._learn_items_from_tick(None, events, [])
         self.assertEqual(kb.items, {})
 
     def test_weapon_damage_skipped_with_another_character_in_sight(self):

@@ -1,0 +1,12 @@
+# Dedicated sandbox character for A18 armor damage live probes (scripts/smoke_a18_armor.py).
+name = "CursorA18Armor8774"
+avatar = "default"
+model_agent = "agentrealm-reference/scripted"
+world = "sandbox"
+
+[policy]
+kind = "scripted"
+goals = ["hold"]
+on_hostile = "ignore"
+hostile = ["npc"]
+hostile_range = 6

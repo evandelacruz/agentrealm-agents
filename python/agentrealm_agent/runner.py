@@ -20,6 +20,7 @@ from .plan import Plan
 from .item_table import (
     AppliedUse,
     absorb_attack_range,
+    absorb_damaged_worn,
     absorb_entities_payload,
     absorb_npc_damaged,
     rejection_attack_range,
@@ -407,7 +408,7 @@ class Runner:
         w.apply_observation(r.get("observation"))
         self._sync_loadout()
         w.learn_threat(events, earlier)
-        self._learn_items_from_tick(r.get("observation"), events)
+        self._learn_items_from_tick(r.get("observation"), events, earlier)
         self.on_events(events)
         self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
@@ -772,11 +773,14 @@ class Runner:
         if intent and intent.get("verb") == "Use":
             self._reach_seen = rejection_attack_range(result)
 
-    def _learn_items_from_tick(self, obs: dict | None, events: list[dict] | None = None) -> None:
+    def _learn_items_from_tick(
+        self, obs: dict | None, events: list[dict] | None = None, earlier_entities: list | None = None
+    ) -> None:
         w = self.world
         reach, self._reach_seen = self._reach_seen, None
         uses, self._applied_uses = self._applied_uses, []
         events = events or []
+        earlier_entities = earlier_entities or []
 
         def learn(items: dict) -> None:
             if obs and not obs.get("unchanged"):
@@ -792,6 +796,7 @@ class Runner:
                 armed_code=w.armed_code,
                 others_in_sight=any(e.kind == "character" for e in w.entities),
             )
+            absorb_damaged_worn(items, events, w.worn_codes, w.entities, earlier_entities)
 
         self._with_item_table(learn)
 

@@ -10,8 +10,9 @@ import random
 from dataclasses import dataclass, field
 
 from .config import Policy
-from .poll_cadence import gate_tick_call
+from .poll_cadence import gate_tick_call, is_urgent
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
+from .zone_discovery import next_zone_probe
 
 SELF_REFRESH = 60  # windows between self reads when nothing forces one
 
@@ -43,17 +44,21 @@ class Memory:
     calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll
     queued_ticks: int = 0  # intents still queued after the last poll, one tick each
     hurt_last_poll: bool = False  # the last poll's events carried Damaged
+    zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
-    """One of: self, position, terrain, entities, tick, skip.
+    """One of: self, position, terrain, entities, zone, tick, skip.
 
     skip spends nothing this window: calm, and the last poll's queue still
     covers it (poll_cadence, M6). The reads rank above tick, so a calm gap's
-    spare windows go to stale terrain first, then stale entities. Urgent
+    spare windows go to stale terrain first, then stale entities, then a
+    pending ``get_zone`` when the gap would otherwise be skipped (A7). Urgent
     windows still take those reads, because entities come only from reads
-    until snapshot deltas fold them in (M6 remaining).
+    until snapshot deltas fold them in (M6 remaining), but never a zone read.
+    idle reads nothing past position, zones included: it only polls for events.
     """
+    m.zone_probe = None
     if m.cancel_queue:
         return "tick"  # stop the stale queue before reading anything
     if m.need_self or m.windows_since_self >= SELF_REFRESH:
@@ -66,7 +71,16 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
         return "terrain"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
         return "entities"
-    return gate_tick_call(w, m, policy)
+    return _tick_zone_or_skip(w, m, policy)
+
+
+def _tick_zone_or_skip(w: WorldModel, m: Memory, policy: Policy) -> str:
+    call = gate_tick_call(w, m, policy)
+    if call == "skip" and not is_urgent(w, m, policy):
+        m.zone_probe = next_zone_probe(w, m)
+        if m.zone_probe is not None:
+            return "zone"
+    return call
 
 
 # Intents.

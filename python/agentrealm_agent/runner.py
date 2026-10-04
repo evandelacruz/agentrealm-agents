@@ -26,6 +26,7 @@ from .executor import (
 )
 from .poll_cadence import calm_poll_interval
 from .world import DOORS, WorldModel, terrain_cells
+from .zone_discovery import apply_town, apply_zone, zone_failed
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
@@ -92,6 +93,7 @@ class Runner:
         horizon_s = max(1, int(world.get("queue_horizon_seconds", DEFAULT_QUEUE_HORIZON_SECONDS)))
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
+        apply_town(self.world, world.get("town"))
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:
@@ -150,6 +152,23 @@ class Runner:
             m.alarm = False
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
+        elif call == "zone":
+            probe, m.zone_probe = m.zone_probe, None
+            if probe is None:
+                return 0.0  # choose_call picked no cell: spend nothing
+            map_id, (x, y) = probe
+            try:
+                z = c.zone(self.cid, map_id, x, y)
+            except ApiError as e:
+                # A 4xx about the cell (unrevealed, out of bounds): drop it so
+                # the next spare window probes another one. Transient and
+                # character-level failures leave it to retry.
+                if _cell_refused(e):
+                    zone_failed(w, map_id, (x, y))
+                raise
+            fact = apply_zone(w, map_id, x, y, z)
+            w.tick = max(w.tick, int(z.get("tick", 0)))
+            self.log(call, f"@{map_id}:{x},{y} safe={fact.safe}", {"zone": z})
         else:
             return self.tick()
         return 0.0
@@ -430,6 +449,15 @@ class Runner:
             self.mem.need_self = self.mem.need_position = True
             return time.time() + 1.0
         return time.time() + 1.0
+
+
+def _cell_refused(e: ApiError) -> bool:
+    """A zone read refused for the cell itself, not for the character or the line."""
+    if e.network or e.paused or e.rate_limited:
+        return False
+    if e.status in (401, 403) or e.status >= 500:
+        return False
+    return e.code not in ("not_on_map", "character_not_live")
 
 
 def _fmt_submit(intents: list[dict] | None, d: Decision) -> str:

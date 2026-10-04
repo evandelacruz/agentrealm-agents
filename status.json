@@ -5,7 +5,10 @@
   "M3": {"state": "done"},
   "M4": {"state": "open"},
   "M5": {"state": "open"},
-  "M6": {"state": "open"},
+  "M6": {
+    "state": "partial",
+    "remaining": "Wire the executor into the runner: Step/Wait pacing from movement_speed, calm vs threatened poll cadences, snapshot deltas and health on the world model, live Olympuff smoke test."
+  },
   "M7": {"state": "open"},
   "M8": {"state": "open"},
   "M9": {"state": "open"},

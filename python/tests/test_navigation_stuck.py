@@ -430,6 +430,7 @@ class CrossMapTraceReplayTest(unittest.TestCase):
 
         w = sim.world_for(sc, cross=cross)
         m = Memory()
+        sim.quiet_investigate(w, m, cross.kb)
         rng = random.Random(7)
         map2 = sim.map2_view()
         for row in trace:

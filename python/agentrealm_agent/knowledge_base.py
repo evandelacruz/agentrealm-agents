@@ -114,12 +114,28 @@ class KnowledgeBase:
                 setattr(kb, key, value)
         known = {"schema_version", "world_code", *SECTION_KEYS}
         kb.extra = {k: v for k, v in raw.items() if k not in known}
+        _migrate_entrance_keys(kb.entrances)
         return kb
 
     @classmethod
     def empty(cls, world_code: str) -> KnowledgeBase:
         _check_world_code(world_code)
         return cls(world_code=world_code)
+
+
+def _migrate_entrance_keys(entrances: dict[str, Any]) -> None:
+    """Rekey old cell-only ``"x,y"`` entrance rows to ``"<map_id>:<x>,<y>"`` from
+    their ``map_id``, once at load. A row with no usable ``map_id`` keeps its old
+    key; readers skip it until the next minimap read records the mark again."""
+    for key in [k for k in entrances if ":" not in k]:
+        row = entrances[key]
+        try:
+            x, y = (int(p) for p in key.split(",", 1))
+            map_id = int(row["map_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        del entrances[key]
+        entrances.setdefault(f"{map_id}:{x},{y}", row)
 
 
 def load(world_code: str) -> KnowledgeBase:

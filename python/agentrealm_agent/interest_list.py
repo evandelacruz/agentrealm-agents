@@ -2,8 +2,9 @@
 
 A30 nominates what can be done from where the agent stands: unread readable
 cells in sight (``Read``) and NPCs within 25 blocks never spoken to (``Say``).
-Unknown zones are read by A7's spare-window probes (respawn ring first, then
-the path). Scrolls, door and entrance looks are deferred (PLAN.md A30).
+It also walks next to unlooked doors and A27 minimap entrance marks on the
+current map to record what they show (``door_look``). Unknown zones are read by A7's spare-window
+probes (respawn ring first, then the path). Scroll reads stay deferred (PLAN.md A30).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .config import Policy
+from .door_look import iter_unlooked, look_key
 from .investigation import cell_was_read, spoken_npc_ids
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -26,7 +28,7 @@ MAX_REJECTIONS = 3
 
 @dataclass(frozen=True)
 class InterestItem:
-    kind: Literal["read_block", "say"]
+    kind: Literal["read_block", "say", "look_door"]
     reason: str
     key: str  # Memory.investigate_rejections key
     map_id: int | None = None
@@ -102,17 +104,45 @@ def _say_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, here: Pos) ->
     return out
 
 
+def _look_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, map_id: int, here: Pos) -> list[InterestItem]:
+    # Overworld only: Level owns interior doors (A37). Current map only, so a
+    # look never routes through a door before the curiosity cap lands (A32).
+    if w.map_level is not None and w.map_level > 0:
+        return []
+    out: list[InterestItem] = []
+    for pos in iter_unlooked(kb, map_id):
+        lk = look_key(map_id, pos)
+        if _gave_up(m, lk):
+            continue
+        out.append(
+            InterestItem(
+                "look_door",
+                f"look entrance @{pos[0]},{pos[1]}",
+                lk,
+                map_id=map_id,
+                pos=pos,
+                sort_key=(2, chebyshev(here, pos), pos),
+            )
+        )
+    return out
+
+
 def list_interest(w: WorldModel, kb: KnowledgeBase | None, policy: Policy, m: Memory) -> list[InterestItem]:
     """What the knowledge base has not finished investigating, best first."""
     if w.pos is None or w.map_id is None or investigate_blocked(w, policy):
         return []
-    items = _unread_blocks(w, kb, m, w.map_id, w.pos) + _say_items(w, kb, m, w.pos)
+    here = w.pos
+    items = (
+        _unread_blocks(w, kb, m, w.map_id, here)
+        + _say_items(w, kb, m, here)
+        + _look_items(w, kb, m, w.map_id, here)
+    )
     items.sort(key=lambda it: it.sort_key)
     return items
 
 
 def pick_interest_tick(w: WorldModel, kb: KnowledgeBase | None, policy: Policy, m: Memory) -> InterestItem | None:
-    """Top item. Every A30 item is done from where the agent stands, so none is
-    charged to the curiosity budget; the cap arrives with A32."""
+    """Top item. Reads and speech from where the agent stands are free; walk-to-look
+    detours are not charged until the curiosity cap ships (A32)."""
     items = list_interest(w, kb, policy, m)
     return items[0] if items else None

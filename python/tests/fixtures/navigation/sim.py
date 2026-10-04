@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import Policy
+from agentrealm_agent.door_look import iter_unlooked, look_key
 from agentrealm_agent.interest_list import MAX_REJECTIONS, say_key
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import view_from_kb
@@ -130,6 +131,16 @@ def apply(
     return False
 
 
+def quiet_investigate(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None) -> None:
+    """Keep Investigate out of a navigation run: parked NPCs already greeted,
+    unlooked doors already given up on, so they are only obstacles here."""
+    for e in w.entities:
+        m.investigate_rejections[say_key(e.id)] = MAX_REJECTIONS
+    for map_id in (1, 2):
+        for pos in iter_unlooked(knowledge, map_id):
+            m.investigate_rejections[look_key(map_id, pos)] = MAX_REJECTIONS
+
+
 def run(
     sc: Scenario,
     policy: Policy,
@@ -147,12 +158,11 @@ def run(
     m = memory or Memory()
     done_map = 2 if cross is not None else 1
     done_pos = cross.goal if cross is not None else sc.goal
-    for e in w.entities:  # already greeted: a parked NPC is only an obstacle here
-        m.investigate_rejections[say_key(e.id)] = MAX_REJECTIONS
+    knowledge = cross.kb if cross is not None else None
+    quiet_investigate(w, m, knowledge)
     rng = random.Random(seed)
     trace: list[dict] = []
     moves = 0
-    knowledge = cross.kb if cross is not None else None
     for _ in range(max_decisions):
         if w.map_id == done_map and w.pos == done_pos:
             return Run("reached", moves, w, m, trace)

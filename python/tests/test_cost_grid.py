@@ -1,12 +1,22 @@
-"""Cost-grid navigation (A12)."""
+"""Cost-grid navigation (A12) and two-level search (A13)."""
 
 import random
 import unittest
+from unittest import mock
 
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import Policy
-from agentrealm_agent.navigation import CostGridParams, cost_path, known_prefix, nearest_target
-from agentrealm_agent.navigation.planner import COSTLY_STEP, _Grid
+from agentrealm_agent.navigation import (
+    CostGridParams,
+    NavSearchState,
+    cost_path,
+    known_prefix,
+    learn_step_rejection,
+    macro_cell,
+    nearest_target,
+)
+from agentrealm_agent.navigation import planner
+from agentrealm_agent.navigation.planner import COSTLY_STEP, _coarse_search, _Grid, _MacroCosts
 from agentrealm_agent.world import Entity, WorldModel
 
 
@@ -97,6 +107,176 @@ class CostGridTest(unittest.TestCase):
     def test_known_prefix_stops_at_fog(self):
         w = grid([".."])
         self.assertEqual(known_prefix([(1, 0), (2, 0), (3, 0)], w.view), [(1, 0)])
+
+
+def strip(length: int, at=(0, 0), perception=3) -> WorldModel:
+    """A known one-row corridor of dirt; everything else is fog."""
+    return grid(["." * length], at=at, perception=perception)
+
+
+def corridor_of(w: WorldModel, goal, nav: NavSearchState, params=None, budget=10**6):
+    g = _Grid(w, {goal}, params or CostGridParams())
+    return _coarse_search(g, _MacroCosts(g), nav, budget)
+
+
+class TwoLevelSearchTest(unittest.TestCase):
+    def in_perception(self, w: WorldModel, path) -> bool:
+        x0, y0, width, height = w.perception_rect()
+        return all(x0 <= x < x0 + width and y0 <= y < y0 + height for x, y in path)
+
+    def test_far_goal_plans_inside_perception_when_direct_search_is_budgeted(self):
+        w = strip(40)
+        nav = NavSearchState(goal=(30, 0))
+        p = cost_path(w, (30, 0), CostGridParams(), nav=nav, fine_budget=5)
+        self.assertEqual(p, [(1, 0), (2, 0), (3, 0)])
+        self.assertTrue(self.in_perception(w, p))
+        self.assertIn(macro_cell((0, 0)), nav.closed)
+
+    def test_unreachable_goal_still_returns_none(self):
+        w = grid(["#####", "#...#", "#...#", "#...#", "#####"], at=(10, 10), perception=5)
+        w.view.tiles[(10, 10)] = "dirt"
+        self.assertIsNone(cost_path(w, (2, 2), CostGridParams()))
+
+    def test_in_perception_goal_past_the_budget_still_gets_a_path(self):
+        # A12 regression: a reachable goal in sight must never read as unreachable.
+        w = strip(10, perception=5)
+        self.assertEqual(cost_path(w, (5, 0), CostGridParams(), fine_budget=2), [(1, 0)])
+        self.assertEqual(cost_path(w, (5, 0), CostGridParams(), fine_budget=6), [(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)])
+
+    def test_unfinished_corridor_still_steps_toward_the_goal(self):
+        w = strip(100)
+        nav = NavSearchState(goal=(90, 0))
+        p = cost_path(w, (90, 0), CostGridParams(), nav=nav, coarse_budget=1, fine_budget=5)
+        self.assertEqual(p, [(1, 0), (2, 0), (3, 0)])
+        self.assertNotIn(macro_cell((0, 0)), nav.closed)
+
+    def test_coarse_search_resumes_across_replans(self):
+        # Two cache tiles a replan: it finishes in as many calls as a single
+        # search needs expansions, halved, only if each call carries on.
+        w = strip(100)
+        fresh = NavSearchState(goal=(90, 0))
+        corridor_of(w, (90, 0), fresh)
+        needed = len(fresh.closed)
+        nav = NavSearchState(goal=(90, 0))
+        calls = 0
+        while (0, 0) not in nav.closed:
+            calls += 1
+            self.assertLessEqual(calls, (needed + 1) // 2)
+            cost_path(w, (90, 0), CostGridParams(), nav=nav, coarse_budget=2, fine_budget=5)
+        self.assertGreater(calls, 1)
+
+    def test_corridor_is_read_from_where_we_stand_after_moving(self):
+        w = strip(100)
+        nav = NavSearchState(goal=(90, 0))
+        self.assertEqual(corridor_of(w, (90, 0), nav), [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0)])
+        w.pos = (40, 0)
+        self.assertEqual(corridor_of(w, (90, 0), nav, budget=0), [(2, 0), (3, 0), (4, 0), (5, 0)])
+
+    def test_corridor_is_redone_when_a_tile_on_it_is_walled_off(self):
+        w = strip(100)
+        nav = NavSearchState(goal=(90, 0))
+        self.assertIn((2, 0), corridor_of(w, (90, 0), nav))
+        for x in range(32, 48):
+            for y in range(-16, 16):
+                w.view.tiles[(x, y)] = "wall"
+        c = corridor_of(w, (90, 0), nav)
+        self.assertNotIn((2, 0), c)
+        self.assertEqual((c[0], c[-1]), ((0, 0), (5, 0)))
+
+    def test_corridor_prices_avoided_cells(self):
+        w = strip(100)
+        avoid = {(x, y) for x in range(32, 48) for y in range(0, 16)}
+        c = corridor_of(w, (90, 0), NavSearchState(goal=(90, 0)), CostGridParams(avoid=avoid))
+        self.assertNotIn((2, 0), c)
+
+    def test_wall_forces_a_detour_through_the_gap(self):
+        # A wall at x 32..47 from far above down to y 47; the short way is below it.
+        w = grid(["." * 16], at=(8, 8), perception=6)
+        for x in range(32, 48):
+            for y in range(-80, 48):
+                w.view.tiles[(x, y)] = "wall"
+        w.view.tiles[(88, 8)] = "dirt"
+        nav = NavSearchState(goal=(88, 8))
+        p = cost_path(w, (88, 8), CostGridParams(), nav=nav, fine_budget=200)
+        c = corridor_of(w, (88, 8), nav, budget=0)
+        self.assertIn((2, 3), c)
+        self.assertTrue(self.in_perception(w, p))
+        self.assertGreater(p[-1][1], 8)  # heads down toward the gap
+
+    def test_goal_change_mid_search_starts_over_from_the_new_goal(self):
+        w = strip(100)
+        nav = NavSearchState(goal=(90, 0))
+        cost_path(w, (90, 0), CostGridParams(), nav=nav, coarse_budget=1, fine_budget=5)
+        cost_path(w, (60, 0), CostGridParams(), nav=nav, coarse_budget=1, fine_budget=5)
+        self.assertEqual(nav.goal, (60, 0))
+        self.assertEqual(nav.cost[macro_cell((60, 0))], 0)
+        self.assertNotIn(macro_cell((90, 0)), nav.cost)
+
+    def test_nearest_target_ranks_by_cost_not_length(self):
+        # (3, 1) is two steps away but only across unnamed lava; (5, 3) is five clear steps.
+        w = grid(["#######", "#.~.###", "#.#####", "#.....#", "#######"], at=(1, 1))
+        found = nearest_target(w, {(3, 1), (5, 3)}, CostGridParams())
+        self.assertEqual(found, ((5, 3), [(1, 2), (2, 3), (3, 3), (4, 3), (5, 3)]))
+
+    def test_nearest_target_path_ends_on_a_far_target(self):
+        w = strip(60, perception=2)
+        found = nearest_target(w, {(50, 0)}, CostGridParams())
+        self.assertEqual(found[0], (50, 0))
+        self.assertEqual(found[1][-1], (50, 0))
+
+
+class TwoLevelBrainTest(unittest.TestCase):
+    def test_corridor_search_resumes_across_decides(self):
+        w = strip(100)
+        m = Memory()
+        policy = Policy(kind="scripted", goals=["goto"], goto=[90, 0])
+        with mock.patch.object(planner, "COARSE_NODE_BUDGET", 2), mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
+            d = decide(w, m, policy, random.Random(0))
+            self.assertEqual((d.intent["x"], d.intent["y"]), (1, 0))
+            nav = m.corridors["goto"]
+            self.assertEqual(len(nav.closed), 2)
+            w.pos, m.path = m.path[-1], []  # walked the plan out; replan
+            decide(w, m, policy, random.Random(0))
+            self.assertIs(m.corridors["goto"], nav)
+            self.assertEqual(len(nav.closed), 4)
+
+    def test_chest_and_goto_keep_separate_searches(self):
+        w = strip(100)
+        w.death_chest = (1, (90, 0), 7)
+        m = Memory()
+        policy = Policy(kind="scripted", goals=["goto"], goto=[0, 60], pickup=True)
+        with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
+            decide(w, m, policy, random.Random(0))
+            chest = m.corridors["chest"]
+            m.path, m.goal = [], ""
+            decide(w, m, policy, random.Random(0))
+        self.assertIs(m.corridors["chest"], chest)
+        self.assertEqual(chest.goal, (90, 0))
+
+    def test_rejected_step_drops_the_corridor_searches(self):
+        w = strip(100)
+        m = Memory()
+        policy = Policy(kind="scripted", goals=["goto"], goto=[90, 0])
+        with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
+            decide(w, m, policy, random.Random(0))
+        self.assertIn("goto", m.corridors)
+        learn_step_rejection(m, w, None, (1, 0), "not_traversable", w.tick)
+        self.assertEqual(m.corridors, {})
+
+    def test_corridor_search_starts_over_on_another_map(self):
+        w = strip(100)
+        m = Memory()
+        policy = Policy(kind="scripted", goals=["goto"], goto=[90, 0])
+        with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
+            decide(w, m, policy, random.Random(0))
+            first = m.corridors["goto"]
+            w2 = WorldModel(character_id=1, map_id=2, pos=(0, 0), perception=3)
+            w2.view.tiles.update(w.view.tiles)
+            w2.terrain_center, w2.terrain_map = (0, 0), 2
+            m.path, m.goal = [], ""
+            decide(w2, m, Policy(kind="scripted", goals=["goto"], goto=[90, 0], goto_map=2), random.Random(0))
+        self.assertIsNot(m.corridors["goto"], first)
+        self.assertEqual(m.corridors["goto"].map_id, 2)
 
 
 class KnownPrefixBrainTest(unittest.TestCase):

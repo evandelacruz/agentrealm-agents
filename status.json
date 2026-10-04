@@ -33,7 +33,7 @@
 
   "A12": {"state": "done"},
 
-  "A13": {"state": "open"},
+  "A13": {"state": "done"},
 
   "A14": {"state": "partial", "remaining": "would_strand handling: awaiting Evan's decision on the landing target (GAME_NOTES ties it to water, which the world model lacks)."},
 

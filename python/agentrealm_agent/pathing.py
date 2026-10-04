@@ -7,7 +7,14 @@ import random
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .navigation import CostGridParams, doors_goal_path, known_prefix, nearest_target, route_first_leg
+from .navigation import (
+    CostGridParams,
+    NavSearchState,
+    doors_goal_path,
+    known_prefix,
+    nearest_target,
+    route_first_leg,
+)
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -58,10 +65,18 @@ def replan(
     """
     m.path, m.goal = [], ""
     for goal in policy.goals:
-        found = plan_goal(goal, w, policy, rng, blocked, costly, knowledge)
+        found = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
         if next_step(w, blocked, found):
             m.path, m.goal = found, goal
             return
+
+
+def nav_search(m: Memory, w: WorldModel, plan: str, goal: Pos) -> NavSearchState:
+    """The corridor search for ``plan``, started over when its goal or map changed (A13)."""
+    nav = m.corridors.get(plan)
+    if nav is None or nav.goal != goal or nav.map_id != w.map_id:
+        nav = m.corridors[plan] = NavSearchState(goal=goal, map_id=w.map_id)
+    return nav
 
 
 def grid_params(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_door: bool = False) -> CostGridParams:
@@ -76,6 +91,7 @@ def grid_params(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_do
 def plan_goal(
     goal: str,
     w: WorldModel,
+    m: Memory,
     policy: Policy,
     rng: random.Random,
     blocked: set[Pos],
@@ -92,7 +108,9 @@ def plan_goal(
         # config.load guarantees goto is set when the goal is listed.
         dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
         params = grid_params(policy, blocked, costly, allow_goal_door=True)
-        return route_first_leg(w, knowledge, dest_map, tuple(policy.goto), params) or None
+        target = tuple(policy.goto)
+        nav = nav_search(m, w, "goto", target) if dest_map == w.map_id else None
+        return route_first_leg(w, knowledge, dest_map, target, params, nav=nav) or None
     if goal == "doors":
         return doors_goal_path(w, knowledge, grid_params(policy, blocked, costly, allow_goal_door=True))
     if goal == "explore":

@@ -10,7 +10,7 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import flee_step, grid_params, next_step, replan
+from ..pathing import flee_step, grid_params, nav_search, next_step, replan
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position, take, use_on, withdraw_all
@@ -100,7 +100,7 @@ def scripted_outcome(
             if contents is None:
                 return StateOutcome(None, f"open chest {chest_id}", state=state)
         elif m.goal != "chest" or not next_step(w, plan_avoid, m.path):
-            found = cost_path(w, at, grid_params(policy, plan_avoid, plan_costly))
+            found = cost_path(w, at, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, "chest", at))
             if next_step(w, plan_avoid, found):
                 m.path, m.goal = found, "chest"
 

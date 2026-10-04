@@ -134,7 +134,7 @@ The numbers in `navigation/planner.py` (A12), and why:
 - **Unnamed hazard 100 (`COSTLY_STEP`).** Fire or lava whose `occupy_damage` no read has named costs as much as a `costly` escape tile: assume the worst until a read names the damage, then charge 1 per point.
 
 - **Walk only the part of the path we have seen.** The executor walks the known prefix and replans when terrain reads reveal what lies ahead, or a step is rejected. Fog optimism is corrected by looking.
-- **Long trips are two-level.** A coarse search over 16×16-block squares (the API's cache-tile size, API Reads) picks the corridor; A* inside the perception window picks the steps. Each search has a node budget per tick, so a long route never stalls a tick.
+- **Long trips are two-level.** A coarse search over 16×16-block squares (the API's cache-tile size, API Reads) picks the corridor; A* inside the perception window picks the steps. Each search has a node budget per tick, so a long route never stalls a tick. The budgets are 48 cache tiles for the corridor and 400 cells for each window search (`COARSE_NODE_BUDGET`, `FINE_NODE_BUDGET`). The corridor search is kept per plan (`goto`, the death chest) in `Memory.corridors` and resumed each replan; it starts over when that plan's goal or map changes, and every corridor search is dropped when a step is rejected.
 
 **2. Rejections teach the map, by code.**
 

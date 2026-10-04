@@ -97,6 +97,7 @@ def learn_step_rejection(
 ) -> None:
     """Reflex 1 plus A14: drop the plan and teach the map from the code."""
     m.path, m.goal = [], ""
+    m.corridors.clear()  # the corridor searches priced the map before this lesson (A13)
     nav = m.nav
     cell = (w.map_id, landing)
     match code:

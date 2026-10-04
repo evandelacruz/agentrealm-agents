@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from ..knowledge_base import KnowledgeBase
 from ..knowledge_maps import door_warp_known, iter_doors, view_from_kb
 from ..world import DOORS, MapView, Pos, WorldModel
-from .planner import CostGridParams, cost_flood, cost_path, nearest_target
+from .planner import CostGridParams, NavSearchState, cost_flood, cost_path, nearest_target
 
 
 @dataclass(frozen=True, order=True)
@@ -116,17 +116,19 @@ def route_first_leg(
     dest_map: int,
     dest: Pos,
     params: CostGridParams,
+    nav: NavSearchState | None = None,
 ) -> list[Pos] | None:
     """Path on the current map toward ``dest_map:dest``, through known door warps when needed.
 
     None when no known route reaches it, so the goal yields like any
     unreachable one. Without a knowledge base no warp is known, so only a
-    destination on the current map can be reached.
+    destination on the current map can be reached. A destination on this
+    map goes through the two-level search, resuming ``nav`` (A13).
     """
     if w.map_id is None or w.pos is None:
         return None
     if w.map_id == dest_map:
-        direct = cost_path(w, dest, params)
+        direct = cost_path(w, dest, params, nav=nav)
         if direct is not None:
             return direct
     return _route(w, kb, dest_map, dest, params)

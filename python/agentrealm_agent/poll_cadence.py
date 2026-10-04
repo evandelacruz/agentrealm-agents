@@ -1,14 +1,25 @@
 """When to spend a window on POST tick vs reads or silence (M6).
 
-Calm: poll every 4–10 ticks and use other windows on reads the scheduler
-already prioritises. Urgent: poll every tick while a hostile is within 3
-blocks or health is dropping (docs/PLAYABLE_AGENT_PLAN.md Executor).
+Calm: poll every 4–10 ticks and leave the windows between to the reads the
+scheduler already prioritises. Urgent: poll every tick while a hostile is
+within 3 blocks or health is dropping (docs/PLAYABLE_AGENT_PLAN.md Executor).
+
+The calm gap never outlasts the queue the last poll sent: a queue of n
+intents runs n ticks, and the character must not stand idle after it. Today's
+queues hold one intent, so a character with something to do still polls every
+tick; the gap opens only when the last poll sent nothing, and widens on its
+own once multi-intent queues land.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .config import Policy
 from .world import WorldModel, chebyshev
+
+if TYPE_CHECKING:
+    from .brain import Memory
 
 THREAT_NEAR_BLOCKS = 3
 CALM_POLL_MIN = 4
@@ -17,73 +28,28 @@ CALM_POLL_MAX = 10
 
 def calm_poll_interval(last_poll_tick: int, character_id: int) -> int:
     """Deterministic spacing in [CALM_POLL_MIN, CALM_POLL_MAX] after a poll."""
-    n = (max(0, last_poll_tick) * 7 + character_id) % (CALM_POLL_MAX - CALM_POLL_MIN + 1)
+    n = (max(0, last_poll_tick) * 3 + character_id) % (CALM_POLL_MAX - CALM_POLL_MIN + 1)
     return CALM_POLL_MIN + n
 
 
 def hostile_within(w: WorldModel, policy: Policy, blocks: int = THREAT_NEAR_BLOCKS) -> bool:
+    """From the last entity read, which the scheduler refreshes between polls."""
     if w.pos is None:
         return False
-    here = w.pos
-    for e in w.entities:
-        if e.kind in policy.hostile and chebyshev(e.pos, here) <= blocks:
-            return True
-    return False
+    return any(e.kind in policy.hostile and chebyshev(e.pos, w.pos) <= blocks for e in w.entities)
 
 
-def health_dropping(w: WorldModel, *, alarm: bool, last_poll_tick: int, prev_health: int | None, health: int | None) -> bool:
-    if alarm:
-        return True
-    if health is not None and prev_health is not None and health < prev_health:
-        return True
-    if w.tick > last_poll_tick and w.damage_since(last_poll_tick + 1) > 0:
-        return True
-    return False
+def is_urgent(w: WorldModel, m: Memory, policy: Policy) -> bool:
+    """Hostile near, or health dropping: Damaged or Attacked not yet re-read
+    (alarm), or Damaged in the last poll's events."""
+    return m.alarm or m.hurt_last_poll or hostile_within(w, policy)
 
 
-def is_urgent(w: WorldModel, policy: Policy, *, alarm: bool, last_poll_tick: int, prev_health: int | None, health: int | None) -> bool:
-    if health_dropping(w, alarm=alarm, last_poll_tick=last_poll_tick, prev_health=prev_health, health=health):
-        return True
-    return hostile_within(w, policy)
-
-
-def should_poll_tick(
-    w: WorldModel,
-    policy: Policy,
-    *,
-    alarm: bool,
-    last_poll_tick: int,
-    calm_interval: int,
-    prev_health: int | None,
-    health: int | None,
-) -> bool:
-    """True when this window should POST tick rather than skip after reads."""
-    if is_urgent(w, policy, alarm=alarm, last_poll_tick=last_poll_tick, prev_health=prev_health, health=health):
-        return True
-    if last_poll_tick < 0:
-        return True
-    return w.tick - last_poll_tick >= calm_interval
-
-
-def gate_tick_call(
-    w: WorldModel,
-    policy: Policy,
-    *,
-    alarm: bool,
-    last_poll_tick: int,
-    calm_interval: int,
-    prev_health: int | None,
-    health: int | None,
-) -> str:
-    """Returns tick or skip when the scheduler would otherwise POST tick."""
-    if should_poll_tick(
-        w,
-        policy,
-        alarm=alarm,
-        last_poll_tick=last_poll_tick,
-        calm_interval=calm_interval,
-        prev_health=prev_health,
-        health=health,
-    ):
+def gate_tick_call(w: WorldModel, m: Memory, policy: Policy) -> str:
+    """tick, or skip to leave this window unspent until the calm gap is up."""
+    if m.last_poll_tick < 0 or is_urgent(w, m, policy):
         return "tick"
-    return "skip"
+    gap = m.calm_poll_interval
+    if m.queued_ticks > 0:
+        gap = min(gap, m.queued_ticks)
+    return "tick" if w.tick - m.last_poll_tick >= gap else "skip"

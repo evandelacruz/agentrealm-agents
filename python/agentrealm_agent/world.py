@@ -81,7 +81,6 @@ class WorldModel:
     movement: int = 1
     alive: bool = True
     lives: int = 0
-    health: int | None = None
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -183,15 +182,9 @@ class WorldModel:
         or by someone first, and is no longer worth going back for; one seen
         empty is not either.
         """
-        if not obs:
+        if not obs or not obs.get("complete"):
             return
-        snap = obs.get("snapshot") or {}
-        owner = snap.get("self") or snap.get("character") or {}
-        if "health" in owner:
-            self.health = int(owner["health"])
-        if not obs.get("complete"):
-            return
-        entities = snap.get("entities") or {}
+        entities = (obs.get("snapshot") or {}).get("entities") or {}
         self.chest_contents = {
             int(ch["id"]): [int(s["id"]) for s in ch["contents"]]
             for ch in entities.get("chests") or []

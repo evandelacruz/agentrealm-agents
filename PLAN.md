@@ -57,6 +57,8 @@ Checked top to bottom:
 3. Entities are older than the character's `entity_refresh` ticks, or a `Damaged`/`Attacked` event just arrived → read entities.
 4. Otherwise → `POST tick` with the chosen intent, or with none.
 
+`POST tick` runs on two cadences (M6). Urgent, meaning a hostile within 3 blocks, a `Damaged`/`Attacked` not yet re-read, or `Damaged` in the last round trip: every window. Calm: every 4–10 ticks, never later than the last queue runs out. Today's queues hold one intent, so the calm gap opens only after a submit with none; a window it skips sends nothing. Each window counts as one tick, so a skipped window still brings the next poll and `entity_refresh` due.
+
 Self is re-read after `Died`, and every 60 windows otherwise.
 
 Position is tracked locally: a submitted `SetPosition` moves us to the target at once, because its result only arrives with the next submit. A rejection puts us back where we stood before it, and the intent submitted in that same round trip was planned from the refused step, so it is not assumed. A rejection, a door, or a death sends us back to step 1.

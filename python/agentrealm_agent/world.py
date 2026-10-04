@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .item_table import loadout_from_inventory
 from .threat import ThreatTable, absorb_damaged, damage_amount
 
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
@@ -98,6 +99,9 @@ class WorldModel:
     lives: int = 0
     health: int | None = None
     max_health: int | None = None
+    attack_range: int | None = None  # armed weapon reach from get_self (B100)
+    armed_code: str | None = None
+    worn_codes: dict[str, str] = field(default_factory=dict)
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -106,6 +110,7 @@ class WorldModel:
     terrain_map: int | None = None
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
+    changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
@@ -142,6 +147,8 @@ class WorldModel:
             self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
+        # Absent while nothing, or no weapon, is armed (B100).
+        self.attack_range = _opt_int(s.get("attack_range"))
 
     def apply_position(self, p: dict) -> None:
         map_id = int(p["map_id"])
@@ -313,9 +320,16 @@ class WorldModel:
             else:
                 self.apply_position(pos)
 
+    def _apply_inventory(self, inv: dict | None) -> None:
+        if inv is None:
+            return
+        self.armed_code, self.worn_codes = loadout_from_inventory(inv)
+
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
         self._apply_vitals(snap, complete=True)
+        if "inventory" in snap:
+            self._apply_inventory(snap.get("inventory"))
         if "entities" in snap:
             entities = snap["entities"] or {}
             self.entities = self._entities_from_payload(entities)
@@ -329,6 +343,8 @@ class WorldModel:
     def _apply_delta_body(self, delta: dict) -> None:
         self._apply_body_scalars(delta)
         self._apply_vitals(delta, complete=False)
+        if "inventory" in delta:
+            self._apply_inventory(delta.get("inventory"))
         if "entities" in delta:
             self._apply_entity_delta(delta["entities"])
             self.entities_tick = self.tick
@@ -343,6 +359,7 @@ class WorldModel:
         carry no subject_id (docs/API.md, Events), so each one is ours.
         """
         flat = []
+        self.changed_blocks = []
         for group in events_by_tick or []:
             for ev in group.get("events") or []:
                 flat.append(ev)
@@ -356,6 +373,7 @@ class WorldModel:
                     p = (int(ev["x"]), int(ev["y"]))
                     v.tiles[p] = ev.get("block_type", "")
                     v.damage.pop(p, None)
+                    self.changed_blocks.append((ev["map_id"], p))
                 elif kind == "SupplyTaken":
                     self.entities = [x for x in self.entities if not (x.kind == "supply" and x.id == ev.get("supply_id"))]
                 elif kind == "Died":

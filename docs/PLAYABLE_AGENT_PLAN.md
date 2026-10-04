@@ -38,7 +38,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 
 | API surface | Used today | Needed for |
 |---|---|---|
-| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Live check: `scripts/smoke_m6_olympuff.py` (A4) on Olympuff | Moving at a steady pace without spending a request per step |
+| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Not measured on a live world yet; M0's paced `Step` queues drew no `movement_cooldown`. `scripts/smoke_m6_olympuff.py` (A4) runs the check; no PASS is recorded yet | Moving at a steady pace without spending a request per step |
 | Multi-intent queues | Movement, and `Use`/`Say`/`Broadcast` behind the `Wait`s their cooldown still owes; every other intent is sent alone; a reflex that fires replaces a running queue | Freeing the request budget; queuing a retreat with an attack |
 | Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; health not yet used by any decision; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
@@ -134,7 +134,7 @@ The numbers in `navigation/planner.py` (A12), and why:
 - **Unnamed hazard 100 (`COSTLY_STEP`).** Fire or lava whose `occupy_damage` no read has named costs as much as a `costly` escape tile: assume the worst until a read names the damage, then charge 1 per point.
 
 - **Walk only the part of the path we have seen.** The executor walks the known prefix and replans when terrain reads reveal what lies ahead, or a step is rejected. Fog optimism is corrected by looking.
-- **Long trips are two-level.** A coarse search over 16×16-block squares (the API's cache-tile size, API Reads) picks the corridor; A* inside the perception window picks the steps. Each search has a node budget per tick, so a long route never stalls a tick.
+- **Long trips are two-level.** A coarse search over 16×16-block squares (the API's cache-tile size, API Reads) picks the corridor; A* inside the perception window picks the steps. Each search has a node budget per tick, so a long route never stalls a tick. The budgets are 48 cache tiles for the corridor and 400 cells for each window search (`COARSE_NODE_BUDGET`, `FINE_NODE_BUDGET`). The corridor search is kept per plan (`goto`, the death chest) in `Memory.corridors` and resumed each replan; it starts over when that plan's goal or map changes, and every corridor search is dropped when a step is rejected.
 
 **2. Rejections teach the map, by code.**
 
@@ -263,7 +263,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Gear and items
 
-- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water).
+- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach and price only; PLAN.md A18 says why the rest waits.
 - **Equip** scores each slot and swaps when a carried item beats the worn one. Consumables (potions, food) are kept for `Heal`.
 - **Budget.** Gems are kept through death and gear is not, so the plan spends gems on what most raises survival first (weapon, armor, potions), then on tools a clue asks for.
 - **Compose.** When any fragment is held, its `fragment` field names the whole and the missing slots. The plan tracks it as a goal, and `Solve` composes when the set is complete.
@@ -276,6 +276,7 @@ A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, sha
 - Clues: the text of every sign, statue, scroll and helper line, with where it was found and when.
 - Break attempts per (block, capability), and the result.
 - NPC type stats, item stats, compose results, and what each entrance turned out to need.
+- `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value (PLAN.md A18).
 - Level progress: which levels are cleared, and the route and solution for each.
 
 This is what makes a second run better than the first, and it is what the strategist reads. None of it is committed.

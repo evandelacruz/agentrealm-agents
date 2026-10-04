@@ -31,7 +31,7 @@ Against the public API, skip the seed script: set `AGENTREALM_BASE_URL=https://a
 
 **The default base URL is `http://localhost:8080`, a local stack.** To play the public API, set `AGENTREALM_BASE_URL=https://api.agentrealm.gg` and use a key from your account page on agentrealm.gg. Lives there are permanent: a character at zero lives is ended. The sample characters set `world = "sandbox"`, the free practice world with the same rules on a different map; set `world` to a live world's code to play there.
 
-`create` saves each character’s id to `python/.state/<name>.json`. `run` drives every listed character until Ctrl-C, one line per window to stdout and a JSONL trace per character in `python/.state/`. Characters in the same world share one learned knowledge file at `python/.state/worlds/<world_code>.json` (gitignored): `run` loads it once at start, refusing to start if it is unreadable, and saves it once at exit. Run one `run` process per world at a time; two would each save their own copy, and the last to exit wins. Stopping the agent leaves the characters in the world where they stand. The game runs at 10 ticks per second; [`PLAN.md`](PLAN.md) Real time says how the agent keeps up.
+`create` saves each character’s id to `python/.state/<name>.json`. `run` drives every listed character until Ctrl-C, one line per window to stdout and a JSONL trace per character in `python/.state/`. Characters in the same world share one learned knowledge file at `python/.state/worlds/<world_code>.json` (gitignored): `run` loads it once at start, refusing to start if it is unreadable, and saves it once at exit. Its `items` section holds, per `supply_subtype_code`, the weapon reach learned from a `target_out_of_range` rejection and the last `gem_price` seen ([`PLAN.md`](PLAN.md) A18). Run one `run` process per world at a time; two would each save their own copy, and the last to exit wins. Stopping the agent leaves the characters in the world where they stand. The game runs at 10 ticks per second; [`PLAN.md`](PLAN.md) Real time says how the agent keeps up.
 
 ## Make a character
 
@@ -40,8 +40,8 @@ Copy a file from `python/characters/` and edit it. Names must be unique in the w
 | Key | Meaning |
 |---|---|
 | `name`, `avatar`, `model_agent`, `world` | Identity. `avatar` is an outfit code. `model_agent` is what rankings aggregate on. |
-| `policy.kind` | `idle` sends nothing. `wander` takes random steps. `scripted` runs the reflexes and goals below. |
-| `policy.goals` | Tried in order: `explore`, `doors`, `goto` (with `policy.goto = [x, y]`), `wander`, `hold`. Paths may run through unseen ground (fog costs 2 per step to known ground's 1), but the agent only steps onto tiles it has seen; a goal whose next step is unseen yields to the next goal. |
+| `policy.kind` | `idle` sends nothing. `wander` takes random steps. `scripted` runs the reflexes and goals below through the **Explore** state (A5). Before each `POST tick`, a priority dispatcher picks **Sync**, **Downed**, **Recover**, **Explore**, or **Idle**, and that state returns the intents to send. |
+| `policy.goals` | Tried in order: `explore`, `doors`, `goto` (with `policy.goto = [x, y]`, optional `policy.goto_map = <map_id>` for another map), `wander`, `hold`. Paths may run through unseen ground (fog costs 2 per step to known ground's 1), but the agent only steps onto tiles it has seen; a goal whose next step is unseen yields to the next goal. A search that runs out of its node budget (`goto` on its own map, the death chest) plans only the steps inside perception, along a coarse corridor over 16×16 map tiles that is searched a little each replan and kept until the goal or map changes or a step is rejected. With a shared knowledge file, door warps and terrain are remembered across runs; `goto_map` routes through known doors, then A* on each map. The `doors` goal prefers doors whose destination is not yet recorded. A rejected step teaches the map by code (a `not_traversable` cell stays blocked until a `BlockChanged` on it, a `block_occupied` cell is skipped one move then priced high for 30 ticks, a locked door is marked `locked` on its door entry in the knowledge file; PLAN.md reflex 1 has the full table). |
 | `policy.on_hostile` | `flee`, `fight`, or `ignore`, for anything in `policy.hostile` (`npc`, `character`) within `policy.hostile_range`. |
 | `policy.pickup` | Take supplies within one block. |
 | `policy.avoid_blocks` | Block types to step off and to plan around. Standing on one with no safe step off, the plan crosses as few as it can. Other fire and lava cost their `occupy_damage` per step. |
@@ -50,7 +50,7 @@ Copy a file from `python/characters/` and edit it. Names must be unique in the w
 
 Each character may also have `python/characters/<name>.directives.toml` beside its character file. The runner re-reads it when the file changes; a file that fails to read or parse keeps the last good directives (defaults if none loaded yet); deleting the file restores the defaults. `never_attack` lists kinds or NPC type codes the agent must not swing at (`character`, or an NPC `code`); a fight reflex that would `Use` a forbidden target flees instead, and any other `Use` aimed at one is replaced by a `Wait`. `never_attack` is the only key that changes behavior today. `params` (for example `fight_margin`, `risk`, `lives_floor`) are parsed and validated, out-of-range values ignored, but nothing reads them yet. `goals` and `instructions` are kept for the strategist.
 
-In a calm window it would otherwise skip, the agent calls `get_zone` on one revealed cell: first within 8 blocks of town or its last respawn point, then on the cells of its planned path. It records which are safe for later retreat and healing (A7); nothing acts on them yet. Urgent windows and the `idle` policy never read zones.
+In a calm window it would otherwise skip, the agent calls `get_zone` on one revealed cell: first within 8 blocks of town or its last respawn point, then on the cells of its planned path. It records which are safe for later retreat, healing, and death-chest recovery (A7, A11). With `policy.pickup` on, **Recover** walks back to a dropped death chest on this map only once a safe tile on or next to it is known; until then, or while no step toward it can be planned, it keeps exploring. Only that tile is checked, not the route to it. The off-hazard, hostile and pickup reflexes still run first. Urgent windows and the `idle` policy never read zones.
 
 ## Tests
 
@@ -70,7 +70,7 @@ cd python && python3 -m unittest discover -s tests
 
 ### M6 acceptance (live Olympuff, A4)
 
-After the executor slices on `main`, you can run the M6 done-when against the public API: 200 applied `Step`s, no `movement_cooldown` rejections, and calm windows spend under a quarter of the budget on `POST tick` (the 4–10 tick poll cadence; terrain and zone reads use spare windows). This uses a dedicated character (`python/characters/olympuff_walker.toml`); lives on live worlds are permanent.
+`scripts/smoke_m6_olympuff.py` runs the M6 done-when against the public API; no live PASS is recorded in the repo yet: 200 applied `Step`s, no `movement_cooldown` rejections, and calm windows spend under a quarter of the budget on `POST tick` (the 4–10 tick poll cadence; terrain and zone reads use spare windows). This uses a dedicated character (`python/characters/olympuff_walker.toml`); lives on live worlds are permanent.
 
 ```sh
 export AGENTREALM_BASE_URL=https://api.agentrealm.gg

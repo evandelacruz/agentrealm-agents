@@ -6,7 +6,9 @@ import unittest
 from agentrealm_agent.brain import Memory, choose_call, decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.navigation import cost_path
+from agentrealm_agent.navigation.rejection import NavMemory
 from agentrealm_agent.world import Entity, WorldModel, terrain_cells
+from agentrealm_agent.zone_discovery import apply_zone
 
 
 def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
@@ -121,11 +123,11 @@ class ReflexTest(unittest.TestCase):
         for name, pol in cases:
             with self.subTest(name):
                 w = world([".....", "....."])
-                m = Memory(blocked={(1, 0): 1})
+                m = Memory(nav=NavMemory(wait_tile=(w.map_id, (1, 0))))
                 d = decide(w, m, pol, random.Random(0))
-                if d.intent is not None:
-                    self.assertNotEqual((d.intent["x"], d.intent["y"]), (1, 0), d.reason)
-                self.assertEqual(m.blocked, {}, "the block lasts one decision")
+                self.assertIsNotNone(d.intent, d.reason)
+                self.assertNotEqual((d.intent["x"], d.intent["y"]), (1, 0), d.reason)
+                self.assertIsNone(m.nav.wait_tile, "the block lasts one decision")
 
     def test_plan_keeps_off_blocks_to_avoid(self):
         # avoid_blocks are walkable, so without this the plan walks into lava
@@ -157,6 +159,7 @@ class DeathChestTest(unittest.TestCase):
         w.apply_events([{"tick": 5, "events": [{"kind": "Died", "cause": "killed", "chest_id": 80, "map_id": 7, "x": 0, "y": 0}]}])
         self.assertEqual(w.death_chest, (7, (0, 0), 80))
         w.map_id, w.pos = 7, (4, 0)  # respawned along the strip
+        apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
 
         m = Memory()
         d = decide(w, m, scripted(goals=["hold"]), random.Random(0))

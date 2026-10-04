@@ -1,4 +1,4 @@
-"""A* over the M7 cost grid (A12).
+"""A* over the M7 cost grid (A12) with two-level search (A13).
 
 See docs/PLAYABLE_AGENT_PLAN.md Navigation and getting unstuck.
 """
@@ -6,6 +6,8 @@ See docs/PLAYABLE_AGENT_PLAN.md Navigation and getting unstuck.
 from __future__ import annotations
 
 import heapq
+from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..world import DOORS, NEIGHBOURS, VOID, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
@@ -26,6 +28,13 @@ HOSTILE_DANGER_RADIUS = 6
 COSTLY_STEP = 100
 HAZARDS = ("fire", "lava")
 
+# Cache-tile size (docs/GAME_NOTES.md, API Reads).
+MACRO_SIZE = 16
+# Node budgets per replan so search never stalls a tick (A13). Read at call
+# time, so a caller's override (or a test's patch) takes effect.
+COARSE_NODE_BUDGET = 48  # cache tiles expanded by the corridor search
+FINE_NODE_BUDGET = 400  # cells expanded by each cell-level search
+
 
 @dataclass
 class CostGridParams:
@@ -36,6 +45,37 @@ class CostGridParams:
     break_nominated: set[Pos] = field(default_factory=set)  # inert until M9: impassable
     hostile_kinds: frozenset[str] = frozenset({"npc"})
     allow_goal_door: bool = False
+
+
+@dataclass
+class NavSearchState:
+    """One goal's corridor search, resumed across replans (A13).
+
+    The search runs backward from the goal's cache tile, so the tree stays
+    rooted where it started however far we walk: each replan reads the
+    corridor from the cache tile we stand in, and only re-aims the frontier.
+    """
+
+    goal: Pos
+    map_id: int | None = None  # map the goal is on; the caller starts over when it changes (A26)
+    origin: Pos | None = None  # cache tile the frontier's priorities aim at
+    frontier: list[tuple[int, int, Pos]] = field(default_factory=list)
+    came: dict[Pos, Pos] = field(default_factory=dict)  # cache tile -> next one toward the goal
+    cost: dict[Pos, int] = field(default_factory=dict)
+    closed: set[Pos] = field(default_factory=set)
+    step: dict[Pos, int | None] = field(default_factory=dict)  # cost to enter each expanded tile, as searched
+
+    def reset(self, goal: Pos) -> None:
+        self.goal, self.origin = goal, None
+        self.frontier, self.came, self.cost, self.closed, self.step = [], {}, {}, set(), {}
+
+
+def macro_cell(p: Pos) -> Pos:
+    return p[0] // MACRO_SIZE, p[1] // MACRO_SIZE
+
+
+def macro_center(m: Pos) -> Pos:
+    return m[0] * MACRO_SIZE + MACRO_SIZE // 2, m[1] * MACRO_SIZE + MACRO_SIZE // 2
 
 
 def known_prefix(path: list[Pos], view: MapView) -> list[Pos]:
@@ -52,15 +92,17 @@ def known_prefix(path: list[Pos], view: MapView) -> list[Pos]:
 class _Grid:
     """One search's view of the cost grid, with per-search state precomputed."""
 
-    def __init__(self, w: WorldModel, goal: Pos, params: CostGridParams):
-        self.w, self.goal, self.params = w, goal, params
+    def __init__(self, w: WorldModel, goals: set[Pos], params: CostGridParams):
+        self.w, self.goals, self.params = w, goals, params
+        # The single goal of a cost_path search (A13); None for a flood.
+        self.goal: Pos | None = next(iter(goals)) if len(goals) == 1 else None
         self.occupied = w.occupied()
         self.hostiles: list[Entity] = [e for e in w.entities if e.kind in params.hostile_kinds]
         # Fog is unbounded, so the search is boxed to the known extent plus
-        # start and goal, with a one-tile fog ring: any detour beyond the box
+        # start and goals, with a one-tile fog ring: any detour beyond the box
         # crosses only fog and is no cheaper than walking the ring.
-        xs = [p[0] for p in w.view.tiles] + [w.pos[0], goal[0]]
-        ys = [p[1] for p in w.view.tiles] + [w.pos[1], goal[1]]
+        xs = [p[0] for p in w.view.tiles] + [w.pos[0]] + [g[0] for g in goals]
+        ys = [p[1] for p in w.view.tiles] + [w.pos[1]] + [g[1] for g in goals]
         self.box = (min(xs) - 1, min(ys) - 1, max(xs) + 1, max(ys) + 1)
 
     def in_box(self, p: Pos) -> bool:
@@ -75,7 +117,7 @@ class _Grid:
         block = self.w.view.tiles.get(p)
         if block is not None and block in DOORS:
             # Stepping onto a door warps, so a door is only ever the goal.
-            return KNOWN_WALKABLE if p == self.goal and params.allow_goal_door else None
+            return KNOWN_WALKABLE if p in self.goals and params.allow_goal_door else None
         if block is None:
             base = FOG
         elif block in WALKABLE:
@@ -96,26 +138,84 @@ class _Grid:
         return base
 
 
-def _search(w: WorldModel, goal: Pos, params: CostGridParams) -> tuple[list[Pos], int] | None:
+class _MacroCosts:
+    """Cost to cross each 16×16 cache tile, from the same cost grid as the cells.
+
+    Cells nobody has said anything about are fog. The rest (known tiles,
+    avoided, costly and break-nominated cells, occupants, and cells in a
+    hostile's danger radius) are priced by ``_Grid.cost``. Crossing costs
+    MACRO_SIZE times the mean passable step, divided by the passable share,
+    so a tile that is mostly wall or mostly hazard is a long way round. An
+    open known tile costs MACRO_SIZE, the least possible, so Chebyshev
+    distance * MACRO_SIZE stays a lower bound.
+    """
+
+    def __init__(self, grid: _Grid):
+        self.grid = grid
+        self.memo: dict[Pos, int | None] = {}
+        cells: dict[Pos, set[Pos]] = defaultdict(set)
+        params = grid.params
+        for src in (grid.w.view.tiles, params.avoid, params.costly, params.break_nominated, grid.occupied):
+            for p in src:
+                cells[macro_cell(p)].add(p)
+        r = HOSTILE_DANGER_RADIUS - 1
+        for h in grid.hostiles:
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    p = (h.pos[0] + dx, h.pos[1] + dy)
+                    cells[macro_cell(p)].add(p)
+        self.cells = cells
+
+    def __call__(self, m: Pos) -> int | None:
+        if m in self.memo:
+            return self.memo[m]
+        n = MACRO_SIZE * MACRO_SIZE
+        special = self.cells.get(m, ())
+        passable = n - len(special)
+        total = passable * FOG
+        for p in special:
+            c = self.grid.cost(p)
+            if c is not None:
+                passable += 1
+                total += c
+        out = None if passable == 0 else max(MACRO_SIZE * KNOWN_WALKABLE, round(MACRO_SIZE * total * n / passable**2))
+        self.memo[m] = out
+        return out
+
+
+def _unwind(came: dict[Pos, Pos], start: Pos, end: Pos) -> list[Pos]:
+    out = [end]
+    while out[-1] in came and came[out[-1]] != start:
+        out.append(came[out[-1]])
+    return out[::-1]
+
+
+@dataclass
+class _SearchResult:
+    path: list[Pos] | None
+    cost: int
+    budget_hit: bool
+
+
+def _astar(grid: _Grid, max_nodes: int) -> _SearchResult:
+    w, goal = grid.w, grid.goal
     assert w.pos is not None
     start = w.pos
     if start == goal:
-        return [], 0
-    grid = _Grid(w, goal, params)
+        return _SearchResult([], 0, False)
     if grid.cost(goal) is None:
-        return None
+        return _SearchResult(None, 0, False)
     frontier: list[tuple[int, int, Pos]] = [(chebyshev(start, goal) * KNOWN_WALKABLE, 0, start)]
     came: dict[Pos, Pos] = {}
     cost: dict[Pos, int] = {start: 0}
-    while frontier:
+    expanded = 0
+    while frontier and expanded < max_nodes:
         _, g, cur = heapq.heappop(frontier)
         if cur == goal:
-            out = [cur]
-            while out[-1] in came and came[out[-1]] != start:
-                out.append(came[out[-1]])
-            return out[::-1], g
+            return _SearchResult(_unwind(came, start, goal), g, False)
         if g > cost.get(cur, 10**9):
             continue
+        expanded += 1
         for dx, dy in NEIGHBOURS:
             n = (cur[0] + dx, cur[1] + dy)
             if not grid.in_box(n):
@@ -128,25 +228,266 @@ def _search(w: WorldModel, goal: Pos, params: CostGridParams) -> tuple[list[Pos]
                 cost[n] = ng
                 came[n] = cur
                 heapq.heappush(frontier, (ng + chebyshev(n, goal) * KNOWN_WALKABLE, ng, n))
+    return _SearchResult(None, 0, bool(frontier))
+
+
+def _search(w: WorldModel, goal: Pos, params: CostGridParams, max_nodes: int = 10**9) -> _SearchResult:
+    return _astar(_Grid(w, {goal}, params), max_nodes)
+
+
+def _corridor(nav: NavSearchState, start_m: Pos, goal_m: Pos) -> list[Pos]:
+    out = [start_m]
+    while out[-1] != goal_m:
+        out.append(nav.came[out[-1]])
+    return out
+
+
+def _coarse_search(grid: _Grid, macro: _MacroCosts, nav: NavSearchState, max_nodes: int) -> list[Pos] | None:
+    """Cache-tile corridor from where we stand to the goal, or ``None`` while unfinished.
+
+    Resumes ``nav``. A finished corridor is re-priced on every call and the
+    search starts over when a tile on it got dearer or impassable.
+    """
+    assert grid.w.pos is not None
+    start_m, goal_m = macro_cell(grid.w.pos), macro_cell(grid.goal)
+    if start_m in nav.closed:
+        path = _corridor(nav, start_m, goal_m)
+        if all((c := macro(m)) is not None and c <= (nav.step.get(m) or 0) for m in path[1:]):
+            return path
+        nav.reset(nav.goal)
+    if not nav.cost:
+        nav.cost = {goal_m: 0}
+        nav.frontier = [(0, 0, goal_m)]
+        nav.origin = None
+
+    def h(m: Pos) -> int:
+        return chebyshev(m, start_m) * MACRO_SIZE * KNOWN_WALKABLE
+
+    if nav.origin != start_m:
+        nav.origin = start_m
+        nav.frontier = [(g + h(m), g, m) for _, g, m in nav.frontier]
+        heapq.heapify(nav.frontier)
+    # Fog is unbounded: keep to the cache tiles round the cell search's box.
+    (bx0, by0), (bx1, by1) = macro_cell(grid.box[:2]), macro_cell(grid.box[2:])
+    expanded = 0
+    while nav.frontier and expanded < max_nodes:
+        _, g, cur = heapq.heappop(nav.frontier)
+        if cur in nav.closed or g > nav.cost.get(cur, 10**9):
+            continue
+        nav.closed.add(cur)
+        expanded += 1
+        sc = nav.step[cur] = macro(cur)
+        if sc is not None:
+            for dx, dy in NEIGHBOURS:
+                n = (cur[0] + dx, cur[1] + dy)
+                if not (bx0 - 1 <= n[0] <= bx1 + 1 and by0 - 1 <= n[1] <= by1 + 1):
+                    continue
+                ng = g + sc
+                if n not in nav.closed and ng < nav.cost.get(n, 10**9):
+                    nav.cost[n] = ng
+                    nav.came[n] = cur
+                    heapq.heappush(nav.frontier, (ng + h(n), ng, n))
+        if cur == start_m:
+            return _corridor(nav, start_m, goal_m)
     return None
 
 
-def cost_path(w: WorldModel, goal: Pos, params: CostGridParams | None = None) -> list[Pos] | None:
-    """A* from ``w.pos`` to ``goal`` over the cost grid. Excludes the start."""
-    found = _search(w, goal, params or CostGridParams())
-    return found[0] if found else None
+def _perception_bounds(w: WorldModel) -> tuple[int, int, int, int]:
+    x0, y0, width, height = w.perception_rect()
+    return x0, y0, x0 + width, y0 + height
+
+
+def _in_rect(p: Pos, x0: int, y0: int, x1: int, y1: int) -> bool:
+    return x0 <= p[0] < x1 and y0 <= p[1] < y1
+
+
+def _corridor_index(corridor: list[Pos]) -> dict[Pos, int]:
+    """Corridor tiles and the tiles beside them, each with its corridor position.
+
+    Two diagonal corridor tiles meet at a single corner cell, so the cell
+    search may also use the tiles round the corridor.
+    """
+    index = {m: i for i, m in enumerate(corridor)}
+    beside: dict[Pos, int] = {}
+    for i, m in enumerate(corridor):
+        for dx, dy in NEIGHBOURS:
+            n = (m[0] + dx, m[1] + dy)
+            if n not in index:
+                beside[n] = min(beside.get(n, i), i)
+    return {**beside, **index}
+
+
+def _toward(goal: Pos, corridor: list[Pos] | None) -> Callable[[Pos], int]:
+    """Estimated steps left to ``goal``, along the corridor when there is one.
+
+    A cell in corridor tile i heads for the centre of tile i + 1 (the last
+    tile heads for the goal), then follows the rest of the corridor. A cell
+    in a tile beside the corridor counts as in the first corridor tile it touches.
+    """
+    if not corridor:
+        return lambda p: chebyshev(p, goal)
+    waypoints = [macro_center(m) for m in corridor[1:]] + [goal]
+    rest = [0] * len(waypoints)
+    for i in range(len(waypoints) - 2, -1, -1):
+        rest[i] = rest[i + 1] + chebyshev(waypoints[i], waypoints[i + 1])
+    index = _corridor_index(corridor)
+
+    def h(p: Pos) -> int:
+        i = index[macro_cell(p)]
+        return chebyshev(p, waypoints[i]) + rest[i]
+
+    return h
+
+
+def _fine_path(
+    grid: _Grid, h: Callable[[Pos], int], corridor: set[Pos] | None, max_nodes: int
+) -> list[Pos] | None:
+    """Best path inside the perception window, kept to ``corridor`` tiles when given.
+
+    ``corridor`` is the corridor's tiles and those beside them. Ends on the
+    goal when the search reaches it; otherwise on the expanded cell with the
+    least cost so far plus twice ``h``, which favours progress over an
+    exactly cheapest prefix, so a blocked or unseen corridor point never
+    leaves us without a step. ``None`` only when no cell but the start was
+    reachable.
+    """
+    w, goal = grid.w, grid.goal
+    assert w.pos is not None
+    start = w.pos
+    x0, y0, x1, y1 = _perception_bounds(w)
+    frontier: list[tuple[int, int, Pos]] = [(h(start), 0, start)]
+    came: dict[Pos, Pos] = {}
+    cost: dict[Pos, int] = {start: 0}
+    reached: set[Pos] = set()
+    expanded = 0
+    while frontier and expanded < max_nodes:
+        _, g, cur = heapq.heappop(frontier)
+        if g > cost.get(cur, 10**9):
+            continue
+        if cur == goal:
+            return _unwind(came, start, goal)
+        expanded += 1
+        if cur != start:
+            reached.add(cur)
+        for dx, dy in NEIGHBOURS:
+            n = (cur[0] + dx, cur[1] + dy)
+            if not _in_rect(n, x0, y0, x1, y1) or not grid.in_box(n):
+                continue
+            if corridor is not None and macro_cell(n) not in corridor:
+                continue
+            sc = grid.cost(n)
+            if sc is None:
+                continue
+            ng = g + sc
+            if ng < cost.get(n, 10**9):
+                cost[n] = ng
+                came[n] = cur
+                heapq.heappush(frontier, (ng + h(n), ng, n))
+    if not reached:
+        return None
+    best = min(reached, key=lambda p: (cost[p] + 2 * h(p), h(p), p))
+    return _unwind(came, start, best)
+
+
+def cost_flood(
+    w: WorldModel, targets: set[Pos], params: CostGridParams | None = None
+) -> dict[Pos, tuple[list[Pos], int]]:
+    """Cheapest path and cost from ``w.pos`` to every reachable target, in one flood (A26).
+
+    Dijkstra over the same cost grid as ``cost_path``. A door target is
+    entered (with ``allow_goal_door``) but never walked through, since
+    stepping onto it warps. Paths exclude the start.
+    """
+    assert w.pos is not None
+    params = params or CostGridParams()
+    start = w.pos
+    out: dict[Pos, tuple[list[Pos], int]] = {}
+    if start in targets:
+        out[start] = ([], 0)
+    remaining = set(targets) - {start}
+    if not remaining:
+        return out
+    grid = _Grid(w, remaining, params)
+    frontier: list[tuple[int, Pos]] = [(0, start)]
+    came: dict[Pos, Pos] = {}
+    cost: dict[Pos, int] = {start: 0}
+    while frontier and remaining:
+        g, cur = heapq.heappop(frontier)
+        if g > cost.get(cur, 10**9):
+            continue
+        if cur in remaining:
+            remaining.discard(cur)
+            out[cur] = (_unwind(came, start, cur), g)
+            if w.view.tiles.get(cur) in DOORS:
+                continue
+        for dx, dy in NEIGHBOURS:
+            n = (cur[0] + dx, cur[1] + dy)
+            if not grid.in_box(n):
+                continue
+            sc = grid.cost(n)
+            if sc is None:
+                continue
+            ng = g + sc
+            if ng < cost.get(n, 10**9):
+                cost[n] = ng
+                came[n] = cur
+                heapq.heappush(frontier, (ng, n))
+    return out
+
+
+def cost_path(
+    w: WorldModel,
+    goal: Pos,
+    params: CostGridParams | None = None,
+    *,
+    nav: NavSearchState | None = None,
+    coarse_budget: int | None = None,
+    fine_budget: int | None = None,
+) -> list[Pos] | None:
+    """Route from ``w.pos`` toward ``goal``; excludes the start (A12, A13).
+
+    One A* over the cost grid, budgeted. When it finds the goal, or proves
+    it unreachable, that is the answer. When the budget runs out instead,
+    plan only inside the perception window: toward the goal when it is in
+    sight, else along the coarse corridor once the search in ``nav`` has
+    finished it, and straight toward the goal until then. That path ends at
+    the goal only if the goal is in sight; the caller replans when it has
+    walked it.
+    """
+    params = params or CostGridParams()
+    coarse_budget = COARSE_NODE_BUDGET if coarse_budget is None else coarse_budget
+    fine_budget = FINE_NODE_BUDGET if fine_budget is None else fine_budget
+    assert w.pos is not None
+    if w.pos == goal:
+        return []
+    grid = _Grid(w, {goal}, params)
+    direct = _astar(grid, fine_budget)
+    if direct.path is not None or not direct.budget_hit:
+        return direct.path
+
+    corridor = None
+    if not _in_rect(goal, *_perception_bounds(w)):
+        if nav is None:
+            nav = NavSearchState(goal=goal)
+        elif nav.goal != goal:
+            nav.reset(goal)
+        corridor = _coarse_search(grid, _MacroCosts(grid), nav, coarse_budget)
+    if corridor:
+        found = _fine_path(grid, _toward(goal, corridor), set(_corridor_index(corridor)), fine_budget)
+        if found:
+            return found
+    return _fine_path(grid, _toward(goal, None), None, fine_budget)
 
 
 def nearest_target(
-    w: WorldModel,
-    targets: set[Pos],
-    params: CostGridParams | None = None,
+    w: WorldModel, targets: set[Pos], params: CostGridParams | None = None
 ) -> tuple[Pos, list[Pos]] | None:
     """Closest target by cost-grid path cost, with its path.
 
     Tries targets in straight-line order and stops once the lower bound on
     the next target's cost (Chebyshev distance * KNOWN_WALKABLE) cannot beat
-    the best path cost found.
+    the best path cost found. Targets are known tiles, so this stays the one
+    unbudgeted A* of A12 rather than the two-level search.
     """
     assert w.pos is not None
     params = params or CostGridParams()
@@ -156,9 +497,8 @@ def nearest_target(
         if best is not None and chebyshev(w.pos, t) * KNOWN_WALKABLE >= best_cost:
             break
         found = _search(w, t, params)
-        if found is None:
+        if found.path is None:
             continue
-        p, c = found
-        if best is None or c < best_cost:
-            best, best_cost = (t, p), c
+        if best is None or found.cost < best_cost:
+            best, best_cost = (t, found.path), found.cost
     return best

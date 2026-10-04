@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 
 TARGET_STEPS = 200
@@ -10,9 +11,15 @@ CALM_BUDGET_FRACTION = 0.25
 
 @dataclass
 class M6AcceptanceMetrics:
-    """Counts windows and steps while the runner drives a character."""
+    """Counts windows, API calls and steps while the runner drives a character.
+
+    Calls are counted on the client itself (``wrap``), so every request a
+    window makes is seen, not just the one the scheduler chose. ``stop`` is
+    set once ``target_steps`` Steps have applied.
+    """
 
     target_steps: int = TARGET_STEPS
+    stop: threading.Event | None = None
     steps_applied: int = 0
     movement_cooldown_rejections: int = 0
     calm_windows: int = 0
@@ -20,20 +27,26 @@ class M6AcceptanceMetrics:
     calm_tick_calls: int = 0  # POST tick only; M6 done-when is poll cadence
     urgent_windows: int = 0
     rejection_codes: list[str] = field(default_factory=list)
+    window_calls: list[str] = field(default_factory=list)  # this window's calls so far
 
-    def on_window(self, *, urgent: bool, call: str) -> None:
-        spent = call != "skip"
+    def wrap(self, client):
+        """``client`` with every method call recorded against the current window."""
+        return _CountingClient(client, self.window_calls)
+
+    def on_window(self, *, urgent: bool) -> None:
+        """Close one window: file the calls it made as urgent or calm."""
+        calls, self.window_calls[:] = list(self.window_calls), []
         if urgent:
             self.urgent_windows += 1
         else:
             self.calm_windows += 1
-            if spent:
-                self.calm_calls += 1
-            if call == "tick":
-                self.calm_tick_calls += 1
+            self.calm_calls += len(calls)
+            self.calm_tick_calls += calls.count("tick")
 
     def on_step_applied(self) -> None:
         self.steps_applied += 1
+        if self.stop is not None and self.reached_step_goal():
+            self.stop.set()
 
     def on_rejection(self, code: str, *, verb: str | None = None) -> None:
         self.rejection_codes.append(code)
@@ -86,3 +99,22 @@ class M6AcceptanceMetrics:
             if other:
                 lines.append(f"other rejections: {', '.join(other)}")
         return lines
+
+
+class _CountingClient:
+    """Forwards to a client, appending each method name called to ``calls``."""
+
+    def __init__(self, inner, calls: list[str]):
+        self._inner = inner
+        self._calls = calls
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._inner, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            self._calls.append(name)  # a request is spent even if it fails
+            return attr(*args, **kwargs)
+
+        return call

@@ -8,11 +8,14 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .brain import Decision, Memory, choose_call, decide, path_blockers, reject_step, remaining_path_stale, walkable_prefix
+from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
+from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
+from .item_table import absorb_attack_range, absorb_entities_payload, rejection_attack_range
 from .knowledge_base import KnowledgeBase
+from .knowledge_maps import record_warp, sync_tiles, sync_world_maps
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
@@ -70,6 +73,7 @@ class Runner:
         self.stop = stop
         self.out = out
         self.knowledge = knowledge
+        self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
         self.world = WorldModel(character_id)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
@@ -77,6 +81,9 @@ class Runner:
         self.pacer = Pacer(1.0)
         self.tick_hz = DEFAULT_TICK_RATE_HZ
         self.queue_horizon_ticks = QUEUE_HORIZON_INTENTS
+        # The latest tick a server response reported. w.tick also counts
+        # windows locally and can run ahead of it; cooldowns count from this.
+        self.server_tick: int | None = None
         cfg.trace_path.parent.mkdir(parents=True, exist_ok=True)
         self.trace = open(cfg.trace_path, "a", buffering=1)
         self.directives = DirectivesWatch(cfg.directives_path)
@@ -118,30 +125,50 @@ class Runner:
                         {"directives": {"params": self.directives.directives.params, "never_attack": self.directives.directives.never_attack}},
                     )
                 call = choose_call(self.world, self.mem, self.cfg.policy)
-                if self.acceptance is not None:
-                    self.acceptance.on_window(
-                        urgent=is_urgent(self.world, self.mem, self.cfg.policy),
-                        call=call,
-                    )
+                urgent = self.acceptance is not None and is_urgent(self.world, self.mem, self.cfg.policy)
                 if call == "skip":
                     self.mem.windows_since_self += 1
-                    if (
-                        self.acceptance is not None
-                        and self.acceptance.reached_step_goal()
-                    ):
-                        self.stop.set()
-                    continue
-                try:
-                    not_before = self.step(call)
-                    if (
-                        self.acceptance is not None
-                        and self.acceptance.reached_step_goal()
-                    ):
-                        self.stop.set()
-                except ApiError as e:
-                    not_before = self.on_error(call, e)
+                else:
+                    try:
+                        not_before = self.step(call)
+                    except ApiError as e:
+                        not_before = self.on_error(call, e)
+                if self.acceptance is not None:
+                    self.acceptance.on_window(urgent=urgent)
         finally:
+            if self.knowledge is not None:
+                # Tiles learned from tick deltas, which terrain reads did not merge.
+                sync_world_maps(self.knowledge, self.world)
             self.trace.close()
+
+    def note_warp_landing(self) -> None:
+        """After a door step, record where the position read says it landed (A26).
+
+        A read that still puts us on the door means it did not warp (locked,
+        or closed): nothing is recorded, so the graph never gets a self-loop.
+        """
+        w, m = self.world, self.mem
+        warp, m.warp_from = m.warp_from, None
+        if warp is None or self.knowledge is None or w.map_id is None or w.pos is None:
+            return
+        from_map, from_pos, block_type = warp
+        if (w.map_id, w.pos) != (from_map, from_pos):
+            record_warp(self.knowledge, from_map, from_pos, block_type, w.map_id, w.pos)
+
+    def sync_terrain(self, t: dict) -> None:
+        """Merge the cells of this terrain read's window into the knowledge base (A26)."""
+        if self.knowledge is None:
+            return
+        map_id = int(t["map_id"])
+        view = self.world.maps[map_id]
+        x0, y0 = int(t["x0"]), int(t["y0"])
+        tiles = {
+            (x, y): view.tiles[(x, y)]
+            for y in range(y0, y0 + int(t["height"]))
+            for x in range(x0, x0 + int(t["width"]))
+            if (x, y) in view.tiles
+        }
+        sync_tiles(self.knowledge, map_id, tiles)
 
     def read_world(self) -> dict | None:
         """The world read that sets the pace, retried like any other call."""
@@ -164,20 +191,23 @@ class Runner:
         elif call == "position":
             p = c.position(self.cid)
             w.apply_position(p)
+            self.note_warp_landing()
             m.need_position, m.path = False, []
             self.log(call, "", {"position": p})
         elif call == "terrain":
             t = c.terrain(self.cid, w.map_id, *w.perception_rect())
             w.apply_terrain(t)
-            w.tick = max(w.tick, int(t.get("tick", 0)))
+            self.heard_tick(t.get("tick"))
+            self.sync_terrain(t)
             n = len(terrain_cells(t))
             self.note_held_path_stale()
             self.log(call, f"{n} cells, {len(w.view.tiles)} known", {"cells": n})
         elif call == "entities":
             e = c.entities(self.cid, w.map_id, *w.perception_rect())
             w.apply_entities(e)
-            w.tick = max(w.tick, int(e.get("tick", 0)))
+            self.heard_tick(e.get("tick"))
             m.alarm = False
+            self._learn_items_from_entities(e)
             self.note_held_path_stale()
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
@@ -196,7 +226,7 @@ class Runner:
                     zone_failed(w, map_id, (x, y))
                 raise
             fact = apply_zone(w, map_id, x, y, z)
-            w.tick = max(w.tick, int(z.get("tick", 0)))
+            self.heard_tick(z.get("tick"))
             self.log(call, f"@{map_id}:{x},{y} safe={fact.safe}", {"zone": z})
         else:
             return self.tick()
@@ -224,7 +254,14 @@ class Runner:
                 # reads it before this poll), so the new walk starts from
                 # where we are. With no walk to send, stop the old queue.
                 self.clear_held_tracking()
-                d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+                d = decide(
+                    w,
+                    m,
+                    self.cfg.policy,
+                    self.rng,
+                    never_attack=self.directives.directives.never_attack,
+                    knowledge=self.knowledge,
+                )
                 intents = self._apply_never_attack(self.intents_for(d))
                 if intents:
                     d = Decision(d.intent, "path stale, resend")
@@ -235,11 +272,20 @@ class Runner:
                 intents = None
         else:
             m.resend_held_queue = False
-            d = decide(w, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+            d = decide(
+                w,
+                m,
+                self.cfg.policy,
+                self.rng,
+                never_attack=self.directives.directives.never_attack,
+                knowledge=self.knowledge,
+            )
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))
+        if "tick" in r:
+            self.server_tick = w.tick
         if intents:
             m.queue_sent_tick = w.tick
             if qid := r.get("queue_id"):
@@ -249,6 +295,7 @@ class Runner:
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
         w.learn_threat(events, earlier)
+        self._learn_items_from_tick(r.get("observation"))
         self.on_events(events)
         self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
@@ -302,15 +349,25 @@ class Runner:
     def reflex_while_held(self) -> Decision | None:
         """A reflex (2–4b) that fires while a queue is held, else None.
 
-        Only a firing reflex may touch memory: the plan, the blocked tiles and
-        the rng stay as they were, so the held queue's steps are not planned twice.
+        Only a firing reflex may touch the plan and the rng; they stay as they
+        were otherwise, so the held queue's steps are not planned twice. The
+        navigation learnings always stay as they were: this probe is not the
+        decision window that ages them (A14).
         """
         m = self.mem
-        saved = (list(m.path), m.goal, dict(m.blocked), self.rng.getstate())
-        d = decide(self.world, m, self.cfg.policy, self.rng, never_attack=self.directives.directives.never_attack)
+        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate())
+        d = decide(
+            self.world,
+            m,
+            self.cfg.policy,
+            self.rng,
+            never_attack=self.directives.directives.never_attack,
+            knowledge=self.knowledge,
+        )
+        m.nav = saved[2]
         if d.reflex:
             return d
-        m.path, m.goal, m.blocked = saved[0], saved[1], saved[2]
+        m.path, m.goal = saved[0], saved[1]
         self.rng.setstate(saved[3])
         return None
 
@@ -323,7 +380,7 @@ class Runner:
         m = self.mem
         if m.held_queue is None or m.resend_held_queue:
             return
-        if remaining_path_stale(self.world, m, self.cfg.policy):
+        if remaining_path_stale(self.world, m, self.cfg.policy, self.knowledge):
             m.resend_held_queue = m.need_position = True
 
     def clear_held_tracking(self) -> None:
@@ -376,16 +433,13 @@ class Runner:
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
-        prefix = walkable_prefix(w, m, self.cfg.policy, m.path)
+        prefix = walkable_prefix(w, m, self.cfg.policy, m.path, self.knowledge)
         on_path = bool(prefix) and prefix[0] == target
         cells = list(prefix) if on_path else [target]
-        # Ticks since the last applied Step, counted to the latest tick we
-        # know of: the first intent runs no earlier, so the owed Waits are
-        # never too few and the first Step never draws movement_cooldown.
-        # Always open with Waits still owed as if the last Step was one tick ago.
-        # w.tick can run ahead of the server's movement clock on calm skips while
-        # a queue runs server-side without intent_results (movement_cooldown).
-        since = 1 if m.last_step_tick is not None else None
+        # Ticks since the last applied Step, counted to the latest tick the
+        # server reported: the first intent runs no earlier, so the owed Waits
+        # are never too few and the first Step never draws movement_cooldown.
+        since = self.ticks_since(m.last_step_tick)
         intents = build_paced_walk_queue(
             w.pos,
             cells,
@@ -405,8 +459,28 @@ class Runner:
             m.path = m.path[queued:]
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
-        m.path_blockers = path_blockers(w, m, self.cfg.policy)
+        m.path_blockers = path_blockers(w, m, self.cfg.policy, self.knowledge)
         return intents
+
+    def heard_tick(self, tick) -> None:
+        """A read's tick: the server clock moved at least this far."""
+        if tick is None:
+            return
+        tick = int(tick)
+        self.world.tick = max(self.world.tick, tick)
+        self.server_tick = tick if self.server_tick is None else max(self.server_tick, tick)
+
+    def ticks_since(self, last_tick: int | None) -> int | None:
+        """Ticks from ``last_tick`` to the latest server-reported tick, at least 1.
+
+        Not to w.tick: the windows counted locally since the last response can
+        run ahead of the server clock, and counting them would owe too few
+        Waits. Before any response, w.tick is all there is.
+        """
+        if last_tick is None:
+            return None
+        now = self.world.tick if self.server_tick is None else min(self.world.tick, self.server_tick)
+        return max(1, now - last_tick)
 
     def _paced_action(self, intent: dict, pace, last_tick: int | None) -> list[dict] | None:
         """``intent`` behind the Waits its cooldown still owes, cut at the horizon.
@@ -415,7 +489,7 @@ class Runner:
         round trip, and the trace says why.
         """
         w, m = self.world, self.mem
-        since = None if last_tick is None else max(1, w.tick - last_tick)
+        since = self.ticks_since(last_tick)
         paced = trim_to_horizon(pace([intent], ticks_since_last=since), limit=self.queue_horizon_ticks)
         while paced and paced[-1]["verb"] == "Wait":
             paced.pop()
@@ -448,7 +522,9 @@ class Runner:
             idx = int(res.get("index", 0))
             if m.pending_intents is not None and idx < m.pending_next_index:
                 continue
+            intent = self._intent_at(idx)
             if self.on_result(res, idx):
+                self._note_reach(res, intent)
                 rejected = True
                 break
             m.pending_next_index = idx + 1
@@ -483,9 +559,10 @@ class Runner:
                 m.last_step_tick = int(result.get("tick", w.tick))
                 if self.acceptance is not None:
                     self.acceptance.on_step_applied()
-                if w.view.tiles.get(w.pos) in DOORS:
+                if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:
                     # A door moves us; the Steps still queued behind this one
                     # would walk from the wrong place.
+                    m.warp_from = (w.map_id, w.pos, w.view.tiles.get(w.pos, "framed_door"))
                     m.need_position, m.path = True, []
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True
@@ -497,19 +574,58 @@ class Runner:
                 m.pending = None
             return False
         if intent and intent.get("verb") == "Step" and w.pos is not None:
-            reject_step(m, step_landing(w.pos, intent["direction"]))
-        code = (result.get("rejection") or {}).get("code", "?")
+            rej = result.get("rejection") or {}
+            learn_step_rejection(
+                m,
+                w,
+                self.knowledge,
+                step_landing(w.pos, intent["direction"]),
+                rej.get("code"),
+                int(result.get("tick", w.tick)),
+            )
         if self.acceptance is not None:
-            verb = (intent or {}).get("verb")
-            self.acceptance.on_rejection(code, verb=verb)
+            code = (result.get("rejection") or {}).get("code", "?")
+            self.acceptance.on_rejection(code, verb=(intent or {}).get("verb"))
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None
         m.pending_next_index = 0
         m.path, m.need_position = [], True
+        m.warp_from = None  # a later Step was refused: the next read is not the door's landing
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
+
+    def _with_item_table(self, fn) -> None:
+        kb = self.knowledge
+        if kb is None:
+            return
+        with kb.lock:
+            fn(kb.items)
+
+    def _learn_items_from_entities(self, payload: dict) -> None:
+        self._with_item_table(lambda items: absorb_entities_payload(items, payload))
+
+    def _note_reach(self, result: dict, intent: dict | None) -> None:
+        # Held until the same response's observation is applied: an Arm that
+        # resolved earlier in this response is only in that inventory, and
+        # get_self's attack_range can trail an Arm (B100), so neither the
+        # previous loadout nor get_self says which weapon this reach belongs to.
+        if intent and intent.get("verb") == "Use":
+            self._reach_seen = rejection_attack_range(result)
+
+    def _learn_items_from_tick(self, obs: dict | None) -> None:
+        w = self.world
+        reach, self._reach_seen = self._reach_seen, None
+
+        def learn(items: dict) -> None:
+            if obs and not obs.get("unchanged"):
+                body = obs.get("snapshot") if obs.get("complete") else obs.get("delta")
+                if isinstance(body, dict) and "entities" in body:
+                    absorb_entities_payload(items, body.get("entities"))
+            absorb_attack_range(items, w.armed_code, reach)
+
+        self._with_item_table(learn)
 
     def on_events(self, events: list[dict]) -> None:
         w, m = self.world, self.mem
@@ -525,6 +641,10 @@ class Runner:
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
                 m.held_queue, m.resend_held_queue = None, False
+                m.warp_from = None
+        # WorldModel.apply_events already parsed BlockChanged (A14).
+        for map_id, p in w.changed_blocks:
+            on_block_changed(m, map_id, p)
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})
@@ -537,6 +657,7 @@ class Runner:
         if e.code in ("not_on_map", "character_not_live"):
             # Waiting to be placed, or dead and waiting to respawn.
             self.mem.need_self = self.mem.need_position = True
+            self.mem.warp_from = None
             return time.time() + 1.0
         return time.time() + 1.0
 

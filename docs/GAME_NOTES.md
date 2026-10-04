@@ -52,6 +52,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 ## Movement and blocks
 
 - **Block types.** Walkable: `grass`, `dirt`, `tile`, and `fire`/`lava`, which deal `occupy_damage` on the tick you enter and every second you stay. Blocked: `water`, `bush`, `tree`, `rock`, `mountain`, `wall`. Doors (warp): `framed_door`, `rock_entry`. Treat an unknown type as blocked (M §9.2).
+- **Door destinations are not served.** A terrain cell names a door's `block_type` (and `locked`), never where it leads. The agent learns each warp by observation: it steps on, then reads its position (M §9.2; A26).
 - **Art.** A cell can carry art (path, fence, house, statue, sign, pond, bridge), but behaviour always comes from `block_type`. Statues and signs are `wall` cells with `readable: true` (M §9.2; Obs).
 - **Breaking blocks.** `Use` with the right supply armed destroys a block; anything else is `applied_no_effect`. A block never says whether it breaks or what breaks it (M §11).
 - **Capabilities, per the manual:**
@@ -203,7 +204,8 @@ Each has a test the agent or a hand session can run.
 | Hostile health per type (no NPC's health is served but a boss's) | Sum `NPCDamaged` on one NPC until its `NPCDied` |
 | Hostile stats (defense, range, speed) per type | Log `NPCDamaged` and our swings for the hit rate (gives defense); log `Damaged` and spacing for damage and cooldown; log first `Attacked` distance for range |
 | Does health regenerate out of combat? | Take a hit, retreat to town, read `health` every 10 s for 2 minutes |
-| Weapon damage and cooldown per subtype | Swing at a lone weak hostile from full health, with a retreat queued in the same request |
+| Weapon damage and cooldown per subtype | Swing at a lone weak hostile from full health, with a retreat queued in the same request. `NPCDamaged` is copied to every character that sees the block (API Events), so count only one on the block and tick our `Use` resolved |
+| How much damage each worn item saves | Take hits from one hostile type with and without the item worn and compare `Damaged` amounts; one hit can't be split between worn slots |
 | What each level's entrance needs | Walk to each minimap mark; read terrain (`locked`, block type), signs and helpers nearby. Stored in `.state/`, never committed |
 | Hunting ground locations and ceilings | `get_zone` on cells around town |
 | Boss fight time limits | Read on entry, or learn from the first attempt |

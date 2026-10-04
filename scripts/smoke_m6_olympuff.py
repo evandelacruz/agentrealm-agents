@@ -47,8 +47,8 @@ def run_smoke(
     target_steps: int,
     timeout_s: float,
 ) -> M6AcceptanceMetrics:
-    metrics = M6AcceptanceMetrics(target_steps=target_steps)
     stop = threading.Event()
+    metrics = M6AcceptanceMetrics(target_steps=target_steps, stop=stop)
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
 
     def out(line: str) -> None:
@@ -56,7 +56,7 @@ def run_smoke(
 
     runner = Runner(
         cfg,
-        client,
+        metrics.wrap(client),
         cid,
         stop,
         out,
@@ -107,8 +107,6 @@ def main(argv: list[str] | None = None) -> int:
     if not args.api_key:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
         return 2
-    if args.character != DEFAULT_CHARACTER and args.base_url == DEFAULT_BASE:
-        pass
     try:
         cfg = config.load(args.character)
     except (config.ConfigError, OSError) as e:

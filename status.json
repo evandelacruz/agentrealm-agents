@@ -15,9 +15,9 @@
 
   "A3": {"state": "done"},
 
-  "A4": {"state": "done"},
+  "A4": {"state": "partial", "remaining": "Run scripts/smoke_m6_olympuff.py against Olympuff and record a redacted PASS transcript."},
 
-  "A5": {"state": "open"},
+  "A5": {"state": "done"},
 
   "A6": {"state": "done"},
 
@@ -29,13 +29,13 @@
 
   "A10": {"state": "open"},
 
-  "A11": {"state": "open"},
+  "A11": {"state": "done"},
 
   "A12": {"state": "done"},
 
-  "A13": {"state": "open"},
+  "A13": {"state": "done"},
 
-  "A14": {"state": "open"},
+  "A14": {"state": "partial", "remaining": "would_strand handling: awaiting Evan's decision on the landing target (GAME_NOTES ties it to water, which the world model lacks)."},
 
   "A15": {"state": "open"},
 
@@ -43,7 +43,7 @@
 
   "A17": {"state": "done"},
 
-  "A18": {"state": "open"},
+  "A18": {"state": "partial", "remaining": "Weapon damage per subtype from NPCDamaged matched to our own Use (block and tick), damage saved per worn item, and capabilities once they can be sourced (not served; PLAN.md Server gaps, A28 break results)."},
 
   "A19": {"state": "open"},
 
@@ -59,7 +59,7 @@
 
   "A25": {"state": "open"},
 
-  "A26": {"state": "open"},
+  "A26": {"state": "done"},
 
   "A27": {"state": "open"},
 

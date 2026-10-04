@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from .world import Pos, ZoneFact, chebyshev
 
 if TYPE_CHECKING:
-    from .brain import Memory
+    from .memory import Memory
     from .world import WorldModel
 
 # Chebyshev radius around each respawn anchor for the first pass of probes.
@@ -50,8 +50,8 @@ def zone_failed(w: WorldModel, map_id: int, pos: Pos) -> None:
 
 
 def safe_tiles(w: WorldModel, map_id: int) -> set[Pos]:
-    """Known safe cells on a map. Discovery output only: no caller acts on it
-    yet; the survival states that walk to safety consume it later (PLAN.md A7)."""
+    """Known safe cells on a map. Recover reads it to pick a safe tile beside
+    the death chest (A11); Retreat and Heal will read it too (A9, A10)."""
     return {pos for pos, fact in w.zones.get(map_id, {}).items() if fact.safe}
 
 

@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 
 from .brain import Decision, Memory, choose_call, decide, reject_step
+from .navigation import known_prefix
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .executor import (
@@ -258,8 +259,9 @@ class Runner:
         if w.pos is None:
             return None
         target = (d.intent["x"], d.intent["y"])
-        on_path = bool(m.path) and m.path[0] == target
-        cells = list(m.path) if on_path else [target]
+        prefix = known_prefix(m.path, w.view)
+        on_path = bool(prefix) and prefix[0] == target
+        cells = list(prefix) if on_path else [target]
         # Ticks since the last applied Step, counted to the latest tick we
         # know of: the first intent runs no earlier, so the owed Waits are
         # never too few and the first Step never draws movement_cooldown.

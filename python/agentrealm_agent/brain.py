@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from .config import Policy
 from .poll_cadence import gate_tick_call
+from .navigation import known_prefix
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60  # windows between self reads when nothing forces one
@@ -167,16 +168,22 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
                 return Decision(withdraw_all(chest_id), f"recover from chest {chest_id}", reflex=True)
             if contents is None:
                 return Decision(None, f"open chest {chest_id}")
-        elif m.goal != "chest" or not m.path or not _step_open(w, plan_avoid, m.path[0]):
-            found = w.path(at, avoid=plan_avoid, costly=escape)
+        elif (
+            m.goal != "chest"
+            or not known_prefix(m.path, view)
+            or not _step_open(w, plan_avoid, known_prefix(m.path, view)[0])
+        ):
+            found = w.path(at, avoid=plan_avoid, costly=escape, hostile_kinds=frozenset(policy.hostile))
             if found:
                 m.path, m.goal = found, "chest"
 
-    # 5. Follow the plan, replanning when it is empty or its next step is not open.
-    if not m.path or not _step_open(w, plan_avoid, m.path[0]):
+    # 5. Follow the plan; walk only the known prefix (A12).
+    prefix = known_prefix(m.path, view)
+    if not prefix or not _step_open(w, plan_avoid, prefix[0]):
         _replan(w, m, policy, rng, plan_avoid, escape)
-    if m.path:
-        return Decision(set_position(m.path[0]), f"{m.goal} → {m.path[-1]}")
+        prefix = known_prefix(m.path, view)
+    if prefix:
+        return Decision(set_position(prefix[0]), f"{m.goal} → {m.path[-1]}")
 
     # 6. Nothing to do.
     return Decision(None, "no goal reachable")
@@ -221,10 +228,15 @@ def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocke
             return
 
 
+def _grid_kw(policy: Policy) -> dict:
+    return {"hostile_kinds": frozenset(policy.hostile)}
+
+
 def _plan_goal(
     goal: str, w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]
 ) -> list[Pos] | None:
     view = w.view
+    kw = _grid_kw(policy)
     if goal == "hold":
         return None
     if goal == "wander":
@@ -232,13 +244,13 @@ def _plan_goal(
         return [rng.choice(sorted(options))] if options else None
     if goal == "goto":
         target = tuple(policy.goto)
-        return w.path(target, allow_goal_door=True, avoid=blocked, costly=costly) or None
+        return w.path(target, allow_goal_door=True, avoid=blocked, costly=costly, **kw) or None
     if goal == "doors":
         doors = {p for p, b in view.tiles.items() if b in DOORS}
-        found = w.nearest(doors, allow_goal_door=True, avoid=blocked, costly=costly)
+        found = w.nearest(doors, allow_goal_door=True, avoid=blocked, costly=costly, **kw)
         return found[1] if found and found[1] else None
     if goal == "explore":
         targets = view.frontier() - {w.pos}
-        found = w.nearest(targets, avoid=blocked, costly=costly)
+        found = w.nearest(targets, avoid=blocked, costly=costly, **kw)
         return found[1] if found and found[1] else None
     return None

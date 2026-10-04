@@ -81,7 +81,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
 
 ### Plan: goal and path
 
-A goal plus an A* path over tiles this character has seen and knows are walkable. Unknown tiles are never pathed through. Occupied tiles and `avoid_blocks` are avoided. Standing on an `avoid_blocks` tile with no safe step off, the plan may cross them, as few as it can. Movement is Chebyshev: diagonals cost the same as straight steps.
+A goal plus an A* path over the M7 cost grid (A12): known walkable costs 1, fog costs 2, fire and lava cost 1 plus `occupy_damage`, hostiles add danger that falls off with distance, and occupants add a high but finite cost. Break-nominated cells stay impassable until M9. The executor walks only the known prefix of the path and replans when terrain reads or a rejection disagree. `avoid_blocks` are impassable except when standing on one with no safe step off, when the plan crosses as few as it can. Movement is Chebyshev: diagonals cost the same as straight steps.
 
 | Goal | Target |
 |---|---|

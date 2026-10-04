@@ -38,9 +38,9 @@ class PathTest(unittest.TestCase):
         self.assertNotIn((1, 0), p)
         self.assertNotIn((1, 1), p)
 
-    def test_unknown_ground_is_never_pathed(self):
+    def test_unknown_ground_is_pathed_as_fog(self):
         w = world(["..", ".."])
-        self.assertIsNone(w.path((5, 5)))
+        self.assertIsNotNone(w.path((5, 5)))
 
 
 class ExploreTest(unittest.TestCase):

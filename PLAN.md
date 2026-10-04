@@ -83,7 +83,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
    | `would_strand` | Not handled yet: treated as anything else below. Open question for Evan: the landing target. GAME_NOTES ties `would_strand` to water (unequipping the supply that keeps us on it), and the world model has no water yet, so the refused cell is not a landing. |
    | anything else | Kept off for the next decision only. |
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
-3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
+3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → the **Fight** state (A23), not a reflex here.
 4. `pickup = true` and a worthwhile supply underfoot, adjacent, or in a ground chest within reach → `Take`, or `WithdrawFromChest` with that one `supply_id`. With the carried chest full, `Drop` the lowest-valued held supply first, only for a pickup worth more; otherwise skip it (A20).
 4a. A worthwhile free supply or known chest supply in sight, `pickup = true`, and a plannable step toward it → the **Loot** state (A20) walks there, after Recover and before Explore. It claims the round only when it sends an intent; otherwise Explore runs.
 4b. Our last death dropped a chest on this map, `pickup = true`, and a tile on or next to it is known safe (A7) → the **Recover** state (A11) walks there; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
@@ -263,7 +263,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A41 | **Run metrics.** Levels cleared, deaths, kills, gems, time per level, from the trace. | A5 |
 | A42 | **Comparison across commits.** A regression shows up as a number. | A41 |
 
-Today the agent falls back to fleeing from every NPC: it aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it (A23 adds `Fight`).
+**Fight** (A23) swings at NPCs and characters when the win estimate clears `fight_margin`, using `Use` on the NPC's block, with retreat steps queued behind the attack. Out of weapon reach it steps closer; with no open step closer it lets go and **Flee** runs.
 
 The playable plan's strategist (M4) replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the remaining one-intent queues in **Real time**; until then those sections describe the shipped agent. Since A5, `states.dispatch` picks the intents; `brain.decide` stays only as a shim over it that keeps the first intent as a `Decision`, until the runner sends a state's whole queue. The call budget is unchanged: one request per character per tick, burst 3.
 

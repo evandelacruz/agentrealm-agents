@@ -96,9 +96,9 @@ class FakeServer:
     def world(self, cid):
         return {"tick_rate_hz": 10}
 
-    def tick(self, cid, intents):
+    def tick(self, cid, intents, *, snapshot_version=None):
         self.calls.append((self.tick_now, "tick"))
-        self.sent.append((self.tick_now, intents))
+        self.sent.append((self.tick_now, intents, snapshot_version))
         ev = self.events_at.get(self.tick_now)
         r = {"tick": self.tick_now, "window_remaining_ms": 0, "queue_id": "q"}
         if ev:
@@ -165,7 +165,7 @@ class RunnerCadenceTest(unittest.TestCase):
         # A paced Step/Wait queue covers several ticks, so the calm gap opens,
         # but the next poll never lands after the queue has run out.
         s = self.run_windows(Policy(goals=["goto"], goto=(30, 0), pickup=False, entity_refresh=1000), 12)
-        (first, queue), (second, _) = s.sent[0], s.sent[1]
+        (first, queue, _), (second, _, __) = s.sent[0], s.sent[1]
         self.assertEqual(first, 101)
         self.assertGreater(len(queue), 1)
         self.assertGreater(second, first + 1, "no window is spent re-polling a running queue")

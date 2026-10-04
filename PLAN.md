@@ -7,7 +7,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 ## Boundaries
 
 - **An ordinary API client.** HTTP only. It imports nothing from the Go code and never touches Postgres, Redis, or NATS. If it needs something the API does not give, that is a server gap, written down below, not a side door.
-- **Python 3.11+, standard library only.** No install step beyond Python. The LLM planner (milestone 4) is the one place a dependency may enter, and it stays optional.
+- **Python 3.11+, standard library only.** No install step beyond Python. The LLM planner (M4) is the one place a dependency may enter, and it stays optional.
 - **Obeys the invariants a client can see.** At most one intent per tick, no standing orders, and when there is no decision it sends nothing.
 
 ## What the API gives today
@@ -94,7 +94,7 @@ Goals are tried in order; the first with a reachable target wins. Re-plan when a
 ### Planner: sets goals and settings
 
 - **scripted**: goals and settings come straight from the character file.
-- **llm** (milestone 4): every N ticks, or when something new happens (new character seen, door found, goal exhausted, damage), it sends the model a summary of the world model and gets back goals, settings, and an optional `Say`/`Broadcast`. It runs off the tick loop. The loop keeps the old answer until a new one lands, so a slow model never costs a tick.
+- **llm** (M4): every N ticks, or when something new happens (new character seen, door found, goal exhausted, damage), it sends the model a summary of the world model and gets back goals, settings, and an optional `Say`/`Broadcast`. It runs off the tick loop. The loop keeps the old answer until a new one lands, so a slow model never costs a tick.
 
 ## Character file
 
@@ -107,7 +107,7 @@ model_agent = "agentrealm-reference/scripted"
 world = "sandbox"
 
 [policy]
-kind = "scripted"                   # idle | wander | scripted (llm is milestone 4, not built)
+kind = "scripted"                   # idle | wander | scripted (llm is M4, not built)
 goals = ["explore", "doors"]
 on_hostile = "flee"                 # flee | fight | ignore
 hostile = ["npc"]                   # npc, character
@@ -140,13 +140,17 @@ Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`), `AGENTREAL
 
 ## Milestones
 
-1. **Client and loop.** HTTP client, call scheduler, wall-clock pacing, 429/503 handling, `create`/`run`/`status`, `idle` and `wander`.
-2. **World model and pathing.** Tile and entity cache per map, local position tracking, A*, `explore`, `doors`, `goto`.
-3. **Reflexes and scripted characters.** The reflex list, the full character file, the trace.
-4. **LLM planner.** Optional dependency. Writes goals and settings off-tick.
-5. **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023.
+These are the backlog. Each has a stable ID; cite it in commits and PR bodies. Per-ID state lives in [`status.json`](status.json), which is not a source of truth: where it disagrees with this file, status is wrong.
 
-Milestones 1–3 are built. Fighting an NPC falls back to fleeing: the agent aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it.
+| ID | Milestone | Depends on |
+|---|---|---|
+| M1 | **Client and loop.** HTTP client, call scheduler, wall-clock pacing, 429/503 handling, `create`/`run`/`status`, `idle` and `wander`. | |
+| M2 | **World model and pathing.** Tile and entity cache per map, local position tracking, A*, `explore`, `doors`, `goto`. | M1 |
+| M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
+| M4 | **LLM planner.** Optional dependency. Writes goals and settings off-tick. | M3 |
+| M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. | M1 |
+
+M1–M3 are built. Fighting an NPC falls back to fleeing: the agent aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it.
 
 ## Tests
 

@@ -1,0 +1,433 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { CLAUDE_REVIEWER_LOGIN, CURSOR_REVIEWER_LOGIN, REVIEW_CHECK_NAME, WORKING_LABEL } from "./config.js";
+import { lockHeld, pullRequestNumber } from "./lock.js";
+
+const execFileAsync = promisify(execFile);
+
+export type OpenPr = {
+  number: number;
+  title: string;
+  url: string;
+  headRefName: string;
+  headRefOid: string;
+  isDraft: boolean;
+  mergeable: string | null;
+  mergeStateStatus: string | null;
+  statusCheckRollup: Array<StatusCheckRollupItem> | null;
+  labels: Array<{ name: string }> | null;
+};
+
+/** CheckRun uses `status` + `conclusion`; legacy StatusContext uses `state`. */
+type StatusCheckRollupItem = {
+  name?: string;
+  status?: string;
+  state?: string;
+  conclusion?: string | null;
+};
+
+export type PrCommentSummary = {
+  number: number;
+  title: string;
+  url: string;
+  headRefName: string;
+  /** Head commit SHA — what a review is "at". Reviews name the commit they read. */
+  headSha: string;
+  isDraft: boolean;
+  /** Combined Cursor + Claude verdict on `headSha` only. See `headVerdict`. */
+  verdict: Verdict;
+  mergeable: string | null;
+  mergeStateStatus: string | null;
+  hasMergeConflict: boolean;
+  unresolvedReviewThreads: number;
+  issueComments: number;
+  checksOk: boolean | null;
+  /** The Cursor review check has not finished. Fixers must leave the PR alone. */
+  reviewInProgress: boolean;
+  /** Open labels on the PR — carries the conductor in-flight locks. */
+  labels: string[];
+  /** Commit SHAs that already carry a submitted review (human or agent). */
+  reviewedShas: string[];
+};
+
+async function ghJson<T>(args: string[]): Promise<T> {
+  try {
+    const { stdout } = await execFileAsync("gh", args, {
+      maxBuffer: 10 * 1024 * 1024,
+      env: process.env,
+    });
+    return JSON.parse(stdout) as T;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`gh ${args.join(" ")} failed: ${message}`);
+  }
+}
+
+async function ghText(args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("gh", args, { env: process.env });
+  return stdout.trim();
+}
+
+export async function listOpenPrs(): Promise<OpenPr[]> {
+  return ghJson<OpenPr[]>([
+    "pr",
+    "list",
+    "--state",
+    "open",
+    "--json",
+    "number,title,url,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,statusCheckRollup,labels",
+    "--limit",
+    "50",
+  ]);
+}
+
+/** Completed CheckRun / StatusContext that should not fail the rollup. */
+function rollupItemSucceeded(c: StatusCheckRollupItem): boolean {
+  if (c.status !== undefined) {
+    const conclusion = c.conclusion ?? "";
+    return (
+      conclusion === "SUCCESS" ||
+      conclusion === "NEUTRAL" ||
+      conclusion === "SKIPPED"
+    );
+  }
+  if (c.state !== undefined) {
+    return c.state === "SUCCESS";
+  }
+  return false;
+}
+
+/** Still running — must not be read as red (would spawn a spurious fixer). */
+function rollupItemPending(c: StatusCheckRollupItem): boolean {
+  if (c.status !== undefined) {
+    return c.status !== "COMPLETED";
+  }
+  if (c.state !== undefined) {
+    return (
+      c.state !== "SUCCESS" &&
+      c.state !== "FAILURE" &&
+      c.state !== "ERROR"
+    );
+  }
+  return false;
+}
+
+export function hasMergeConflict(pr: Pick<OpenPr, "mergeable" | "mergeStateStatus">): boolean {
+  return pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY";
+}
+
+/** True while the auto code-review check is still running. A label is not involved. */
+export function reviewInProgress(pr: Pick<OpenPr, "statusCheckRollup">): boolean {
+  return (pr.statusCheckRollup ?? []).some(
+    (check) => check.name === REVIEW_CHECK_NAME && rollupItemPending(check),
+  );
+}
+
+/**
+ * Aggregate CI for routing: `true` all green, `false` at least one red,
+ * `null` when there are no checks or any check is still in flight.
+ *
+ * Pending must stay `null` — treating IN_PROGRESS as failure queues fixers
+ * for PRs whose smoke job has not finished yet.
+ */
+export function rollupOk(pr: Pick<OpenPr, "statusCheckRollup">): boolean | null {
+  const checks = pr.statusCheckRollup;
+  if (!checks || checks.length === 0) return null;
+  if (checks.some(rollupItemPending)) return null;
+  return checks.every(rollupItemSucceeded);
+}
+
+export type Verdict = "APPROVED" | "CHANGES_REQUESTED" | null;
+
+/** A submitted or pending review, oldest first, as the GraphQL `reviews` connection returns it. */
+export type ReviewNode = {
+  state: string;
+  body: string;
+  author: { login: string } | null;
+  commit: { oid: string } | null;
+};
+
+/** GraphQL drops the `[bot]` suffix that REST keeps. Match either. */
+function isAuthor(review: ReviewNode, login: string): boolean {
+  const author = review.author?.login ?? "";
+  return author === login || author === `${login}[bot]`;
+}
+
+const CONDITION = /\b(once|after|if|until|pending|assuming|but)\b/i;
+const BLOCKING =
+  /\b(?:not approving|do not merge|don't merge|treat [^.\n]* as blocking|requesting changes|changes requested|request changes|still blocking)\b|(?<!\bno |\bnon-)\bblocking issue|(?<![-\w])blocking\s*[:(]/i;
+const APPROVING =
+  /\b(no blocking issues|nothing blocking|good to merge|lgtm|approving|would approve|treat this as an approval)\b/i;
+
+/** Drop fenced code, inline code, and quoted lines: verdict words there are not the reviewer's. */
+function verdictText(body: string): string {
+  return body
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`]*`/g, "")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith(">"))
+    .join("\n");
+}
+
+/**
+ * Claude reviews post under the repo owner's account, so GitHub records them
+ * as COMMENTED. The verdict is in the body: an unconditional approval is
+ * APPROVED; anything else is CHANGES_REQUESTED.
+ */
+export function claudeBodyVerdict(body: string): Exclude<Verdict, null> {
+  const text = verdictText(body);
+  if (BLOCKING.test(text)) return "CHANGES_REQUESTED";
+  const approval = text.match(new RegExp(`[^.\\n]*${APPROVING.source}[^.\\n]*`, "i"));
+  if (!approval || CONDITION.test(approval[0])) return "CHANGES_REQUESTED";
+  return "APPROVED";
+}
+
+/**
+ * The review verdict on the current head, per the fixer skill. Labels play
+ * no part. Cursor's verdict is its latest APPROVED / CHANGES_REQUESTED review;
+ * Claude's is its latest review with a body. A verdict on an older commit is
+ * no verdict. Either at changes requested wins; both approved is approved;
+ * anything else is still waiting on a review.
+ */
+export function headVerdict(reviews: ReviewNode[], headSha: string): Verdict {
+  const submitted = reviews.filter((r) => r.state !== "PENDING");
+  const cursor = submitted
+    .filter(
+      (r) =>
+        isAuthor(r, CURSOR_REVIEWER_LOGIN) &&
+        (r.state === "APPROVED" || r.state === "CHANGES_REQUESTED"),
+    )
+    .at(-1);
+  const claude = submitted
+    .filter((r) => isAuthor(r, CLAUDE_REVIEWER_LOGIN) && r.body.trim() !== "")
+    .at(-1);
+
+  const cursorVerdict: Verdict =
+    cursor && cursor.commit?.oid === headSha ? (cursor.state as Verdict) : null;
+  const claudeVerdict: Verdict =
+    claude && claude.commit?.oid === headSha ? claudeBodyVerdict(claude.body) : null;
+
+  if (cursorVerdict === "CHANGES_REQUESTED" || claudeVerdict === "CHANGES_REQUESTED") {
+    return "CHANGES_REQUESTED";
+  }
+  if (cursorVerdict === "APPROVED" && claudeVerdict === "APPROVED") return "APPROVED";
+  return null;
+}
+
+type TriageFields = Pick<
+  PrCommentSummary,
+  | "isDraft"
+  | "verdict"
+  | "hasMergeConflict"
+  | "unresolvedReviewThreads"
+  | "checksOk"
+  | "reviewInProgress"
+>;
+
+/**
+ * Sort open PRs for `prs`, per conductor skill step 8. A PR that needs a
+ * fixer (conflict, red CI, changes requested, or open threads without
+ * approval) appears only there — never also as polish or merge-ready. PRs
+ * whose review check is still running appear nowhere.
+ */
+export function triagePrs<T extends TriageFields>(
+  summaries: T[],
+): { needsFix: T[]; needsPolish: T[]; mergeReady: T[] } {
+  const settled = summaries.filter((s) => !s.reviewInProgress);
+  const blocked = (s: T) =>
+    s.hasMergeConflict ||
+    s.checksOk === false ||
+    s.verdict === "CHANGES_REQUESTED" ||
+    (s.unresolvedReviewThreads > 0 && s.verdict !== "APPROVED");
+  const needsFix = settled.filter(blocked);
+  const clear = settled.filter((s) => !blocked(s));
+  return {
+    needsFix,
+    // An open thread on an approved PR is a nit by the reviewer's own verdict,
+    // so it takes the skill's polish path — never a `--pr` fixer spawn.
+    needsPolish: clear.filter((s) => s.unresolvedReviewThreads > 0 && s.verdict === "APPROVED"),
+    mergeReady: clear.filter(
+      (s) =>
+        !s.isDraft &&
+        s.unresolvedReviewThreads === 0 &&
+        s.verdict === "APPROVED" &&
+        s.checksOk === true,
+    ),
+  };
+}
+
+export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
+  const prs = await listOpenPrs();
+  if (prs.length === 0) return [];
+
+  const owner = await ghText(["repo", "view", "--json", "owner", "--jq", ".owner.login"]);
+  const name = await ghText(["repo", "view", "--json", "name", "--jq", ".name"]);
+
+  const summaries: PrCommentSummary[] = [];
+  for (const pr of prs) {
+    const [prDetail, issueComments] = await Promise.all([
+      ghJson<{
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: { nodes: Array<{ isResolved: boolean }> };
+              reviews: { nodes: ReviewNode[] };
+            };
+          };
+        };
+      }>([
+        "api",
+        "graphql",
+        "-f",
+        `query=query { repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${pr.number}) { reviewThreads(first: 100) { nodes { isResolved } } reviews(last: 50) { nodes { state body author { login } commit { oid } } } } } }`,
+      ]),
+      ghJson<{ comments: unknown[] }>([
+        "pr",
+        "view",
+        String(pr.number),
+        "--json",
+        "comments",
+      ]),
+    ]);
+
+    const detail = prDetail.data.repository.pullRequest;
+    summaries.push({
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      headRefName: pr.headRefName,
+      headSha: pr.headRefOid,
+      isDraft: pr.isDraft,
+      verdict: headVerdict(detail.reviews.nodes, pr.headRefOid),
+      mergeable: pr.mergeable,
+      mergeStateStatus: pr.mergeStateStatus,
+      hasMergeConflict: hasMergeConflict(pr),
+      unresolvedReviewThreads: detail.reviewThreads.nodes.filter((t) => !t.isResolved).length,
+      issueComments: issueComments.comments.length,
+      checksOk: rollupOk(pr),
+      reviewInProgress: reviewInProgress(pr),
+      labels: (pr.labels ?? []).map((l) => l.name),
+      reviewedShas: submittedReviewShas(detail.reviews.nodes),
+    });
+  }
+  return summaries;
+}
+
+async function prLabelNames(prNumber: number): Promise<string[]> {
+  const view = await ghJson<{ labels: Array<{ name: string }> | null }>([
+    "pr",
+    "view",
+    String(prNumber),
+    "--json",
+    "labels",
+  ]);
+  return (view.labels ?? []).map((label) => label.name);
+}
+
+/**
+ * Claim `conductor:working` on an existing PR. Refuses when that label is
+ * already present, so a second writer does not start. Adds only this label.
+ * Never replaces the label set. Callers must not delete the label first to
+ * bypass the refuse — Claude Code fixers use the same lock. A review still
+ * running is a GitHub check, not a label.
+ *
+ * The claim is check-then-add, not atomic: two writers that start within the
+ * same moment can both see no label and both claim it.
+ */
+export async function acquireWorkingLock(prRef: string): Promise<void> {
+  const number = pullRequestNumber(prRef);
+  if (lockHeld(await prLabelNames(number))) {
+    throw new Error(`PR #${number} already has ${WORKING_LABEL}. Not starting another writer.`);
+  }
+  try {
+    await ghText(["pr", "edit", String(number), "--add-label", WORKING_LABEL]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("addLabelsToLabelable") || message.includes("Resource not accessible")) {
+      throw new Error(
+        `Cannot set ${WORKING_LABEL} on PR #${number}. The GitHub token cannot edit labels. Grant the Cursor GitHub app permission to apply labels, then retry. ${message}`,
+      );
+    }
+    throw err;
+  }
+}
+
+/** Drop `conductor:working` only. Used when spawn or follow-up fails before the agent starts. */
+export async function releaseWorkingLock(prRef: string): Promise<void> {
+  const number = pullRequestNumber(prRef);
+  await ghText(["pr", "edit", String(number), "--remove-label", WORKING_LABEL]);
+}
+
+async function assertReviewSettled(prRef: string): Promise<void> {
+  const number = pullRequestNumber(prRef);
+  const view = await ghJson<{ statusCheckRollup: OpenPr["statusCheckRollup"] }>([
+    "pr",
+    "view",
+    String(number),
+    "--json",
+    "statusCheckRollup",
+  ]);
+  if (reviewInProgress(view)) {
+    throw new Error(
+      `PR #${number} has "${REVIEW_CHECK_NAME}" still running. Not starting a fixer.`,
+    );
+  }
+}
+
+/**
+ * Run `body` with the lock held. `body` calls `started()` once the agent has
+ * been sent its prompt. A failure before that releases the lock so the PR is
+ * not stuck. A failure after it (for example `run.wait()` under `--wait`)
+ * keeps the lock: the cloud agent is still writing, and it removes the label
+ * after its push.
+ */
+export async function holdLock<T>(
+  release: () => Promise<void>,
+  body: (started: () => void) => Promise<T>,
+): Promise<T> {
+  let agentStarted = false;
+  try {
+    return await body(() => {
+      agentStarted = true;
+    });
+  } catch (err) {
+    if (!agentStarted) {
+      try {
+        await release();
+      } catch {
+        // The original error is the one to surface. The label may still be set.
+      }
+    }
+    throw err;
+  }
+}
+
+/**
+ * Hold `conductor:working` for the duration of `body`. The label stays if
+ * `body` succeeds or fails after the agent starts — the agent removes it
+ * after the push. A failure before the agent starts releases the label.
+ */
+export async function withWorkingLock<T>(
+  prRef: string,
+  body: (started: () => void) => Promise<T>,
+): Promise<T> {
+  await assertReviewSettled(prRef);
+  await acquireWorkingLock(prRef);
+  return holdLock(() => releaseWorkingLock(prRef), body);
+}
+
+/**
+ * Commit SHAs carrying a *submitted* review. PENDING reviews are drafts the
+ * author has not sent, so they must not count as "this commit was reviewed" —
+ * treating them as reviewed would silently drop the PR out of the queue.
+ */
+export function submittedReviewShas(
+  reviews: Array<Pick<ReviewNode, "state" | "commit">>,
+): string[] {
+  const shas = new Set<string>();
+  for (const review of reviews) {
+    if (review.state === "PENDING") continue;
+    if (review.commit?.oid) shas.add(review.commit.oid);
+  }
+  return [...shas];
+}

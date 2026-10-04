@@ -46,7 +46,7 @@ class KnowledgeBaseTest(unittest.TestCase):
         )
         base.breaks["12,10,20,cut"] = {"result": "opened", "block_after": "dirt"}
         base.npc_types["wolf"] = {"damage_per_hit": 2}
-        base.items["bronze_sword"] = {"weapon_damage": 2, "attack_range": 1}
+        base.items["bronze_sword"] = {"weapon_damage": {"wolf": 2}, "attack_range": 1}
         base.entrances["120,40"] = {"locked": True, "needs": "iron_key"}
         base.levels["3"] = {"cleared": True}
         base.compose.append({"whole": "master_key", "tick": 500})

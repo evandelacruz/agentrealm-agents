@@ -5,10 +5,9 @@ scheduler already prioritises. Urgent: poll every tick while a hostile is
 within 3 blocks or health is dropping (docs/PLAYABLE_AGENT_PLAN.md Executor).
 
 The calm gap never outlasts the queue the last poll sent: a queue of n
-intents runs n ticks, and the character must not stand idle after it. Today's
-queues hold one intent, so a character with something to do still polls every
-tick; the gap opens only when the last poll sent nothing, and widens on its
-own once multi-intent queues land.
+intents runs n ticks, and the character must not stand idle after it. A paced
+movement queue opens the gap up to its length; a one-intent queue still brings
+the next poll a tick later.
 """
 
 from __future__ import annotations

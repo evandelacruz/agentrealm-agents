@@ -38,8 +38,8 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 
 | API surface | Used today | Needed for |
 |---|---|---|
-| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | No: each plan step is one `SetPosition` in a one-intent queue, one per call window, and any rejection only clears the path (the tests exercise `block_occupied` and `beyond_movement_range`). Which codes the shipped loop draws on a live world is not measured; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
-| Multi-intent queues | No: always one intent | Freeing the request budget; queuing a retreat with an attack |
+| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Not measured on a live world yet; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
+| Multi-intent queues | Movement only; every other intent is sent alone, and a running queue is not yet re-sent when a reflex fires | Freeing the request budget; queuing a retreat with an attack |
 | Snapshot deltas (`snapshot_version`), health in the observation | Health and max health from complete snapshots, not yet used by any decision; no `snapshot_version`, so no deltas; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
 | `Use` on a block (attacks the NPC on it, or breaks the block) | No: flees from every NPC | Fighting, opening the way |
@@ -80,7 +80,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 - **Terrain reads.** With perception 25 the terrain window is 51×51, so terrain is read only on a map change or after moving about half the window.
 - **Deltas feed the model.** Health, inventory and entity changes are folded into the world model from them.
 
-Shipped so far: `python/agentrealm_agent/executor/pacing.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_intents`) and the next poll. The attack and speech accumulators are paced separately; there is no mixed-queue helper yet, and the runner does not use it yet.
+Shipped so far: the runner sends movement as paced `Step`/`Wait` queues (`executor/movement.py`), cut at the world's horizon, and polls on the two cadences (`poll_cadence.py`); the calm gap never outlasts the intents still queued. `python/agentrealm_agent/executor/pacing.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_intents`) and the next poll. The attack and speech accumulators are paced separately; there is no mixed-queue helper yet, and the runner does not use it yet.
 
 ### State machine
 

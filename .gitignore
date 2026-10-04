@@ -1,2 +1,3 @@
 python/.state/
 .state/
+__pycache__/

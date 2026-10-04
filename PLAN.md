@@ -80,10 +80,10 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
    | `conflict_lost` | Nothing; the next move may retry. |
    | `door_locked` | Impassable, and stored as a locked door under the map's `doors` in the knowledge base, which every character of the world then keeps off. |
    | `over_strength_ceiling` | Impassable until the loadout (armed or worn) changes, and stored under the map's `hunting` in the knowledge base with the zone's ceiling for A27's strength bracket. |
-   | `would_strand` | Not handled yet: treated as anything else below. Open question for Evan: the landing target. GAME_NOTES ties `would_strand` to water (unequipping the supply that keeps us on it), and the world model has no water yet, so the refused cell is not a landing. |
+   | `would_strand` | Treated as anything else below. The server refuses the move that would strand us (GAME_NOTES: unequipping the supply that keeps us on water), so the agent is never left stuck; it just tries something else next decision. |
    | anything else | Kept off for the next decision only. |
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
-3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
+3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → the **Fight** state (A23), not a reflex here.
 4. `pickup = true` and a worthwhile supply underfoot, adjacent, or in a ground chest within reach → `Take`, or `WithdrawFromChest` with that one `supply_id`. With the carried chest full, `Drop` the lowest-valued held supply first, only for a pickup worth more; otherwise skip it (A20).
 4a. A worthwhile free supply or known chest supply in sight, `pickup = true`, and a plannable step toward it → the **Loot** state (A20) walks there, after Recover and before Explore. It claims the round only when it sends an intent; otherwise Explore runs.
 4b. Our last death dropped a chest on this map, `pickup = true`, and a tile on or next to it is known safe (A7) → the **Recover** state (A11) walks there; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
@@ -146,11 +146,12 @@ python -m agentrealm_agent create characters/wren.toml
 python -m agentrealm_agent run characters/wren.toml [characters/kit.toml ...]
 python -m agentrealm_agent status characters/wren.toml
 python -m agentrealm_agent metrics characters/wren.toml
+python -m agentrealm_agent compare-metrics baseline.json candidate.json
 ```
 
 Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local stack; the public API is `https://api.agentrealm.gg`, where lives are permanent), `AGENTREALM_API_KEY`. After `make up` in the game repo, run [`scripts/seed_local_stack.py`](scripts/seed_local_stack.py) with `AGENTREALM_STACK_DIR` pointing at that compose project so the front tier logs yield a verification token; it mints the first key and writes `export` lines to `python/.state/local.env` (mode 0600, git-ignored). Re-running reuses that key. `--probe` also waits until sandbox `create` succeeds, at the cost of a character that holds one of the account's two sandbox slots for 24 hours (Manual §13).
 
-`run` drives every listed character, one thread each. Each character logs one line per window to stdout (tick, position, call made, intent, the result of the last one, events) and a JSONL trace to `.state/<name>.trace.jsonl`, so a death can be read back as a decision. `metrics` reads the last run from that trace (the trace is appended to; each run starts with a `world` record) and prints levels cleared, deaths, kills, gems, time per level, and how many lines it could not parse. Time per level runs from leaving the overworld (the town's map) to the level's `level_clear_ceremony`, across every map of the level; a run that starts inside a level has no time for it (A41).
+`run` drives every listed character, one thread each. Each character logs one line per window to stdout (tick, position, call made, intent, the result of the last one, events) and a JSONL trace to `.state/<name>.trace.jsonl`, so a death can be read back as a decision. `metrics` reads the last run from that trace (the trace is appended to; each run starts with a `world` record) and prints levels cleared, deaths, kills, gems, time per level, and how many lines it could not parse. Time per level runs from leaving the overworld (the town's map) to the level's `level_clear_ceremony`, across every map of the level; a run that starts inside a level has no time for it (A41). `compare-metrics` subtracts a baseline from a candidate and prints the deltas, so a regression shows up as a number (A42). Each side is a trace (`.jsonl`), a metrics snapshot (`.json`), a captured `metrics` line for one character (a capture with several lines is refused), or a character file whose trace is read. A delta is `null` when either side has no value: `gems` never seen, or a level timed in only one run (cleared in one and not the other, or entered mid-level), which would otherwise read as a slowdown or speedup of the whole level time.
 
 ## Server gaps that limit the agent
 
@@ -193,7 +194,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 
 | ID | Item | Depends on |
 |---|---|---|
-| A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. | A1, A2 |
+| A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. A state that claims the round but sends no intent falls through to the next state; that rule lives in the dispatcher (A44), so states do not add their own fallbacks. | A1, A2 |
 | A6 | **Threat table.** Damage per hit per hostile type from `Damaged`; the unmeasured default. | |
 | A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery records safe tiles; **Retreat** (A9) and **Heal** (A10) walk to them, and **Recover** (A11) walks to a death chest only from a known safe tile on or beside it. A failed zone read drops that cell from probing. | |
 | A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
@@ -202,9 +203,10 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A11 | **Recover.** Walk to the death chest only when the spot is safe. Needs `pickup = true` and a known safe tile on or beside the chest on this map; reflexes 2–4 still run first, and with no plannable step the state falls back to Explore's goals for that round. Only the destination is checked: the route to it is not, which is A9's. | A5, A7 |
 | A12 | **Cost-grid planner.** The cost table (fog, hazards, hostile danger, expiring occupants, break costs inert), walking the known prefix. | |
 | A13 | **Two-level search.** Coarse 16×16 corridor search and A* in the perception window, each with a node budget per tick. | A12 |
-| A14 | **Rejection learning.** What each rejection code teaches the map (reflex 1 table): impassable, occupant cost for 30 ticks, locked doors and hunting closures in the knowledge base. `would_strand` waits on Evan's decision on the landing target (reflex 1 table). | A12, A17 |
+| A14 | **Rejection learning.** What each rejection code teaches the map (reflex 1 table): impassable, occupant cost for 30 ticks, locked doors and hunting closures in the knowledge base. `would_strand` is treated like any other code (reflex 1 table). | A12, A17 |
 | A15 | **Stuck detection and escalation.** Steps 1, 3 and 5, backoff, frontier drop; the navigation fixtures and trace replay tests. | A5, A12, A14 |
-| A16 | **M7 acceptance.** M7 done-when. | A4, A9, A10, A11, A13, A15 |
+| A16 | **M7 acceptance.** M7 done-when. | A4, A9, A10, A11, A13, A15, A44 |
+| A44 | **Dispatcher fall-through.** A state whose `guard` holds but whose `act` sends no intent yields the round to the next state, so a guard/act mismatch can never freeze the agent. The dispatcher enforces it once; a test drives each shipped state through that case. | A5 |
 
 **M8: Gear, economy and combat.** Loot (A20) is a partial: hearts and gems first wait on their supply codes (GAME_NOTES open questions).
 
@@ -262,7 +264,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A41 | **Run metrics.** Levels cleared, deaths, kills, gems, time per level, from the trace. | A5 |
 | A42 | **Comparison across commits.** A regression shows up as a number. | A41 |
 
-Today the agent falls back to fleeing from every NPC: it aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it (A23 adds `Fight`).
+**Fight** (A23) swings at NPCs and characters when the win estimate clears `fight_margin`, using `Use` on the NPC's block, with retreat steps queued behind the attack. Out of weapon reach it steps closer; with no open step closer it lets go and **Flee** runs.
 
 The playable plan's strategist (M4) replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the remaining one-intent queues in **Real time**; until then those sections describe the shipped agent. Since A5, `states.dispatch` picks the intents; `brain.decide` stays only as a shim over it that keeps the first intent as a `Decision`, until the runner sends a state's whole queue. The call budget is unchanged: one request per character per tick, burst 3.
 

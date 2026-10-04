@@ -1,4 +1,4 @@
-"""Run metrics from a character trace (A41).
+"""Run metrics from a character trace (A41) and compare runs (A42).
 
 Parses JSONL written by ``Runner`` and returns counts and timings for
 evaluation (M12): levels cleared, deaths, kills, gems, and time per level.
@@ -6,6 +6,9 @@ evaluation (M12): levels cleared, deaths, kills, gems, and time per level.
 The trace is append-only across runs. Metrics cover the last run only: each
 run starts with a ``world`` record, and everything before the last one is
 ignored.
+
+``compare_run_metrics`` subtracts a baseline from a candidate so a regression
+shows up as a number (M12).
 """
 
 from __future__ import annotations
@@ -34,6 +37,42 @@ class RunMetrics:
             "time_per_level": {str(k): v for k, v in sorted(self.time_per_level.items())},
             "bad_lines": self.bad_lines,
         }
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> RunMetrics:
+        """Inverse of ``to_dict``. Raises ``ValueError`` on anything else."""
+        if not isinstance(raw, dict):
+            raise ValueError(f"metrics must be a JSON object, got {type(raw).__name__}")
+        missing = sorted(set(_METRIC_KEYS) - set(raw))
+        if missing:
+            raise ValueError(f"metrics missing {', '.join(missing)}")
+        counts = {}
+        for key in ("deaths", "kills", "levels_cleared", "bad_lines"):
+            counts[key] = _count(key, raw[key])
+        gems = raw["gems"]
+        if gems is not None:
+            gems = _count("gems", gems)
+        tpl = raw["time_per_level"]
+        if not isinstance(tpl, dict):
+            raise ValueError("time_per_level must be an object")
+        time_per_level: dict[int, float] = {}
+        for k, v in tpl.items():
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ValueError(f"time_per_level[{k!r}] must be a number")
+            try:
+                time_per_level[int(k)] = float(v)
+            except ValueError:
+                raise ValueError(f"time_per_level key {k!r} is not a level number") from None
+        return cls(gems=gems, time_per_level=time_per_level, **counts)
+
+
+_METRIC_KEYS = ("deaths", "kills", "gems", "levels_cleared", "time_per_level", "bad_lines")
+
+
+def _count(key: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{key} must be a non-negative integer, got {value!r}")
+    return value
 
 
 class LevelTimer:
@@ -138,6 +177,67 @@ def metrics_from_trace(path: Path) -> RunMetrics:
     out = compute_metrics(iter_trace(path, bad))
     out.bad_lines = bad[0]
     return out
+
+
+def _parse_metrics_json(text: str) -> RunMetrics:
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"not metrics JSON: {e}") from None
+    return RunMetrics.from_dict(raw)
+
+
+def load_metrics_source(path: Path) -> RunMetrics:
+    """Metrics from a trace (``.jsonl``), snapshot (``.json``), or CLI capture.
+
+    A CLI capture is ``metrics`` stdout for one character: a single
+    ``name: {json}`` line. ``metrics`` prints one line per character, so a
+    capture with several lines is refused rather than silently comparing
+    whichever character came first.
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".jsonl":
+        return metrics_from_trace(path)
+    text = path.read_text(encoding="utf-8")
+    if suffix == ".json":
+        return _parse_metrics_json(text)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("no metrics line")
+    if len(lines) > 1:
+        raise ValueError(
+            f"{len(lines)} metrics lines; capture `metrics` for one character"
+        )
+    line = lines[0]
+    if not line.startswith("{") and ": " in line:
+        line = line.split(": ", 1)[1]
+    return _parse_metrics_json(line)
+
+
+def compare_run_metrics(baseline: RunMetrics, candidate: RunMetrics) -> dict[str, Any]:
+    """Deltas, candidate minus baseline, for each metric field.
+
+    A delta is ``None`` when a side has no value to subtract: ``gems`` never
+    seen, or a level with a time in only one run (cleared in one and not the
+    other, or entered mid-level). Diffing against zero there would read a new
+    clear as a large slowdown.
+    """
+    diff: dict[str, Any] = {
+        "deaths": candidate.deaths - baseline.deaths,
+        "kills": candidate.kills - baseline.kills,
+        "levels_cleared": candidate.levels_cleared - baseline.levels_cleared,
+        "bad_lines": candidate.bad_lines - baseline.bad_lines,
+    }
+    if baseline.gems is not None and candidate.gems is not None:
+        diff["gems"] = candidate.gems - baseline.gems
+    else:
+        diff["gems"] = None
+    b, c = baseline.time_per_level, candidate.time_per_level
+    diff["time_per_level"] = {
+        str(level): (c[level] - b[level]) if level in b and level in c else None
+        for level in sorted(set(b) | set(c))
+    }
+    return diff
 
 
 def tick_trace_extras(

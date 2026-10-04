@@ -145,7 +145,7 @@ The numbers in `navigation/planner.py` (A12), and why:
 | `conflict_lost` | Retry next move |
 | `door_locked` | Door needs a key; recorded in the knowledge base, not retried |
 | `over_strength_ceiling` | Zone closed to us at this strength |
-| `would_strand` | Step to land first |
+| `would_strand` | Nothing beyond the one-decision wait any other code gets; the server refuses the move that would strand us |
 
 An opening we cut or burned is open only until it grows back (about 60 s for a bush). It is planned through with that deadline, never as permanent.
 
@@ -339,7 +339,7 @@ If you find a sign with numbers on it, try them as a code at the nearest locked 
 """                                                     # free text, passed to the strategist
 ```
 
-Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. `never_attack`, a `gather_gems` goal (**Gather**, A22), and the survival `params` **Retreat** reads (A9) change behavior today, and `fight_margin` waits for **Fight** (A23). `goals` replace the goal stack when present (A34); shorthand like `gather_gems:20` and `buy:torch` is parsed into typed ops. A reload with unchanged `goals` keeps the stack's progress. With no valid `goals`, the built-in plan mirrors the character's `policy.goals`. Until the states behind them ship, only `explore_area`, `travel` (`entrance`, `town`, `point`) and `wait` run from the stack; other ops are dropped and logged when they reach the top, and so is an op with no path for 30 seconds. **Gather** reads `gather_gems` from `goals` directly, so dropping it from the stack does not stop it. `wait` seconds convert at the world's `tick_rate_hz`. `instructions` are kept for the strategist (A35).
+Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. `never_attack`, a `gather_gems` goal (**Gather**, A22), and the survival `params` **Retreat** reads (A9) and `fight_margin` (**Fight**, A23) change behavior today. `goals` replace the goal stack when present (A34); shorthand like `gather_gems:20` and `buy:torch` is parsed into typed ops. A reload with unchanged `goals` keeps the stack's progress. With no valid `goals`, the built-in plan mirrors the character's `policy.goals`. Until the states behind them ship, only `explore_area`, `travel` (`entrance`, `town`, `point`) and `wait` run from the stack; other ops are dropped and logged when they reach the top, and so is an op with no path for 30 seconds. **Gather** reads `gather_gems` from `goals` directly, so dropping it from the stack does not stop it. `wait` seconds convert at the world's `tick_rate_hz`. `instructions` are kept for the strategist (A35).
 
 Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
 

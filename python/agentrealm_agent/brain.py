@@ -86,6 +86,8 @@ class Decision:
     reason: str
     # Reflexes 2–4b: urgent enough to drop a queue still in flight (M6).
     reflex: bool = False
+    # Pre-built multi-intent queue (A23 **Fight** attack + retreat tail).
+    submit_queue: list[dict] | None = None
 
 
 def decide(
@@ -113,8 +115,10 @@ def decide(
     if params is not None:
         ctx.params = params
     outcome = dispatch(w, ctx)
-    intent = outcome.intents[0] if outcome.intents else None
-    return Decision(intent, outcome.reason, outcome.reflex)
+    intents = outcome.intents
+    intent = intents[0] if intents else None
+    submit_queue = intents if intents and outcome.paced else None
+    return Decision(intent, outcome.reason, outcome.reflex, submit_queue=submit_queue)
 
 
 def walkable_prefix(

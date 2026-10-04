@@ -7,7 +7,7 @@
 
   "M3": {"state": "done"},
 
-  "M5": {"state": "partial", "remaining": "Run scripts/seed_local_stack.py --probe against a real local stack and confirm create works end to end; the readiness probe stays opt-in until the API offers a read-only sandbox readiness signal or a character delete (PLAN.md Server gaps)."},
+  "M5": {"state": "partial", "note": "Waiting on Evan: live run of scripts/seed_local_stack.py --probe against a real local stack. PR #29 closed for that reason; do not reopen it from the backlog.", "remaining": "Run scripts/seed_local_stack.py --probe against a real local stack and confirm create works end to end; the readiness probe stays opt-in until the API offers a read-only sandbox readiness signal or a character delete (PLAN.md Server gaps)."},
 
   "A1": {"state": "done"},
 
@@ -35,7 +35,7 @@
 
   "A13": {"state": "done"},
 
-  "A14": {"state": "partial", "remaining": "would_strand handling: awaiting Evan's decision on the landing target (GAME_NOTES ties it to water, which the world model lacks)."},
+  "A14": {"state": "done"},
 
   "A15": {"state": "open"},
 
@@ -53,7 +53,7 @@
 
   "A22": {"state": "partial", "remaining": "Gem piles: set the pile supply code in states/gather.py once observed (GAME_NOTES.md Open questions); pile targeting is off until then."},
 
-  "A23": {"state": "open"},
+  "A23": {"state": "done"},
 
   "A24": {"state": "open"},
 
@@ -91,7 +91,9 @@
 
   "A41": {"state": "done"},
 
-  "A42": {"state": "open"},
+  "A42": {"state": "done"},
 
-  "A43": {"state": "done"}
+  "A43": {"state": "done"},
+
+  "A44": {"state": "open"}
 }

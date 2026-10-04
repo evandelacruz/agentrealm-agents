@@ -165,20 +165,29 @@ class DecideShimTest(unittest.TestCase):
         self.assertEqual((d.reason, d.reflex), ("downed", False))
 
     def test_decide_passes_never_attack_through(self):
+        from agentrealm_agent.directives import PARAM_DEFAULTS
+
         w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("character", 9, (2, 1))]
+        w.entities = [Entity("character", 9, (2, 1), code="peer")]
+        w.health, w.lives = 500, 10
+        w.threat.record(("character", "peer"), 1)
         pol = Policy(kind="scripted", on_hostile="fight", hostile=["character"])
-        self.assertEqual(decide(w, Memory(), pol, random.Random(0)).intent["verb"], "Use")
-        d = decide(w, Memory(), pol, random.Random(0), never_attack=["character"])
+        params = {**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1}
+        self.assertEqual(decide(w, Memory(), pol, random.Random(0), params=params).intent["verb"], "Use")
+        d = decide(w, Memory(), pol, random.Random(0), never_attack=["character"], params=params)
         self.assertEqual(d.intent["verb"], "SetPosition")
 
-    def test_fight_keeps_the_plan(self):
+    def test_fight_clears_the_plan(self):
         w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("character", 9, (2, 1))]
+        w.entities = [Entity("character", 9, (2, 1), code="peer")]
+        w.health, w.lives = 500, 10
+        w.threat.record(("character", "peer"), 1)
         m = Memory(path=[(0, 0)], goal="explore")
         pol = Policy(kind="scripted", on_hostile="fight", hostile=["character"])
-        decide(w, m, pol, random.Random(0))
-        self.assertEqual(m.path, [(0, 0)])
+        from agentrealm_agent.directives import PARAM_DEFAULTS
+
+        decide(w, m, pol, random.Random(0), params={**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1})
+        self.assertEqual(m.path, [])
 
 if __name__ == "__main__":
     unittest.main()

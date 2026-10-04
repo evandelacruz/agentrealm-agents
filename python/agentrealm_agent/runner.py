@@ -533,6 +533,10 @@ class Runner:
     def intents_for(self, d: Decision) -> list[dict] | None:
         """Movement, Use, and Say/Broadcast become paced queues; others stay one intent."""
         w, m = self.world, self.mem
+        if d.submit_queue is not None:
+            m.pending_intents, m.pending_queue, m.pending_next_index = d.submit_queue, None, 0
+            m.pending = None
+            return d.submit_queue
         if d.intent is None:
             return None
         intent = d.intent

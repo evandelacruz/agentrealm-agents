@@ -86,7 +86,7 @@ class ReflexTest(unittest.TestCase):
              ["...", "...", "..."], (1, 1), [Entity("npc", 5, (2, 1))], scripted(),
              "SetPosition", lambda i: i["x"] == 0),
             ("fight swings at a character in range",
-             ["...", "...", "..."], (1, 1), [Entity("character", 5, (2, 1))],
+             ["...", "...", "..."], (1, 1), [Entity("character", 5, (2, 1), code="peer")],
              scripted(on_hostile="fight", hostile=["character"], hostile_range=1),
              "Use", lambda i: i["target"] == {"kind": "character", "character_id": 5}),
             ("take a supply in reach before walking",
@@ -101,7 +101,20 @@ class ReflexTest(unittest.TestCase):
             with self.subTest(name):
                 w = world(rows, at=at)
                 w.entities = ents
-                d = decide(w, Memory(), pol, random.Random(0))
+                if name.startswith("fight swings"):
+                    w.health, w.lives = 500, 10
+                    w.threat.record(("character", "peer"), 1)
+                    from agentrealm_agent.directives import PARAM_DEFAULTS
+
+                    d = decide(
+                        w,
+                        Memory(),
+                        pol,
+                        random.Random(0),
+                        params={**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1},
+                    )
+                else:
+                    d = decide(w, Memory(), pol, random.Random(0))
                 self.assertIsNotNone(d.intent, d.reason)
                 self.assertEqual(d.intent["verb"], verb, d.reason)
                 self.assertTrue(check(d.intent), d.intent)

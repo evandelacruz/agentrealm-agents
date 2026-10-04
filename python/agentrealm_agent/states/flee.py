@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from ..pathing import flee_step
-from ..survival import hostiles_in_range, on_safe_tile
+from ..survival import hostiles_in_range, on_safe_tile, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
-from .explore import fight_target, plan_sets
+from .explore import plan_sets
+from .fight import can_engage, fight_target
 from .intents import set_position
 
 
@@ -29,9 +30,10 @@ def _toward_safety(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], saf
 def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
     """``policy.on_hostile`` as the README documents it.
 
-    ``flee`` flees every hostile in range; ``fight`` flees only one it may not
-    hit (an NPC until A23, or a ``never_attack`` target); ``ignore`` never
-    flees. Standing on a known safe tile, nothing can hurt us, so it stays.
+    ``flee`` flees every hostile in range; ``fight`` flees when there is no
+    swingable target (``never_attack``), the win estimate says we lose, or
+    the target is out of weapon reach with no open step closer; ``ignore``
+    never flees. On a known safe tile, nothing can hurt us, so it stays.
     """
     policy = ctx.policy
     if policy.kind != "scripted" or not world.alive or world.pos is None:
@@ -40,7 +42,12 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
         return False
     if on_safe_tile(world):
         return False
-    return fight_target(world, policy, ctx.never_attack) is None
+    if policy.on_hostile == "flee":
+        return True
+    target = fight_target(world, policy, ctx.never_attack)
+    if target is None or would_lose(world, policy, ctx.params):
+        return True
+    return not can_engage(world, target, ctx)
 
 
 class FleeState(State):

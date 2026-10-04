@@ -5,15 +5,14 @@ from __future__ import annotations
 import random
 
 from ..config import Policy
-from ..directives import attack_forbidden
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..plan import Plan
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import next_step, path_owned_by_plan, replan
-from ..world import Entity, Pos, WorldModel, chebyshev
+from ..world import Pos, WorldModel
 from .base import PlayContext, State, StateOutcome
-from .intents import set_position, use_on
+from .intents import set_position
 from .pickup import pickup_outcome
 
 
@@ -98,36 +97,14 @@ def reflex_outcome(
     state: str,
     knowledge: KnowledgeBase | None = None,
 ) -> StateOutcome | None:
-    """Reflexes 3–4 (PLAN.md): fight a character, the pickup rule of A20.
+    """Reflex 4 (PLAN.md): the pickup rule of A20.
 
-    Stepping off a hazard is **Escape** and fleeing is **Flee** (A9); both
-    outrank every state that calls this.
+    **Fight** (A23) owns hostile swings. Stepping off a hazard is **Escape**
+    and fleeing is **Flee** (A9); both outrank every state that calls this.
     """
     here = w.pos
     if here is None:
         return None
-    target = fight_target(w, policy, never_attack)
-    if target is not None:
-        return StateOutcome([use_on(target)], f"fight {target.kind} {target.id}", reflex=True, state=state)
-
     if policy.pickup:
         return pickup_outcome(w, knowledge, state=state)
-    return None
-
-
-def fight_target(w: WorldModel, policy: Policy, never_attack: list[str]) -> Entity | None:
-    """With ``on_hostile = "fight"``, the nearest hostile in range if it may be hit.
-
-    Only characters can be hit today (A23 adds NPCs); a hostile that cannot be
-    hit is fled from instead (**Flee**).
-    """
-    here = w.pos
-    if here is None or policy.on_hostile != "fight":
-        return None
-    hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
-    if not hostiles:
-        return None
-    target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
-    if target.kind == "character" and not attack_forbidden(target, never_attack):
-        return target
     return None

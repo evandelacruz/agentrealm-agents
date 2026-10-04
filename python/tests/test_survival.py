@@ -197,16 +197,29 @@ class FleeTest(unittest.TestCase):
 
 
 class OnHostileTest(unittest.TestCase):
-    """policy.on_hostile as the README documents it; default params never block a fight."""
+    """policy.on_hostile as the README documents it."""
 
     def setUp(self):
         self.w = world(["...", "...", "..."], at=(1, 1))
 
-    def test_fight_swings_at_an_unmeasured_character_at_default_params(self):
+    def test_fight_swings_when_the_win_estimate_clears(self):
+        self.w.entities = [Entity("character", 5, (2, 1), code="peer")]
+        self.w.health, self.w.lives = 500, 10
+        self.w.threat.record(("character", "peer"), 1)
+        d = decide(
+            self.w,
+            Memory(),
+            Policy(kind="scripted", on_hostile="fight", hostile=["character"]),
+            random.Random(0),
+            params={**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1},
+        )
+        self.assertEqual(d.intent["verb"], "Use")
+
+    def test_fight_flees_an_unmeasured_type_at_low_risk(self):
         self.w.entities = [Entity("character", 5, (2, 1), code="peer")]
         d = decide(self.w, Memory(), Policy(kind="scripted", on_hostile="fight", hostile=["character"]),
                    random.Random(0))
-        self.assertEqual(d.intent["verb"], "Use")
+        self.assertEqual(d.intent["verb"], "SetPosition")
 
     def test_fight_flees_an_npc(self):
         self.w.entities = [Entity("npc", 5, (2, 1))]

@@ -132,8 +132,8 @@ def has_unmeasured_type(w: WorldModel, group: list[Entity]) -> bool:
 def would_lose(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:
     """True when the win estimate is below the effective fight margin.
 
-    Nothing gates on it yet: **Fight** (A23) will, so that a fight the
-    estimate says we lose turns into **Flee**.
+    **Fight** (A23) and **Flee** gate on this; **Retreat** also fires when
+    the group outclasses us.
     """
     group = combat_group(w, policy)
     if not group:
@@ -153,14 +153,15 @@ def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]
 
     A hit's size comes from what is attacking (the threat table), so with no
     hostile in range there is nothing to retreat from. ``on_hostile = "ignore"``
-    never retreats. Retreating because the group outclasses us waits for
-    **Fight** (A23) and its win estimate.
+    never retreats.
     """
     if policy.on_hostile == "ignore" or on_safe_tile(w):
         return False
     group = combat_group(w, policy)
     if not group:
         return False
+    if policy.on_hostile == "fight" and would_lose(w, policy, params):
+        return True
     eff = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
     hits = effective_retreat_hits(int(params["retreat_hits"]), eff)
     return retreat_by_health(w.health, hits, max_hit_damage(group, w.threat))

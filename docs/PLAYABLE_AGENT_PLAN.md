@@ -127,6 +127,12 @@ Paths are never straight lines. Bushes, trees, water, walls, fences, NPCs and ot
 | NPC or character standing there | High but finite, and it expires: they move |
 | Known blocked, including every obstacle not nominated (a block never says whether it breaks or what breaks it), or marked unreachable | Impassable |
 
+The numbers in `navigation/planner.py` (A12), and why:
+- **Fog 2.** Twice a known step: the agent still aims into fog, but prefers ground it has seen when the detour is short.
+- **Occupant 50.** Worth a long detour, yet finite: people move, so a corridor with someone in it is a last resort, not a wall.
+- **Hostile danger 30, falling 5 per block, gone at radius 6.** A step next to a hostile is worth about a 25-block detour, and the cost reaches 0 at 6 blocks, so it bends routes near hostiles without repricing the whole map.
+- **Unnamed hazard 100 (`COSTLY_STEP`).** Fire or lava whose `occupy_damage` no read has named costs as much as a `costly` escape tile: assume the worst until a read names the damage, then charge 1 per point.
+
 - **Walk only the part of the path we have seen.** The executor walks the known prefix and replans when terrain reads reveal what lies ahead, or a step is rejected. Fog optimism is corrected by looking.
 - **Long trips are two-level.** A coarse search over 16×16-block squares (the API's cache-tile size, API Reads) picks the corridor; A* inside the perception window picks the steps. Each search has a node budget per tick, so a long route never stalls a tick.
 
@@ -331,7 +337,7 @@ If you find a sign with numbers on it, try them as a code at the nearest locked 
 """                                                     # free text, passed to the strategist
 ```
 
-Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist.
+Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. Until A9 and the M4 strategist land, only `never_attack` changes behavior; `params`, `goals`, and `instructions` are parsed and validated but not yet read.
 
 Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
 

@@ -47,6 +47,11 @@ class CharacterConfig:
     def trace_path(self) -> Path:
         return STATE_DIR / f"{self.name}.trace.jsonl"
 
+    @property
+    def directives_path(self) -> Path:
+        """``characters/<name>.directives.toml`` beside the character file (A8)."""
+        return self.path.parent / f"{self.name}.directives.toml"
+
 
 class ConfigError(ValueError):
     pass

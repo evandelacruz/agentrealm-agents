@@ -142,20 +142,6 @@ def cost_path(w: WorldModel, goal: Pos, params: CostGridParams | None = None) ->
     return found[0] if found else None
 
 
-def path_cost(w: WorldModel, path: list[Pos], params: CostGridParams | None = None) -> int:
-    """Sum of step costs along ``path``; 10**9 when a step is impassable."""
-    if not path:
-        return 0
-    grid = _Grid(w, path[-1], params or CostGridParams())
-    total = 0
-    for p in path:
-        sc = grid.cost(p)
-        if sc is None:
-            return 10**9
-        total += sc
-    return total
-
-
 def nearest_target(
     w: WorldModel,
     targets: set[Pos],

@@ -5,7 +5,10 @@
   "M3": {"state": "done"},
   "M4": {"state": "open"},
   "M5": {"state": "open"},
-  "M6": {"state": "partial", "remaining": "Paced Step/Wait queues, alarm cadence poll every tick, snapshot deltas, health tracking, Olympuff smoke test"},
+  "M6": {
+    "state": "partial",
+    "remaining": "Wire the executor into the runner: Step/Wait pacing from movement_speed, the 4–10 tick calm gap once multi-intent queues land (calm waits today only while the last poll sent nothing), health dropping from snapshot deltas in the urgent cadence, snapshot deltas and health on the world model, live Olympuff smoke test."
+  },
   "M7": {"state": "open"},
   "M8": {"state": "open"},
   "M9": {"state": "open"},

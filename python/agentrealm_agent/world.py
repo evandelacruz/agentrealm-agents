@@ -5,7 +5,7 @@ from __future__ import annotations
 import heapq
 from dataclasses import dataclass, field
 
-from .threat import ThreatTable, absorb_damaged
+from .threat import ThreatTable, absorb_damaged, damage_amount
 
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
 # warp: never occupied, but stepping onto one warps.
@@ -316,9 +316,9 @@ class WorldModel:
                 flat.append(ev)
                 kind = ev.get("kind")
                 if kind == "Damaged":
-                    tick = int(ev.get("tick", group["tick"]))
-                    self.recent_damage.append((tick, int(ev.get("amount", 0))))
-                    absorb_damaged(self.threat, ev, self.entities)
+                    amount = damage_amount(ev)
+                    if amount is not None:
+                        self.recent_damage.append((int(ev.get("tick", group["tick"])), amount))
                 elif kind == "BlockChanged" and ev.get("map_id") in self.maps:
                     self.maps[ev["map_id"]].tiles[(int(ev["x"]), int(ev["y"]))] = ev.get("block_type", "")
                 elif kind == "SupplyTaken":
@@ -328,6 +328,19 @@ class WorldModel:
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
         return flat
+
+    def learn_threat(self, events: list[dict], earlier: list[Entity]) -> None:
+        """Folds this round trip's Damaged events into the threat table (A6).
+
+        Call after apply_observation, so a source first listed in the same
+        response resolves to its type. A source that left view in that
+        response is looked up in earlier, the entities before it. There is
+        no entity list per event tick, so a source seen in neither is not
+        recorded.
+        """
+        for ev in events:
+            if ev.get("kind") == "Damaged":
+                absorb_damaged(self.threat, ev, self.entities, earlier)
 
     def apply_observation(self, obs: dict | None) -> None:
         """Folds a tick observation into the model (Manual §7.2).

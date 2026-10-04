@@ -33,7 +33,7 @@ Copy a file from `python/characters/` and edit it. Names must be unique in the w
 | `policy.goals` | Tried in order: `explore`, `doors`, `goto` (with `policy.goto = [x, y]`), `wander`, `hold`. |
 | `policy.on_hostile` | `flee`, `fight`, or `ignore`, for anything in `policy.hostile` (`npc`, `character`) within `policy.hostile_range`. |
 | `policy.pickup` | Take supplies within one block. |
-| `policy.avoid_blocks` | Block types to step off. |
+| `policy.avoid_blocks` | Block types to step off and to plan around. Standing on one with no safe step off, the plan crosses as few as it can. |
 | `policy.entity_refresh` | Ticks between entity reads when nothing is happening. |
 | `policy.seed` | Random seed for `wander`. Defaults to the character id. |
 

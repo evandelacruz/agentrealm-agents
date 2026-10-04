@@ -117,6 +117,17 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(r.world.pos)
         self.assertEqual(r.world.recent_damage, [(11, 3)])
 
+    def test_a_step_sent_as_we_die_is_not_assumed(self):
+        # Died forgets the position; the step sent that round trip has no
+        # position to land from, so the model stays unplaced until re-read.
+        fake = FakeClient([{"tick": 12, "window_remaining_ms": 0, "events_by_tick": [
+            {"tick": 11, "events": [{"tick": 11, "kind": "Died", "cause": "npc"}]}]}])
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.tick()
+        self.assertIsNotNone(fake.sent[0])
+        self.assertIsNone(r.world.pos)
+        self.assertIsNone(r.world.map_id)
+
 
 class NetworkTest(unittest.TestCase):
     def test_network_failure_is_retried_not_fatal(self):

@@ -8,13 +8,17 @@ from agentrealm_agent import config
 
 
 class ConfigTest(unittest.TestCase):
-    def test_list_and_point_fields_are_type_checked(self):
+    def test_fields_are_type_checked(self):
         # A bare string for a list field would iterate its characters.
         cases = [
             ('hostile = "npc"', "policy.hostile"),
             ('goals = "explore"', "policy.goals"),
             ('avoid_blocks = "lava"', "policy.avoid_blocks"),
             ('goals = ["goto"]\ngoto = "2,3"', "policy.goto"),
+            ('entity_refresh = "5"', "policy.entity_refresh"),
+            ('hostile_range = 1.5', "policy.hostile_range"),
+            ('pickup = "yes"', "policy.pickup"),
+            ('seed = "abc"', "policy.seed"),
         ]
         for body, key in cases:
             with self.subTest(key), tempfile.TemporaryDirectory() as tmp:

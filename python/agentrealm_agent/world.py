@@ -32,6 +32,9 @@ def terrain_cells(t: dict) -> dict:
 
 Pos = tuple[int, int]
 
+# Extra cost of a step onto a `costly` tile: worth a long detour to avoid one.
+COSTLY_STEP = 100
+
 NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
 
 
@@ -214,11 +217,15 @@ class WorldModel:
         occ = self.occupied() | avoid
         return [n for n in self.neighbours(p) if self.view.walkable(n) and n not in occ]
 
-    def path(self, goal: Pos, allow_goal_door: bool = False, avoid: set[Pos] = frozenset()) -> list[Pos] | None:
+    def path(
+        self, goal: Pos, allow_goal_door: bool = False, avoid: set[Pos] = frozenset(), costly: set[Pos] = frozenset()
+    ) -> list[Pos] | None:
         """A* over known walkable tiles, Chebyshev steps. Excludes the start.
 
-        Occupied tiles and avoid are never entered. With allow_goal_door, the
-        goal may be a door: the last step lands on it and warps.
+        Occupied tiles and avoid are never entered; a step onto a costly tile
+        costs COSTLY_STEP more, so the path crosses as few as it can. With
+        allow_goal_door, the goal may be a door: the last step lands on it and
+        warps.
         """
         assert self.pos is not None
         start = self.pos
@@ -249,27 +256,35 @@ class WorldModel:
             for n in self.neighbours(cur):
                 if not passable(n):
                     continue
-                ng = g + 1
+                ng = g + self.step_cost(n, costly)
                 if ng < cost.get(n, 10**9):
                     cost[n] = ng
                     came[n] = cur
                     heapq.heappush(frontier, (ng + chebyshev(n, goal), ng, n))
         return None
 
+    def step_cost(self, p: Pos, costly: set[Pos]) -> int:
+        return 1 + COSTLY_STEP if p in costly else 1
+
     def nearest(
-        self, targets: set[Pos], allow_goal_door: bool = False, avoid: set[Pos] = frozenset()
+        self, targets: set[Pos], allow_goal_door: bool = False, avoid: set[Pos] = frozenset(),
+        costly: set[Pos] = frozenset(),
     ) -> tuple[Pos, list[Pos]] | None:
-        """The closest target by path length, with its path.
+        """The closest target by path cost, with its path.
 
         Tries targets in straight-line order and stops once no remaining target
         can beat the best path found.
         """
         assert self.pos is not None
         best: tuple[Pos, list[Pos]] | None = None
+        best_cost = 0
         for t in sorted(targets, key=lambda t: chebyshev(self.pos, t)):
-            if best is not None and chebyshev(self.pos, t) >= len(best[1]):
+            if best is not None and chebyshev(self.pos, t) >= best_cost:
                 break
-            p = self.path(t, allow_goal_door, avoid)
-            if p is not None and (best is None or len(p) < len(best[1])):
-                best = (t, p)
+            p = self.path(t, allow_goal_door, avoid, costly)
+            if p is None:
+                continue
+            c = sum(self.step_cost(q, costly) for q in p)
+            if best is None or c < best_cost:
+                best, best_cost = (t, p), c
         return best

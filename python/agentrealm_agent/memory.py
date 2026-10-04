@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 from .navigation import NavSearchState
 from .navigation.rejection import NavMemory
+from .travel.ops import TravelOp
+from .travel.strength import StrengthBracket
 from .world import Pos
 
 
@@ -40,3 +42,7 @@ class Memory:
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
+    travel_ops: list[TravelOp] = field(default_factory=list)  # parsed travel:* directives goals (A27)
+    travel_index: int = 0
+    strength: StrengthBracket = field(default_factory=StrengthBracket)
+    loadout_key: tuple = ()  # reset strength bracket when armed/worn changes (A27)

@@ -21,6 +21,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 | `GET /characters/{id}/terrain-tiles?map_id&x0&y0&width&height` | Block types inside perception, plus revealed ground, as a grid: `rows` of `legend` symbols, `?` for clouds. |
 | `GET /characters/{id}/entity-tiles?…` | Characters, NPCs, supplies inside perception. |
 | `GET /characters/{id}/zone?map_id&x&y` | Zone at a revealed cell: `safe`, `brightness`, and a hunting ground's `strength_ceiling`. |
+| `GET /characters/{id}/minimap` | Every revealed map's size and level entrance marks (`entrances`: `{x, y}` per map). |
 | `POST /characters/{id}/tick` `{"intents": [{...}], "snapshot_version": N}` | Replaces the character's queue with an ordered list (`[]` clears it; no `intents` leaves it running). Optional `snapshot_version` is the observation version last applied; the server answers with a delta when it still matches. Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
 
 Auth is `Authorization: Bearer <key>`.

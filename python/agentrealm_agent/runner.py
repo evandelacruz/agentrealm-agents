@@ -16,6 +16,9 @@ from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .item_table import absorb_attack_range, absorb_entities_payload, rejection_attack_range
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_warp, sync_tiles, sync_world_maps
+from .travel.knowledge import record_hunting_zone, record_shop_cell, sync_entrances, sync_town
+from .travel.ops import refresh_travel_stack
+from .travel.strength import loadout_key, note_hunting_entry
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
@@ -101,6 +104,10 @@ class Runner:
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
         apply_town(self.world, world.get("town"))
+        if self.knowledge is not None:
+            sync_town(self.knowledge, world.get("town"))
+            self._sync_minimap()
+        refresh_travel_stack(self.mem, self.directives.directives.goals)
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:
@@ -113,6 +120,7 @@ class Runner:
                 # carry the server's tick and correct it.
                 self.world.tick += 1
                 if self.directives.maybe_reload():
+                    refresh_travel_stack(self.mem, self.directives.directives.goals)
                     self.log(
                         "directives",
                         f"reloaded never_attack={self.directives.directives.never_attack}",
@@ -161,6 +169,41 @@ class Runner:
         }
         sync_tiles(self.knowledge, map_id, tiles)
 
+    def _sync_minimap(self) -> None:
+        if self.knowledge is None:
+            return
+        try:
+            body = self.client.minimap(self.cid)
+        except ApiError:
+            return
+        sync_entrances(self.knowledge, body)
+
+    def _sync_loadout(self) -> None:
+        key = loadout_key(self.world)
+        if key != self.mem.loadout_key:
+            self.mem.loadout_key = key
+            self.mem.strength.reset()
+
+    def _learn_shops_from_entities(self, payload: dict) -> None:
+        if self.knowledge is None or self.world.map_id is None:
+            return
+        for s in payload.get("supplies") or []:
+            if not isinstance(s, dict):
+                continue
+            price = s.get("gem_price")
+            if price is None or isinstance(price, bool):
+                continue
+            try:
+                if int(price) <= 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            try:
+                pos = (int(s["x"]), int(s["y"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            record_shop_cell(self.knowledge, self.world.map_id, pos)
+
     def read_world(self) -> dict | None:
         """The world read that sets the pace, retried like any other call."""
         while not self.stop.is_set():
@@ -199,6 +242,7 @@ class Runner:
             w.tick = max(w.tick, int(e.get("tick", 0)))
             m.alarm = False
             self._learn_items_from_entities(e)
+            self._learn_shops_from_entities(e)
             self.note_held_path_stale()
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
@@ -217,6 +261,8 @@ class Runner:
                     zone_failed(w, map_id, (x, y))
                 raise
             fact = apply_zone(w, map_id, x, y, z)
+            if self.knowledge is not None and fact.strength_ceiling is not None:
+                record_hunting_zone(self.knowledge, map_id, (x, y), fact.strength_ceiling)
             w.tick = max(w.tick, int(z.get("tick", 0)))
             self.log(call, f"@{map_id}:{x},{y} safe={fact.safe}", {"zone": z})
         else:
@@ -283,6 +329,7 @@ class Runner:
         earlier = w.entities
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        self._sync_loadout()
         w.learn_threat(events, earlier)
         self._learn_items_from_tick(r.get("observation"))
         self.on_events(events)
@@ -526,6 +573,8 @@ class Runner:
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
+                if w.map_id is not None:
+                    note_hunting_entry(m.strength, w, w.map_id, w.pos)
                 if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:
                     # A door moves us; the Steps still queued behind this one
                     # would walk from the wrong place.

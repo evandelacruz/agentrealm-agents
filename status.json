@@ -7,7 +7,7 @@
   "M5": {"state": "open"},
   "M6": {
     "state": "partial",
-    "remaining": "Executor pacing, poll cadences, snapshot deltas (snapshot_version) in the runner/world model, consuming health in decisions, live Olympuff smoke test. Health and max_health are folded from complete snapshots only."
+    "remaining": "Wire the executor into the runner: Step/Wait pacing from movement_speed, calm vs threatened poll cadences, snapshot deltas (snapshot_version) on the world model, consuming health in decisions, live Olympuff smoke test. Health and max_health are folded from complete snapshots only."
   },
   "M7": {"state": "open"},
   "M8": {"state": "open"},

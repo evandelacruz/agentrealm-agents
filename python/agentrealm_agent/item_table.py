@@ -14,8 +14,20 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   Events). Damage is rolled and the target's defense lowers it (docs/
   GAME_NOTES.md Combat), so one hit is a sample, not the weapon's stat; the
   max is kept per NPC type and only ever rises.
+- ``damage_taken``: ``{npc_type_code: max hit}``, the largest ``Damaged`` amount
+  from that NPC type while this subtype was the only filled worn slot for the
+  whole response (API Events, Snapshots). Rolled damage depends on the
+  attacker's power and our defense (docs/GAME_NOTES.md Combat), so it is a
+  sample, not the item's defense stat.
+- ``damage_without``: ``{npc_type_code: max hit}`` from that NPC type while no
+  worn slot was filled, filed only under the subtype that was worn alone just
+  before the slots emptied.
+- ``damage_saved``: ``{npc_type_code: damage_without − damage_taken}``,
+  recomputed from the row's two maxes whenever either changes, and present
+  only while both exist and the gap is positive. It estimates how far the item
+  lowers that type's best hit, not the item's defense stat.
 
-Damage taken per worn item and capabilities are not stored: see PLAN.md A18.
+Capabilities are not stored: see PLAN.md A18 (Server gaps).
 """
 
 from __future__ import annotations
@@ -23,7 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from .threat import damage_amount
+from .threat import damage_amount, type_key_from_damaged
 
 Pos = tuple[int, int]
 
@@ -211,6 +223,47 @@ def merge_item(items: dict[str, dict[str, Any]], code: str | None, **facts: Any)
         items.setdefault(code, {}).update(kept)
 
 
+def _merge_max_per_npc(row: dict[str, Any], field: str, npc_type: str, amount: int) -> None:
+    per_type = row.get(field)
+    if not isinstance(per_type, dict):
+        per_type = row[field] = {}
+    old = _positive_int(per_type.get(npc_type))
+    if old is None or amount > old:
+        per_type[npc_type] = amount
+
+
+def _refresh_damage_saved(row: dict[str, Any], npc_type: str) -> None:
+    """Set ``damage_saved[npc_type]`` to ``damage_without − damage_taken`` now.
+
+    Recomputed from the row's two maxes whenever either changes, so it never
+    goes stale; dropped while either side is missing or the gap is not positive.
+    """
+    taken = row.get("damage_taken")
+    without = row.get("damage_without")
+    t = _positive_int(taken.get(npc_type)) if isinstance(taken, dict) else None
+    w = _positive_int(without.get(npc_type)) if isinstance(without, dict) else None
+    per_type = row.get("damage_saved")
+    if t is not None and w is not None and w > t:
+        if not isinstance(per_type, dict):
+            per_type = row["damage_saved"] = {}
+        per_type[npc_type] = w - t
+    elif isinstance(per_type, dict):
+        per_type.pop(npc_type, None)
+        if not per_type:
+            del row["damage_saved"]
+
+
+def merge_worn_hit(items: dict[str, dict[str, Any]], code: str | None, field: str, npc_type: str, amount: Any) -> None:
+    """Raise ``field`` (``damage_taken`` or ``damage_without``) for ``npc_type``
+    under ``code``, then recompute that type's ``damage_saved``."""
+    n = _positive_int(amount)
+    if not code or not npc_type or n is None:
+        return
+    row = items.setdefault(code, {})
+    _merge_max_per_npc(row, field, npc_type, n)
+    _refresh_damage_saved(row, npc_type)
+
+
 def merge_weapon_hit(items: dict[str, dict[str, Any]], code: str | None, npc_type: str, amount: Any) -> None:
     """Raise ``weapon_damage[npc_type]`` under ``code`` to ``amount`` if larger.
 
@@ -372,3 +425,34 @@ def absorb_npc_damaged(
     for u, amounts in hits.items():
         if len(amounts) == 1:
             merge_weapon_hit(items, armed_code, u.npc_type, amounts[0])
+
+
+def absorb_damaged_worn(
+    items: dict[str, dict[str, Any]],
+    events: list[dict],
+    worn_codes: dict[str, str],
+    removed_code: str | None,
+    *entity_views: list[Any],
+) -> None:
+    """Record ``Damaged`` from NPCs against one worn item, or its bare baseline.
+
+    The caller passes only a response whose worn loadout held for every tick
+    in it, so ``worn_codes`` is the loadout at each hit's tick. With exactly
+    one filled worn slot, the hit raises that subtype's ``damage_taken``. With
+    none filled, it raises ``damage_without`` on ``removed_code`` alone: the
+    subtype that was the only worn item just before the slots emptied. Any
+    other loadout records nothing (PLAN.md A18).
+    """
+    if len(worn_codes) == 1:
+        code, field = next(iter(worn_codes.values())), "damage_taken"
+    elif not worn_codes and removed_code:
+        code, field = removed_code, "damage_without"
+    else:
+        return
+    for ev in events:
+        if ev.get("kind") != "Damaged":
+            continue
+        key = type_key_from_damaged(ev, *entity_views)
+        if key is None or key[0] != "npc":
+            continue
+        merge_worn_hit(items, code, field, key[1], damage_amount(ev))

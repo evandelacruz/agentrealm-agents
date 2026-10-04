@@ -20,6 +20,7 @@ from .plan import Plan
 from .item_table import (
     AppliedUse,
     absorb_attack_range,
+    absorb_damaged_worn,
     absorb_entities_payload,
     absorb_npc_damaged,
     rejection_attack_range,
@@ -57,6 +58,10 @@ from .zone_discovery import apply_town, apply_zone, zone_failed
 WINDOW_MARGIN = 0.05
 # Ticks past a queue's own length to wait for its results before giving up.
 QUEUE_RESULT_SLACK = 2
+# Applied verbs that can change what is worn: Wear(supplyId) and Remove(slot)
+# (agentrealm.gg/docs/manual, Intent reference). Drop may take a worn supply,
+# which is not documented either way.
+LOADOUT_VERBS = ("Wear", "Remove", "Drop")
 
 
 @dataclass
@@ -94,6 +99,9 @@ class Runner:
         self.knowledge = knowledge
         self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
+        self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
+        self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
+        self._removed_map: int | None = None  # A18: map the character was on when it was taken off
         self.world = WorldModel(character_id)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
@@ -403,11 +411,12 @@ class Runner:
                 m.pending_queue = qid
         rejected = self.apply_intent_results(r.get("intent_results") or [])
         earlier = w.entities
+        worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
         self._sync_loadout()
         w.learn_threat(events, earlier)
-        self._learn_items_from_tick(r.get("observation"), events)
+        self._learn_items_from_tick(r.get("observation"), events, earlier, worn_before)
         self.on_events(events)
         self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
@@ -638,6 +647,7 @@ class Runner:
         """Fold intent results since the last call. True if the last one rejected."""
         w, m = self.world, self.mem
         self._applied_uses = []
+        self._loadout_verbs = []
         if not results:
             return False
         rejected = False
@@ -701,6 +711,8 @@ class Runner:
                     npc_type = use_npc_type(intent, block, w.entities)
                     others = any(e.kind == "character" for e in w.entities)
                     self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type, others))
+            if intent and intent.get("verb") in LOADOUT_VERBS:
+                self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
             self._note_investigation(intent, result)
@@ -772,11 +784,38 @@ class Runner:
         if intent and intent.get("verb") == "Use":
             self._reach_seen = rejection_attack_range(result)
 
-    def _learn_items_from_tick(self, obs: dict | None, events: list[dict] | None = None) -> None:
+    def _learn_items_from_tick(
+        self,
+        obs: dict | None,
+        events: list[dict] | None = None,
+        earlier_entities: list | None = None,
+        worn_before: dict[str, str] | None = None,
+    ) -> None:
         w = self.world
         reach, self._reach_seen = self._reach_seen, None
         uses, self._applied_uses = self._applied_uses, []
+        verbs, self._loadout_verbs = self._loadout_verbs, []
         events = events or []
+        earlier_entities = earlier_entities or []
+        worn_before = w.worn_codes if worn_before is None else worn_before
+        # Damaged events span the response's ticks but the loadout is read once,
+        # at its end: a response whose worn loadout changed (in the snapshot, or
+        # by an applied Wear/Remove/Drop) has hits at an unknown loadout, so its
+        # hits are skipped and only the removed item is remembered (A18).
+        worn_changed = worn_before != w.worn_codes or bool(verbs)
+        if worn_before != w.worn_codes:
+            # Only a lone item taken off by our own Remove is credited with the
+            # bare hits after it; gear lost any other way (death) is not.
+            lone = len(worn_before) == 1 and not w.worn_codes and verbs == ["Remove"]
+            self._removed_code = next(iter(worn_before.values())) if lone else None
+            self._removed_map = w.map_id
+        elif any(v != "Drop" for v in verbs):
+            # Something was worn or removed and the slots ended where they began:
+            # which item was last worn alone is no longer known.
+            self._removed_code = None
+        if self._removed_map != w.map_id:
+            # The baseline holds only until the next loadout change, death or map change.
+            self._removed_code = None
 
         def learn(items: dict) -> None:
             if obs and not obs.get("unchanged"):
@@ -792,6 +831,8 @@ class Runner:
                 armed_code=w.armed_code,
                 others_in_sight=any(e.kind == "character" for e in w.entities),
             )
+            if not worn_changed:
+                absorb_damaged_worn(items, events, w.worn_codes, self._removed_code, w.entities, earlier_entities)
 
         self._with_item_table(learn)
 
@@ -810,6 +851,7 @@ class Runner:
                 m.pending_next_index = 0
                 m.held_queue, m.resend_held_queue = None, False
                 m.warp_from = None
+                self._removed_code = None
         # WorldModel.apply_events already parsed BlockChanged (A14).
         for map_id, p in w.changed_blocks:
             on_block_changed(m, map_id, p)

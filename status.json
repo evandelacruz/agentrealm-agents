@@ -43,7 +43,7 @@
 
   "A17": {"state": "done"},
 
-  "A18": {"state": "partial", "remaining": "Damage saved per worn item (needs Damaged amounts from one attacker type with and without the item; docs/GAME_NOTES.md open questions), and capabilities once they can be sourced (not served on reads; PLAN.md Server gaps, A28 break results)."},
+  "A18": {"state": "partial", "remaining": "Capabilities once they can be sourced (not served on reads; PLAN.md Server gaps, A28 break results)."},
 
   "A19": {"state": "open"},
 

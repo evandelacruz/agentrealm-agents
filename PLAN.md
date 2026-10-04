@@ -21,6 +21,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 | `GET /characters/{id}/terrain-tiles?map_id&x0&y0&width&height` | Block types inside perception, plus revealed ground, as a grid: `rows` of `legend` symbols, `?` for clouds. |
 | `GET /characters/{id}/entity-tiles?…` | Characters, NPCs, supplies inside perception. |
 | `GET /characters/{id}/zone?map_id&x&y` | Zone at a revealed cell: `safe`, `brightness`, and a hunting ground's `strength_ceiling`. |
+| `GET /characters/{id}/minimap` | Every revealed map's size and level entrance marks (`entrances`: `{x, y}` per map). |
 | `POST /characters/{id}/tick` `{"intents": [{...}], "snapshot_version": N}` | Replaces the character's queue with an ordered list (`[]` clears it; no `intents` leaves it running). Optional `snapshot_version` is the observation version last applied; the server answers with a delta when it still matches. Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
 
 Auth is `Authorization: Bearer <key>`.
@@ -78,7 +79,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
    | `block_occupied` | Kept off for the next decision, then costs 100 extra for 30 ticks. |
    | `conflict_lost` | Nothing; the next move may retry. |
    | `door_locked` | Impassable, and stored as a locked door under the map's `doors` in the knowledge base, which every character of the world then keeps off. |
-   | `over_strength_ceiling` | Impassable this run, and stored under the map's `hunting` in the knowledge base with the zone's ceiling for A27's strength bracket. |
+   | `over_strength_ceiling` | Impassable until the loadout (armed or worn) changes, and stored under the map's `hunting` in the knowledge base with the zone's ceiling for A27's strength bracket. |
    | `would_strand` | Not handled yet: treated as anything else below. Open question for Evan: the landing target. GAME_NOTES ties `would_strand` to water (unequipping the supply that keeps us on it), and the world model has no water yet, so the refused cell is not a landing. |
    | anything else | Kept off for the next decision only. |
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
@@ -86,6 +87,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
 4. `pickup = true` and a worthwhile supply underfoot, adjacent, or in a ground chest within reach → `Take`, or `WithdrawFromChest` with that one `supply_id`. With the carried chest full, `Drop` the lowest-valued held supply first, only for a pickup worth more; otherwise skip it (A20).
 4a. A worthwhile free supply or known chest supply in sight, `pickup = true`, and a plannable step toward it → the **Loot** state (A20) walks there, after Recover and before Explore. It claims the round only when it sends an intent; otherwise Explore runs.
 4b. Our last death dropped a chest on this map, `pickup = true`, and a tile on or next to it is known safe (A7) → the **Recover** state (A11) walks there; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
+4c. Directives `goals` name a `travel:*` destination that resolves → the **Travel** state (A27, priority 5: below Heal and Recover, above Explore) walks the first resolvable op of the stack; arriving drops it, an unresolved one is skipped and dropped once a later one is acted on (A27 row).
 5. Plan has a next step → walk the path as a paced `Step` queue (see **Scheduler**).
 6. Otherwise → nothing.
 
@@ -223,7 +225,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | ID | Item | Depends on |
 |---|---|---|
 | A26 | **Door graph and cross-map routing.** Warps recorded in the knowledge base; route over the graph, then A* on each map. | A12, A17 |
-| A27 | **Travel.** To entrance marks, town, hunting grounds and shops; strength bracketed by `over_strength_ceiling`. | A5, A26 |
+| A27 | **Travel.** To entrance marks, town, hunting grounds and shops; strength bracketed by `over_strength_ceiling`. Directives `goals` entries `travel:<to>[:[map_id:]x:y]` form a stack, walked in order with the cost grid and door graph (A26) after reflexes 2–4. An op that does not resolve yet (`shop` before any priced supply is seen, `town` with no town or respawn known, `hunting_ground` with no eligible ceiling) is skipped: dropped once Travel acts on a later op, kept while none resolves, so Explore runs until the knowledge base can resolve it. Arriving drops the op; with no step plannable, Travel falls back to Explore's goals for that round. A shop is a cell where a supply with a `gem_price` was seen: a priced supply "spends those gems when picked up" ([manual §11](https://agentrealm.gg/docs/manual#11-game-rules)). The API names no shops, and a bought-out cell stays listed. Entrance marks come from one `get_minimap` read at startup, so marks on maps revealed later are learned on the next run. The bracket keeps only the lower bound (`over_strength_ceiling` ⇒ strength above that ceiling): a successful entry would not change which grounds are candidates until win estimates (M8) choose between ceilings. A loadout change resets it and reopens the cells it closed. | A5, A26 |
 | A28 | **Break and break memory.** Per (block, capability); break costs go live; escalation steps 2 and 4; `Escape` through blocks. | A5, A15, A17 |
 | A29 | **M9 acceptance.** M9 done-when. | A25, A27, A28 |
 

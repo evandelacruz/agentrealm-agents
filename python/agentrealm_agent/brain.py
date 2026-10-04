@@ -97,18 +97,22 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
         return Decision(None, "idle")
     here = w.pos
     view = w.view
-    blocked = set(m.blocked)
 
     if policy.kind == "wander":
         return _wander(w, m, rng)
 
     # 1. A rejected step is kept out of every choice below until it ages out.
+    # Blocks that hurt are kept out the same way, so no plan walks into one.
+    hazards = {p for p, b in view.tiles.items() if b in policy.avoid_blocks}
+    blocked = set(m.blocked) | hazards
     # 2. Standing on a block that hurts.
-    if view.tiles.get(here) in policy.avoid_blocks:
-        safe = [n for n in w.open_neighbours(here, blocked) if view.tiles.get(n) not in policy.avoid_blocks]
+    if here in hazards:
+        safe = w.open_neighbours(here, blocked)
         if safe:
             m.path = []
             return Decision(set_position(min(safe)), f"off {view.tiles.get(here)}")
+        # Surrounded by it: let the plan below cross it to get out.
+        blocked = set(m.blocked)
 
     # 3. Hostiles.
     hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
@@ -139,14 +143,14 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
                 return Decision(withdraw_all(chest_id), f"recover from chest {chest_id}")
             if contents is None:
                 return Decision(None, f"open chest {chest_id}")
-        elif m.goal != "chest" or not m.path or not _step_open(w, m, m.path[0]):
+        elif m.goal != "chest" or not m.path or not _step_open(w, blocked, m.path[0]):
             found = w.path(at, avoid=blocked)
             if found:
                 m.path, m.goal = found, "chest"
 
     # 5. Follow the plan, replanning when it is empty or its next step is not open.
-    if not m.path or not _step_open(w, m, m.path[0]):
-        _replan(w, m, policy, rng)
+    if not m.path or not _step_open(w, blocked, m.path[0]):
+        _replan(w, m, policy, rng, blocked)
     if m.path:
         return Decision(set_position(m.path[0]), f"{m.goal} → {m.path[-1]}")
 
@@ -174,20 +178,20 @@ def _flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos]) -> Pos 
     return None if best == here else best
 
 
-def _step_open(w: WorldModel, m: Memory, p: Pos) -> bool:
+def _step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:
     if chebyshev(w.pos, p) > w.movement:
         return False
-    if p in m.blocked:
+    if p in blocked:
         return False
     if w.view.tiles.get(p) in DOORS:
         return True
     return w.view.walkable(p) and p not in w.occupied()
 
 
-def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> None:
+def _replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked: set[Pos]) -> None:
     m.path, m.goal = [], ""
     for goal in policy.goals:
-        found = _plan_goal(goal, w, policy, rng, set(m.blocked))
+        found = _plan_goal(goal, w, policy, rng, blocked)
         if found:
             m.path, m.goal = found, goal
             return

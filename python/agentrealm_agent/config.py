@@ -69,6 +69,16 @@ def load(path: str | Path) -> CharacterConfig:
         value = getattr(policy, key)
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise ConfigError(f"{path.name}: `policy.{key}` must be a list of strings, like [\"{Policy().__dict__[key][0]}\"]")
+    for key in ("hostile_range", "entity_refresh"):
+        value = getattr(policy, key)
+        if type(value) is not int or value < 0:
+            raise ConfigError(f"{path.name}: `policy.{key}` must be a whole number >= 0")
+    if type(policy.pickup) is not bool:
+        raise ConfigError(f"{path.name}: `policy.pickup` must be true or false")
+    if policy.seed is not None and type(policy.seed) is not int:
+        raise ConfigError(f"{path.name}: `policy.seed` must be an integer")
+    if not isinstance(raw.get("world", "sandbox"), str):
+        raise ConfigError(f"{path.name}: `world` must be a string")
     if policy.goto is not None:
         if not isinstance(policy.goto, list) or len(policy.goto) != 2 or not all(type(v) is int for v in policy.goto):
             raise ConfigError(f"{path.name}: `policy.goto` must be [x, y]")

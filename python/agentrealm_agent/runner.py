@@ -64,15 +64,17 @@ class Runner:
         self.pacer = Pacer(1.0 / hz)
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
-        while not self.stop.is_set():
-            self.pacer.wait_next_window(not_before)
-            not_before = 0.0
-            call = choose_call(self.world, self.mem, self.cfg.policy)
-            try:
-                not_before = self.step(call)
-            except ApiError as e:
-                not_before = self.on_error(call, e)
-        self.trace.close()
+        try:
+            while not self.stop.is_set():
+                self.pacer.wait_next_window(not_before)
+                not_before = 0.0
+                call = choose_call(self.world, self.mem, self.cfg.policy)
+                try:
+                    not_before = self.step(call)
+                except ApiError as e:
+                    not_before = self.on_error(call, e)
+        finally:
+            self.trace.close()
 
     def read_world(self) -> dict | None:
         """The world read that sets the pace, retried like any other call."""
@@ -141,7 +143,8 @@ class Runner:
             # A rejection in this response means `submitted` was planned from a
             # step that never happened. Do not build on it: the position read the
             # rejection forces lands after it resolves and says where we are.
-            if not rejected:
+            # After a death there is no position to build on either.
+            if not rejected and w.pos is not None:
                 m.undo = w.pos
                 self.assume_applied(submitted)
         # The intent resolves at this sim window's boundary. Do not call

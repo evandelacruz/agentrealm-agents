@@ -127,7 +127,7 @@ python -m agentrealm_agent run characters/wren.toml [characters/kit.toml ...]
 python -m agentrealm_agent status characters/wren.toml
 ```
 
-Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local stack; the public API is `https://api.agentrealm.gg`, where lives are permanent), `AGENTREALM_API_KEY`.
+Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local stack; the public API is `https://api.agentrealm.gg`, where lives are permanent), `AGENTREALM_API_KEY`. After `make up` in the game repo, run [`scripts/seed_local_stack.py`](scripts/seed_local_stack.py) with `AGENTREALM_STACK_DIR` pointing at that compose project so the front tier logs yield a verification token; it mints the first key and writes `export` lines to `python/.state/local.env` (mode 0600, git-ignored). Re-running reuses that key. `--probe` also waits until sandbox `create` succeeds, at the cost of a character that holds one of the account's two sandbox slots for 24 hours (Manual §13).
 
 `run` drives every listed character, one thread each. Each character logs one line per window to stdout (tick, position, call made, intent, the result of the last one, events) and a JSONL trace to `.state/<name>.trace.jsonl`, so a death can be read back as a decision.
 
@@ -136,6 +136,7 @@ Environment: `AGENTREALM_BASE_URL` (default `http://localhost:8080`, a local sta
 | Gap | Effect on the agent | Where it lands |
 |---|---|---|
 | Sandbox content loads on the sim's first start; the `default` outfit is seeded | Create works with avatar `default` once the sim has started; before that it answers `world_not_ready`. | B13, B39 |
+| No character delete and no read-only sandbox readiness signal | The seed script can confirm the sandbox map is loaded only by creating a probe character, which then holds one of the account's two sandbox slots until it ends, so the probe is opt-in (M5). | None |
 | No hostile's reach is served | `hostile_range` is a guess in the character file. | None |
 | No NPC's health or damage is served, except a boss's health | Hostile health and damage per type are learned from `NPCDamaged`, `NPCDied` and `Damaged`, with conservative defaults until measured ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) Combat). | None |
 | Our own strength is served only on the owner watch sheet, not on a character route | The agent brackets its strength from `over_strength_ceiling` rejections and does not read the watch sheet, which sits outside the character call budget. | None |

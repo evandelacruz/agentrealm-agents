@@ -7,8 +7,12 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
+
+# One intent object as sent on the wire (`{"verb": "Step", ...}`).
+Intent = dict[str, Any]
 
 
 @dataclass
@@ -93,10 +97,36 @@ class Client:
 
     # The round trip.
 
-    def tick(self, cid: int, intents: list[dict] | None) -> dict:
-        """The round trip. `intents` replaces the held queue; None leaves it as it is."""
-        body = {} if intents is None else {"intents": intents}
-        return self._call("POST", f"/characters/{cid}/tick", body)
+    def tick(
+        self,
+        cid: int,
+        intents: Intent | Sequence[Intent] | None = None,
+        *,
+        snapshot_version: int | None = None,
+    ) -> dict:
+        """The round trip.
+
+        ``intents`` replaces the held queue when set: one dict, an ordered list,
+        or ``[]`` to clear it. ``None`` omits ``intents`` and leaves the queue
+        as it is. ``snapshot_version`` is the observation version last applied.
+        """
+        return self._call("POST", f"/characters/{cid}/tick", _tick_body(intents, snapshot_version))
+
+
+def _tick_body(
+    intents: Intent | Sequence[Intent] | None,
+    snapshot_version: int | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {}
+    if snapshot_version is not None:
+        body["snapshot_version"] = snapshot_version
+    if intents is None:
+        return body
+    if isinstance(intents, Mapping):
+        body["intents"] = [dict(intents)]
+    else:
+        body["intents"] = [dict(i) for i in intents]
+    return body
 
 
 def _rect(map_id: int, x0: int, y0: int, width: int, height: int) -> dict:

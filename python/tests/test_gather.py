@@ -118,14 +118,15 @@ class GatherActTest(unittest.TestCase):
         w = grid(["...", "..."], at=(1, 0))
         safe(w, (1, 0), (2, 0))
         w.entities = [Entity("supply", 9, (2, 0), "gem")]
-        self.assertIsNone(outcome(w).intents)
+        # pickup off: the generic supply reflex (reflex 4) is not Gather's pile logic.
+        self.assertIsNone(outcome(w, pickup=False).intents)
 
     def test_takes_gem_pile_in_range_once_its_code_is_known(self):
         w = grid(["g.g"], at=(1, 0))
         safe(w, (1, 0))
         w.entities = [Entity("supply", 9, (2, 0), "gem_pile")]
         with mock.patch.object(gather_mod, "UNKNOWN_GEM_PILE_CODES", frozenset({"gem_pile"})):
-            out = outcome(w)
+            out = outcome(w, pickup=False)
         self.assertEqual(out.intents[0]["verb"], "Take")
 
     def test_skips_grass_outside_safe_ish_ground(self):

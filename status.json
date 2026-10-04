@@ -29,7 +29,7 @@
 
   "A10": {"state": "open"},
 
-  "A11": {"state": "open"},
+  "A11": {"state": "done"},
 
   "A12": {"state": "done"},
 
@@ -89,7 +89,7 @@
 
   "A40": {"state": "open"},
 
-  "A41": {"state": "open"},
+  "A41": {"state": "done"},
 
   "A42": {"state": "open"},
 

@@ -10,12 +10,10 @@ from ..pathing import grid_params, next_step
 from ..plan_goals import gather_gems_goal
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
-from .explore import ExploreState
+from .explore import ExploreState, plan_sets, reflex_outcome
 from .gather_safe import is_safe_ish
 from .intents import set_position, take, use_block
-from .reflexes import safety_reflex
 
-GATHER_BLOCKS = frozenset({"grass", "bush"})
 # The supply code a gem pile carries is not published (GAME_NOTES.md open
 # questions), so pile targeting stays off until it is observed. Gem caches
 # (gem_cache_5/7/10) are a different drop and are not piles.
@@ -75,9 +73,8 @@ def gather_outcome(
         return StateOutcome(None, "position unknown", state=state)
     view = w.view
 
-    reflex, plan_avoid, plan_costly = safety_reflex(
-        w, m, policy, never_attack=never_attack, knowledge=knowledge, state=state
-    )
+    blocked, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
+    reflex = reflex_outcome(w, m, policy, blocked, never_attack=never_attack, state=state)
     if reflex is not None:
         if not m.path and m.goal == GOAL:
             m.goal, m.gather_target = "", None
@@ -86,7 +83,7 @@ def gather_outcome(
     piles = [e for e in w.entities if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and is_safe_ish(w, e.pos, policy)]
     if piles:
         s = min(piles, key=lambda e: (chebyshev(e.pos, here), e.id))
-        return StateOutcome([take(s)], f"take {s.code or s.id}", reflex=True, state=state)
+        return StateOutcome([take(s)], f"take {s.code or s.id}", state=state)
 
     if view.tiles.get(here) == "grass" and is_safe_ish(w, here, policy):
         return StateOutcome([use_block(here)], "cut grass", state=state)

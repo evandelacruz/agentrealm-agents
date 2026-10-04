@@ -9,14 +9,17 @@ from .downed import DownedState
 from .explore import ExploreState
 from .gather import GatherState
 from .idle import IdleState
+from .recover import RecoverState
 from .sync import SyncState
 
 # Priority order (PLAYABLE_AGENT_PLAN.md State machine). Sync and Downed are
-# both priority 0 and never both act: each only waits. Survival states A9–A11
-# slot in above Gather; M8 economy states slot above Explore.
+# both priority 0 and never both act: each only waits. A9–A10 slot above Explore
+# later; Recover (A11) is priority 3, above Gather. M8 economy states slot above
+# Explore.
 STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
+    RecoverState(),
     GatherState(),
     ExploreState(),
     IdleState(),

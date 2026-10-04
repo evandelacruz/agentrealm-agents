@@ -8,6 +8,7 @@ from agentrealm_agent.config import Policy
 from agentrealm_agent.navigation import cost_path
 from agentrealm_agent.navigation.rejection import NavMemory
 from agentrealm_agent.world import Entity, WorldModel, terrain_cells
+from agentrealm_agent.zone_discovery import apply_zone
 
 
 def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
@@ -158,6 +159,7 @@ class DeathChestTest(unittest.TestCase):
         w.apply_events([{"tick": 5, "events": [{"kind": "Died", "cause": "killed", "chest_id": 80, "map_id": 7, "x": 0, "y": 0}]}])
         self.assertEqual(w.death_chest, (7, (0, 0), 80))
         w.map_id, w.pos = 7, (4, 0)  # respawned along the strip
+        apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
 
         m = Memory()
         d = decide(w, m, scripted(goals=["hold"]), random.Random(0))

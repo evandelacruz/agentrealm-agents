@@ -103,6 +103,7 @@ class WorldModel:
     attack_range: int | None = None  # armed weapon reach from get_self (B100)
     armed_code: str | None = None
     worn_codes: dict[str, str] = field(default_factory=dict)
+    gems: int | None = None
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -324,6 +325,10 @@ class WorldModel:
     def _apply_inventory(self, inv: dict | None) -> None:
         if inv is None:
             return
+        if "gems" in inv:
+            gems = _opt_int(inv.get("gems"))
+            if gems is not None and gems >= 0:
+                self.gems = gems
         self.armed_code, self.worn_codes = loadout_from_inventory(inv)
         if "gems" in inv:
             self.gems = _opt_int(inv.get("gems"))

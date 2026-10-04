@@ -14,7 +14,16 @@ see PLAN.md A18 for why.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Iterable
+
+DEFAULT_CARRY_CAPACITY = 10
+
+
+@dataclass(frozen=True)
+class InventorySupply:
+    id: int
+    code: str = ""
 
 
 def _supply_code(entry: Any) -> str | None:
@@ -35,14 +44,26 @@ def _positive_int(v: Any) -> int | None:
     return n if n > 0 else None
 
 
-def loadout_from_inventory(inv: dict | None) -> tuple[str | None, dict[str, str]]:
-    """Armed subtype and worn slot -> subtype from a snapshot ``inventory``.
+def _inventory_supplies(raw: Any) -> list[InventorySupply]:
+    if not isinstance(raw, list):
+        return []
+    out: list[InventorySupply] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        sid = entry.get("id")
+        if sid is None:
+            continue
+        out.append(InventorySupply(int(sid), _supply_code(entry) or ""))
+    return out
 
-    Each supply there is an ``id`` and ``supply_subtype_code``; ``worn`` is
-    keyed by slot (API Snapshots).
-    """
+
+def carried_from_inventory(
+    inv: dict | None,
+) -> tuple[list[InventorySupply], list[InventorySupply], str | None, dict[str, str], int | None]:
+    """Held, stowed-in-chest, armed code, worn codes, and optional capacity."""
     if not inv:
-        return None, {}
+        return [], [], None, {}, None
     armed = _supply_code(inv.get("armed"))
     worn: dict[str, str] = {}
     raw = inv.get("worn")
@@ -51,6 +72,23 @@ def loadout_from_inventory(inv: dict | None) -> tuple[str | None, dict[str, str]
             code = _supply_code(entry)
             if code:
                 worn[str(slot)] = code
+    capacity = _positive_int(inv.get("capacity"))
+    return (
+        _inventory_supplies(inv.get("held")),
+        _inventory_supplies(inv.get("chest")),
+        armed,
+        worn,
+        capacity,
+    )
+
+
+def loadout_from_inventory(inv: dict | None) -> tuple[str | None, dict[str, str]]:
+    """Armed subtype and worn slot -> subtype from a snapshot ``inventory``.
+
+    Each supply there is an ``id`` and ``supply_subtype_code``; ``worn`` is
+    keyed by slot (API Snapshots).
+    """
+    _, _, armed, worn, _ = carried_from_inventory(inv)
     return armed, worn
 
 

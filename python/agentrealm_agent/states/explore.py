@@ -8,12 +8,11 @@ from ..config import Policy
 from ..directives import attack_forbidden
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
-from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import flee_step, grid_params, nav_search, next_step, replan
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
-from .intents import set_position, take, use_on, withdraw_all
+from .intents import set_position, use_on
 
 
 class ExploreState(State):
@@ -82,27 +81,6 @@ def scripted_outcome(
             return StateOutcome(
                 [set_position(away)], f"flee {target.kind} {target.id}", reflex=True, state=state
             )
-
-    if policy.pickup:
-        near = [e for e in w.entities if e.kind == "supply" and chebyshev(e.pos, here) <= 1]
-        if near:
-            s = min(near, key=lambda e: (chebyshev(e.pos, here), e.id))
-            return StateOutcome([take(s)], f"take {s.code or s.id}", reflex=True, state=state)
-
-    if policy.pickup and w.death_chest is not None and w.death_chest[0] == w.map_id:
-        _, at, chest_id = w.death_chest
-        if chebyshev(at, here) <= 1:
-            contents = w.chest_contents.get(chest_id)
-            if contents:
-                return StateOutcome(
-                    [withdraw_all(chest_id)], f"recover from chest {chest_id}", reflex=True, state=state
-                )
-            if contents is None:
-                return StateOutcome(None, f"open chest {chest_id}", state=state)
-        elif m.goal != "chest" or not next_step(w, plan_avoid, m.path):
-            found = cost_path(w, at, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, "chest", at))
-            if next_step(w, plan_avoid, found):
-                m.path, m.goal = found, "chest"
 
     step = next_step(w, plan_avoid, m.path)
     if step is None:

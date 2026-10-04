@@ -20,3 +20,7 @@ def take(e: Entity) -> dict:
 def withdraw_all(chest_id: int) -> dict:
     # No supply_ids: take everything that fits, lowest ids first (B117).
     return {"verb": "WithdrawFromChest", "chest_id": chest_id}
+
+
+def drop(supply_id: int) -> dict:
+    return {"verb": "Drop", "supply_id": supply_id}

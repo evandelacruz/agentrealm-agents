@@ -662,6 +662,8 @@ def _fmt_intent(i: dict | None) -> str:
         return f"Take({i['supply_id']})"
     if verb == "WithdrawFromChest":
         return f"WithdrawFromChest({i['chest_id']}:{','.join(map(str, i.get('supply_ids', ['all'])))})"
+    if verb == "Drop":
+        return f"Drop({i['supply_id']})"
     return verb
 
 

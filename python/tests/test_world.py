@@ -74,7 +74,7 @@ class SnapshotObservationTest(unittest.TestCase):
         self.w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": [
             {"id": 80, "x": 0, "y": 0, "contents": [{"id": 1, "supply_subtype_code": "apple"}]},
         ]}}})
-        self.assertEqual(self.w.chest_contents[80], [1])
+        self.assertEqual([s.id for s in self.w.chest_contents[80]], [1])
         self.assertIsNone(self.w.snapshot_version)
 
     def test_snapshot_without_complete_flag_is_ignored(self):
@@ -107,7 +107,7 @@ class SnapshotObservationTest(unittest.TestCase):
         self.w.entities_tick = -1
         self.w.apply_observation({"version": "11", "complete": True, "snapshot": {"lives": 5}})
         self.assertIn(("npc", 301), {(e.kind, e.id) for e in self.w.entities})
-        self.assertEqual(self.w.chest_contents[80], [1321])
+        self.assertEqual([s.id for s in self.w.chest_contents[80]], [1321])
         self.assertEqual(self.w.entities_tick, -1)
 
     def test_snapshot_entities_mark_entity_read(self):

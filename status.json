@@ -9,17 +9,17 @@
 
   "M5": {"state": "partial", "remaining": "Run scripts/seed_local_stack.py --probe against a real local stack and confirm create works end to end; the readiness probe stays opt-in until the API offers a read-only sandbox readiness signal or a character delete (PLAN.md Server gaps)."},
 
-  "A1": {"state": "open"},
+  "A1": {"state": "done"},
 
   "A2": {"state": "done"},
 
-  "A3": {"state": "open"},
+  "A3": {"state": "done"},
 
   "A4": {"state": "open"},
 
   "A5": {"state": "open"},
 
-  "A6": {"state": "open"},
+  "A6": {"state": "done"},
 
   "A7": {"state": "open"},
 
@@ -41,7 +41,7 @@
 
   "A16": {"state": "open"},
 
-  "A17": {"state": "open"},
+  "A17": {"state": "done"},
 
   "A18": {"state": "open"},
 

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .config import Policy
+from .curiosity_budget import curiosity_room
+from .directives import PARAM_DEFAULTS
 from .door_look import iter_unlooked, look_key
 from .investigation import cell_was_read, spoken_npc_ids
 from .knowledge_base import KnowledgeBase
@@ -35,6 +37,7 @@ class InterestItem:
     pos: Pos | None = None
     npc: Entity | None = None
     sort_key: tuple = ()
+    charges_budget: bool = False
 
 
 def read_key(map_id: int, pos: Pos) -> str:
@@ -105,8 +108,7 @@ def _say_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, here: Pos) ->
 
 
 def _look_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, map_id: int, here: Pos) -> list[InterestItem]:
-    # Overworld only: Level owns interior doors (A37). Current map only, so a
-    # look never routes through a door before the curiosity cap lands (A32).
+    # Overworld only: Level owns interior doors (A37). Current map only.
     if w.map_level is not None and w.map_level > 0:
         return []
     out: list[InterestItem] = []
@@ -122,6 +124,7 @@ def _look_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, map_id: int,
                 map_id=map_id,
                 pos=pos,
                 sort_key=(2, chebyshev(here, pos), pos),
+                charges_budget=True,
             )
         )
     return out
@@ -141,8 +144,19 @@ def list_interest(w: WorldModel, kb: KnowledgeBase | None, policy: Policy, m: Me
     return items
 
 
-def pick_interest_tick(w: WorldModel, kb: KnowledgeBase | None, policy: Policy, m: Memory) -> InterestItem | None:
-    """Top item. Reads and speech from where the agent stands are free; walk-to-look
-    detours are not charged until the curiosity cap ships (A32)."""
-    items = list_interest(w, kb, policy, m)
-    return items[0] if items else None
+def pick_interest_tick(
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    policy: Policy,
+    m: Memory,
+    *,
+    params: dict[str, float | int] | None = None,
+    tick: int | None = None,
+) -> InterestItem | None:
+    """Top interest item the curiosity budget still allows (A32)."""
+    params = dict(PARAM_DEFAULTS if params is None else params)
+    now = w.tick if tick is None else tick
+    for item in list_interest(w, kb, policy, m):
+        if not item.charges_budget or curiosity_room(params, m, now):
+            return item
+    return None

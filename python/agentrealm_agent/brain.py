@@ -1,7 +1,7 @@
-"""Deciding: which call to spend this window on, and which intent to send.
+"""Scheduler (choose_call) and pathing helpers for the state machine (A5).
 
-Both are pure functions of the world model and the policy, so the same
-observations give the same choice and a trace reads back as a decision.
+Tick intents come from ``states.dispatch``; ``decide`` adapts that to ``Decision``
+for the runner. Both paths are pure in the world model and policy.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ import random
 from dataclasses import dataclass, field
 
 from .config import Policy
-from .directives import attack_forbidden
 from .executor.movement import step_landing
 from .navigation import CostGridParams, cost_path, known_prefix, nearest_target
 from .poll_cadence import gate_tick_call, is_urgent
@@ -50,6 +49,16 @@ class Memory:
     resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
     path_blockers: set = field(default_factory=set)  # blocked cells the walk queue already crossed when sent (A43)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
+
+
+@dataclass
+class PlayContext:
+    """Policy, memory, and runtime knobs passed into the state machine (A5)."""
+
+    memory: Memory
+    policy: Policy
+    rng: random.Random
+    never_attack: list[str] = field(default_factory=list)
 
 
 def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
@@ -132,95 +141,13 @@ def decide(
     *,
     never_attack: list[str] | None = None,
 ) -> Decision:
-    """The reflex list from PLAN.md. The first rule that matches wins.
+    """Priority state machine (A5), kept as Decision for the runner and older tests."""
+    from .states import dispatch
 
-    Each call is one decision window: it ages the tiles reflex 1 blocked.
-    """
-    d = _decide(w, m, policy, rng, never_attack=never_attack or [])
-    m.blocked = {p: n - 1 for p, n in m.blocked.items() if n > 1}
-    return d
-
-
-def _decide(
-    w: WorldModel, m: Memory, policy: Policy, rng: random.Random, *, never_attack: list[str]
-) -> Decision:
-    if policy.kind == "idle" or w.pos is None or not w.alive:
-        return Decision(None, "idle")
-    here = w.pos
-    view = w.view
-
-    if policy.kind == "wander":
-        return _wander(w, m, rng)
-
-    # 1. A rejected step is kept out of every choice below until it ages out.
-    # Blocks that hurt are kept out the same way, so no plan walks into one.
-    hazards = {p for p, b in view.tiles.items() if b in policy.avoid_blocks}
-    blocked = set(m.blocked) | hazards
-    # Plans keep off hazards, except when standing on one with no safe step
-    # off: then they may cross hazards, as few as they can, to get out.
-    escape: set[Pos] = set()
-    # 2. Standing on a block that hurts.
-    if here in hazards:
-        safe = w.open_neighbours(here, blocked)
-        if safe:
-            m.path = []
-            return Decision(set_position(min(safe)), f"off {view.tiles.get(here)}", reflex=True)
-        escape = hazards
-    plan_avoid = blocked - escape
-
-    # 3. Hostiles.
-    hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
-    if hostiles and policy.on_hostile != "ignore":
-        target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
-        if policy.on_hostile == "fight":
-            if target.kind == "character" and not attack_forbidden(target, never_attack):
-                return Decision(use_on(target), f"fight {target.kind} {target.id}", reflex=True)
-            # NPC targets have no Use target kind on the wire yet; fall through to flee.
-            # never_attack on characters also falls through to flee.
-        away = _flee_step(w, hostiles, blocked)
-        if away is not None:
-            m.path = []
-            return Decision(set_position(away), f"flee {target.kind} {target.id}", reflex=True)
-
-    # 4. Supplies within reach.
-    if policy.pickup:
-        near = [e for e in w.entities if e.kind == "supply" and chebyshev(e.pos, here) <= 1]
-        if near:
-            s = min(near, key=lambda e: (chebyshev(e.pos, here), e.id))
-            return Decision(take(s), f"take {s.code or s.id}", reflex=True)
-
-    # 4b. Our death chest: go back for it and take everything out (B103).
-    if policy.pickup and w.death_chest is not None and w.death_chest[0] == w.map_id:
-        _, at, chest_id = w.death_chest
-        if chebyshev(at, here) <= 1:
-            contents = w.chest_contents.get(chest_id)
-            if contents:
-                return Decision(withdraw_all(chest_id), f"recover from chest {chest_id}", reflex=True)
-            if contents is None:
-                return Decision(None, f"open chest {chest_id}")
-        elif m.goal != "chest" or not _next_step(w, plan_avoid, m.path):
-            found = cost_path(w, at, _grid(policy, plan_avoid, escape))
-            if _next_step(w, plan_avoid, found):
-                m.path, m.goal = found, "chest"
-
-    # 5. Follow the plan, walking only its known prefix (A12). Replan when
-    # the next step is not open or not yet seen.
-    step = _next_step(w, plan_avoid, m.path)
-    if step is None:
-        _replan(w, m, policy, rng, plan_avoid, escape)
-        step = _next_step(w, plan_avoid, m.path)
-    if step is not None:
-        return Decision(set_position(step), f"{m.goal} → {m.path[-1]}")
-
-    # 6. Nothing to do.
-    return Decision(None, "no goal reachable")
-
-
-def _wander(w: WorldModel, m: Memory, rng: random.Random) -> Decision:
-    options = w.open_neighbours(w.pos, set(m.blocked))
-    if not options:
-        return Decision(None, "wander: boxed in")
-    return Decision(set_position(rng.choice(sorted(options))), "wander")
+    ctx = PlayContext(m, policy, rng, never_attack=never_attack or [])
+    outcome = dispatch(w, ctx)
+    intent = outcome.intents[0] if outcome.intents else None
+    return Decision(intent, outcome.reason, outcome.reflex)
 
 
 def _flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:

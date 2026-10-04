@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
 from .threat import ThreatTable, absorb_damaged, damage_amount
+
+log = logging.getLogger(__name__)
 
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
 # warp: never occupied, but stepping onto one warps.
@@ -162,17 +165,22 @@ class WorldModel:
         self.attack_range = _opt_int(s.get("attack_range"))
 
     def apply_position(self, p: dict) -> None:
-        # Absent or null on the overworld; anything but an integer is rejected
-        # before the read changes the model (A37).
+        # `level` belongs to the map (Manual §5.3): a read that omits it keeps
+        # the map's level, and a new map starts with none until a read names
+        # it. A non-integer `level` is logged and read as omitted (A37).
+        has_level = "level" in p
         level = p.get("level")
         if level is not None and (isinstance(level, bool) or not isinstance(level, int)):
-            raise ValueError(f"position level must be an integer, got {level!r}")
+            log.warning("position level must be an integer, got %r; ignored", level)
+            has_level, level = False, None
         map_id = int(p["map_id"])
         if map_id != self.map_id:
             self.snapshot_version = None  # entities no longer match its base
+            self.map_level = None
         self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
-        self.map_level = level
+        if has_level:
+            self.map_level = level
 
     def perception_rect(self) -> tuple[int, int, int, int]:
         """x0, y0, width, height of the perception window around us."""

@@ -43,14 +43,35 @@ class InsideLevelTest(unittest.TestCase):
         w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": None})
         self.assertFalse(inside_level(w))
 
-    def test_non_integer_level_rejected(self):
+    def test_delta_without_level_stays_inside(self):
+        w = grid(["."], map_id=9)
+        w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
+        w.apply_position({"map_id": 9, "x": 1, "y": 0})
+        self.assertEqual(w.map_level, 2)
+        self.assertTrue(inside_level(w))
+
+    def test_new_map_without_level_resets_it(self):
+        w = grid(["."], map_id=9)
+        w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
+        w.apply_position({"map_id": 1, "x": 5, "y": 5})
+        self.assertIsNone(w.map_level)
+        self.assertFalse(inside_level(w))
+
+    def test_non_integer_level_ignored(self):
         w = grid(["."], map_id=9)
         w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
         for bad in ("2", "deep", 1.5, True, [1]):
             with self.subTest(level=bad):
-                with self.assertRaises(ValueError):
-                    w.apply_position({"map_id": 8, "x": 3, "y": 3, "level": bad})
-                self.assertEqual((w.map_id, w.pos, w.map_level), (9, (0, 0), 2), "a rejected read changes nothing")
+                with self.assertLogs("agentrealm_agent.world", level="WARNING"):
+                    w.apply_position({"map_id": 9, "x": 3, "y": 3, "level": bad})
+                self.assertEqual((w.map_id, w.pos, w.map_level), (9, (3, 3), 2), "keeps the last good level")
+
+    def test_malformed_level_in_delta_does_not_raise(self):
+        w = grid(["."], map_id=9)
+        w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
+        with self.assertLogs("agentrealm_agent.world", level="WARNING"):
+            w.apply_observation({"version": 11, "delta": {"position": {"map_id": 9, "x": 2, "y": 2, "level": "deep"}}})
+        self.assertEqual((w.pos, w.map_level), ((2, 2), 2))
 
 
 class LevelStateTest(unittest.TestCase):

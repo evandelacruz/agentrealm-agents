@@ -1,4 +1,4 @@
-# Game notes (milestone 0)
+# Game notes (M0)
 
 What the agent needs to know to play Agent Realm. Every fact names its source:
 
@@ -33,11 +33,11 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 
 - **Clock and budget.** 10 ticks/s. One request per character per tick, burst 3, counted across every `/characters/{id}/…` route, reads included (M §7.4).
 - **Queue.** Each POST carries up to `queue_horizon_seconds × tick_rate` intents, 40 at 10 Hz (M §7.6). Over that is `queue_too_long`.
-- **Movement pacing.** At movement speed 2500 (2.5 blocks/s), a move is allowed every 4 ticks: `Step, Wait, Wait, Wait`. Four rates use the same accumulator mechanism (API Movement):
+- **Movement pacing.** At movement speed 2500 (2.5 blocks/s), a move is allowed every 4 ticks: `Step, Wait, Wait, Wait`. Three rates use the same accumulator mechanism (API Movement):
   - movement: one move per 1000 / speed seconds;
   - attacks: one per weapon cooldown, 1 s by default (10 ticks);
   - speech: one per second;
-  - all three, integer accumulators capped at one action, so nothing banks.
+  - each is an integer accumulator capped at one action, so nothing banks.
 - **Pacing worked in play.** About 60 queued steps ran with no `movement_cooldown` (Obs).
 - **Breaking a block spends the attack accumulator.** `Use` on a bush, then `Use` again 2 ticks later, was rejected `attack_cooldown` (Obs 1835985–87).
 - **Some intents don't wait on the move accumulator.** `Arm`, `Read`, `Take`, `WithdrawFromChest` and `Use` ran on the tick right after a `Step`. Nine `Read`s in a row on consecutive ticks all applied (Obs).
@@ -119,6 +119,8 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   | `matches` | 5 |
   | `small_potion` | 10 |
 
+- **Gems and lives are counters.** Gems and hearts (extra lives) are consumed on pickup into counters (M §11). In Olympuff, cut grass and bushes drop gems and hearts (M §16).
+- **Food.** Olympuff's golden cap heals 6 and is eaten on pickup (M §16). Potions are drunk with `Arm` + `Use` on self; swapping what is armed costs a tick (API Use). Small potion +10, large +30 (M §16).
 - **Gear tiers:** bronze in town, iron at waystations, adamant at the Last Camp and from bosses (M §16).
 - **Gems come from** cutting grass and bushes (10% in ring 1, 15% farther), felling trees, gem piles that return on an interval, and gem caches. Field work earns about 3 gems a minute (M §16). Gems are kept on death.
 - **Food and gems on the ground.** Apples, berries and gem piles lie around town, free to pick up (Obs).
@@ -160,6 +162,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   - `Died` named `chest_id` and its landing block, and listed the 4 dropped supplies;
   - `Respawned` came exactly 50 ticks later, on the town plaza;
   - `WithdrawFromChest` with only the `chest_id` took everything back.
+- **Zero lives.** At zero lives the character is ended, permanently: every intent is `character_ended` (M §11).
 - **Respawn zones:** Olympuff has five waystations plus a corner of the town plaza (M §11).
 - **Dying in a boss room** puts the chest outside the level, within 20 blocks of its perimeter (M §11).
 - **Sleep.** `Sleep` needs 10 s with no damage dealt or taken (`recent_damage`) and is refused inside a level (`sleep_not_allowed_in_level`). A character with no intent for 10 minutes falls asleep (M §11).
@@ -199,3 +202,6 @@ Each has a test the agent or a hand session can run.
 | What each level's entrance needs | Walk to each minimap mark; read terrain (`locked`, block type), signs and helpers nearby. Stored in `.state/`, never committed |
 | Hunting ground locations and ceilings | `get_zone` on cells around town |
 | Boss fight time limits | Read on entry, or learn from the first attempt |
+| How ground food other than the golden cap heals (apples, berries): on pickup, or carried and `Use`d on self | `Take` one while hurt and read `health`; if unchanged, `Arm` + `Use` self |
+| Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
+| Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |

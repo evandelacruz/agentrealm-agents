@@ -7,7 +7,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 ## Boundaries
 
 - **An ordinary API client.** HTTP only. It imports nothing from the Go code and never touches Postgres, Redis, or NATS. If it needs something the API does not give, that is a server gap, written down below, not a side door.
-- **Python 3.11+, standard library only.** No install step beyond Python. The LLM planner (milestone 4) is the one place a dependency may enter, and it stays optional.
+- **Python 3.11+, standard library only.** No install step beyond Python. The LLM planner (M4) is the one place a dependency may enter, and it stays optional.
 - **Obeys the invariants a client can see.** At most one intent per tick, no standing orders, and when there is no decision it sends nothing.
 
 ## What the API gives today
@@ -94,7 +94,7 @@ Goals are tried in order; the first with a reachable target wins. Re-plan when a
 ### Planner: sets goals and settings
 
 - **scripted**: goals and settings come straight from the character file.
-- **llm** (milestone 4): every N ticks, or when something new happens (new character seen, door found, goal exhausted, damage), it sends the model a summary of the world model and gets back goals, settings, and an optional `Say`/`Broadcast`. It runs off the tick loop. The loop keeps the old answer until a new one lands, so a slow model never costs a tick.
+- **llm** (M4, superseded by the strategist in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)): every N ticks, or when something new happens (new character seen, door found, goal exhausted, damage), it sends the model a summary of the world model and gets back goals, settings, and an optional `Say`/`Broadcast`. It runs off the tick loop. The loop keeps the old answer until a new one lands, so a slow model never costs a tick.
 
 ## Character file
 
@@ -107,7 +107,7 @@ model_agent = "agentrealm-reference/scripted"
 world = "sandbox"
 
 [policy]
-kind = "scripted"                   # idle | wander | scripted (llm is milestone 4, not built)
+kind = "scripted"                   # idle | wander | scripted (llm is M4, not built)
 goals = ["explore", "doors"]
 on_hostile = "flee"                 # flee | fight | ignore
 hostile = ["npc"]                   # npc, character
@@ -139,12 +139,27 @@ Environment: `AGENTREALM_API_KEY`, and optionally `AGENTREALM_BASE_URL` (default
 
 ## Milestones
 
-1. **Client and loop.** HTTP client, call scheduler, wall-clock pacing, 429/503 handling, `create`/`run`/`status`, `idle` and `wander`.
-2. **World model and pathing.** Tile and entity cache per map, local position tracking, A*, `explore`, `doors`, `goto`.
-3. **Reflexes and scripted characters.** The reflex list, the full character file, the trace.
-4. **LLM planner.** Optional dependency. Writes goals and settings off-tick.
+These are the backlog. Each has a stable ID; cite it in commits and PR bodies. Per-ID state lives in [`status.json`](status.json), which is not a source of truth: where it disagrees with this file, status is wrong.
 
-Milestones 1–3 are built. Fighting an NPC falls back to fleeing: the agent aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it.
+| ID | Milestone | Depends on |
+|---|---|---|
+| M0 | **Discovery.** Docs read, hand play through MCP, [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) written. | |
+| M1 | **Client and loop.** HTTP client, call scheduler, wall-clock pacing, 429/503 handling, `create`/`run`/`status`, `idle` and `wander`. | |
+| M2 | **World model and pathing.** Tile and entity cache per map, local position tracking, A*, `explore`, `doors`, `goto`. | M1 |
+| M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
+| M4 | **Strategist and directives.** The LLM planner: optional dependency, off-tick, emits typed plan operations, never intents. Plus the runtime directives file. Specified in the playable plan. | M9 |
+| M5 | **Local seed.** A script that gives the local stack an account, a key, and a playable sandbox map, so `create` works end to end. The `default` outfit is already seeded by migration 00023. Only for running against a local stack; the agent's default target is the public API. | M1 |
+| M6 | **Executor.** `Step`/`Wait` paced multi-intent queues, two poll cadences, snapshot deltas, health tracking. | M3 |
+| M7 | **State machine and survival.** Prioritised states replace `brain.decide`; cost-grid navigation, stuck detection. | M6 |
+| M8 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight`; learned item table. | M7 |
+| M9 | **Navigation and knowledge.** Per-world knowledge base, `Travel`, door graph, `Break` and break memory. | M8 |
+| M10 | **Curiosity and clues.** Interest list, odd-block detector, `Investigate`, clue capture. | M9 |
+| M11 | **Levels.** `Level`, `Boss`, `Solve`. | M4, M10 |
+| M12 | **Evaluation.** Metrics per run, compared across commits. | M7 |
+
+M1–M3 are built, and M0 is done. Fighting an NPC falls back to fleeing: the agent aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it.
+
+M0 and M4, M6–M12 are specified in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md), with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). M4 there replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the one-intent queues in **Real time**; until then those sections describe the shipped agent. The call budget is unchanged: one request per character per tick, burst 3.
 
 ## Tests
 

@@ -1,8 +1,10 @@
 # Plan: an agent that can actually play
 
-Goal: a reference agent that survives, gears up, fights, travels the overworld, solves clues, and clears levels. "Clear all `level_count` levels" is how a world is beaten (`GET /world`); Olympuff has 8.
+Goal: a reference agent that survives, gears up, fights, travels the overworld, solves clues, and clears levels. "Clear all `level_count` levels" is how a world is beaten (`GET /characters/{id}/world`); Olympuff has 8.
 
 The game facts this plan relies on are in [GAME_NOTES.md](GAME_NOTES.md), with sources.
+
+Milestone IDs are the ones in [PLAN.md](../PLAN.md) **Milestones**, the one backlog: M0 (discovery, done), M6 to M12, and M4, which this plan redefines as the strategist. PLAN.md says which of its sections this plan supersedes and when.
 
 ## Verdict on the approach
 
@@ -13,10 +15,10 @@ Five rules keep it working:
 1. **Use priority states, not a flat FSM.** Survival interrupts first, opportunities second, the plan's goal last. A flat graph of every state-to-state transition grows too large to maintain.
 2. **The LLM never emits intents.** It emits typed plan operations from a fixed vocabulary (go here, read that, buy this, break that block with this tool). The state machine turns them into moves. Unknown or invalid operations are dropped.
 3. **Replays stay deterministic.** Every LLM answer and directive change is written to the trace, so a run can be replayed without the model.
-4. **The rules are known; the world must be learned.** Milestone 0 answered how levels, combat, items, `Compose` and death work. What each world hides (which entrance needs what, where the secrets are) is told only through in-world text: signs, statues, scrolls, helper lines. Reading that text and acting on it is the strategist's job, and the knowledge base is where it accumulates.
+4. **The rules are known; the world must be learned.** M0 answered how levels, combat, items, `Compose` and death work. What each world hides (which entrance needs what, where the secrets are) is told only through in-world text: signs, statues, scrolls, helper lines. Reading that text and acting on it is the strategist's job, and the knowledge base is where it accumulates.
 5. **No spoilers in the repo.** The repo is public. World clues, puzzle answers and level details live only in the gitignored per-world knowledge base. Tests use invented worlds.
 
-## What milestone 0 settled
+## What M0 settled
 
 | Unknown | Answer |
 |---|---|
@@ -61,14 +63,14 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
   (per world, .state/, gitignored)
                             │
                             ▼
-                    state machine  ── every tick: pick state by priority, state.act()
+                    state machine  ── every round trip: pick state by priority, state.act()
                             │
                             ▼
                     executor ── builds paced intent queues, sends one round trip,
                                 re-sends only when the queue is invalidated
 ```
 
-### Executor (fixes milestone 1)
+### Executor (M6; replaces the M1 one-intent loop)
 
 - **Paced queues.** Paths become `Step`, `Wait`×n, `Step`, … queues. The number of waits comes from `movement_speed`. Attacks are paced by the weapon cooldown (10 ticks by default), and block breaking spends the same attack accumulator. Speech is paced at 10 ticks. The queue is cut at the world's horizon.
 - **Re-send only when the queue goes wrong.** That means a result is rejected, a delta changes something on the path, or the state changes. A rejection discards the rest of the queue, so a path is rebuilt from the current position, not resent.
@@ -80,23 +82,23 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 
 ### State machine
 
-States are checked in priority order each tick. The first whose guard holds runs; each has entry and exit conditions with hysteresis so it does not flip back and forth.
+States are checked in priority order once per round trip: after each `POST tick` response is folded into the world model, before the next request. The first whose guard holds runs `act`, which returns the queue for the ticks until the next poll. Between round trips the server runs that queue one intent per tick, and nothing runs client-side; a state that must react within a tick (a hostile closing, health dropping) does so by switching the executor to its every-tick cadence. Each state has entry and exit conditions with hysteresis so it does not flip back and forth.
 
 | Priority | State | Enters when | Does |
 |---|---|---|---|
 | 0 | `Sync` | Unplaced, position unknown, after a warp | Reads self and position, waits for placement |
 | 0 | `Downed` | `Died` | Waits for `Respawned`, then queues `Recover` |
 | 1 | `Escape` | Standing on damage, or trapped | Steps off; crosses as little hazard as possible |
-| 1 | `Retreat` | The next two expected hits could kill, or the threat outclasses us | Goes to the nearest known safe tile, then `Heal` (see Health and lives) |
-| 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Eats nearby food, else drinks a potion from the reserve (`Arm` + `Use` self), else rests in a safe zone |
-| 2 | `Fight` | A hostile is in range and the win estimate clears the margin, counting every hostile within 2 blocks of it | Closes to `attack_range`, `Use` on the NPC's block, with the retreat queued behind |
+| 1 | `Retreat` | The next `retreat_hits` expected hits could kill (per-type damage from the threat table), or the threat outclasses us | Goes to the nearest known safe tile, then `Heal` (see Health and lives) |
+| 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Food in reach: walk onto it or `Take` it; food eaten on pickup heals there, carried food is then `Arm` + `Use` self. Else a carried potion: `Arm` + `Use` self, then re-`Arm` the weapon. Else, only if safe-zone regeneration has been measured, rests in a safe zone. Else goes to town and waits in the safe zone for the next goal to need less, raising a `buy` for potions (`Shop`, M8) |
+| 2 | `Fight` | A hostile is in range, it is not of a kind in `never_attack`, and the win estimate clears the margin, counting every hostile within 2 blocks of it | Closes to `attack_range`, `Use` on the NPC's block, with the retreat queued behind |
 | 2 | `Flee` | A hostile is in range and we would lose | Opens distance toward safety; safe zones stop all damage |
 | 3 | `Recover` | Our death chest is on a reachable map | Walks next to it (a safe tile next to it is enough), `WithdrawFromChest` |
 | 3 | `Equip` | Carrying something better than what is worn or armed | `Arm`, `Wear`, `Remove`; armor scored by damage it would have saved |
 | 3 | `Loot` | A worthwhile free supply or chest is near enough | Walks, `Take` or `WithdrawFromChest`, `Drop` junk when full |
 | 3 | `Shop` | The plan wants an item that is in sight with a `gem_price` we can pay | Walks onto it or `Take`s it |
 | 4 | `Investigate` | The interest list has an item within the curiosity budget (see Curiosity) | `Read`, `Say`, `get_zone`, walk to look; stores text as a clue |
-| 4 | `Break` | The plan names a block to open, or the odd-block detector scores a nearby block high enough | Arms the matching capability, `Use` on the block, records the result per block |
+| 4 | `Break` | The plan names a block to open, or the odd-block detector scores a nearby block high enough | Arms a capability not yet tried on that block, `Use` on the block, records the result per (block, capability) |
 | 4 | `Solve` | The plan holds an action to try (compose, a key at a door, a tool at a block) | Carries out the plan operation and checks the result |
 | 5 | `Gather` | The plan needs gems | Cuts grass and bushes and visits gem piles in safe-ish ground |
 | 5 | `Level` | Inside a level | Walks the rooms toward the unexplored doors, using `Fight`/`Break`/`Investigate` as they apply |
@@ -105,7 +107,7 @@ States are checked in priority order each tick. The first whose guard holds runs
 | 5 | `Explore` | Nothing else | Frontier exploration, unvisited entrance marks first; frontiers that turn out unreachable are dropped with a backoff |
 | 6 | `Idle` / `Sleep` | Stopping, or the plan says wait | Sends nothing, or `Sleep` at shutdown (not allowed inside a level) |
 
-Every state is a small class with `guard(world, plan) -> bool`, `act(world, plan) -> Queue | None` and `done(world) -> bool`. They are tested the way `brain.py` is tested today: a model in, an intent queue out.
+Every state is a small class with `guard(world, plan) -> bool`, `act(world, plan) -> list[Intent] | None` and `done(world) -> bool`. `act` returns the whole queue to send, in order, or `None` to send nothing. That is the M7 test seam: a world model and plan in, a `list[Intent]` out. It replaces today's `brain.decide(...) -> Decision`, which carries at most one intent, so new tests are not written in that shape.
 
 ### Navigation and getting unstuck
 
@@ -117,14 +119,14 @@ Paths are never straight lines. Bushes, trees, water, walls, fences, NPCs and ot
 |---|---|
 | Known walkable | 1 |
 | Fog (never seen) | 2. Assumed open, so the agent can aim at an entrance 300 blocks into the fog |
-| A breakable obstacle we hold the capability for, not marked as failed in break memory | Break time plus 1, so a bush in a hedge line is a door, not a wall |
+| An obstacle nominated for breaking (named by the plan, or scored by the odd-block detector) with a capability we hold that break memory has not marked as failed on it | Break time plus 1, plus the gem price of a consumable tool if that is the capability, so a nominated bush in a hedge line is a door, not a wall. Inert until `Break` lands in M9: before that the cell is impassable |
 | `fire`, `lava` | 1 plus a cost per point of `occupy_damage`; entered only when there is no other way |
 | Near a hostile | A danger cost that falls off with distance, so routes keep away from hostiles |
 | NPC or character standing there | High but finite, and it expires: they move |
-| Known blocked, or marked unreachable | Impassable |
+| Known blocked, including every obstacle not nominated (a block never says whether it breaks or what breaks it), or marked unreachable | Impassable |
 
 - **Walk only the part of the path we have seen.** The executor walks the known prefix and replans when terrain reads reveal what lies ahead, or a step is rejected. Fog optimism is corrected by looking.
-- **Long trips are two-level.** A coarse search over 16×16 blocks (the server's own tile size) picks the corridor; A* inside the perception window picks the steps. Each search has a node budget per tick, so a long route never stalls a tick.
+- **Long trips are two-level.** A coarse search over 16×16-block squares (the API's cache-tile size, API Reads) picks the corridor; A* inside the perception window picks the steps. Each search has a node budget per tick, so a long route never stalls a tick.
 
 **2. Rejections teach the map, by code.**
 
@@ -147,14 +149,14 @@ An opening we cut or burned is open only until it grows back (about 60 s for a b
 
 **4. Escalation, in order, each step only if the one before fails:**
 1. Replan with the learned blocks, and with fog optimism lowered so known ground is preferred.
-2. Break through: if a breakable obstacle lies on the best blocked route and we hold the capability, `Break` it. A failed try is recorded per block and never repeated.
+2. Break through (M9): if a nominated obstacle lies on the best blocked route and we hold a capability not yet tried on it, `Break` it. A failed try is recorded per (block, capability); that pair is never tried again, but another capability may be.
 3. Reveal: explore the frontier cells nearest the goal, following the wall of the obstacle (left-hand rule) for a bounded number of moves, to uncover a way round.
 4. Change the means: if the goal is enclosed on this map (water, cliffs, a locked door), record what seems to be needed (a raft, a key, a door from another map) and route through the door graph if one is known.
 5. Give up for now: mark the goal unreachable with an exponential backoff, pick the next goal, and raise the strategist's `stuck` trigger. The trigger carries the goal, the explored outline and the blocking cell types. The strategist may answer with a tool to buy or a different route.
 
 **Cross-map routing.** Doors are edges of a graph. Each warp records where it landed, unvisited doors are exploration targets, and a route is a search over the door graph, then A* on each map.
 
-**Escape.** If regrowth or a crowd closes the agent in, `Escape` breaks out with whatever capability it holds, or waits for the blocker to move. Waiting inside a safe zone costs nothing.
+**Escape.** If regrowth or a crowd closes the agent in, `Escape` tries the capabilities it holds that break memory has not marked as failed on the enclosing blocks, or waits for the blocker to move. Waiting inside a safe zone costs nothing.
 
 **Tests.** Fixtures with:
 - a U-shaped trap: a local minimum that greedy moves fall into;
@@ -174,12 +176,12 @@ Progress in this game is hidden behind things a player has to poke at. Helpers d
 
 | Thing | Action | Notes |
 |---|---|---|
-| Unread `readable` cell (sign, statue, plinth) | `Read` | From up to 25 blocks away, no walk needed. Free: no speech cost, one per tick |
+| Unread `readable` cell (sign, statue, plinth) | `Read` | While it is in sight (perception × zone brightness, plus light, capped at perception), so no walk is needed once seen. Free: no speech cost, one per tick |
 | Unread scroll, carried or in sight | `Read` | |
 | NPC id never spoken to | `Say` once | Works from 25 blocks. A helper replies with its line; a hostile stays silent, which also tells us it is not a helper. Spaced 1 s apart |
 | Supply type never seen | Walk over or `Take`, if free and safe | Fills the item table |
 | Odd block out | Try each capability we hold, cheapest first | Detector below |
-| Cell with unusual art, or a statue facing differently from its neighbours | Investigate the cells around it | Art is a public picture and authors use it as a clue (M §9.2) |
+| Cell with unusual art, or a statue `facing` differently from its neighbours | Investigate the cells around it | Unsourced guess: the manual says art is a picture only and behaviour comes from `block_type` (M §9.2). Lowest priority until GAME_NOTES open questions confirm it |
 | Unvisited door or entrance mark | Walk to it, look | A locked or hidden door gets recorded with what it seems to need |
 | Unknown zone | `get_zone` once | Finds safe zones and hunting grounds |
 
@@ -193,12 +195,13 @@ A boost comes from a clue that mentions its type or surroundings ("rings hollow"
 **Trying a block.**
 - Weapons first, since they are free and not used up: a sword cuts and chops, a mallet smashes.
 - Then tools, which are used up: matches (5 gems), then bombs (expensive). A tool is spent only if the block scores high or a clue points at it.
-- Every outcome is stored per block: `applied_no_effect` with which capability, or what it turned into and what dropped.
+- Every outcome is stored per (block, capability): `applied_no_effect`, or what it turned into and what dropped. A pair that failed is never tried again; a pair that worked is reused after the block grows back.
 - A capability we lack, on a high-scoring block, becomes a `buy` suggestion for the strategist.
 
 **Budget, so curiosity doesn't get it killed or stalled.**
 - Each item scores value × novelty ÷ (distance + danger + consumable cost).
-- `Investigate` and `Break` run only when survival and the current goal allow, and get a capped share of time. A directive param `curiosity`, default 0.2, sets that share.
+- `Investigate` and `Break` run only when survival and the current goal allow, and get a capped share of time. The directive param `curiosity`, default 0.2, is that share, as a fraction of game ticks: over the last 600 ticks (60 s at 10 Hz), the ticks covered by queues that `Investigate` or `Break` sent may not exceed `curiosity` × 600. Reads and speech from where the agent stands are not counted.
+- Both are disabled while a hostile is within `hostile_range` and for the whole of a boss fight.
 - Reading and speaking from where the agent stands are nearly free, so they always happen. Detours are what the budget limits.
 - Above the cap, items wait for idle moments, or for the strategist to promote one.
 
@@ -206,7 +209,7 @@ A boost comes from a clue that mentions its type or surroundings ("rings hollow"
 
 ### Health and lives
 
-Health is the resource every other decision spends, and lives are the budget behind it. On a live world, at zero lives the character is gone for good. The agent tracks both and acts to keep them up.
+Health is the resource every other decision spends, and lives are the budget behind it. On a live world, at zero lives the character is ended, permanently: `character_ended` on every intent (M §11). The agent tracks both and acts to keep them up.
 
 **What it tracks.** `health` and `max_health` arrive in every round trip's observation while awake (the current agent ignores them). `lives` is in the snapshot too. Each `Damaged` event is logged with its source, so the agent knows what is hurting it and how fast.
 
@@ -220,21 +223,21 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 **Protecting health in the moment:**
 - **Never start a fight hurt.** `Fight` needs health above the expected damage of the whole group over the fight, plus a margin. Otherwise heal first.
-- **Retreat in time.** The threshold is set in hits, not percent: when the next two hits from what is attacking could kill, it leaves. The steps away are already queued behind every attack (see Executor).
+- **Retreat in time.** The threshold is set in hits, not percent: when the next `retreat_hits` (default 2) hits from what is attacking could kill, it leaves. A hit's size comes from the threat table, learned per hostile type from `Damaged` events (the API serves no hostile's damage). A type not yet measured is assumed to hit as hard as the hardest measured type, and before anything is measured, 2, the most a weak hostile dealt in M0. The steps away are already queued behind every attack (see Executor).
 - **Drink mid-fight** only when retreating is impossible, such as a boss room or being cornered. Swapping in a potion costs a tick, drinking costs another, and re-arming the weapon a third, so the agent compares those three ticks of incoming damage with the heal.
 - **Step off damaging ground** at once (`Escape`). Fire and lava are crossed only when the route has no other way.
 - **Traps.** Wear goggles when they are owned and the area is trapped. Never walk on a seen armed trap.
 - **Never stand around exposed.** `Sleep` in a safe zone when the run ends, since an awake, unattended character keeps taking hits. Idle waits happen in safe zones.
 
 **Healing:**
-- **Food first, it's free.** Food lying in sight is eaten when the amount missing is at least what it heals, and is remembered as a source. How much each type heals is learned from the `health` change.
+- **Food first, it's free.** Food lying in sight is picked up (walk onto it or `Take`) when the amount missing is at least what it heals, and is remembered as a source. Some food is eaten on pickup, like Olympuff's golden cap (M §16); carried food is eaten with `Arm` + `Use` self, the same call as a potion (API Use). Which kind each type is, and how much it heals, is learned from the `health` change.
 - **Potions are a reserve.** The agent keeps N potions (the `potion_reserve` directive, default 2). Below that, `Shop` buys more before any trip away from town. A potion is drunk out of combat only when no food is near and the next goal needs the health.
-- **Safe zones.** Health returning in a safe zone has not been observed yet. Milestone 2 measures it. If it returns, resting in town is the free fallback.
+- **Safe zones.** Health returning in a safe zone has not been observed yet. M7 measures it. If it returns, resting in town is the free fallback; if not, the fallback is potions and food, and an agent with neither waits in town and raises a `buy` (see `Heal`).
 
 **Raising health and protection over time:**
 - **Armor first.** Defense counts twice: it lowers the chance to be hit and the damage of each hit. `Equip` scores armor by the damage it would have saved against the threats in the item and threat tables, and the gem budget puts armor and potions ahead of curiosity spending.
-- **Max health rises on a level's first clear** (`level_clear_ceremony.max_health_gain`), so clearing levels is also how the agent grows. Any other permanent gain is a supply consumed for it, and the agent uses such a supply as soon as it finds one.
-- **Extra lives** are auto-consumed supplies. Any seen within reach becomes a top-priority `Loot` goal.
+- **Max health rises on a level's first clear** (`level_clear_ceremony.max_health_gain`), so clearing levels is also how the agent grows. Whether any supply raises max health permanently is an open question in GAME_NOTES; the plan counts on none.
+- **Extra lives** are hearts, consumed on pickup into the lives counter (M §11). In Olympuff they drop from cut grass and bushes (M §16). A heart in sight and safe to reach is a top `Loot` target.
 
 **After a death.** `Recover` runs only when the chest's spot is safe enough at full health: no group of hostiles still there, and not deep in fog. Otherwise the agent re-equips from town and gets the chest later, or writes it off. Every death is logged with its cause and the decision that led to it, and it tightens the risk level for that hostile type.
 
@@ -242,10 +245,10 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 - **Our side.** Reach is `attack_range` from `get_self`, refreshed after `Arm`; a `target_out_of_range` result also reports reach and distance. Our hit chance is published: d20 + attack ≥ 10 + target defense. Our damage per hit is learned from `NPCDamaged`.
 - **Their side.** Damage per hit, interval and reach per NPC type are learned from `Damaged` and `Attacked` events and kept in the knowledge base. Hostile stats are never served.
-- **Win estimate.** Ticks for us to kill everything that will join, versus ticks for that group to kill us. Fight above a margin, flee below it. Directives can bias the margin.
+- **Win estimate.** Ticks for us to kill everything that will join, versus ticks for that group to kill us. Fight above a margin, flee below it. Directives can bias the margin. No NPC's health is served except a boss's (M §9.3), so a type's health is learned as the total `NPCDamaged` it took before `NPCDied`; until a type has a kill on record, its health is assumed to be the largest seen for any type, and it falls under "conservative until measured".
 - **Conservative until measured.** At 10 health with no armor, the default is to fight only a lone hostile of a type already measured, or a new type from full health with an escape queued.
-- **Where to hunt.** Hunting grounds advertise a strength ceiling; pick the strongest one we can win in. Fields near town are the next step up.
-- **Never fight from a safe zone** (rejected). Use one to recover, and as a step-away escape when it is adjacent.
+- **Where to hunt.** Hunting grounds advertise a strength ceiling (`get_zone`); pick the highest ceiling at or above our strength that the win estimates say we can win in. Our strength is on the owner watch sheet, `GET /watch/characters/{id}/sheet`, which the character's own key may read and which spends the account's viewing bucket, not the character's call budget (M §5.5, §7.4). It is read after an `Equip` change and at most once a minute. If that read is refused, strength is bracketed by probing: an `over_strength_ceiling` rejection means our strength is above that ceiling, a successful entry that it is at or below. Fields near town are the next step up.
+- **Never fight from a safe zone** (rejected: `not_allowed_in_safe_zone`, M §11; GAME_NOTES Zones). Use one to recover, and as a step-away escape when it is adjacent.
 - **Bosses.** A boss shows `health`/`max_health`, so progress is measurable. A fight is on a clock, one at a time, and the door may be contested. The `Boss` state needs explicit preconditions from the plan: health, potions, gear, and the means to reach the boss.
 
 ### Gear and items
@@ -257,11 +260,11 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Knowledge base
 
-A JSON file per world in `python/.state/`, gitignored, shared by every character of that world:
+A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, shared by every character of that world run from this checkout. It sits apart from the per-character `python/.state/<name>.json` and trace files:
 
 - Revealed terrain per map, entrance marks, doors and where they lead, safe tiles, hunting grounds and ceilings, shops and prices.
 - Clues: the text of every sign, statue, scroll and helper line, with where it was found and when.
-- Per-block break attempts: which capability was tried on which block, and the result.
+- Break attempts per (block, capability), and the result.
 - NPC type stats, item stats, compose results, and what each entrance turned out to need.
 - Level progress: which levels are cleared, and the route and solution for each.
 
@@ -276,15 +279,37 @@ This is what makes a second run better than the first, and it is what the strate
 - **Output:** JSON checked against a schema. The example uses an invented world:
 
   ```json
-  {"goals": [{"op": "buy", "code": "torch", "why": "clue: the cave is dark"},
+  {"goals": [{"op": "say", "npc_type": "guard", "text": "hello"},
+             {"op": "buy", "code": "torch", "why": "clue: the cave is dark"},
              {"op": "travel", "to": "entrance", "x": 120, "y": 40},
              {"op": "break_block", "x": 118, "y": 41, "capability": "burn"}],
-   "params": {"fight_margin": 1.5, "retreat_health": 0.5},
-   "notes": "The sign says the door is behind the burnt hedge.",
-   "say": {"npc_type": "guard", "text": "hello"}}
+   "params": {"fight_margin": 1.5, "retreat_hits": 2, "curiosity": 0.2,
+              "lives_floor": 3, "risk": 0.5, "potion_reserve": 2},
+   "notes": "The sign says the door is behind the burnt hedge."}
   ```
 
-- **Operations** form a fixed set: `travel`, `explore_area`, `read`, `say`, `buy`, `break_block`, `use_block`, `compose`, `fetch_item`, `gather_gems`, `hunt`, `enter_level`, `fight_boss`, `avoid`, `wait`, `set_param`. Each maps onto a state. Anything outside the set is dropped and logged.
+  Top level has exactly three keys. `goals` replaces the goal stack, tried in order. `params` is applied at once, as the directives file's `params` are. `notes` is free text for the trace. Everything the agent should do, speech included, is a goal op; a `set_param` op changes a param only when the goal stack reaches it.
+
+- **Operations** form a fixed set. Each maps onto a state and has fixed fields; every op may also carry `why` (free text, logged). An op with an unknown name, a missing field, or a field of the wrong type is dropped and logged.
+
+  | Op | Fields | State |
+  |---|---|---|
+  | `travel` | `to` (`entrance`, `town`, `hunting_ground`, `shop`, `point`), `x`, `y`, optional `map_id` | `Travel` |
+  | `explore_area` | `x`, `y`, `radius` | `Explore` |
+  | `read` | `x`, `y` for a readable cell, or `supply_id` for a scroll | `Investigate` |
+  | `say` | `npc_id` or `npc_type`, `text` | `Investigate` |
+  | `buy` | `code` (a `supply_subtype_code`) | `Shop` |
+  | `break_block` | `x`, `y`, `capability` (`cut`, `chop`, `smash`, `burn`, `blast`) | `Break` |
+  | `use_block` | `x`, `y`, `code` (the supply to arm, such as a key) | `Solve` |
+  | `compose` | `composes_into` | `Solve` |
+  | `fetch_item` | `code`, optional `x`, `y` | `Loot` |
+  | `gather_gems` | `count` | `Gather` |
+  | `hunt` | `npc_type`, optional `x`, `y` of the ground | `Fight` |
+  | `enter_level` | `x`, `y` of the entrance | `Level` |
+  | `fight_boss` | `x`, `y` of the boss door | `Boss` |
+  | `avoid` | one of `npc_type`, `block_type`, or `x`, `y`, `radius` | Cost grid |
+  | `wait` | `seconds` | `Idle` |
+  | `set_param` | `name`, `value` | none |
 - **Packaging:** an optional extra, so the core stays standard library only. With no model configured, the plan comes from the character file and simple built-in rules: read everything, gear up, hunt, explore entrance marks.
 
 ### Runtime directives
@@ -292,36 +317,49 @@ This is what makes a second run better than the first, and it is what the strate
 A per-character file, `characters/<name>.directives.toml`, re-read whenever it changes:
 
 ```toml
-params = { retreat_health = 0.5, fight_margin = 2.0 }   # applied directly, no LLM
+params = { fight_margin = 2.0, retreat_hits = 2, curiosity = 0.2, lives_floor = 3, risk = 0.5, potion_reserve = 2 }
+never_attack = ["character"]                            # hard constraint, enforced by state guards
 goals = ["gather_gems:20", "buy:bronze_mail"]           # replaces the goal stack
 instructions = """
-Do not attack other players' characters.
 If you find a sign with numbers on it, try them as a code at the nearest locked door.
 """                                                     # free text, passed to the strategist
 ```
 
-Structured keys take effect on the next tick with no model involved. Free text only steers the strategist.
+Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist.
+
+Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
+
+| Param | Default | Meaning |
+|---|---|---|
+| `fight_margin` | 1.5 | Our ticks-to-win must beat theirs by this factor |
+| `retreat_hits` | 2 | Retreat when this many expected hits could kill |
+| `curiosity` | 0.2 | Share of ticks `Investigate` and `Break` may use (see Curiosity) |
+| `lives_floor` | 3 | At or below this many lives, fight only measured weak hostiles and stay inside explored ground |
+| `risk` | 0.5 | 0 cautious to 1 bold; scales the fight margin, retreat threshold, untested types and level entry |
+| `potion_reserve` | 2 | Potions to keep; `Shop` restocks below it before leaving town |
 
 ## Milestones
 
-| # | Milestone | Done when |
-|---|---|---|
-| 0 | **Discovery.** Docs read, hand play through MCP, [GAME_NOTES.md](GAME_NOTES.md) written. | Done: every unknown above has an answer or a measurement to take |
-| 1 | **Executor.** `Step`/`Wait` pacing, multi-intent queues, two poll cadences, deltas and complete snapshots, health tracking. A live smoke test against Olympuff. | A character walks 200 blocks with no `movement_cooldown` rejections, using under a quarter of its request budget while calm |
-| 2 | **State machine and survival.** Replace `brain.decide` with prioritised states: `Sync`, `Downed`, `Escape`, `Retreat`, `Heal`, `Flee`, `Recover`, `Explore`. Cost-grid planner, rejection learning, stuck detection and escalation steps 1, 3 and 5. Trace replay tests and the navigation fixtures. | Survives an hour in the overworld, retreating before the next two hits could kill, healing from food, and recovering its chest only when the spot is safe; it measures whether health returns in safe zones; reaches a point 150 blocks away through fog and obstacles, or gives up with a reason, never loops |
-| 3 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight` with group-aware win estimates and the retreat queued; learned threat and item tables. | Earns gems, buys armor, a weapon and a potion reserve, and kills lone weak hostiles without dying; never starts a fight below its health floor |
-| 4 | **Navigation and knowledge.** Per-world knowledge base, overworld `Travel` to entrance marks and back to town, door graph and cross-map routing, per-block break memory, `Break` (escalation steps 2 and 4). | Visits every entrance mark within its strength, records what each needs, and returns to town |
-| 5 | **Curiosity and clues.** Interest list, odd-block detector, `Investigate` and `Break` under the curiosity budget, clue capture with place and time, no-LLM clue rules. | Every readable cell and NPC within 25 blocks of its route has been read or spoken to; it finds and opens an odd block in a test map, and never spends a tool twice on the same block |
-| 6 | **Strategist and directives.** LLM planner thread, plan schema, directives file, trace logging. | Given clues from a test world, it plans the right `buy`/`travel`/`break_block` operations and the state machine carries them out |
-| 7 | **Levels.** `Level`, `Boss`, `Solve` (`Compose`, keys at doors). Boss preconditions from the plan; boss progress from its `health`. | Clears the easiest open level unattended, then uses what it learned to attempt the next |
-| 8 | **Evaluation.** Metrics per run (levels cleared, deaths, kills, gems, time per level), compared across commits. | A regression shows up as a number |
+These are rows of PLAN.md **Milestones**, which owns the IDs and the dependencies; this table owns the scope and the done-when.
 
-Milestones 1 and 2 come first whatever else changes. Milestones 3 to 7 now have known shapes. What remains uncertain is the order of levels in each world, and the strategist learns that.
+| ID | Milestone | Done when |
+|---|---|---|
+| M0 | **Discovery.** Docs read, hand play through MCP, [GAME_NOTES.md](GAME_NOTES.md) written. | Done: every unknown above has an answer or a measurement to take |
+| M6 | **Executor.** `Step`/`Wait` pacing, multi-intent queues, two poll cadences, deltas and complete snapshots, health tracking. A live smoke test against Olympuff. | A character walks 200 blocks with no `movement_cooldown` rejections, using under a quarter of its request budget while calm |
+| M7 | **State machine and survival.** Replace `brain.decide` with prioritised states: `Sync`, `Downed`, `Escape`, `Retreat`, `Heal`, `Flee`, `Recover`, `Explore`. Threat table (damage per hit per hostile type, from `Damaged`). Cost-grid planner with break costs inert, rejection learning, stuck detection and escalation steps 1, 3 and 5. Trace replay tests and the navigation fixtures. | Survives an hour in the overworld, retreating before the next `retreat_hits` hits could kill by its threat table, healing from carried potions, and recovering its chest only when the spot is safe; it measures whether health returns in safe zones; reaches a point 150 blocks away through fog and walkable detours, or gives up with a reason, never loops. A route that needs a block broken counts as a give-up with that reason |
+| M8 | **Gear, economy and combat.** `Gather`, `Shop`, `Loot`, `Equip`, `Fight` with group-aware win estimates and the retreat queued; learned item table; healing from food. | Earns gems, buys armor, a weapon and a potion reserve, heals from food it picks up, and kills lone weak hostiles without dying; never starts a fight below its health floor |
+| M9 | **Navigation and knowledge.** Per-world knowledge base, overworld `Travel` to entrance marks and back to town, door graph and cross-map routing, break memory per (block, capability), `Break` (escalation steps 2 and 4; break costs go live in the grid). | Visits every entrance mark within its strength, records what each needs, and returns to town |
+| M10 | **Curiosity and clues.** Interest list, odd-block detector, `Investigate` and `Break` under the curiosity budget, clue capture with place and time, no-LLM clue rules. | Every readable cell that came into sight along its route has been read, and every NPC that came within 25 blocks spoken to; it finds and opens an odd block in a test map, and never tries the same capability twice on the same block |
+| M4 | **Strategist and directives.** LLM planner thread, plan schema, directives file, trace logging. | Given clues from a test world, it plans the right `buy`/`travel`/`break_block` operations and the state machine carries them out |
+| M11 | **Levels.** `Level`, `Boss`, `Solve` (`Compose`, keys at doors). Boss preconditions from the plan; boss progress from its `health`. | Clears the easiest open level unattended, then uses what it learned to attempt the next |
+| M12 | **Evaluation.** Metrics per run (levels cleared, deaths, kills, gems, time per level), compared across commits. | A regression shows up as a number |
+
+M6 and M7 come first whatever else changes. M8 to M11 now have known shapes. What remains uncertain is the order of levels in each world, and the strategist learns that.
 
 ## Risks
 
 - **The early game is lethal.** Ten health against hostiles that gang up means one bad engagement costs a life. Lives are finite on live worlds (Pippin is down to 5). Mitigation: conservative defaults, an escape queued with every attack, and practice on the sandbox before Olympuff.
-- **Latency kills.** Hand play through MCP lost a life to a 4 s round trip. The executor must poll every tick while threatened; this is a milestone 1 requirement, not a tuning detail.
+- **Latency kills.** Hand play through MCP lost a life to a 4 s round trip. The executor must poll every tick while threatened; this is an M6 requirement, not a tuning detail.
 - **Clue interpretation is the hard part.** Riddles and directions are written for people. Without the strategist the agent can still gear up, hunt and walk to entrances, but it will not know what a locked or hidden entrance wants. Keep the no-LLM path useful; accept that levels need the strategist.
 - **Spoilers.** Real-world clue text must never reach the repo, the tests or the PR text. Fixtures use invented worlds; the knowledge base stays in gitignored `.state/`.
 - **Getting stuck.** Fog, regrowing blocks and NPCs in corridors will trap a naive walker. The Navigation section makes "stuck" a detected state with fixed escalation and a give-up, never a silent loop.

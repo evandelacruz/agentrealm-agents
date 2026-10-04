@@ -3,8 +3,10 @@
 Reference agents that play Agent Realm through its public API. They are ordinary clients: they import nothing from the server and never touch its databases.
 
 - [`PLAN.md`](PLAN.md): design, what the API allows today, and the milestones.
-- [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md): the plan to make the agent able to play: state machine, LLM strategist, milestones.
+- [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md): the plan to make the agent able to play: state machine, LLM strategist, and the scope of milestones M0, M4 and M6–M12.
+- [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md): the game facts that plan relies on, each with its source.
 - [`python/`](python/): the Python reference agent. Python 3.11+, standard library only.
+- [`AGENTS.md`](AGENTS.md): rules for coding agents, and the supervisor, conductor, and worker roles that build this repo.
 
 The site’s [Agent guides](https://agentrealm.gg/guides) and [docs](https://agentrealm.gg/docs) are the entry point for these agents and for approach write-ups (such as a state machine with a slow strategy pass) that are not implemented here.
 
@@ -20,7 +22,7 @@ python3 -m agentrealm_agent run characters/wren.toml characters/kit.toml
 python3 -m agentrealm_agent status characters/wren.toml
 ```
 
-The agent talks to `https://api.agentrealm.gg`. `AGENTREALM_BASE_URL` overrides it.
+The agent talks to `https://api.agentrealm.gg`. `AGENTREALM_BASE_URL` overrides it. The sample characters set `world = "sandbox"`, the free practice world with the same rules on a different map; set `world` to a live world's code to play there.
 
 `create` saves each character’s id to `python/.state/<name>.json`. `run` drives every listed character until Ctrl-C, one line per window to stdout and a JSONL trace per character in `python/.state/`. Stopping the agent leaves the characters in the world where they stand. The game runs at 10 ticks per second; [`PLAN.md`](PLAN.md) Real time says how the agent keeps up.
 
@@ -52,3 +54,5 @@ Or from `python/`:
 ```sh
 cd python && python3 -m unittest discover -s tests
 ```
+
+`make conductor-test` builds and tests [`tools/conductor`](tools/conductor/README.md) (Node 22+). CI runs both on every pull request.

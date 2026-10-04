@@ -13,8 +13,8 @@ def use_on(e: Entity) -> dict:
     return {"verb": "Use", "target": {"kind": "character", "character_id": e.id}}
 
 
-def take(e: Entity) -> dict:
-    return {"verb": "Take", "supply_id": e.id}
+def take(supply_id: int) -> dict:
+    return {"verb": "Take", "supply_id": supply_id}
 
 
 def withdraw_all(chest_id: int) -> dict:
@@ -24,3 +24,8 @@ def withdraw_all(chest_id: int) -> dict:
 
 def drop(supply_id: int) -> dict:
     return {"verb": "Drop", "supply_id": supply_id}
+
+
+def withdraw(chest_id: int, supply_ids: list[int]) -> dict:
+    # All or nothing: carry_capacity_full when one too many (API WithdrawFromChest).
+    return {"verb": "WithdrawFromChest", "chest_id": chest_id, "supply_ids": list(supply_ids)}

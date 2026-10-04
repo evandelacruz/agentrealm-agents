@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory
+from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
 from .threat import ThreatTable, absorb_damaged, damage_amount
 
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
@@ -49,12 +49,6 @@ NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != 
 
 def chebyshev(a: Pos, b: Pos) -> int:
     return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
-
-
-@dataclass(frozen=True)
-class ChestSupply:
-    id: int
-    code: str = ""
 
 
 @dataclass
@@ -111,7 +105,10 @@ class WorldModel:
     worn_codes: dict[str, str] = field(default_factory=dict)
     held_supplies: list[InventorySupply] = field(default_factory=list)
     chest_supplies: list[InventorySupply] = field(default_factory=list)
+    # Lowered by a carry_capacity_full rejection; back to the default on respawn,
+    # which brings a new 10-slot chest (Manual §11; loot.learn_loot_rejection).
     carry_capacity: int = DEFAULT_CARRY_CAPACITY
+    undroppable: set[int] = field(default_factory=set)  # supply ids Drop refused not_transferable
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
@@ -128,7 +125,7 @@ class WorldModel:
     death_chest: tuple[int, Pos, int] | None = None
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.
-    chest_contents: dict[int, list[ChestSupply]] = field(default_factory=dict)
+    chest_contents: dict[int, list[InventorySupply]] = field(default_factory=dict)
     # Zone facts from get_zone (A7): map_id -> cell -> fact. Safe tiles derive
     # from these (zone_discovery.safe_tiles).
     zones: dict[int, dict[Pos, ZoneFact]] = field(default_factory=dict)
@@ -277,9 +274,7 @@ class WorldModel:
                 if kind != "chest" or "contents" not in entry:
                     continue
                 cid = int(entry["id"])
-                self.chest_contents[cid] = [
-                    ChestSupply(int(s["id"]), s.get("supply_subtype_code") or "") for s in entry["contents"]
-                ]
+                self.chest_contents[cid] = supplies_from_list(entry["contents"])
             for eid in part.get("removed") or []:
                 self.chest_contents.pop(int(eid), None)
         self.entities = list(by_key.values())
@@ -307,11 +302,9 @@ class WorldModel:
             v.tiles[p] = cell.get("block_type", "")
             _set_damage(v, p, cell)
 
-    def _chest_contents_from_entities(self, entities: dict) -> dict[int, list[ChestSupply]]:
+    def _chest_contents_from_entities(self, entities: dict) -> dict[int, list[InventorySupply]]:
         return {
-            int(ch["id"]): [
-                ChestSupply(int(s["id"]), s.get("supply_subtype_code") or "") for s in ch["contents"]
-            ]
+            int(ch["id"]): supplies_from_list(ch["contents"])
             for ch in entities.get("chests") or []
             if "contents" in ch
         }
@@ -352,13 +345,7 @@ class WorldModel:
     def _apply_inventory(self, inv: dict | None) -> None:
         if inv is None:
             return
-        held, stowed, armed, worn, capacity = carried_from_inventory(inv)
-        self.held_supplies = held
-        self.chest_supplies = stowed
-        self.armed_code = armed
-        self.worn_codes = worn
-        if capacity is not None:
-            self.carry_capacity = capacity
+        self.held_supplies, self.chest_supplies, self.armed_code, self.worn_codes = carried_from_inventory(inv)
 
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
@@ -416,6 +403,7 @@ class WorldModel:
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
                 elif kind == "Respawned":
+                    self.carry_capacity = DEFAULT_CARRY_CAPACITY  # a new, empty blue chest (10), Manual §11
                     try:
                         self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))
                     except (KeyError, TypeError, ValueError):

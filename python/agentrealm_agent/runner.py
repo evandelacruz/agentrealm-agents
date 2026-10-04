@@ -16,6 +16,7 @@ from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .item_table import absorb_attack_range, absorb_entities_payload, rejection_attack_range
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_warp, sync_tiles, sync_world_maps
+from .loot import learn_loot_rejection
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
@@ -550,6 +551,7 @@ class Runner:
                 rej.get("code"),
                 int(result.get("tick", w.tick)),
             )
+        learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None

@@ -29,7 +29,7 @@
 
   "A10": {"state": "open"},
 
-  "A11": {"state": "open"},
+  "A11": {"state": "done"},
 
   "A12": {"state": "done"},
 
@@ -47,7 +47,7 @@
 
   "A19": {"state": "open"},
 
-  "A20": {"state": "done"},
+  "A20": {"state": "partial", "remaining": "Hearts and gems first, off until their supply codes are known; Drop of stowed supplies and larger-chest capacity are undocumented (GAME_NOTES open questions)."},
 
   "A21": {"state": "open"},
 

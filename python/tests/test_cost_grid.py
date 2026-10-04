@@ -18,6 +18,7 @@ from agentrealm_agent.navigation import (
 from agentrealm_agent.navigation import planner
 from agentrealm_agent.navigation.planner import COSTLY_STEP, _coarse_search, _Grid, _MacroCosts
 from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_agent.zone_discovery import apply_zone
 
 
 def grid(rows: list[str], at=(0, 0), perception=5) -> WorldModel:
@@ -243,6 +244,7 @@ class TwoLevelBrainTest(unittest.TestCase):
     def test_chest_and_goto_keep_separate_searches(self):
         w = strip(100)
         w.death_chest = (1, (90, 0), 7)
+        apply_zone(w, 1, 89, 0, {"safe": True, "brightness": 1})
         m = Memory()
         policy = Policy(kind="scripted", goals=["goto"], goto=[0, 60], pickup=True)
         with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
@@ -251,7 +253,7 @@ class TwoLevelBrainTest(unittest.TestCase):
             m.path, m.goal = [], ""
             decide(w, m, policy, random.Random(0))
         self.assertIs(m.corridors["chest"], chest)
-        self.assertEqual(chest.goal, (90, 0))
+        self.assertEqual(chest.goal, (89, 0))
 
     def test_rejected_step_drops_the_corridor_searches(self):
         w = strip(100)

@@ -17,11 +17,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+# A new character's carried chest holds 10 (Manual §11, "a new, empty blue
+# chest (10)"). The snapshot serves no capacity field, and how a bigger chest
+# changes it is unknown (docs/GAME_NOTES.md open questions).
 DEFAULT_CARRY_CAPACITY = 10
 
 
 @dataclass(frozen=True)
 class InventorySupply:
+    """A supply's ``id`` and ``supply_subtype_code``, as the snapshot's
+    ``inventory`` and a ground chest's ``contents`` list it (API Snapshots)."""
+
     id: int
     code: str = ""
 
@@ -44,26 +50,31 @@ def _positive_int(v: Any) -> int | None:
     return n if n > 0 else None
 
 
-def _inventory_supplies(raw: Any) -> list[InventorySupply]:
+def supplies_from_list(raw: Any) -> list[InventorySupply]:
+    """``[{id, supply_subtype_code}, …]`` as supplies; malformed entries are skipped."""
     if not isinstance(raw, list):
         return []
     out: list[InventorySupply] = []
     for entry in raw:
         if not isinstance(entry, dict):
             continue
-        sid = entry.get("id")
+        sid = _positive_int(entry.get("id"))
         if sid is None:
             continue
-        out.append(InventorySupply(int(sid), _supply_code(entry) or ""))
+        out.append(InventorySupply(sid, _supply_code(entry) or ""))
     return out
 
 
 def carried_from_inventory(
     inv: dict | None,
-) -> tuple[list[InventorySupply], list[InventorySupply], str | None, dict[str, str], int | None]:
-    """Held, stowed-in-chest, armed code, worn codes, and optional capacity."""
+) -> tuple[list[InventorySupply], list[InventorySupply], str | None, dict[str, str]]:
+    """Held, stowed in the carried chest, armed code, and worn slot -> code.
+
+    The snapshot's ``inventory`` is ``gems``, ``armed``, ``worn`` by slot,
+    ``held``, and ``chest`` (API Snapshots).
+    """
     if not inv:
-        return [], [], None, {}, None
+        return [], [], None, {}
     armed = _supply_code(inv.get("armed"))
     worn: dict[str, str] = {}
     raw = inv.get("worn")
@@ -72,14 +83,7 @@ def carried_from_inventory(
             code = _supply_code(entry)
             if code:
                 worn[str(slot)] = code
-    capacity = _positive_int(inv.get("capacity"))
-    return (
-        _inventory_supplies(inv.get("held")),
-        _inventory_supplies(inv.get("chest")),
-        armed,
-        worn,
-        capacity,
-    )
+    return supplies_from_list(inv.get("held")), supplies_from_list(inv.get("chest")), armed, worn
 
 
 def loadout_from_inventory(inv: dict | None) -> tuple[str | None, dict[str, str]]:
@@ -88,7 +92,7 @@ def loadout_from_inventory(inv: dict | None) -> tuple[str | None, dict[str, str]
     Each supply there is an ``id`` and ``supply_subtype_code``; ``worn`` is
     keyed by slot (API Snapshots).
     """
-    _, _, armed, worn, _ = carried_from_inventory(inv)
+    _, _, armed, worn = carried_from_inventory(inv)
     return armed, worn
 
 

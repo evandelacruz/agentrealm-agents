@@ -83,8 +83,9 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
    | anything else | Kept off for the next decision only. |
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
 3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
-4. Supply underfoot or adjacent and `pickup = true` → `Take`.
-4b. Our last death dropped a chest on this map and `pickup = true` → walk to it; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
+4. `pickup = true` and a worthwhile supply underfoot, adjacent, or in a ground chest within reach → `Take`, or `WithdrawFromChest` with that one `supply_id`. With the carried chest full, `Drop` the lowest-valued held supply first, only for a pickup worth more; otherwise skip it (A20).
+4a. A worthwhile free supply or known chest supply in sight, `pickup = true`, and a plannable step toward it → the **Loot** state (A20) walks there, after Recover and before Explore. It claims the round only when it sends an intent; otherwise Explore runs.
+4b. Our last death dropped a chest on this map, `pickup = true`, and a tile on or next to it is known safe (A7) → the **Recover** state (A11) walks there; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; tick POSTs carry the last applied observation version when we have one, so most round trips get deltas and the chest's `contents` stay in the model without a full snapshot every time.
 5. Plan has a next step → walk the path as a paced `Step` queue (see **Scheduler**).
 6. Otherwise → nothing.
 
@@ -191,25 +192,25 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 |---|---|---|
 | A5 | **State framework.** `State` with `guard`/`act`/`done`, a priority dispatcher replacing `brain.decide`, `Sync`, `Downed`, `Explore`, `Idle`; the `list[Intent]` test seam. | A1, A2 |
 | A6 | **Threat table.** Damage per hit per hostile type from `Damaged`; the unmeasured default. | |
-| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery only: it records safe tiles; acting on them is A9–A11. A failed zone read drops that cell from probing. | |
+| A7 | **Safe-tile discovery.** `get_zone` around the respawn point and along the route, within the call budget. Discovery records safe tiles; **Recover** (A11) walks to a death chest only from a known safe tile on or beside it; retreat and heal still wait on A9–A10. A failed zone read drops that cell from probing. | |
 | A8 | **Runtime directives.** `characters/<name>.directives.toml`, re-read on change; params with ranges and defaults; `never_attack` enforced in the executor. | |
 | A9 | **Retreat, Flee and Escape.** `retreat_hits` and the `risk`/`lives_floor` formula; retreat to a known safe tile. | A5, A6, A7, A8 |
 | A10 | **Heal.** Food in reach, carried potion, measured safe-zone regeneration, else wait in town and raise `buy`. | A5, A7 |
-| A11 | **Recover.** Walk to the death chest only when the spot is safe. | A5, A7 |
+| A11 | **Recover.** Walk to the death chest only when the spot is safe. Needs `pickup = true` and a known safe tile on or beside the chest on this map; reflexes 2–4 still run first, and with no plannable step the state falls back to Explore's goals for that round. Only the destination is checked: the route to it is not, which is A9's. | A5, A7 |
 | A12 | **Cost-grid planner.** The cost table (fog, hazards, hostile danger, expiring occupants, break costs inert), walking the known prefix. | |
 | A13 | **Two-level search.** Coarse 16×16 corridor search and A* in the perception window, each with a node budget per tick. | A12 |
 | A14 | **Rejection learning.** What each rejection code teaches the map (reflex 1 table): impassable, occupant cost for 30 ticks, locked doors and hunting closures in the knowledge base. `would_strand` waits on Evan's decision on the landing target (reflex 1 table). | A12, A17 |
 | A15 | **Stuck detection and escalation.** Steps 1, 3 and 5, backoff, frontier drop; the navigation fixtures and trace replay tests. | A5, A12, A14 |
 | A16 | **M7 acceptance.** M7 done-when. | A4, A9, A10, A11, A13, A15 |
 
-**M8: Gear, economy and combat.**
+**M8: Gear, economy and combat.** Loot (A20) is a partial: hearts and gems first wait on their supply codes (GAME_NOTES open questions).
 
 | ID | Item | Depends on |
 |---|---|---|
 | A17 | **Per-world knowledge base.** `python/.state/worlds/<world_code>.json`: load, save, sections, shared by the world's characters. Loaded once when `run` starts, saved once at exit; one `run` process per world. | |
 | A18 | **Item table.** `items` in the knowledge base, keyed by `supply_subtype_code`. A row holds only served facts, each a positive integer that overwrites the last: `attack_range` from a `Use` rejected `target_out_of_range` (it carries the reach judged by, B100), filed under the subtype armed in that same response's observation (`get_self`'s `attack_range` names no subtype and can trail an `Arm`, so it is not used); `gem_price` from supplies on entity reads and snapshot entities. Not stored yet: weapon damage (`NPCDamaged` reaches everyone who sees the block, so a hit is ours only when matched to our `Use`), damage taken per worn item (a `Damaged` hit can't be split between worn slots), and capabilities (not served; Server gaps). | A17 |
 | A19 | **Equip.** Score slots, swap when a carried item is better. | A5, A18 |
-| A20 | **Loot.** `Take`, `WithdrawFromChest`, `Drop` junk when full; hearts first. | A5 |
+| A20 | **Loot.** `Take`, `WithdrawFromChest`, `Drop` junk when full; hearts first. Shipped: the Loot state and reflex 4 (walk, `Take`, `WithdrawFromChest` one supply, `Drop` the worst held supply for a better pickup, skip when not worth it), carry space from the snapshot's `inventory` at the sourced 10 slots, `carry_capacity_full` and `not_transferable` learned from rejections. Remaining: hearts and gems first, off until their supply codes are known; dropping stowed supplies and larger chests' capacity, both undocumented (GAME_NOTES open questions). | A5 |
 | A21 | **Shop.** Buy in-sight priced supplies the plan wants; restock to `potion_reserve`. | A5, A18 |
 | A22 | **Gather.** Gems from grass, bushes and gem piles in safe-ish ground. | A5 |
 | A23 | **Fight.** Group-aware win estimate, `never_attack`, retreat queued behind attacks, conservative until measured, never from a safe zone. | A5, A6, A8, A9 |

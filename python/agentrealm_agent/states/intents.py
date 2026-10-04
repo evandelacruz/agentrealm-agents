@@ -28,3 +28,11 @@ def read_block(map_id: int, pos: Pos) -> dict:
 
 def say_to(npc: Entity, text: str = "hello") -> dict:
     return {"verb": "Say", "text": text, "target": {"kind": "npc", "npc_id": npc.id}}
+
+
+def arm(supply_id: int) -> dict:
+    return {"verb": "Arm", "supply_id": supply_id}
+
+
+def use_self(character_id: int) -> dict:
+    return {"verb": "Use", "target": {"kind": "character", "character_id": character_id}}

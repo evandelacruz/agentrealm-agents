@@ -48,6 +48,8 @@ Copy a file from `python/characters/` and edit it. Names must be unique in the w
 | `policy.entity_refresh` | Ticks between entity reads when nothing is happening. |
 | `policy.seed` | Random seed for `wander`. Defaults to the character id. |
 
+Each character may also have `python/characters/<name>.directives.toml` beside its character file. The runner re-reads it when the file changes. `params` tune survival defaults (for example `fight_margin`, `risk`, `lives_floor`); values out of range are ignored. `never_attack` lists kinds or NPC type codes the agent must not swing at (`character`, or an NPC `code`); a fight reflex that would `Use` a forbidden target flees instead.
+
 ## Tests
 
 From the repo root:

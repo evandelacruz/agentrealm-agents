@@ -10,6 +10,7 @@ import random
 from dataclasses import dataclass, field
 
 from .config import Policy
+from .directives import attack_forbidden
 from .poll_cadence import gate_tick_call
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
@@ -103,17 +104,26 @@ def reject_step(m: Memory, p: Pos) -> None:
     m.blocked[p] = BLOCK_WINDOWS
 
 
-def decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Decision:
+def decide(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    rng: random.Random,
+    *,
+    never_attack: list[str] | None = None,
+) -> Decision:
     """The reflex list from PLAN.md. The first rule that matches wins.
 
     Each call is one decision window: it ages the tiles reflex 1 blocked.
     """
-    d = _decide(w, m, policy, rng)
+    d = _decide(w, m, policy, rng, never_attack=never_attack or [])
     m.blocked = {p: n - 1 for p, n in m.blocked.items() if n > 1}
     return d
 
 
-def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Decision:
+def _decide(
+    w: WorldModel, m: Memory, policy: Policy, rng: random.Random, *, never_attack: list[str]
+) -> Decision:
     if policy.kind == "idle" or w.pos is None or not w.alive:
         return Decision(None, "idle")
     here = w.pos
@@ -143,9 +153,10 @@ def _decide(w: WorldModel, m: Memory, policy: Policy, rng: random.Random) -> Dec
     if hostiles and policy.on_hostile != "ignore":
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
         if policy.on_hostile == "fight":
-            if target.kind == "character":
+            if target.kind == "character" and not attack_forbidden(target, never_attack):
                 return Decision(use_on(target), f"fight {target.kind} {target.id}", reflex=True)
             # NPC targets have no Use target kind on the wire yet; fall through to flee.
+            # never_attack on characters also falls through to flee.
         away = _flee_step(w, hostiles, blocked)
         if away is not None:
             m.path = []

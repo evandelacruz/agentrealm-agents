@@ -15,7 +15,16 @@ from .navigation import (
     nearest_target,
     route_first_leg,
 )
-from .plan import EXPLORE_PATH_OPS, OP_STATE, GoalOp, Plan
+from .plan import (
+    EXPLORE_ANYWHERE,
+    EXPLORE_PATH_OPS,
+    OP_STATE,
+    PLAN_STALL_SECONDS,
+    TRAVEL_PATHED,
+    GoalOp,
+    Plan,
+    explore_targets,
+)
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -59,43 +68,73 @@ def path_for_plan_op(
     costly: set[Pos],
     knowledge: KnowledgeBase | None,
 ) -> tuple[list[Pos], str] | None:
-    """Map the current plan op to a cost-grid path for Explore pathing (A34)."""
-    if op["op"] not in EXPLORE_PATH_OPS:
-        return None
-    if op["op"] == "wait":
-        return None
+    """A cost-grid path for an ``explore_area`` or ``travel`` op, and its goal label (A34)."""
     if op["op"] == "explore_area":
+        targets = explore_targets(op, w)
         center = (op["x"], op["y"])
-        radius = op["radius"]
-        targets = {p for p in w.view.frontier() if chebyshev(p, center) <= radius}
-        if not targets and w.pos is not None and chebyshev(w.pos, center) > 1:
+        if not targets and op["radius"] < EXPLORE_ANYWHERE and chebyshev(w.pos, center) > op["radius"]:
             targets = {center}
         found = nearest_target(w, targets, grid_params(policy, blocked, costly))
-        if found and found[1]:
-            return found[1], "explore_area"
+        return (found[1], "explore_area") if found and found[1] else None
+    if op["op"] != "travel":
         return None
-    if op["op"] == "travel":
-        params = grid_params(policy, blocked, costly, allow_goal_door=True)
-        dest = op["to"]
-        if dest == "point":
-            target = (op["x"], op["y"])
-            dest_map = op.get("map_id", w.map_id)
-            nav = nav_search(m, w, "plan_goto", target) if dest_map == w.map_id else None
-            path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
-            return (path, "plan_travel") if path else None
-        if dest == "entrance":
-            path = doors_goal_path(w, knowledge, params)
-            return (path, "plan_entrance") if path else None
-        if dest == "town":
-            for map_id, pos in w.respawn_anchors:
-                if map_id == w.map_id:
-                    nav = nav_search(m, w, "plan_town", pos)
-                    path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav)
-                    if path:
-                        return path, "plan_town"
-            return None
-        return None
+    params = grid_params(policy, blocked, costly, allow_goal_door=True)
+    if op["to"] == "point":
+        target = (op["x"], op["y"])
+        dest_map = op.get("map_id", w.map_id)
+        nav = nav_search(m, w, "plan_goto", target) if dest_map == w.map_id else None
+        path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
+        return (path, "plan_travel") if path else None
+    if op["to"] == "entrance":
+        path = doors_goal_path(w, knowledge, params)
+        return (path, "plan_entrance") if path else None
+    if op["to"] == "town":
+        for map_id, pos in w.respawn_anchors:
+            if map_id == w.map_id:
+                path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav_search(m, w, "plan_town", pos))
+                if path:
+                    return path, "plan_town"
     return None
+
+
+def plan_step(
+    plan: Plan,
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None,
+) -> bool:
+    """Set ``m.path`` from the plan's current op. True when the plan decided the round.
+
+    Ops no shipped state can run, and ``travel`` to a destination with no
+    path yet, are dropped and logged. An op that finds no path for
+    ``PLAN_STALL_SECONDS`` is dropped too, so the stack never stalls; until
+    then ``policy.goals`` get the move. A ``wait`` decides the round with no move.
+    """
+    while True:
+        plan.advance(w)
+        op = plan.current()
+        if op is None:
+            return False
+        if op["op"] not in EXPLORE_PATH_OPS:
+            plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet")
+            continue
+        if op["op"] == "wait":
+            return True
+        if op["op"] == "travel" and op["to"] not in TRAVEL_PATHED:
+            plan.drop_current(f"no path to a {op['to']} yet")
+            continue
+        found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
+        if found and next_step(w, blocked, found[0]):
+            plan.stalled_since_tick = None
+            m.path, m.goal = found
+            return True
+        if plan.note_stalled(w.tick):
+            plan.drop_current(f"no path for {PLAN_STALL_SECONDS}s")
+            continue
+        return False
 
 
 def replan(
@@ -114,27 +153,9 @@ def replan(
     so a later goal (explore, say) gets the move while terrain reads catch up.
     When a plan is active, its current op is tried before ``policy.goals``.
     """
-    if plan is not None:
-        plan.advance_if_done(w, m, policy)
-        while True:
-            op = plan.current()
-            if op is None:
-                break
-            if op["op"] not in EXPLORE_PATH_OPS:
-                owner = OP_STATE.get(op["op"])
-                if owner not in (None, "Explore", "Travel", "Idle"):
-                    plan.drop_current(f"no {owner} state yet")
-                    continue
-                break
-            found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
-            if found and next_step(w, blocked, found[0]):
-                m.path, m.goal = found[0], found[1]
-                return
-            if op["op"] == "wait":
-                return
-            break
-
     m.path, m.goal = [], ""
+    if plan is not None and plan_step(plan, w, m, policy, blocked, costly, knowledge):
+        return
     for goal in policy.goals:
         found = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
         if next_step(w, blocked, found):

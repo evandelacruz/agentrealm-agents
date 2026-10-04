@@ -88,22 +88,46 @@ class Runner:
 
     def _build_plan(self) -> Plan:
         d = self.directives.directives
-        from_directives = Plan.from_directives(directive_goals=d.goals, directive_params=d.params)
-        if from_directives is not None:
-            return from_directives
-        return Plan.from_policy(self.cfg.policy, d.params)
+        plan = Plan.from_directives(directive_goals=d.goals, directive_params=d.params)
+        if plan is None:
+            plan = Plan.from_policy(self.cfg.policy, d.params)
+        plan.tick_hz = self.tick_hz
+        return plan
 
-    def _decide(self, w, m):
+    def reload_directives(self, old_goals: list[str]) -> None:
+        """Apply reloaded directives to the plan (A34).
+
+        Changed ``goals`` rebuild the stack from the top. Otherwise the stack
+        keeps its progress and only the params reset to the file's values.
+        """
         d = self.directives.directives
+        if d.goals != old_goals:
+            self.plan = self._build_plan()
+        else:
+            self.plan.floor_params, self.plan.params = dict(d.params), dict(d.params)
+        self.log(
+            "directives",
+            f"reloaded never_attack={d.never_attack} goals={len(d.goals)}",
+            {
+                "directives": {
+                    "params": d.params,
+                    "never_attack": d.never_attack,
+                    "goals": d.goals,
+                    "plan_index": self.plan.index,
+                    "plan_len": len(self.plan.goals),
+                }
+            },
+        )
+
+    def _decide(self, w, m, *, plan: Plan | None = None):
         return decide(
             w,
             m,
             self.cfg.policy,
             self.rng,
-            never_attack=d.never_attack,
+            never_attack=self.directives.directives.never_attack,
             knowledge=self.knowledge,
-            plan=self.plan,
-            directive_params=d.params,
+            plan=plan,
         )
 
     def log(self, call: str, detail: str, record: dict) -> None:
@@ -118,7 +142,7 @@ class Runner:
             self.trace.close()
             return
         hz = max(1, int(world.get("tick_rate_hz", 1)))
-        self.tick_hz = hz
+        self.tick_hz = self.plan.tick_hz = hz
         horizon_s = max(1, int(world.get("queue_horizon_seconds", DEFAULT_QUEUE_HORIZON_SECONDS)))
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
@@ -134,22 +158,9 @@ class Runner:
                 # calm gap and entity_refresh would never come due. Responses
                 # carry the server's tick and correct it.
                 self.world.tick += 1
+                old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():
-                    self.plan = self._build_plan()
-                    d = self.directives.directives
-                    self.log(
-                        "directives",
-                        f"reloaded never_attack={d.never_attack} goals={len(d.goals)}",
-                        {
-                            "directives": {
-                                "params": d.params,
-                                "never_attack": d.never_attack,
-                                "goals": d.goals,
-                                "plan_index": self.plan.index,
-                                "plan_len": len(self.plan.goals),
-                            }
-                        },
-                    )
+                    self.reload_directives(old_goals)
                 call = choose_call(self.world, self.mem, self.cfg.policy)
                 if call == "skip":
                     self.mem.windows_since_self += 1
@@ -277,7 +288,7 @@ class Runner:
                 # reads it before this poll), so the new walk starts from
                 # where we are. With no walk to send, stop the old queue.
                 self.clear_held_tracking()
-                d = self._decide(w, m)
+                d = self._decide(w, m, plan=self.plan)
                 intents = self._apply_never_attack(self.intents_for(d))
                 if intents:
                     d = Decision(d.intent, "path stale, resend")
@@ -288,7 +299,7 @@ class Runner:
                 intents = None
         else:
             m.resend_held_queue = False
-            d = self._decide(w, m)
+            d = self._decide(w, m, plan=self.plan)
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
@@ -356,10 +367,11 @@ class Runner:
     def reflex_while_held(self) -> Decision | None:
         """A reflex (2–4b) that fires while a queue is held, else None.
 
-        Only a firing reflex may touch the plan and the rng; they stay as they
+        Only a firing reflex may touch the path and the rng; they stay as they
         were otherwise, so the held queue's steps are not planned twice. The
         navigation learnings always stay as they were: this probe is not the
-        decision window that ages them (A14).
+        decision window that ages them (A14). The goal stack is not passed at
+        all: reflexes never read it, and the probe must not pop or drop its ops.
         """
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate())

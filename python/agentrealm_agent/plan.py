@@ -10,8 +10,8 @@ from typing import Any
 
 from .config import Policy
 from .directives import PARAM_DEFAULTS, _valid_param
-from .memory import Memory
-from .world import WorldModel, chebyshev
+from .executor.constants import DEFAULT_TICK_RATE_HZ
+from .world import DOORS, Pos, WorldModel, chebyshev
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +19,6 @@ GoalOp = dict[str, Any]
 
 TRAVEL_TO = frozenset({"entrance", "town", "hunting_ground", "shop", "point"})
 CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
-SURVIVAL_PARAMS = frozenset({"fight_margin", "retreat_hits", "lives_floor", "potion_reserve", "risk"})
 ALL_PARAMS = frozenset(PARAM_DEFAULTS)
 
 # Op name -> owning state (docs/PLAYABLE_AGENT_PLAN.md Operations table).
@@ -42,8 +41,18 @@ OP_STATE: dict[str, str | None] = {
     "set_param": None,
 }
 
-# States shipped in A5 that can advance the stack today (pathing-only slice).
+# Ops the shipped Explore pathing can drive today. Every other op is dropped
+# with a log line when it reaches the top of the stack (A34 slice).
 EXPLORE_PATH_OPS = frozenset({"explore_area", "travel", "wait"})
+# `travel` destinations with a path today; `hunting_ground` and `shop` wait on A20/Shop.
+TRAVEL_PATHED = frozenset({"entrance", "town", "point"})
+
+# Built-in `explore` explores the whole map: no center, no radius bound.
+EXPLORE_ANYWHERE = 1 << 30
+# Built-in `hold`: one hour, re-entered from policy.goals when it ends.
+HOLD_SECONDS = 3600
+# An op that finds no path for this long is dropped and logged.
+PLAN_STALL_SECONDS = 30
 
 # Shorthand in directives `goals = ["gather_gems:20", "buy:torch"]`.
 _SHORTHAND = re.compile(r"^([a-z_]+):(.+)$")
@@ -366,7 +375,12 @@ def apply_set_param(
 
 @dataclass
 class Plan:
-    """Validated goal stack plus effective params (A34)."""
+    """Validated goal stack plus effective params (A34).
+
+    ``params`` holds the effective survival params; nothing reads them until
+    the survival states land (A9+). ``current`` and ``goal_done`` only read;
+    ``advance`` and ``drop_current`` are the only calls that move the stack.
+    """
 
     goals: list[GoalOp]
     params: dict[str, float | int]
@@ -374,34 +388,42 @@ class Plan:
     index: int = 0
     floor_params: dict[str, float | int] = field(default_factory=lambda: dict(PARAM_DEFAULTS))
     wait_started_tick: int | None = None
+    stalled_since_tick: int | None = None  # first tick the current op found no path
+    tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
 
     def current(self) -> GoalOp | None:
-        while self.index < len(self.goals) and self.goals[self.index]["op"] == "set_param":
-            self.params = apply_set_param(self.floor_params, self.params, self.goals[self.index])
-            self.index += 1
-        if self.index >= len(self.goals):
-            return None
-        return self.goals[self.index]
+        """The op at the top of the stack, or None when it is empty."""
+        return self.goals[self.index] if self.index < len(self.goals) else None
 
-    def advance_if_done(self, world: WorldModel, memory: Memory, policy: Policy) -> None:
-        """Pop finished goals; apply set_param ops reached in order."""
-        while True:
-            op = self.current()
-            if op is None:
-                return
-            if not goal_done(op, world, memory, policy, self):
+    def advance(self, world: WorldModel) -> None:
+        """Apply ``set_param`` ops reached in order and pop finished goals."""
+        while (op := self.current()) is not None:
+            if op["op"] == "set_param":
+                self.params = apply_set_param(self.floor_params, self.params, op)
+                self._pop_current()
+                continue
+            if not goal_done(op, world, self):
+                if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
+                    self.wait_started_tick = world.tick
                 return
             self._pop_current()
 
     def drop_current(self, reason: str) -> None:
         op = self.current()
         if op is not None:
-            log.warning("plan: skipping op %r: %s", op, reason)
+            log.warning("plan: dropped op %r: %s", op, reason)
         self._pop_current()
+
+    def note_stalled(self, tick: int) -> bool:
+        """Record that the current op found no path; True once it has stalled too long."""
+        if self.stalled_since_tick is None:
+            self.stalled_since_tick = tick
+        return tick - self.stalled_since_tick >= PLAN_STALL_SECONDS * self.tick_hz
 
     def _pop_current(self) -> None:
         self.index += 1
         self.wait_started_tick = None
+        self.stalled_since_tick = None
 
     @classmethod
     def from_directives(
@@ -414,6 +436,7 @@ class Plan:
             return None
         ops = parse_directives_goals(directive_goals)
         if not ops:
+            log.warning("plan: no valid directives goal in %r; using the built-in plan", directive_goals)
             return None
         floor = dict(directive_params)
         return cls(list(ops), dict(floor), floor_params=floor)
@@ -424,64 +447,63 @@ class Plan:
 
 
 def builtin_goals(policy: Policy) -> list[GoalOp]:
-    """Character policy plus simple rules when no directives goals and no model."""
+    """``policy.goals`` as ops, one for one, when directives set no goals and there is no model.
+
+    ``wander`` has no op; it is left to ``policy.goals``, which ``replan``
+    falls back to whenever the stack has no path (or is empty).
+    """
     ops: list[GoalOp] = []
     for goal in policy.goals:
         if goal == "explore":
-            ops.append({"op": "explore_area", "x": 0, "y": 0, "radius": 9999})
+            ops.append({"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE})
         elif goal == "doors":
             ops.append({"op": "travel", "to": "entrance", "x": 0, "y": 0})
         elif goal == "goto" and policy.goto is not None:
             x, y = policy.goto
-            dest_map = policy.goto_map
             op: GoalOp = {"op": "travel", "to": "point", "x": x, "y": y}
-            if dest_map is not None:
-                op["map_id"] = dest_map
+            if policy.goto_map is not None:
+                op["map_id"] = policy.goto_map
             ops.append(op)
         elif goal == "hold":
-            ops.append({"op": "wait", "seconds": 3600})
-        elif goal == "wander":
-            # Idle state's wander policy; keep a no-op wait so the stack is non-empty.
-            ops.append({"op": "wait", "seconds": 0})
-    if not ops:
-        ops.append({"op": "explore_area", "x": 0, "y": 0, "radius": 9999})
-    if not any(op.get("op") == "travel" and op.get("to") == "entrance" for op in ops):
-        ops.append({"op": "travel", "to": "entrance", "x": 0, "y": 0})
+            ops.append({"op": "wait", "seconds": HOLD_SECONDS})
     return ops
 
 
-def goal_done(op: GoalOp, world: WorldModel, memory: Memory, policy: Policy, plan: Plan) -> bool:
+def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:
+    """Frontier cells inside an ``explore_area`` op, other than where we stand."""
+    frontier = world.view.frontier() - {world.pos}
+    if op["radius"] >= EXPLORE_ANYWHERE:
+        return frontier
+    center = (op["x"], op["y"])
+    return {p for p in frontier if chebyshev(p, center) <= op["radius"]}
+
+
+def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
+    """Whether ``op`` is finished. Reads only; ``Plan.advance`` pops it."""
     if world.pos is None:
         return False
     name = op["op"]
     if name == "wait":
         if plan.wait_started_tick is None:
-            plan.wait_started_tick = world.tick
             return op["seconds"] == 0
-        return world.tick - plan.wait_started_tick >= op["seconds"] * 10
+        return world.tick - plan.wait_started_tick >= op["seconds"] * plan.tick_hz
     if name == "explore_area":
-        here = world.pos
-        if chebyshev(here, (op["x"], op["y"])) <= max(1, op["radius"]):
+        if explore_targets(op, world):
+            return False
+        if op["radius"] >= EXPLORE_ANYWHERE:
             return True
-        targets = {p for p in world.view.frontier() if chebyshev(p, (op["x"], op["y"])) <= op["radius"]}
-        return not targets
+        # A bounded area counts as explored only once we have seen into it.
+        center = (op["x"], op["y"])
+        return center in world.view.tiles or chebyshev(world.pos, center) <= op["radius"]
     if name == "travel":
         if op["to"] == "point":
-            target = (op["x"], op["y"])
             dest_map = op.get("map_id", world.map_id)
-            return dest_map == world.map_id and world.pos == target
+            return dest_map == world.map_id and world.pos == (op["x"], op["y"])
         if op["to"] == "entrance":
-            tile = world.view.tiles.get(world.pos)
-            return tile in {"framed_door", "rock_entry"}
+            return world.view.tiles.get(world.pos) in DOORS
         if op["to"] == "town":
-            for map_id, pos in world.respawn_anchors:
-                if map_id == world.map_id and world.pos == pos:
-                    return True
-            return False
-        return False
-    state = OP_STATE.get(name)
-    if state is not None and state not in {"Explore", "Idle", "Travel"}:
-        return False
+            return (world.map_id, world.pos) in world.respawn_anchors
+    # Ops whose states are not shipped never finish here; replan drops them.
     return False
 
 

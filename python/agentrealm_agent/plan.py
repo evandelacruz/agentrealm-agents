@@ -401,6 +401,7 @@ class Plan:
     floor_params: dict[str, float | int] = field(default_factory=lambda: dict(PARAM_DEFAULTS))
     wait_started_tick: int | None = None
     stalled_since_tick: int | None = None  # first tick the current op found no path
+    use_block_before: str | None = None  # block_type at a `use_block` target when first seen as the head op
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
 
     def snapshot(self) -> tuple:
@@ -412,6 +413,7 @@ class Plan:
             dict(self.floor_params),
             self.wait_started_tick,
             self.stalled_since_tick,
+            self.use_block_before,
         )
 
     def restore(self, saved: tuple) -> None:
@@ -423,6 +425,7 @@ class Plan:
             floor_params,
             self.wait_started_tick,
             self.stalled_since_tick,
+            self.use_block_before,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
 
@@ -437,6 +440,8 @@ class Plan:
                 self.params = apply_set_param(self.floor_params, self.params, op)
                 self._pop_current()
                 continue
+            if op["op"] == "use_block" and self.use_block_before is None and world.map_id is not None:
+                self.use_block_before = world.view.tiles.get((op["x"], op["y"]))
             if not goal_done(op, world, self):
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
@@ -459,6 +464,7 @@ class Plan:
         self.index += 1
         self.wait_started_tick = None
         self.stalled_since_tick = None
+        self.use_block_before = None
 
     @classmethod
     def from_directives(
@@ -542,14 +548,13 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
     if name == "use_block":
-        pos = (op["x"], op["y"])
-        if world.map_id is not None and (world.map_id, pos) in world.changed_blocks:
-            return True
-        tile = world.view.tiles.get(pos)
-        if tile is None:
-            return False
-        # A door that opened reads as walkable ground, not a door type.
-        return tile not in DOORS and tile not in ("", "dirt", "grass")
+        # Done once the target's block_type differs from what it was when the
+        # op reached the top: a successful Use destroys the block, which then
+        # shows its destroyed type (GAME_NOTES Breaking blocks). BlockChanged
+        # events and terrain reads both update the tile, so a missed window
+        # does not lose the change.
+        tile = world.view.tiles.get((op["x"], op["y"]))
+        return plan.use_block_before is not None and tile is not None and tile != plan.use_block_before
     # Ops whose states are not shipped never finish here; replan drops them.
     return False
 

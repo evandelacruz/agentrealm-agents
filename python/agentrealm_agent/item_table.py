@@ -34,7 +34,11 @@ DEFAULT_CARRY_CAPACITY = 10
 
 
 class FragmentMeta:
-    """``fragment`` metadata on a held fragment supply (API Snapshots)."""
+    """``fragment`` metadata on a held fragment supply (API Snapshots).
+
+    ``missing_slots`` is None when the server's list could not be read; the
+    fragment is still kept, and completeness falls back to the slots held.
+    """
 
     __slots__ = ("composes_into", "piece_count", "slot", "missing_slots")
 
@@ -44,7 +48,7 @@ class FragmentMeta:
         composes_into: str,
         piece_count: int,
         slot: int,
-        missing_slots: tuple[int, ...],
+        missing_slots: tuple[int, ...] | None,
     ) -> None:
         self.composes_into = composes_into
         self.piece_count = piece_count
@@ -53,6 +57,10 @@ class FragmentMeta:
 
 
 def parse_fragment(raw: Any) -> FragmentMeta | None:
+    """The ``fragment`` field, or None when it is absent or names no whole.
+
+    Slot numbers may be 0: the docs do not say slots are 1-based.
+    """
     if not isinstance(raw, dict):
         return None
     into = raw.get("composes_into")
@@ -60,31 +68,38 @@ def parse_fragment(raw: Any) -> FragmentMeta | None:
         return None
     piece_count = _fragment_int(raw.get("piece_count"))
     slot = _fragment_int(raw.get("slot"))
-    if piece_count is None or slot is None:
+    if piece_count is None or piece_count < 1 or slot is None:
         return None
-    missing_raw = raw.get("missing_slots")
-    missing: tuple[int, ...] = ()
-    if isinstance(missing_raw, list):
-        slots: list[int] = []
-        for item in missing_raw:
-            n = _fragment_int(item)
-            if n is None:
-                return None
-            slots.append(n)
-        missing = tuple(slots)
-    elif missing_raw is not None:
+    return FragmentMeta(
+        composes_into=into,
+        piece_count=piece_count,
+        slot=slot,
+        missing_slots=_missing_slots(raw.get("missing_slots")),
+    )
+
+
+def _missing_slots(raw: Any) -> tuple[int, ...] | None:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
         return None
-    return FragmentMeta(composes_into=into, piece_count=piece_count, slot=slot, missing_slots=missing)
+    slots = [_fragment_int(item) for item in raw]
+    if any(n is None for n in slots):
+        return None
+    return tuple(n for n in slots if n is not None)
 
 
 def _fragment_int(value: Any) -> int | None:
+    """A non-negative int; bools and non-integral values are rejected."""
     if isinstance(value, bool):
+        return None
+    if isinstance(value, float) and not value.is_integer():
         return None
     try:
         n = int(value)
     except (TypeError, ValueError, OverflowError):
         return None
-    return n if n > 0 else None
+    return n if n >= 0 else None
 
 
 @dataclass(frozen=True)

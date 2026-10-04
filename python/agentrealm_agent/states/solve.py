@@ -9,7 +9,7 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
-from ..plan import SOLVE_OPS, GoalOp, Plan
+from ..plan import PLAN_STALL_SECONDS, SOLVE_OPS, GoalOp, Plan
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome
@@ -39,6 +39,8 @@ def use_reach(knowledge: KnowledgeBase | None, code: str) -> int:
 
 
 def held_supply(w: WorldModel, code: str) -> InventorySupply | None:
+    """A supply of ``code`` in hand. One only in the carried chest does not count:
+    Solve does not withdraw it, so the op stalls and is dropped (A39)."""
     for s in w.held_supplies:
         if s.code == code:
             return s
@@ -68,8 +70,32 @@ def solve_outcome(
         return reflex
 
     if op["op"] == "compose":
-        return _compose_outcome(w, op, state)
-    return _use_block_outcome(w, m, policy, op, plan_avoid, plan_costly, knowledge, state)
+        out = _compose_outcome(w, op, state)
+    else:
+        out = _use_block_outcome(w, m, policy, op, plan_avoid, plan_costly, knowledge, state)
+    return _track_progress(plan, w, m, op, out, state)
+
+
+def _track_progress(
+    plan: Plan, w: WorldModel, m: Memory, op: GoalOp, out: StateOutcome, state: str
+) -> StateOutcome:
+    """Drop the op once it has made no progress for ``PLAN_STALL_SECONDS`` (A34).
+
+    A step toward the target is progress. Sending nothing (pieces or supply
+    missing, target unreachable) is not, and neither is a `Compose`, `Arm` or
+    `Use` that has not finished the op, so a rejected or ineffective try
+    cannot pin the stack either. While the op sends nothing, dispatch falls
+    through to the states below (A44).
+    """
+    if out.intents and any(i.get("verb") == "SetPosition" for i in out.intents):
+        plan.stalled_since_tick = None
+        return out
+    if not plan.note_stalled(w.tick):
+        return out
+    plan.drop_current(f"{out.reason}; no progress for {PLAN_STALL_SECONDS}s")
+    if m.goal == GOAL:
+        m.path, m.goal = [], ""
+    return StateOutcome(None, f"dropped {op['op']}: {out.reason}", state=state)
 
 
 def _compose_outcome(w: WorldModel, op: GoalOp, state: str) -> StateOutcome:

@@ -168,6 +168,8 @@ def plan_step(
     path yet, are dropped and logged. An op that finds no path for
     ``PLAN_STALL_SECONDS`` is dropped too, so the stack never stalls; until
     then ``policy.goals`` get the move. A ``wait`` decides the round with no move.
+    ``compose`` and ``use_block`` belong to **Solve**, which drops them itself
+    when they stall (A39), so they are left on the stack here.
     """
     while True:
         plan.advance(w)

@@ -50,6 +50,7 @@ def reveal(w: WorldModel, sc: Scenario) -> None:
 
 def world_for(sc: Scenario) -> WorldModel:
     w = WorldModel(character_id=1, map_id=1, pos=sc.start, perception=sc.perception)
+    w.map_level = sc.level
     w.entities = [Entity("npc", 100 + i, p, code="parked") for i, p in enumerate(sc.npcs)]
     reveal(w, sc)
     return w

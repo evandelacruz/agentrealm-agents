@@ -294,6 +294,25 @@ class RecoverStuckTest(unittest.TestCase):
         self.assertEqual(len(c.memory.nav_stuck.stuck_signals), 1, "backed off: not retried each round")
 
 
+class LevelStuckTest(unittest.TestCase):
+    def test_walled_door_escalates_then_backs_off(self):
+        sc = grids.LEVEL_WALLED_DOOR
+        policy = sim.scripted(goals=["hold"])
+        r = sim.run(sc, policy)
+        self.assertEqual(r.outcome, "abandoned")
+        self.assertTrue(all(row["reason"].startswith("level →") for row in r.trace[:-1]), r.trace)
+        sig = r.signal
+        self.assertEqual((sig["goal"], sig["target"]), ("level:door", list(sc.goal)))
+        self.assertEqual(sig["escalation"], ["no_path", "no_path", "no_frontier"], "cautious, then reveal, then give up")
+        w, m = r.world, r.memory
+        key = nav_stuck.goal_key("level:door", 1, sc.goal)
+        self.assertEqual(key, nav_stuck.goal_key("doors", 1, sc.goal), "the doors goal skips it too")
+        d = decide(w, m, policy, random.Random(1))
+        self.assertNotIn(f"level → {sc.goal}", d.reason, "backed off: Level does not walk to it")
+        self.assertTrue(nav_stuck.is_backed_off(m.nav_stuck, key, w.tick))
+        self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
+
+
 class TraceReplayTest(unittest.TestCase):
     def test_trace_replays_through_stuck_reveal_and_backoff(self):
         sc = grids.WATER_ENCLOSURE

@@ -53,9 +53,10 @@ BACKOFF_BASE_TICKS = 300
 
 WALK, CAUTIOUS, REVEAL, REVEALED = 0, 1, 3, 4
 
-# Explore goals share one key per frontier cell, so a frontier dropped under
-# either is skipped by both.
-FRONTIER_GOALS = frozenset({"explore", "explore_area"})
+# Goals that share one key per cell, so a frontier or door dropped under one
+# is skipped by the others (Explore's goals and Level's walks).
+SHARED_KEYS = {"explore": "frontier", "explore_area": "frontier", "level:frontier": "frontier", "level:door": "doors"}
+FRONTIER_GOALS = frozenset(g for g, kind in SHARED_KEYS.items() if kind == "frontier")
 
 ATTEMPTS_KEPT = 32
 SIGNALS_KEPT = 16  # nothing drains them until the strategist (A35)
@@ -92,7 +93,7 @@ class NavStuckMemory:
 
 
 def goal_key(goal: str, map_id: int | None, target: Pos) -> str:
-    kind = "frontier" if goal in FRONTIER_GOALS else goal
+    kind = SHARED_KEYS.get(goal, goal)
     mid = map_id if map_id is not None else -1
     return f"{kind}:{mid}:{target[0]},{target[1]}"
 

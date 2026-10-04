@@ -5,7 +5,9 @@ square; ``sim.run`` reveals more as it moves, so the planner meets fog the way
 it does live. Outside the rows is wall: every map is bounded.
 
 Glyphs: ``.`` dirt, ``#`` wall, ``b`` bush, ``~`` water, ``S`` start,
-``G`` goal (dirt), ``N`` an NPC parked on dirt.
+``G`` goal (dirt), ``D`` a door (the goal when there is no ``G``), ``N`` an
+NPC parked on dirt. ``level`` puts the scenario on a level interior map, where
+the Level state walks.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from dataclasses import dataclass
 
 from agentrealm_agent.world import Pos
 
-GLYPHS = {".": "dirt", "#": "wall", "b": "bush", "~": "water", "S": "dirt", "G": "dirt", "N": "dirt"}
+GLYPHS = {".": "dirt", "#": "wall", "b": "bush", "~": "water", "S": "dirt", "G": "dirt", "N": "dirt", "D": "framed_door"}
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,7 @@ class Scenario:
     name: str
     rows: tuple[str, ...]
     perception: int = 2
+    level: int | None = None
 
     def _find(self, glyph: str) -> list[Pos]:
         return [(x, y) for y, row in enumerate(self.rows) for x, g in enumerate(row) if g == glyph]
@@ -32,7 +35,7 @@ class Scenario:
 
     @property
     def goal(self) -> Pos:
-        return self._find("G")[0]
+        return (self._find("G") or self._find("D"))[0]
 
     @property
     def npcs(self) -> list[Pos]:
@@ -130,4 +133,23 @@ FOG_DEAD_END_CLOSED = Scenario(
         "S.......#.G",
         "###########",
     ),
+)
+
+# Inside a level: the door is in sight across a wall whose far end is fog, so
+# Level plans round it; the wall runs the map's whole height, so the door is
+# abandoned once the fog clears.
+LEVEL_WALLED_DOOR = Scenario(
+    "level_walled_door",
+    (
+        "...#....",
+        "...#....",
+        ".S.#D...",
+        "...#....",
+        "...#....",
+        "...#....",
+        "...#....",
+        "...#....",
+    ),
+    perception=3,
+    level=1,
 )

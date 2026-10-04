@@ -80,7 +80,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 - **Terrain reads.** With perception 25 the terrain window is 51×51, so terrain is read only on a map change or after moving about half the window.
 - **Deltas feed the model.** Health, inventory and entity changes are folded into the world model from them.
 
-Shipped so far: `python/agentrealm_agent/executor.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_ticks`) and the next poll. The attack and speech accumulators are paced separately; there is no mixed-queue helper yet, and the runner does not use the module yet.
+Shipped so far: `python/agentrealm_agent/executor/pacing.py` paces attack and speech queues and builds attack queues with their retreat, cut at the world's horizon (`queue_horizon_intents`) and the next poll. The attack and speech accumulators are paced separately; there is no mixed-queue helper yet, and the runner does not use it yet.
 
 ### State machine
 

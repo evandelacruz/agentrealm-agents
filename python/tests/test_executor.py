@@ -1,145 +1,86 @@
-"""M6 executor pacing helpers."""
+"""Executor queue limits and intent shapes (M6), no server."""
 
 import unittest
 
+from agentrealm_agent.client import _tick_body
 from agentrealm_agent.executor import (
-    DEFAULT_WEAPON_COOLDOWN_TICKS,
-    SPEECH_INTERVAL_TICKS,
-    build_attack_queue,
-    pace_speech,
-    pace_uses,
-    queue_horizon_ticks,
+    QUEUE_HORIZON_INTENTS,
+    queue_horizon_intents,
+    step,
+    trim_to_horizon,
     wait,
+    within_horizon,
 )
 
-HORIZON = 40
+H = QUEUE_HORIZON_INTENTS
 
 
-def use_block(x: int, y: int) -> dict:
-    return {"verb": "Use", "target": {"kind": "block", "x": x, "y": y}}
+class HorizonTest(unittest.TestCase):
+    def test_default_horizon_is_forty_at_ten_hz(self):
+        self.assertEqual(QUEUE_HORIZON_INTENTS, 40)
+        self.assertEqual(queue_horizon_intents(), 40)
+        self.assertEqual(queue_horizon_intents(tick_rate_hz=10, horizon_seconds=4), 40)
+
+    def test_horizon_scales_with_world_clock(self):
+        self.assertEqual(queue_horizon_intents(tick_rate_hz=20, horizon_seconds=4), 80)
+
+    def test_rejects_non_positive_or_non_int_inputs(self):
+        for bad in (0, -1, 2.5, True, None):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    queue_horizon_intents(tick_rate_hz=bad)
+                with self.assertRaises(ValueError):
+                    queue_horizon_intents(horizon_seconds=bad)
 
 
-def say(text: str, npc_id: int) -> dict:
-    return {"verb": "Say", "text": text, "target": {"kind": "character", "character_id": npc_id}}
+class TrimTest(unittest.TestCase):
+    def test_short_queue_unchanged(self):
+        q = [wait(), step("right")]
+        self.assertEqual(trim_to_horizon(q, limit=H), q)
+        self.assertTrue(within_horizon(q, limit=H))
+
+    def test_exactly_at_horizon_fits(self):
+        q = [wait()] * 40
+        self.assertTrue(within_horizon(q, limit=H))
+        self.assertEqual(trim_to_horizon(q, limit=H), q)
+
+    def test_one_over_horizon_is_cut(self):
+        q = [step("up")] * 40 + [wait()]
+        self.assertFalse(within_horizon(q, limit=H))
+        self.assertEqual(trim_to_horizon(q, limit=H), q[:40])
+
+    def test_long_queue_keeps_prefix(self):
+        q = [step("up"), step("down")] * 25
+        self.assertEqual(trim_to_horizon(q, limit=H), q[:40])
+
+    def test_zero_limit(self):
+        self.assertEqual(trim_to_horizon([wait()], limit=0), [])
+        self.assertTrue(within_horizon([], limit=0))
+        self.assertFalse(within_horizon([wait()], limit=0))
+
+    def test_rejects_negative_or_non_int_limit(self):
+        for bad in (-1, 1.5, True, None):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    trim_to_horizon([wait()], limit=bad)
+                with self.assertRaises(ValueError):
+                    within_horizon([wait()], limit=bad)
+
+    def test_trim_returns_copy(self):
+        q = [wait()]
+        trimmed = trim_to_horizon(q, limit=H)
+        self.assertEqual(trimmed, q)
+        self.assertIsNot(trimmed, q)
 
 
-def waits_then_use(n: int) -> list[dict]:
-    return [wait()] * n + [use_block(0, 0)]
+class IntentShapeTest(unittest.TestCase):
+    def test_step_and_wait_match_tick_schema(self):
+        self.assertEqual(step("up_left"), {"verb": "Step", "direction": "up_left"})
+        self.assertEqual(wait(), {"verb": "Wait"})
 
-
-class QueueHorizonTest(unittest.TestCase):
-    def test_from_world(self):
-        self.assertEqual(queue_horizon_ticks({"queue_horizon_seconds": 4, "tick_rate_hz": 10}), 40)
-        self.assertEqual(queue_horizon_ticks({"queue_horizon_seconds": 2.5, "tick_rate_hz": 20}), 50)
-
-    def test_missing_field(self):
-        with self.assertRaises(ValueError):
-            queue_horizon_ticks({"tick_rate_hz": 10})
-
-
-class PaceUsesTest(unittest.TestCase):
-    def test_two_uses_default_cooldown(self):
-        q = pace_uses([use_block(1, 0), use_block(1, 0)])
-        self.assertEqual(q[0], use_block(1, 0))
-        self.assertEqual(q[1 + DEFAULT_WEAPON_COOLDOWN_TICKS - 1], use_block(1, 0))
-        self.assertEqual(len(q), 1 + (DEFAULT_WEAPON_COOLDOWN_TICKS - 1) + 1)
-        self.assertTrue(all(x == wait() for x in q[1 : 1 + DEFAULT_WEAPON_COOLDOWN_TICKS - 1]))
-
-    def test_custom_cooldown(self):
-        q = pace_uses([use_block(0, 0), use_block(0, 0)], cooldown_ticks=4)
-        self.assertEqual(len(q), 1 + 3 + 1)
-        self.assertEqual(q[0]["verb"], "Use")
-        self.assertEqual(q[4]["verb"], "Use")
-
-    def test_empty(self):
-        self.assertEqual(pace_uses([]), [])
-
-    def test_carried_cooldown_delays_first_use(self):
-        self.assertEqual(pace_uses([use_block(0, 0)], ticks_since_last=4), waits_then_use(6))
-        self.assertEqual(pace_uses([use_block(0, 0)], ticks_since_last=10), waits_then_use(0))
-
-    def test_other_intents_count_toward_gap(self):
-        arm = {"verb": "Arm", "item_id": 1}
-        q = pace_uses([use_block(0, 0), arm, use_block(0, 0)])
-        self.assertEqual(q, [use_block(0, 0), arm] + waits_then_use(8))
-
-
-class PaceSpeechTest(unittest.TestCase):
-    def test_two_says(self):
-        a, b = say("hi", 1), say("again", 1)
-        q = pace_speech([a, b])
-        self.assertEqual(q[0], a)
-        self.assertEqual(q[SPEECH_INTERVAL_TICKS], b)
-        self.assertEqual(len(q), 1 + (SPEECH_INTERVAL_TICKS - 1) + 1)
-
-    def test_broadcast_paced_like_say(self):
-        bcast = {"verb": "Broadcast", "text": "hello"}
-        q = pace_speech([say("a", 2), bcast])
-        self.assertEqual(q[0]["verb"], "Say")
-        self.assertEqual(q[SPEECH_INTERVAL_TICKS]["verb"], "Broadcast")
-
-    def test_carried_speech_interval(self):
-        a = say("hi", 1)
-        q = pace_speech([a], ticks_since_last=8)
-        self.assertEqual(q, [wait(), wait(), a])
-
-
-class BuildAttackQueueTest(unittest.TestCase):
-    def test_retreat_appended_when_it_fits(self):
-        retreat = [{"verb": "Step", "direction": "up"}] * 3
-        q = build_attack_queue([use_block(1, 1)], retreat, poll_interval_ticks=40, horizon_ticks=HORIZON)
-        self.assertEqual(q[0]["verb"], "Use")
-        self.assertEqual(q[-3:], retreat)
-
-    def test_caps_to_poll_interval_and_keeps_retreat(self):
-        uses = [use_block(1, 1)] * 3
-        retreat = [{"verb": "Step", "direction": "left"}] * 4
-        # One paced use is 1 intent; three uses with cooldown 10 -> 1 + 9 + 1 + 9 + 1 = 21
-        q = build_attack_queue(uses, retreat, poll_interval_ticks=12, horizon_ticks=HORIZON, weapon_cooldown_ticks=10)
-        self.assertLessEqual(len(q), 12)
-        self.assertEqual(q[-4:], retreat)
-
-    def test_drops_extra_attacks_before_retreat(self):
-        uses = [use_block(0, 0)] * 5
-        retreat = [{"verb": "Step", "direction": "down"}]
-        q = build_attack_queue(uses, retreat, poll_interval_ticks=8, horizon_ticks=HORIZON, weapon_cooldown_ticks=10)
-        self.assertEqual(q, [use_block(0, 0), retreat[0]])
-
-    def test_retreat_follows_last_swing_without_waits(self):
-        uses = [use_block(0, 0)] * 3
-        retreat = [{"verb": "Step", "direction": "down"}] * 2
-        q = build_attack_queue(uses, retreat, poll_interval_ticks=20, horizon_ticks=HORIZON, weapon_cooldown_ticks=10)
-        last_use = max(i for i, x in enumerate(q) if x["verb"] == "Use")
-        self.assertEqual(q[last_use + 1 :], retreat)
-
-    def test_horizon_caps_long_poll(self):
-        uses = [use_block(0, 0)] * 10
-        q = build_attack_queue(uses, None, poll_interval_ticks=100, horizon_ticks=25, weapon_cooldown_ticks=10)
-        self.assertLessEqual(len(q), 25)
-        self.assertEqual(q[-1]["verb"], "Use")
-
-    def test_cooldown_carries_into_next_queue(self):
-        retreat = [{"verb": "Step", "direction": "up"}]
-        q = build_attack_queue(
-            [use_block(0, 0)], retreat, poll_interval_ticks=20, horizon_ticks=HORIZON, ticks_since_last_use=3
-        )
-        self.assertEqual(q, waits_then_use(7) + retreat)
-
-    def test_no_swing_fits_after_carried_cooldown(self):
-        retreat = [{"verb": "Step", "direction": "up"}]
-        q = build_attack_queue(
-            [use_block(0, 0)], retreat, poll_interval_ticks=4, horizon_ticks=HORIZON, ticks_since_last_use=1
-        )
-        self.assertEqual(q, retreat)
-
-    def test_no_retreat_bounded_by_poll(self):
-        uses = [use_block(0, 0)] * 4
-        q = build_attack_queue(uses, None, poll_interval_ticks=15, horizon_ticks=HORIZON, weapon_cooldown_ticks=10)
-        self.assertLessEqual(len(q), 15)
-
-    def test_poll_interval_must_be_positive(self):
-        with self.assertRaises(ValueError):
-            build_attack_queue([use_block(0, 0)], None, poll_interval_ticks=0, horizon_ticks=HORIZON)
+    def test_queue_goes_through_client_tick_body(self):
+        q = [step("right"), wait(), wait(), wait(), step("right")]
+        self.assertEqual(_tick_body(q, None), {"intents": q})
 
 
 if __name__ == "__main__":

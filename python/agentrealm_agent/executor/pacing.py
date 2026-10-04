@@ -13,20 +13,10 @@ from __future__ import annotations
 
 from typing import Callable, Iterable
 
+from .intents import wait
+
 DEFAULT_WEAPON_COOLDOWN_TICKS = 10
 SPEECH_INTERVAL_TICKS = 10
-
-
-def queue_horizon_ticks(world: dict) -> int:
-    """Longest queue the world accepts: ``queue_horizon_seconds × tick_rate_hz``."""
-    try:
-        return int(world["queue_horizon_seconds"] * world["tick_rate_hz"])
-    except KeyError as e:
-        raise ValueError(f"world is missing {e.args[0]}") from None
-
-
-def wait() -> dict:
-    return {"verb": "Wait"}
 
 
 def waits(count: int) -> list[dict]:
@@ -113,7 +103,7 @@ def build_attack_queue(
     horizon), attacks drop from the end until the queue fits, keeping the
     retreat tail when possible. Trailing ``Wait``s left by the cut are
     dropped too, so the retreat starts on the tick after the last swing.
-    ``horizon_ticks`` comes from the world (``queue_horizon_ticks``).
+    ``horizon_ticks`` comes from the world (``queue_horizon_intents``).
     """
     if poll_interval_ticks <= 0:
         raise ValueError("poll_interval_ticks must be positive")

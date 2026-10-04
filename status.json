@@ -7,7 +7,7 @@
   "M5": {"state": "open"},
   "M6": {
     "state": "partial",
-    "remaining": "Step/Wait path pacing (attack and speech pacing are in agentrealm_agent/executor.py, not yet wired into the runner), poll cadences, snapshot deltas and health in the runner/world model, live Olympuff smoke test."
+    "remaining": "Wire the executor into the runner (attack and speech pacing are in agentrealm_agent/executor/pacing.py, not yet used by the runner): Step/Wait pacing from movement_speed, calm vs threatened poll cadences, snapshot deltas and health on the world model, live Olympuff smoke test."
   },
   "M7": {"state": "open"},
   "M8": {"state": "open"},

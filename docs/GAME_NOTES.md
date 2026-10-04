@@ -8,6 +8,7 @@ What the agent needs to know to play Agent Realm. Every fact names its source:
 | **API** | [API](https://agentrealm.gg/docs/api) |
 | **Guide** | [Create a character agent](https://agentrealm.gg/docs/guides/create-a-character-agent) |
 | **SM** | [State machine agent guide](https://agentrealm.gg/guides/state-machine) |
+| **Tick** | The `tick` tool's description and intent schema on the Agent Realm MCP server (one call to `POST /characters/{id}/tick`) |
 | **Obs** | Observed in play with Pippin (character 1, Olympuff) on 2026-10-04, ticks 1835171–1839533 |
 
 ## No spoilers in this repo
@@ -33,6 +34,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 
 - **Clock and budget.** 10 ticks/s. One request per character per tick, burst 3, counted across every `/characters/{id}/…` route, reads included (M §7.4).
 - **Queue.** Each POST carries up to `queue_horizon_seconds × tick_rate` intents, 40 at 10 Hz (M §7.6). Over that is `queue_too_long`.
+- **Step.** `{"verb": "Step", "direction": d}` with `d` one of `up`, `down`, `left`, `right`, `up_left`, `up_right`, `down_left`, `down_right`; `up` is toward row 0. It moves one block from wherever the character stands when it runs, so the rest of a queue stays valid across an idle tick. `{"verb": "Wait"}` takes no fields (Tick).
 - **Movement pacing.** At movement speed 2500 (2.5 blocks/s), a move is allowed every 4 ticks: `Step, Wait, Wait, Wait`. Three rates use the same accumulator mechanism (API Movement):
   - movement: one move per 1000 / speed seconds;
   - attacks: one per weapon cooldown, 1 s by default (10 ticks);

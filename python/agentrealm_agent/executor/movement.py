@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from .constants import DEFAULT_TICK_RATE_HZ
+from .intents import IntentQueue, StepDirection, step, wait
+
 Pos = tuple[int, int]
 
 # API Movement: `up` is toward row 0 (decreasing y).
-_DIRECTION_BY_DELTA: dict[tuple[int, int], str] = {
+_DIRECTION_BY_DELTA: dict[tuple[int, int], StepDirection] = {
     (0, -1): "up",
     (0, 1): "down",
     (-1, 0): "left",
@@ -19,20 +22,12 @@ _DIRECTION_BY_DELTA: dict[tuple[int, int], str] = {
 }
 
 
-def direction_between(frm: Pos, to: Pos) -> str:
+def direction_between(frm: Pos, to: Pos) -> StepDirection:
     """Chebyshev-one step direction from ``frm`` to ``to`` (docs/API.md Step)."""
     direction = _DIRECTION_BY_DELTA.get((to[0] - frm[0], to[1] - frm[1]))
     if direction is None:
         raise ValueError(f"not a one-block step: {frm!r} -> {to!r}")
     return direction
-
-
-def step_intent(direction: str) -> dict:
-    return {"verb": "Step", "direction": direction}
-
-
-def wait_intent() -> dict:
-    return {"verb": "Wait"}
 
 
 def ticks_per_step(*, tick_rate_hz: int, movement_speed_milli: int) -> int:
@@ -56,9 +51,9 @@ def build_paced_walk_queue(
     cells: Sequence[Pos],
     *,
     movement_speed_milli: int,
-    tick_rate_hz: int = 10,
+    tick_rate_hz: int = DEFAULT_TICK_RATE_HZ,
     ticks_since_last_step: int | None = None,
-) -> list[dict]:
+) -> IntentQueue:
     """Turn a one-block path into ``Step``, ``Wait``×n, … intents.
 
     ``cells`` lists each block to enter in order; ``from_cell`` is where the
@@ -79,13 +74,13 @@ def build_paced_walk_queue(
     if not cells:
         return []
 
-    queue: list[dict] = []
+    queue: IntentQueue = []
     if ticks_since_last_step is not None:
-        queue.extend(wait_intent() for _ in range(max(0, period - ticks_since_last_step)))
+        queue.extend(wait() for _ in range(max(0, period - ticks_since_last_step)))
     prev = from_cell
     for i, target in enumerate(cells):
         if i:
-            queue.extend(wait_intent() for _ in range(period - 1))
-        queue.append(step_intent(direction_between(prev, target)))
+            queue.extend(wait() for _ in range(period - 1))
+        queue.append(step(direction_between(prev, target)))
         prev = target
     return queue

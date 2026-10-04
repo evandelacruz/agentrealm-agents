@@ -72,6 +72,8 @@ class MapView:
     damage: dict[Pos, int] = field(default_factory=dict)
     # Signs and statues (Manual §9.2): readable wall cells from terrain reads.
     readable: dict[Pos, bool] = field(default_factory=dict)
+    # Doors may carry ``locked: true`` on terrain reads (Manual §9.2).
+    locked: dict[Pos, bool] = field(default_factory=dict)
 
     def walkable(self, p: Pos) -> bool:
         return self.tiles.get(p) in WALKABLE
@@ -213,6 +215,7 @@ class WorldModel:
             _set_damage(view, p, cell)
             # A full read: a cell whose legend entry lacks the flag is not readable.
             _set_readable(view, p, cell, full=True)
+            _set_locked(view, p, cell, full=True)
         self.terrain_center = self.pos
         self.terrain_map = self.map_id
 
@@ -309,6 +312,7 @@ class WorldModel:
             v.tiles[p] = cell.get("block_type", "")
             _set_damage(v, p, cell)
             _set_readable(v, p, cell)
+            _set_locked(v, p, cell)
         for cell in patch.get("removed") or []:
             map_id = int(cell["map_id"])
             p = (int(cell["x"]), int(cell["y"]))
@@ -316,6 +320,7 @@ class WorldModel:
             v.tiles.pop(p, None)
             v.damage.pop(p, None)
             v.readable.pop(p, None)
+            v.locked.pop(p, None)
 
     def _apply_snapshot_terrain(self, terrain: dict) -> None:
         for cell in terrain.get("cells") or []:
@@ -325,6 +330,7 @@ class WorldModel:
             v.tiles[p] = cell.get("block_type", "")
             _set_damage(v, p, cell)
             _set_readable(v, p, cell)
+            _set_locked(v, p, cell)
 
     def _chest_contents_from_entities(self, entities: dict) -> dict[int, list[InventorySupply]]:
         return {
@@ -511,6 +517,13 @@ def _set_readable(view: MapView, p: Pos, cell: dict, *, full: bool = False) -> N
         view.readable[p] = True
     elif full or "readable" in cell:
         view.readable.pop(p, None)
+
+
+def _set_locked(view: MapView, p: Pos, cell: dict, *, full: bool = False) -> None:
+    if cell.get("locked"):
+        view.locked[p] = True
+    elif full or "locked" in cell:
+        view.locked.pop(p, None)
 
 
 def _opt_int(v) -> int | None:

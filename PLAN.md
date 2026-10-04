@@ -79,7 +79,7 @@ The first rule that matches picks the intent. They run on every `POST tick`, als
    | `block_occupied` | Kept off for the next decision, then costs 100 extra for 30 ticks. |
    | `conflict_lost` | Nothing; the next move may retry. |
    | `door_locked` | Impassable, and stored as a locked door under the map's `doors` in the knowledge base, which every character of the world then keeps off. |
-   | `over_strength_ceiling` | Impassable this run, and stored under the map's `hunting` in the knowledge base with the zone's ceiling for A27's strength bracket. |
+   | `over_strength_ceiling` | Impassable until the loadout (armed or worn) changes, and stored under the map's `hunting` in the knowledge base with the zone's ceiling for A27's strength bracket. |
    | `would_strand` | Not handled yet: treated as anything else below. Open question for Evan: the landing target. GAME_NOTES ties `would_strand` to water (unequipping the supply that keeps us on it), and the world model has no water yet, so the refused cell is not a landing. |
    | anything else | Kept off for the next decision only. |
 2. Standing on a block in `avoid_blocks` → step to the nearest safe neighbour.
@@ -222,7 +222,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | ID | Item | Depends on |
 |---|---|---|
 | A26 | **Door graph and cross-map routing.** Warps recorded in the knowledge base; route over the graph, then A* on each map. | A12, A17 |
-| A27 | **Travel.** To entrance marks, town, hunting grounds and shops; strength bracketed by `over_strength_ceiling`. | A5, A26 |
+| A27 | **Travel.** To entrance marks, town, hunting grounds and shops; strength bracketed by `over_strength_ceiling`. Directives `goals` entries `travel:<to>[:[map_id:]x:y]` form a stack, walked in order with the cost grid and door graph (A26) after reflexes 2–4. An op that does not resolve yet (`shop` before any priced supply is seen, `town` with no town or respawn known, `hunting_ground` with no eligible ceiling) is skipped: dropped once Travel acts on a later op, kept while none resolves, so Explore runs until the knowledge base can resolve it. Arriving drops the op; with no step plannable, Travel falls back to Explore's goals for that round. A shop is a cell where a supply with a `gem_price` was seen (GAME_NOTES Buying); the API names no shops, and a bought-out cell stays listed. Entrance marks come from one `get_minimap` read at startup, so marks on maps revealed later are learned on the next run. The bracket keeps only the lower bound (`over_strength_ceiling` ⇒ strength above that ceiling): a successful entry would not change which grounds are candidates until win estimates (M8) choose between ceilings. A loadout change resets it and reopens the cells it closed. | A5, A26 |
 | A28 | **Break and break memory.** Per (block, capability); break costs go live; escalation steps 2 and 4; `Escape` through blocks. | A5, A15, A17 |
 | A29 | **M9 acceptance.** M9 done-when. | A25, A27, A28 |
 

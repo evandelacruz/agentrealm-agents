@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from ..knowledge_base import KnowledgeBase
+from ..knowledge_maps import HUNTING
 from ..world import Pos
 
 SHOPS = "shops"
-HUNTING = "hunting"
 TOWN = "town"
 
 
@@ -68,22 +68,6 @@ def sync_entrances(kb: KnowledgeBase, minimap: dict) -> None:
                 row.setdefault("y", y)
 
 
-def record_hunting_zone(kb: KnowledgeBase | None, map_id: int, pos: Pos, ceiling: int | None, *, closed: bool = False) -> None:
-    if kb is None:
-        return
-    entry: dict[str, Any] = {}
-    if ceiling is not None:
-        entry["strength_ceiling"] = ceiling
-    if closed:
-        entry["closed"] = True
-    with kb.lock:
-        hunting = kb.maps.setdefault(str(map_id), {}).setdefault(HUNTING, {})
-        prev = hunting.get(_cell_key(pos))
-        if isinstance(prev, dict):
-            entry = {**prev, **entry}
-        hunting[_cell_key(pos)] = entry
-
-
 def iter_hunting_cells(kb: KnowledgeBase | None) -> list[tuple[int, Pos, dict[str, Any]]]:
     if kb is None:
         return []
@@ -100,7 +84,9 @@ def iter_hunting_cells(kb: KnowledgeBase | None) -> list[tuple[int, Pos, dict[st
             if not isinstance(hunting, dict):
                 continue
             for key, fact in hunting.items():
-                if not isinstance(fact, dict) or fact.get("closed"):
+                # A closed cell stays a candidate while its ceiling is known: the
+                # strength bracket rules it out, and a loadout change reopens it.
+                if not isinstance(fact, dict) or (fact.get("closed") and "strength_ceiling" not in fact):
                     continue
                 try:
                     x, y = (int(p) for p in key.split(",", 1))

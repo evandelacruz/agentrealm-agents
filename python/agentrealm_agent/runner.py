@@ -15,10 +15,10 @@ from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .item_table import absorb_attack_range, absorb_entities_payload, rejection_attack_range
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import record_warp, sync_tiles, sync_world_maps
-from .travel.knowledge import record_hunting_zone, record_shop_cell, sync_entrances, sync_town
+from .knowledge_maps import record_hunting_zone, record_warp, sync_tiles, sync_world_maps
+from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.ops import refresh_travel_stack
-from .travel.strength import loadout_key, note_hunting_entry
+from .travel.strength import loadout_key
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
@@ -170,21 +170,28 @@ class Runner:
         sync_tiles(self.knowledge, map_id, tiles)
 
     def _sync_minimap(self) -> None:
+        """Entrance marks into the knowledge base (A27). Read once at startup:
+        marks on maps revealed later are learned on the next run (PLAN.md A27)."""
         if self.knowledge is None:
             return
         try:
             body = self.client.minimap(self.cid)
-        except ApiError:
+        except ApiError as e:
+            self.log("minimap", f"failed: {e}", {"error": str(e)})
             return
         sync_entrances(self.knowledge, body)
 
     def _sync_loadout(self) -> None:
+        """A loadout change resets the strength bracket and reopens the
+        cells it closed (PLAYABLE_AGENT_PLAN Combat, A27)."""
         key = loadout_key(self.world)
         if key != self.mem.loadout_key:
             self.mem.loadout_key = key
-            self.mem.strength.reset()
+            self.mem.nav.impassable -= self.mem.strength.reset()
 
     def _learn_shops_from_entities(self, payload: dict) -> None:
+        """A cell holding a supply with a ``gem_price`` is where it can be
+        bought (GAME_NOTES Buying); ``travel:shop`` heads for one (A27)."""
         if self.knowledge is None or self.world.map_id is None:
             return
         for s in payload.get("supplies") or []:
@@ -573,8 +580,6 @@ class Runner:
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
-                if w.map_id is not None:
-                    note_hunting_entry(m.strength, w, w.map_id, w.pos)
                 if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:
                     # A door moves us; the Steps still queued behind this one
                     # would walk from the wrong place.

@@ -10,9 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..knowledge_maps import iter_doors, record_locked_door
-from ..travel.knowledge import record_hunting_zone
-from ..travel.strength import note_over_strength
+from ..knowledge_maps import iter_doors, record_hunting_zone, record_locked_door
 from ..world import DOORS, Pos
 
 if TYPE_CHECKING:
@@ -76,7 +74,8 @@ def end_decision(nav: NavMemory, tick: int) -> None:
 
 
 def record_strength_closed(kb: KnowledgeBase | None, w: WorldModel, pos: Pos) -> int | None:
-    """Mark a hunting cell closed in the knowledge base (A27). Returns its ceiling."""
+    """Mark a hunting cell closed in the knowledge base. Returns its ceiling
+    when a ``get_zone`` read has served it, for A27's strength bracket."""
     if w.map_id is None:
         return None
     fact = w.zones.get(w.map_id, {}).get(pos)
@@ -113,8 +112,8 @@ def learn_step_rejection(
                 record_locked_door(kb, w.map_id, landing, block if block in DOORS else "framed_door")
         case "over_strength_ceiling":
             nav.impassable.add(cell)
-            ceiling = record_strength_closed(kb, w, landing)
-            note_over_strength(m.strength, ceiling)
+            # A loadout change reopens the cell (A27: StrengthBracket.reset).
+            m.strength.note_over(cell, record_strength_closed(kb, w, landing))
         case _:
             # A code this table does not handle (or none): keep off the cell for
             # one decision, as reflex 1 did before A14, and learn nothing more.

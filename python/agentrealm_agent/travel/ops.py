@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..world import Pos
 
 TRAVEL_KINDS = ("entrance", "town", "hunting_ground", "shop", "point")
 
@@ -19,45 +18,28 @@ class TravelOp:
     why: str = ""
 
 
-def parse_travel_dict(raw: dict[str, Any]) -> TravelOp | None:
-    if raw.get("op") != "travel":
-        return None
-    to = raw.get("to")
-    if to not in TRAVEL_KINDS:
-        return None
-    x, y = _opt_int(raw.get("x")), _opt_int(raw.get("y"))
-    if to in ("entrance", "point", "shop") and (x is None or y is None):
-        if to != "shop":
-            return None
-    if to == "shop" and x is not None and y is None:
-        return None
-    return TravelOp(to=str(to), x=x, y=y, map_id=_opt_int(raw.get("map_id")), why=str(raw.get("why") or ""))
-
-
 def parse_travel_string(goal: str) -> TravelOp | None:
-    """``travel:<to>[:map_id:x:y]`` or ``travel:<to>:x:y`` from directives goals."""
-    if not goal.startswith("travel:"):
-        return None
+    """``travel:<to>``, ``travel:<to>:x:y`` or ``travel:<to>:map_id:x:y``.
+
+    ``town`` and ``hunting_ground`` take no coordinates, ``entrance`` and
+    ``point`` need them, ``shop`` takes either. Anything else is ignored.
+    """
     parts = goal.split(":")
-    if len(parts) < 2:
+    if len(parts) < 2 or parts[0] != "travel" or parts[1] not in TRAVEL_KINDS:
         return None
     to = parts[1]
-    if to not in TRAVEL_KINDS:
-        return None
     nums = [_opt_int(p) for p in parts[2:]]
-    nums = [n for n in nums if n is not None]
-    map_id = x = y = None
-    if to in ("town", "hunting_ground"):
-        pass
-    elif to == "shop" and not nums:
-        pass
-    elif len(nums) == 2:
-        x, y = nums
-    elif len(nums) == 3:
-        map_id, x, y = nums
-    elif to in ("entrance", "point"):
+    if any(n is None for n in nums):
         return None
-    return TravelOp(to=to, x=x, y=y, map_id=map_id)
+    if not nums:
+        return None if to in ("entrance", "point") else TravelOp(to=to)
+    if to in ("town", "hunting_ground"):
+        return None
+    if len(nums) == 2:
+        return TravelOp(to=to, x=nums[0], y=nums[1])
+    if len(nums) == 3:
+        return TravelOp(to=to, x=nums[1], y=nums[2], map_id=nums[0])
+    return None
 
 
 def parse_travel_goals(goals: list[str]) -> list[TravelOp]:
@@ -83,9 +65,11 @@ def current_travel_op(memory) -> TravelOp | None:
     return memory.travel_ops[memory.travel_index]
 
 
-def advance_travel_op(memory) -> None:
-    memory.travel_index += 1
-    memory.path, memory.goal = [], ""
+def set_travel_index(memory, index: int) -> None:
+    """Move the stack to ``index``; ops before it are dropped (arrived or unresolved)."""
+    if index != memory.travel_index:
+        memory.travel_index = index
+        memory.path, memory.goal = [], ""
 
 
 def _opt_int(v: Any) -> int | None:

@@ -26,8 +26,11 @@ class Memory:
     need_position: bool = True
     need_self: bool = True
     windows_since_self: int = 0
-    pending: dict | None = None  # the intent submitted last, awaiting its result
-    pending_queue: str | None = None  # the queue_id `pending` was sent under
+    pending: dict | None = None  # last non-queue intent submitted, awaiting its result
+    pending_queue: str | None = None  # the queue_id movement or intent was sent under
+    pending_intents: list[dict] | None = None  # full queue last submitted with intents
+    pending_next_index: int = 0  # next intent index still awaiting a result
+    held_queue: dict | None = None  # server queue {"queue_id", "next_index"} while not empty
     undo: Pos | None = None  # where we stood before assuming `pending` moved us
     blocked: dict[Pos, int] = field(default_factory=dict)  # rejected tile -> decisions left to keep off it
     alarm: bool = False  # Damaged or Attacked since the last entity read

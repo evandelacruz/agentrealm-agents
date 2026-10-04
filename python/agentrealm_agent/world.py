@@ -79,6 +79,7 @@ class WorldModel:
     pos: Pos | None = None
     perception: int = 1
     movement: int = 1
+    movement_speed: int = 2500  # thousandths of a block per second (GetSelf)
     alive: bool = True
     lives: int = 0
     tick: int = 0
@@ -106,6 +107,8 @@ class WorldModel:
     def apply_self(self, s: dict) -> None:
         self.perception = max(1, int(s.get("perception_range", 1)))
         self.movement = max(1, int(s.get("movement_range", 1)))
+        if "movement_speed" in s:
+            self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
 

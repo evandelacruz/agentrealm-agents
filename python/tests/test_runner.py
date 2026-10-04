@@ -58,29 +58,29 @@ class RunnerTest(unittest.TestCase):
         return r
 
     def test_rejected_step_rolls_back_and_is_not_resubmitted(self):
-        # Reflex 1 (PLAN.md): a rejected SetPosition does
-        # not enter the block, so the local model must not keep us there.
+        # Reflex 1 (PLAN.md): a rejected Step does not enter the block.
         pol = Policy(goals=["goto"], goto=(4, 0), pickup=False)
         fake = FakeClient([
             {"tick": 10, "window_remaining_ms": 0},
             {"tick": 11, "window_remaining_ms": 0,
              "intent_results": [rejected("q1", "block_occupied", "occupied", 10)]},
-            {"tick": 13, "window_remaining_ms": 0,
-             "intent_results": [rejected("q2", "beyond_movement_range", "range", 11)]},
+            {"tick": 13, "window_remaining_ms": 0},
         ])
         r = self.runner(fake, pol)
         r.tick()
-        self.assertEqual(fake.sent[0], [{"verb": "SetPosition", "x": 1, "y": 0}], "a one-entry queue")
-        self.assertEqual(r.world.pos, (1, 0), "assumed applied")
+        self.assertEqual(fake.sent[0][0], {"verb": "Step", "direction": "right"})
+        self.assertGreater(len(fake.sent[0]), 1, "paced multi-intent queue")
+        self.assertEqual(r.world.pos, (0, 0), "movement resolves from results, not assumed")
 
-        r.tick()  # planned from (1, 0) before the rejection was known
-        self.assertEqual(r.world.pos, (0, 0), "rolled back to before the rejected step")
+        r.tick()  # queue held; rejection for the first Step arrives
+        self.assertIsNone(fake.sent[1])
+        self.assertEqual(r.world.pos, (0, 0))
         self.assertTrue(r.mem.need_position)
 
-        r.world.apply_position({"map_id": 7, "x": 0, "y": 0})  # the forced position read
+        r.world.apply_position({"map_id": 7, "x": 0, "y": 0})
         r.mem.need_position, r.mem.undo = False, None
         r.tick()
-        self.assertNotEqual(fake.sent[2], [{"verb": "SetPosition", "x": 1, "y": 0}])
+        self.assertNotEqual(fake.sent[2], fake.sent[0], "replan avoids the rejected step")
 
     def test_a_result_for_another_queue_is_not_applied(self):
         # docs/API.md Intent Results: a result names its queue_id and index, so
@@ -88,13 +88,17 @@ class RunnerTest(unittest.TestCase):
         fake = FakeClient([
             {"tick": 10, "window_remaining_ms": 0},
             {"tick": 11, "window_remaining_ms": 0,
+             "intent_results": [{"tick": 10, "queue_id": "q1", "index": 0, "outcome": "applied_no_effect"}]},
+            {"tick": 12, "window_remaining_ms": 0,
              "intent_results": [rejected("q0", "block_occupied", "occupied", 9)]},
         ])
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.tick()
         r.tick()
+        self.assertEqual(r.world.pos, (1, 0))
+        r.tick()
         self.assertFalse(r.mem.need_position)
-        self.assertEqual(r.world.pos, (2, 0))
+        self.assertEqual(r.world.pos, (1, 0))
 
     def test_nothing_to_do_leaves_the_queue_as_it_is(self):
         # docs/API.md Intent Queue: a request without intents leaves the held

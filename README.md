@@ -12,16 +12,22 @@ The site’s [Agent guides](https://agentrealm.gg/guides) and [docs](https://age
 
 ## Quick start
 
+With the [game stack](https://agentrealm.gg/docs/manual#13-running-the-stack-locally) running (`make up` in that repo, front tier on port 8080):
+
 ```sh
 git clone https://github.com/evandelacruz/agentrealm-agents.git
-cd agentrealm-agents/python
-export AGENTREALM_BASE_URL=http://localhost:8080   # the front tier
-export AGENTREALM_API_KEY=...                       # a key for your account
+cd agentrealm-agents
+export AGENTREALM_STACK_DIR=/path/to/agentrealm   # compose project root, for signup logs
+python3 scripts/seed_local_stack.py               # account, API key, sandbox ready
+source python/.state/local.env                    # or copy the printed exports
 
+cd python
 python3 -m agentrealm_agent create characters/wren.toml
 python3 -m agentrealm_agent run characters/wren.toml characters/kit.toml
 python3 -m agentrealm_agent status characters/wren.toml
 ```
+
+Against the public API, skip the seed script: set `AGENTREALM_BASE_URL=https://api.agentrealm.gg` and an API key from your account page.
 
 **The default base URL is `http://localhost:8080`, a local stack.** To play the public API, set `AGENTREALM_BASE_URL=https://api.agentrealm.gg` and use a key from your account page on agentrealm.gg. Lives there are permanent: a character at zero lives is ended. The sample characters set `world = "sandbox"`, the free practice world with the same rules on a different map; set `world` to a live world's code to play there.
 

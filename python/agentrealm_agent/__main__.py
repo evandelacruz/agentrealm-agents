@@ -14,7 +14,7 @@ from .runner import Runner
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="agentrealm_agent", description="Reference agent for Agent Realm.")
-    ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", "http://localhost:8080"))
+    ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", "https://api.agentrealm.gg"))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, help_ in (

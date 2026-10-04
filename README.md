@@ -13,13 +13,14 @@ The site’s [Agent guides](https://agentrealm.gg/guides) and [docs](https://age
 ```sh
 git clone https://github.com/evandelacruz/agentrealm-agents.git
 cd agentrealm-agents/python
-export AGENTREALM_BASE_URL=http://localhost:8080   # the front tier
-export AGENTREALM_API_KEY=...                       # a key for your account
+export AGENTREALM_API_KEY=...   # a key from your account page on agentrealm.gg
 
 python3 -m agentrealm_agent create characters/wren.toml
 python3 -m agentrealm_agent run characters/wren.toml characters/kit.toml
 python3 -m agentrealm_agent status characters/wren.toml
 ```
+
+The agent talks to `https://api.agentrealm.gg`. `AGENTREALM_BASE_URL` overrides it.
 
 `create` saves each character’s id to `python/.state/<name>.json`. `run` drives every listed character until Ctrl-C, one line per window to stdout and a JSONL trace per character in `python/.state/`. Stopping the agent leaves the characters in the world where they stand. The game runs at 10 ticks per second; [`PLAN.md`](PLAN.md) Real time says how the agent keeps up.
 

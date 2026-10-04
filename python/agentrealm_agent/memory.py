@@ -62,3 +62,4 @@ class Memory:
     heal_wait: tuple[int, int] | None = None  # (tick, health) Heal began sending nothing, reset when health rises
     heal_backoff_until: int = -1  # Heal yields to Explore until this tick
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
+    solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)

@@ -1,6 +1,6 @@
 """Paced multi-intent queues for real-time play (M6).
 
-The runner and state machine will build queues here; this slice is types and limits only.
+Types, limits and paced Step/Wait queue building; the runner wires them in later.
 """
 
 from .constants import (
@@ -10,6 +10,7 @@ from .constants import (
     queue_horizon_intents,
 )
 from .intents import IntentQueue, StepDirection, StepIntent, WaitIntent, step, wait
+from .movement import build_paced_walk_queue, direction_between, ticks_per_step
 from .queue import trim_to_horizon, within_horizon
 
 __all__ = [
@@ -20,8 +21,11 @@ __all__ = [
     "StepDirection",
     "StepIntent",
     "WaitIntent",
+    "build_paced_walk_queue",
+    "direction_between",
     "queue_horizon_intents",
     "step",
+    "ticks_per_step",
     "trim_to_horizon",
     "wait",
     "within_horizon",

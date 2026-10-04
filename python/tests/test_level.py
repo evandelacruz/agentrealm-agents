@@ -8,6 +8,7 @@ from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import CostGridParams
+from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.level import inside_level
 from agentrealm_agent.travel import refresh_travel_stack, sync_town
@@ -128,6 +129,21 @@ class LevelStateTest(unittest.TestCase):
         w = grid(["###", "#.#", "###"], at=(1, 1), map_id=8)
         w.apply_position({"map_id": 8, "x": 1, "y": 1, "level": 1})
         m = Memory()
+        ctx = PlayContext(m, Policy(kind="scripted", goals=["hold"]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
+        out = dispatch(w, ctx)
+        self.assertNotEqual(out.state, "Level")
+        self.assertTrue(any(y.startswith("Level: no level step") for y in out.yielded), out.yielded)
+
+    def test_skips_door_and_frontiers_given_up_on(self):
+        # A door or frontier dropped by stuck detection stays out of Level's
+        # choice until its backoff ends, as it does for the goals (A15).
+        w = grid(["....D"], at=(0, 0), map_id=8)
+        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
+        m = Memory()
+        until = w.tick + 300
+        m.nav_stuck.backoff_until[nav_stuck.goal_key("doors", 8, (4, 0))] = until
+        for p in w.view.frontier():
+            m.nav_stuck.backoff_until[nav_stuck.goal_key("explore", 8, p)] = until
         ctx = PlayContext(m, Policy(kind="scripted", goals=["hold"]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
         out = dispatch(w, ctx)
         self.assertNotEqual(out.state, "Level")

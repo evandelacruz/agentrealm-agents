@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import random
 import threading
@@ -10,6 +11,8 @@ from dataclasses import dataclass
 
 from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
 from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
+from .navigation.stuck import on_rejection as nav_on_rejection
+from .navigation.stuck import on_step as nav_on_step
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
@@ -469,18 +472,21 @@ class Runner:
         Only a firing reflex may touch the path and the rng; they stay as they
         were otherwise, so the held queue's steps are not planned twice. The
         navigation learnings always stay as they were: this probe is not the
-        decision window that ages them (A14). The goal stack always stays as it
+        decision window that ages them (A14), and neither do the stuck attempts,
+        which only a real decision may escalate (A15). The goal stack always stays as it
         was too: reflexes never consume its ops, so the probe must not advance,
         pop, or drop them (A34).
         """
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op)
+        saved_stuck = copy.deepcopy(m.nav_stuck)
         saved_plan = self.plan.snapshot()
         try:
             d = self._decide(self.world, m, plan=self.plan)
         finally:
             self.plan.restore(saved_plan)
         m.nav = saved[2]
+        m.nav_stuck = saved_stuck
         if d.reflex:
             return d
         m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
@@ -678,6 +684,7 @@ class Runner:
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
+                nav_on_step(m, w)
                 if self.acceptance is not None:
                     self.acceptance.on_step_applied()
                 if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:
@@ -702,6 +709,7 @@ class Runner:
             return False
         if intent and intent.get("verb") == "Step" and w.pos is not None:
             rej = result.get("rejection") or {}
+            nav_on_rejection(m)  # before the rejection drops the goal (A15)
             learn_step_rejection(
                 m,
                 w,

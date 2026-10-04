@@ -37,7 +37,7 @@
 
   "A14": {"state": "done"},
 
-  "A15": {"state": "open"},
+  "A15": {"state": "partial", "remaining": "Stuck detection on cross-map legs: a goto or Travel leg toward a door to another map is not tracked, so it escalates only on the destination's map (PLAN.md Stuck detection)."},
 
   "A16": {"state": "open"},
 

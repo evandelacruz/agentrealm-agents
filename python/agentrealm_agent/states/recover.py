@@ -8,7 +8,8 @@ from ..knowledge_base import KnowledgeBase
 from ..loot import carry_slots_used, loot_score, worst_droppable
 from ..memory import Memory
 from ..navigation import cost_path
-from ..pathing import grid_params, nav_search, next_step
+from ..navigation import stuck as nav_stuck
+from ..pathing import grid_params, guided_step, nav_search
 from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
@@ -119,19 +120,15 @@ def recover_outcome(
         if contents is None:
             return StateOutcome(None, f"open chest {chest_id}", state=state, wait=True)
 
-    if m.goal != "chest" or not next_step(w, plan_avoid, m.path):
-        found = cost_path(
-            w,
-            target,
-            grid_params(policy, plan_avoid, plan_costly),
-            nav=nav_search(m, w, "chest", target),
-        )
-        if next_step(w, plan_avoid, found):
-            m.path, m.goal = found, "chest"
+    def plan(att):
+        params = grid_params(policy, plan_avoid, plan_costly, m=m)
+        return cost_path(w, target, params, nav=nav_search(m, w, "chest", target))
 
-    step = next_step(w, plan_avoid, m.path) if m.goal == "chest" else None
+    # Stuck detection and escalation drive the walk; a chest given up on is backed off (A15).
+    step = guided_step(m, w, "chest", target, plan_avoid, plan)
     if step is not None:
-        return StateOutcome([set_position(step)], f"chest → {m.path[-1]}", state=state)
+        note = nav_stuck.level_note(nav_stuck.active(m, w))
+        return StateOutcome([set_position(step)], f"chest → {target}{note}", state=state)
     return None
 
 

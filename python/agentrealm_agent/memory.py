@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from .navigation import NavSearchState
 from .navigation.rejection import NavMemory
+from .navigation.stuck import NavStuckMemory
 from .travel.ops import TravelOp
 from .travel.strength import StrengthBracket
 from .world import Pos
@@ -33,6 +34,7 @@ class Memory:
     last_use_tick: int | None = None  # tick our last Use applied (weapon cooldown, A1)
     last_speech_tick: int | None = None  # tick our last Say/Broadcast applied (A1)
     nav: NavMemory = field(default_factory=NavMemory)  # what Step rejections taught the map (A14)
+    nav_stuck: NavStuckMemory = field(default_factory=NavStuckMemory)  # stuck detection and escalation (A15)
     alarm: bool = False  # Damaged or Attacked since the last entity read
     last_poll_tick: int = -1  # sim tick of the last POST tick (M6 cadence)
     calm_poll_interval: int = 7  # ticks between calm polls, 4–10 after each poll

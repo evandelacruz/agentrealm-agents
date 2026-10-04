@@ -8,14 +8,16 @@ from .base import PlayContext, State, StateOutcome
 from .downed import DownedState
 from .explore import ExploreState
 from .idle import IdleState
+from .recover import RecoverState
 from .sync import SyncState
 
 # Priority order (PLAYABLE_AGENT_PLAN.md State machine). Sync and Downed are
-# both priority 0 and never both act: each only waits. Survival states A9–A11
-# slot in above Explore later.
+# both priority 0 and never both act: each only waits. A9–A10 slot above Explore
+# later; Recover (A11) is priority 3.
 STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
+    RecoverState(),
     ExploreState(),
     IdleState(),
 )

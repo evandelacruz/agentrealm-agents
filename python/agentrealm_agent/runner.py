@@ -382,7 +382,10 @@ class Runner:
         # Ticks since the last applied Step, counted to the latest tick we
         # know of: the first intent runs no earlier, so the owed Waits are
         # never too few and the first Step never draws movement_cooldown.
-        since = None if m.last_step_tick is None else max(1, w.tick - m.last_step_tick)
+        # Always open with Waits still owed as if the last Step was one tick ago.
+        # w.tick can run ahead of the server's movement clock on calm skips while
+        # a queue runs server-side without intent_results (movement_cooldown).
+        since = 1 if m.last_step_tick is not None else None
         intents = build_paced_walk_queue(
             w.pos,
             cells,
@@ -497,7 +500,8 @@ class Runner:
             reject_step(m, step_landing(w.pos, intent["direction"]))
         code = (result.get("rejection") or {}).get("code", "?")
         if self.acceptance is not None:
-            self.acceptance.on_rejection(code)
+            verb = (intent or {}).get("verb")
+            self.acceptance.on_rejection(code, verb=verb)
         m.pending = None
         m.pending_intents = None
         m.pending_queue = None

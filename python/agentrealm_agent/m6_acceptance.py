@@ -35,9 +35,9 @@ class M6AcceptanceMetrics:
     def on_step_applied(self) -> None:
         self.steps_applied += 1
 
-    def on_rejection(self, code: str) -> None:
+    def on_rejection(self, code: str, *, verb: str | None = None) -> None:
         self.rejection_codes.append(code)
-        if code == "movement_cooldown":
+        if code == "movement_cooldown" and verb == "Step":
             self.movement_cooldown_rejections += 1
 
     @property

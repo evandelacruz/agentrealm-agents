@@ -22,8 +22,11 @@ class M6AcceptanceMetricsTest(unittest.TestCase):
         m = M6AcceptanceMetrics(target_steps=200, steps_applied=199)
         self.assertIn("steps", m.failures()[0])
         m.steps_applied = 200
-        m.movement_cooldown_rejections = 1
+        m.on_rejection("movement_cooldown", verb="Step")
         self.assertTrue(any("movement_cooldown" in f for f in m.failures()))
+        m.movement_cooldown_rejections = 0
+        m.on_rejection("movement_cooldown", verb="Wait")
+        self.assertFalse(m.failures())
         m.movement_cooldown_rejections = 0
         m.calm_windows = 100
         m.calm_tick_calls = int(100 * CALM_BUDGET_FRACTION)

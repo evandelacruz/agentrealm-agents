@@ -262,7 +262,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | A41 | **Run metrics.** Levels cleared, deaths, kills, gems, time per level, from the trace. | A5 |
 | A42 | **Comparison across commits.** A regression shows up as a number. | A41 |
 
-Today the agent falls back to fleeing from every NPC: it aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it (A23 adds `Fight`).
+**Fight** (A23) swings at NPCs and characters when the win estimate clears `fight_margin`, using `Use` on the NPC's block, with retreat steps queued behind the attack.
 
 The playable plan's strategist (M4) replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the remaining one-intent queues in **Real time**; until then those sections describe the shipped agent. Since A5, `states.dispatch` picks the intents; `brain.decide` stays only as a shim over it that keeps the first intent as a `Decision`, until the runner sends a state's whole queue. The call budget is unchanged: one request per character per tick, burst 3.
 

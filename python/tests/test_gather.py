@@ -208,11 +208,24 @@ class GatherReflexTest(unittest.TestCase):
         out = dispatch(w, ctx(w, ["gather_gems:3"], avoid_blocks=["lava"]))
         self.assertEqual(out.state, "Escape")
 
-    def test_fights_a_character_like_explore(self):
+    def test_fight_outranks_gather(self):
         w = grid(["ggg"], at=(1, 0))
-        w.entities = [Entity("character", 5, (2, 0))]
-        out = outcome(w, on_hostile="fight", hostile=["character"], hostile_range=2)
-        self.assertEqual(out.intents[0]["verb"], "Use")
+        w.entities = [Entity("character", 5, (2, 0), code="peer")]
+        w.health, w.lives = 500, 10
+        w.threat.record(("character", "peer"), 1)
+        from agentrealm_agent.directives import PARAM_DEFAULTS
+
+        c = ctx(
+            w,
+            ["gather_gems:3"],
+            Memory(path=[(0, 0)], goal="gather"),
+            on_hostile="fight",
+            hostile=["character"],
+            hostile_range=2,
+        )
+        c.params = {**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1}
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Fight")
         self.assertEqual(out.intents[0]["target"], {"kind": "character", "character_id": 5})
 
 

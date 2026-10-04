@@ -8,6 +8,7 @@ from .base import PlayContext, State, StateOutcome
 from .downed import DownedState
 from .escape import EscapeState
 from .explore import ExploreState
+from .fight import FightState
 from .flee import FleeState
 from .gather import GatherState
 from .heal import HealState
@@ -30,6 +31,7 @@ STATES: tuple[State, ...] = (
     EscapeState(),
     RetreatState(),
     HealState(),
+    FightState(),
     FleeState(),
     RecoverState(),
     LootState(),

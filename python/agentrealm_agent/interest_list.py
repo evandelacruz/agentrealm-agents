@@ -2,8 +2,8 @@
 
 A30 nominates what can be done from where the agent stands: unread readable
 cells in sight (``Read``) and NPCs within 25 blocks never spoken to (``Say``).
-It also walks to unvisited doors and minimap entrance marks to record what they
-need (A27 marks, A30 door looks). Unknown zones are read by A7's spare-window
+It also walks next to unlooked doors and A27 minimap entrance marks on the
+current map to record what they show (``door_look``). Unknown zones are read by A7's spare-window
 probes (respawn ring first, then the path). Scroll reads stay deferred (PLAN.md A30).
 """
 
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .config import Policy
-from .door_look import iter_unlooked_entrances, look_key
+from .door_look import iter_unlooked, look_key
 from .investigation import cell_was_read, spoken_npc_ids
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -104,24 +104,20 @@ def _say_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, here: Pos) ->
     return out
 
 
-def _look_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, here: Pos) -> list[InterestItem]:
-    # Overworld curiosity: Level owns interior doors (A37); entrance looks use A27 marks.
+def _look_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, map_id: int, here: Pos) -> list[InterestItem]:
+    # Overworld only: Level owns interior doors (A37). Current map only, so a
+    # look never routes through a door before the curiosity cap lands (A32).
     if w.map_level is not None and w.map_level > 0:
         return []
     out: list[InterestItem] = []
-    seen: set[tuple[int, Pos]] = set()
-    for map_id, pos, _ent_key in iter_unlooked_entrances(kb):
-        key = (map_id, pos)
-        if key in seen:
-            continue
-        seen.add(key)
+    for pos in iter_unlooked(kb, map_id):
         lk = look_key(map_id, pos)
         if _gave_up(m, lk):
             continue
         out.append(
             InterestItem(
                 "look_door",
-                f"look entrance @{pos[0]},{pos[1]} map {map_id}",
+                f"look entrance @{pos[0]},{pos[1]}",
                 lk,
                 map_id=map_id,
                 pos=pos,
@@ -139,7 +135,7 @@ def list_interest(w: WorldModel, kb: KnowledgeBase | None, policy: Policy, m: Me
     items = (
         _unread_blocks(w, kb, m, w.map_id, here)
         + _say_items(w, kb, m, here)
-        + _look_items(w, kb, m, here)
+        + _look_items(w, kb, m, w.map_id, here)
     )
     items.sort(key=lambda it: it.sort_key)
     return items

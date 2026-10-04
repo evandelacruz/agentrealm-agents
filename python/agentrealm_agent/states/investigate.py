@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..door_look import LOOK_GOAL, apply_door_look, approach_pos, ready_to_look
 from ..interest_list import pick_interest_tick
-from ..navigation import cost_path, route_first_leg
+from ..navigation import cost_path
 from ..pathing import grid_params, guided_step, nav_search
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
@@ -40,29 +40,30 @@ def _look_outcome(
     w: WorldModel,
     ctx: PlayContext,
     map_id: int,
-    door_pos: tuple[int, int],
+    pos: tuple[int, int],
     reason: str,
     reject_key: str,
 ) -> StateOutcome:
     kb = ctx.knowledge
-    if ready_to_look(w, map_id, door_pos):
-        if apply_door_look(kb, w, map_id, door_pos):
-            ctx.memory.path, ctx.memory.goal = [], ""
-            return StateOutcome(None, f"looked {door_pos}", state=InvestigateState.name)
+    if ready_to_look(w, map_id, pos):
+        if apply_door_look(kb, w, map_id, pos):
+            if ctx.memory.goal == LOOK_GOAL:
+                ctx.memory.path, ctx.memory.goal = [], ""
+            return StateOutcome(None, f"looked {pos}", state=InvestigateState.name)
         return StateOutcome(None, "door not revealed yet", state=InvestigateState.name)
-    _, plan_avoid, plan_costly = plan_sets(w, ctx.memory, ctx.policy, kb)
-    stand = approach_pos(w, kb, map_id, door_pos)
+    stand = approach_pos(w, pos)
+    step = None
+    if stand is not None:
+        _, plan_avoid, plan_costly = plan_sets(w, ctx.memory, ctx.policy, kb)
 
-    def plan(att):
-        params = grid_params(ctx.policy, plan_avoid, plan_costly, allow_goal_door=False, m=ctx.memory)
-        if w.map_id == map_id:
+        def plan(att):
+            params = grid_params(ctx.policy, plan_avoid, plan_costly, allow_goal_door=False, m=ctx.memory)
             return cost_path(w, stand, params, nav=nav_search(ctx.memory, w, LOOK_GOAL, stand))
-        return route_first_leg(w, kb, map_id, stand, params, nav=nav_search(ctx.memory, w, LOOK_GOAL, stand))
 
-    step = guided_step(ctx.memory, w, LOOK_GOAL, stand, plan_avoid, plan)
+        step = guided_step(ctx.memory, w, LOOK_GOAL, stand, plan_avoid, plan)
     if step is not None:
         return StateOutcome([set_position(step)], reason, state=InvestigateState.name)
-    # No route: count a refusal so a unreachable mark does not pin Investigate forever.
+    # No route: count a refusal so an unreachable mark does not pin Investigate forever.
     rejections = ctx.memory.investigate_rejections
     rejections[reject_key] = rejections.get(reject_key, 0) + 1
     return StateOutcome(None, f"{reason}; no path", state=InvestigateState.name)

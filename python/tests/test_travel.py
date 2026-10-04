@@ -219,7 +219,7 @@ class RunnerTravelTest(unittest.TestCase):
     def test_minimap_entrances_merge_map_id(self):
         r = self.runner(FakeClient({"maps": [{"map_id": 5, "entrances": [{"x": 10, "y": 20}]}]}))
         r._sync_minimap()
-        self.assertEqual(r.knowledge.entrances["10,20"]["map_id"], 5)
+        self.assertEqual(r.knowledge.entrances["5:10,20"]["map_id"], 5)
 
     def test_minimap_failure_is_logged_and_learns_nothing(self):
         r = self.runner(FakeClient(None))

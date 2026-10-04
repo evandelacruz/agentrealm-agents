@@ -55,13 +55,7 @@ WALK, CAUTIOUS, REVEAL, REVEALED = 0, 1, 3, 4
 
 # Goals that share one key per cell, so a frontier or door dropped under one
 # is skipped by the others (Explore's goals and Level's walks).
-SHARED_KEYS = {
-    "explore": "frontier",
-    "explore_area": "frontier",
-    "level:frontier": "frontier",
-    "level:door": "doors",
-    "investigate:look": "doors",
-}
+SHARED_KEYS = {"explore": "frontier", "explore_area": "frontier", "level:frontier": "frontier", "level:door": "doors"}
 FRONTIER_GOALS = frozenset(g for g, kind in SHARED_KEYS.items() if kind == "frontier")
 
 ATTEMPTS_KEPT = 32

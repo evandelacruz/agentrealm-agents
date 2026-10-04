@@ -20,7 +20,7 @@ It is outside the formal backlog. It is built interactively and changes as the A
 | `GET /characters/{id}/world` | Tick rate, sandbox flag, status. |
 | `GET /characters/{id}/terrain-tiles?map_id&x0&y0&width&height` | Block types inside perception, plus revealed ground, as a grid: `rows` of `legend` symbols, `?` for clouds. |
 | `GET /characters/{id}/entity-tiles?…` | Characters, NPCs, supplies inside perception. |
-| `POST /characters/{id}/tick` `{"intents": [{...}]}` | Replaces the character's queue with a one-intent list. Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
+| `POST /characters/{id}/tick` `{"intents": [{...}]}` | Replaces the character's queue with an ordered list; no `intents` leaves the held queue running. Returns `queue_id`, `intent_results` since the last call, events by tick, dropped count, the observation, and the clock. |
 
 Auth is `Authorization: Bearer <key>`.
 
@@ -30,7 +30,7 @@ The runner paces one call per wall-clock window (`epoch / tick interval`). That 
 
 ## Real time
 
-Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; a path goes out as one queue of `SetPosition` steps paced with `Wait` by `movement_speed`, cut on a step boundary at the horizon. While it runs the agent only polls; it sends a new queue when a result is rejected or unknown, an event or read makes the rest of the path wrong, or survival events arrive. A dropped queue the server may still hold is replaced, by a lone `Wait` if there is nothing else to do (M6). `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
+Worlds run at 10 ticks per second by default. The agent's shape already fits: the planner is the slow loop and writes plans off the tick, and the reflexes are the fast executor. The intent queue (B98) lets one request carry up to four seconds of intents, run one per tick; a path goes out as one `Step`, `Wait`×n, … queue paced by `movement_speed`, cut after the last `Step` that fits the horizon, and the next queue opens with the `Wait`s still owed; every other intent goes alone. While it runs the agent only polls; it sends a new queue when a result is rejected or unknown, an event or read makes the rest of the path wrong, or survival events arrive. A dropped queue the server may still hold is replaced, by a lone `Wait` if there is nothing else to do (M6). `run` does not send `Sleep` (B45) when it stops, so a stopped character stays standing until auto-sleep takes it off the map. See [Real-time play](https://agentrealm.gg/docs/guides/create-a-character-agent#real-time-play).
 
 ## Architecture
 
@@ -59,7 +59,7 @@ Checked top to bottom:
 
 Self is re-read after `Died`, and every 60 windows otherwise.
 
-Position is tracked locally from results: an applied `SetPosition` moves us to its target. A rejection of the first step puts us back where we stood when the queue was sent, and the server discards the rest of the queue. A queue the client drops itself forces a position read, since its later results are no longer read. A rejection, a door, or a death sends us back to step 1.
+Position is tracked locally from results: an applied `Step` moves us to the block it enters. A rejection of the first step puts us back where we stood when the queue was sent, and the server discards the rest of the queue. A queue the client drops itself forces a position read, since its later results are no longer read; a `Step` onto a door with more queued behind it drops the rest. A rejection, a door, or a death sends us back to step 1.
 
 `Attacked`, `Damaged`, and `Died` on a queue are always ours: they carry no `subject_id` there.
 
@@ -72,7 +72,7 @@ The first rule that matches picks the intent:
 3. Hostile in range: `on_hostile = "flee"` → step to the neighbour farthest from it. `"fight"` → `Use` on it.
 4. Supply underfoot or adjacent and `pickup = true` → `Take`.
 4b. Our last death dropped a chest on this map and `pickup = true` → walk to it; on or next to it, `WithdrawFromChest` with only its `chest_id`, which takes everything that fits, until the snapshot shows it empty or gone. `Died` names the chest and where it landed; this agent sends no `snapshot_version`, so every round trip carries a complete snapshot with the chest's `contents`.
-5. Plan has a next step → `SetPosition` there.
+5. Plan has a next step → walk the path as a paced `Step` queue (see **Real time**).
 6. Otherwise → nothing.
 
 "Hostile" and "in range" read from settings: the API serves no hostile's reach and no other character's health.
@@ -163,7 +163,7 @@ These are the backlog. Each has a stable ID; cite it in commits and PR bodies. P
 
 M1–M3 are built, and M0 is done. Fighting an NPC falls back to fleeing: the agent aims `Use` only at characters, although a weapon `Use` on the block an NPC stands on attacks it.
 
-M0 and M4, M6–M12 are specified in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md), with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). M4 there replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the one-intent queues in **Real time**; until then those sections describe the shipped agent. The call budget is unchanged: one request per character per tick, burst 3.
+M0 and M4, M6–M12 are specified in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md), with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). M4 there replaces the planner sketched in **Planner** above. Once M6 and M7 land, the playable plan's executor and state machine supersede **Scheduler**, **Reflexes** and **Plan** above, and the remaining one-intent queues in **Real time**; until then those sections describe the shipped agent. The call budget is unchanged: one request per character per tick, burst 3.
 
 ## Tests
 

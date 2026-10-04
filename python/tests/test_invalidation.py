@@ -9,35 +9,44 @@ from unittest import mock
 from agentrealm_agent import config
 from agentrealm_agent.brain import Memory
 from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.executor import QUEUE_HORIZON_INTENTS, Executor, paced_set_positions, wait
+from agentrealm_agent.executor import QUEUE_HORIZON_INTENTS, Executor, wait
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.world import Entity, WorldModel
 from tests.test_runner import FakeClient, rejected
 
 
 class PacedQueueTest(unittest.TestCase):
-    def test_four_ticks_between_moves_at_default_speed(self):
-        q = paced_set_positions([(1, 0), (2, 0)], tick_rate_hz=10, movement_speed=2500)
-        self.assertEqual(
-            [i.get("verb") for i in q],
-            ["SetPosition", "Wait", "Wait", "Wait", "SetPosition", "Wait", "Wait", "Wait"],
-        )
+    def setUp(self):
+        self.ex = Executor(tick_rate_hz=10)
+        self.w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3, tick=20)
 
-    def test_long_path_is_cut_on_a_step_boundary(self):
-        # 11 steps × 4 ticks is over the 40-intent horizon: keep 10 whole steps,
-        # each with its trailing waits, so the next send's first move is paced.
+    def test_four_ticks_between_moves_at_default_speed(self):
+        q = self.ex.build_movement_queue([(1, 0), (2, 0)], self.w)
+        self.assertEqual([i["verb"] for i in q], ["Step", "Wait", "Wait", "Wait", "Step"])
+
+    def test_long_path_is_cut_after_the_last_step_that_fits(self):
+        # 11 steps × 4 ticks is over the 40-intent horizon: keep 10 steps and
+        # drop the trailing Waits; the next queue opens with the Waits owed.
         path = [(x, 0) for x in range(1, 12)]
-        q = paced_set_positions(path, tick_rate_hz=10, movement_speed=2500)
-        self.assertEqual(len(q), QUEUE_HORIZON_INTENTS)
-        self.assertEqual(sum(i["verb"] == "SetPosition" for i in q), 10)
-        self.assertEqual(q[-4:], [{"verb": "SetPosition", "x": 10, "y": 0}] + [wait()] * 3)
+        q = self.ex.build_movement_queue(path, self.w)
+        self.assertLessEqual(len(q), QUEUE_HORIZON_INTENTS)
+        self.assertEqual(sum(i["verb"] == "Step" for i in q), 10)
+        self.assertEqual(q[-1], {"verb": "Step", "direction": "right"})
 
     def test_lead_waits_after_a_recent_move(self):
-        ex = Executor(tick_rate_hz=10)
-        w = WorldModel(character_id=1, map_id=7, pos=(1, 0), perception=3, tick=20)
-        ex.last_move_tick = 19  # next move allowed at tick 23; first intent runs at 21
-        q = ex.build_movement_queue([(2, 0), (3, 0)], w)
-        self.assertEqual(q[:3], [wait(), wait(), {"verb": "SetPosition", "x": 2, "y": 0}])
+        self.w.pos = (1, 0)
+        self.ex.last_move_tick = 19  # next move allowed at tick 23; first intent runs at 21
+        q = self.ex.build_movement_queue([(2, 0), (3, 0)], self.w)
+        self.assertEqual(q[:3], [wait(), wait(), {"verb": "Step", "direction": "right"}])
+
+    def test_single_step_decision_is_paced_too(self):
+        self.ex.last_move_tick = 19
+        q = self.ex.build_from_decision({"verb": "SetPosition", "x": 1, "y": 0}, [], self.w)
+        self.assertEqual(q, [wait(), wait(), {"verb": "Step", "direction": "right"}])
+
+    def test_a_non_adjacent_target_goes_as_sent(self):
+        intent = {"verb": "SetPosition", "x": 3, "y": 0}
+        self.assertEqual(self.ex.build_from_decision(intent, [], self.w), [intent])
 
 
 class QueueInvalidationTest(unittest.TestCase):
@@ -73,7 +82,7 @@ class QueueInvalidationTest(unittest.TestCase):
         r.tick()
         first = fake.sent[0]
         self.assertGreater(len(first), 1, "multi-intent movement queue")
-        self.assertEqual(first[0], {"verb": "SetPosition", "x": 1, "y": 0})
+        self.assertEqual(first[0], {"verb": "Step", "direction": "right"})
 
         r.tick()
         self.assertEqual(r.world.pos, (0, 0))
@@ -86,7 +95,7 @@ class QueueInvalidationTest(unittest.TestCase):
         r.tick()
         resend = fake.sent[2]
         self.assertIsNotNone(resend)
-        self.assertNotEqual(resend[0], {"verb": "SetPosition", "x": 1, "y": 0})
+        self.assertNotEqual(resend[0], {"verb": "Step", "direction": "right"})
 
     def test_beyond_movement_range_clears_remainder(self):
         ex = Executor(tick_rate_hz=10)
@@ -179,8 +188,16 @@ class ExecutorTest(unittest.TestCase):
         self.assertFalse(self.ex.active)
         self.assertEqual(self.w.pos, (2, 0))
         self.assertEqual(self.m.path, [])
-        self.assertEqual(self.ex.last_move_tick, 14)
+        self.assertEqual(self.ex.last_move_tick, 14)  # the second Step, index 4
         self.assertIsNone(self.ex.tick_payload(None), "nothing held to replace")
+
+    def test_a_door_mid_queue_drops_and_replaces_the_rest(self):
+        # A door moves us, so the Steps queued behind it would walk from the wrong place.
+        self.w.view.tiles[(1, 0)] = "framed_door"
+        self.assertTrue(self.ex.ingest_results([self.applied(0, 10)], self.w, self.m))
+        self.assertTrue(self.m.need_position)
+        self.assertFalse(self.ex.active)
+        self.assertEqual(self.ex.tick_payload(None), [wait()])
 
     def test_unknown_outcome_drops_the_queue(self):
         res = {"tick": 10, "queue_id": "q1", "index": 0, "outcome": "discarded"}

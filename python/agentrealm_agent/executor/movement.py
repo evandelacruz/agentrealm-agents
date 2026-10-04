@@ -30,6 +30,14 @@ def direction_between(frm: Pos, to: Pos) -> StepDirection:
     return direction
 
 
+def step_landing(frm: Pos, direction: StepDirection) -> Pos:
+    """The block a ``Step`` in ``direction`` from ``frm`` enters."""
+    for (dx, dy), name in _DIRECTION_BY_DELTA.items():
+        if name == direction:
+            return (frm[0] + dx, frm[1] + dy)
+    raise ValueError(f"unknown direction {direction!r}")
+
+
 def ticks_per_step(*, tick_rate_hz: int, movement_speed_milli: int) -> int:
     """Ticks between allowed moves at ``movement_speed_milli``.
 

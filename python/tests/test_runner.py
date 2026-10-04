@@ -60,7 +60,7 @@ class RunnerTest(unittest.TestCase):
         return r
 
     def test_rejected_step_rolls_back_and_is_not_resubmitted(self):
-        # Reflex 1 (PLAN.md): a rejected SetPosition does
+        # Reflex 1 (PLAN.md): a rejected Step does
         # not enter the block, so the local model must not keep us there.
         pol = Policy(goals=["goto"], goto=(4, 0), pickup=False)
         fake = FakeClient([
@@ -71,7 +71,7 @@ class RunnerTest(unittest.TestCase):
         ])
         r = self.runner(fake, pol)
         r.tick()
-        self.assertEqual(fake.sent[0][0], {"verb": "SetPosition", "x": 1, "y": 0})
+        self.assertEqual(fake.sent[0][0], {"verb": "Step", "direction": "right"})
         self.assertEqual(r.world.pos, (0, 0), "no move until a result lands")
 
         r.tick()
@@ -81,7 +81,7 @@ class RunnerTest(unittest.TestCase):
         r.world.apply_position({"map_id": 7, "x": 0, "y": 0})  # the forced position read
         r.mem.need_position = False
         r.tick()
-        self.assertNotEqual(fake.sent[2][0], {"verb": "SetPosition", "x": 1, "y": 0})
+        self.assertNotEqual(fake.sent[2][0], {"verb": "Step", "direction": "right"})
 
     def test_a_result_for_another_queue_is_not_applied(self):
         # docs/API.md Intent Results: a result names its queue_id and index, so

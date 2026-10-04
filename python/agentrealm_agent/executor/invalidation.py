@@ -16,54 +16,21 @@ from ..client import Intent
 from ..world import DOORS, Pos, WorldModel, chebyshev
 from .constants import DEFAULT_TICK_RATE_HZ, queue_horizon_intents
 from .intents import wait
-from .movement import ticks_per_step
+from .movement import build_paced_walk_queue, step_landing
 from .queue import trim_to_horizon
 
-DEFAULT_MOVEMENT_SPEED = 2500  # millimeters per second; 2.5 blocks/s at 10 Hz → 4 ticks per step
 SURVIVAL_EVENTS = frozenset({"Damaged", "Attacked", "Died"})
 APPLIED = frozenset({"applied", "applied_no_effect"})
 
 
-def set_position(p: Pos) -> Intent:
-    return {"verb": "SetPosition", "x": p[0], "y": p[1]}
-
-
-def _gap(tick_rate_hz: int, movement_speed: int) -> int:
-    """Move intents spaced by this many ticks (Wait count is one less)."""
-    return ticks_per_step(
-        tick_rate_hz=max(1, tick_rate_hz), movement_speed_milli=max(1, movement_speed)
-    )
-
-
-def paced_set_positions(
-    steps: list[Pos],
-    tick_rate_hz: int,
-    movement_speed: int,
-    *,
-    lead_waits: int = 0,
-) -> list[Intent]:
-    """SetPosition steps, each followed by its Wait run, cut on step boundaries.
-
-    Every step carries its trailing waits, so a queue that runs to the end leaves
-    the move accumulator full for the next send's first step. `lead_waits` pads
-    the front when the last move landed too recently.
-    """
-    if not steps:
-        return []
-    gap = _gap(tick_rate_hz, movement_speed)
-    limit = queue_horizon_intents(tick_rate_hz=max(1, tick_rate_hz))
-    lead = min(max(0, lead_waits), gap - 1)
-    out: list[Intent] = [wait() for _ in range(lead)]
-    for p in steps:
-        unit = [set_position(p)] + [wait() for _ in range(gap - 1)]
-        if len(out) + len(unit) > limit and any(i.get("verb") == "SetPosition" for i in out):
-            break
-        out.extend(unit)
-    return trim_to_horizon(out, limit=limit)
-
-
-def movement_targets(intents: list[Intent]) -> list[Pos]:
-    return [(i["x"], i["y"]) for i in intents if i.get("verb") == "SetPosition"]
+def _target(intent: Intent, at: Pos | None) -> Pos | None:
+    """The block a move intent enters from `at`; None for anything else."""
+    verb = intent.get("verb")
+    if verb == "SetPosition":
+        return (intent["x"], intent["y"])
+    if verb == "Step" and at is not None:
+        return step_landing(at, intent["direction"])
+    return None
 
 
 @dataclass
@@ -72,6 +39,8 @@ class InFlight:
     intents: list[Intent]
     next_index: int = 0  # next intent index awaiting a result
     anchor: Pos | None = None  # position before the queue was sent
+    # The block each move intent enters, by index (None for Wait and the rest).
+    targets: list[Pos | None] = field(default_factory=list)
 
 
 @dataclass
@@ -122,23 +91,47 @@ class Executor:
             self.invalidated = True
             m.path, m.need_position = [], True
             return
-        self.in_flight = InFlight(queue_id=queue_id, intents=list(intents), anchor=anchor)
+        targets: list[Pos | None] = []
+        at = anchor
+        for intent in intents:
+            target = _target(intent, at)
+            targets.append(target)
+            at = target or at
+        self.in_flight = InFlight(queue_id=queue_id, intents=list(intents), anchor=anchor, targets=targets)
         self.invalidated = False
 
     def build_movement_queue(self, path: list[Pos], w: WorldModel) -> list[Intent]:
-        speed = getattr(w, "movement_speed", DEFAULT_MOVEMENT_SPEED)
-        lead = 0
+        """Step/Wait queue along `path` from `w.pos`, cut after the last Step that fits.
+
+        The first intent runs no earlier than the tick after `w.tick`, so the
+        queue opens with the Waits still owed since the last applied move.
+        """
+        if w.pos is None or not path:
+            return []
+        since = None
         if self.last_move_tick is not None:
-            gap = _gap(self.tick_rate_hz, speed)
-            # The first intent runs no earlier than the tick after w.tick.
-            lead = self.last_move_tick + gap - (w.tick + 1)
-        return paced_set_positions(path, self.tick_rate_hz, speed, lead_waits=lead)
+            since = max(1, w.tick + 1 - self.last_move_tick)
+        q = build_paced_walk_queue(
+            w.pos,
+            path,
+            movement_speed_milli=w.movement_speed,
+            tick_rate_hz=self.tick_rate_hz,
+            ticks_since_last_step=since,
+        )
+        q = trim_to_horizon(q, limit=queue_horizon_intents(tick_rate_hz=self.tick_rate_hz))
+        # Waits after the last Step only idle; the next queue opens with what is owed.
+        while q and q[-1].get("verb") == "Wait":
+            q.pop()
+        return q
 
     def build_from_decision(self, intent: Intent | None, path: list[Pos], w: WorldModel) -> list[Intent] | None:
         if intent is None:
             return None
-        if intent.get("verb") == "SetPosition" and len(path) > 1:
-            return self.build_movement_queue(path, w)
+        if intent.get("verb") == "SetPosition" and w.pos is not None:
+            target = (intent["x"], intent["y"])
+            if chebyshev(w.pos, target) == 1:
+                cells = path if path and path[0] == target else [target]
+                return self.build_movement_queue(cells, w) or None
         return [intent]
 
     def ingest_results(
@@ -171,32 +164,39 @@ class Executor:
                 self.last_rejection = res
                 self._drop_remainder(m)
                 return True
-            self._on_applied(intent, res, w, m)
             self.in_flight.next_index = idx + 1
+            if self._on_applied(intent, self.in_flight.targets[idx], res, w, m):
+                return True
         if self.in_flight.next_index >= len(self.in_flight.intents):
             self.in_flight = None
         return False
 
-    def _on_applied(self, intent: Intent, result: dict, w: WorldModel, m: Memory) -> None:
-        if intent.get("verb") != "SetPosition":
-            return
+    def _on_applied(self, intent: Intent, target: Pos | None, result: dict, w: WorldModel, m: Memory) -> bool:
+        """Apply one move. True when it dropped the rest of the queue."""
+        if target is None:
+            return False
         if "tick" in result:
             self.last_move_tick = int(result["tick"])
-        target = (intent["x"], intent["y"])
         if m.path and m.path[0] == target:
             m.path.pop(0)
         if w.view.tiles.get(target) in DOORS:
+            # A door moves us; Steps queued behind it would walk from the wrong place.
+            if self.in_flight is not None and self.in_flight.next_index < len(self.in_flight.intents):
+                self._drop_remainder(m)
+                return True
             m.need_position, m.path = True, []
         else:
             w.pos = target
+        return False
 
     def _on_rejected(self, intent: Intent, result: dict, w: WorldModel, m: Memory) -> None:
         # The server discards the rest of the queue on a rejection (GAME_NOTES).
         idx = int(result.get("index", 0))
         if idx == 0 and self.in_flight and self.in_flight.anchor is not None:
             w.pos = self.in_flight.anchor
-        if intent.get("verb") == "SetPosition":
-            reject_step(m, (intent["x"], intent["y"]))
+        target = self.in_flight.targets[idx] if self.in_flight else None
+        if target is not None:
+            reject_step(m, target)
         m.path, m.need_position = [], True
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
@@ -206,18 +206,17 @@ class Executor:
         """True when remaining queued moves no longer match the world."""
         if not self.active or self.in_flight is None:
             return False
-        remaining = self.in_flight.intents[self.in_flight.next_index :]
-        if not remaining:
+        remaining = self.in_flight.targets[self.in_flight.next_index :]
+        if not any(t is not None for t in remaining):
             return False
         if w.pos is None:
             self._drop_remainder(m)
             return True
         cur = w.pos
         occ = w.occupied()
-        for intent in remaining:
-            if intent.get("verb") != "SetPosition":
+        for target in remaining:
+            if target is None:
                 continue
-            target = (intent["x"], intent["y"])
             if chebyshev(cur, target) > w.movement:
                 self._drop_remainder(m)
                 return True

@@ -35,6 +35,8 @@ Pos = tuple[int, int]
 # Extra cost of a step onto a `costly` tile: worth a long detour to avoid one.
 COSTLY_STEP = 100
 
+DEFAULT_MOVEMENT_SPEED = 2500  # thousandths of a block per second (API Movement)
+
 NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
 
 
@@ -79,7 +81,7 @@ class WorldModel:
     pos: Pos | None = None
     perception: int = 1
     movement: int = 1
-    movement_speed: int = 2500  # mm/s; pacing uses tick_rate and this (API Movement)
+    movement_speed: int = DEFAULT_MOVEMENT_SPEED  # thousandths of a block per second (GetSelf)
     alive: bool = True
     lives: int = 0
     health: int | None = None
@@ -109,7 +111,7 @@ class WorldModel:
     def apply_self(self, s: dict) -> None:
         self.perception = max(1, int(s.get("perception_range", 1)))
         self.movement = max(1, int(s.get("movement_range", 1)))
-        self.movement_speed = max(1, int(s.get("movement_speed", 2500)))
+        self.movement_speed = max(1, int(s.get("movement_speed", DEFAULT_MOVEMENT_SPEED)))
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
 

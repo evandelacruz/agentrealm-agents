@@ -102,7 +102,7 @@ class Runner:
         elif call == "position":
             p = c.position(self.cid)
             w.apply_position(p)
-            m.need_position, m.path, m.undo = False, [], None
+            m.need_position, m.path = False, []
             self.log(call, "", {"position": p})
         elif call == "terrain":
             t = c.terrain(self.cid, w.map_id, *w.perception_rect())
@@ -206,8 +206,8 @@ def _fmt_intents(intents: list[dict] | None) -> str:
         return "—"
     if len(intents) == 1:
         return _fmt_intent(intents[0])
-    moves = sum(1 for i in intents if i.get("verb") == "SetPosition")
-    return f"queue×{len(intents)} ({moves} moves)"
+    moves = sum(1 for i in intents if i.get("verb") == "Step")
+    return f"queue×{len(intents)} ({moves} steps)"
 
 
 def _fmt_intent(i: dict | None) -> str:
@@ -216,6 +216,8 @@ def _fmt_intent(i: dict | None) -> str:
     verb = i["verb"]
     if verb == "SetPosition":
         return f"SetPosition({i['x']},{i['y']})"
+    if verb == "Step":
+        return f"Step({i['direction']})"
     if verb == "Use":
         t = i["target"]
         return f"Use({t.get('kind')}:{t.get('character_id', '')})"

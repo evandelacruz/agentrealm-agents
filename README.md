@@ -25,13 +25,14 @@ cd python
 python3 -m agentrealm_agent create characters/wren.toml
 python3 -m agentrealm_agent run characters/wren.toml characters/kit.toml
 python3 -m agentrealm_agent status characters/wren.toml
+python3 -m agentrealm_agent metrics characters/wren.toml
 ```
 
 Against the public API, skip the seed script: set `AGENTREALM_BASE_URL=https://api.agentrealm.gg` and an API key from your account page.
 
 **The default base URL is `http://localhost:8080`, a local stack.** To play the public API, set `AGENTREALM_BASE_URL=https://api.agentrealm.gg` and use a key from your account page on agentrealm.gg. Lives there are permanent: a character at zero lives is ended. The sample characters set `world = "sandbox"`, the free practice world with the same rules on a different map; set `world` to a live world's code to play there.
 
-`create` saves each character’s id to `python/.state/<name>.json`. `run` drives every listed character until Ctrl-C, one line per window to stdout and a JSONL trace per character in `python/.state/`. Characters in the same world share one learned knowledge file at `python/.state/worlds/<world_code>.json` (gitignored): `run` loads it once at start, refusing to start if it is unreadable, and saves it once at exit. Its `items` section holds, per `supply_subtype_code`, the weapon reach learned from a `target_out_of_range` rejection and the last `gem_price` seen ([`PLAN.md`](PLAN.md) A18). Run one `run` process per world at a time; two would each save their own copy, and the last to exit wins. Stopping the agent leaves the characters in the world where they stand. The game runs at 10 ticks per second; [`PLAN.md`](PLAN.md) Real time says how the agent keeps up.
+`create` saves each character’s id to `python/.state/<name>.json`. `run` drives every listed character until Ctrl-C, one line per window to stdout and a JSONL trace per character in `python/.state/`. After a run, `metrics` summarizes that trace (deaths, kills, gems, levels cleared, time per level; [`PLAN.md`](PLAN.md) A41). Characters in the same world share one learned knowledge file at `python/.state/worlds/<world_code>.json` (gitignored): `run` loads it once at start, refusing to start if it is unreadable, and saves it once at exit. Its `items` section holds, per `supply_subtype_code`, the weapon reach learned from a `target_out_of_range` rejection and the last `gem_price` seen ([`PLAN.md`](PLAN.md) A18). Run one `run` process per world at a time; two would each save their own copy, and the last to exit wins. Stopping the agent leaves the characters in the world where they stand. The game runs at 10 ticks per second; [`PLAN.md`](PLAN.md) Real time says how the agent keeps up.
 
 ## Make a character
 

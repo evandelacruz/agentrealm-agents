@@ -5,7 +5,10 @@
   "M3": {"state": "done"},
   "M4": {"state": "open"},
   "M5": {"state": "open"},
-  "M6": {"state": "partial", "remaining": "Step/Wait paced multi-intent queues, snapshot deltas, full health tracking, live smoke test"},
+  "M6": {
+    "state": "partial",
+    "remaining": "Executor pacing (Step/Wait multi-intent queues, which lengthen the calm poll gap), snapshot deltas and health in the runner/world model, live Olympuff smoke test."
+  },
   "M7": {"state": "open"},
   "M8": {"state": "open"},
   "M9": {"state": "open"},

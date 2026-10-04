@@ -6,6 +6,7 @@ from ..config import Policy
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import route_first_leg
+from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, nav_search, next_step
 from ..travel.ops import current_travel_op, set_travel_index
 from ..travel.resolve import ResolvedDestination, at_destination, resolve_travel
@@ -98,10 +99,11 @@ def _travel_step(
     None when no step can be planned."""
     goal = f"travel:{dest.label}"
     if m.goal != goal or not next_step(w, plan_avoid, m.path):
-        params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True)
+        params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
         nav = nav_search(m, w, "travel", dest.pos) if dest.map_id == w.map_id else None
         found = route_first_leg(w, knowledge, dest.map_id, dest.pos, params, nav=nav)
         if found and next_step(w, plan_avoid, found):
+            nav_stuck.track_plan(m, w, goal, dest.pos)
             m.path, m.goal = found, goal
         else:
             m.path, m.goal = [], ""

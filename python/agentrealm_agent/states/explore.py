@@ -9,7 +9,8 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..plan import Plan
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import next_step, path_owned_by_plan, replan
+from ..navigation import stuck as nav_stuck
+from ..pathing import grid_params, next_step, path_owned_by_plan, replan
 from ..world import Pos, WorldModel
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position
@@ -63,12 +64,26 @@ def scripted_outcome(
         if op is not None and op["op"] == "wait":
             return StateOutcome(None, "plan wait", state=state)
 
-    step = next_step(w, plan_avoid, m.path) if path_owned_by_plan(plan, m, policy.goals) else None
+    params = grid_params(policy, plan_avoid, plan_costly, m=m)
+    att = m.nav_stuck.attempt
+    if att is not None and m.path:
+        nav_stuck.maybe_escalate(m, w, att.target, params)
+    step = nav_stuck.reveal_step(w, m, plan_avoid) if nav_stuck.in_reveal(m) else None
+    if step is None:
+        step = next_step(w, plan_avoid, m.path) if path_owned_by_plan(plan, m, policy.goals) else None
     if step is None:
         replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge, plan=plan)
         step = next_step(w, plan_avoid, m.path)
+    if step is None and att is not None:
+        nav_stuck.maybe_escalate(m, w, att.target, params)
+        if nav_stuck.in_reveal(m):
+            step = nav_stuck.reveal_step(w, m, plan_avoid)
+        elif not m.path:
+            replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge, plan=plan)
+            step = next_step(w, plan_avoid, m.path)
     if step is not None:
-        return StateOutcome([set_position(step)], f"{m.goal} → {m.path[-1]}", state=state)
+        label = m.path[-1] if m.path else att.target if att else "?"
+        return StateOutcome([set_position(step)], f"{m.goal} → {label}", state=state)
 
     return StateOutcome(None, "no goal reachable", state=state)
 

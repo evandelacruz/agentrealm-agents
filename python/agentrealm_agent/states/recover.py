@@ -8,6 +8,7 @@ from ..knowledge_base import KnowledgeBase
 from ..loot import carry_slots_used, loot_score, worst_droppable
 from ..memory import Memory
 from ..navigation import cost_path
+from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, nav_search, next_step
 from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
@@ -123,10 +124,11 @@ def recover_outcome(
         found = cost_path(
             w,
             target,
-            grid_params(policy, plan_avoid, plan_costly),
+            grid_params(policy, plan_avoid, plan_costly, m=m),
             nav=nav_search(m, w, "chest", target),
         )
         if next_step(w, plan_avoid, found):
+            nav_stuck.track_plan(m, w, "chest", target)
             m.path, m.goal = found, "chest"
 
     step = next_step(w, plan_avoid, m.path) if m.goal == "chest" else None

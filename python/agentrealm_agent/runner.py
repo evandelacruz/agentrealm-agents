@@ -9,7 +9,9 @@ import time
 from dataclasses import dataclass
 
 from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
-from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
+from .navigation.rejection import copy_nav, learn_step_rejection, navigation_avoid_costly, on_block_changed
+from .navigation.stuck import on_step as nav_on_step
+from .pathing import grid_params
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
@@ -678,6 +680,9 @@ class Runner:
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
+                avoid, costly = navigation_avoid_costly(m.nav, self.knowledge, w.map_id, w.tick)
+                hazards = {p for p, b in w.view.tiles.items() if b in self.cfg.policy.avoid_blocks}
+                nav_on_step(m, w, grid_params(self.cfg.policy, avoid | hazards, costly, m=m))
                 if self.acceptance is not None:
                     self.acceptance.on_step_applied()
                 if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:

@@ -15,6 +15,7 @@ from .navigation import (
     nearest_target,
     route_first_leg,
 )
+from .navigation import stuck as nav_stuck
 from .plan import (
     EXPLORE_ANYWHERE,
     EXPLORE_PATH_OPS,
@@ -112,14 +113,16 @@ def path_for_plan_op(
         center = (op["x"], op["y"])
         if not targets and op["radius"] < EXPLORE_ANYWHERE and chebyshev(w.pos, center) > op["radius"]:
             targets = {center}
-        found = nearest_target(w, targets, grid_params(policy, blocked, costly))
+        found = nearest_target(w, targets, grid_params(policy, blocked, costly, m=m))
         return (found[1], plan_op_goal(op)) if found and found[1] else None
     if op["op"] != "travel":
         return None
-    params = grid_params(policy, blocked, costly, allow_goal_door=True)
+    params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m)
     if op["to"] == "point":
         target = (op["x"], op["y"])
         dest_map = op.get("map_id", w.map_id)
+        if _goal_backed_off(m, "plan_goto", dest_map, target, w.tick):
+            return None
         nav = nav_search(m, w, "plan_goto", target) if dest_map == w.map_id else None
         path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
         return (path, plan_op_goal(op)) if path else None
@@ -129,6 +132,8 @@ def path_for_plan_op(
     if op["to"] == "town":
         for map_id, pos in w.respawn_anchors:
             if map_id == w.map_id:
+                if _goal_backed_off(m, "plan_town", map_id, pos, w.tick):
+                    continue
                 path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav_search(m, w, "plan_town", pos))
                 if path:
                     return path, plan_op_goal(op)
@@ -167,7 +172,7 @@ def plan_step(
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
         if found and next_step(w, blocked, found[0]):
             plan.stalled_since_tick = None
-            m.path, m.goal = found
+            _store_path(m, w, found[1], found[0])
             m.goal_op = dict(op)
             return True
         if plan.note_stalled(w.tick):
@@ -198,7 +203,7 @@ def replan(
     for goal in policy.goals:
         found = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
         if next_step(w, blocked, found):
-            m.path, m.goal = found, goal
+            _store_path(m, w, goal, found)
             return
 
 
@@ -210,13 +215,30 @@ def nav_search(m: Memory, w: WorldModel, plan: str, goal: Pos) -> NavSearchState
     return nav
 
 
-def grid_params(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_door: bool = False) -> CostGridParams:
-    return CostGridParams(
+def grid_params(
+    policy: Policy,
+    avoid: set[Pos],
+    costly: set[Pos],
+    allow_goal_door: bool = False,
+    m: Memory | None = None,
+) -> CostGridParams:
+    base = CostGridParams(
         avoid=set(avoid),
         costly=set(costly),
         hostile_kinds=frozenset(policy.hostile),
         allow_goal_door=allow_goal_door,
     )
+    return nav_stuck.planning_params(m, base) if m is not None else base
+
+
+def _store_path(m: Memory, w: WorldModel, goal: str, path: list[Pos]) -> None:
+    if path:
+        nav_stuck.track_plan(m, w, goal, path[-1])
+    m.path, m.goal = path, goal
+
+
+def _goal_backed_off(m: Memory, goal: str, map_id: int | None, target: Pos, tick: int) -> bool:
+    return nav_stuck.is_backed_off(m.nav_stuck, nav_stuck.goal_key(goal, map_id, target), tick)
 
 
 def plan_goal(
@@ -238,14 +260,18 @@ def plan_goal(
     if goal == "goto":
         # config.load guarantees goto is set when the goal is listed.
         dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
-        params = grid_params(policy, blocked, costly, allow_goal_door=True)
         target = tuple(policy.goto)
+        if _goal_backed_off(m, "goto", dest_map, target, w.tick):
+            return None
+        params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m)
         nav = nav_search(m, w, "goto", target) if dest_map == w.map_id else None
         return route_first_leg(w, knowledge, dest_map, target, params, nav=nav) or None
     if goal == "doors":
-        return doors_goal_path(w, knowledge, grid_params(policy, blocked, costly, allow_goal_door=True))
+        return doors_goal_path(w, knowledge, grid_params(policy, blocked, costly, allow_goal_door=True, m=m))
     if goal == "explore":
-        targets = view.frontier() - {w.pos}
-        found = nearest_target(w, targets, grid_params(policy, blocked, costly))
+        targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, view.frontier() - {w.pos}, w.tick)
+        found = nearest_target(w, targets, grid_params(policy, blocked, costly, m=m))
+        if found:
+            nav_stuck.track_plan(m, w, "explore", found[0])
         return found[1] if found and found[1] else None
     return None

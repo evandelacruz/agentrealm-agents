@@ -126,13 +126,13 @@ class RecoverDispatchTest(unittest.TestCase):
         self.assertIsNone(out.intents)
         self.assertEqual(out.reason, "open chest 80")
 
-    def test_flee_reflex_still_beats_recover(self):
+    def test_flee_beats_recover(self):
         w = world(["....."], at=(2, 0))
         died_at(w, 0, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
         w.entities = [Entity(id=9, kind="npc", pos=(1, 0))]
         out = dispatch(w, ctx(scripted(goals=["hold"], hostile=["npc"], hostile_range=2, on_hostile="flee")))
-        self.assertEqual(out.state, "Recover")
+        self.assertEqual(out.state, "Flee")
         self.assertTrue(out.reflex)
         self.assertEqual(out.intents[0]["x"], 3)
 

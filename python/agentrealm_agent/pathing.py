@@ -15,6 +15,7 @@ from .navigation import (
     nearest_target,
     route_first_leg,
 )
+from .plan import EXPLORE_PATH_OPS, OP_STATE, GoalOp, Plan
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -49,6 +50,54 @@ def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos |
     return None
 
 
+def path_for_plan_op(
+    op: GoalOp,
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None,
+) -> tuple[list[Pos], str] | None:
+    """Map the current plan op to a cost-grid path for Explore pathing (A34)."""
+    if op["op"] not in EXPLORE_PATH_OPS:
+        return None
+    if op["op"] == "wait":
+        return None
+    if op["op"] == "explore_area":
+        center = (op["x"], op["y"])
+        radius = op["radius"]
+        targets = {p for p in w.view.frontier() if chebyshev(p, center) <= radius}
+        if not targets and w.pos is not None and chebyshev(w.pos, center) > 1:
+            targets = {center}
+        found = nearest_target(w, targets, grid_params(policy, blocked, costly))
+        if found and found[1]:
+            return found[1], "explore_area"
+        return None
+    if op["op"] == "travel":
+        params = grid_params(policy, blocked, costly, allow_goal_door=True)
+        dest = op["to"]
+        if dest == "point":
+            target = (op["x"], op["y"])
+            dest_map = op.get("map_id", w.map_id)
+            nav = nav_search(m, w, "plan_goto", target) if dest_map == w.map_id else None
+            path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
+            return (path, "plan_travel") if path else None
+        if dest == "entrance":
+            path = doors_goal_path(w, knowledge, params)
+            return (path, "plan_entrance") if path else None
+        if dest == "town":
+            for map_id, pos in w.respawn_anchors:
+                if map_id == w.map_id:
+                    nav = nav_search(m, w, "plan_town", pos)
+                    path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav)
+                    if path:
+                        return path, "plan_town"
+            return None
+        return None
+    return None
+
+
 def replan(
     w: WorldModel,
     m: Memory,
@@ -57,12 +106,34 @@ def replan(
     blocked: set[Pos],
     costly: set[Pos],
     knowledge: KnowledgeBase | None = None,
+    plan: Plan | None = None,
 ) -> None:
     """Take the first goal whose path starts on a seen, open step.
 
     A path whose first step lies in fog is skipped like an unreachable goal,
     so a later goal (explore, say) gets the move while terrain reads catch up.
+    When a plan is active, its current op is tried before ``policy.goals``.
     """
+    if plan is not None:
+        plan.advance_if_done(w, m, policy)
+        while True:
+            op = plan.current()
+            if op is None:
+                break
+            if op["op"] not in EXPLORE_PATH_OPS:
+                owner = OP_STATE.get(op["op"])
+                if owner not in (None, "Explore", "Travel", "Idle"):
+                    plan.drop_current(f"no {owner} state yet")
+                    continue
+                break
+            found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
+            if found and next_step(w, blocked, found[0]):
+                m.path, m.goal = found[0], found[1]
+                return
+            if op["op"] == "wait":
+                return
+            break
+
     m.path, m.goal = [], ""
     for goal in policy.goals:
         found = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)

@@ -134,7 +134,7 @@ entity_refresh = 5                  # ticks between entity reads when calm
 
 Created character IDs are saved in `python/.state/<name>.json` (gitignored), so `run` finds the character again.
 
-A separate runtime file, `characters/<name>.directives.toml`, is re-read whenever it changes (A8). It carries survival `params` (defaults and ranges in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)), a hard `never_attack` list enforced in the reflexes and on tick submit, and optional strategist fields (`goals`, `instructions`) for later milestones. Only `never_attack` changes behavior so far; `params` are parsed and validated for the items that will read them (A9, A23). A file that fails to read or parse keeps the last good directives, or the defaults on first load; deleting the file restores the defaults.
+A separate runtime file, `characters/<name>.directives.toml`, is re-read whenever it changes (A8). It carries survival `params` (defaults and ranges in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)), a hard `never_attack` list enforced in the reflexes and on tick submit, and optional strategist fields (`goals`, `instructions`). On reload, validated `goals` replace the goal stack; with none set, the built-in plan comes from the character policy (A34, `plan.py`). `params` are parsed, validated, and kept on the active plan for survival states to read (A9+). `never_attack` is enforced in reflexes and on tick submit. A file that fails to read or parse keeps the last good directives, or the defaults on first load; deleting the file restores the defaults.
 
 ## CLI
 

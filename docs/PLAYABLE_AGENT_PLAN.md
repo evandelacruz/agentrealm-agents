@@ -338,7 +338,7 @@ If you find a sign with numbers on it, try them as a code at the nearest locked 
 """                                                     # free text, passed to the strategist
 ```
 
-Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. Until A9 and the M4 strategist land, only `never_attack` changes behavior; `params`, `goals`, and `instructions` are parsed and validated but not yet read.
+Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. `never_attack` is enforced in reflexes and on tick submit. `params` are validated and kept on the plan object; survival states read them in later milestones (A9+). `goals` replace the goal stack when present (A34); shorthand like `gather_gems:20` and `buy:torch` is parsed into typed ops. With no `goals` in the directives file, the built-in plan comes from the character policy plus an entrance-mark travel op. `instructions` are kept for the strategist (A35).
 
 Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
 

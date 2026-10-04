@@ -10,6 +10,7 @@ from ..client import Intent
 from ..config import Policy
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
+from ..plan import Plan
 from ..world import WorldModel
 
 
@@ -22,6 +23,8 @@ class PlayContext:
     rng: random.Random
     never_attack: list[str] = field(default_factory=list)
     knowledge: KnowledgeBase | None = None  # per-world door graph, terrain, locked doors (A26, A14)
+    plan: Plan | None = None  # validated goal stack (A34)
+    directive_params: dict[str, float | int] = field(default_factory=dict)
 
 
 @dataclass

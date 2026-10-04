@@ -8,6 +8,7 @@ from ..config import Policy
 from ..directives import attack_forbidden
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
+from ..plan import Plan
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import flee_step, grid_params, nav_search, next_step, replan
@@ -33,6 +34,7 @@ class ExploreState(State):
             ctx.rng,
             never_attack=ctx.never_attack,
             knowledge=ctx.knowledge,
+            plan=ctx.plan,
             state=self.name,
         )
 
@@ -45,6 +47,7 @@ def scripted_outcome(
     *,
     never_attack: list[str],
     knowledge: KnowledgeBase | None = None,
+    plan: Plan | None = None,
     state: str = "Explore",
 ) -> StateOutcome:
     """Reflex list then plan (PLAN.md). M7 test seam: list[Intent] in the outcome."""
@@ -104,9 +107,15 @@ def scripted_outcome(
             if next_step(w, plan_avoid, found):
                 m.path, m.goal = found, "chest"
 
+    if plan is not None:
+        plan.advance_if_done(w, m, policy)
+        op = plan.current()
+        if op is not None and op.get("op") == "wait":
+            return StateOutcome(None, "plan wait", state=state)
+
     step = next_step(w, plan_avoid, m.path)
     if step is None:
-        replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge)
+        replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge, plan=plan)
         step = next_step(w, plan_avoid, m.path)
     if step is not None:
         return StateOutcome([set_position(step)], f"{m.goal} → {m.path[-1]}", state=state)

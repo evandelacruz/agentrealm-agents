@@ -13,6 +13,7 @@ from .navigation.rejection import copy_nav, learn_step_rejection, on_block_chang
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
+from .plan import Plan
 from .item_table import absorb_attack_range, absorb_entities_payload, rejection_attack_range
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_warp, sync_tiles, sync_world_maps
@@ -83,6 +84,27 @@ class Runner:
         self.trace = open(cfg.trace_path, "a", buffering=1)
         self.directives = DirectivesWatch(cfg.directives_path)
         self.directives.ensure_loaded()
+        self.plan = self._build_plan()
+
+    def _build_plan(self) -> Plan:
+        d = self.directives.directives
+        from_directives = Plan.from_directives(directive_goals=d.goals, directive_params=d.params)
+        if from_directives is not None:
+            return from_directives
+        return Plan.from_policy(self.cfg.policy, d.params)
+
+    def _decide(self, w, m):
+        d = self.directives.directives
+        return decide(
+            w,
+            m,
+            self.cfg.policy,
+            self.rng,
+            never_attack=d.never_attack,
+            knowledge=self.knowledge,
+            plan=self.plan,
+            directive_params=d.params,
+        )
 
     def log(self, call: str, detail: str, record: dict) -> None:
         w = self.world
@@ -113,10 +135,20 @@ class Runner:
                 # carry the server's tick and correct it.
                 self.world.tick += 1
                 if self.directives.maybe_reload():
+                    self.plan = self._build_plan()
+                    d = self.directives.directives
                     self.log(
                         "directives",
-                        f"reloaded never_attack={self.directives.directives.never_attack}",
-                        {"directives": {"params": self.directives.directives.params, "never_attack": self.directives.directives.never_attack}},
+                        f"reloaded never_attack={d.never_attack} goals={len(d.goals)}",
+                        {
+                            "directives": {
+                                "params": d.params,
+                                "never_attack": d.never_attack,
+                                "goals": d.goals,
+                                "plan_index": self.plan.index,
+                                "plan_len": len(self.plan.goals),
+                            }
+                        },
                     )
                 call = choose_call(self.world, self.mem, self.cfg.policy)
                 if call == "skip":
@@ -245,14 +277,7 @@ class Runner:
                 # reads it before this poll), so the new walk starts from
                 # where we are. With no walk to send, stop the old queue.
                 self.clear_held_tracking()
-                d = decide(
-                    w,
-                    m,
-                    self.cfg.policy,
-                    self.rng,
-                    never_attack=self.directives.directives.never_attack,
-                    knowledge=self.knowledge,
-                )
+                d = self._decide(w, m)
                 intents = self._apply_never_attack(self.intents_for(d))
                 if intents:
                     d = Decision(d.intent, "path stale, resend")
@@ -263,14 +288,7 @@ class Runner:
                 intents = None
         else:
             m.resend_held_queue = False
-            d = decide(
-                w,
-                m,
-                self.cfg.policy,
-                self.rng,
-                never_attack=self.directives.directives.never_attack,
-                knowledge=self.knowledge,
-            )
+            d = self._decide(w, m)
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
@@ -345,14 +363,7 @@ class Runner:
         """
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate())
-        d = decide(
-            self.world,
-            m,
-            self.cfg.policy,
-            self.rng,
-            never_attack=self.directives.directives.never_attack,
-            knowledge=self.knowledge,
-        )
+        d = self._decide(self.world, m)
         m.nav = saved[2]
         if d.reflex:
             return d

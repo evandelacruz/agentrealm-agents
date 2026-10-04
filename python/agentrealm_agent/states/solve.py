@@ -60,7 +60,7 @@ def solve_outcome(
     plan.advance(w)
     op = plan.current()
     if op is None or op["op"] not in SOLVE_OPS:
-        return StateOutcome(None, "no solve op", state=state)
+        return _rearm_outcome(w, m, state)
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
     reflex = reflex_outcome(w, policy, never_attack=never_attack, state=state, knowledge=knowledge)
@@ -98,6 +98,21 @@ def _track_progress(
     return StateOutcome(None, f"dropped {op['op']}: {out.reason}", state=state)
 
 
+def _rearm_outcome(w: WorldModel, m: Memory, state: str) -> StateOutcome:
+    """Arm what was armed before a ``use_block`` swapped it out, once (A39).
+
+    Sent a single time: a rejected `Arm` (or a weapon no longer in hand) is not
+    retried, so it cannot hold the round.
+    """
+    code, m.solve_rearm = m.solve_rearm, None
+    if code is None or w.armed_code == code:
+        return StateOutcome(None, "no solve op", state=state)
+    supply = held_supply(w, code)
+    if supply is None:
+        return StateOutcome(None, f"cannot re-arm {code}: not in hand", state=state)
+    return StateOutcome([arm(supply.id)], f"re-arm {code}", state=state)
+
+
 def _compose_outcome(w: WorldModel, op: GoalOp, state: str) -> StateOutcome:
     whole = op["composes_into"]
     if holds_whole(w.held_supplies, whole):
@@ -130,6 +145,8 @@ def _use_block_outcome(
     reach = use_reach(knowledge, code)
     intents: list[dict] = []
     if w.armed_code != code:
+        if m.solve_rearm is None and w.armed_code is not None:
+            m.solve_rearm = w.armed_code
         intents.append(arm(supply.id))
 
     if chebyshev(here, target) <= reach:
@@ -188,7 +205,8 @@ def _use_stands(w: WorldModel, target: Pos, reach: int, blocked: set[Pos]) -> se
 
 
 class SolveState(State):
-    """Priority 4: compose fragments and use keys or tools at blocks from the plan."""
+    """Priority 4: compose fragments and use keys or tools at blocks from the plan,
+    then re-arm what a ``use_block`` swapped out."""
 
     name = "Solve"
 
@@ -197,7 +215,7 @@ class SolveState(State):
             ctx.policy.kind == "scripted"
             and world.alive
             and world.pos is not None
-            and solve_op(ctx.plan) is not None
+            and (solve_op(ctx.plan) is not None or ctx.memory.solve_rearm is not None)
         )
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:

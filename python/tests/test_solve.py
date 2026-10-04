@@ -185,6 +185,33 @@ class SolveStateTest(unittest.TestCase):
         self.assertEqual([i["verb"] for i in out.intents], ["Arm", "Use"])
         self.assertEqual(out.intents[1]["target"], {"kind": "block", "x": 2, "y": 0})
 
+    def test_use_block_rearms_previous_weapon_after_use(self):
+        w = grid([".D."], at=(1, 0))
+        w.held_supplies = [InventorySupply(5, "rusty_key"), InventorySupply(9, "bronze_sword")]
+        w.armed_code = "bronze_sword"
+        plan = Plan([{"op": "use_block", "x": 2, "y": 0, "code": "rusty_key"}], dict(PARAM_DEFAULTS))
+        c = ctx(w, plan)
+        out = dispatch(w, c)
+        self.assertEqual(out.intents[0], {"verb": "Arm", "supply_id": 5})
+        w.armed_code = "rusty_key"
+        out = dispatch(w, c)
+        self.assertEqual(out.intents[0]["verb"], "Use")
+        w.view.tiles[(2, 0)] = "framed_door_open"  # the Use changed the block: op done
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Solve")
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 9}])
+        self.assertIsNone(plan.current())
+        w.armed_code = "bronze_sword"
+        self.assertFalse(SolveState().guard(w, c))
+
+    def test_rearm_sent_once_and_skipped_when_weapon_gone(self):
+        w = grid(["."])
+        m = Memory(solve_rearm="bronze_sword")
+        out = solve_outcome(w, m, Policy(kind="scripted"), Plan([], dict(PARAM_DEFAULTS)), never_attack=[])
+        self.assertIsNone(out.intents)
+        self.assertIn("not in hand", out.reason)
+        self.assertIsNone(m.solve_rearm)
+
     def test_use_block_walks_into_reach(self):
         w = grid(["...."], at=(0, 0))
         w.held_supplies = [InventorySupply(5, "rusty_key")]

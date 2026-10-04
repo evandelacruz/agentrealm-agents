@@ -8,7 +8,7 @@ from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
-from .fight import fight_target
+from .fight import can_engage, fight_target
 from .intents import set_position
 
 
@@ -32,8 +32,8 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
 
     ``flee`` flees every hostile in range; ``fight`` flees when there is no
     swingable target (``never_attack``), the win estimate says we lose, or
-    the target cannot be reached; ``ignore`` never flees. On a known safe
-    tile, nothing can hurt us, so it stays.
+    the target is out of weapon reach with no open step closer; ``ignore``
+    never flees. On a known safe tile, nothing can hurt us, so it stays.
     """
     policy = ctx.policy
     if policy.kind != "scripted" or not world.alive or world.pos is None:
@@ -44,9 +44,10 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
         return False
     if policy.on_hostile == "flee":
         return True
-    if fight_target(world, policy, ctx.never_attack) is None:
+    target = fight_target(world, policy, ctx.never_attack)
+    if target is None or would_lose(world, policy, ctx.params):
         return True
-    return would_lose(world, policy, ctx.params)
+    return not can_engage(world, target, ctx)
 
 
 class FleeState(State):

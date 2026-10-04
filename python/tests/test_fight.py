@@ -128,6 +128,54 @@ class FightStateTest(unittest.TestCase):
         self.assertIsNotNone(d.submit_queue)
         self.assertGreater(len(d.submit_queue), 1)
 
+    def test_single_intent_fight_queue_is_not_repaced(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.health, w.lives = 500, 10
+        w.entities = [Entity("npc", 5, (2, 1), code="snotling")]
+        w.threat.record(("npc", "snotling"), 1)
+        m = Memory()
+        m.calm_poll_interval = 1
+        d = decide(
+            w,
+            m,
+            Policy(kind="scripted", on_hostile="fight", hostile=["npc"]),
+            random.Random(0),
+            params={**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1},
+        )
+        self.assertEqual(d.submit_queue, [d.intent])
+
+    def test_attack_uses_are_separate_dicts(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.health, w.lives = 500, 10
+        w.entities = [Entity("npc", 5, (2, 1), code="snotling")]
+        w.threat.record(("npc", "snotling"), 1)
+        c = ctx(params={"risk": 1.0, "lives_floor": 1}, on_hostile="fight", hostile=["npc"], hostile_range=2)
+        c.memory.calm_poll_interval = 100
+        out = dispatch(w, c)
+        uses = [i for i in out.intents if i["verb"] == "Use"]
+        self.assertGreater(len(uses), 1)
+        self.assertIsNot(uses[0], uses[1])
+
+    def test_cannot_close_hands_off_to_flee(self):
+        # Boxed in at (0, 0); the NPC is two away, outside reach 1.
+        w = world([".#.", "##.", "..."], at=(0, 0))
+        w.health, w.lives = 500, 10
+        w.entities = [Entity("npc", 5, (2, 0), code="snotling")]
+        w.threat.record(("npc", "snotling"), 1)
+        c = ctx(params={"risk": 1.0, "lives_floor": 1}, on_hostile="fight", hostile=["npc"], hostile_range=2)
+        self.assertFalse(should_fight(w, c))
+        self.assertEqual(dispatch(w, c).state, "Flee")
+
+    def test_closing_still_fights(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        w.health, w.lives = 500, 10
+        w.entities = [Entity("npc", 5, (2, 0), code="snotling")]
+        w.threat.record(("npc", "snotling"), 1)
+        c = ctx(params={"risk": 1.0, "lives_floor": 1}, on_hostile="fight", hostile=["npc"], hostile_range=2)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Fight")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+
 
 if __name__ == "__main__":
     unittest.main()

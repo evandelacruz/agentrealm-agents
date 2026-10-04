@@ -16,6 +16,10 @@ from .explore import plan_sets
 from .intents import set_position, use_block, use_on
 
 
+# ``Use`` swings queued per submit, ahead of the retreat tail.
+ATTACK_USES = 3
+
+
 def fight_target(w: WorldModel, policy, never_attack: list[str]) -> Entity | None:
     """Nearest hostile in range that ``on_hostile = fight`` may swing at."""
     here = w.pos
@@ -106,15 +110,25 @@ def close_step(w: WorldModel, target: Entity, blocked: set[Pos]) -> Pos | None:
     return min(options, key=lambda p: (chebyshev(p, target.pos), p))
 
 
+def can_engage(world: WorldModel, target: Entity, ctx: PlayContext) -> bool:
+    """In weapon reach, or one open step brings us closer."""
+    if in_weapon_reach(world, target, ctx.knowledge):
+        return True
+    blocked, _, _ = plan_sets(world, ctx.memory, ctx.policy, ctx.knowledge)
+    return close_step(world, target, blocked) is not None
+
+
 def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
+    """Swing or close in; false when we cannot close, so **Flee** runs."""
     policy = ctx.policy
     if policy.kind != "scripted" or not world.alive or world.pos is None:
         return False
     if policy.on_hostile != "fight" or on_safe_tile(world):
         return False
-    if fight_target(world, policy, ctx.never_attack) is None:
+    target = fight_target(world, policy, ctx.never_attack)
+    if target is None or would_lose(world, policy, ctx.params):
         return False
-    return not would_lose(world, policy, ctx.params)
+    return can_engage(world, target, ctx)
 
 
 class FightState(State):
@@ -144,7 +158,7 @@ class FightState(State):
                 reflex=True,
                 state=self.name,
             )
-        uses = [attack_intent(target)] * 3
+        uses = [attack_intent(target) for _ in range(ATTACK_USES)]
         retreat = retreat_tail(w, m, policy, ctx, limit=8)
         horizon = queue_horizon_intents()
         queue = build_attack_queue(
@@ -157,4 +171,4 @@ class FightState(State):
         if not queue:
             return StateOutcome(None, "attack queue empty", state=self.name)
         label = f"fight {target.kind} {target.id}"
-        return StateOutcome(queue, label, reflex=True, state=self.name)
+        return StateOutcome(queue, label, reflex=True, state=self.name, paced=True)

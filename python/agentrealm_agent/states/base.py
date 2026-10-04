@@ -37,6 +37,8 @@ class StateOutcome:
     reason: str
     reflex: bool = False
     state: str = ""
+    # Already paced (A23 **Fight**): the runner sends it as is.
+    paced: bool = False
 
 
 class State(ABC):

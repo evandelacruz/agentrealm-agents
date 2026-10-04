@@ -117,7 +117,7 @@ def decide(
     outcome = dispatch(w, ctx)
     intents = outcome.intents
     intent = intents[0] if intents else None
-    submit_queue = intents if intents and len(intents) > 1 else None
+    submit_queue = intents if intents and outcome.paced else None
     return Decision(intent, outcome.reason, outcome.reflex, submit_queue=submit_queue)
 
 

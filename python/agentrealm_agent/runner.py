@@ -23,6 +23,7 @@ from .executor import (
 )
 from .poll_cadence import calm_poll_interval
 from .world import DOORS, WorldModel, terrain_cells
+from .zone_discovery import apply_town, apply_zone, next_zone_probe
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
@@ -80,6 +81,7 @@ class Runner:
         horizon_s = max(1, int(world.get("queue_horizon_seconds", DEFAULT_QUEUE_HORIZON_SECONDS)))
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
+        apply_town(self.world, world.get("town"))
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:
@@ -138,6 +140,14 @@ class Runner:
             m.alarm = False
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
+        elif call == "zone":
+            probe = next_zone_probe(w, m)
+            assert probe is not None
+            map_id, (x, y) = probe
+            z = c.zone(self.cid, map_id, x, y)
+            fact = apply_zone(w, map_id, x, y, z)
+            w.tick = max(w.tick, int(z.get("tick", 0)))
+            self.log(call, f"@{map_id}:{x},{y} safe={fact.safe}", {"zone": z})
         else:
             return self.tick()
         return 0.0

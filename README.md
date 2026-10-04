@@ -48,6 +48,8 @@ Copy a file from `python/characters/` and edit it. Names must be unique in the w
 | `policy.entity_refresh` | Ticks between entity reads when nothing is happening. |
 | `policy.seed` | Random seed for `wander`. Defaults to the character id. |
 
+While calm, the agent also calls `get_zone` on revealed cells around town and along its path, building a map of safe tiles for later retreat and healing (A7).
+
 ## Tests
 
 From the repo root:

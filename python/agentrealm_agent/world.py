@@ -99,6 +99,11 @@ class WorldModel:
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[int]] = field(default_factory=dict)
+    # Zone facts from get_zone (A7): map_id -> cell -> fact; safe cells per map.
+    zones: dict[int, dict[Pos, object]] = field(default_factory=dict)
+    safe_tiles: dict[int, set[Pos]] = field(default_factory=dict)
+    # Town and Respawned locations used to seed safe-tile probes.
+    respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
 
     @property
     def view(self) -> MapView:
@@ -322,6 +327,10 @@ class WorldModel:
                     self.forget_position()
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
+                elif kind == "Respawned":
+                    from .zone_discovery import record_respawn_anchor
+
+                    record_respawn_anchor(self, int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))
         return flat
 
     def apply_observation(self, obs: dict | None) -> None:

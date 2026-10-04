@@ -243,16 +243,23 @@ class WorldModel:
         if gone or self.chest_contents.get(chest_id) == []:
             self.death_chest = None
 
+    def _apply_vitals(self, body: dict, complete: bool) -> None:
+        """Reads health and max health from a snapshot or a delta.
+
+        A complete snapshot is authoritative, so a field it omits (asleep)
+        clears the old value. A delta replaces only the fields it carries.
+        A value that is not a number reads as unknown.
+        """
+        for key in ("health", "max_health"):
+            if complete or key in body:
+                setattr(self, key, _opt_int(body.get(key)))
+
     def _apply_body_scalars(self, body: dict) -> None:
         """Fields a snapshot and a delta share: present means replace."""
         if "lives" in body:
             self.lives = int(body["lives"])
         if "alive" in body:
             self.alive = bool(body["alive"])
-        if "health" in body:
-            self.health = None if body["health"] is None else int(body["health"])
-        if "max_health" in body:
-            self.max_health = None if body["max_health"] is None else int(body["max_health"])
         if "position" in body:
             pos = body["position"]
             if pos is None:
@@ -262,6 +269,7 @@ class WorldModel:
 
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
+        self._apply_vitals(snap, complete=True)
         if "entities" in snap:
             entities = snap["entities"] or {}
             self.entities = self._entities_from_payload(entities)
@@ -274,6 +282,7 @@ class WorldModel:
 
     def _apply_delta_body(self, delta: dict) -> None:
         self._apply_body_scalars(delta)
+        self._apply_vitals(delta, complete=False)
         if "entities" in delta:
             self._apply_entity_delta(delta["entities"])
             self.entities_tick = self.tick
@@ -420,3 +429,12 @@ class WorldModel:
             if best is None or c < best_cost:
                 best, best_cost = (t, p), c
         return best
+
+
+def _opt_int(v) -> int | None:
+    if isinstance(v, bool):
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError, OverflowError):
+        return None

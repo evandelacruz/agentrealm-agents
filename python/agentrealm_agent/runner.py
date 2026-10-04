@@ -15,6 +15,7 @@ from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .item_table import absorb_attack_range, absorb_entities_payload, rejection_attack_range
 from .knowledge_base import KnowledgeBase
+from .knowledge_maps import record_warp, sync_tiles, sync_world_maps
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
@@ -126,7 +127,39 @@ class Runner:
                 except ApiError as e:
                     not_before = self.on_error(call, e)
         finally:
+            if self.knowledge is not None:
+                # Tiles learned from tick deltas, which terrain reads did not merge.
+                sync_world_maps(self.knowledge, self.world)
             self.trace.close()
+
+    def note_warp_landing(self) -> None:
+        """After a door step, record where the position read says it landed (A26).
+
+        A read that still puts us on the door means it did not warp (locked,
+        or closed): nothing is recorded, so the graph never gets a self-loop.
+        """
+        w, m = self.world, self.mem
+        warp, m.warp_from = m.warp_from, None
+        if warp is None or self.knowledge is None or w.map_id is None or w.pos is None:
+            return
+        from_map, from_pos, block_type = warp
+        if (w.map_id, w.pos) != (from_map, from_pos):
+            record_warp(self.knowledge, from_map, from_pos, block_type, w.map_id, w.pos)
+
+    def sync_terrain(self, t: dict) -> None:
+        """Merge the cells of this terrain read's window into the knowledge base (A26)."""
+        if self.knowledge is None:
+            return
+        map_id = int(t["map_id"])
+        view = self.world.maps[map_id]
+        x0, y0 = int(t["x0"]), int(t["y0"])
+        tiles = {
+            (x, y): view.tiles[(x, y)]
+            for y in range(y0, y0 + int(t["height"]))
+            for x in range(x0, x0 + int(t["width"]))
+            if (x, y) in view.tiles
+        }
+        sync_tiles(self.knowledge, map_id, tiles)
 
     def read_world(self) -> dict | None:
         """The world read that sets the pace, retried like any other call."""
@@ -149,12 +182,14 @@ class Runner:
         elif call == "position":
             p = c.position(self.cid)
             w.apply_position(p)
+            self.note_warp_landing()
             m.need_position, m.path = False, []
             self.log(call, "", {"position": p})
         elif call == "terrain":
             t = c.terrain(self.cid, w.map_id, *w.perception_rect())
             w.apply_terrain(t)
             w.tick = max(w.tick, int(t.get("tick", 0)))
+            self.sync_terrain(t)
             n = len(terrain_cells(t))
             self.note_held_path_stale()
             self.log(call, f"{n} cells, {len(w.view.tiles)} known", {"cells": n})
@@ -491,9 +526,10 @@ class Runner:
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
-                if w.view.tiles.get(w.pos) in DOORS:
+                if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:
                     # A door moves us; the Steps still queued behind this one
                     # would walk from the wrong place.
+                    m.warp_from = (w.map_id, w.pos, w.view.tiles.get(w.pos, "framed_door"))
                     m.need_position, m.path = True, []
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True
@@ -519,6 +555,7 @@ class Runner:
         m.pending_queue = None
         m.pending_next_index = 0
         m.path, m.need_position = [], True
+        m.warp_from = None  # a later Step was refused: the next read is not the door's landing
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
@@ -568,6 +605,7 @@ class Runner:
                 m.pending_intents = m.pending = m.pending_queue = None
                 m.pending_next_index = 0
                 m.held_queue, m.resend_held_queue = None, False
+                m.warp_from = None
         # WorldModel.apply_events already parsed BlockChanged (A14).
         for map_id, p in w.changed_blocks:
             on_block_changed(m, map_id, p)
@@ -583,6 +621,7 @@ class Runner:
         if e.code in ("not_on_map", "character_not_live"):
             # Waiting to be placed, or dead and waiting to respawn.
             self.mem.need_self = self.mem.need_position = True
+            self.mem.warp_from = None
             return time.time() + 1.0
         return time.time() + 1.0
 

@@ -52,6 +52,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 ## Movement and blocks
 
 - **Block types.** Walkable: `grass`, `dirt`, `tile`, and `fire`/`lava`, which deal `occupy_damage` on the tick you enter and every second you stay. Blocked: `water`, `bush`, `tree`, `rock`, `mountain`, `wall`. Doors (warp): `framed_door`, `rock_entry`. Treat an unknown type as blocked (M §9.2).
+- **Door destinations are not served.** A terrain cell names a door's `block_type` (and `locked`), never where it leads. The agent learns each warp by observation: it steps on, then reads its position (M §9.2; A26).
 - **Art.** A cell can carry art (path, fence, house, statue, sign, pond, bridge), but behaviour always comes from `block_type`. Statues and signs are `wall` cells with `readable: true` (M §9.2; Obs).
 - **Breaking blocks.** `Use` with the right supply armed destroys a block; anything else is `applied_no_effect`. A block never says whether it breaks or what breaks it (M §11).
 - **Capabilities, per the manual:**

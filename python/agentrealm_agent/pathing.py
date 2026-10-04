@@ -5,8 +5,9 @@ from __future__ import annotations
 import random
 
 from .config import Policy
+from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .navigation import CostGridParams, cost_path, known_prefix, nearest_target
+from .navigation import CostGridParams, doors_goal_path, known_prefix, nearest_target, route_first_leg
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -41,7 +42,15 @@ def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos |
     return None
 
 
-def replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]) -> None:
+def replan(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    rng: random.Random,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None = None,
+) -> None:
     """Take the first goal whose path starts on a seen, open step.
 
     A path whose first step lies in fog is skipped like an unreachable goal,
@@ -49,7 +58,7 @@ def replan(w: WorldModel, m: Memory, policy: Policy, rng: random.Random, blocked
     """
     m.path, m.goal = [], ""
     for goal in policy.goals:
-        found = plan_goal(goal, w, policy, rng, blocked, costly)
+        found = plan_goal(goal, w, policy, rng, blocked, costly, knowledge)
         if next_step(w, blocked, found):
             m.path, m.goal = found, goal
             return
@@ -65,7 +74,13 @@ def grid_params(policy: Policy, avoid: set[Pos], costly: set[Pos], allow_goal_do
 
 
 def plan_goal(
-    goal: str, w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], costly: set[Pos]
+    goal: str,
+    w: WorldModel,
+    policy: Policy,
+    rng: random.Random,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None = None,
 ) -> list[Pos] | None:
     view = w.view
     if goal == "hold":
@@ -74,12 +89,12 @@ def plan_goal(
         options = w.open_neighbours(w.pos, blocked)
         return [rng.choice(sorted(options))] if options else None
     if goal == "goto":
-        target = tuple(policy.goto)
-        return cost_path(w, target, grid_params(policy, blocked, costly, allow_goal_door=True)) or None
+        # config.load guarantees goto is set when the goal is listed.
+        dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
+        params = grid_params(policy, blocked, costly, allow_goal_door=True)
+        return route_first_leg(w, knowledge, dest_map, tuple(policy.goto), params) or None
     if goal == "doors":
-        doors = {p for p, b in view.tiles.items() if b in DOORS}
-        found = nearest_target(w, doors, grid_params(policy, blocked, costly, allow_goal_door=True))
-        return found[1] if found and found[1] else None
+        return doors_goal_path(w, knowledge, grid_params(policy, blocked, costly, allow_goal_door=True))
     if goal == "explore":
         targets = view.frontier() - {w.pos}
         found = nearest_target(w, targets, grid_params(policy, blocked, costly))

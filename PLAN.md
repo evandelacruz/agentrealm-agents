@@ -97,12 +97,14 @@ A goal plus an A* path over the M7 cost grid (A12, `navigation/planner.py`). Ste
 | Goal | Target |
 |---|---|
 | `explore` | Nearest frontier: a known walkable tile next to an unknown one. |
-| `doors` | Nearest known door (`framed_door`, `rock_entry`). Stepping onto one warps. |
-| `goto` | A fixed `(x, y)`. |
+| `doors` | Nearest known door (`framed_door`, `rock_entry`) whose warp is not yet recorded, else the nearest door. Stepping onto one warps. |
+| `goto` | A fixed `(x, y)`, on `policy.goto_map` when set (A26), else the current map. |
 | `hold` | Stay. |
 | `wander` | A random walkable neighbour. |
 
 Goals are tried in order; the first with a reachable target wins. Re-plan when a step is rejected, when the map changes, or when a terrain read disagrees with the path.
+
+**Door graph (A26, `navigation/door_graph.py`).** A `goto` on another map, or one not reachable on this map, is a Dijkstra search over the door graph: nodes are the start, the goal, every known door and every warp landing; walking edges come from one cost-grid flood per node, and a door with a recorded warp has a zero-cost edge to its landing. A door reached on foot is left only through its warp, so one whose warp is unknown is a dead end; the start walks out even when it stands on a door. The agent walks the first leg; after the warp, it replans from the landing. With no known route the goal yields like any unreachable one. Warps are learned by observation: a `Step` onto a door sets `warp_from`, and the next position read records where it landed, unless it still stands on the door (no self-loops). A refused Step, a death, or a not-on-map error drops the pending warp. Knowledge base shape, under `maps["<map_id>"]` (`knowledge_maps.py`): `terrain` is `{"x,y": block_type}`, merged per terrain read's window and once more from the world model at exit; `doors` is a list of `{x, y, block_type}` sorted by cell, plus `to_map_id`, `to_x`, `to_y` once a warp is recorded, and `locked: true` once a Step onto it was refused `door_locked` (A14).
 
 ### Planner: sets goals and settings
 

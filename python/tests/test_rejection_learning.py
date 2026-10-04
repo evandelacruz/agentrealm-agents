@@ -176,7 +176,7 @@ class RunnerRejectionTest(unittest.TestCase):
             ("block_occupied", lambda r: self.assertEqual(
                 r.mem.nav.occupant_until, {(7, (1, 0)): 10 + OCCUPANT_LEARN_TICKS})),
             ("door_locked", lambda r: self.assertEqual(
-                kb.maps["7"]["doors"], [{"x": 1, "y": 0, "locked": True}])),
+                kb.maps["7"]["doors"], [{"x": 1, "y": 0, "block_type": "framed_door", "locked": True}])),
         ):
             with self.subTest(code=code):
                 fake = FakeClient([

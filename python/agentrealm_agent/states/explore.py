@@ -106,7 +106,7 @@ def scripted_outcome(
 
     step = next_step(w, plan_avoid, m.path)
     if step is None:
-        replan(w, m, policy, rng, plan_avoid, plan_costly)
+        replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge)
         step = next_step(w, plan_avoid, m.path)
     if step is not None:
         return StateOutcome([set_position(step)], f"{m.goal} → {m.path[-1]}", state=state)

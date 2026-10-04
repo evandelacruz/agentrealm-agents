@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..world import Pos
+from ..knowledge_maps import iter_doors, record_locked_door
+from ..world import DOORS, Pos
 
 if TYPE_CHECKING:
     from ..knowledge_base import KnowledgeBase
@@ -43,14 +44,12 @@ def locked_doors_from_kb(kb: KnowledgeBase | None, map_id: int) -> set[Pos]:
     if kb is None:
         return set()
     out: set[Pos] = set()
-    with kb.lock:
-        section = kb.maps.get(str(map_id)) or {}
-        for door in section.get("doors") or []:
-            if door.get("locked"):
-                try:
-                    out.add((int(door["x"]), int(door["y"])))
-                except (KeyError, TypeError, ValueError):
-                    continue
+    for door in iter_doors(kb, map_id):
+        if door.get("locked"):
+            try:
+                out.add((int(door["x"]), int(door["y"])))
+            except (KeyError, TypeError, ValueError):
+                continue
     return out
 
 
@@ -72,17 +71,6 @@ def end_decision(nav: NavMemory, tick: int) -> None:
     """Ages the learnings once per decision: the one place they are pruned."""
     nav.wait_tile = None
     nav.occupant_until = {k: until for k, until in nav.occupant_until.items() if until > tick}
-
-
-def record_locked_door(kb: KnowledgeBase, map_id: int, x: int, y: int) -> None:
-    with kb.lock:
-        section = kb.maps.setdefault(str(map_id), {})
-        doors = section.setdefault("doors", [])
-        for door in doors:
-            if door.get("x") == x and door.get("y") == y:
-                door["locked"] = True
-                return
-        doors.append({"x": x, "y": y, "locked": True})
 
 
 def record_strength_closed(kb: KnowledgeBase | None, w: WorldModel, pos: Pos) -> None:
@@ -122,7 +110,8 @@ def learn_step_rejection(
         case "door_locked":
             nav.impassable.add(cell)
             if kb is not None:
-                record_locked_door(kb, w.map_id, landing[0], landing[1])
+                block = w.view.tiles.get(landing)
+                record_locked_door(kb, w.map_id, landing, block if block in DOORS else "framed_door")
         case "over_strength_ceiling":
             nav.impassable.add(cell)
             record_strength_closed(kb, w, landing)

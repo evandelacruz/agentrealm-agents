@@ -21,7 +21,7 @@ class PlayContext:
     policy: Policy
     rng: random.Random
     never_attack: list[str] = field(default_factory=list)
-    knowledge: KnowledgeBase | None = None  # world knowledge: locked doors (A14)
+    knowledge: KnowledgeBase | None = None  # per-world door graph, terrain, locked doors (A26, A14)
 
 
 @dataclass

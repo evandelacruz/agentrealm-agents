@@ -162,18 +162,17 @@ class WorldModel:
         self.attack_range = _opt_int(s.get("attack_range"))
 
     def apply_position(self, p: dict) -> None:
+        # Absent or null on the overworld; anything but an integer is rejected
+        # before the read changes the model (A37).
+        level = p.get("level")
+        if level is not None and (isinstance(level, bool) or not isinstance(level, int)):
+            raise ValueError(f"position level must be an integer, got {level!r}")
         map_id = int(p["map_id"])
         if map_id != self.map_id:
             self.snapshot_version = None  # entities no longer match its base
         self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
-        if "level" in p:
-            try:
-                self.map_level = int(p["level"])
-            except (TypeError, ValueError):
-                self.map_level = None
-        else:
-            self.map_level = None
+        self.map_level = level
 
     def perception_rect(self) -> tuple[int, int, int, int]:
         """x0, y0, width, height of the perception window around us."""

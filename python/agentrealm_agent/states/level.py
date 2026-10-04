@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from ..config import Policy
 from ..knowledge_base import KnowledgeBase
-from ..level import inside_level
 from ..memory import Memory
 from ..navigation import doors_goal_path, nearest_target
 from ..pathing import grid_params, next_step
@@ -14,6 +13,16 @@ from .explore import plan_sets, reflex_outcome
 from .intents import set_position
 
 GOAL = "level"
+
+
+def inside_level(w: WorldModel) -> bool:
+    """True when the position read names a positive ``level`` (Manual §5.3).
+
+    Interior maps carry ``level``; the overworld omits it or sends zero.
+    """
+    if not w.alive or w.map_id is None:
+        return False
+    return w.map_level is not None and w.map_level > 0
 
 
 def level_outcome(
@@ -67,7 +76,11 @@ def _replan_level(
 
 
 class LevelState(State):
-    """Priority 5, above Travel and Explore. Active on level interior maps."""
+    """Priority 5, below Travel and above Explore. Active on level interior maps.
+
+    A ``travel:*`` directive that resolves outranks it (PLAN.md A37); with
+    no door or frontier step it sends nothing and dispatch falls through (A44).
+    """
 
     name = "Level"
 
@@ -76,7 +89,7 @@ class LevelState(State):
             ctx.policy.kind == "scripted"
             and world.alive
             and world.pos is not None
-            and inside_level(world, ctx.knowledge)
+            and inside_level(world)
         )
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:

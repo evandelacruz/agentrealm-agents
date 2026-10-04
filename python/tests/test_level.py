@@ -6,11 +6,11 @@ import unittest
 from agentrealm_agent.config import Policy
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
-from agentrealm_agent.level import inside_level
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import CostGridParams
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.travel import sync_town
+from agentrealm_agent.states.level import inside_level
+from agentrealm_agent.travel import refresh_travel_stack, sync_town
 from agentrealm_agent.world import WorldModel
 
 
@@ -32,15 +32,25 @@ class InsideLevelTest(unittest.TestCase):
     def test_map_level_from_position(self):
         w = grid(["."], map_id=9)
         w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
-        self.assertTrue(inside_level(w, None))
+        self.assertTrue(inside_level(w))
         w.apply_position({"map_id": 1, "x": 0, "y": 0, "level": 0})
-        self.assertFalse(inside_level(w, None))
+        self.assertFalse(inside_level(w))
 
     def test_without_level_field_not_inside(self):
-        kb = KnowledgeBase.empty("sandbox")
-        sync_town(kb, {"map_id": 1, "x": 0, "y": 0})
         w = grid(["."], map_id=8)
-        self.assertFalse(inside_level(w, kb))
+        w.apply_position({"map_id": 8, "x": 0, "y": 0})
+        self.assertFalse(inside_level(w))
+        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": None})
+        self.assertFalse(inside_level(w))
+
+    def test_non_integer_level_rejected(self):
+        w = grid(["."], map_id=9)
+        w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
+        for bad in ("2", "deep", 1.5, True, [1]):
+            with self.subTest(level=bad):
+                with self.assertRaises(ValueError):
+                    w.apply_position({"map_id": 8, "x": 3, "y": 3, "level": bad})
+                self.assertEqual((w.map_id, w.pos, w.map_level), (9, (0, 0), 2), "a rejected read changes nothing")
 
 
 class LevelStateTest(unittest.TestCase):
@@ -72,18 +82,35 @@ class LevelStateTest(unittest.TestCase):
         self.assertEqual(out.state, "Level")
         self.assertEqual(m.path[-1], (4, 0), "walk toward the door whose warp is unknown")
 
-    def test_level_beats_travel_while_inside(self):
+    def test_travel_directive_outranks_level(self):
         kb = KnowledgeBase.empty("sandbox")
-        sync_town(kb, {"map_id": 2, "x": 0, "y": 0})
-        w = grid(["...."], at=(0, 0), map_id=8)
+        w = grid(["....D"], at=(0, 0), map_id=8)
         w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 3})
         m = Memory()
-        from agentrealm_agent.travel import refresh_travel_stack
-
         refresh_travel_stack(m, ["travel:point:3:0"])
+        out = dispatch(w, ctx_for(m, kb))
+        self.assertEqual(out.state, "Travel")
+
+    def test_level_takes_over_once_travel_arrives(self):
+        kb = KnowledgeBase.empty("sandbox")
+        w = grid(["....D"], at=(0, 0), map_id=8)
+        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 3})
+        m = Memory()
+        refresh_travel_stack(m, ["travel:point:0:0"])
+        dispatch(w, ctx_for(m, kb))  # arrival drops the op
         out = dispatch(w, ctx_for(m, kb))
         self.assertEqual(out.state, "Level")
 
+    def test_no_level_step_falls_through(self):
+        # Walled in with nothing unexplored in reach: Level sends nothing and
+        # does not hold the round, so a lower state gets it (A44).
+        w = grid(["###", "#.#", "###"], at=(1, 1), map_id=8)
+        w.apply_position({"map_id": 8, "x": 1, "y": 1, "level": 1})
+        m = Memory()
+        ctx = PlayContext(m, Policy(kind="scripted", goals=["hold"]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
+        out = dispatch(w, ctx)
+        self.assertNotEqual(out.state, "Level")
+        self.assertTrue(any(y.startswith("Level: no level step") for y in out.yielded), out.yielded)
 
 if __name__ == "__main__":
     unittest.main()

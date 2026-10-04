@@ -252,7 +252,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 
 | ID | Item | Depends on |
 |---|---|---|
-| A37 | **Level.** Priority 5, above Travel and Explore. Active when the position read names a positive ``level`` (Manual §5.3). Walks toward the nearest door whose warp is not yet recorded, else the nearest door, else a frontier tile; fight and pickup reflexes still run first (same door preference as the ``doors`` goal). | A23, A27 |
+| A37 | **Level.** Priority 5, below Travel and above Explore. Active when the position read names a positive integer `level` (Manual §5.3); a non-integer `level` is rejected as a malformed read. Walks toward the nearest door whose warp is not yet recorded, else the nearest door, else a frontier tile; fight and pickup reflexes still run first (same door preference as the `doors` goal). Exit rule: a `travel:*` directive that resolves outranks Level, so Travel can walk the agent out (to town, say); Level takes over again once that op is reached or while none resolves. With no door or frontier step it sends nothing without `wait`, so dispatch falls through to Travel's or Explore's goals (A44). | A23, A27 |
 | A38 | **Boss.** Plan preconditions, the clock, progress from boss `health`. | A37 |
 | A39 | **Solve.** `Compose`, keys at doors, `use_block`. | A34, A37 |
 | A40 | **M11 acceptance.** M11 done-when. | A36, A38, A39 |

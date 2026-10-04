@@ -10,8 +10,8 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import flee_step, grid_params, nav_search, next_step, replan
-from ..world import Pos, WorldModel, chebyshev
+from ..pathing import grid_params, nav_search, next_step, replan
+from ..world import WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position, take, use_on, withdraw_all
 
@@ -53,34 +53,17 @@ def scripted_outcome(
         return StateOutcome(None, "position unknown", state=state)
     view = w.view
 
-    # Rejection learnings stay out of every choice below (A14, reflex 1).
+    # Hazard escape and flee are Escape / Flee / Retreat (A9); fight stays here until A23.
     nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
-    hazards = {p for p, b in view.tiles.items() if b in policy.avoid_blocks}
-    blocked = nav_avoid | hazards
-    escape: set[Pos] = set()
-    if here in hazards:
-        safe = w.open_neighbours(here, blocked)
-        if safe:
-            m.path = []
-            p = min(safe)
-            return StateOutcome([set_position(p)], f"off {view.tiles.get(here)}", reflex=True, state=state)
-        escape = hazards
-    plan_avoid = blocked - escape
-    plan_costly = escape | nav_costly
+    plan_avoid = nav_avoid
+    plan_costly = nav_costly
 
     hostiles = [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
-    if hostiles and policy.on_hostile != "ignore":
+    if hostiles and policy.on_hostile == "fight":
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
-        if policy.on_hostile == "fight":
-            if target.kind == "character" and not attack_forbidden(target, never_attack):
-                return StateOutcome(
-                    [use_on(target)], f"fight {target.kind} {target.id}", reflex=True, state=state
-                )
-        away = flee_step(w, hostiles, blocked)
-        if away is not None:
-            m.path = []
+        if target.kind == "character" and not attack_forbidden(target, never_attack):
             return StateOutcome(
-                [set_position(away)], f"flee {target.kind} {target.id}", reflex=True, state=state
+                [use_on(target)], f"fight {target.kind} {target.id}", reflex=True, state=state
             )
 
     if policy.pickup:

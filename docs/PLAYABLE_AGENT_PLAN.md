@@ -40,7 +40,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 |---|---|---|
 | `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Not measured on a live world yet; M0's paced `Step` queues drew no `movement_cooldown` | Moving at a steady pace without spending a request per step |
 | Multi-intent queues | Movement, and `Use`/`Say`/`Broadcast` behind the `Wait`s their cooldown still owes; every other intent is sent alone; a reflex that fires replaces a running queue | Freeing the request budget; queuing a retreat with an attack |
-| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; health not yet used by any decision; entity layer still from separate reads | Perception, retreat |
+| Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; **Retreat** and **Flee** (A9) read health with the threat table; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
 | `Use` on a block (attacks the NPC on it, or breaks the block) | No: flees from every NPC | Fighting, opening the way |
 | Priced supplies (`gem_price`) | No | Buying gear, potions, tools |
@@ -338,7 +338,7 @@ If you find a sign with numbers on it, try them as a code at the nearest locked 
 """                                                     # free text, passed to the strategist
 ```
 
-Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. Until A9 and the M4 strategist land, only `never_attack` changes behavior; `params`, `goals`, and `instructions` are parsed and validated but not yet read.
+Structured keys take effect on the next round trip with no model involved. Free text only steers the strategist. `never_attack` and the survival `params` that **Retreat**, **Flee**, and **Escape** read (A9) change behavior today; `goals` and `instructions` wait for the M4 strategist.
 
 Hard constraints are never free text. `never_attack` lists what may not be attacked: `character`, or NPC type codes. `Fight` and `Boss` guards refuse such a target, and the executor drops any `Use` aimed at one, whatever the strategist says, and with the strategist off. The strategist cannot change it: a `set_param` naming it is dropped.
 

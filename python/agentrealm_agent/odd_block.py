@@ -4,7 +4,7 @@ PLAYABLE_AGENT_PLAN Curiosity **Odd-block detector**: one rock in a garden, one
 bush in a wheat field. A block is odd when its type is rare in a 7×7
 neighbourhood (one or two of it), most surrounding cells share one other type,
 and it is breakable in principle. Clue text that names the block type adds a
-boost; capability and tool rules live in ``clues`` (A32).
+boost; the clue rules for capabilities and tools live in ``clues`` (A32).
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from .break_memory import (
     BREAKABLE,
     CAPABILITIES,
     WEAPONS,
-    _capability_order,
     attempt_failed,
     attempt_open,
     BreakChoice,
@@ -25,7 +24,7 @@ from .break_memory import (
     pick_supply_for_capability,
     untried_capabilities,
 )
-from .clues import capability_priority, clue_allows_tools
+from .clues import capabilities_named_near, clues_on_map, tool_allowed
 from .curiosity_budget import curiosity_room
 from .interest_list import MAX_REJECTIONS, investigate_blocked, sight_range
 from .knowledge_base import KnowledgeBase
@@ -103,20 +102,9 @@ def is_odd_block(tiles: dict[Pos, str], pos: Pos) -> bool:
     return dominant / len(neighbours) >= DOMINANT_FRAC
 
 
-def _clue_on_map(clue: dict, map_id: int) -> bool:
-    try:
-        return int(clue.get("map_id")) == map_id
-    except (TypeError, ValueError):
-        return False
-
-
 def _clues_on_map(kb: KnowledgeBase | None, map_id: int) -> list[str]:
     """Lower-cased text of the clues on ``map_id``; clues on other maps do not count."""
-    if kb is None:
-        return []
-    with kb.lock:
-        clues = list(kb.clues)
-    return [(c.get("text") or "").lower() for c in clues if _clue_on_map(c, map_id)]
+    return [(c.get("text") or "").lower() for c in clues_on_map(kb, map_id)]
 
 
 def _clue_boost(clue_texts: list[str], block: str) -> float:
@@ -182,17 +170,21 @@ def _choice_at_odd(
 ) -> BreakChoice | None:
     if w.map_id is None:
         return None
-    allow_tools = clue_allows_tools(kb, w.map_id, nomination.clue_boost)
-    caps = untried_capabilities(kb, w.map_id, nomination.pos, held_capabilities(w, kb))
-    caps.sort(key=lambda c: (capability_priority(c, kb, w.map_id), *_capability_order(c)))
-    for cap in caps:
+    # Clue rules (A32): a tool is spent only when a clue names this block's
+    # type or names the capability near it; named capabilities go first, but
+    # never ahead of a free weapon (Curiosity: weapons, then tools).
+    named_near = capabilities_named_near(kb, w.map_id, nomination.pos)
+    choices: list[BreakChoice] = []
+    for cap in untried_capabilities(kb, w.map_id, nomination.pos, held_capabilities(w, kb)):
         supply = pick_supply_for_capability(w, cap, kb)
-        if supply is None:
+        if supply is None or not tool_allowed(supply.code, cap, nomination.clue_boost > 0, named_near):
             continue
-        if supply.code not in WEAPONS and not allow_tools:
-            continue
-        return BreakChoice(nomination.pos, cap, supply, break_step_cost(kb, supply.code))
-    return None
+        choices.append(BreakChoice(nomination.pos, cap, supply, break_step_cost(kb, supply.code)))
+    if not choices:
+        return None
+    # Weapons, then named capabilities, then the cheaper tool; min keeps the first
+    # of equals, so ties follow untried_capabilities' order (cut, chop, smash, burn, blast).
+    return min(choices, key=lambda c: (c.supply.code not in WEAPONS, c.capability not in named_near, c.cost))
 
 
 def _consumable_cost(choice: BreakChoice) -> int:

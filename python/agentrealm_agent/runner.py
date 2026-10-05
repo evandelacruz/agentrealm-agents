@@ -825,19 +825,6 @@ class Runner:
                     pos,
                     int(result.get("tick", self.world.tick)),
                 )
-        elif target.get("kind") == "supply" and applied and target.get("supply_id") is not None:
-            map_id = self.world.map_id
-            pos = self.world.pos
-            if map_id is not None and pos is not None:
-                note_read_clue(
-                    self.knowledge,
-                    self.mem,
-                    result,
-                    int(map_id),
-                    pos,
-                    int(result.get("tick", self.world.tick)),
-                    kind="scroll",
-                )
         elif intent["verb"] == "Say" and intent.get("npc_id") is not None:
             key = say_key(int(intent["npc_id"]))
             if applied:

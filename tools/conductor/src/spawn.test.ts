@@ -4,7 +4,7 @@ import { buildName, prependIds } from "./spawn.js";
 
 test("buildName prefers an explicit name, then IDs, then the default", () => {
   assert.equal(buildName(["M4"], "LLM planner"), "LLM planner");
-  assert.equal(buildName(["M4", "M5"], undefined), "Implement M4, M5");
+  assert.equal(buildName(["A8", "A50"], undefined), "Implement A8, A50");
   assert.equal(buildName([], "  "), "agentrealm-agents implementer");
 });
 

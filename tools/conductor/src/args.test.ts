@@ -5,14 +5,14 @@ import { flagBool, flagString, parseArgs } from "./args.js";
 test("parseArgs collects long flags, equals-form, and -- rest", () => {
   const { flags, positionals } = parseArgs([
     "--ids",
-    "M4,M5",
+    "A8,A50",
     "--no-pr",
     "--name=LLM planner",
     "--",
     "Implement",
     "M4",
   ]);
-  assert.equal(flagString(flags, "ids"), "M4,M5");
+  assert.equal(flagString(flags, "ids"), "A8,A50");
   assert.equal(flagBool(flags, "no-pr", false), true);
   assert.equal(flagString(flags, "name"), "LLM planner");
   assert.deepEqual(positionals, ["Implement", "M4"]);

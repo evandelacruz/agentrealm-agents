@@ -6,11 +6,13 @@ Rules for agents working in this repo. Read this first.
 
 Reference agents that play Agent Realm through its public API. Read [README.md](README.md), then [PLAN.md](PLAN.md).
 
+The goal is for people to build their own agents for Agent Realm (agentrealm.gg), and for that to be easy and fun. Our agent is the starting point they copy, edit and grow, so it has to be easy to read and easy to change, not only correct.
+
 ## Where truth lives
 
 | File | Role |
 |---|---|
-| [PLAN.md](PLAN.md) | Design, what the API allows today, server gaps, and the backlog: PR-sized items (A1, A2, …) with their dependencies, grouped under milestone headings (M0–M12). |
+| [PLAN.md](PLAN.md) | Design, what the API allows today, server gaps, and the backlog: PR-sized items (A1, A2, …) with their dependencies, grouped under milestone headings (M0–M13). |
 | [docs/PLAYABLE_AGENT_PLAN.md](docs/PLAYABLE_AGENT_PLAN.md) | Scope and done-when of the milestones M0, M4 and M6–M12. PLAN.md owns the item IDs and dependencies. |
 | [docs/GAME_NOTES.md](docs/GAME_NOTES.md) | Game facts the plan relies on, each with its source. |
 | [status.json](status.json) | Per-item work state. Not a source of truth. |
@@ -34,8 +36,9 @@ Decided. Do not cross without flagging prominently.
 
 ## Rules for agents
 
-- Cite backlog IDs (A1, M5, …) in commits and PR bodies.
+- Cite backlog IDs (A1, A50, …) in commits and PR bodies.
 - Read the cited PLAN.md sections and this file before writing code.
+- Write for the newcomer who will copy this agent: plain names, a short docstring on each state, one obvious place to add a behavior. Reviews flag anything that makes the agent harder to read or extend, the same as a bug.
 - Keep PLAN.md and README.md matching the code. A behavior change that leaves them describing the old one is not done.
 - Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`. The `test` GitHub Actions workflow runs both on every PR.
 - Open PRs **ready for review, not draft**. If tooling defaults to draft, run `gh pr ready`.

@@ -7,7 +7,6 @@ from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
 from .downed import DownedState
 from .escape import EscapeState
-from .example_greet import ExampleGreetState
 from .explore import ExploreState
 from .fight import FightState
 from .flee import FleeState
@@ -51,7 +50,6 @@ STATES: tuple[State, ...] = (
     TravelState(),
     BossState(),
     LevelState(),
-    ExampleGreetState(),  # A51 teaching state; off unless directives [flags] example_greet
     ExploreState(),
     IdleState(),
 )

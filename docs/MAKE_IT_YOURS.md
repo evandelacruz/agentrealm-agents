@@ -51,7 +51,7 @@ Tests for fall-through live in `python/tests/test_states.py` (`DispatcherFallThr
 2. Import it in `states/dispatch.py` and insert an instance into **`STATES`** at the right priority — higher in the tuple means it runs earlier. Match the table in [docs/PLAYABLE_AGENT_PLAN.md](PLAYABLE_AGENT_PLAN.md) (*State machine*) unless you deliberately want to interrupt something else.
 3. Export nothing special from `states/__init__.py` unless other code needs your helpers.
 
-Keep default behavior unchanged: gate your state behind policy, directives, or a flag that is off in defaults (see the example below).
+That one line in `STATES` is the switch: a state that is not in the tuple never runs. Keep your additions in your own copy (a fork or branch) so the shipped agent stays as it is.
 
 ## Reading the world
 
@@ -117,30 +117,40 @@ Each character can have `python/characters/<name>.directives.toml`, re-read when
 | `never_attack` | Block swings at listed kinds or NPC codes. |
 | `goals` | Replace the plan stack (`explore_area`, `travel:*`, `gather_gems:20`, …). |
 | `instructions` | Reserved for the future strategist (M4). |
-| `flags` | Boolean toggles for optional behavior (see example). |
 
 Invalid params are ignored with a log line; a broken file keeps the last good directives.
 
-## Worked example: greet each NPC once
+## Worked example: say hello to other players
 
-The repo ships **`ExampleGreetState`** in `python/agentrealm_agent/states/example_greet.py` (~45 lines with helpers). It is wired in `dispatch.py` **above Explore** and **off by default**.
+The repo ships **`ExampleGreetState`** in `python/agentrealm_agent/states/example_greet.py` (about 50 lines). It says hello once to each other player in sight. No shipped state talks to players (Investigate says hello to **NPCs**), so it adds behavior instead of shadowing a state that already runs.
 
-Enable it in directives:
+It is **not** in the shipped `STATES`, so the reference agent never runs it. To try it in your copy, add one line to `STATES` in `states/dispatch.py`, above Explore:
 
-```toml
-[flags]
-example_greet = true
+```python
+from .example_greet import ExampleGreetState
+...
+    LevelState(),
+    ExampleGreetState(),  # mine: say hello to players in sight
+    ExploreState(),
+    IdleState(),
+)
 ```
 
 Behavior:
 
-1. `guard` — scripted, alive, on-map, flag on, and some NPC is in readable sight and not yet in `spoken_npcs` on the knowledge base.
-2. `act` — `Say` hello to the nearest such NPC (`intents.say_to`).
-3. After the server applies the say, the runner records the NPC in the knowledge base; the next window greets someone else or falls through to Explore.
+1. `guard` — scripted, alive, and some other character is in readable sight and not greeted yet.
+2. `act` — `Say` hello to the nearest one, addressed by `character_id`, and remember its id.
+3. The next window greets the next player, or falls through to Explore.
 
-To copy the pattern for your own state, duplicate the file, rename the class, adjust `guard`/`act`, register in `STATES`, and add a test beside `python/tests/test_example_greet.py`.
+Things the example does on purpose, worth keeping in your own states:
 
-When you outgrow a flag, switch to a `goals` shorthand (like **Gather**'s `gather_gems:20`) or a planner op once you hook into the plan stack (A34).
+- **Its own memory.** The greeted set lives on the state, keyed by your character's id because one `STATES` tuple serves every character the process runs. It needs no knowledge base, and it marks a player when the `Say` is sent, so a refused hello is not retried: at most one per player per run. (Investigate instead records NPCs in the knowledge base after an applied `Say`, which persists across runs.)
+- **Pacing and budget.** It returns one `Say` per decision window. The runner sends it through the speech pacer and inside the window's `POST tick`, so it costs no extra call.
+- **Priority.** Placed above Explore, it waits for every survival state and for Investigate. A player standing next to a hostile NPC is greeted only after the fight.
+
+Its test, `python/tests/test_example_greet.py`, runs in `make test`. It checks that the shipped `STATES` leaves the example out, then patches `STATES` with the example inserted above Explore and drives the real dispatcher. Copy that pattern: duplicate the module, rename the class, change `guard` and `act`, add your line to `STATES`, and add a test beside it.
+
+When your state needs settings, read them from the character file (`ctx.policy`) or directives `goals` (like **Gather**'s `gather_gems:20`), or hook into the plan stack (A34).
 
 ## What to read next
 

@@ -69,6 +69,12 @@ def _plan_choice(w: WorldModel, ctx: PlayContext, op: GoalOp) -> BreakChoice | N
     return BreakChoice(pos, cap, supply, break_step_cost(ctx.knowledge, supply.code))
 
 
+def odd_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
+    """The odd block Break would take now (A31); reads memory only."""
+    m = ctx.memory
+    return pick_odd_break(w, ctx.knowledge, ctx.policy, m, params=ctx.params, stick_to=m.break_odd)
+
+
 def break_outcome(
     w: WorldModel,
     m: Memory,
@@ -77,8 +83,9 @@ def break_outcome(
     never_attack: list[str],
     ctx: PlayContext,
     state: str = "Break",
-    curious: bool = True,
+    odd: bool = False,
 ) -> StateOutcome:
+    """One Break round: the plan op or stuck step 2, or with ``odd`` an odd block (A31)."""
     _, plan_avoid, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)
     reflex = reflex_outcome(
         w, ctx.policy, never_attack=never_attack, state=state, knowledge=ctx.knowledge
@@ -88,29 +95,24 @@ def break_outcome(
             m.path, m.goal = [], ""
         return reflex
 
-    op = break_op(plan)
-    odd = False
-    if op is not None:
-        choice = _plan_choice(w, ctx, op)
-    elif (att := nav_stuck.active(m, w)) is not None and att.level == nav_stuck.BREAK:
-        choice = _stuck_choice(w, ctx)
-    elif not curious:
-        choice = None
+    if odd:
+        choice = odd_choice(w, ctx)
+        m.break_odd = (w.map_id, choice.pos) if choice is not None and w.map_id is not None else None
+        if choice is None:
+            return StateOutcome(None, "nothing to break", state=state)
     else:
-        odd = True
-        choice = pick_odd_break(
-            w,
-            ctx.knowledge,
-            ctx.policy,
-            m,
-            params=ctx.params,
-            stick_to=m.break_odd,
-        )
-    if choice is None:
-        att = nav_stuck.active(m, w)
-        if att is not None and att.level == nav_stuck.BREAK:
-            nav_stuck.escalate(m, w, att, "no_break")
-        return StateOutcome(None, "nothing to break", state=state)
+        op = break_op(plan)
+        if op is not None:
+            choice = _plan_choice(w, ctx, op)
+        elif (att := nav_stuck.active(m, w)) is not None and att.level == nav_stuck.BREAK:
+            choice = _stuck_choice(w, ctx)
+        else:
+            choice = None
+        if choice is None:
+            att = nav_stuck.active(m, w)
+            if att is not None and att.level == nav_stuck.BREAK:
+                nav_stuck.escalate(m, w, att, "no_break")
+            return StateOutcome(None, "nothing to break", state=state)
 
     reach = use_reach(ctx.knowledge, choice.supply.code)
     intents: list[dict] = []
@@ -139,7 +141,7 @@ def break_outcome(
     path = cost_path(w, choice.pos, params, nav=nav_search(m, w, GOAL, choice.pos))
     step = next_step(w, plan_avoid, path)
     if step is None:
-        att = nav_stuck.active(m, w)
+        att = None if odd else nav_stuck.active(m, w)
         if att is not None and att.level == nav_stuck.BREAK:
             stuck_reason = nav_stuck.stuck_reason(att, w.tick)
             if stuck_reason:
@@ -156,7 +158,7 @@ class BreakState(State):
     the weapon that was swapped out for the break. Odd blocks are OddBreakState's."""
 
     name = "Break"
-    curious = False
+    odd = False
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
@@ -168,8 +170,9 @@ class BreakState(State):
             return True
         m = ctx.memory
         # A break opened its block and the attempt went back to walking: the
-        # weapon armed before it is still to be restored.
-        return m.break_rearm is not None and m.break_pending is None
+        # weapon armed before it is still to be restored. Not while OddBreak
+        # still has a block to walk to, or the two would swap supplies every tick.
+        return m.break_rearm is not None and m.break_pending is None and odd_choice(world, ctx) is None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
@@ -182,7 +185,7 @@ class BreakState(State):
             never_attack=ctx.never_attack,
             ctx=ctx,
             state=self.name,
-            curious=self.curious,
+            odd=self.odd,
         )
         if out.intents or out.reason != "nothing to break":
             return out
@@ -196,19 +199,15 @@ class BreakState(State):
 
 
 class OddBreakState(BreakState):
-    """Break on an odd block (A31), below Solve, Travel, Boss and Level so curiosity never outranks the goal."""
+    """Break on an odd block (A31), below Solve, Travel, Boss and Level so curiosity never outranks the goal.
 
-    curious = True
+    Its guard is the odd pick alone and writes nothing; ``act`` records the target.
+    """
+
+    name = "OddBreak"
+    odd = True
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
-        if super().guard(world, ctx):
-            return True
-        m = ctx.memory
-        return pick_odd_break(
-            world,
-            ctx.knowledge,
-            ctx.policy,
-            m,
-            params=ctx.params,
-            stick_to=m.break_odd,
-        ) is not None
+        if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
+            return False
+        return odd_choice(world, ctx) is not None

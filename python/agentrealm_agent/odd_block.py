@@ -18,6 +18,7 @@ from .break_memory import (
     attempt_failed,
     attempt_open,
     BreakChoice,
+    BREAK_BASE_COST,
     break_step_cost,
     held_capabilities,
     pick_supply_for_capability,
@@ -41,18 +42,24 @@ class OddNomination:
     clue_boost: float
 
 
-def _map_tiles(w: WorldModel, kb: KnowledgeBase | None, map_id: int) -> dict[Pos, str]:
+def _window_tiles(
+    w: WorldModel, kb: KnowledgeBase | None, map_id: int, center: Pos, radius: int
+) -> dict[Pos, str]:
+    """Known tiles within ``radius`` of ``center``: the live view first, then knowledge-base terrain.
+
+    Bounded by the window, not the map, so a well-explored map costs no more than a fresh one.
+    """
     view = w.maps.get(map_id)
-    tiles = dict(view.tiles if view is not None else w.view.tiles)
-    if kb is not None:
+    live = view.tiles if view is not None else w.view.tiles
+    cx, cy = center
+    cells = [(x, y) for x in range(cx - radius, cx + radius + 1) for y in range(cy - radius, cy + radius + 1)]
+    tiles = {p: live[p] for p in cells if p in live}
+    if kb is not None and len(tiles) < len(cells):
         with kb.lock:
             raw = (kb.maps.get(str(map_id)) or {}).get("terrain") or {}
-        for key, block in raw.items():
-            try:
-                x, y = (int(p) for p in key.split(",", 1))
-            except ValueError:
-                continue
-            tiles.setdefault((x, y), block)
+            for x, y in cells:
+                if (x, y) not in tiles and (block := raw.get(f"{x},{y}")) is not None:
+                    tiles[(x, y)] = block
     return tiles
 
 
@@ -77,10 +84,10 @@ def is_odd_block(tiles: dict[Pos, str], pos: Pos) -> bool:
         return False
     if block in DOORS:
         return False
-    same = sum(1 for p, b in tiles.items() if b == block and chebyshev(p, pos) <= RADIUS)
+    neighbours = _neighbourhood(tiles, pos)
+    same = 1 + sum(1 for _, b in neighbours if b == block)
     if same > RARE_MAX:
         return False
-    neighbours = _neighbourhood(tiles, pos)
     if len(neighbours) < 8:
         return False
     counts: dict[str, int] = {}
@@ -101,21 +108,21 @@ def _clue_on_map(clue: dict, map_id: int) -> bool:
         return False
 
 
-def _clue_boost(kb: KnowledgeBase | None, block: str, map_id: int) -> float:
-    """One per clue on ``map_id`` that names ``block``; clues on other maps do not count."""
-    if kb is None or not block:
-        return 0.0
-    needle = block.lower()
-    boost = 0.0
+def _clues_on_map(kb: KnowledgeBase | None, map_id: int) -> list[str]:
+    """Lower-cased text of the clues on ``map_id``; clues on other maps do not count."""
+    if kb is None:
+        return []
     with kb.lock:
         clues = list(kb.clues)
-    for clue in clues:
-        if not _clue_on_map(clue, map_id):
-            continue
-        text = (clue.get("text") or "").lower()
-        if needle in text:
-            boost += 1.0
-    return boost
+    return [(c.get("text") or "").lower() for c in clues if _clue_on_map(c, map_id)]
+
+
+def _clue_boost(clue_texts: list[str], block: str) -> float:
+    """One per clue that names ``block``."""
+    if not block:
+        return 0.0
+    needle = block.lower()
+    return float(sum(1 for text in clue_texts if needle in text))
 
 
 def odd_score(tiles: dict[Pos, str], pos: Pos, clue_boost: float) -> float:
@@ -144,56 +151,52 @@ def _tried(kb: KnowledgeBase | None, map_id: int, pos: Pos) -> bool:
 def list_odd_blocks(
     w: WorldModel,
     kb: KnowledgeBase | None,
-    policy,
     m: Memory | None = None,
 ) -> list[OddNomination]:
-    """Odd blocks in sight, never opened, untried ones first, then by score over distance and danger."""
+    """Odd blocks in sight that no break has opened and that are not given up on."""
     if w.map_id is None or w.pos is None:
         return []
-    here = w.pos
-    tiles = _map_tiles(w, kb, w.map_id)
-    sr = sight_range(w, w.map_id, here)
+    here, map_id = w.pos, w.map_id
+    sr = sight_range(w, map_id, here)
+    tiles = _window_tiles(w, kb, map_id, here, sr + RADIUS)
+    clue_texts = _clues_on_map(kb, map_id)
     out: list[OddNomination] = []
     for p, block in tiles.items():
-        if block not in BREAKABLE:
+        if block not in BREAKABLE or chebyshev(here, p) > sr:
             continue
-        if chebyshev(here, p) > sr:
+        if _gave_up(m, map_id, p) or already_opened(kb, map_id, p):
             continue
-        if _gave_up(m, w.map_id, p) or already_opened(kb, w.map_id, p):
-            continue
-        boost = _clue_boost(kb, block, w.map_id)
+        boost = _clue_boost(clue_texts, block)
         score = odd_score(tiles, p, boost)
-        if score <= 0:
-            continue
-        out.append(OddNomination(p, score, boost))
-    out.sort(
-        key=lambda n: (
-            _tried(kb, w.map_id, n.pos),
-            -(n.score / (chebyshev(here, n.pos) + 1 + _danger_near(w, policy, n.pos))),
-            n.pos,
-        )
-    )
+        if score > 0:
+            out.append(OddNomination(p, score, boost))
     return out
 
 
 def _choice_at_odd(
     w: WorldModel,
     kb: KnowledgeBase | None,
-    pos: Pos,
     nomination: OddNomination,
 ) -> BreakChoice | None:
     if w.map_id is None:
         return None
     # Consumable tools only when a clue on this map names the block.
     allow_tools = nomination.clue_boost > 0
-    for cap in untried_capabilities(kb, w.map_id, pos, held_capabilities(w, kb)):
+    for cap in untried_capabilities(kb, w.map_id, nomination.pos, held_capabilities(w, kb)):
         supply = pick_supply_for_capability(w, cap, kb)
         if supply is None:
             continue
         if supply.code not in WEAPONS and not allow_tools:
             continue
-        return BreakChoice(pos, cap, supply, break_step_cost(kb, supply.code))
+        return BreakChoice(nomination.pos, cap, supply, break_step_cost(kb, supply.code))
     return None
+
+
+def _consumable_cost(choice: BreakChoice) -> int:
+    """What a break uses up: nothing for a weapon, one plus the gem price for a tool."""
+    if choice.supply.code in WEAPONS:
+        return 0
+    return 1 + choice.cost - BREAK_BASE_COST
 
 
 def _stick_choice(
@@ -208,15 +211,15 @@ def _stick_choice(
         return None
     if chebyshev(w.pos, pos) > sight_range(w, map_id, w.pos):
         return None
-    tiles = _map_tiles(w, kb, map_id)
+    tiles = _window_tiles(w, kb, map_id, pos, RADIUS)
     block = tiles.get(pos)
     if block is None:
         return None
-    boost = _clue_boost(kb, block, map_id)
+    boost = _clue_boost(_clues_on_map(kb, map_id), block)
     score = odd_score(tiles, pos, boost)
     if score <= 0:
         return None
-    return _choice_at_odd(w, kb, pos, OddNomination(pos, score, boost))
+    return _choice_at_odd(w, kb, OddNomination(pos, score, boost))
 
 
 def _gave_up(m: Memory | None, map_id: int, pos: Pos) -> bool:
@@ -240,7 +243,12 @@ def pick_odd_break(
     params: dict[str, float | int],
     stick_to: tuple[int, Pos] | None = None,
 ) -> BreakChoice | None:
-    """Best odd block we can still try, when curiosity allows (A31)."""
+    """Best odd block we can still try, when curiosity allows (A31). Reads memory, never writes it.
+
+    The sticky target wins while it holds. Otherwise blocks with no failed pair
+    come first, then value over distance, danger and what the break uses up
+    (PLAYABLE_AGENT_PLAN Curiosity).
+    """
     if w.pos is None or w.map_id is None or investigate_blocked(w, policy) or w.in_boss_fight():
         return None
     if not curiosity_room(params, m, w.tick):
@@ -249,12 +257,14 @@ def pick_odd_break(
         choice = _stick_choice(w, kb, m, stick_to)
         if choice is not None:
             return choice
-        m.break_odd = None
-    for nom in list_odd_blocks(w, kb, policy, m):
-        choice = _choice_at_odd(w, kb, nom.pos, nom)
-        if choice is not None:
-            m.break_odd = (w.map_id, nom.pos)
-            return choice
-    m.break_odd = None
-    return None
-
+    here, map_id = w.pos, w.map_id
+    ranked: list[tuple[tuple, BreakChoice]] = []
+    for nom in list_odd_blocks(w, kb, m):
+        choice = _choice_at_odd(w, kb, nom)
+        if choice is None:
+            continue
+        denom = chebyshev(here, nom.pos) + 1 + _danger_near(w, policy, nom.pos) + _consumable_cost(choice)
+        ranked.append(((_tried(kb, map_id, nom.pos), -nom.score / denom, nom.pos), choice))
+    if not ranked:
+        return None
+    return min(ranked, key=lambda t: t[0])[1]

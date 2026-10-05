@@ -38,7 +38,7 @@ from .travel import TravelState
 # (A11), Equip (A19), Loot (A20) and Shop (A21) are priority 3, in the plan's table order; Investigate
 # (A30) and Solve (A39) are priority 4, above Gather (A22), Travel (A27), Boss
 # (A38) and Level (A37) at 5. M8 economy states slot above Explore. Break for
-# a plan op or stuck step 2 (A28) sits with Investigate; Break on an odd block
+# a plan op or stuck step 2 (A28) sits with Investigate; OddBreak, Break on an odd block
 # (A31) sits below Level so curiosity never preempts Solve, Travel, Boss or Level.
 STATES: tuple[State, ...] = (
     SyncState(),

@@ -21,11 +21,11 @@ from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext, StateOutcome
 from agentrealm_agent.states.boss import BossState
-from agentrealm_agent.states.intents import use_block
+from agentrealm_agent.states.intents import arm, use_block
 from agentrealm_agent.states.break_state import BreakState, OddBreakState, break_outcome
 from agentrealm_agent.states.level import LevelState
 from agentrealm_agent.states.solve import SolveState
-from agentrealm_agent.world import WorldModel
+from agentrealm_agent.world import WorldModel, chebyshev
 
 dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")
 
@@ -124,8 +124,8 @@ class PickOddBreakTest(unittest.TestCase):
         m = Memory()
         m.break_odd = (2, (4, 4))
         choice = pick_odd_break(w, None, Policy(kind="scripted"), m, params={"curiosity": 0.2}, stick_to=m.break_odd)
-        self.assertIsNotNone(choice)
-        self.assertEqual(m.break_odd, (1, (4, 4)))
+        self.assertIsNotNone(choice, "the stale map-2 target is ignored and the map-1 bush picked afresh")
+        self.assertEqual(choice.pos, (4, 4))
 
     def test_unreachable_target_is_dropped_after_the_refusal_cap(self):
         rows = ["........."] * 9
@@ -134,12 +134,11 @@ class PickOddBreakTest(unittest.TestCase):
         m = Memory()
         params = {"curiosity": 0.2}
         for _ in range(MAX_REJECTIONS):
+            m.break_odd = (1, (4, 4))
             self.assertIsNotNone(pick_odd_break(w, None, Policy(kind="scripted"), m, params=params, stick_to=m.break_odd))
-            self.assertEqual(m.break_odd, (1, (4, 4)))
             note_odd_unreachable(m, 1, (4, 4))
             self.assertIsNone(m.break_odd)
         self.assertIsNone(pick_odd_break(w, None, Policy(kind="scripted"), m, params=params, stick_to=(1, (4, 4))))
-        self.assertIsNone(m.break_odd)
 
     def test_skips_block_with_every_capability_failed(self):
         rows = ["........."] * 9
@@ -166,7 +165,6 @@ class PickOddBreakTest(unittest.TestCase):
             pick_odd_break(w, kb, Policy(kind="scripted"), m, params=params, stick_to=(1, (4, 4))),
             "a sticky target that was opened is not swung at again",
         )
-        self.assertIsNone(m.break_odd)
 
     def test_untried_block_is_preferred_over_a_partly_failed_one(self):
         rows = ["........."] * 15
@@ -178,6 +176,48 @@ class PickOddBreakTest(unittest.TestCase):
         choice = pick_odd_break(w, kb, Policy(kind="scripted"), m, params={"curiosity": 0.2})
         self.assertIsNotNone(choice)
         self.assertEqual(choice.pos, (10, 4), "the nearer bush already failed once")
+
+    def test_pick_does_not_write_memory(self):
+        rows = ["........."] * 9
+        rows[4] = "....b...."
+        w = self._world(rows, at=(4, 4))
+        m = Memory()
+        m.break_odd = (2, (1, 1))
+        self.assertIsNotNone(pick_odd_break(w, None, Policy(kind="scripted"), m, params={"curiosity": 0.2}, stick_to=m.break_odd))
+        self.assertEqual(m.break_odd, (2, (1, 1)))
+        self.assertEqual(m.break_odd_refusals, {})
+
+    def test_consumable_cost_ranks_a_weapon_break_first(self):
+        # Two bushes a clue names, each with one failed pair: the nearer one is
+        # left only to matches, the farther one to the knife. A priced tool
+        # puts the nearer bush second.
+        rows = ["..............."] * 9
+        rows[4] = "......b....b..."
+        w = self._world(rows, at=(5, 5))
+        w.held_supplies = [InventorySupply(1, "pocket_knife"), InventorySupply(2, "matches")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.clues.append({"text": "the bush hides something", "map_id": 1})
+        record_attempt(kb, map_id=1, pos=(6, 4), capability="cut", result="applied_no_effect")
+        record_attempt(kb, map_id=1, pos=(11, 4), capability="burn", result="applied_no_effect")
+        kb.items["matches"] = {"gem_price": 20}
+        choice = pick_odd_break(w, kb, Policy(kind="scripted"), Memory(), params={"curiosity": 0.2})
+        self.assertEqual((choice.pos, choice.supply.code), ((11, 4), "pocket_knife"))
+        kb.items["matches"] = {"gem_price": 0}
+        choice = pick_odd_break(w, kb, Policy(kind="scripted"), Memory(), params={"curiosity": 0.2})
+        self.assertEqual((choice.pos, choice.supply.code), ((6, 4), "matches"), "a free tool loses only to distance")
+
+    def test_neighbourhood_reads_remembered_terrain_outside_the_live_view(self):
+        # Live view holds only the bush; the knowledge base remembers the grass
+        # round it. The 7x7 window still sees the motif.
+        w = WorldModel(character_id=1, map_id=1, pos=(4, 4), perception=8)
+        w.view.tiles = {(4, 4): "bush"}
+        w.terrain_center, w.terrain_map = (4, 4), 1
+        w.held_supplies = [InventorySupply(1, "bronze_sword")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.maps["1"] = {"terrain": {f"{x},{y}": "grass" for x in range(9) for y in range(9) if (x, y) != (4, 4)}}
+        choice = pick_odd_break(w, kb, Policy(kind="scripted"), Memory(), params={"curiosity": 0.2})
+        self.assertIsNotNone(choice)
+        self.assertEqual(choice.pos, (4, 4))
 
 
 def _odd_world() -> WorldModel:
@@ -197,9 +237,40 @@ class BreakOddDispatchTest(unittest.TestCase):
         ctx = PlayContext(Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0))
         self.assertFalse(BreakState().guard(w, ctx), "the priority-4 Break never takes odd blocks")
         self.assertTrue(OddBreakState().guard(w, ctx))
+        self.assertIsNone(ctx.memory.break_odd, "the guard writes nothing")
         out = dispatch(w, ctx)
-        self.assertEqual(out.state, "Break")
+        self.assertEqual(out.state, "OddBreak")
         self.assertEqual(out.intents, [use_block((4, 4))])
+        self.assertEqual(ctx.memory.break_odd, (1, (4, 4)))
+        self.assertEqual(ctx.memory.break_pending, (1, (4, 4), "cut"))
+
+    def test_walk_with_a_swapped_supply_reaches_the_break(self):
+        # Mallet armed, knife held, lone bush six tiles off. OddBreak arms the
+        # knife and walks; priority-4 Break must not swap the mallet back.
+        rows = ["............."] * 9
+        rows[4] = "..........b.."
+        w = WorldModel(character_id=1, map_id=1, pos=(4, 4), perception=8)
+        w.view.tiles = _tiles(rows)
+        w.terrain_center, w.terrain_map = (4, 4), 1
+        w.held_supplies = [InventorySupply(1, "bronze_mallet"), InventorySupply(2, "pocket_knife")]
+        w.armed_code = "bronze_mallet"
+        ctx = PlayContext(Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0))
+        out = dispatch(w, ctx)
+        self.assertEqual(out.state, "OddBreak")
+        self.assertEqual(out.intents[0], arm(2))
+        self.assertEqual(ctx.memory.break_rearm, "bronze_mallet")
+        w.armed_code = "pocket_knife"
+        for _ in range(10):
+            if chebyshev(w.pos, (10, 4)) <= 1:
+                break
+            out = dispatch(w, ctx)
+            self.assertEqual(out.state, "OddBreak", out.reason)
+            self.assertNotIn("Arm", [i.get("verb") for i in out.intents])
+            w.pos = (w.pos[0] + 1, 4)
+            w.terrain_center = w.pos
+        out = dispatch(w, ctx)
+        self.assertEqual(out.state, "OddBreak")
+        self.assertEqual(out.intents, [use_block((10, 4))])
 
     def test_odd_break_sits_below_solve_boss_and_level(self):
         names = [type(s).__name__ for s in dispatch_module.STATES]
@@ -234,7 +305,7 @@ class BreakOddDispatchTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(1, "bronze_sword")]
         w.armed_code = "bronze_sword"
         ctx = PlayContext(Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0))
-        out = break_outcome(w, ctx.memory, None, never_attack=[], ctx=ctx)
+        out = break_outcome(w, ctx.memory, None, never_attack=[], ctx=ctx, odd=True)
         self.assertIsNone(out.intents)
         self.assertIsNone(ctx.memory.break_odd)
         self.assertEqual(ctx.memory.break_odd_refusals, {(1, (4, 1)): 1})

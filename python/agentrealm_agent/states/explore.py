@@ -19,7 +19,14 @@ from ..memory import Memory
 from ..plan import Plan
 from ..navigation.rejection import navigation_avoid_costly
 from ..navigation import stuck as nav_stuck
-from ..pathing import attempt_plan, escalation_step, next_step, path_owned_by_plan, replan
+from ..pathing import (
+    attempt_plan,
+    escalation_step,
+    goto_navigation_pending,
+    next_step,
+    path_owned_by_plan,
+    replan,
+)
 from ..world import Pos, WorldModel
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position
@@ -71,13 +78,21 @@ def scripted_outcome(
     if reflex is not None:
         return reflex
 
+    # While the policy ``goto`` is still owed (A58), the plan's moves wait:
+    # no ``wait`` hold here, and ``replan`` skips its ops. The goto path is
+    # kept like a plan-owned one, so stuck detection (A15) still escalates
+    # and gives up on it.
+    walking_goto = goto_navigation_pending(w, m, policy)
     if plan is not None:
         plan.advance(w, m)
         op = plan.current()
-        if op is not None and op["op"] == "wait":
+        if op is not None and op["op"] == "wait" and not walking_goto:
             return StateOutcome(None, "plan wait", state=state)
 
-    owned = path_owned_by_plan(plan, m, policy.goals)
+    if walking_goto:
+        owned = m.goal == "goto"
+    else:
+        owned = path_owned_by_plan(plan, m, policy.goals)
     target_plan = attempt_plan(m, w, policy, plan_avoid, plan_costly, knowledge)
     step = _escalated_step(w, m, plan_avoid, target_plan, knowledge) if owned else None
     if step is None and owned:

@@ -41,7 +41,7 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 
-  "A58": {"state": "open"},
+  "A58": {"state": "partial", "remaining": "First live hour reached navigation with 0 deaths but regen was never measured (never hurt in a safe zone). The second hour failed at start because the reused character was asleep; the smoke script now wakes it (see docs/observations/A58_live_play.md). Re-run make smoke-m7-olympuff on OlympuffM6Walk5d4e, or on OlympuffSurvivor once a character slot is free; a PASS still needs a hurt window in a safe zone."},
 
   "A59": {"state": "open"},
 

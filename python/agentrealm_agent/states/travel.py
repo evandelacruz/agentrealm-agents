@@ -7,7 +7,7 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import route_first_leg
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, guided_step, nav_search, next_step
+from ..pathing import goto_navigation_pending, grid_params, guided_step, nav_search, next_step
 from ..travel.ops import current_travel_op, set_travel_index
 from ..travel.resolve import ResolvedDestination, at_destination, resolve_travel
 from ..world import Pos, WorldModel
@@ -46,6 +46,8 @@ class TravelState(State):
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
+            return False
+        if goto_navigation_pending(world, ctx.memory, ctx.policy):
             return False
         return _arrived(world, ctx) or next_travel_target(world, ctx) is not None
 

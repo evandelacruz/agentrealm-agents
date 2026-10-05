@@ -49,6 +49,32 @@ def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
     return [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
 
 
+def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
+    """True while the agent still owes the ``goto`` in ``policy.goals`` (M7 smoke, A58).
+
+    While it is, the walk comes first: Loot, Shop, Investigate, Travel and
+    OddBreak stay out, Break runs only for the goto's own stuck escalation,
+    and the plan's moves and ``wait`` hold are skipped (``replan``, Explore).
+    Heal is not deferred, so a hurt character still walks to safety.
+
+    The deferral lifts while the agent stands on the target, or while stuck
+    detection is backed off from it after a give-up; it comes back when the
+    agent steps off the target or the backoff ends, because ``goto`` stays
+    first in the goals.
+    """
+    if policy.goto is None or "goto" not in policy.goals:
+        return False
+    dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
+    if w.map_id != dest_map or w.pos is None:
+        return False
+    target = tuple(policy.goto)
+    if w.pos == target:
+        return False
+    if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
+        return False
+    return True
+
+
 def flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:
     here = w.pos
     options = w.open_neighbours(here, blocked) + [here]
@@ -264,7 +290,11 @@ def replan(
     for the caller's stuck detection (A15).
     """
     m.path, m.goal, m.goal_op = [], "", None
-    if plan is not None and plan_step(plan, w, m, policy, blocked, costly, knowledge):
+    if (
+        plan is not None
+        and not goto_navigation_pending(w, m, policy)
+        and plan_step(plan, w, m, policy, blocked, costly, knowledge)
+    ):
         return None
     missed: tuple[str, Leg, bool] | None = None
     for goal in policy.goals:

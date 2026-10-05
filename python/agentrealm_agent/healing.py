@@ -117,18 +117,27 @@ def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
 
     The sample restarts when health falls or the last window seen is too far
     back (the character left the zone, or another state ran meanwhile).
+
+    Only a hurt character can show regen: health back counts as "yes" even
+    when it reaches full, but a window at full health (or with ``max_health``
+    unknown) starts no sample and gives no verdict. A "no" is only ever a hurt
+    window with no health back.
     """
+    s = m.heal_regen_sample
     if w.health is None:
         m.heal_regen_sample = None
         return None
-    s = m.heal_regen_sample
-    if s is None or w.health < s[1] or w.tick - s[2] > REGEN_SAMPLE_GAP_TICKS:
+    fresh = s is not None and w.health >= s[1] and w.tick - s[2] <= REGEN_SAMPLE_GAP_TICKS
+    if fresh and w.health > s[1]:
+        m.heal_regen_sample = None
+        return "yes"
+    if not hurt(w):
+        m.heal_regen_sample = None
+        return None
+    if not fresh:
         m.heal_regen_sample = (w.tick, w.health, w.tick)
         return None
     start_tick, start_health, _ = s
-    if w.health > start_health:
-        m.heal_regen_sample = None
-        return "yes"
     if w.tick - start_tick >= REGEN_MEASURE_TICKS:
         m.heal_regen_sample = None
         return "no"

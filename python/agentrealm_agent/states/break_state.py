@@ -1,4 +1,9 @@
-"""Break: open blocks from the plan or stuck escalation step 2 (A28)."""
+"""Break: arm a capability and ``Use`` a nominated block (A28).
+
+Module ``break_state`` (``break`` is reserved). Priority 4. Runs for a
+``break_block`` plan op, stuck navigation at escalation step 2, or to re-arm
+after a successful break.
+"""
 
 from __future__ import annotations
 
@@ -126,6 +131,9 @@ def break_outcome(
 
 
 class BreakState(State):
+    """Priority 4. Opens breakables from the plan or stuck escalation; re-arms
+    the weapon that was swapped out for the break."""
+
     name = "Break"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

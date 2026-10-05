@@ -1,4 +1,9 @@
-"""Pick the state to run this round trip and run its act (A5)."""
+"""Pick the state to run this round trip and run its act (A5).
+
+``STATES`` is the extension point: insert your state class here in priority
+order (see ``docs/MAKE_IT_YOURS.md``). Per-state behavior is documented on
+each class in this package and in ``docs/CHARACTER_AND_STATES.md``.
+"""
 
 from __future__ import annotations
 

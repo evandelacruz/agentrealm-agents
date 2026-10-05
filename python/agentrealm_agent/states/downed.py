@@ -1,4 +1,8 @@
-"""Downed: dead until the world respawns us (Recover is A11)."""
+"""Downed: wait while dead (priority 0).
+
+Runs when ``world.alive`` is false. **Recover** handles the death chest after
+respawn (A11).
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,8 @@ from .base import PlayContext, State, StateOutcome
 
 
 class DownedState(State):
+    """Priority 0. Holds the round with ``wait=True`` until the world respawns us."""
+
     name = "Downed"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

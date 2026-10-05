@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from ..equip import ARMED, EquipUpgrade, best_equip_upgrade
+from ..knowledge_base import knowledge_items
 from ..navigation import stuck as nav_stuck
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
 from .intents import arm, remove_slot, wear
 from .break_state import break_op
-from .pickup import knowledge_items
 from .solve import solve_op
 
 

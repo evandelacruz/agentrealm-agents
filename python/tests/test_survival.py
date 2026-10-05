@@ -226,10 +226,7 @@ class FleeTest(unittest.TestCase):
         """Only the cell behind is open away from the hostile: Flee takes it."""
         w = world(["#####", ".....", "#####"], at=(2, 1))
         w.entities = [Entity("npc", 5, (0, 1))]
-        m = Memory()
-        m.nav_stuck.cells_map = w.map_id
-        m.nav_stuck.recent_cells = [(3, 1), (2, 1)]
-        out = dispatch(w, ctx(m=m, hostile_range=3))
+        out = dispatch(w, ctx(hostile_range=3))
         self.assertEqual(step(out), (3, 1))
 
     def test_ties_break_toward_a_known_safe_tile(self):

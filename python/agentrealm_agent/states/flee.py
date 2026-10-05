@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from ..pathing import flee_step
+import dataclasses
+
+from ..memory import Memory
+from ..navigation import cost_path, oscillation
+from ..pathing import flee_run, flee_step, grid_params, step_open
 from ..survival import hostiles_in_range, on_safe_tile, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
@@ -13,12 +17,45 @@ from .fight import can_engage, fight_target
 from .intents import set_position
 
 
-def _flee_avoid(m, w: WorldModel) -> Pos | None:
-    """The cell the agent just left, when it is still standing on the last one."""
-    cells = m.nav_stuck.recent_cells
-    if w.pos is None or len(cells) < 2 or cells[-1] != w.pos:
+def _committed_step(w: WorldModel, m: Memory, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:
+    """The next cell of ``m.flee_path``, or None when the escape has arrived or is blocked.
+
+    Drops the cells already walked. Blocked means the next cell is shut or
+    out of reach, or the hostiles have moved so that it now lands nearer the
+    nearest of them than ``flee_step``'s best step would.
+    """
+    path = m.flee_path
+    if w.pos in path:
+        del path[: path.index(w.pos) + 1]
+    if not path or not step_open(w, blocked, path[0]):
         return None
-    return cells[-2]
+    nxt, best = path[0], flee_step(w, hostiles, blocked) or w.pos
+    if min(chebyshev(nxt, h.pos) for h in hostiles) < min(chebyshev(best, h.pos) for h in hostiles):
+        return None
+    return nxt
+
+
+def flee_escape(
+    w: WorldModel, m: Memory, ctx: PlayContext, hostiles: list[Entity], blocked: set[Pos], safes: set[Pos]
+) -> list[Pos]:
+    """A multi-step escape, or [] when standing still is best (A9, A58).
+
+    The first step is ``flee_step``'s, so ties still break toward the nearest
+    known safe tile. The rest is a route from there to that safe tile when
+    one is known, else ``flee_run`` away from the hostiles.
+    """
+    first = flee_step(w, hostiles, blocked, safes)
+    if first is None:
+        return []
+    goal = min(safes, key=lambda s: (chebyshev(s, first), s)) if safes else None
+    if goal is None:
+        return flee_run(w, hostiles, blocked, first)
+    if goal == first:
+        return [first]
+    _, plan_avoid, plan_costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
+    params = grid_params(ctx.policy, plan_avoid | blocked, plan_costly)
+    rest = cost_path(dataclasses.replace(w, pos=first), goal, params) or []
+    return [first] + rest
 
 
 def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
@@ -49,7 +86,13 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
 class FleeState(State):
     """Priority 2, after **Fight**. Opens distance per ``policy.on_hostile`` when
     hostiles are in range and we are not on a safe tile; stands down during a
-    boss fight (A38)."""
+    boss fight (A38).
+
+    Flee commits to a multi-step escape (``flee_escape``) and walks it until
+    it arrives, is blocked, or Flee stops running, rather than re-picking the
+    greedy best step every decision: against two moving hostiles that
+    re-pick sends it back and forth between two cells (A58). Cornered, it
+    stands still."""
 
     name = "Flee"
 
@@ -67,8 +110,17 @@ class FleeState(State):
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, w.pos), e.id))
         blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
         safes = safe_tiles(w, w.map_id) if w.map_id is not None else set()
-        avoid = _flee_avoid(m, w)
-        away = flee_step(w, hostiles, blocked, avoid=avoid, safes=safes or None)
+        # Start over when Flee did not run last decision (the threat was
+        # gone in between) or the oscillation guard caught Flee/Retreat
+        # pacing (A15); a caught escape keeps off the paced cells.
+        paced = oscillation.take_escape(m, w)
+        if m.state != self.name or paced:
+            m.flee_path = []
+        away = _committed_step(w, m, hostiles, blocked | m.flee_avoid)
+        if away is None:
+            m.flee_avoid = paced
+            m.flee_path = flee_escape(w, m, ctx, hostiles, blocked | paced, safes)
+            away = m.flee_path[0] if m.flee_path else None
         if away is None:
             return StateOutcome(None, "nowhere to flee", state=self.name, wait=True)
         m.path = []

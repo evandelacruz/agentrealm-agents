@@ -87,6 +87,18 @@ class RetreatTest(unittest.TestCase):
         self.assertEqual(out.state, "Retreat")
         self.assertEqual(step(out), (2, 0))
 
+    def test_routes_around_cells_the_oscillation_guard_caught_it_pacing_on(self):
+        """A15: Retreat-only pacing makes the next Retreat replan around the other cell."""
+        w, m = self.hurt(), Memory()
+        m.state, m.path, m.goal = "Retreat", [(2, 0), (3, 0), (4, 0)], "safe"
+        m.nav_stuck.cells_map = w.map_id
+        m.nav_stuck.recent_cells = [(2, 0), (1, 0), (2, 0), (1, 0), (2, 0)]
+        m.nav_stuck.recent_moves = [("safe", "Retreat")] * 5
+        m.nav_stuck.last_move = ("safe", "Retreat")
+        out = dispatch(w, ctx(m=m, hostile=["npc"]))
+        self.assertEqual(out.state, "Retreat")
+        self.assertEqual(step(out), (2, 1))
+
     def test_threshold_is_retreat_hits_times_the_hit(self):
         # risk 0.5 with lives well above the floor: retreat_hits applies as set.
         params = {"retreat_hits": 2, "risk": 0.5, "lives_floor": 3}
@@ -168,17 +180,47 @@ class FleeTest(unittest.TestCase):
         w.threat.record(("npc", "snotling"), 1)
         self.assertEqual(dispatch(w, ctx()).state, "Flee")
 
-    def test_two_hostiles_does_not_immediately_step_back(self):
-        """Greedy flee ping-pongs between two cells when two hostiles pin it (A58)."""
-        w = world([".....", ".....", ".....", ".....", "....."], at=(2, 2))
-        w.entities = [Entity("npc", 1, (2, 3)), Entity("npc", 2, (3, 2))]
+    def test_two_moving_hostiles_do_not_pin_flee_between_two_cells(self):
+        """A58 runs 4 and 6: Flee paced between two diagonal cells for minutes.
+
+        Two NPCs each step back and forth between two cells. Re-picking the
+        greedy best step every decision answers each move by stepping back to
+        the other cell, forever; the committed escape keeps going until it is
+        out of their range.
+        """
+        w = world(["." * 12] * 14, at=(6, 6))
+        c = ctx(hostile_range=3)
+        moves = [((3, 6), (8, 7)), ((3, 7), (9, 6))]
+        cells = []
+        for t in range(12):
+            w.tick += 1
+            w.entities = [Entity("npc", 1, moves[t % 2][0]), Entity("npc", 2, moves[t % 2][1])]
+            out = dispatch(w, c)
+            if out.state != "Flee":
+                break
+            w.pos = w.terrain_center = step(out)
+            cells.append(w.pos)
+        self.assertEqual(cells[:2], [(7, 5), (6, 6)], "the first steps are flee_step's")
+        self.assertGreater(len(set(cells)), 2, cells)
+        self.assertNotEqual(out.state, "Flee", f"still fleeing after {cells}")
+
+    def test_the_oscillation_guard_forces_an_escape_off_the_paced_cells(self):
+        """A15: Flee-only pacing makes the next Flee keep off the other cell."""
+        here, back = (2, 2), (3, 3)
+        w = world([".....", ".....", ".....", ".....", "....."], at=here)
+        w.entities = [Entity("npc", 5, (0, 2))]
         m = Memory()
-        c = ctx(m=m, on_hostile="flee", hostile=["npc"], hostile_range=3)
-        first = step(dispatch(w, c))
-        w.pos = first
-        m.nav_stuck.recent_cells = [(2, 2), first]
-        second = step(dispatch(w, c))
-        self.assertNotEqual(second, (2, 2), "flee should not bounce straight back")
+        c = ctx(m=m, hostile_range=3)
+        self.assertEqual(step(dispatch(w, c)), back, "flee_step's best step")
+        m.flee_path, m.state = [], "Flee"
+        m.nav_stuck.cells_map = w.map_id
+        m.nav_stuck.recent_cells = [back, here, back, here, back]
+        m.nav_stuck.recent_moves = [("", "Flee")] * 5
+        m.nav_stuck.last_move = ("", "Flee")
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Flee")
+        self.assertEqual(step(out), (3, 2))
+        self.assertTrue(m.nav_stuck.oscillations[-1]["escape"])
 
     def test_ties_break_toward_a_known_safe_tile(self):
         w = world([".....", ".....", "....."], at=(2, 1))

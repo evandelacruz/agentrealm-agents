@@ -100,6 +100,27 @@ def play(competitor: State, decisions: int = 20):
     return w, c, cells
 
 
+class GotoReplanBack(State):
+    """Like Explore in A58 run 5: the goto walk itself, replanned each
+    decision, steps east from A and then back west from B. Named Explore,
+    so the guard files every move as the goto walk's."""
+
+    name = "Explore"
+
+    def guard(self, world, ctx):
+        return world.pos in (A, B) and goto_navigation_pending(world, ctx.memory, ctx.policy)
+
+    def done(self, world, ctx):
+        return not self.guard(world, ctx)
+
+    def act(self, world, ctx):
+        m = ctx.memory
+        nav_stuck.track(m, world, "goto", GOTO)
+        nxt = B if world.pos == A else A
+        m.path, m.goal = [nxt, GOTO], "goto"
+        return StateOutcome([set_position(nxt)], "goto replan", state=self.name)
+
+
 class RetreatPace(State):
     """A survival state pacing on its own: walks its ``safe`` path from A to
     B, then a bare step back from B to A, as a Retreat/Fight pair might."""
@@ -154,6 +175,31 @@ class PacingDispatchTest(unittest.TestCase):
             self.assertEqual(event["states"], ["RetreatPace"])
         self.assertEqual(c.memory.nav_stuck.stuck_signals, [])
         self.assertTrue(goto_navigation_pending(w, c.memory, c.policy), "goto not backed off")
+
+    def test_the_goto_walk_pacing_on_its_own_is_given_up(self):
+        """A58 run 5: the goto walk's own replans stepped it back and forth.
+
+        The guard alone ends it: one give-up, then Explore walks off west and
+        never returns to the two cells while the goto is backed off. No
+        back-step block in the walk is needed for that.
+        """
+        w, c, cells = play(GotoReplanBack(), decisions=14)
+        events = c.memory.nav_stuck.oscillations
+        self.assertEqual([(e["goal"], e["states"]) for e in events], [("goto", ["Explore"])], cells)
+        self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), "goto backed off")
+        after = cells[oscillation.OSCILLATION_STEPS :]
+        self.assertEqual(after[:3], [(1, 0), (0, 0), (0, 0)], cells)
+
+    def test_a_goto_behind_the_agent_takes_the_step_back(self):
+        """One step back toward a goto behind it is a route, not pacing."""
+        w, c = world(at=B), ctx()
+        c.policy = Policy(kind="scripted", goals=["goto", "explore"], goto=(0, 0))
+        c.memory.nav_stuck.cells_map = w.map_id
+        c.memory.nav_stuck.recent_cells = [A, B]
+        c.memory.nav_stuck.recent_moves = [("goto", "Explore")] * 2
+        with mock.patch.object(dispatch_module, "STATES", (ExploreState(),)):
+            out = dispatch_module.dispatch(w, c)
+        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), A)
 
     def test_a_straight_walk_never_fires(self):
         w, c = world(), ctx()
@@ -217,6 +263,19 @@ class DetectorTest(unittest.TestCase):
         self.assertEqual(m.nav_stuck.last_move, ("", "Fight"), "a step off the path is not the walk's")
         oscillation.note_move(m, None, "")
         self.assertEqual(m.nav_stuck.last_move, ("", ""))
+
+    def test_flee_or_retreat_pacing_hands_the_cells_to_the_escape(self):
+        m, w = Memory(), world()
+        fired = self._see(m, w, [A, B, A, B, A, B], move=("", "Flee"))
+        self.assertTrue(fired[5]["escape"])
+        self.assertEqual(oscillation.take_escape(m, w), {A}, "the cell stood on is not escaped")
+        self.assertEqual(oscillation.take_escape(m, w), set(), "read once")
+
+    def test_pacing_with_any_other_state_forces_no_escape(self):
+        m, w = Memory(), world()
+        fired = self._see(m, w, [A, B, A, B, A, B], move=("", "Fight"))
+        self.assertNotIn("escape", fired[5])
+        self.assertEqual(oscillation.take_escape(m, w), set())
 
     def test_a_map_change_starts_over(self):
         m, w = Memory(), world()

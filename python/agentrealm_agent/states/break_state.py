@@ -20,7 +20,6 @@ from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..pathing import goto_navigation_pending, grid_params, nav_search, next_step
-from .flee import should_flee
 from ..plan import GoalOp, Plan
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -190,12 +189,7 @@ class BreakState(State):
         if break_op(ctx.plan) is not None and not walking_goto:
             return True
         att = nav_stuck.active(ctx.memory, world)
-        if (
-            att is not None
-            and att.level == nav_stuck.BREAK
-            and (not walking_goto or att.goal == "goto")
-            and not should_flee(world, ctx)
-        ):
+        if att is not None and att.level == nav_stuck.BREAK and (not walking_goto or att.goal == "goto"):
             return True
         m = ctx.memory
         # A break opened its block and the attempt went back to walking: the

@@ -49,36 +49,6 @@ def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
     return [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
 
 
-def goto_back_avoid(m: Memory, w: WorldModel) -> Pos | None:
-    """Cell the agent just left; skip stepping straight back on the goto walk (A58).
-
-    Only when Explore's own ``goto`` step brought the agent here. Another
-    state's move (Break, Loot, Flee, …) may legitimately need a step back.
-    """
-    stuck = m.nav_stuck
-    cells = stuck.recent_cells
-    if w.pos is None or len(cells) < 2 or cells[-1] != w.pos:
-        return None
-    # Legitimate goto routes backtrack around fog and dead ends; only block
-    # when the last few cells already look like a two-cell loop.
-    if len(cells) >= 4 and len(set(cells[-4:])) > 2:
-        return None
-    moves = stuck.recent_moves
-    if moves and len(moves) >= len(cells) - 1:
-        goal, state = moves[-1]
-        if state not in ("", "Explore") or goal not in ("", "goto"):
-            return None
-    return cells[-2]
-
-
-def nav_blocked_for_walk(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos]) -> set[Pos]:
-    """``blocked`` plus the back-avoid cell while a policy ``goto`` is owed."""
-    avoid = goto_back_avoid(m, w)
-    if avoid is not None and goto_navigation_pending(w, m, policy):
-        return blocked | {avoid}
-    return blocked
-
-
 def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
     """True while the agent still owes the ``goto`` in ``policy.goals`` (M7 smoke, A58).
 
@@ -105,39 +75,75 @@ def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
     return True
 
 
-def flee_step(
-    w: WorldModel,
-    hostiles: list[Entity],
-    blocked: set[Pos],
-    *,
-    avoid: Pos | None = None,
-    safes: set[Pos] | None = None,
-) -> Pos | None:
-    """One step away from hostiles; ``safes`` breaks ties toward safety.
+# How far a committed flee run reaches past its first step when no safe tile
+# is known (A9, A58). Long enough to leave two hostiles' reach, short enough
+# that the run is replanned before the map around it goes stale.
+FLEE_RUN_STEPS = 6
 
-    When two hostiles pin the agent between two cells, the greedy best step
-    can ping-pong forever. Skip ``avoid`` (the cell just left) when another
-    step scores as well, so flee keeps opening distance.
+
+def _nearest(p: Pos, hostiles: list[Entity]) -> int:
+    return min(chebyshev(p, h.pos) for h in hostiles)
+
+
+def flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], safes: set[Pos] = frozenset()) -> Pos | None:
+    """The best single step away from ``hostiles``, or None when standing still is best.
+
+    Ranked by distance to the nearest hostile, then by distance to the
+    nearest known safe tile when ``safes`` holds any, else by the summed
+    distance to every hostile, then by the cell. Standing still is one of the
+    candidates, so a cornered agent waits instead of stepping closer.
     """
     here = w.pos
-    move_options = [p for p in w.open_neighbours(here, blocked) if p != here]
-    if not move_options:
-        return None
+    options = w.open_neighbours(here, blocked) + [here]
 
-    def safety(p: Pos) -> tuple:
-        nearest = min(chebyshev(p, h.pos) for h in hostiles)
-        total = sum(chebyshev(p, h.pos) for h in hostiles)
+    def safety(p: Pos) -> tuple[int, int, Pos]:
         if safes:
-            to_safe = min((chebyshev(p, s) for s in safes), default=0)
-            return (nearest, total, -to_safe, p)
-        return (nearest, total, p)
+            return _nearest(p, hostiles), -min(chebyshev(p, s) for s in safes), p
+        return _nearest(p, hostiles), sum(chebyshev(p, h.pos) for h in hostiles), p
 
-    ranked = sorted(move_options, key=safety, reverse=True)
-    if avoid is not None:
-        others = [p for p in ranked if p != avoid]
-        if others:
-            ranked = others
-    return ranked[0]
+    best = max(options, key=safety)
+    return None if best == here else best
+
+
+def flee_run(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], first: Pos) -> list[Pos]:
+    """``first``, then a route of up to ``FLEE_RUN_STEPS`` more seen, open cells away from the hostiles.
+
+    A breadth-first search from ``first`` that only enters cells the agent
+    reaches before any hostile could (each cell further from every hostile
+    than the steps it takes to get there). The run ends on the cell it found
+    furthest from the nearest hostile, preferring the longer run and then
+    the cell further from the hostiles' centroid on ties.
+    """
+    cx = sum(h.pos[0] for h in hostiles) / len(hostiles)
+    cy = sum(h.pos[1] for h in hostiles) / len(hostiles)
+    occupied = w.occupied() | blocked
+    came: dict[Pos, Pos | None] = {first: None}
+    depth = {first: 1}
+    frontier = [first]
+    while frontier:
+        nxt_frontier = []
+        for cur in frontier:
+            d = depth[cur] + 1
+            if d > FLEE_RUN_STEPS + 1:
+                continue
+            for n in w.neighbours(cur):
+                if n in came or n == w.pos or n in occupied or not w.view.walkable(n):
+                    continue
+                if _nearest(n, hostiles) <= d:
+                    continue
+                came[n], depth[n] = cur, d
+                nxt_frontier.append(n)
+        frontier = nxt_frontier
+
+    def score(p: Pos) -> tuple[int, int, float, Pos]:
+        return _nearest(p, hostiles), depth[p], abs(p[0] - cx) + abs(p[1] - cy), p
+
+    end = max(came, key=score)
+    run = []
+    while end is not None:
+        run.append(end)
+        end = came[end]
+    return run[::-1]
 
 
 def step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:

@@ -175,19 +175,6 @@ class KeptGotoPathStuckTest(unittest.TestCase):
         self.assertFalse(goto_navigation_pending(w, c.memory, c.policy))
 
 
-class GotoBackAvoidTest(unittest.TestCase):
-    def test_explore_goto_does_not_replan_straight_back(self):
-        w, c = world(at=(3, 0)), ctx(goto=True)
-        c.memory.nav_stuck.cells_map = w.map_id
-        c.memory.nav_stuck.recent_cells = [(2, 0), (3, 0), (2, 0), (3, 0)]
-        c.memory.nav_stuck.recent_moves = [("goto", "Explore")] * 3
-        c.memory.path, c.memory.goal = [(2, 0), (1, 0)], "goto"
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Explore")
-        self.assertIsNotNone(out.intents)
-        self.assertNotEqual((out.intents[0]["x"], out.intents[0]["y"]), (2, 0))
-
-
 class RegenProbeTest(unittest.TestCase):
     """A10: only a hurt window in a safe zone gives a regen verdict."""
 

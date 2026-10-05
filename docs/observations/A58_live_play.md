@@ -34,7 +34,37 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Run 3b (stopped after ~3 min):** the same pacing, now with an Equip `Wear` and Break walks taking turns with the goto walk. Stopped by hand, so the gate never ran: no verdict, regen not measured.
 - **What was wrong:** each fix after 3a patched one more state (relabel Break's walk as `goto`, skip replan, defer Equip, hold Break while a `Use` was pending). That was the bug: any two states that take turns moving the character can pace, so a fix per state never ends. Those patches are removed again.
 - **Fix:** one oscillation guard in dispatch (A15, `navigation/oscillation.py`). When the character's last 6 cell changes stayed on at most 2 cells, it gives up the target it walks to through stuck detection's step 5 (reason `pacing`) and traces an `oscillation` event, whichever states caused it. The smoke script now aborts with exit 1 on sustained oscillation (more than 3 give-ups in 6000 ticks; events where survival states did the moving do not count), so a live run cannot burn the hour pacing.
-- **Status:** tested offline only. The next live hour waits on this fix being merged.
+- **Status:** tested offline only. **Next:** rerun the full live hour.
+
+## Run 4 — stopped (~10 min): Flee ping-pong between two cells
+
+- **Character:** chosen at run time via `CHARACTER_NAME` (not committed).
+- **Gate:** navigation gave up on the 150-block `goto` with reason `pacing` between two cells near the start (~613–614 on x); regen never measured; 0 deaths; smoke did not abort (Flee pacing has no `goal` on oscillation events).
+- **Trace:** from roughly tick 3428289 the agent paced between two diagonal neighbours (`614,398` ↔ `615,397`) under **Flee**, alternating `flee npc 140` and `flee npc 142`. No Heal, no regen verdict, no progress toward explore or the goto target for ~10 minutes; run stopped by hand.
+- **Cause:** with two hostiles in range, greedy `flee_step` maximised distance to the nearest NPC each tick, so the best step from each cell was back to the other.
+- **Fix:** see *Agent changes this pass (after runs 4–6)* below. A first patch that skipped the step back to the cell just left was withdrawn.
+
+## Run 5 — ABORT: sustained oscillation on goto (~5.5 min)
+
+- **Character:** chosen at run time via `CHARACTER_NAME` (not committed).
+- **Gate:** exit 1 `ABORT: sustained oscillation` — 4 goto pacing give-ups in 6000 ticks (last at 425↔426 on y=375); regen not measured; 0 deaths; ~333 s wall clock.
+- **Trace:** 24 oscillation events (4 with `goal: goto`); one Loot-only pacing event (`385,371`↔`385,373`, nothing given up). No Flee ping-pong after the Run 4 fix.
+- **Cause:** Explore replanned the goto path each tick and kept stepping back to the cell just left (393↔394, then 425↔426), tripping the oscillation guard repeatedly after each backoff ended.
+- **Fix:** none beyond the A15 guard, which did its job here: each pacing spot was given up and the smoke run stopped instead of burning the hour. A back-step block on the goto walk was tried and withdrawn: it also blocked a legitimate single step back toward a target behind the agent. Why the goto replan flipped at those two spots is not known from this trace.
+
+## Run 6 — stopped (~12 min): Flee still pinned (live run budget exhausted)
+
+- **Character:** chosen at run time via `CHARACTER_NAME` (not committed).
+- **Gate:** not finished; 0 deaths; regen not measured; stopped by hand after ~12 minutes on the same two cells (`614,397` ↔ `615,396`) with **Flee** and goto **Break** queues alternating.
+- **Trace:** one `oscillation` with `goal: goto` early; survival pacing did not abort the smoke run. Flee anti-backstep (Run 4 fix) was too weak when only the reverse step scored best; Break escalation for the goto still walked while hostiles were in range.
+- **Fix:** see below. Deferring goto **Break** while `should_flee` was tried and withdrawn: Flee outranks Break and always sends an intent or waits, so Break never ran while `should_flee` held; the alternation came from Flee pacing, which the committed escape removes.
+
+## Agent changes this pass (after runs 4–6)
+
+- **Flee commits to an escape (A9).** Re-picking the greedy best step every decision cannot settle against two moving hostiles: each of their moves makes the cell just left the best again. Flee now plans a multi-step escape and walks it until it arrives, is blocked, or Flee stops. The first step is still the best single step (ties toward a known safe tile; standing still when cornered); the rest is a route to the nearest known safe tile when the agent gets to every cell of it before any hostile could, else up to 6 seen cells away from the hostiles under the same rule. Offline test `test_two_moving_hostiles_do_not_pin_flee_between_two_cells` rebuilds the runs 4/6 pin (two NPCs stepping back and forth, the agent on a diagonal pair); it fails on `main` and passes here.
+- **Survival pacing corrects itself in the guard (A15).** When only Flee and Retreat made the pacing moves, the oscillation guard hands the paced cells to them: on that same decision Flee plans a fresh escape that keeps off them, or Retreat routes around them. Nothing is given up and the smoke abort count is unchanged.
+- **Withdrawn:** the reverse-step skip in `flee_step`, the goto back-step block (`goto_back_avoid`, `nav_blocked_for_walk`), and the Break deferral while `should_flee`. `test_the_goto_walk_pacing_on_its_own_is_given_up` shows the guard alone ends run 5's goto pacing; `test_a_goto_behind_the_agent_takes_the_step_back` keeps a single step back allowed.
+- **Status:** offline only; no live run since run 6. **Next:** the full live hour once this merges.
 
 ## Done-when
 

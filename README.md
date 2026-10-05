@@ -85,3 +85,16 @@ Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_ag
 Give-up rule: navigation passes on a give-up only when stuck detection gave up on that target itself, with a reason (for example, a route that needs a block broken). Give-ups on other goals, such as frontier cells while exploring, are counted in the summary but never pass. Heal actions are reported, not gated.
 
 No live hour has passed yet (A58); runs that did not are in [`docs/observations/A16_live_play.md`](docs/observations/A16_live_play.md) and [`docs/observations/A58_live_play.md`](docs/observations/A58_live_play.md). CI covers the gate, the runner hooks and the navigation fixtures in `python/tests/test_m7_acceptance.py` without live keys.
+
+Live M9 smoke: `make smoke-m9-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M9 done-when via [`scripts/smoke_m9_olympuff.py`](scripts/smoke_m9_olympuff.py), using profile `python/characters/olympuff_m9.toml`. Start on the overworld (`doors` walks every entrance mark, then `explore` fills the map); the run ends when every required mark is looked and recorded and the character is back in town, or when the time budget is reached.
+
+Pass criteria (PLAN.md A29, checked in [`m9_acceptance.py`](python/agentrealm_agent/m9_acceptance.py)):
+
+- no death, and alive at the end;
+- no tick where `should_retreat` held while a non-survival state ran;
+- Recover withdraws only on a known safe tile;
+- no loop (24 Steps in a row at one cell with one reason);
+- no API error;
+- on a run of at least 95% of the default time budget (two hours): every entrance mark within strength looked with its `block_type` (and `needs: key` when locked), and the character on town at the end.
+
+Marks skipped because the strength bracket closed the cell under `over_strength_ceiling` are counted in the summary, not required. Heal actions are reported, not gated. No live M9 pass yet; CI covers the gate in `python/tests/test_m9_acceptance.py` without live keys.

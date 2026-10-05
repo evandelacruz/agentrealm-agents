@@ -75,7 +75,7 @@
 
   "A28": {"state": "done"},
 
-  "A29": {"state": "open"},
+  "A29": {"state": "partial", "remaining": "Acceptance gate, smoke script and tests shipped; live Olympuff pass waits on A25 and earlier gates."},
 
   "A30": {"state": "done"},
 

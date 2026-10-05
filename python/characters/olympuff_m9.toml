@@ -1,0 +1,13 @@
+# A29 live M9 acceptance: look every overworld entrance mark, then return to town
+# (scripts/smoke_m9_olympuff.py). The doors goal sends Travel to unvisited marks;
+# explore fills the map between them.
+world = "olympuff"
+
+[policy]
+kind = "scripted"
+goals = ["doors", "explore"]
+on_hostile = "flee"
+hostile = ["npc"]
+pickup = true
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 20

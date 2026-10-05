@@ -1,4 +1,4 @@
-.PHONY: test conductor-test smoke-m6-olympuff smoke-m7-olympuff
+.PHONY: test conductor-test smoke-m6-olympuff smoke-m7-olympuff smoke-m9-olympuff
 test: ## Run unit tests (no server)
 	cd python && python3 -m unittest discover -s tests
 
@@ -14,3 +14,6 @@ smoke-m6-olympuff: ## Live M6 acceptance on Olympuff (A4; needs AGENTREALM_API_K
 
 smoke-m7-olympuff: ## Live M7 acceptance on Olympuff (A16; needs AGENTREALM_API_KEY and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID)
 	python3 scripts/smoke_m7_olympuff.py $(CHARACTER_FLAGS)
+
+smoke-m9-olympuff: ## Live M9 acceptance on Olympuff (A29; needs AGENTREALM_API_KEY and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID)
+	python3 scripts/smoke_m9_olympuff.py $(CHARACTER_FLAGS)

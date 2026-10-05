@@ -169,7 +169,11 @@ def break_outcome(
         if odd:
             note_odd_unreachable(m, w.map_id, choice.pos)
         return StateOutcome(None, f"cannot reach {choice.pos}", state=state)
-    m.path, m.goal = path or [], GOAL
+    att = None if odd else nav_stuck.active(m, w)
+    # Keep the goto label while breaking for a goto stuck attempt (A58), so
+    # Explore does not replan the long walk every tick.
+    path_goal = att.goal if att is not None and att.goal != GOAL else GOAL
+    m.path, m.goal = path or [], path_goal
     return StateOutcome(intents + [set_position(step)], f"break → {choice.pos}", state=state)
 
 

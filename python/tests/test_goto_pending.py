@@ -20,7 +20,7 @@ from agentrealm_agent.healing import (
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import goto_navigation_pending
+from agentrealm_agent.pathing import goto_navigation_pending, replan
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
@@ -173,6 +173,12 @@ class KeptGotoPathStuckTest(unittest.TestCase):
         signals = c.memory.nav_stuck.stuck_signals
         self.assertEqual([s["goal"] for s in signals], ["goto"])
         self.assertFalse(goto_navigation_pending(w, c.memory, c.policy))
+
+    def test_replan_keeps_an_open_goto_path_while_pending(self):
+        w, c = self._walking()
+        path = list(c.memory.path)
+        replan(w, c.memory, c.policy, random.Random(0), set(), set())
+        self.assertEqual(c.memory.path, path)
 
 
 class RegenProbeTest(unittest.TestCase):

@@ -20,6 +20,14 @@ FOOD_CODES = frozenset({"apple", "berry", "golden_cap"})
 POTION_CODES = frozenset({"small_potion", "large_potion"})
 DEFAULT_BUY_POTION = "small_potion"
 
+
+def potion_count(w: WorldModel) -> int:
+    """Held and stowed potions (Boss preconditions, Shop reserve, A21, A38)."""
+    codes = POTION_CODES
+    n = sum(1 for h in w.held_supplies if h.code in codes)
+    n += sum(1 for s in w.chest_supplies if s.code in codes)
+    return n
+
 # Ticks at 10 Hz in a safe zone with no health back before this run counts
 # safe-zone regen as absent (~20 s).
 REGEN_MEASURE_TICKS = 200

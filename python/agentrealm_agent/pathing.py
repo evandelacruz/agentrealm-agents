@@ -25,6 +25,7 @@ from .plan import (
     EXPLORE_PATH_OPS,
     OP_STATE,
     PLAN_STALL_SECONDS,
+    SHOP_PLAN_OPS,
     TRAVEL_PATHED,
     GoalOp,
     Plan,
@@ -181,7 +182,7 @@ def plan_step(
         if op["op"] in SOLVE_OPS:
             return False
         if op["op"] not in EXPLORE_PATH_OPS:
-            if op["op"] in BOSS_PLAN_OPS:
+            if op["op"] in BOSS_PLAN_OPS or op["op"] in SHOP_PLAN_OPS:
                 return False
             plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet")
             continue

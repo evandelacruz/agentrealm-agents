@@ -1,7 +1,6 @@
 # A57 live play (redacted)
 
-Dedicated characters **OlympuffM6Walk5d4e** (cid 10, Olympuff map 76) and **OlympuffWalker** (cid 4),
-with earlier context from **GemPileObserver0c52** (cid 7) and sandbox **CursorA18Armor8774** (cid 8).
+Characters **OlympuffM6Walk5d4e** (Olympuff map 76) and **GemPileObserver0c52**.
 Sessions on 2026-10-05 against the public API. Supply ids are omitted.
 
 ## Technique
@@ -23,8 +22,8 @@ before re-queuing. Space `GET …/entity-tiles` at least ~1 s from burst movemen
 ## Stowed `Drop`
 
 - **Not observed.** No run filled `inventory.chest` with a droppable supply. Town `apple` `Take`s
-  from **GemPileObserver0c52** did not add `held` or `chest` rows in the snapshot (likely eaten on
-  pickup at full health). Shop priced supplies were in sight from **OlympuffM6Walk5d4e** at
+  from **GemPileObserver0c52** did not add `held` or `chest` rows in the snapshot. Why is
+  unconfirmed: `health` and `lives` were not read before and after. Shop priced supplies were in sight from **OlympuffM6Walk5d4e** at
   (439,404) and (430,395) — e.g. `matches` 5 gems at (414,402), `middle_chest` 50 at (416,402) —
   but walking onto shop cells from town/plaza rows was often blocked by `wall` tiles; buys were not
   completed in this pass.
@@ -33,7 +32,7 @@ before re-queuing. Space `GET …/entity-tiles` at least ~1 s from burst movemen
 
 ## Larger chest (`middle_chest`)
 
-- **Not measured.** **OlympuffM6Walk5d4e** held 10 gems; **Pippin Thistledown** 12; no character
+- **Not measured.** **OlympuffM6Walk5d4e** held 10 gems at the end of the pass; no character
   reached 50 gems or applied a `Take` of `middle_chest`. Manual §16 cap (30) remains the assumed
   default in code until measured.
 - **Still open (A57):** buy `middle_chest`, fill until `carry_capacity_full`, and replace

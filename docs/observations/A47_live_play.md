@@ -46,12 +46,6 @@ Dedicated characters **A20LootObserver** (Olympuff, map 76), **OlympuffM6Walk5d4
 - **Rate limits:** `GET …/entity-tiles` in the same burst as walk `Step` queues hit `429`;
   retry after `Retry-After` succeeded.
 
-## Session 4 (A57 pass, 2026-10-05)
-
-See [`A57_live_play.md`](A57_live_play.md) for this pass: field grass cuts without a life code,
-shop coordinates seen from the east fields, and carry probes still blocked on filling
-`inventory.chest`.
-
 ## API notes
 
 - Stay near one request per tick window; retry on `429`.

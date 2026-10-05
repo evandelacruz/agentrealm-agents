@@ -1,0 +1,13 @@
+# A33 live M10 acceptance: curiosity on the Olympuff overworld
+# (scripts/smoke_m10_olympuff.py). The smoke script explores for the target
+# duration; signs and NPCs along the route are judged by m10_acceptance.py.
+world = "olympuff"
+
+[policy]
+kind = "scripted"
+goals = ["explore"]
+on_hostile = "flee"
+hostile = ["npc"]
+pickup = true
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 20

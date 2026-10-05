@@ -1,4 +1,4 @@
-"""What the live acceptance runs (M6 A4, M7 A16) share.
+"""What the live acceptance runs (M6 A4, M7 A16, M10 A33) share.
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
@@ -8,6 +8,8 @@ call).
 
 from __future__ import annotations
 
+import threading
+
 from .config import Policy
 from .client import ApiError
 from .knowledge_base import KnowledgeBase
@@ -16,7 +18,13 @@ from .world import WorldModel
 
 
 class AcceptanceHooks:
-    """No-op base for acceptance metrics. Override the hooks you need."""
+    """No-op base for acceptance metrics. Override the hooks you need.
+
+    ``stop``, when set, is the runner's stop event: a metrics class sets it to
+    end the run early (clock done, death, a goal reached).
+    """
+
+    stop: threading.Event | None = None
 
     def wrap(self, client):
         """The client the runner should call through (to count requests or errors)."""

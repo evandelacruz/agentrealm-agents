@@ -85,7 +85,7 @@
 
   "A32": {"state": "done"},
 
-  "A33": {"state": "open"},
+  "A33": {"state": "partial", "remaining": "Gate shipped (m10_acceptance.py, smoke_m10_olympuff.py, Makefile, tests); live pass pending on A29 and earlier gates."},
 
   "A34": {"state": "done"},
 

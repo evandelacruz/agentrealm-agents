@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -27,53 +26,13 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
+from agentrealm_agent.acceptance_smoke import run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
-from agentrealm_agent.executor.intents import wait  # noqa: E402
-from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
-from agentrealm_agent.runner import Runner  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m7.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
-
-# Self reads before giving up on a character that stays asleep or downed, one
-# a second: well inside the call budget, and longer than the 5 s respawn delay.
-WAKE_READS = 30
-# What to do about the known wake rejections (GAME_NOTES Sleep). Any other
-# rejected wake ``Wait`` also stops the start, with its code.
-WAKE_REFUSALS = {
-    "alive_cap_full": "the world's alive cap is full; wait for a slot and re-run",
-    "block_occupied": "no free block to wake on; wait and re-run",
-}
-
-
-def wake(client: Client, cid: int, *, pause=time.sleep) -> None:
-    """Get the character awake and alive before its position is read.
-
-    A sleeping character (asleep after 10 idle minutes) is off the map and
-    has no position. Any intent wakes it; ``Wait`` is the one that does
-    nothing else (GAME_NOTES Sleep). A downed one respawns after
-    ``respawn_delay_seconds``, so this reads self until it is alive.
-    Raises ValueError saying why it could not.
-
-    This repeats Sync's wake (``states/sync.py``) because the goto target
-    needs a position before the runner starts; keep the two in step.
-    """
-    for _ in range(WAKE_READS):
-        s = client.self_(cid)
-        if not s.get("alive", True):
-            pause(1.0)
-            continue
-        if not s.get("asleep"):
-            return
-        reply = client.tick(cid, [wait()])
-        for result in reply.get("intent_results") or []:
-            if result.get("outcome") == "rejected":
-                code = (result.get("rejection") or {}).get("code") or "unknown"
-                raise ValueError(f"cannot wake: {code}: {WAKE_REFUSALS.get(code, 'wake Wait rejected')}")
-        pause(1.0)
-    raise ValueError(f"still asleep or downed after {WAKE_READS} self reads")
 
 
 def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
@@ -92,54 +51,6 @@ def aim_at(cfg: config.CharacterConfig, overworld: int, target: tuple[int, int])
     """Send the agent to ``target`` first, then let it explore for the rest of the hour."""
     cfg.policy.goto, cfg.policy.goto_map = target, overworld
     cfg.policy.goals = ["goto"] + [g for g in cfg.policy.goals if g != "goto"]
-
-
-def run_smoke(
-    client: Client,
-    cfg: config.CharacterConfig,
-    cid: int,
-    metrics: M7AcceptanceMetrics,
-    *,
-    timeout_s: float,
-) -> tuple[M7AcceptanceMetrics, float]:
-    stop = threading.Event()
-    metrics.stop = stop
-    started = time.monotonic()
-    knowledge: KnowledgeBase = load_knowledge(cfg.world)
-
-    def out(line: str) -> None:
-        print(line, flush=True)
-
-    runner = Runner(
-        cfg,
-        metrics.wrap(client),
-        cid,
-        stop,
-        out,
-        knowledge=knowledge,
-        acceptance=metrics,
-    )
-
-    def watchdog() -> None:
-        if timeout_s <= 0:
-            return
-        if stop.wait(timeout_s):
-            return
-        out(f"[{cfg.profile}] timeout after {timeout_s:.0f}s")
-        stop.set()
-
-    thread = threading.Thread(target=runner.run, daemon=True)
-    wd = threading.Thread(target=watchdog, daemon=True)
-    thread.start()
-    wd.start()
-    thread.join()
-    stop.set()
-    elapsed = time.monotonic() - started
-    try:
-        save_knowledge(knowledge)
-    except OSError as e:
-        out(f"knowledge base {knowledge.world_code}: not saved: {e}")
-    return metrics, elapsed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -222,7 +133,11 @@ def main(argv: list[str] | None = None) -> int:
         target=target,
         target_seconds=args.seconds,
     )
-    metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout)
+
+    def out(line: str) -> None:
+        print(line, flush=True)
+
+    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out)
     print(f"finished in {elapsed:.1f}s", flush=True)
     if metrics.oscillation_abort:
         print(f"ABORT: {metrics.oscillation_abort}; the agent paced instead of playing", file=sys.stderr)

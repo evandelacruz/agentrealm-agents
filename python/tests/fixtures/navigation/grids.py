@@ -158,6 +158,19 @@ CROSS_MAP_OPEN = Scenario(
     perception=3,
 )
 
+# Lone bush in open dirt: OddBreak opens it (A33 / M10 acceptance fixture).
+ODD_BUSH = Scenario(
+    "odd_bush",
+    (
+        ".........",
+        ".........",
+        "..S.b....",
+        ".........",
+        ".........",
+    ),
+    perception=4,
+)
+
 # Straight corridor: fog beyond perception; goto walks 150+ blocks (A16 / M7).
 OPEN_CORRIDOR_150 = Scenario(
     "open_corridor_150",

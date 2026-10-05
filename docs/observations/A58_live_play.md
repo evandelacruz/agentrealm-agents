@@ -29,7 +29,8 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 
 - **Started:** 2026-10-05 (UTC). Reuses the same M6-walk slot as run 1 (`CHARACTER_NAME`, not committed).
 - **Gate focus:** safe-zone regen must get a yes/no verdict during a hurt window in a safe tile; navigation already passed on run 1.
-- **Status:** in progress.
+- **Run 3a (aborted ~5 min):** Ping-pong at x≈616–617 during goto break escalation; agent fix keeps the goto goal label through break walks and skips replan while the goto path still steps (pushed on this branch).
+- **Status:** run 3b restarting after fix.
 
 ## Done-when
 

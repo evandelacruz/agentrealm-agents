@@ -22,7 +22,7 @@ from ..healing import (
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import goto_navigation_pending, grid_params, hostiles_in_range, nav_search, next_step
+from ..pathing import grid_params, hostiles_in_range, nav_search, next_step
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import arm, set_position, take, use_self
@@ -35,10 +35,6 @@ class HealState(State):
     """Above Explore. Every branch that sends nothing is bounded: no reachable
     safe tile yields at once, and a wait with no health back yields after
     ``HEAL_WAIT_TICKS``; Heal then stays out for ``HEAL_BACKOFF_TICKS``.
-
-    While the policy ``goto`` is still owed (A58), Heal does not walk: it uses
-    food in reach, carried heals and the safe zone it stands in, and otherwise
-    sends nothing so Explore keeps the walk.
 
     Heal also runs, even at full health or with a hostile in range, while the
     weapon a drink swapped out is still to be re-armed (A24). That is one
@@ -70,13 +66,10 @@ def _wants_heal(w: WorldModel, ctx: PlayContext) -> bool:
 
 def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     m, policy = ctx.memory, ctx.policy
-    # While the policy ``goto`` is still owed (A58), Heal uses only what is in
-    # reach: no walk to far food or to a safe tile. Explore keeps the walk.
-    may_walk = not goto_navigation_pending(w, m, policy)
 
     # Food lying in sight, then carried food, then a carried potion (the
     # plan's Heal row). Health changes from these must not count as regen.
-    if out := _act_food(w, m, policy, ctx, may_walk=may_walk):
+    if out := _act_food(w, m, policy, ctx):
         m.heal_regen_sample = None
         return out
     if out := _act_carried(w, m):
@@ -89,8 +82,6 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     known = regen_known(ctx.knowledge, m)
     if not standing_in_safe_zone(w):
         m.heal_regen_sample = None
-        if not may_walk:
-            return _out(None, "goto pending, no walk to a safe tile")
         goal = {"yes": "heal_rest", "no": "heal_town"}.get(known, "heal_measure")
         if out := _walk_to_safe(w, m, policy, ctx, goal=goal):
             return out
@@ -146,9 +137,7 @@ def _walk_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at:
     return _out([set_position(step)], f"{goal} → {at}")
 
 
-def _act_food(
-    w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *, may_walk: bool = True
-) -> StateOutcome | None:
+def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> StateOutcome | None:
     here = w.pos
     assert here is not None
     for food in food_in_sight(w, m)[:FOOD_CANDIDATES]:
@@ -156,7 +145,7 @@ def _act_food(
             note_try(m, "take", food.id)
             return _out([take(food.id)], f"take food {food.code}")
         # Walking onto it also picks up food eaten on pickup (golden cap).
-        if may_walk and (out := _walk_toward(w, m, policy, ctx, food.pos, goal="heal_food")):
+        if out := _walk_toward(w, m, policy, ctx, food.pos, goal="heal_food"):
             return out
     return None
 

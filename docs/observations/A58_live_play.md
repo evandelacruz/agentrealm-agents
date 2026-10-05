@@ -21,7 +21,7 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map` — 
 
 - Defer Loot, Shop, Investigate, Travel, OddBreak and non-`goto` Break while `goto_navigation_pending`; skip the plan's ops and `wait` hold.
 - Let policy `goto` outrank plan travel during the 150-block walk; keep an in-flight goto path instead of replan ping-pong.
-- Heal does not walk while the goto is owed; it still eats, drinks and rests in a safe zone it stands in.
+- Heal is not deferred: a hurt character still walks to safety mid-goto.
 - The goto path is kept through Explore's normal flow, so stuck detection still escalates and gives up on it.
 - A full-health regen probe was tried and dropped: health cannot rise at full health, so it could only ever report "no". Regen is measured only while hurt; the gate's regen check still needs a run that is hurt in a safe zone.
 

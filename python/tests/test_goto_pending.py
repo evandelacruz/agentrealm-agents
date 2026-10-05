@@ -2,6 +2,7 @@
 
 Each test sets up something a state would act on, checks the state takes it
 with no ``goto`` in the goals, then checks it yields while the goto is owed.
+Heal is the exception: a hurt character still walks to safety.
 Also covers the honest regen probe (A10) and stuck detection on a kept goto
 path (A15).
 """
@@ -105,15 +106,14 @@ class GotoDefersStatesTest(unittest.TestCase):
         att.level = nav_stuck.BREAK
         self.assertTrue(BreakState().guard(w, ctx(goto=True, m=m)), "the goto's own break")
 
-    def test_heal_does_not_walk_to_a_safe_tile(self):
+    def test_hurt_heal_still_walks_to_safety_mid_goto(self):
+        # Survival beats navigation: Heal is not deferred.
         w = world(at=(3, 0))
         w.health = 5
         w.zones[1] = {(0, 0): ZoneFact(safe=True), (3, 0): ZoneFact(safe=False)}
-        out = dispatch(w, ctx(goto=False))
-        self.assertEqual((out.state, out.intents), ("Heal", [{"verb": "SetPosition", "x": 2, "y": 0}]))
-        out = dispatch(w, ctx(goto=True))
-        self.assertEqual(out.state, "Explore")
-        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 4, "y": 0}])
+        for goto in (False, True):
+            out = dispatch(w, ctx(goto=goto))
+            self.assertEqual((out.state, out.intents), ("Heal", [{"verb": "SetPosition", "x": 2, "y": 0}]))
 
     def test_heal_still_rests_in_the_safe_zone_it_stands_in(self):
         w = world(at=(3, 0))

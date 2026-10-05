@@ -1,4 +1,4 @@
-"""What the acceptance runs (M6 A4, M7 A16, M8 A25, M10 A33, M4 A36) share.
+"""What the acceptance runs (M6 A4, M7 A16, M8 A25, M9 A29, M10 A33, M4 A36) share.
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it

@@ -35,19 +35,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .acceptance_run import TimedRunHooks
+from .acceptance_survival import LOOP_STEP_LIMIT, SurvivalAcceptanceMetrics, withdraw_cells
 from .config import Policy
-from .executor.movement import step_landing
-from .healing import regen_known
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .survival import should_retreat
 from .world import Pos, WorldModel, chebyshev
-from .zone_discovery import safe_tiles
 
 TARGET_SECONDS = 3600.0
 TARGET_DISTANCE = 150
-LOOP_STEP_LIMIT = 24  # Step-sending decisions in a row at one cell with one reason
 # Sustained pacing: the guard gave up a target more than this many times in
 # this many ticks (10 minutes at 10 ticks/s); events that gave nothing up do
 # not count. Its backoffs double (30 s, 60 s, 120 s),
@@ -55,12 +50,19 @@ LOOP_STEP_LIMIT = 24  # Step-sending decisions in a row at one cell with one rea
 OSCILLATION_ABORT_COUNT = 3
 OSCILLATION_ABORT_TICKS = 6000
 
-# States that are already the right answer when should_retreat holds.
-SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee")
+__all__ = [
+    "LOOP_STEP_LIMIT",
+    "OSCILLATION_ABORT_COUNT",
+    "OSCILLATION_ABORT_TICKS",
+    "TARGET_DISTANCE",
+    "TARGET_SECONDS",
+    "M7AcceptanceMetrics",
+    "withdraw_cells",
+]
 
 
 @dataclass(kw_only=True)
-class M7AcceptanceMetrics(TimedRunHooks):
+class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
     """Counts survival, navigation and API faults while the runner plays one hour.
 
     ``target`` is the overworld cell the agent is sent to (``policy.goto``),
@@ -77,18 +79,11 @@ class M7AcceptanceMetrics(TimedRunHooks):
     target_give_up: str | None = None  # stuck detection's reason for giving up on the target
     other_give_ups: int = 0  # give-ups on any other goal: reported, never a pass
     lives_seen: int | None = None
-    retreat_misses: int = 0
-    recover_withdraws: int = 0
-    recover_unsafe: int = 0
-    heal_actions: int = 0
     regen: str | None = None  # "yes" or "no" once measured
-    loop_detected: bool = False
     oscillation_ticks: list[int] = field(default_factory=list)  # each guard event's tick
     pacing_give_up_ticks: list[int] = field(default_factory=list)  # ticks of events that gave up a target
     oscillation_abort: str | None = None  # why the run was stopped for pacing
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
-    _loop_key: tuple[Pos, str] | None = None
-    _loop_streak: int = 0
 
     def on_oscillation(self, event: dict) -> None:
         """Count the guard's events; sustained give-ups for pacing end the run.
@@ -129,19 +124,18 @@ class M7AcceptanceMetrics(TimedRunHooks):
             self.lives_seen = w.lives
         self._note_navigation(w)
         self._note_give_ups(m)
-        if should_retreat(w, policy, params) and state not in SURVIVAL_STATES:
-            self.retreat_misses += 1
-        if intents and state == "Heal":
-            self.heal_actions += 1
-        if intents and state == "Recover":
-            safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
-            for cell in withdraw_cells(w.pos, intents):
-                self.recover_withdraws += 1
-                if cell not in safe:
-                    self.recover_unsafe += 1
-        self.regen = regen_known(knowledge, m) or self.regen
-        if intents is not None:
-            self._note_loop(w, reason, intents)
+        regen = self.note_survival_tick(
+            w,
+            m,
+            state=state,
+            reason=reason,
+            intents=intents,
+            policy=policy,
+            params=params,
+            knowledge=knowledge,
+            track_regen=True,
+        )
+        self.regen = regen or self.regen
 
     def _note_navigation(self, w: WorldModel) -> None:
         if w.pos is None or w.map_id != self.overworld_map_id:
@@ -163,30 +157,13 @@ class M7AcceptanceMetrics(TimedRunHooks):
             elif not on_target:
                 self.other_give_ups += 1
 
-    def _note_loop(self, w: WorldModel, reason: str, intents: list[dict]) -> None:
-        moving = any(i.get("verb") == "Step" for i in intents)
-        if not moving or w.pos is None:
-            self._loop_key, self._loop_streak = None, 0
-            return
-        key = (w.pos, reason)
-        self._loop_streak = self._loop_streak + 1 if key == self._loop_key else 1
-        self._loop_key = key
-        if self._loop_streak >= LOOP_STEP_LIMIT:
-            self.loop_detected = True
-
     def navigation_ok(self) -> bool:
         """Stood on the target, or stuck detection gave up on that target with a reason."""
         return self.target_reached or self.target_give_up is not None
 
     def failures(self, *, full_hour: bool = True) -> list[str]:
         """What fails the run. Navigation and regen are judged only on a full hour."""
-        out = list(self.base_failures())
-        if self.retreat_misses:
-            out.append(f"{self.retreat_misses} tick(s) should_retreat held outside a survival state")
-        if self.recover_unsafe:
-            out.append(f"{self.recover_unsafe} Recover withdraw(s) from a cell not known safe")
-        if self.loop_detected:
-            out.append(f"loop: {LOOP_STEP_LIMIT} Steps in a row at one cell with one reason")
+        out = list(self.survival_failures())
         if self.oscillation_abort:
             out.append(self.oscillation_abort)
         if full_hour and not self.navigation_ok():
@@ -206,31 +183,8 @@ class M7AcceptanceMetrics(TimedRunHooks):
             f"navigation target {self.target} from {self.origin}: {nav}",
             f"max chebyshev distance from origin: {self.max_distance}",
             f"give-ups on other goals: {self.other_give_ups}",
-            f"deaths: {self.deaths}",
-            f"retreat misses: {self.retreat_misses}",
-            f"recover withdraws: {self.recover_withdraws} (from a cell not known safe: {self.recover_unsafe})",
-            f"heal actions: {self.heal_actions}",
+            *self.survival_summary_lines(),
             f"safe-zone regen: {self.regen or 'not measured'}",
-            f"loop detected: {self.loop_detected}",
             f"oscillation events: {len(self.oscillation_ticks)} (gave up a target: {len(self.pacing_give_up_ticks)})",
-            f"API errors: {len(self.api_errors)}",
             f"lives last seen: {self.lives_seen}",
         ]
-
-
-def withdraw_cells(pos: Pos | None, intents: list[dict]) -> list[Pos | None]:
-    """Where the agent stands when each ``WithdrawFromChest`` in the queue runs.
-
-    Walks the queue from ``pos``: a ``Step`` moves one block, a ``SetPosition``
-    moves to its cell. None when the start is unknown.
-    """
-    cells: list[Pos | None] = []
-    for intent in intents:
-        verb = intent.get("verb")
-        if pos is not None and verb == "Step":
-            pos = step_landing(pos, intent["direction"])
-        elif verb == "SetPosition":
-            pos = (int(intent["x"]), int(intent["y"]))
-        elif verb == "WithdrawFromChest":
-            cells.append(pos)
-    return cells

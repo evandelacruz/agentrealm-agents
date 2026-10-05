@@ -1,0 +1,16 @@
+# A29 live M9 acceptance: look every overworld entrance mark, then return to town
+# (scripts/smoke_m9_olympuff.py). Investigate (A30) walks next to each minimap
+# entrance mark and records the look; `doors` walks door tiles in view, not
+# minimap marks, and explore fills the map between them. Once every mark is
+# recorded the smoke script adds `travel:town` to this profile's directives
+# file, so Travel (A27) walks the agent back to town.
+world = "olympuff"
+
+[policy]
+kind = "scripted"
+goals = ["doors", "explore"]
+on_hostile = "flee"
+hostile = ["npc"]
+pickup = true
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 20

@@ -334,7 +334,7 @@ def plan_step(
                 continue
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
         if found and next_step(w, blocked, found[0]):
-            plan.stalled_since_tick = None
+            plan.note_progress()
             _store_path(m, w, found[1], found[0], found[2])
             m.goal_op = dict(op)
             return True

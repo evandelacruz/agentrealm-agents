@@ -217,6 +217,21 @@ class ShopBuyTest(unittest.TestCase):
         self.assertEqual(out.state, "Shop")
         self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
 
+    def test_only_the_plans_own_buy_counts_as_acting_on_it(self):
+        # A36: a potion restock while `buy torch` heads the stack is not the buy.
+        w = world()
+        w.health, w.max_health = 10, 10
+        w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
+        plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
+        params = dict(PARAM_DEFAULTS, potion_reserve=2)
+        out = dispatch(w, ctx(w, plan=plan, params=params))
+        self.assertEqual((out.state, out.intents), ("Shop", [{"verb": "Take", "supply_id": 5}]))
+        self.assertIsNone(plan.acted)
+        w.entities.append(Entity("supply", 6, (2, 1), "torch", gem_price=2))  # cheaper: Shop picks it
+        out = dispatch(w, ctx(w, plan=plan, params=params))
+        self.assertEqual((out.state, out.intents), ("Shop", [{"verb": "Take", "supply_id": 6}]))
+        self.assertEqual(plan.acted, {"op": "buy", "code": "torch"})
+
     def test_no_shop_when_reserve_met(self):
         w = world()
         w.health, w.max_health = 10, 10

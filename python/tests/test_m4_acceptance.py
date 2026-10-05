@@ -287,6 +287,26 @@ class M4DoneWhenTest(TestWorldCase):
         self.assertFalse(server.burnt)
 
 
+class RunnerActedOpTest(TestWorldCase):
+    def test_before_tick_gets_the_op_this_round_acted_on(self):
+        seen: list = []
+
+        class Hooks(M4AcceptanceMetrics):
+            def before_tick(self, w, m, *, plan_op=None, **kw):
+                seen.append(plan_op)
+
+        stop = threading.Event()
+        server = TestWorldServer(stop, 10)
+        cfg = CharacterConfig("T", "testworld", Policy(goals=["hold"], pickup=False), Path("t.toml"))
+        r = runner.Runner(cfg, server, 1, stop, out=lambda _: None, acceptance=Hooks())
+        self.addCleanup(r.trace.close)
+        r.world = WorldModel(character_id=1, map_id=MAP, pos=START, perception=25, tick=100)
+        r.mem = Memory(need_self=False, need_position=False)
+        r.plan.acted = dict(TO_HEDGE)  # left over from an earlier round
+        r.tick()  # `hold` waits: nothing acts on a stack op
+        self.assertEqual(seen, [None])
+
+
 class MetricsTest(unittest.TestCase):
     """Each gate condition on its own, so breaking one fails a test."""
 

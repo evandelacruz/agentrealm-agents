@@ -397,6 +397,7 @@ class Runner:
 
     def tick(self) -> float:
         w, m = self.world, self.mem
+        self.plan.acted = None  # set again only by a state acting on the head op this round (A36)
         if m.cancel_queue:
             # The rest of the server queue was planned from a position that no
             # longer holds (a door moved us): replace it with nothing.
@@ -408,6 +409,7 @@ class Runner:
             # held queue and its intent replaces it. A stale path resends a
             # fresh walk queue; anything else leaves the queue running.
             d = self.reflex_while_held()
+            self.plan.acted = None  # the probe's decision is not this round's
             if d is not None:
                 self.drop_held_queue()
                 # Something must replace the held queue, or it keeps running.
@@ -443,7 +445,7 @@ class Runner:
                 policy=self.cfg.policy,
                 params=self.plan.params,
                 knowledge=self.knowledge,
-                plan_op=self.plan.current(),
+                plan_op=self.plan.acted,
             )
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))

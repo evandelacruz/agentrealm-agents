@@ -181,7 +181,7 @@ def _plan_progress(plan: Plan | None, from_plan: bool) -> None:
     """A Use or step toward the plan's own ``break_block`` resets its stall clock (A34).
     A reflex, stuck step 2 or an odd block does not, so a stuck op still drops."""
     if from_plan and plan is not None:
-        plan.stalled_since_tick = None
+        plan.note_progress()
 
 
 class BreakState(State):

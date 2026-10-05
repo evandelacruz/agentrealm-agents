@@ -88,7 +88,7 @@ def _track_progress(
     through to the states below (A44).
     """
     if out.intents and any(i.get("verb") == "SetPosition" for i in out.intents):
-        plan.stalled_since_tick = None
+        plan.note_progress()
         return out
     if not plan.note_stalled(w.tick):
         return out

@@ -8,9 +8,10 @@ a clue in the knowledge base, a fake model and a fake server, played by the
 real ``Runner`` and states. These metrics are what it checks, op by op:
 
 - **planned**: an applied strategist answer had the op (extra fields allowed);
-- **run**: the state that owns the op (``OP_DRIVERS``) sent a new queue while
-  the op was the head of the stack. Another state taking the round (a reflex,
-  Flee, Heal) is normal priority order and is not a failure;
+- **run**: the state that owns the op (``OP_DRIVERS``) sent a new queue that
+  acted on it (``Plan.acted``: a step toward it, its Take or its Use). A round
+  spent on a reflex, another goal or a higher-priority state (Flee, Heal) does
+  not count, and is not a failure either;
 - **finished**: the stack popped the op as done (a ``goal_done`` trigger).
 
 At least one clue trigger must reach the strategist, and no request may fail.

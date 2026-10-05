@@ -106,4 +106,4 @@ Pass criteria (PLAN.md A36, checked in [`m4_acceptance.py`](python/agentrealm_ag
 
 - at least one clue trigger reaches the strategist;
 - no API error;
-- each required op is planned by an applied strategist answer, run by the state that owns it (`Shop` for `buy`, `Break` for `break_block`, Explore's plan pathing or `Travel` for `travel`) with a new queue while it is the head of the stack, and finished (popped as done).
+- each required op is planned by an applied strategist answer, run by the state that owns it (`Shop` for `buy`, `Break` for `break_block`, Explore's plan pathing or `Travel` for `travel`) with a new queue that acts on it, and finished (popped as done).

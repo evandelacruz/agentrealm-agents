@@ -50,7 +50,9 @@ class AcceptanceHooks:
         """A tick is about to be sent. ``w`` is the world the decision saw.
 
         ``intents`` is None when a held queue keeps running and nothing new is sent.
-        ``plan_op`` is the stack's current goal, when the runner knows it (A36).
+        ``plan_op`` is the goal-stack op this decision acted on (``Plan.acted``):
+        set only when the state that owns the head op stepped toward it or sent
+        its Take or Use, None otherwise (a reflex, another goal, a held queue) (A36).
         """
 
     def on_strategist_trigger(self, trigger: dict) -> None:

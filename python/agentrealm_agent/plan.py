@@ -436,6 +436,7 @@ class Plan:
     floor_params: dict[str, float | int] = field(default_factory=lambda: dict(PARAM_DEFAULTS))
     wait_started_tick: int | None = None
     stalled_since_tick: int | None = None  # first tick the current op found no path
+    acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
 
@@ -498,6 +499,13 @@ class Plan:
             log.info("plan: finished op %r: %s", op, reason)
             note_goal_done(memory, op, reason)
         self._pop_current()
+
+    def note_progress(self) -> None:
+        """The state that owns the head op acted on it this decision: a step
+        toward it, a Take or a Use for it. Resets the stall clock (A34) and
+        records the op in ``acted`` (A36)."""
+        self.stalled_since_tick = None
+        self.acted = self.current()
 
     def note_stalled(self, tick: int) -> bool:
         """Record that the current op found no path; True once it has stalled too long."""

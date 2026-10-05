@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..healing import supply_matches
 from ..knowledge_base import knowledge_items
 from ..loot import Pickup, loot_score, pickup_room
 from ..memory import Memory
@@ -43,9 +44,11 @@ class ShopState(State):
         )
         if reflex is not None:
             return reflex
+        op = plan_buy_op(ctx, world)
+        supply = _target(world, ctx) if op is not None else None
         out = shop_outcome(world, ctx, self.name)
-        if out.intents and ctx.plan is not None and plan_buy_op(ctx, world) is not None:
-            ctx.plan.stalled_since_tick = None  # progress on the plan's buy (A34 stall rule)
+        if out.intents and ctx.plan is not None and supply is not None and supply_matches(op["code"], supply.code):
+            ctx.plan.note_progress()  # a step or Take for the plan's own buy, not a potion restock
         return out
 
 

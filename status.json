@@ -51,7 +51,9 @@
 
   "A20": {"state": "done"},
 
-  "A47": {"state": "open", "note": "Observable in live play: life ground code, stowed Drop, middle_chest capacity (steps in PLAN.md A47; docs/observations/A20_live_play.md)."},
+  "A47": {"state": "partial", "remaining": "Code ships: life code filed to the item table on a single-Take lives rise, Manual §16 chest cap as an assumed default, held-only drops. What needs live play to observe (confirm the life code, stowed Drop, measured middle_chest cap) is split to A57 (docs/observations/A47_live_play.md)."},
+
+  "A57": {"state": "open"},
 
   "A21": {"state": "done"},
 

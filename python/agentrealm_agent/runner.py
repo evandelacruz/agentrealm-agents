@@ -32,6 +32,7 @@ from .item_table import (
 )
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_warp, sync_tiles, sync_world_maps
+from .equip import learn_equip_rejection
 from .loot import learn_loot_rejection
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.ops import refresh_travel_stack
@@ -740,6 +741,8 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
+        if m.state == "Equip":
+            learn_equip_rejection(m, w, intent)
         target = use_target_block(intent, w.entities) if intent and intent.get("verb") == "Use" else None
         self._note_break_use(intent, result, target, index)
         if self.acceptance is not None:

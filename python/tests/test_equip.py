@@ -2,17 +2,18 @@
 
 import random
 import unittest
-from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import default_directives
 from agentrealm_agent.equip import (
-    armor_score,
     best_equip_upgrade,
-    infer_wear_slot,
-    weapon_score,
+    compare,
+    learn_equip_rejection,
+    learn_worn_slots,
+    sync_refusals,
+    wear_slot,
 )
-from agentrealm_agent.item_table import InventorySupply
+from agentrealm_agent.item_table import FragmentMeta, InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import PlayContext, dispatch
@@ -20,9 +21,9 @@ from agentrealm_agent.threat import ThreatTable
 from agentrealm_agent.world import WorldModel
 
 
-def ctx(w: WorldModel, kb: KnowledgeBase | None = None) -> PlayContext:
+def ctx(kb: KnowledgeBase | None = None, m: Memory | None = None) -> PlayContext:
     return PlayContext(
-        Memory(),
+        m or Memory(),
         Policy(kind="scripted", goals=["hold"]),
         random.Random(0),
         directives=default_directives(),
@@ -30,91 +31,217 @@ def ctx(w: WorldModel, kb: KnowledgeBase | None = None) -> PlayContext:
     )
 
 
-class EquipScoringTest(unittest.TestCase):
-    def test_infer_wear_slots(self):
-        self.assertEqual(infer_wear_slot("bronze_helm"), "head")
-        self.assertEqual(infer_wear_slot("bronze_mail"), "body")
-        self.assertIsNone(infer_wear_slot("bronze_sword"))
-        self.assertIsNone(infer_wear_slot("small_potion"))
-        self.assertIsNone(infer_wear_slot("middle_chest"))
+def world() -> WorldModel:
+    return WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)
 
-    def test_armor_score_weights_damage_saved(self):
-        items = {"bronze_mail": {"damage_saved": {"rat": 3}}}
-        threat = ThreatTable()
-        threat.record(("npc", "rat"), 5)
-        self.assertEqual(armor_score("bronze_mail", items, threat), 15)
-        self.assertEqual(armor_score("leather_cap", items, threat), 0)
 
-    def test_weapon_score_uses_gem_price_without_hits(self):
-        items = {"bronze_sword": {"gem_price": 15}, "pocket_knife": {}}
-        threat = ThreatTable()
-        self.assertEqual(weapon_score("bronze_sword", items, threat), 15)
-        self.assertEqual(weapon_score("pocket_knife", items, threat), 0)
+def rats(amount: int = 5) -> ThreatTable:
+    t = ThreatTable()
+    t.record(("npc", "rat"), amount)
+    return t
 
-    def test_best_upgrade_picks_weapon(self):
-        w = WorldModel(character_id=1, map_id=7, pos=(0, 0))
+
+class SlotTest(unittest.TestCase):
+    def test_slot_only_from_served_worn(self):
+        m = Memory()
+        # Substring look-alikes and unseen codes have no slot.
+        for code in ("bronze_mail", "waxed_cloth", "elbow_pad", "legend_map", "bronze_helm"):
+            self.assertIsNone(wear_slot(code, m))
+        w = world()
+        w.worn_codes = {"body": "bronze_mail"}
+        learn_worn_slots(m, w)
+        self.assertEqual(wear_slot("bronze_mail", m), "body")
+        self.assertIsNone(wear_slot("small_potion", m))
+        self.assertIsNone(wear_slot("bronze_sword", m))
+
+    def test_unknown_slot_is_not_worn(self):
+        w = world()
+        w.held_supplies = [InventorySupply(8, "iron_mail")]
+        items = {"iron_mail": {"gem_price": 60}}
+        self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory()))
+
+    def test_only_sourced_weapons_are_armed(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "waxed_axe"), InventorySupply(6, "torch")]
+        items = {"waxed_axe": {"gem_price": 40}, "torch": {"gem_price": 10}}
+        self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory()))
+
+    def test_fragments_and_consumables_skipped(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        frag = FragmentMeta(composes_into="bronze_sword", piece_count=2, slot=0, missing_slots=(1,))
+        w.held_supplies = [InventorySupply(5, "bronze_sword", frag), InventorySupply(6, "small_potion")]
+        items = {"bronze_sword": {"gem_price": 15}, "small_potion": {"gem_price": 10}}
+        self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory()))
+
+
+class ScoringTest(unittest.TestCase):
+    def test_measured_hits_on_shared_types_only(self):
+        items = {
+            "bronze_mail": {"damage_saved": {"rat": 3, "bat": 9}, "gem_price": 20},
+            "iron_mail": {"damage_saved": {"rat": 4}, "gem_price": 60},
+        }
+        t = rats(5)
+        t.record(("npc", "bat"), 2)
+        self.assertEqual(compare("iron_mail", "bronze_mail", items, t, "damage_saved"), (20, 15))
+
+    def test_falls_back_to_price_not_mixed_units(self):
+        # Measured hits on one side only: compare prices, never hits against a price.
+        items = {"bronze_mail": {"damage_saved": {"rat": 3}, "gem_price": 20}, "iron_mail": {"gem_price": 60}}
+        self.assertEqual(compare("iron_mail", "bronze_mail", items, rats(), "damage_saved"), (60, 20))
+
+    def test_incomparable_is_none(self):
+        items = {"bronze_mail": {"damage_saved": {"rat": 3}}, "iron_mail": {"gem_price": 60}}
+        self.assertIsNone(compare("iron_mail", "bronze_mail", items, rats(), "damage_saved"))
+
+    def test_starting_kit_counts_as_free(self):
+        items = {"bronze_sword": {"gem_price": 15}}
+        self.assertEqual(compare("bronze_sword", "pocket_knife", items, ThreatTable(), "weapon_damage"), (15, 0))
+
+
+class UpgradeTest(unittest.TestCase):
+    def test_arms_bought_sword_over_knife(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        up = best_equip_upgrade(w, {"bronze_sword": {"gem_price": 15}}, w.threat, Memory())
+        assert up is not None
+        self.assertEqual((up.slot, up.supply_id, up.remove_first), ("armed", 5, False))
+
+    def test_swaps_body_armor_on_clear_gain(self):
+        m = Memory()
+        m.equip_slots = {"bronze_mail": "body", "iron_mail": "body"}
+        w = world()
+        w.worn_codes = {"body": "bronze_mail"}
+        w.held_supplies = [InventorySupply(8, "iron_mail")]
+        items = {"bronze_mail": {"gem_price": 20}, "iron_mail": {"gem_price": 60}}
+        up = best_equip_upgrade(w, items, w.threat, m)
+        assert up is not None
+        self.assertEqual((up.slot, up.supply_id, up.remove_first), ("body", 8, True))
+
+    def test_no_swap_on_tie_or_noise(self):
+        m = Memory()
+        m.equip_slots = {"bronze_mail": "body", "iron_mail": "body"}
+        w = world()
+        w.worn_codes = {"body": "bronze_mail"}
+        w.held_supplies = [InventorySupply(8, "iron_mail")]
+        t = rats(5)
+        for saved in (4, 5, 2):  # tie, one rolled point better, worse
+            items = {"bronze_mail": {"damage_saved": {"rat": 4}}, "iron_mail": {"damage_saved": {"rat": saved}}}
+            self.assertIsNone(best_equip_upgrade(w, items, t, m), saved)
+        # Equal prices, and a small re-price, keep what is worn.
+        for price in (20, 24):
+            items = {"bronze_mail": {"gem_price": 20}, "iron_mail": {"gem_price": price}}
+            self.assertIsNone(best_equip_upgrade(w, items, t, m), price)
+
+    def test_no_swap_back_after_upgrade(self):
+        w = world()
+        w.armed_code = "bronze_sword"
+        w.held_supplies = [InventorySupply(4, "pocket_knife")]
+        items = {"bronze_sword": {"gem_price": 15}}
+        self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory()))
+
+    def test_leaves_deliberately_armed_tool(self):
+        w = world()
+        w.armed_code = "torch"  # Solve or Break armed it
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        items = {"bronze_sword": {"gem_price": 15}, "torch": {"gem_price": 10}}
+        self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory()))
+
+    def test_leaves_armed_slot_while_solve_or_break_borrows_it(self):
+        w = world()
         w.armed_code = "pocket_knife"
         w.held_supplies = [InventorySupply(5, "bronze_sword")]
         items = {"bronze_sword": {"gem_price": 15}}
-        up = best_equip_upgrade(w, items, w.threat)
-        self.assertIsNotNone(up)
-        assert up is not None
-        self.assertEqual(up.intents, ({"verb": "Arm", "supply_id": 5},))
-        self.assertIn("bronze_sword", up.reason)
-
-    def test_best_upgrade_swaps_body_armor(self):
-        w = WorldModel(character_id=1, map_id=7, pos=(0, 0))
-        w.worn_codes = {"body": "leather_vest"}
-        w.held_supplies = [InventorySupply(8, "bronze_mail")]
-        items = {
-            "leather_vest": {"gem_price": 5},
-            "bronze_mail": {"gem_price": 20},
-        }
-        up = best_equip_upgrade(w, items, w.threat)
-        self.assertIsNotNone(up)
-        assert up is not None
-        self.assertEqual(
-            up.intents,
-            (
-                {"verb": "Remove", "slot": "body"},
-                {"verb": "Wear", "supply_id": 8},
-            ),
-        )
-
-
-class EquipDispatchTest(unittest.TestCase):
-    def test_equip_before_loot(self):
-        w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=5)
-        w.armed_code = "pocket_knife"
-        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory(), armed_owned=True))
         kb = KnowledgeBase.empty("sandbox")
-        kb.items["bronze_sword"] = {"gem_price": 15}
-        out = dispatch(w, ctx(w, kb))
+        kb.items.update(items)
+        for attr in ("solve_rearm", "break_rearm"):
+            c = ctx(kb)
+            setattr(c.memory, attr, "bronze_mallet")
+            self.assertNotEqual(dispatch(w, c).state, "Equip", attr)
+
+
+class RefusalTest(unittest.TestCase):
+    def setUp(self):
+        self.w = world()
+        self.w.armed_code = "pocket_knife"
+        self.w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        self.kb = KnowledgeBase.empty("sandbox")
+        self.kb.items["bronze_sword"] = {"gem_price": 15}
+
+    def test_refused_arm_not_resent_until_inventory_changes(self):
+        c = ctx(self.kb)
+        out = dispatch(self.w, c)
+        self.assertEqual(out.state, "Equip")
+        learn_equip_rejection(c.memory, self.w, out.intents[0])
+        for _ in range(3):
+            self.assertNotEqual(dispatch(self.w, c).state, "Equip")
+        self.w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(9, "apple")]
+        out = dispatch(self.w, c)
         self.assertEqual(out.state, "Equip")
         self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 5}])
 
-    def test_skips_potion_for_heal(self):
-        w = WorldModel(character_id=1, map_id=7, pos=(0, 0))
-        w.held_supplies = [InventorySupply(3, "small_potion")]
-        kb = KnowledgeBase.empty("sandbox")
-        kb.items["small_potion"] = {"gem_price": 10}
-        out = dispatch(w, ctx(w, kb))
-        self.assertNotEqual(out.state, "Equip")
+    def test_refused_wear_and_remove(self):
+        m = Memory()
+        m.equip_slots = {"bronze_mail": "body", "iron_mail": "body"}
+        w = world()
+        w.worn_codes = {"body": "bronze_mail"}
+        w.held_supplies = [InventorySupply(8, "iron_mail")]
+        items = {"bronze_mail": {"gem_price": 20}, "iron_mail": {"gem_price": 60}}
+        learn_equip_rejection(m, w, {"verb": "Wear", "supply_id": 8})
+        sync_refusals(m, w)
+        self.assertIsNone(best_equip_upgrade(w, items, w.threat, m))
+        m2 = Memory()
+        m2.equip_slots = dict(m.equip_slots)
+        learn_equip_rejection(m2, w, {"verb": "Remove", "slot": "body"})
+        sync_refusals(m2, w)
+        self.assertIsNone(best_equip_upgrade(w, items, w.threat, m2))
+        w.worn_codes = {}
+        w.held_supplies = [InventorySupply(7, "bronze_mail"), InventorySupply(8, "iron_mail")]
+        sync_refusals(m2, w)
+        self.assertIsNotNone(best_equip_upgrade(w, items, w.threat, m2))
 
-    def test_equip_falls_through_when_upgrade_gone(self):
-        import agentrealm_agent.states.equip as equip_mod
+    def test_other_verbs_ignored(self):
+        m = Memory()
+        learn_equip_rejection(m, self.w, {"verb": "Drop", "supply_id": 5})
+        self.assertEqual(m.equip_refused, set())
 
-        w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)
-        for x in range(3):
-            w.view.tiles[(x, 0)] = "dirt"
+
+class DispatchTest(unittest.TestCase):
+    def test_equip_before_loot(self):
+        w = world()
         w.armed_code = "pocket_knife"
         w.held_supplies = [InventorySupply(5, "bronze_sword")]
         kb = KnowledgeBase.empty("sandbox")
         kb.items["bronze_sword"] = {"gem_price": 15}
-        with mock.patch.object(equip_mod, "best_equip_upgrade", return_value=None):
-            out = dispatch(w, ctx(w, kb))
-        self.assertIn("Equip: nothing to equip", out.yielded)
-        self.assertNotEqual(out.state, "Equip")
+        out = dispatch(w, ctx(kb))
+        self.assertEqual(out.state, "Equip")
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 5}])
+
+    def test_wear_learned_from_served_worn(self):
+        c = ctx()
+        w = world()
+        w.worn_codes = {"body": "bronze_mail"}
+        dispatch(w, c)  # files bronze_mail under body
+        w.worn_codes = {}
+        w.held_supplies = [InventorySupply(8, "bronze_mail")]
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Equip")
+        self.assertEqual(out.intents, [{"verb": "Wear", "supply_id": 8}])
+
+    def test_not_scripted_or_dead(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["bronze_sword"] = {"gem_price": 15}
+        c = ctx(kb)
+        c.policy = Policy(kind="wander")
+        self.assertNotEqual(dispatch(w, c).state, "Equip")
+        w.alive = False
+        self.assertNotEqual(dispatch(w, ctx(kb)).state, "Equip")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,22 @@
 """Equip scoring and upgrade selection (A19, M8).
 
-Armor is scored by ``damage_saved`` against hostile types in the threat table,
-weighted by each type's expected hit damage. Weapons use ``weapon_damage`` the
-same way. With no learned hits, ``gem_price`` from the item table breaks ties.
+Only sourced facts decide what goes where:
+
+- **Weapons** are the exact codes GAME_NOTES names as weapons
+  (``break_memory.WEAPONS``). Nothing else is armed by Equip.
+- **Worn slots** come from the snapshot's ``worn`` by slot: a subtype seen
+  worn in a slot is filed there for the run. A held subtype never seen worn has
+  no known slot and is not worn (supply reads serve no slot; PLAN.md Server gaps).
+
+Each slot compares like with like, never across units: learned per-NPC-type
+hits (``weapon_damage`` for weapons, ``damage_saved`` for armor) on the hostile
+types both items have measured, weighted by the threat table; failing that,
+``gem_price`` when both have one. The non-transferable starting kit has no shop
+price and counts as 0 gems. Items with nothing comparable are left alone. A
+swap needs a clear gain (``MIN_GAIN_RATIO``), so ties and noise never swap.
+
+A refused ``Arm``, ``Wear`` or ``Remove`` marks its (subtype, slot) pair, and
+Equip does not try that pair again until the loadout or inventory changes.
 Consumables and compose fragments are never equipped; they stay for Heal and
 Solve (PLAYABLE_AGENT_PLAN Gear).
 """
@@ -12,167 +26,209 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .break_memory import WEAPONS
 from .healing import FOOD_CODES, POTION_CODES
 from .item_table import InventorySupply
 from .loot import NON_TRANSFERABLE
+from .memory import Memory
 from .threat import ThreatTable
 from .world import WorldModel
 
+ARMED = "armed"
 WEAR_SLOTS = ("head", "body", "legs", "feet", "accessory")
 
-# Subtype code substrings for armed gear (GAME_NOTES Items; capabilities not served).
-ARMED_HINTS = (
-    "sword",
-    "knife",
-    "mallet",
-    "axe",
-    "bow",
-    "dagger",
-    "hammer",
-    "torch",
-    "matches",
-    "wand",
-)
+# A swap must beat what is in the slot by more than this factor: equal or near-equal
+# scores (one rolled hit apart, or a re-price) keep what is equipped.
+MIN_GAIN_RATIO = 1.25
 
 
 def is_consumable(code: str | None) -> bool:
     return bool(code) and (code in FOOD_CODES or code in POTION_CODES)
 
 
-def is_armed_gear(code: str | None) -> bool:
-    if not code or is_consumable(code):
-        return False
-    return any(h in code for h in ARMED_HINTS)
+def is_weapon(code: str | None) -> bool:
+    return bool(code) and code in WEAPONS
 
 
-def infer_wear_slot(code: str | None) -> str | None:
-    """Map a held subtype to a worn slot, or None when it should not be worn."""
-    if not code or is_consumable(code) or is_armed_gear(code):
+def learn_worn_slots(m: Memory, w: WorldModel) -> None:
+    """File each worn subtype under the slot the snapshot serves it in."""
+    for slot, code in w.worn_codes.items():
+        if slot in WEAR_SLOTS and code:
+            m.equip_slots[code] = slot
+
+
+def wear_slot(code: str | None, m: Memory) -> str | None:
+    if not code or is_consumable(code) or is_weapon(code):
         return None
-    if "chest" in code and "bronze" not in code and "mail" not in code:
-        # Carried chest upgrades (e.g. middle_chest) are not worn armor.
-        if code.endswith("_chest") or code == "middle_chest":
-            return None
-    if any(k in code for k in ("map", "cloak", "disguise", "goggles")):
-        return "accessory"
-    if any(k in code for k in ("helm", "hat", "hood", "goggle")):
-        return "head"
-    if any(k in code for k in ("boot", "feet", "shoe", "sandal")):
-        return "feet"
-    if any(k in code for k in ("leg", "greave", "pant")):
-        return "legs"
-    if any(k in code for k in ("mail", "body", "plate", "vest", "armor", "robe")):
-        return "body"
+    return m.equip_slots.get(code)
+
+
+def _price(code: str, items: dict[str, dict[str, Any]]) -> int | None:
+    price = (items.get(code) or {}).get("gem_price")
+    if isinstance(price, int) and not isinstance(price, bool) and price > 0:
+        return price
+    if code in NON_TRANSFERABLE:
+        return 0  # starting kit: never sold, so no shop price
     return None
 
 
-def _gem_price_score(row: dict[str, Any]) -> int:
-    price = row.get("gem_price")
-    if isinstance(price, int) and not isinstance(price, bool) and price > 0:
-        return price
-    return 0
+def _per_npc(code: str, items: dict[str, dict[str, Any]], field: str) -> dict[str, int]:
+    raw = (items.get(code) or {}).get(field)
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(v, int) and not isinstance(v, bool) and v > 0}
 
 
-def _weighted_per_npc(row: dict[str, Any], field: str, threat: ThreatTable) -> int:
-    per_type = row.get(field)
-    if not isinstance(per_type, dict):
-        return 0
-    total = 0
-    for key, amount in threat.by_type.items():
-        if key[0] != "npc" or not isinstance(amount, int) or amount <= 0:
-            continue
-        hit = per_type.get(key[1])
-        if isinstance(hit, int) and not isinstance(hit, bool) and hit > 0:
-            total += hit * amount
-    return total
+def _threat_weights(threat: ThreatTable) -> dict[str, int]:
+    return {
+        key[1]: amount
+        for key, amount in threat.by_type.items()
+        if key[0] == "npc" and isinstance(amount, int) and amount > 0
+    }
 
 
-def armor_score(code: str | None, items: dict[str, dict[str, Any]], threat: ThreatTable) -> int:
-    if not code:
-        return 0
-    row = items.get(code) or {}
-    saved = _weighted_per_npc(row, "damage_saved", threat)
-    if saved > 0:
-        return saved
-    return _gem_price_score(row)
+def compare(
+    held: str,
+    current: str,
+    items: dict[str, dict[str, Any]],
+    threat: ThreatTable,
+    field: str,
+) -> tuple[int, int] | None:
+    """(held score, current score) on one shared scale, or None when none is shared.
+
+    Measured hits on the threat-table NPC types both subtypes have a sample
+    for come first; else both ``gem_price``s.
+    """
+    weights = _threat_weights(threat)
+    h, c = _per_npc(held, items, field), _per_npc(current, items, field)
+    shared = [t for t in weights if t in h and t in c]
+    if shared:
+        return sum(h[t] * weights[t] for t in shared), sum(c[t] * weights[t] for t in shared)
+    hp, cp = _price(held, items), _price(current, items)
+    if hp is not None and cp is not None:
+        return hp, cp
+    return None
 
 
-def weapon_score(code: str | None, items: dict[str, dict[str, Any]], threat: ThreatTable) -> int:
-    if not code:
-        return 0
-    row = items.get(code) or {}
-    damage = _weighted_per_npc(row, "weapon_damage", threat)
-    if damage > 0:
-        return damage
-    return _gem_price_score(row)
-
-
-def _held_candidates(w: WorldModel) -> list[InventorySupply]:
-    out: list[InventorySupply] = []
-    for s in w.held_supplies:
-        if s.fragment is not None:
-            continue
-        if s.code in NON_TRANSFERABLE and not is_armed_gear(s.code):
-            continue
-        out.append(s)
-    return out
+def clear_gain(held: int, current: int) -> bool:
+    return held > current * MIN_GAIN_RATIO
 
 
 @dataclass(frozen=True)
 class EquipUpgrade:
-    delta: int
-    intents: tuple[dict, ...]
-    reason: str
+    """Put held supply ``supply_id`` (``code``) in ``slot``, taking off what is worn there first."""
+
+    slot: str
+    supply_id: int
+    code: str
+    remove_first: bool = False
+
+
+def _candidates(w: WorldModel) -> list[InventorySupply]:
+    return [s for s in w.held_supplies if s.fragment is None and s.code and not is_consumable(s.code)]
+
+
+def _best_for_slot(
+    slot: str,
+    current: str | None,
+    held: list[InventorySupply],
+    items: dict[str, dict[str, Any]],
+    threat: ThreatTable,
+    field: str,
+) -> InventorySupply | None:
+    """The held supply that clearly beats ``current``; an empty slot takes any candidate."""
+    if not held:
+        return None
+    if current is None:
+        priced = [(_price(s.code, items) or 0, s) for s in held]
+        return max(priced, key=lambda p: (p[0], -p[1].id))[1]
+    ranked: list[tuple[float, int, InventorySupply]] = []
+    for s in held:
+        if s.code == current:
+            continue
+        pair = compare(s.code, current, items, threat, field)
+        if pair is None or not clear_gain(*pair):
+            continue
+        # Each candidate is scored against current on its own shared scale, so
+        # candidates are ranked by gain ratio, never by raw score across scales.
+        ranked.append((pair[0] / max(pair[1], 1), -s.id, s))
+    return max(ranked, key=lambda r: r[:2])[2] if ranked else None
 
 
 def best_equip_upgrade(
     w: WorldModel,
     items: dict[str, dict[str, Any]],
     threat: ThreatTable,
+    m: Memory,
+    armed_owned: bool = False,
 ) -> EquipUpgrade | None:
-    """The best held upgrade to armed or one worn slot, or None."""
-    candidates: list[EquipUpgrade] = []
+    """The first slot with a clear upgrade, weapon first, then worn slots in order.
+
+    ``armed_owned`` is True while another state (Solve, Break) holds the armed
+    slot. Heal, Solve and Break arm potions and tools on purpose, so the armed
+    slot is only touched while it holds a weapon or nothing.
+    """
+    refused = m.equip_refused
+    held = _candidates(w)
 
     armed = w.armed_code
-    armed_sc = weapon_score(armed, items, threat)
-    for s in _held_candidates(w):
-        if not is_armed_gear(s.code):
-            continue
-        sc = weapon_score(s.code, items, threat)
-        if sc > armed_sc:
-            candidates.append(
-                EquipUpgrade(
-                    sc - armed_sc,
-                    ({"verb": "Arm", "supply_id": s.id},),
-                    f"arm {s.code}",
-                )
-            )
+    if not armed_owned and (armed is None or is_weapon(armed)):
+        weapons = [s for s in held if is_weapon(s.code) and (s.code, ARMED) not in refused]
+        s = _best_for_slot(ARMED, armed, weapons, items, threat, "weapon_damage")
+        if s is not None:
+            return EquipUpgrade(ARMED, s.id, s.code)
 
     for slot in WEAR_SLOTS:
         worn = w.worn_codes.get(slot)
-        worn_sc = armor_score(worn, items, threat)
-        for s in _held_candidates(w):
-            if infer_wear_slot(s.code) != slot:
-                continue
-            sc = armor_score(s.code, items, threat)
-            if sc <= worn_sc:
-                continue
-            intents: list[dict] = []
-            if worn:
-                intents.append({"verb": "Remove", "slot": slot})
-            intents.append({"verb": "Wear", "supply_id": s.id})
-            candidates.append(
-                EquipUpgrade(
-                    sc - worn_sc,
-                    tuple(intents),
-                    f"wear {s.code} ({slot})",
-                )
-            )
-
-    if not candidates:
-        return None
-    return max(candidates, key=lambda u: (u.delta, u.reason))
+        if worn is not None and (None, slot) in refused:
+            continue  # Remove refused on this slot
+        fits = [s for s in held if wear_slot(s.code, m) == slot and (s.code, slot) not in refused]
+        s = _best_for_slot(slot, worn, fits, items, threat, "damage_saved")
+        if s is None:
+            continue
+        return EquipUpgrade(slot, s.id, s.code, remove_first=worn is not None)
+    return None
 
 
-def equip_guard(w: WorldModel, items: dict[str, dict[str, Any]], threat: ThreatTable) -> bool:
-    return best_equip_upgrade(w, items, threat) is not None
+def loadout_signature(w: WorldModel) -> tuple:
+    return (
+        w.armed_code,
+        tuple(sorted(w.worn_codes.items())),
+        tuple(sorted(s.id for s in w.held_supplies)),
+    )
+
+
+def sync_refusals(m: Memory, w: WorldModel) -> None:
+    """Forget refusals once the loadout or inventory has changed since they were noted."""
+    sig = loadout_signature(w)
+    if m.equip_refused_sig is None:
+        m.equip_refused_sig = sig
+    elif m.equip_refused_sig != sig:
+        m.equip_refused.clear()
+        m.equip_refused_sig = sig
+
+
+def learn_equip_rejection(m: Memory, w: WorldModel, intent: dict | None) -> None:
+    """Mark the (subtype, slot) an Equip ``Arm``, ``Wear`` or ``Remove`` was refused for.
+
+    Called before the response's observation is applied, so held supplies are
+    still the ones the intent named. The signature is taken on the next guard.
+    """
+    if not intent:
+        return
+    verb = intent.get("verb")
+    if verb == "Remove":
+        slot = intent.get("slot")
+        if isinstance(slot, str):
+            m.equip_refused.add((None, slot))
+    elif verb in ("Arm", "Wear"):
+        sid = intent.get("supply_id")
+        code = next((s.code for s in w.held_supplies if s.id == sid), None)
+        if code is None:
+            return
+        slot = ARMED if verb == "Arm" else wear_slot(code, m)
+        if slot is not None:
+            m.equip_refused.add((code, slot))
+    else:
+        return
+    m.equip_refused_sig = None

@@ -149,7 +149,7 @@ class RecoverDispatchTest(unittest.TestCase):
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
         full_inventory(w)
         w.chest_contents[80] = [InventorySupply(71, "torch")]
-        out = dispatch(w, ctx(scripted(goals=["hold"])))
+        out = dispatch(w, ctx(scripted(goals=["hold"]), m=Memory(equip_not_wearable={"torch"})))
         # Recover yields and Explore (goal "hold") has nothing to send either.
         self.assertEqual(out.state, "")
         self.assertIsNone(out.intents)

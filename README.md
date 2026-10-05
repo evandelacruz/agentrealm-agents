@@ -27,7 +27,7 @@ python3 -m agentrealm_agent metrics characters/wren.toml                    # su
 python3 -m agentrealm_agent compare-metrics baseline.metrics candidate.metrics   # candidate-minus-baseline deltas
 ```
 
-The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample characters use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` stores the character id under `python/.state/`; `run` plays until Ctrl-C and writes a trace there. Run one `run` process per world at a time. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
+The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample characters use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` stores the character id under `python/.state/`; `run` plays until Ctrl-C and writes a trace there. Run one `run` process per world at a time. Optional strategist (A35): set `AGENTREALM_STRATEGIST_MODEL` and `AGENTREALM_STRATEGIST_API_KEY` or `OPENAI_API_KEY`; see `python/agentrealm_agent/strategist.py` for rate and cost limits. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
 
 Copy and edit a file in `python/characters/` to try different behavior (`policy.kind` can be `idle`, `wander`, or `scripted`).
 
@@ -38,7 +38,7 @@ Copy and edit a file in `python/characters/` to try different behavior (`policy.
 - **Reflexes** run first every tick and need no model: step off lava, take a supply underfoot, flee a close hostile, walk the next step of the path.
 - **States** are named behaviors, each with a `guard` (should I run?) and an `act` (what do I send?).
 - **Dispatcher** walks the states in a fixed priority order: survival first, then loot and recovery, then puzzles, travel and bosses, then explore and idle. A state with nothing to send falls through to the next, so the agent never stalls.
-- **Plan** is the path being walked: goals from the character file or live directives, A* over known tiles, around fog and hazards.
+- **Plan** is the path being walked: goals from the character file or live directives, A* over known tiles, around fog and hazards. An optional **strategist** (background thread) can replace the goal stack from an LLM when `AGENTREALM_STRATEGIST_MODEL` and an API key are set; without it, clue text still steers exploration (A32).
 
 Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md). Tables in [`PLAN.md`](PLAN.md): [Scheduler](PLAN.md#scheduler-which-call-this-window), [Reflexes](PLAN.md#reflexes-every-round-trip-no-model), [Plan](PLAN.md#plan-goal-and-path).
 

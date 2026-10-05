@@ -256,7 +256,7 @@ Items are grouped into milestones (M0–M13). A milestone is a heading, not a wo
 | ID | Item | Depends on |
 |---|---|---|
 | A34 | **Plan schema and goal stack.** Op table, field validation, param limits; states consume goals; the built-in plan with no model. Gather (A22) reads `gather_gems[:count]` straight from directives `goals` via `plan_goals.py`. | A5, A8 |
-| A35 | **Strategist thread.** Optional LLM dependency, triggers, rate and cost limits, trace logging. | A32, A34 |
+| A35 | **Strategist thread.** Shipped (`strategist.py`): a background thread drains `Memory.clue_signals`, `nav_stuck.stuck_signals`, and `Memory.strategist_signals` (death, level, goal_done, goal_failed, idle); with `AGENTREALM_STRATEGIST_MODEL` and an API key it calls the OpenAI chat API (stdlib `urllib`, optional `openai` package not required), rate-limits calls (`AGENTREALM_STRATEGIST_MIN_INTERVAL_S`, `AGENTREALM_STRATEGIST_MAX_CALLS`, `AGENTREALM_STRATEGIST_MAX_USD`), logs prompts and answers to the trace, and applies `parse_plan_payload` (A34) to replace the goal stack when an answer lands unless directives `goals` own the stack; with no model, signals are drained and the built-in plan plus A32 clue rules stay in charge. | A32, A34 |
 | A36 | **M4 acceptance.** M4 done-when. | A33, A35 |
 
 **M11: Levels.**

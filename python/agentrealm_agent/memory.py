@@ -67,6 +67,9 @@ class Memory:
     buy_signals_seen: set[tuple[str, str]] = field(default_factory=set)
     # Clues (A32): {"trigger": "clue", **kb.clues row} per new clue; the strategist (A35) drains them.
     clue_signals: list[dict] = field(default_factory=list)
+    # Strategist (A35): death, level, goal_done, goal_failed, idle; clue and stuck live elsewhere.
+    strategist_signals: list[dict] = field(default_factory=list)
+    strategist_progress_tick: int = 0  # last tick with plan or movement progress (idle trigger)
     # Shop (A21): (supply id, code, gems before, supply pos, map id, tick sent)
     # of the Take in flight. Its buy signal is consumed on an applied Take or a
     # gem drop, kept on a rejection; it expires on leaving the shop cell or a timeout.

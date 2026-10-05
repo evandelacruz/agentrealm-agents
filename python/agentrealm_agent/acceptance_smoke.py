@@ -1,4 +1,4 @@
-"""Shared Olympuff smoke helpers (M7 A16, M8 A25)."""
+"""Shared helpers for live acceptance smoke scripts (M7 A16, M8 A25, M10 A33)."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import threading
 import time
 from typing import Callable
 
-from .acceptance_run import TimedRunHooks
+from . import config
+from .acceptance import AcceptanceHooks
 from .client import Client
-from .config import CharacterConfig
 from .executor.intents import wait
 from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
 from .runner import Runner
@@ -33,7 +33,7 @@ def wake(client: Client, cid: int, *, pause: Callable[[float], None] = time.slee
     ``respawn_delay_seconds``, so this reads self until it is alive.
     Raises ValueError saying why it could not.
 
-    This repeats Sync's wake (``states/sync.py``) because startup reads
+    This repeats Sync's wake (``states/sync.py``) because acceptance scripts
     need a position before the runner starts; keep the two in step.
     """
     for _ in range(WAKE_READS):
@@ -55,7 +55,8 @@ def wake(client: Client, cid: int, *, pause: Callable[[float], None] = time.slee
 def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
     """The overworld's map id and where the character stands on it.
 
-    Raises ValueError when the character is not on the overworld.
+    Raises ValueError when the character is not on the overworld, where M7 and M8
+    are judged.
     """
     town = client.world(cid).get("town") or {}
     p = client.position(cid)
@@ -64,31 +65,35 @@ def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
     return int(town["map_id"]), (int(p["x"]), int(p["y"]))
 
 
-def run_smoke(
+def run_acceptance_smoke(
     client: Client,
-    cfg: CharacterConfig,
+    cfg: config.CharacterConfig,
     cid: int,
-    metrics: TimedRunHooks,
+    metrics: AcceptanceHooks,
     *,
     timeout_s: float,
-    log: Callable[[str], None] | None = None,
-) -> float:
-    """Play until ``metrics`` stops the run or ``timeout_s`` passes; the seconds it took."""
+    out: Callable[[str], None] | None = None,
+) -> tuple[float, KnowledgeBase]:
+    """Run the runner with ``metrics`` until it stops or ``timeout_s`` elapses.
+
+    Returns the seconds played and the knowledge base the runner wrote to; judge
+    the run on that one, not a reload, which misses the run if the save failed.
+    """
     stop = threading.Event()
     metrics.stop = stop
     started = time.monotonic()
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
 
-    def out(line: str) -> None:
-        if log is not None:
-            log(line)
+    def emit(line: str) -> None:
+        if out is not None:
+            out(line)
 
     runner = Runner(
         cfg,
         metrics.wrap(client),
         cid,
         stop,
-        out,
+        emit,
         knowledge=knowledge,
         acceptance=metrics,
     )
@@ -98,7 +103,7 @@ def run_smoke(
             return
         if stop.wait(timeout_s):
             return
-        out(f"[{cfg.profile}] timeout after {timeout_s:.0f}s")
+        emit(f"[{cfg.profile}] timeout after {timeout_s:.0f}s")
         stop.set()
 
     thread = threading.Thread(target=runner.run, daemon=True)
@@ -111,5 +116,5 @@ def run_smoke(
     try:
         save_knowledge(knowledge)
     except OSError as e:
-        out(f"knowledge base {knowledge.world_code}: not saved: {e}")
-    return elapsed
+        emit(f"knowledge base {knowledge.world_code}: not saved: {e}")
+    return elapsed, knowledge

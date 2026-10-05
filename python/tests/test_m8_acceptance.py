@@ -242,7 +242,7 @@ class SmokeScriptTest(unittest.TestCase):
                 mock.patch.object(self.smoke.time, "sleep"), \
                 mock.patch.object(self.smoke, "wake"), \
                 mock.patch.object(self.smoke, "navigation_start", return_value=(OVERWORLD, (0, 0))), \
-                mock.patch.object(self.smoke, "run_smoke", return_value=10.0):
+                mock.patch.object(self.smoke, "run_acceptance_smoke", return_value=(10.0, None)):
             code, out, _ = self.main(["--api-key", "k", "--character-id", "9", "--seconds", "10"])
         self.assertEqual(code, 0, out)
 
@@ -252,7 +252,7 @@ class SmokeScriptTest(unittest.TestCase):
                 mock.patch.object(self.smoke.time, "sleep"), \
                 mock.patch.object(self.smoke, "wake"), \
                 mock.patch.object(self.smoke, "navigation_start", return_value=(OVERWORLD, (0, 0))), \
-                mock.patch.object(self.smoke, "run_smoke", return_value=float(TARGET_SECONDS)):
+                mock.patch.object(self.smoke, "run_acceptance_smoke", return_value=(float(TARGET_SECONDS), None)):
             code, _, err = self.main(["--api-key", "k", "--character-id", "9", "--seconds", str(TARGET_SECONDS)])
         self.assertEqual(code, 1)
         self.assertIn("gems never increased", err)

@@ -408,14 +408,14 @@ class SmokeScriptTest(unittest.TestCase):
     def run_main(self, seconds: float, played):
         """``main`` against a fake client; ``played(metrics)`` stands in for the hour."""
 
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s, log=None):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None):
             played(metrics)
-            return seconds
+            return seconds, None
 
         with mock.patch.object(self.smoke, "Client") as Client, \
                 mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
                 mock.patch.object(self.smoke.time, "sleep"), \
-                mock.patch.object(self.smoke, "run_smoke", side_effect=run_smoke):
+                mock.patch.object(self.smoke, "run_acceptance_smoke", side_effect=run_smoke):
             client = Client.return_value
             client.world.return_value = {"town": {"map_id": OVERWORLD, "x": 0, "y": 0}}
             client.position.return_value = {"map_id": OVERWORLD, "x": 10, "y": 20}
@@ -489,7 +489,11 @@ class SmokeScriptTest(unittest.TestCase):
         with mock.patch.object(self.smoke, "Client") as Client, \
                 mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
                 mock.patch.object(self.smoke.time, "sleep"), \
-                mock.patch.object(self.smoke, "run_smoke", return_value=10):
+                mock.patch.object(
+                    self.smoke,
+                    "run_acceptance_smoke",
+                    side_effect=lambda c, cfg, cid, m, **kw: (10, None),
+                ):
             fake = FakeSleeper()
             Client.return_value = fake
             fake.on_position = lambda: seen.append(list(fake.ticks))

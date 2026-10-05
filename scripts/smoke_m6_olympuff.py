@@ -22,7 +22,7 @@ sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
-from agentrealm_agent.client import ApiError, Client  # noqa: E402
+from agentrealm_agent.client import Client  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
 from agentrealm_agent.m6_acceptance import M6AcceptanceMetrics, TARGET_STEPS  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402

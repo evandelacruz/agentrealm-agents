@@ -72,7 +72,10 @@ def _id_for_name(client: Client | None, cfg: CharacterConfig, name: str) -> int:
     """The one character called ``name`` in the profile's world."""
     if client is None:
         raise CharacterSelectionError("--character-name needs an API key")
-    matches = find_character_ids_by_name(client, cfg.world, name)
+    try:
+        matches = find_character_ids_by_name(client, cfg.world, name)
+    except ApiError as e:
+        raise CharacterSelectionError(f"could not list characters to find {name!r}: {e}") from e
     if not matches:
         raise CharacterSelectionError(
             f"no character named {name!r} in world {cfg.world!r}; create one or pick another name"

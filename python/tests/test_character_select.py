@@ -71,6 +71,12 @@ class ResolveCharacterIdTest(unittest.TestCase):
         with self.assertRaisesRegex(CharacterSelectionError, "no character named"):
             resolve_character_id(client, self.cfg(), character_id=None, character_name="Nobody")
 
+    def test_list_characters_error_is_a_selection_error(self):
+        client = mock.Mock()
+        client.list_characters.side_effect = ApiError(401, "unauthorized")
+        with self.assertRaisesRegex(CharacterSelectionError, "could not list characters"):
+            resolve_character_id(client, self.cfg(), character_name="Pat")
+
     def test_id_and_name_together(self):
         with self.assertRaisesRegex(CharacterSelectionError, "not both"):
             resolve_character_id(mock.Mock(), self.cfg(), character_id=1, character_name="Pat")
@@ -162,6 +168,17 @@ class ProfileAndCliTest(unittest.TestCase):
         rc, _, err, client = self.main("run", str(self.toml), "--character-name", "Pat")
         self.assertEqual(rc, 0, err)
         client.self_.assert_called_with(5)
+
+    def test_status_by_name_api_error_exits_2(self):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict("os.environ", {"AGENTREALM_API_KEY": "k"}, clear=True), \
+                mock.patch.object(cli, "Client") as client_cls:
+            client_cls.return_value.list_characters.side_effect = ApiError(401, "unauthorized")
+            with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+                rc = cli.main(["status", str(self.toml), "--character-name", "Pat"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(len(err.getvalue().strip().splitlines()), 1)
+        self.assertIn("could not list characters", err.getvalue())
 
     def test_legacy_name_field_rejected(self):
         bad = self.dir / "bad.toml"

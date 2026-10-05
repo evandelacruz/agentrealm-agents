@@ -126,7 +126,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   | `matches` | 5 |
   | `small_potion` | 10 |
 
-- **Gems and lives are counters.** Gems and hearts (extra lives) are consumed on pickup into counters and leave nothing in the chest, so they take no slot; lives cap at 20 ever gained (M §11; API). In Olympuff, cut grass and bushes drop gems and hearts (M §16).
+- **Gems and lives are counters.** Gems and hearts (extra lives) are consumed on pickup into counters and leave nothing in the chest, so they take no slot; lives cap at 20 ever gained (M §11; API). Manual §16 documents **gem** drops from cutting Olympuff grass and bushes (10% in ring 1, 15% farther); it documents gems and hearts from **sandbox** field grass and bushes when broken. The ground `supply_subtype_code` for a life on Olympuff is not observed yet (Obs: [`docs/observations/A20_live_play.md`](observations/A20_live_play.md)).
 - **Food.** Olympuff's golden cap heals 6 and is eaten on pickup (M §16). Potions are drunk with `Arm` + `Use` on self; swapping what is armed costs a tick (API Use). Small potion +10, large +30 (M §16).
 - **Gear tiers:** bronze in town, iron at waystations, adamant at the Last Camp and from bosses (M §16).
 - **Gems come from** cutting grass and bushes (10% in ring 1, 15% farther), felling trees, gem piles that return on an interval, and gem caches. Field work earns about 3 gems a minute (M §16). Gems are kept on death.
@@ -217,7 +217,7 @@ Each has a test the agent or a hand session can run.
 | How ground food other than the golden cap heals (apples, berries): on pickup, or carried and `Use`d on self | `Take` one while hurt and read `health`; if unchanged, `Arm` + `Use` self |
 | Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
 | How to tell a scroll supply from others before reading it. Nothing sourced names scroll subtype codes, so `Investigate` reads no scrolls yet (PLAN.md A30) | Log `supply_subtype_code` of every supply seen; `Read` one of each once and keep the codes that do not answer `nothing_to_read` |
-| Which `supply_subtype_code` a life (heart) has on the ground. Until known, A20's hearts first is off | `Take` a heart dropped by cut grass and log its code with the `lives` change |
+| Which `supply_subtype_code` a life (heart) has on the ground. Until known, A20's hearts first is off | On Olympuff, keep cutting grass and bushes and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16) |
 | Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? A20 drops held only | `Drop` a stowed supply and read the result |
 | Is the armed supply also listed in `held`? A20 counts held, worn, armed and stowed separately | Compare `inventory` before and after an `Arm` |
 | Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full` | Carry one and fill until `carry_capacity_full` |

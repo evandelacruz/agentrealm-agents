@@ -17,7 +17,7 @@ before re-queuing. Space `GET …/entity-tiles` at least ~1 s from burst movemen
   once `small_potion` in snapshot entities; `lives` stayed 10 throughout.
 - **Take** of adjacent `gem` supplies raised the gems counter (6→10 over the session); no pickup
   raised `lives`.
-- **Still open (A58):** wire `LIFE_SUPPLY_CODES` once a `Take` raises `lives` and A47's
+- **Still open (A57):** wire `LIFE_SUPPLY_CODES` once a `Take` raises `lives` and A47's
   `learn_life_code` files the code (or sandbox field grass with a bomb per Manual §16).
 
 ## Stowed `Drop`
@@ -28,7 +28,7 @@ before re-queuing. Space `GET …/entity-tiles` at least ~1 s from burst movemen
   (439,404) and (430,395) — e.g. `matches` 5 gems at (414,402), `middle_chest` 50 at (416,402) —
   but walking onto shop cells from town/plaza rows was often blocked by `wall` tiles; buys were not
   completed in this pass.
-- **Still open (A58):** `Drop` a supply id listed only in `inventory.chest` and record applied vs
+- **Still open (A57):** `Drop` a supply id listed only in `inventory.chest` and record applied vs
   `not_held` (store result in the knowledge base if accepted).
 
 ## Larger chest (`middle_chest`)
@@ -36,7 +36,7 @@ before re-queuing. Space `GET …/entity-tiles` at least ~1 s from burst movemen
 - **Not measured.** **OlympuffM6Walk5d4e** held 10 gems; **Pippin Thistledown** 12; no character
   reached 50 gems or applied a `Take` of `middle_chest`. Manual §16 cap (30) remains the assumed
   default in code until measured.
-- **Still open (A58):** buy `middle_chest`, fill until `carry_capacity_full`, and replace
+- **Still open (A57):** buy `middle_chest`, fill until `carry_capacity_full`, and replace
   `MANUAL_CHEST_CAPACITY` for `middle_chest` with the measured slot count.
 
 ## API notes

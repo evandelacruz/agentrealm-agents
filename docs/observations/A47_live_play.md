@@ -15,20 +15,20 @@ API.
 
 - **Not observed.** Grass `Use` samples (40–80 cuts) at town coordinates produced no new codes in
   entity deltas; `lives` stayed 10.
-- **Still open (A58):** which code a life pickup uses on Olympuff (see [A20_live_play.md](A20_live_play.md), [A57_live_play.md](A57_live_play.md)).
+- **Still open (A57):** which code a life pickup uses on Olympuff (see [A20_live_play.md](A20_live_play.md), [A57_live_play.md](A57_live_play.md)).
 
 ## Stowed `Drop`
 
 - **Not observed.** No run filled `inventory.chest` with a droppable supply: free pickups were out
   of reach or `Take` was `target_not_nearby`, and account characters could not be created
   (`character_cap_reached`).
-- **Still open (A58):** whether `Drop` accepts a supply id listed only in `inventory.chest` ([A57_live_play.md](A57_live_play.md)).
+- **Still open (A57):** whether `Drop` accepts a supply id listed only in `inventory.chest` ([A57_live_play.md](A57_live_play.md)).
 
 ## Larger chest (`middle_chest`)
 
 - **Shop seen:** wide entity read at the town shop listed `middle_chest` priced at 50 gems
   (Manual §16 table: capacity 30). Test characters had 6–12 gems; no purchase was attempted.
-- **Still open (A58):** measured `carry_capacity_full` slot count after buying and filling with a
+- **Still open (A57):** measured `carry_capacity_full` slot count after buying and filling with a
   `middle_chest` upgrade ([A57_live_play.md](A57_live_play.md)).
 
 ## Session 3 (A57 pass, 2026-10-05)

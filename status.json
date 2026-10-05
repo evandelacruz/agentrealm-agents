@@ -55,9 +55,7 @@
 
   "A47": {"state": "done"},
 
-  "A57": {"state": "done", "note": "Live play pass documented in docs/observations/A57_live_play.md; code wiring for life code, stowed Drop, and measured middle_chest cap split to A58."},
-
-  "A58": {"state": "open"},
+  "A57": {"state": "partial", "remaining": "All three facts still unconfirmed and no code changed: a life's ground supply_subtype_code for LIFE_SUPPLY_CODES (field cuts saw only gem, berry, small_potion), whether Drop takes a supply stowed in inventory.chest (no stowed supply yet), and middle_chest capacity at carry_capacity_full (no character reached 50 gems). Session notes in docs/observations/A57_live_play.md."},
 
   "A21": {"state": "done"},
 

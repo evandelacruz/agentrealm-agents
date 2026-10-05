@@ -284,6 +284,12 @@ class DetectorTest(unittest.TestCase):
         self.assertNotIn("escape", fired[5])
         self.assertEqual(oscillation.take_escape(m, w), set())
 
+    def test_pacing_no_state_moved_forces_no_escape(self):
+        m, w = Memory(), world()
+        fired = self._see(m, w, [A, B, A, B, A, B])
+        self.assertEqual(fired[5]["states"], [])
+        self.assertNotIn("escape", fired[5])
+
     def test_a_map_change_starts_over(self):
         m, w = Memory(), world()
         self._see(m, w, [A, B, A, B, A])

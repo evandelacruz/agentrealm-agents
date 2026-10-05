@@ -18,7 +18,7 @@ from agentrealm_agent.survival import (
     should_retreat,
     would_lose,
 )
-from agentrealm_agent.pathing import FLEE_RUN_STEPS, flee_run
+from agentrealm_agent.pathing import FLEE_RUN_STEPS, flee_run, outruns
 from agentrealm_agent.world import Entity, WorldModel, chebyshev
 from agentrealm_agent.zone_discovery import apply_zone
 
@@ -213,7 +213,7 @@ class FleeTest(unittest.TestCase):
         m = Memory()
         c = ctx(m=m, hostile_range=3)
         self.assertEqual(step(dispatch(w, c)), back, "flee_step's best step")
-        m.flee_path, m.state = [], "Flee"
+        m.flee_path, m.state = [back], "Flee"  # the escape that was pacing
         m.nav_stuck.cells_map = w.map_id
         m.nav_stuck.recent_cells = [back, here, back, here, back]
         m.nav_stuck.recent_moves = [("", "Flee")] * 5
@@ -222,6 +222,8 @@ class FleeTest(unittest.TestCase):
         self.assertEqual(out.state, "Flee")
         self.assertEqual(step(out), (3, 2))
         self.assertTrue(m.nav_stuck.oscillations[-1]["escape"])
+        self.assertEqual(m.flee_avoid, {back}, "kept off while this escape runs")
+        self.assertNotIn(back, m.flee_path)
 
     def test_never_steps_next_to_a_hostile_to_avoid_the_cell_behind(self):
         """Only the cell behind is open away from the hostile: Flee takes it."""
@@ -229,6 +231,116 @@ class FleeTest(unittest.TestCase):
         w.entities = [Entity("npc", 5, (0, 1))]
         out = dispatch(w, ctx(hostile_range=3))
         self.assertEqual(step(out), (3, 1))
+
+    def test_escape_routes_on_to_a_known_safe_tile(self):
+        w = world([".........", ".........", "........."], at=(2, 1))
+        w.entities = [Entity("npc", 5, (0, 1))]
+        safe_at(w, (7, 1))
+        m = Memory()
+        c = ctx(m=m, hostile_range=7)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Flee")
+        self.assertEqual(m.flee_path[0], step(out))
+        self.assertEqual(m.flee_path[-1], (7, 1), m.flee_path)
+        for _ in range(8):
+            if out.state != "Flee":
+                break
+            w.pos = w.terrain_center = step(out)
+            out = dispatch(w, c)
+        self.assertEqual(w.pos, (7, 1), "walked the route onto the safe tile")
+        self.assertNotEqual(out.state, "Flee", "and stays there")
+
+    def test_a_safe_tile_one_step_away_is_the_whole_escape(self):
+        w = world([".......", ".......", ".......", "......."], at=(2, 1))
+        w.entities = [Entity("npc", 5, (2, 0))]
+        safe_at(w, (3, 2))
+        m = Memory()
+        out = dispatch(w, ctx(m=m))
+        self.assertEqual(step(out), (3, 2))
+        self.assertEqual(m.flee_path, [(3, 2)])
+
+    def test_ties_break_toward_the_safe_tile_even_against_the_cell_order(self):
+        w = world([".....", ".....", "....."], at=(2, 1))
+        w.entities = [Entity("npc", 5, (2, 0))]
+        safe_at(w, (0, 2))
+        self.assertEqual(step(dispatch(w, ctx())), (1, 2))
+
+    def test_a_forced_escape_routes_to_safety_around_the_paced_cell(self):
+        here, back = (2, 1), (1, 2)
+        w = world(["#######", "#.....#", "#.....#", "#.....#", "#######"], at=here)
+        w.entities = [Entity("npc", 1, (5, 1))]
+        safe_at(w, (1, 3))
+        m = Memory()
+        m.state = "Flee"
+        m.nav_stuck.cells_map = w.map_id
+        m.nav_stuck.recent_cells = [back, here, back, here, back]
+        m.nav_stuck.recent_moves = [("", "Flee")] * 5
+        m.nav_stuck.last_move = ("", "Flee")
+        out = dispatch(w, ctx(m=m, hostile_range=3))
+        self.assertEqual(out.state, "Flee")
+        self.assertEqual(m.flee_path[-1], (1, 3), m.flee_path)
+        self.assertNotIn(back, m.flee_path)
+
+    def test_a_restart_after_another_state_plans_a_fresh_escape(self):
+        """Flee's old escape is dropped once another state took a decision."""
+        w = world(["........."] * 9, at=(4, 4))
+        w.entities = [Entity("npc", 1, (4, 1))]
+        m = Memory()
+        c = ctx(m=m, hostile_range=3)
+        w.pos = w.terrain_center = step(dispatch(w, c))
+        self.assertEqual((w.pos, m.flee_path[1]), ((5, 5), (4, 5)))
+        m.state = "Investigate"  # another state had the last decision; the agent stayed put
+        w.entities = [Entity("npc", 2, (6, 4))]
+        self.assertEqual(step(dispatch(w, c)), (6, 6))
+
+    def test_a_shut_committed_cell_is_replanned(self):
+        w = world([".....", ".....", "....."], at=(2, 1))
+        w.entities = [Entity("npc", 5, (0, 1))]
+        w.view.tiles[(3, 1)] = "wall"
+        m = Memory()
+        m.state, m.flee_path = "Flee", [(3, 1), (4, 1)]
+        out = dispatch(w, ctx(m=m, hostile_range=3))
+        self.assertNotEqual(step(out), (3, 1))
+
+    def test_a_committed_cell_worse_than_standing_still_is_dropped(self):
+        w = world(["......."], at=(3, 0))
+        w.entities = [Entity("npc", 1, (0, 0)), Entity("npc", 2, (6, 0))]
+        m = Memory()
+        m.state, m.flee_path = "Flee", [(4, 0), (5, 0)]
+        out = dispatch(w, ctx(m=m, hostile_range=3))
+        self.assertEqual(out.state, "Flee")
+        self.assertIsNone(out.intents, "both ways are nearer a hostile; it stands still")
+
+    def test_a_dead_end_corridor_waits_instead_of_stepping_closer(self):
+        w = world(["###", "#.#", "#.#", "#.#", "#.#"], at=(1, 1))
+        w.entities = [Entity("npc", 5, (1, 4))]
+        out = dispatch(w, ctx(hostile_range=3))
+        self.assertEqual(out.state, "Flee")
+        self.assertIsNone(out.intents)
+
+    def test_a_safe_tile_behind_a_hostile_is_not_fled_to(self):
+        # The safe tile is west, past the NPC: the escape runs east instead.
+        w = world([".........", ".........", "........."], at=(4, 1))
+        w.entities = [Entity("npc", 5, (2, 1))]
+        safe_at(w, (0, 1))
+        m = Memory()
+        out = dispatch(w, ctx(m=m, hostile_range=3))
+        self.assertEqual(out.state, "Flee")
+        self.assertNotIn((0, 1), m.flee_path)
+        self.assertTrue(all(x > 4 for x, _ in m.flee_path), m.flee_path)
+
+    def test_a_forced_escape_keeps_off_the_paced_cell_while_it_runs(self):
+        """The decision after the guard forced an escape off ``back``: the
+        hostiles have moved so ``back`` is now the best single step, and the
+        escape still takes its own next cell instead of pacing back."""
+        here, back, nxt = (3, 2), (3, 3), (4, 3)
+        w = world([".......", "..###..", "..#.#..", "..#..#.", "..###..", ".......", "......."], at=here)
+        w.entities = [Entity("npc", 1, (0, -1)), Entity("npc", 2, (7, 0))]
+        m = Memory()
+        m.state, m.flee_path, m.flee_avoid = "Flee", [nxt, (5, 4)], {back}
+        out = dispatch(w, ctx(m=m, hostile_range=4))
+        self.assertEqual(out.state, "Flee")
+        self.assertEqual(step(out), nxt)
 
     def test_ties_break_toward_a_known_safe_tile(self):
         w = world([".....", ".....", "....."], at=(2, 1))
@@ -267,6 +379,28 @@ class FleeRunTest(unittest.TestCase):
         self.assertEqual(len(run), FLEE_RUN_STEPS + 1)
         self.assertEqual(run, [(x, 0) for x in range(1, FLEE_RUN_STEPS + 2)])
 
+    def test_keeps_off_blocked_cells(self):
+        w = world(["." * 12], at=(0, 0))
+        run = flee_run(w, [Entity("npc", 1, (-2, 0))], {(4, 0)}, (1, 0))
+        self.assertEqual(run, [(1, 0), (2, 0), (3, 0)])
+
+    def test_never_steps_back_onto_the_agents_cell(self):
+        # East of the agent is further from the NPC, but only through its own cell.
+        w = world(["....."], at=(2, 0))
+        run = flee_run(w, [Entity("npc", 1, (-3, 0))], set(), (1, 0))
+        self.assertEqual(run, [(1, 0)])
+
+    def test_prefers_the_longer_run_on_ties(self):
+        w = world(["......", "......", "......"], at=(0, 1))
+        run = flee_run(w, [Entity("npc", 1, (4, 0))], set(), (0, 2))
+        self.assertEqual(run, [(0, 2), (1, 1), (0, 0)])
+
+    def test_outruns_counts_steps_from_the_agent(self):
+        npc = [Entity("npc", 1, (4, 0))]
+        self.assertTrue(outruns([(1, 0), (2, 0)], [Entity("npc", 1, (5, 0))]))
+        self.assertFalse(outruns([(1, 0), (2, 0)], npc), "(2, 0) is 2 steps out and 2 from the NPC")
+        self.assertTrue(outruns([(3, 0)], npc), "the first step is flee_step's, not checked")
+
     def test_never_runs_past_a_hostile_that_reaches_the_cell_first(self):
         # The corridor east runs 7 cells but passes beside the NPC at (4, 0);
         # it would reach (3, 1)-(5, 1) no later than the agent does.
@@ -274,6 +408,7 @@ class FleeRunTest(unittest.TestCase):
         hostiles = [Entity("npc", 1, (-3, 1)), Entity("npc", 2, (4, 0))]
         run = flee_run(w, hostiles, set(), (2, 1))
         self.assertNotIn((4, 1), run)
+        self.assertTrue(all(w.view.walkable(cell) for cell in run), run)
         for depth, cell in enumerate(run[1:], start=2):
             self.assertGreater(min(chebyshev(cell, h.pos) for h in hostiles), depth, run)
 

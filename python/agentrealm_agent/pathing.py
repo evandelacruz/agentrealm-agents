@@ -85,6 +85,16 @@ def _nearest(p: Pos, hostiles: list[Entity]) -> int:
     return min(chebyshev(p, h.pos) for h in hostiles)
 
 
+def outruns(route: list[Pos], hostiles: list[Entity]) -> bool:
+    """Every cell of ``route`` after its first is reached before any hostile could get there.
+
+    ``route`` starts one step from the agent, so its cell ``i`` is ``i + 1``
+    steps away; a hostile that is no further than that would get there no
+    later than the agent (A9).
+    """
+    return all(_nearest(p, hostiles) > i + 1 for i, p in enumerate(route) if i)
+
+
 def flee_step(
     w: WorldModel, hostiles: list[Entity], blocked: set[Pos], safes: Collection[Pos] = frozenset()
 ) -> Pos | None:
@@ -110,14 +120,12 @@ def flee_step(
 def flee_run(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], first: Pos) -> list[Pos]:
     """``first``, then a route of up to ``FLEE_RUN_STEPS`` more seen, open cells away from the hostiles.
 
-    A breadth-first search from ``first`` that only enters cells the agent
-    reaches before any hostile could (each cell further from every hostile
+    A breadth-first search from ``first`` that never steps back onto the
+    agent's own cell and only enters cells the agent reaches before any
+    hostile could (the ``outruns`` rule: each cell further from every hostile
     than the steps it takes to get there). The run ends on the cell it found
-    furthest from the nearest hostile, preferring the longer run and then
-    the cell further from the hostiles' centroid on ties.
+    furthest from the nearest hostile, preferring the longer run on ties.
     """
-    cx = sum(h.pos[0] for h in hostiles) / len(hostiles)
-    cy = sum(h.pos[1] for h in hostiles) / len(hostiles)
     occupied = w.occupied() | blocked
     came: dict[Pos, Pos | None] = {first: None}
     depth = {first: 1}
@@ -137,10 +145,7 @@ def flee_run(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], first: Po
                 nxt_frontier.append(n)
         frontier = nxt_frontier
 
-    def score(p: Pos) -> tuple[int, int, float, Pos]:
-        return _nearest(p, hostiles), depth[p], abs(p[0] - cx) + abs(p[1] - cy), p
-
-    end = max(came, key=score)
+    end = max(came, key=lambda p: (_nearest(p, hostiles), depth[p], p))
     run = []
     while end is not None:
         run.append(end)

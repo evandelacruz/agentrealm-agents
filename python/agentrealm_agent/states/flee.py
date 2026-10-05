@@ -6,7 +6,7 @@ import dataclasses
 
 from ..memory import Memory
 from ..navigation import cost_path, oscillation
-from ..pathing import flee_run, flee_step, grid_params, step_open
+from ..pathing import flee_run, flee_step, grid_params, outruns, step_open
 from ..survival import hostiles_in_range, on_safe_tile, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
@@ -42,20 +42,23 @@ def flee_escape(
 
     The first step is ``flee_step``'s, so ties still break toward the nearest
     known safe tile. The rest is a route from there to that safe tile when
-    one is known, else ``flee_run`` away from the hostiles.
+    one is known and the agent reaches every cell of it before any hostile
+    could (``outruns``), else ``flee_run`` away from the hostiles. A safe
+    tile behind a hostile is Retreat's to reach, not Flee's.
     """
     first = flee_step(w, hostiles, blocked, safes)
     if first is None:
         return []
-    goal = min(safes, key=lambda s: (chebyshev(s, first), s)) if safes else None
-    if goal is None:
-        return flee_run(w, hostiles, blocked, first)
-    if goal == first:
-        return [first]
-    _, plan_avoid, plan_costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
-    params = grid_params(ctx.policy, plan_avoid | blocked, plan_costly)
-    rest = cost_path(dataclasses.replace(w, pos=first), goal, params) or []
-    return [first] + rest
+    if safes:
+        goal = min(safes, key=lambda s: (chebyshev(s, first), s))
+        if goal == first:
+            return [first]
+        _, _, plan_costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
+        params = grid_params(ctx.policy, blocked, plan_costly)
+        rest = cost_path(dataclasses.replace(w, pos=first), goal, params)
+        if rest and outruns([first] + rest, hostiles):
+            return [first] + rest
+    return flee_run(w, hostiles, blocked, first)
 
 
 def should_flee(world: WorldModel, ctx: PlayContext) -> bool:

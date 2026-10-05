@@ -46,11 +46,11 @@ class RetreatState(State):
         if w.pos == goal:
             return StateOutcome(None, "at safe tile", state=self.name)
         _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
-        # The oscillation guard caught Flee/Retreat pacing: route around those cells (A15).
-        paced = oscillation.take_escape(m, w)
-        plan_avoid |= paced
+        # The oscillation guard caught Flee/Retreat pacing: the paced cell is
+        # shut, so a path stepping onto it is replanned around it below (A15).
+        plan_avoid |= oscillation.take_escape(m, w)
         params = grid_params(policy, plan_avoid, plan_costly)
-        if paced or m.goal != "safe" or not m.path or m.path[-1] != goal:
+        if m.goal != "safe" or not m.path or m.path[-1] != goal:
             m.path = cost_path(w, goal, params, nav=nav_search(m, w, "safe", goal)) or []
             m.goal = "safe"
         step = next_step(w, plan_avoid, m.path)

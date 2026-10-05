@@ -71,7 +71,7 @@
 
   "A30": {"state": "done"},
 
-  "A56": {"state": "open", "note": "Observe a scroll code in live play: spot a scroll, read its supply_subtype_code from get_entity_tiles or the snapshot supplies, Read it once to confirm it is not nothing_to_read (GAME_NOTES open questions; docs/observations/A30_live_play.md)."},
+  "A56": {"state": "open"},
 
   "A31": {"state": "open"},
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import io
-import sys
 import tempfile
 import threading
 import unittest
@@ -12,7 +11,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_agent import acceptance_smoke, config
 from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics
 from agentrealm_agent.m7_acceptance import OSCILLATION_ABORT_COUNT
 from agentrealm_agent.memory import Memory
@@ -158,8 +157,7 @@ STRATEGIST_ENV = {"AGENTREALM_STRATEGIST_MODEL": "fake-model", "AGENTREALM_STRAT
 
 
 class SharedRunSmokeTest(unittest.TestCase):
-    def test_oscillation_abort_ends_the_runner_through_run_smoke(self):
-        common = sys.modules[load_smoke().run_smoke.__module__]
+    def test_oscillation_abort_ends_the_runner_through_run_acceptance_smoke(self):
         seen = {}
 
         class FakeRunner:
@@ -173,11 +171,11 @@ class SharedRunSmokeTest(unittest.TestCase):
                 seen["stopped_during_run"] = seen["stop"].is_set()
 
         cfg = config.load(REPO / "python" / "characters" / "olympuff_m11.toml")
-        with mock.patch.object(common, "Runner", FakeRunner), \
-                mock.patch.object(common, "load_knowledge"), \
-                mock.patch.object(common, "save_knowledge"), \
-                redirect_stdout(io.StringIO()):
-            m, _ = common.run_smoke(mock.Mock(), cfg, 9, metrics(), timeout_s=0)
+        m = metrics()
+        with mock.patch.object(acceptance_smoke, "Runner", FakeRunner), \
+                mock.patch.object(acceptance_smoke, "load_knowledge"), \
+                mock.patch.object(acceptance_smoke, "save_knowledge"):
+            acceptance_smoke.run_acceptance_smoke(mock.Mock(), cfg, 9, m, timeout_s=0)
         self.assertIs(m.stop, seen["stop"])
         self.assertTrue(seen["stopped_during_run"], "the abort must stop the runner, not wait for it to end")
         self.assertIsNotNone(m.oscillation_abort)
@@ -200,14 +198,14 @@ class SmokeScriptTest(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def run_main(self, seconds: float, played):
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None):
             played(metrics)
-            return metrics, seconds
+            return seconds, None
 
         with mock.patch.object(self.smoke, "Client") as Client, \
                 mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
                 mock.patch.object(self.smoke.time, "sleep"), \
-                mock.patch.object(self.smoke, "run_smoke", side_effect=run_smoke):
+                mock.patch.object(self.smoke, "run_acceptance_smoke", side_effect=run_smoke):
             client = Client.return_value
             client.world.return_value = {"town": {"map_id": OVERWORLD, "x": 0, "y": 0}}
             client.position.return_value = {"map_id": OVERWORLD, "x": 10, "y": 20}

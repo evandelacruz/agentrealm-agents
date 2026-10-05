@@ -22,23 +22,17 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SCRIPTS = Path(__file__).resolve().parent
 PYTHON = REPO / "python"
-sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
+from agentrealm_agent.acceptance_smoke import navigation_start, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
-from smoke_olympuff_common import (  # noqa: E402
-    DEFAULT_BASE,
-    navigation_start,
-    run_smoke,
-    wake,
-)
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m7.toml"
+DEFAULT_BASE = "https://api.agentrealm.gg"
 
 
 def aim_at(cfg: config.CharacterConfig, overworld: int, target: tuple[int, int]) -> None:
@@ -127,7 +121,11 @@ def main(argv: list[str] | None = None) -> int:
         target=target,
         target_seconds=args.seconds,
     )
-    metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout)
+
+    def out(line: str) -> None:
+        print(line, flush=True)
+
+    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out)
     print(f"finished in {elapsed:.1f}s", flush=True)
     if metrics.oscillation_abort:
         print(f"ABORT: {metrics.oscillation_abort}; the agent paced instead of playing", file=sys.stderr)

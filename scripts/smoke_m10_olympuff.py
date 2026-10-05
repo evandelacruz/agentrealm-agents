@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""A40: Live M11 acceptance on Olympuff (docs/PLAYABLE_AGENT_PLAN.md M11 done-when).
+"""A33: Live M10 acceptance on Olympuff (docs/PLAYABLE_AGENT_PLAN.md M10 done-when).
 
-Plays until the gate passes or the wall-clock limit is reached. Needs the
-strategist enabled (``AGENTREALM_STRATEGIST_MODEL`` plus an API key): it is the
-only thing that pushes ``fight_boss`` on this profile. The character
-must start on the overworld (sleeping characters are woken with one ``Wait``,
-downed ones are waited out). Pass criteria are in
-``agentrealm_agent/m11_acceptance.py`` and the README. Requires AGENTREALM_API_KEY.
+Explores from wherever the character stands for the target duration (default
+one hour). Pass criteria are in ``agentrealm_agent/m10_acceptance.py`` and the
+README. The odd-block clause is checked offline on the ``ODD_BUSH`` fixture.
+Requires AGENTREALM_API_KEY.
 """
 
 from __future__ import annotations
@@ -22,23 +20,22 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance_smoke import navigation_start, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
-from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics  # noqa: E402
-from agentrealm_agent.strategist import StrategistConfig  # noqa: E402
+from agentrealm_agent.m10_acceptance import FULL_RUN_FRACTION, TARGET_SECONDS, M10AcceptanceMetrics  # noqa: E402
 
-DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m11.toml"
+DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m10.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="M11 acceptance smoke test on Olympuff (A40).")
+    ap = argparse.ArgumentParser(description="M10 acceptance smoke test on Olympuff (A33).")
     ap.add_argument(
         "--profile",
         type=Path,
         default=DEFAULT_PROFILE,
-        help="behavior profile TOML (default: python/characters/olympuff_m11.toml)",
+        help="behavior profile TOML (default: python/characters/olympuff_m10.toml)",
     )
     ap.add_argument("--character-id", type=int, default=None)
     ap.add_argument("--character-name", default=None)
@@ -48,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         "--seconds",
         type=float,
         default=TARGET_SECONDS,
-        help=f"max wall-clock seconds before stopping (default {TARGET_SECONDS:.0f})",
+        help="wall-clock seconds to play before stopping (M10 smoke default: 3600)",
     )
     ap.add_argument(
         "--timeout",
@@ -69,15 +66,6 @@ def main(argv: list[str] | None = None) -> int:
     if cfg.world != "olympuff":
         print(f"expected world olympuff, got {cfg.world!r}", file=sys.stderr)
         return 2
-    # Only the strategist pushes ``fight_boss`` on this profile, and a level
-    # clears only by killing its boss (A38), so without it the gate cannot pass.
-    if not StrategistConfig.from_env().enabled:
-        print(
-            "M11 needs the strategist: set AGENTREALM_STRATEGIST_MODEL and "
-            "AGENTREALM_STRATEGIST_API_KEY (or OPENAI_API_KEY)",
-            file=sys.stderr,
-        )
-        return 2
 
     client = Client(args.base_url, args.api_key)
     try:
@@ -93,30 +81,29 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         wake(client, cid)
-        overworld, _origin = navigation_start(client, cid)
     except (ApiError, ValueError) as e:
         print(f"start: {e}", file=sys.stderr)
         return 2
-    time.sleep(1.0)
+    time.sleep(1.0)  # the runner's own world read follows: stay inside the burst of 3
 
     print(
-        f"M11 smoke (A40): profile {cfg.profile} character {cid} on {cfg.world} "
-        f"→ up to {args.seconds:.0f}s on overworld {overworld}, base {args.base_url}",
+        f"M10 smoke (A33): profile {cfg.profile} character {cid} on {cfg.world} "
+        f"→ {args.seconds:.0f}s explore, base {args.base_url}",
         flush=True,
     )
-    metrics = M11AcceptanceMetrics(overworld_map_id=overworld, target_seconds=args.seconds)
+    metrics = M10AcceptanceMetrics(target_seconds=args.seconds)
 
     def out(line: str) -> None:
         print(line, flush=True)
 
-    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out)
+    elapsed, knowledge = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out)
     print(f"finished in {elapsed:.1f}s", flush=True)
-    for line in metrics.summary_lines():
+    for line in metrics.summary_lines(knowledge):
         print(line, flush=True)
-    full_run = args.seconds >= TARGET_SECONDS * 0.95
-    failures = list(metrics.failures(full_run=full_run))
-    if full_run and elapsed + 1.0 < args.seconds and not metrics.milestone_ok():
-        failures.append(f"ran {elapsed:.0f}s < limit {args.seconds:.0f}s without passing the gate")
+    full_run = args.seconds >= TARGET_SECONDS * FULL_RUN_FRACTION
+    failures = list(metrics.failures(full_run=full_run, knowledge=knowledge))
+    if elapsed + 1.0 < args.seconds:
+        failures.append(f"ran {elapsed:.0f}s < target {args.seconds:.0f}s")
     try:
         alive = client.self_(cid).get("alive", True)
         if not alive:
@@ -126,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     if failures:
         print("FAIL:", "; ".join(failures), file=sys.stderr)
         return 1
-    print("PASS: M11 acceptance criteria met", flush=True)
+    print("PASS: M10 acceptance criteria met", flush=True)
     return 0
 
 

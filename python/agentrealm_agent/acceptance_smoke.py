@@ -1,29 +1,17 @@
-"""Shared Olympuff smoke helpers (M7 A16, M11 A40)."""
+"""Shared helpers for live acceptance smoke scripts (M7 A16, M10 A33, M11 A40)."""
 
 from __future__ import annotations
 
-import sys
 import threading
 import time
-from pathlib import Path
-from typing import TypeVar
+from typing import Callable
 
-REPO = Path(__file__).resolve().parents[1]
-PYTHON = REPO / "python"
-if str(PYTHON) not in sys.path:
-    sys.path.insert(0, str(PYTHON))
-
-from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.client import Client  # noqa: E402
-from agentrealm_agent.executor.intents import wait  # noqa: E402
-from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
-from agentrealm_agent.m7_acceptance import M7AcceptanceMetrics  # noqa: E402
-from agentrealm_agent.m11_acceptance import M11AcceptanceMetrics  # noqa: E402
-from agentrealm_agent.runner import Runner  # noqa: E402
-
-GateMetrics = TypeVar("GateMetrics", M7AcceptanceMetrics, M11AcceptanceMetrics)
-
-DEFAULT_BASE = "https://api.agentrealm.gg"
+from . import config
+from .acceptance import AcceptanceHooks
+from .client import Client
+from .executor.intents import wait
+from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
+from .runner import Runner
 
 # Self reads before giving up on a character that stays asleep or downed, one
 # a second: well inside the call budget, and longer than the 5 s respawn delay.
@@ -36,7 +24,7 @@ WAKE_REFUSALS = {
 }
 
 
-def wake(client: Client, cid: int, *, pause=time.sleep) -> None:
+def wake(client: Client, cid: int, *, pause: Callable[[float], None] = time.sleep) -> None:
     """Get the character awake and alive before its position is read.
 
     A sleeping character (asleep after 10 idle minutes) is off the map and
@@ -45,7 +33,7 @@ def wake(client: Client, cid: int, *, pause=time.sleep) -> None:
     ``respawn_delay_seconds``, so this reads self until it is alive.
     Raises ValueError saying why it could not.
 
-    This repeats Sync's wake (``states/sync.py``) because the smoke scripts
+    This repeats Sync's wake (``states/sync.py``) because acceptance scripts
     need a position before the runner starts; keep the two in step.
     """
     for _ in range(WAKE_READS):
@@ -76,28 +64,35 @@ def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
     return int(town["map_id"]), (int(p["x"]), int(p["y"]))
 
 
-def run_smoke(
+def run_acceptance_smoke(
     client: Client,
     cfg: config.CharacterConfig,
     cid: int,
-    metrics: GateMetrics,
+    metrics: AcceptanceHooks,
     *,
     timeout_s: float,
-) -> tuple[GateMetrics, float]:
+    out: Callable[[str], None] | None = None,
+) -> tuple[float, KnowledgeBase]:
+    """Run the runner with ``metrics`` until it stops or ``timeout_s`` elapses.
+
+    Returns the seconds played and the knowledge base the runner wrote to; judge
+    the run on that one, not a reload, which misses the run if the save failed.
+    """
     stop = threading.Event()
     metrics.stop = stop
     started = time.monotonic()
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
 
-    def out(line: str) -> None:
-        print(line, flush=True)
+    def emit(line: str) -> None:
+        if out is not None:
+            out(line)
 
     runner = Runner(
         cfg,
         metrics.wrap(client),
         cid,
         stop,
-        out,
+        emit,
         knowledge=knowledge,
         acceptance=metrics,
     )
@@ -107,7 +102,7 @@ def run_smoke(
             return
         if stop.wait(timeout_s):
             return
-        out(f"[{cfg.profile}] timeout after {timeout_s:.0f}s")
+        emit(f"[{cfg.profile}] timeout after {timeout_s:.0f}s")
         stop.set()
 
     thread = threading.Thread(target=runner.run, daemon=True)
@@ -120,5 +115,5 @@ def run_smoke(
     try:
         save_knowledge(knowledge)
     except OSError as e:
-        out(f"knowledge base {knowledge.world_code}: not saved: {e}")
-    return metrics, elapsed
+        emit(f"knowledge base {knowledge.world_code}: not saved: {e}")
+    return elapsed, knowledge

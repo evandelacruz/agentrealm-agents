@@ -74,7 +74,7 @@ cd python && python3 -m unittest discover -s tests
 
 ### M6 acceptance (live Olympuff, A4)
 
-`scripts/smoke_m6_olympuff.py` runs the M6 done-when against the public API; no live PASS is recorded in the repo yet: 200 applied `Step`s, no `movement_cooldown` rejections, and calm windows spend under a quarter of the budget on `POST tick` (the 4–10 tick poll cadence; terrain and zone reads use spare windows). This uses a dedicated character (`python/characters/olympuff_walker.toml`); lives on live worlds are permanent.
+`scripts/smoke_m6_olympuff.py` runs the M6 done-when against the public API: 200 applied `Step`s, no `movement_cooldown` rejections, and calm windows spend under a quarter of the budget on `POST tick` (the 4–10 tick poll cadence; terrain and zone reads use spare windows). Any failed request (a 4xx such as `malformed_intent`, or a 429) also fails the run. The first live run is in [`docs/acceptance/m6_olympuff_PASS.transcript`](docs/acceptance/m6_olympuff_PASS.transcript); it is not accepted (see its header), and A4 waits on a re-run. If the character file's `.state` entry is lost, a create refused `identity_reuse` reuses the same-named Olympuff character from `GET /characters`. This uses a dedicated character (`python/characters/olympuff_walker.toml`); lives on live worlds are permanent.
 
 ```sh
 export AGENTREALM_BASE_URL=https://api.agentrealm.gg

@@ -28,7 +28,7 @@ class InvestigateState(State):
         if item is None:
             return StateOutcome(None, "nothing to investigate", state=self.name)
         if item.kind == "read_block" and item.map_id is not None and item.pos is not None:
-            return StateOutcome([read_block(item.map_id, item.pos)], item.reason, state=self.name)
+            return StateOutcome([read_block(item.pos)], item.reason, state=self.name)
         if item.kind == "say" and item.npc is not None:
             return StateOutcome([say_to(item.npc)], item.reason, state=self.name)
         if item.kind == "look_door" and item.map_id is not None and item.pos is not None:

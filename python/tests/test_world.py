@@ -165,3 +165,29 @@ class SnapshotObservationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AsleepTest(unittest.TestCase):
+    def setUp(self):
+        self.w = WorldModel(character_id=1, map_id=7, pos=None, perception=3)
+
+    def test_self_sets_and_clears_asleep(self):
+        self.w.apply_self({"asleep": True})
+        self.assertTrue(self.w.asleep)
+        self.w.apply_self({})
+        self.assertTrue(self.w.asleep, "a self read without the field keeps it")
+        self.w.apply_self({"asleep": False})
+        self.assertFalse(self.w.asleep)
+
+    def test_a_position_means_awake(self):
+        self.w.asleep = True
+        self.w.apply_position({"map_id": 7, "x": 2, "y": 3})
+        self.assertFalse(self.w.asleep)
+
+    def test_observation_snapshot_and_delta_carry_asleep(self):
+        self.w.apply_observation({"version": 1, "complete": True, "snapshot": {"asleep": True}})
+        self.assertTrue(self.w.asleep)
+        self.w.apply_observation({"version": 2, "delta": {"lives": 3}})
+        self.assertTrue(self.w.asleep, "a delta without the field keeps it")
+        self.w.apply_observation({"version": 3, "delta": {"asleep": False}})
+        self.assertFalse(self.w.asleep)

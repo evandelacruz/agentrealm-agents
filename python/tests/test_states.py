@@ -316,6 +316,30 @@ class DispatcherFallThroughTest(unittest.TestCase):
         self.assertEqual(out.reason, "no state (Explore: no goal reachable)")
 
 
+class SyncWakeTest(unittest.TestCase):
+    def asleep_off_the_map(self) -> WorldModel:
+        w = world(["..."])
+        w.pos, w.asleep = None, True
+        return w
+
+    def test_asleep_sends_one_wait_and_rereads_self(self):
+        c = ctx(self.asleep_off_the_map(), Memory(need_self=False))
+        out = dispatch(self.asleep_off_the_map(), c)
+        self.assertEqual((out.state, out.reason), ("Sync", "wake"))
+        self.assertEqual(out.intents, [{"verb": "Wait"}], "intents is a list like every other state's")
+        self.assertTrue(c.memory.need_self, "self is re-read, so a missed wake cannot loop")
+
+    def test_decide_wakes_an_asleep_character_without_error(self):
+        d = decide(self.asleep_off_the_map(), Memory(need_self=False), Policy(kind="scripted"), random.Random(0))
+        self.assertEqual((d.intent, d.reason), ({"verb": "Wait"}, "wake"))
+
+    def test_awake_with_no_position_sends_nothing(self):
+        w = world(["..."])
+        w.pos = None
+        d = decide(w, Memory(need_self=False), Policy(kind="scripted"), random.Random(0))
+        self.assertEqual((d.intent, d.reason), (None, "sync"))
+
+
 class DecideShimTest(unittest.TestCase):
     def test_decide_keeps_the_first_intent_reason_and_reflex(self):
         w = world(["...", "...", "..."], at=(1, 1))

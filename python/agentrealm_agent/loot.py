@@ -13,7 +13,7 @@ Sourced rules (docs/GAME_NOTES.md, Items, slots and gear):
   (Manual §11).
 
 Ground gems use ``supply_subtype_code`` ``gem`` (GAME_NOTES, Obs). Lives on
-the ground are still unknown, so hearts first stays off (PLAN.md A20 partial).
+the ground are still unknown, so hearts first stays off until A47 observes one.
 """
 
 from __future__ import annotations

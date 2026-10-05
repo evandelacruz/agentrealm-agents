@@ -47,7 +47,9 @@
 
   "A19": {"state": "partial", "remaining": "Wearing a subtype never yet worn: no read serves its slot (PLAN.md Server gaps)."},
 
-  "A20": {"state": "partial", "remaining": "Hearts first until a life's ground supply_subtype_code is observed (Olympuff live play: 1500+ grass cuts at map 76 town, codes gem/berry only — docs/observations/A20_live_play.md). Stowed Drop and middle_chest carry capacity (GAME_NOTES open questions). Gems-first uses code gem."},
+  "A20": {"state": "done"},
+
+  "A47": {"state": "open", "remaining": "Hearts-first until life's ground supply_subtype_code is observed; stowed Drop and middle_chest capacity (GAME_NOTES open questions; docs/observations/A20_live_play.md)."},
 
   "A21": {"state": "partial", "remaining": "travel:shop has no path yet, so Shop buys only priced supplies already in sight."},
 

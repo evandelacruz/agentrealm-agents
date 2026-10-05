@@ -35,9 +35,13 @@ def metrics(**kw) -> M11AcceptanceMetrics:
     return M11AcceptanceMetrics(**kw)
 
 
-def level_world(level: int, pos=(0, 0)) -> WorldModel:
+INTERIOR = OVERWORLD + 1
+
+
+def level_world(level: int | None, pos=(0, 0)) -> WorldModel:
+    """A level interior map; ``level=None`` before a read has named its level (A37)."""
     w = open_world(pos)
-    w.map_level = level
+    w.map_id, w.terrain_map, w.map_level = INTERIOR, INTERIOR, level
     return w
 
 
@@ -78,12 +82,19 @@ class LevelGateTest(unittest.TestCase):
         decide(m, open_world(), mem)
         self.assertTrue(m.milestone_ok(), "the same op counts once outside the level")
 
-    def test_plan_op_inside_an_uncleared_level_counts(self):
+    def test_a_map_change_inside_the_cleared_level_is_not_leaving_it(self):
+        m = metrics()
+        m.on_level_clear({"level_number": 1, "max_health_gain": 5})
+        decide(m, level_world(None), Memory())
+        decide(m, level_world(1), Memory())
+        self.assertFalse(m.milestone_ok())
+
+    def test_plan_op_on_an_interior_map_with_no_level_yet_does_not_count(self):
         m, mem = metrics(), Memory()
         m.on_level_clear({"level_number": 1, "max_health_gain": 5})
         mem.goal_op = {"op": "fight_boss", "x": 3, "y": 4}
-        decide(m, level_world(2), mem)
-        self.assertTrue(m.milestone_ok())
+        decide(m, level_world(None), mem)
+        self.assertFalse(m.milestone_ok())
 
     def test_short_run_skips_level_criteria(self):
         m = metrics()
@@ -143,6 +154,9 @@ class OscillationStopTest(unittest.TestCase):
         self.assert_abort_stops(metrics())
 
 
+STRATEGIST_ENV = {"AGENTREALM_STRATEGIST_MODEL": "fake-model", "AGENTREALM_STRATEGIST_API_KEY": "fake-key"}
+
+
 class SharedRunSmokeTest(unittest.TestCase):
     def test_oscillation_abort_ends_the_runner_through_run_smoke(self):
         common = sys.modules[load_smoke().run_smoke.__module__]
@@ -198,12 +212,19 @@ class SmokeScriptTest(unittest.TestCase):
             client.world.return_value = {"town": {"map_id": OVERWORLD, "x": 0, "y": 0}}
             client.position.return_value = {"map_id": OVERWORLD, "x": 10, "y": 20}
             client.self_.return_value = {"alive": True}
-            return self.main(["--api-key", "k", "--character-id", "9", "--seconds", str(seconds)])
+            return self.main(["--api-key", "k", "--character-id", "9", "--seconds", str(seconds)], STRATEGIST_ENV)
 
     def test_no_api_key_exits_2(self):
         code, _, err = self.main([])
         self.assertEqual(code, 2)
         self.assertIn("AGENTREALM_API_KEY", err)
+
+    def test_no_strategist_exits_2_before_any_call(self):
+        with mock.patch.object(self.smoke, "Client") as Client:
+            code, _, err = self.main(["--api-key", "k", "--character-id", "9"])
+        self.assertEqual(code, 2)
+        self.assertIn("AGENTREALM_STRATEGIST_MODEL", err)
+        Client.assert_not_called()
 
     def test_short_run_passes_without_levels(self):
         code, out, _ = self.run_main(10, lambda m: None)

@@ -6,10 +6,10 @@ module checks:
 - Clears the easiest open level unattended: at least one ``level_clear_ceremony``
   with a ``level_number`` (boss defeat observed, never inferred from absence).
 - Uses what it learned to attempt the next: after the first clear, the character
-  leaves level interior maps and enters a level interior again (a positive
-  ``level`` on the position read), or the plan's top op is ``enter_level`` or
-  ``fight_boss`` while not inside a level already cleared (the op names a
-  door, not a level, so a level whose clear was seen is "that level").
+  is back on the overworld map and then enters a level interior again (a
+  positive ``level`` on the position read), or the plan's top op is
+  ``enter_level`` or ``fight_boss`` while it stands on the overworld map.
+  Only the overworld counts as having left the level.
 
 Shared survival gates (same as M7 A16 where they apply during a long unattended
 run): no death; no retreat miss; Recover withdraws only on known safe tiles; no
@@ -48,7 +48,7 @@ SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee", "Boss"
 class M11AcceptanceMetrics(AcceptanceHooks):
     """Counts level clears, the follow-on attempt, and shared survival faults."""
 
-    overworld_map_id: int | None = None
+    overworld_map_id: int  # "left the level" means back on this map
     target_seconds: float = TARGET_SECONDS
     stop: threading.Event | None = None
     clock: Callable[[], float] = time.monotonic
@@ -64,7 +64,6 @@ class M11AcceptanceMetrics(AcceptanceHooks):
     _loop: StepLoopTracker = field(default_factory=StepLoopTracker)
     _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
     _outside_after_first_clear: bool = False
-    _plan_attempt_after_clear: bool = False
 
     @property
     def loop_detected(self) -> bool:
@@ -138,17 +137,16 @@ class M11AcceptanceMetrics(AcceptanceHooks):
     def _note_level_attempt(self, w: WorldModel, m: Memory) -> None:
         if not self.cleared_levels:
             return
-        in_cleared = inside_level(w) and w.map_level in self.cleared_levels
-        if m.goal_op is not None and m.goal_op.get("op") in ("enter_level", "fight_boss") and not in_cleared:
-            self._plan_attempt_after_clear = True
-        if self._plan_attempt_after_clear:
-            self.next_level_attempted = True
-            return
-        if inside_level(w):
-            if self._outside_after_first_clear:
+        # Left the level means back on the overworld map. Any other map counts
+        # as still inside it: a new interior map has no ``level`` until a read
+        # names it (A37), so ``inside_level`` alone cannot tell.
+        on_overworld = w.map_id == self.overworld_map_id
+        if on_overworld:
+            self._outside_after_first_clear = True
+            if m.goal_op is not None and m.goal_op.get("op") in ("enter_level", "fight_boss"):
                 self.next_level_attempted = True
-            return
-        self._outside_after_first_clear = True
+        elif inside_level(w) and self._outside_after_first_clear:
+            self.next_level_attempted = True
 
     def milestone_ok(self) -> bool:
         return bool(self.cleared_levels) and self.next_level_attempted
@@ -170,7 +168,7 @@ class M11AcceptanceMetrics(AcceptanceHooks):
         if full_run and self.cleared_levels and not self.next_level_attempted:
             out.append(
                 f"cleared level(s) {sorted(self.cleared_levels)} but never attempted the next "
-                "(re-enter a level or stack enter_level/fight_boss after the clear)"
+                "(back on the overworld, re-enter a level or stack enter_level/fight_boss)"
             )
         if self.api_errors:
             out.append(f"{len(self.api_errors)} API error(s): {', '.join(sorted(set(self.api_errors)))}")

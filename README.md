@@ -86,7 +86,7 @@ Give-up rule: navigation passes on a give-up only when stuck detection gave up o
 
 No live hour has passed yet (A58); runs that did not are in [`docs/observations/A16_live_play.md`](docs/observations/A16_live_play.md) and [`docs/observations/A58_live_play.md`](docs/observations/A58_live_play.md). CI covers the gate, the runner hooks and the navigation fixtures in `python/tests/test_m7_acceptance.py` without live keys.
 
-Live M11 smoke: `make smoke-m11-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M11 done-when via [`scripts/smoke_m11_olympuff.py`](scripts/smoke_m11_olympuff.py), using profile `python/characters/olympuff_m11.toml` and a character you choose at run time. Start on the overworld (same wake and respawn wait as M7). The runner plays until it clears a level and attempts the next one, or until the default two-hour wall clock (`--seconds` overrides).
+Live M11 smoke: `make smoke-m11-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M11 done-when via [`scripts/smoke_m11_olympuff.py`](scripts/smoke_m11_olympuff.py), using profile `python/characters/olympuff_m11.toml` and a character you choose at run time. It also needs the strategist: set `AGENTREALM_STRATEGIST_MODEL` and `AGENTREALM_STRATEGIST_API_KEY` (or `OPENAI_API_KEY`), or the script exits 2, since only the strategist pushes the `fight_boss` op that clears a level. Start on the overworld (same wake and respawn wait as M7). The runner plays until it clears a level and attempts the next one, or until the default two-hour wall clock (`--seconds` overrides).
 
 Pass criteria (PLAN.md A40, checked in [`m11_acceptance.py`](python/agentrealm_agent/m11_acceptance.py)):
 
@@ -95,6 +95,6 @@ Pass criteria (PLAN.md A40, checked in [`m11_acceptance.py`](python/agentrealm_a
 - Recover withdraws only on a known safe tile;
 - no loop or sustained oscillation (same thresholds as M7);
 - no API error;
-- on a run of at least 95% of the default limit: at least one `level_clear_ceremony`, then a follow-on attempt (re-enter a level interior after leaving one, or stack `enter_level` / `fight_boss` after the clear while not inside a level already cleared).
+- on a run of at least 95% of the default limit: at least one `level_clear_ceremony`, then a follow-on attempt: back on the overworld map, then into a level interior again, or `enter_level` / `fight_boss` on top of the plan while on the overworld map. Only the overworld map counts as having left the level.
 
 No live Olympuff pass yet (A40 partial); CI covers the gate and smoke wiring in `python/tests/test_m11_acceptance.py` without live keys.

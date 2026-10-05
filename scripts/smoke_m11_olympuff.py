@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """A40: Live M11 acceptance on Olympuff (docs/PLAYABLE_AGENT_PLAN.md M11 done-when).
 
-Plays until the gate passes or the wall-clock limit is reached. The character
+Plays until the gate passes or the wall-clock limit is reached. Needs the
+strategist enabled (``AGENTREALM_STRATEGIST_MODEL`` plus an API key): it is the
+only thing that pushes ``fight_boss`` on this profile. The character
 must start on the overworld (sleeping characters are woken with one ``Wait``,
 downed ones are waited out). Pass criteria are in
 ``agentrealm_agent/m11_acceptance.py`` and the README. Requires AGENTREALM_API_KEY.
@@ -25,6 +27,7 @@ from agentrealm_agent import config  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics  # noqa: E402
+from agentrealm_agent.strategist import StrategistConfig  # noqa: E402
 from smoke_olympuff_common import (  # noqa: E402
     DEFAULT_BASE,
     navigation_start,
@@ -71,6 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if cfg.world != "olympuff":
         print(f"expected world olympuff, got {cfg.world!r}", file=sys.stderr)
+        return 2
+    # Only the strategist pushes ``fight_boss`` on this profile, and a level
+    # clears only by killing its boss (A38), so without it the gate cannot pass.
+    if not StrategistConfig.from_env().enabled:
+        print(
+            "M11 needs the strategist: set AGENTREALM_STRATEGIST_MODEL and "
+            "AGENTREALM_STRATEGIST_API_KEY (or OPENAI_API_KEY)",
+            file=sys.stderr,
+        )
         return 2
 
     client = Client(args.base_url, args.api_key)

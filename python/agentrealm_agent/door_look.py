@@ -12,11 +12,9 @@ from __future__ import annotations
 from typing import Any
 
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import iter_doors, record_locked_door, sync_tiles
+from .knowledge_maps import is_level_interior, iter_doors, record_locked_door, sync_tiles
 from .travel.knowledge import iter_entrances, merge_entrance
 from .world import DOORS, UNKNOWN, VOID, Pos, WorldModel, chebyshev
-
-LOOK_GOAL = "investigate:look"
 
 
 def look_key(map_id: int, pos: Pos) -> str:
@@ -145,7 +143,8 @@ def iter_unlooked(kb: KnowledgeBase | None, map_id: int) -> list[Pos]:
 
 
 def iter_unlooked_targets(kb: KnowledgeBase | None) -> list[tuple[int, Pos]]:
-    """Every unlooked entrance mark or door on any map in the knowledge base."""
+    """Every unlooked entrance mark or door on any map in the knowledge base,
+    except level interiors: Level owns their doors (A37)."""
     if kb is None:
         return []
     map_ids: set[int] = set()
@@ -159,6 +158,8 @@ def iter_unlooked_targets(kb: KnowledgeBase | None) -> list[tuple[int, Pos]]:
                 continue
     out: list[tuple[int, Pos]] = []
     for mid in sorted(map_ids):
+        if is_level_interior(kb, mid):
+            continue
         for pos in iter_unlooked(kb, mid):
             out.append((mid, pos))
     return out

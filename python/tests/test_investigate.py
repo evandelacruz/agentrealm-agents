@@ -14,14 +14,21 @@ from agentrealm_agent.door_look import apply_door_look, infer_needs, look_key, r
 from agentrealm_agent.interest_list import MAX_REJECTIONS, list_interest, pick_interest_tick, sight_range
 from agentrealm_agent.investigation import cell_was_read, mark_cell_read, mark_npc_spoken, spoken_npc_ids
 from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import iter_doors, record_warp, sync_map_from_view, sync_tiles
+from agentrealm_agent.knowledge_maps import (
+    is_level_interior,
+    iter_doors,
+    record_map_level,
+    record_warp,
+    sync_map_from_view,
+    sync_tiles,
+)
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.intents import read_block
 from agentrealm_agent.travel.knowledge import entrance_from_kb, sync_entrances
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact
+from agentrealm_agent.world import Entity, WorldModel, ZoneFact, chebyshev
 
 
 def world(rows: list[str], at=(1, 1), perception=3) -> WorldModel:
@@ -97,6 +104,30 @@ class InterestListTest(unittest.TestCase):
         kb.entrances["9:1,1"] = {"map_id": 9, "x": 1, "y": 1}
         items = list_interest(w, kb, Policy(kind="scripted"), Memory())
         self.assertEqual([(it.kind, it.map_id, it.pos) for it in items], [("look_door", 9, (1, 1))])
+
+    def test_same_map_look_sorts_before_other_map_look(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["3:0,1"] = {"map_id": 3, "x": 0, "y": 1}
+        kb.entrances["7:2,2"] = {"map_id": 7, "x": 2, "y": 2}
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([(it.map_id, it.pos) for it in items], [(7, (2, 2)), (3, (0, 1))])
+
+    def test_level_interior_map_looks_are_not_nominated(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        inside = WorldModel(1, map_id=9, pos=(0, 0))
+        inside.map_level = 2
+        record_map_level(kb, inside)
+        self.assertTrue(is_level_interior(kb, 9))
+        sync_tiles(kb, 9, {(1, 1): "framed_door"})
+        kb.entrances["9:2,2"] = {"map_id": 9, "x": 2, "y": 2}
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [], "Level owns them (A37)")
+        overworld = WorldModel(1, map_id=9, pos=(0, 0))
+        overworld.map_level = 0
+        record_map_level(kb, overworld)
+        self.assertFalse(is_level_interior(kb, 9))
+        self.assertEqual(len(list_interest(w, kb, Policy(kind="scripted"), Memory())), 2)
 
     def test_unlooked_door_is_nominated_and_visited_door_is_not(self):
         w = world(["....", "....", "...."], at=(0, 0))
@@ -238,8 +269,47 @@ class InvestigateStateTest(unittest.TestCase):
         ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
         out = dispatch(w, ctx)
         self.assertEqual(out.state, "Investigate")
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}], "toward the warp door")
         self.assertEqual(ctx.memory.goal, look_key(2, (3, 3)))
+        return w, kb, ctx
+
+    def test_arrival_on_other_map_hands_off_to_on_map_look(self):
+        _, kb, ctx = self.test_investigate_routes_to_other_map_entrance()
+        w = WorldModel(1, map_id=2, pos=(0, 3), perception=8)
+        for y in range(4):
+            for x in range(4):
+                w.view.tiles[(x, y)] = "dirt"
+        w.maps[2] = w.view
+        out = dispatch(w, ctx)
+        self.assertEqual(out.state, "Investigate")
+        step = (out.intents[0]["x"], out.intents[0]["y"])
+        self.assertEqual(chebyshev((0, 3), step), 1)
+        self.assertLess(chebyshev(step, (3, 3)), chebyshev((0, 3), (3, 3)), "straight at the mark now")
+        self.assertEqual(chebyshev(ctx.memory.path[-1], (3, 3)), 1, "the on-map look stands beside the mark")
+        self.assertEqual(ctx.memory.goal, look_key(2, (3, 3)))
+
+    def test_unreachable_other_map_look_is_dropped_after_refusals(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["9:1,1"] = {"map_id": 9, "x": 1, "y": 1}  # no warp to map 9 known
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        lk = look_key(9, (1, 1))
+        for i in range(MAX_REJECTIONS):
+            out = dispatch(w, ctx)
+            self.assertEqual(ctx.memory.investigate_rejections.get(lk), i + 1, out.reason)
+        self.assertIsNone(pick_interest_tick(w, kb, Policy(kind="scripted"), ctx.memory, params=ctx.params))
+        self.assertNotEqual(dispatch(w, ctx).state, "Investigate")
+
+    def test_curiosity_cap_blocks_other_map_walk(self):
+        w, kb, _ = self.test_investigate_routes_to_other_map_entrance()
+        w.tick = 600
+        m = Memory(curiosity_spans=[(500, 60)])  # 60 charged ticks in the window
+        ctx = PlayContext(m, Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        ctx.params["curiosity"] = 0.05  # cap 30, spent
+        self.assertIsNone(pick_interest_tick(w, kb, Policy(kind="scripted"), m, params=ctx.params))
+        self.assertNotEqual(dispatch(w, ctx).state, "Investigate")
+        ctx.params["curiosity"] = 0.2  # cap 120 leaves room
+        self.assertEqual(dispatch(w, ctx).state, "Investigate")
 
     def test_investigate_walks_to_entrance_mark(self):
         rows = ["." * 8 for _ in range(8)]

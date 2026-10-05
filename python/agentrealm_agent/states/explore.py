@@ -65,8 +65,8 @@ def scripted_outcome(
             return StateOutcome(None, "plan wait", state=state)
 
     owned = path_owned_by_plan(plan, m, policy.goals)
-    target_plan = attempt_plan(m, w, policy, plan_avoid, plan_costly)
-    step = _escalated_step(w, m, plan_avoid, target_plan) if owned else None
+    target_plan = attempt_plan(m, w, policy, plan_avoid, plan_costly, knowledge)
+    step = _escalated_step(w, m, plan_avoid, target_plan, knowledge) if owned else None
     if step is None and owned:
         step = next_step(w, plan_avoid, m.path)
         att = nav_stuck.active(m, w)
@@ -76,7 +76,7 @@ def scripted_outcome(
         missed = replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge, plan=plan)
         step = next_step(w, plan_avoid, m.path)
         if step is None and missed is not None:
-            step = _missed_step(w, m, plan_avoid, target_plan, *missed)
+            step = _missed_step(w, m, plan_avoid, target_plan, knowledge, *missed)
     if step is not None:
         att = nav_stuck.active(m, w)
         label = m.path[-1] if m.path else att.target if att else step
@@ -91,6 +91,7 @@ def _missed_step(
     m: Memory,
     avoid: set[Pos],
     target_plan,
+    knowledge: KnowledgeBase | None,
     goal: str,
     leg: nav_stuck.Leg,
     routed: bool,
@@ -101,12 +102,19 @@ def _missed_step(
     if att is None:
         return None
     if att.level == nav_stuck.REVEAL:
-        return escalation_step(m, w, att, avoid, target_plan, None)
+        return escalation_step(m, w, att, avoid, target_plan, None, knowledge)
+    if routed:
+        found = target_plan(att)
+        if found and not next_step(w, avoid, found):
+            m.path, m.goal = found, goal
+            nav_stuck.observe(att, w, found)
     reason = nav_stuck.stuck_reason(att, w.tick) if routed else "no_path"
-    return escalation_step(m, w, att, avoid, target_plan, reason) if reason else None
+    return escalation_step(m, w, att, avoid, target_plan, reason, knowledge) if reason else None
 
 
-def _escalated_step(w: WorldModel, m: Memory, avoid: set[Pos], target_plan) -> Pos | None:
+def _escalated_step(
+    w: WorldModel, m: Memory, avoid: set[Pos], target_plan, knowledge: KnowledgeBase | None
+) -> Pos | None:
     """The active attempt's move when it is stuck or revealing (A15), else None.
 
     None also when the attempt was just given up: the caller replans, and
@@ -119,9 +127,9 @@ def _escalated_step(w: WorldModel, m: Memory, avoid: set[Pos], target_plan) -> P
         nav_stuck.finish(m, att)
         return None
     if att.level == nav_stuck.REVEAL:
-        return escalation_step(m, w, att, avoid, target_plan, None)
+        return escalation_step(m, w, att, avoid, target_plan, None, knowledge)
     reason = nav_stuck.stuck_reason(att, w.tick)
-    return escalation_step(m, w, att, avoid, target_plan, reason) if reason else None
+    return escalation_step(m, w, att, avoid, target_plan, reason, knowledge) if reason else None
 
 
 def plan_sets(

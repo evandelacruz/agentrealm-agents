@@ -49,6 +49,25 @@ def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
     return [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
 
 
+def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
+    """True while the agent still owes the ``goto`` in ``policy.goals`` (M7 smoke).
+
+    Loot and Investigate defer to Explore so a long walk is not spent on gems
+    or NPC hellos. Give-ups and reaching the target clear the deferral.
+    """
+    if policy.goto is None or "goto" not in policy.goals:
+        return False
+    dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
+    if w.map_id != dest_map or w.pos is None:
+        return False
+    target = tuple(policy.goto)
+    if w.pos == target:
+        return False
+    if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
+        return False
+    return True
+
+
 def flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:
     here = w.pos
     options = w.open_neighbours(here, blocked) + [here]

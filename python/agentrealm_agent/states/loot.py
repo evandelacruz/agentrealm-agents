@@ -6,8 +6,7 @@ from ..knowledge_base import knowledge_items
 from ..loot import worthwhile_pickups
 from ..memory import Memory
 from ..navigation import cost_path
-from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, nav_search, next_step
+from ..pathing import goto_navigation_pending, grid_params, nav_search, next_step
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome
@@ -44,21 +43,6 @@ class LootState(State):
         return out if out is not None else StateOutcome(None, "nothing to loot", state=self.name)
 
 
-def _defer_far_loot_for_goto(w: WorldModel, m: Memory, policy) -> bool:
-    """M7 navigation: do not walk off toward gems while a ``goto`` target is still owed."""
-    if policy.goto is None or "goto" not in policy.goals:
-        return False
-    dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
-    if w.map_id != dest_map or w.pos is None:
-        return False
-    target = tuple(policy.goto)
-    if w.pos == target:
-        return False
-    if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
-        return False
-    return True
-
-
 def loot_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | None:
     """The pickup in reach, else the first step toward the best reachable one; None for neither."""
     here = w.pos
@@ -67,7 +51,7 @@ def loot_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | 
     near = pickup_outcome(w, ctx.knowledge, state=state)
     if near is not None:
         return near
-    if _defer_far_loot_for_goto(w, ctx.memory, ctx.policy):
+    if goto_navigation_pending(w, ctx.memory, ctx.policy):
         return None
     _, plan_avoid, plan_costly = plan_sets(w, ctx.memory, ctx.policy, ctx.knowledge)
     far = [p for p in worthwhile_pickups(w, knowledge_items(ctx.knowledge)) if chebyshev(p.pos, here) > 1]

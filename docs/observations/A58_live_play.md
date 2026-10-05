@@ -25,13 +25,15 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - The goto path is kept through Explore's normal flow, so stuck detection still escalates and gives up on it.
 - A full-health regen probe was tried and dropped: health cannot rise at full health, so it could only ever report "no". Regen is measured only while hurt; the gate's regen check still needs a run that is hurt in a safe zone.
 
-## Run 3 — rerun (cursor/a58-live-hour-rerun)
+## Run 3 — aborted: pacing between two cells
 
-- **Started:** 2026-10-05 (UTC). Reuses the same M6-walk slot as run 1 (`CHARACTER_NAME`, not committed).
+- **Character:** chosen at run time, as in run 1 (not committed).
 - **Gate focus:** safe-zone regen must get a yes/no verdict during a hurt window in a safe tile; navigation already passed on run 1.
-- **Run 3a (aborted ~5 min):** Ping-pong at x≈616–617 during goto break escalation; agent fix keeps the goto goal label through break walks and skips replan while the goto path still steps (pushed on this branch).
-- **Run 3b (aborted ~3 min):** Still ping-pong; Wear mid-goto and break walks while `break_pending` waited on BlockChanged. Fixes: defer Equip during goto; do not re-enter Break while pending.
-- **Status:** run 3c in progress after those fixes.
+- **Run 3a (stopped after ~5 min):** during the goto walk the character paced back and forth between two cells around x≈616–617 while the goto's stuck escalation was at step 2 (Break). Stopped by hand, so the gate never ran: no verdict, regen not measured.
+- **Run 3b (stopped after ~3 min):** the same pacing, now with an Equip `Wear` and Break walks taking turns with the goto walk. Stopped by hand, so the gate never ran: no verdict, regen not measured.
+- **What was wrong:** each fix after 3a patched one more state (relabel Break's walk as `goto`, skip replan, defer Equip, hold Break while a `Use` was pending). That was the bug: any two states that take turns moving the character can pace, so a fix per state never ends. Those patches are removed again.
+- **Fix:** one oscillation guard in dispatch (A15, `navigation/oscillation.py`). When the character's last 6 cell changes stayed on at most 2 cells, it gives up the target it walks to through stuck detection's step 5 and traces an `oscillation` event, whichever states caused it. The smoke script now aborts with exit 1 on sustained oscillation (more than 3 events in 6000 ticks), so a live run cannot burn the hour pacing.
+- **Status:** tested offline only. The next live hour waits on this fix being merged.
 
 ## Done-when
 

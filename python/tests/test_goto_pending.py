@@ -20,13 +20,11 @@ from agentrealm_agent.healing import (
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import goto_navigation_pending, replan
+from agentrealm_agent.pathing import goto_navigation_pending
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.break_state import BreakState
-from agentrealm_agent.states.equip import EquipState
-from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.states.investigate import InvestigateState
 from agentrealm_agent.states.shop import ShopState
 from agentrealm_agent.states.travel import TravelState
@@ -95,12 +93,6 @@ class GotoDefersStatesTest(unittest.TestCase):
         w.view.readable[(1, 1)] = True
         self.assertTrue(InvestigateState().guard(w, ctx(goto=False)))
         self.assertFalse(InvestigateState().guard(w, ctx(goto=True)))
-
-    def test_equip(self):
-        w = world()
-        w.held_supplies = [InventorySupply(1, "red_chest")]
-        self.assertTrue(EquipState().guard(w, ctx(goto=False)))
-        self.assertFalse(EquipState().guard(w, ctx(goto=True)))
 
     def test_travel(self):
         w = world()
@@ -181,12 +173,6 @@ class KeptGotoPathStuckTest(unittest.TestCase):
         signals = c.memory.nav_stuck.stuck_signals
         self.assertEqual([s["goal"] for s in signals], ["goto"])
         self.assertFalse(goto_navigation_pending(w, c.memory, c.policy))
-
-    def test_replan_keeps_an_open_goto_path_while_pending(self):
-        w, c = self._walking()
-        path = list(c.memory.path)
-        replan(w, c.memory, c.policy, random.Random(0), set(), set())
-        self.assertEqual(c.memory.path, path)
 
 
 class RegenProbeTest(unittest.TestCase):

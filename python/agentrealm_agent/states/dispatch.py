@@ -7,6 +7,7 @@ each class in this package and in ``docs/CHARACTER_AND_STATES.md``.
 
 from __future__ import annotations
 
+from ..navigation import oscillation
 from ..navigation.rejection import end_decision
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
@@ -75,9 +76,15 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     it ages what Step rejections taught the map (A14), and starts, ends or
     finishes the boss fight before any guard reads it (A38), and settles
     a Shop purchase whose gems were spent (A21).
+
+    Before any state runs, the oscillation guard checks whether the character
+    is pacing between two cells, whichever states are doing it, and if so
+    gives up the target it walks to (``navigation/oscillation.py``, A15).
     """
     m = ctx.memory
     yielded: list[str] = []
+    if oscillation.check(m, world) is not None:
+        yielded.append("oscillation: gave up the target it paced toward")
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
     try:

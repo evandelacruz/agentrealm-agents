@@ -5,7 +5,6 @@ from __future__ import annotations
 from ..equip import ARMED, EquipUpgrade, best_equip_upgrade
 from ..knowledge_base import knowledge_items
 from ..navigation import stuck as nav_stuck
-from ..pathing import goto_navigation_pending
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
 from .intents import arm, remove_slot, wear
@@ -20,8 +19,6 @@ class EquipState(State):
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
-            return False
-        if goto_navigation_pending(world, ctx.memory, ctx.policy):
             return False
         return _upgrade(world, ctx) is not None
 

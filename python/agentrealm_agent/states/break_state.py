@@ -169,11 +169,7 @@ def break_outcome(
         if odd:
             note_odd_unreachable(m, w.map_id, choice.pos)
         return StateOutcome(None, f"cannot reach {choice.pos}", state=state)
-    att = None if odd else nav_stuck.active(m, w)
-    # Keep the goto label while breaking for a goto stuck attempt (A58), so
-    # Explore does not replan the long walk every tick.
-    path_goal = att.goal if att is not None and att.goal != GOAL else GOAL
-    m.path, m.goal = path or [], path_goal
+    m.path, m.goal = path or [], GOAL
     return StateOutcome(intents + [set_position(step)], f"break → {choice.pos}", state=state)
 
 
@@ -189,15 +185,13 @@ class BreakState(State):
             return False
         # While the policy goto is owed, only its own stuck escalation breaks a
         # block; plan break ops and other goals' escalations wait (A58).
-        m = ctx.memory
-        if m.break_pending is not None:
-            return False  # wait for BlockChanged before walking on (A28)
         walking_goto = goto_navigation_pending(world, ctx.memory, ctx.policy)
         if break_op(ctx.plan) is not None and not walking_goto:
             return True
         att = nav_stuck.active(ctx.memory, world)
         if att is not None and att.level == nav_stuck.BREAK and (not walking_goto or att.goal == "goto"):
             return True
+        m = ctx.memory
         # A break opened its block and the attempt went back to walking: the
         # weapon armed before it is still to be restored. Not while OddBreak
         # holds the round and still has a block to walk to, or the two would

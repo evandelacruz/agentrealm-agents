@@ -20,6 +20,11 @@ module checks for each clause:
   the same cell with the same reason. A wait (Heal resting in a safe zone) is
   not movement, so it never counts as a loop.
 
+- Does not pace: the oscillation guard (``navigation/oscillation.py``) gives
+  up a target the agent paces toward. More than ``OSCILLATION_ABORT_COUNT``
+  of those within ``OSCILLATION_ABORT_TICKS`` ends the run at once, so a
+  live hour never burns its time walking back and forth.
+
 Heal actions are reported but not gated: a character that is never hurt has
 nothing to heal.
 """
@@ -44,6 +49,11 @@ from .zone_discovery import safe_tiles
 TARGET_SECONDS = 3600.0
 TARGET_DISTANCE = 150
 LOOP_STEP_LIMIT = 24  # Step-sending decisions in a row at one cell with one reason
+# Sustained pacing: the guard fired more than this many times in this many
+# ticks (10 minutes at 10 ticks/s). Its backoffs double (30 s, 60 s, 120 s),
+# so a target that keeps making the agent pace trips this within minutes.
+OSCILLATION_ABORT_COUNT = 3
+OSCILLATION_ABORT_TICKS = 6000
 
 # States that are already the right answer when should_retreat holds.
 SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee")
@@ -77,6 +87,8 @@ class M7AcceptanceMetrics(AcceptanceHooks):
     heal_actions: int = 0
     regen: str | None = None  # "yes" or "no" once measured
     loop_detected: bool = False
+    oscillation_ticks: list[int] = field(default_factory=list)  # each guard event's tick
+    oscillation_abort: str | None = None  # why the run was stopped for pacing
     api_errors: list[str] = field(default_factory=list)
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
     _loop_key: tuple[Pos, str] | None = None
@@ -97,6 +109,19 @@ class M7AcceptanceMetrics(AcceptanceHooks):
         self.deaths += 1
         if self.stop is not None:
             self.stop.set()
+
+    def on_oscillation(self, event: dict) -> None:
+        """Count the guard's events; sustained pacing ends the run."""
+        tick = int(event.get("tick") or 0)
+        self.oscillation_ticks.append(tick)
+        recent = [t for t in self.oscillation_ticks if tick - t < OSCILLATION_ABORT_TICKS]
+        if len(recent) > OSCILLATION_ABORT_COUNT and self.oscillation_abort is None:
+            self.oscillation_abort = (
+                f"sustained oscillation: {len(recent)} oscillation events in "
+                f"{OSCILLATION_ABORT_TICKS} ticks (last at tick {tick}, cells {event.get('cells')})"
+            )
+            if self.stop is not None:
+                self.stop.set()
 
     def before_tick(
         self,
@@ -174,6 +199,8 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             out.append(f"{self.recover_unsafe} Recover withdraw(s) from a cell not known safe")
         if self.loop_detected:
             out.append(f"loop: {LOOP_STEP_LIMIT} Steps in a row at one cell with one reason")
+        if self.oscillation_abort:
+            out.append(self.oscillation_abort)
         if full_hour and not self.navigation_ok():
             out.append(f"target {self.target} neither reached nor given up on (max distance {self.max_distance})")
         if full_hour and self.regen is None:
@@ -199,6 +226,7 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             f"heal actions: {self.heal_actions}",
             f"safe-zone regen: {self.regen or 'not measured'}",
             f"loop detected: {self.loop_detected}",
+            f"oscillation events: {len(self.oscillation_ticks)}",
             f"API errors: {len(self.api_errors)}",
             f"lives last seen: {self.lives_seen}",
         ]

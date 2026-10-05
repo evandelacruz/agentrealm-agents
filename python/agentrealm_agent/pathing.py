@@ -289,8 +289,6 @@ def replan(
     its leg, and whether a route was found (its first step was not open),
     for the caller's stuck detection (A15).
     """
-    if goto_navigation_pending(w, m, policy) and m.goal == "goto" and next_step(w, blocked, m.path):
-        return None
     m.path, m.goal, m.goal_op = [], "", None
     if (
         plan is not None

@@ -16,7 +16,13 @@ from agentrealm_agent.acceptance import AcceptanceHooks
 from agentrealm_agent.client import ApiError
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.m7_acceptance import LOOP_STEP_LIMIT, TARGET_DISTANCE, M7AcceptanceMetrics
+from agentrealm_agent.m7_acceptance import (
+    LOOP_STEP_LIMIT,
+    OSCILLATION_ABORT_COUNT,
+    OSCILLATION_ABORT_TICKS,
+    TARGET_DISTANCE,
+    M7AcceptanceMetrics,
+)
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
@@ -207,6 +213,26 @@ class LoopGateTest(unittest.TestCase):
         self.assertTrue(m.loop_detected)
 
 
+class OscillationAbortTest(unittest.TestCase):
+    def test_sustained_pacing_stops_the_run_and_fails_it(self):
+        stop = threading.Event()
+        m = metrics(stop=stop)
+        for i in range(OSCILLATION_ABORT_COUNT):
+            m.on_oscillation({"tick": i * 100, "cells": [[1, 0], [2, 0]]})
+        self.assertFalse(stop.is_set(), "a few give-ups are the guard doing its job")
+        m.on_oscillation({"tick": OSCILLATION_ABORT_COUNT * 100, "cells": [[1, 0], [2, 0]]})
+        self.assertTrue(stop.is_set())
+        self.assertTrue(any("sustained oscillation" in f for f in m.failures(full_hour=False)))
+
+    def test_events_spread_past_the_window_do_not_abort(self):
+        stop = threading.Event()
+        m = metrics(stop=stop)
+        for i in range(OSCILLATION_ABORT_COUNT * 3):
+            m.on_oscillation({"tick": i * OSCILLATION_ABORT_TICKS // 2, "cells": []})
+        self.assertFalse(stop.is_set())
+        self.assertEqual(m.failures(full_hour=False), [])
+
+
 class ApiErrorTest(unittest.TestCase):
     def test_api_errors_fail_the_run(self):
         class Reads:
@@ -261,6 +287,20 @@ class RunnerHookTest(RunnerCase):
         r.world.health = 10
         r.tick()
         self.assertEqual(calls, ["before_tick health=10", "tick"])
+
+    def test_oscillation_events_reach_the_trace_and_the_gate(self):
+        stop = threading.Event()
+        m = metrics()
+        server = TownServer(10, stop)
+        r = self.make_runner(server, stop, m)
+        event = {"event": "oscillation", "tick": 5, "map_id": OVERWORLD, "cells": [[1, 0], [2, 0]]}
+        r.mem.nav_stuck.oscillations.append(event)
+        with mock.patch.object(r, "log") as log:
+            r.trace_oscillations()
+        log.assert_called_once()
+        self.assertEqual(log.call_args.args[0], "oscillation")
+        self.assertEqual(m.oscillation_ticks, [5])
+        self.assertEqual(r.mem.nav_stuck.oscillations, [])
 
     def test_died_event_reaches_on_death(self):
         stop = threading.Event()
@@ -385,6 +425,15 @@ class SmokeScriptTest(unittest.TestCase):
         code, out, _ = self.run_main(3600, played)
         self.assertEqual(code, 0, out)
         self.assertIn("gave up (no_path)", out)
+
+    def test_sustained_oscillation_exits_1_with_a_clear_message(self):
+        def played(m):
+            for i in range(OSCILLATION_ABORT_COUNT + 1):
+                m.on_oscillation({"tick": i, "cells": [[1, 0], [2, 0]]})
+
+        code, _, err = self.run_main(3600, played)
+        self.assertEqual(code, 1)
+        self.assertIn("ABORT: sustained oscillation", err)
 
     def test_start_off_the_overworld_exits_2(self):
         client = mock.Mock()

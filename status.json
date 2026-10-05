@@ -41,7 +41,7 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 
-  "A58": {"state": "partial", "remaining": "First live hour reached the 150-block target with 0 deaths but never measured safe-zone regen; the regen fix and sleep-wake are merged (#89). Rerun the full hour on a character chosen at run time once A59 lands. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "First live hour reached the 150-block target with 0 deaths but never measured safe-zone regen. Rerun 3 was stopped twice for pacing between two cells mid-goto; the dispatch oscillation guard (A15) and the smoke abort on sustained oscillation are the fix, tested offline only. The next full live hour waits on that PR. Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 

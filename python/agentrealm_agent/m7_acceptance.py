@@ -116,9 +116,11 @@ class M7AcceptanceMetrics(AcceptanceHooks):
         self.oscillation_ticks.append(tick)
         recent = [t for t in self.oscillation_ticks if tick - t < OSCILLATION_ABORT_TICKS]
         if len(recent) > OSCILLATION_ABORT_COUNT and self.oscillation_abort is None:
+            gave_up = f"gave up {event['goal']}" if "goal" in event else "nothing given up"
             self.oscillation_abort = (
-                f"sustained oscillation: {len(recent)} oscillation events in "
-                f"{OSCILLATION_ABORT_TICKS} ticks (last at tick {tick}, cells {event.get('cells')})"
+                f"sustained oscillation: {len(recent)} pacing events in {OSCILLATION_ABORT_TICKS} ticks "
+                f"(last at tick {tick}, cells {event.get('cells')}, moved by "
+                f"{', '.join(event.get('states') or []) or 'no state'}, {gave_up})"
             )
             if self.stop is not None:
                 self.stop.set()

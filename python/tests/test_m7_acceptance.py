@@ -223,6 +223,7 @@ class OscillationAbortTest(unittest.TestCase):
         m.on_oscillation({"tick": OSCILLATION_ABORT_COUNT * 100, "cells": [[1, 0], [2, 0]]})
         self.assertTrue(stop.is_set())
         self.assertTrue(any("sustained oscillation" in f for f in m.failures(full_hour=False)))
+        self.assertIn("nothing given up", m.oscillation_abort, "never blames a target the guard kept")
 
     def test_events_spread_past_the_window_do_not_abort(self):
         stop = threading.Event()

@@ -531,8 +531,11 @@ class Runner:
         stuck = self.mem.nav_stuck
         events, stuck.oscillations = stuck.oscillations, []
         for event in events:
-            gave_up = f"gave up {event['goal']} → {tuple(event['target'])}" if "goal" in event else "no target"
-            self.log("oscillation", f"pacing {event['cells']}: {gave_up}", event)
+            if "goal" in event:
+                outcome = f"gave up {event['goal']} → {tuple(event['target'])}"
+            else:
+                outcome = f"nothing given up, moved by {', '.join(event.get('states') or []) or 'no state'}"
+            self.log("oscillation", f"pacing {event['cells']}: {outcome}", event)
             if self.acceptance is not None:
                 self.acceptance.on_oscillation(event)
 

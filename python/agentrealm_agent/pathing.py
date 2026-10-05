@@ -270,15 +270,20 @@ def grid_params(
     params = nav_stuck.planning_params(m, base) if m is not None else base
     if w is None or w.pos is None:
         return params
+    # Breakables are priced only at break time (A15 step 2, A28): for **Break**
+    # walking to the cell it opens (``break_goal``), or for an attempt at the
+    # BREAK level. Below it they stay impassable, so a plan never routes into
+    # a block nothing is going to open.
     goal = break_goal
-    att = nav_stuck.active(m, w) if m is not None else None
-    if goal is None and att is not None:
+    if goal is None:
+        att = nav_stuck.active(m, w) if m is not None else None
+        if att is None or att.level != nav_stuck.BREAK:
+            return params
         goal = att.target
-    nominated = {p for p, b in w.view.tiles.items() if b in ("bush", "tree", "rock", "mountain", "wall")}
-    costs = break_costs_for_planning(w, knowledge, goal, nominated=nominated)
+    costs = break_costs_for_planning(w, knowledge, goal)
     if not costs:
         return params
-    return dataclasses.replace(params, break_nominated=nominated, break_costs=costs)
+    return dataclasses.replace(params, break_nominated=set(costs), break_costs=costs)
 
 
 def _store_path(m: Memory, w: WorldModel, goal: str, path: list[Pos], leg: Leg | None) -> None:
@@ -442,7 +447,6 @@ def attempt_plan(
             m=m,
             w=w,
             knowledge=knowledge,
-            break_goal=att.target,
         )
         if att.level == nav_stuck.ALT_ROUTE:
             params = dataclasses.replace(params, break_costs={}, break_nominated=set())
@@ -480,9 +484,7 @@ def plan_goal(
         target = tuple(policy.goto)
         if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
             return None, None
-        params = grid_params(
-            policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge, break_goal=target
-        )
+        params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
         nav = nav_search(m, w, "goto", target) if dest_map == w.map_id else None
         path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav) or None
         return path, nav_stuck.leg_toward(m, w, "goto", dest_map, target, path)

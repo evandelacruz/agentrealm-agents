@@ -20,7 +20,10 @@ from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.door_look import LOOK_GOAL, approach_pos
+from agentrealm_agent.knowledge_maps import sync_tiles
 from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_agent.pathing import grid_params
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.break_state import BreakState
@@ -36,8 +39,21 @@ class BreakMemoryTest(unittest.TestCase):
 
     def test_capabilities_from_manual_classes(self):
         self.assertEqual(capabilities_for_code("bronze_sword"), frozenset({"cut", "chop"}))
-        self.assertEqual(capabilities_for_code("pocket_knife"), frozenset({"cut", "chop"}))
+        self.assertEqual(capabilities_for_code("pocket_knife"), frozenset({"cut"}))
         self.assertEqual(capabilities_for_code("bronze_mallet"), frozenset({"smash"}))
+        self.assertEqual(capabilities_for_code("matches"), frozenset({"burn"}))
+
+    def test_unsourced_code_carries_nothing(self):
+        # No substring guessing: a code GAME_NOTES does not name has no class.
+        for code in ("iron_sword", "big_bomb", "matchbox", "torch_holder"):
+            self.assertEqual(capabilities_for_code(code), frozenset(), code)
+
+    def test_capability_learned_from_an_opened_break(self):
+        kb = KnowledgeBase.empty("sandbox")
+        record_attempt(kb, map_id=1, pos=(3, 4), capability="cut", result="opened", code="iron_sword")
+        record_attempt(kb, map_id=1, pos=(5, 4), capability="chop", result="applied_no_effect", code="iron_sword")
+        self.assertEqual(capabilities_for_code("iron_sword", kb), frozenset({"cut"}))
+        self.assertEqual(capabilities_for_code("iron_mallet", kb), frozenset())
 
     def test_failed_pair_is_remembered(self):
         kb = KnowledgeBase.empty("sandbox")
@@ -202,3 +218,112 @@ class BreakFromGuidedWalkTest(unittest.TestCase):
         out = BreakState().act(w, c)
         self.assertIsNone(out.intents, "no Use on a pair already refused")
         self.assertEqual(att.level, nav_stuck.REVEAL, "step 2 has nothing left: on to step 3")
+
+
+class BreakPricingTest(unittest.TestCase):
+    """Breakables are passable in the grid only at break time (A15 step 2)."""
+
+    def setUp(self):
+        self.w = _sword_world([".b..."], at=(0, 0))
+        self.m = Memory()
+        self.att = nav_stuck.track(self.m, self.w, "goto", (4, 0))
+        self.policy = Policy(kind="scripted", goals=["goto"])
+
+    def params(self, **kw):
+        return grid_params(self.policy, set(), set(), m=self.m, w=self.w, **kw)
+
+    def test_below_break_level_the_bush_stays_impassable(self):
+        for level in (nav_stuck.WALK, nav_stuck.CAUTIOUS):
+            self.att.level = level
+            p = self.params()
+            self.assertEqual(p.break_costs, {}, level)
+            self.assertEqual(p.break_nominated, set(), level)
+
+    def test_after_break_level_the_bush_stays_impassable(self):
+        for level in (nav_stuck.REVEAL, nav_stuck.REVEALED, nav_stuck.ALT_ROUTE):
+            self.att.level = level
+            self.assertEqual(self.params().break_costs, {}, level)
+
+    def test_at_break_level_the_route_bush_is_priced(self):
+        self.att.level = nav_stuck.BREAK
+        p = self.params()
+        self.assertEqual(set(p.break_costs), {(1, 0)})
+        self.assertEqual(p.break_nominated, {(1, 0)})
+
+    def test_break_walking_to_its_target_prices_that_cell(self):
+        self.assertEqual(set(self.params(break_goal=(1, 0)).break_costs), {(1, 0)})
+
+    def test_off_route_breakables_are_not_priced(self):
+        self.w = _sword_world([".b...", "b...."], at=(0, 0))
+        self.att = nav_stuck.track(self.m, self.w, "goto", (4, 0))
+        self.att.level = nav_stuck.BREAK
+        self.assertEqual(set(self.params().break_costs), {(1, 0)})
+
+
+class BreakRearmTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
+        self.kb = KnowledgeBase.empty("sandbox")
+        r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=self.kb)
+        self.addCleanup(r.trace.close)
+        w = _sword_world(["..b.."], at=(1, 0))
+        w.held_supplies = [InventorySupply(5, "bronze_mallet"), InventorySupply(9, "bronze_sword")]
+        w.armed_code = "bronze_sword"
+        r.world, r.mem = w, Memory(need_self=False, need_position=False)
+        self.r = r
+        self.ctx = PlayContext(
+            r.mem, Policy(kind="scripted", goals=["hold"], pickup=False), random.Random(0), knowledge=self.kb
+        )
+        self.att = nav_stuck.track(r.mem, w, "goto", (4, 0))
+        self.att.level = nav_stuck.BREAK
+        self.att.break_x, self.att.break_y, self.att.break_cap = 2, 0, "smash"
+
+    def test_previous_weapon_is_rearmed_after_a_successful_break(self):
+        r, w, m = self.r, self.r.world, self.r.mem
+        out = BreakState().act(w, self.ctx)
+        self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
+        self.assertEqual(m.break_rearm, "bronze_sword")
+        m.pending_intents = list(out.intents)
+        w.armed_code = "bronze_mallet"
+        self.assertFalse(r.on_result({"tick": 3, "outcome": "applied"}, 1))
+        w.view.tiles[(2, 0)] = "dirt"
+        w.changed_blocks = [(7, (2, 0))]
+        r._resolve_pending_break()
+        self.assertEqual(self.att.level, nav_stuck.WALK, "the way is open: walking again")
+        self.assertEqual(self.kb.breaks[break_key(7, (2, 0), "smash")]["code"], "bronze_mallet")
+        self.assertTrue(BreakState().guard(w, self.ctx), "Break still owes the re-arm")
+        out = BreakState().act(w, self.ctx)
+        self.assertEqual(out.intents, [arm(9)])
+        self.assertIsNone(m.break_rearm)
+        self.assertFalse(BreakState().guard(w, self.ctx))
+
+    def test_no_rearm_while_the_break_is_in_flight(self):
+        m = self.r.mem
+        self.att.level = nav_stuck.WALK
+        m.break_rearm, m.break_pending = "bronze_sword", (7, (2, 0), "smash")
+        self.assertFalse(BreakState().guard(self.r.world, self.ctx))
+
+
+class InvestigateYieldsToBreakTest(unittest.TestCase):
+    def test_stuck_door_look_reaches_break(self):
+        # Investigate's walk to look at a door hits step 2: it yields, Break swings.
+        w = _sword_world(["....b.", "......"], at=(5, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        sync_tiles(kb, 7, {(0, 0): "framed_door"})
+        w.view.tiles[(0, 0)] = "framed_door"
+        stand = approach_pos(w, (0, 0))
+        m = Memory()
+        att = nav_stuck.track(m, w, LOOK_GOAL, stand)
+        att.level = nav_stuck.BREAK
+        att.break_x, att.break_y, att.break_cap = 4, 0, "cut"
+        c = PlayContext(m, Policy(kind="scripted", goals=["hold"], pickup=False), random.Random(0), knowledge=kb)
+        out = dispatch(w, c)
+        self.assertTrue(any(y.startswith("Investigate:") and y.endswith("stuck: break") for y in out.yielded), out)
+        self.assertEqual(out.state, "Break", out.reason)
+        self.assertEqual(out.intents, [arm(5), use_block((4, 0))])
+        self.assertEqual(m.investigate_rejections, {}, "a step-2 yield is not a refusal")

@@ -42,7 +42,7 @@ def _stuck_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
             # That pair failed or was refused: nominate afresh, or escalate past step 2.
             nav_stuck.clear_break_target(att)
             return nominate_on_path(w, ctx.knowledge, w.pos, att.target) if w.pos is not None else None
-        supply = pick_supply_for_capability(w, att.break_cap)
+        supply = pick_supply_for_capability(w, att.break_cap, ctx.knowledge)
         if supply is None:
             return None
         return BreakChoice(pos, att.break_cap, supply, break_step_cost(ctx.knowledge, supply.code))
@@ -56,7 +56,7 @@ def _plan_choice(w: WorldModel, ctx: PlayContext, op: GoalOp) -> BreakChoice | N
     cap = op["capability"]
     if attempt_failed(ctx.knowledge, w.map_id, pos, cap):
         return None
-    supply = pick_supply_for_capability(w, cap)
+    supply = pick_supply_for_capability(w, cap, ctx.knowledge)
     if supply is None:
         return None
     return BreakChoice(pos, cap, supply, break_step_cost(ctx.knowledge, supply.code))
@@ -134,7 +134,12 @@ class BreakState(State):
         if break_op(ctx.plan) is not None:
             return True
         att = nav_stuck.active(ctx.memory, world)
-        return att is not None and att.level == nav_stuck.BREAK
+        if att is not None and att.level == nav_stuck.BREAK:
+            return True
+        # A break opened its block and the attempt went back to walking: the
+        # weapon armed before it is still to be restored.
+        m = ctx.memory
+        return m.break_rearm is not None and m.break_pending is None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)

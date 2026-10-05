@@ -910,6 +910,7 @@ class Runner:
                     result="opened",
                     block_after=block_after,
                     tick=w.tick,
+                    code=w.armed_code,
                 )
                 m.break_pending = None
                 on_break_opened(m, w, nav_active(m, w))

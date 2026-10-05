@@ -65,9 +65,10 @@ class Memory:
     # Heal (A10): strategist buy ops; Shop (A21) consumes them later.
     buy_signals: list[dict] = field(default_factory=list)
     buy_signals_seen: set[tuple[str, str]] = field(default_factory=set)
-    # Shop (A21): (supply id, code, gems before) of the Take in flight. Its
-    # buy signal is consumed on an applied Take or a gem drop, kept on a rejection.
-    shop_pending: tuple[int, str, int | None] | None = None
+    # Shop (A21): (supply id, code, gems before, supply pos, map id, tick sent)
+    # of the Take in flight. Its buy signal is consumed on an applied Take or a
+    # gem drop, kept on a rejection; it expires on leaving the shop cell or a timeout.
+    shop_pending: tuple[int, str, int | None, tuple[int, int], int | None, int] | None = None
     # Safe-zone regen sample: (start tick, start health, last tick seen). Only a
     # "yes" is saved to the knowledge base; a "no" holds for this run only.
     heal_regen_sample: tuple[int, int, int] | None = None

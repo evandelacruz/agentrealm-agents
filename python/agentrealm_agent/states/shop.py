@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..loot import inventory_full, worst_droppable
+from ..loot import Pickup, loot_score, pickup_room
 from ..memory import Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
@@ -56,16 +56,18 @@ def _target(w: WorldModel, ctx: PlayContext) -> Entity | None:
 
 
 def shop_take_intents(w: WorldModel, items: dict, supply: Entity) -> list[dict] | None:
-    """``Drop`` junk when full, then ``Take`` the priced supply."""
+    """``Take`` the priced supply; with a full pack, ``Drop`` the worst held
+    supply first, but only when the purchase outscores it (Loot's rule, A20)."""
     price = price_of(supply, items)
     if price is None or not can_afford(w, price):
         return None
-    if inventory_full(w):
-        shed = worst_droppable(w, items)
-        if shed is None:
-            return None
-        return [drop(shed.id), take(supply.id)]
-    return [take(supply.id)]
+    priced = {**items, supply.code: {**(items.get(supply.code) or {}), "gem_price": price}}
+    room = pickup_room(w, Pickup(supply.id, supply.code, supply.pos, None, loot_score(supply.code, priced)), items)
+    if room is False:
+        return None
+    if room is True:
+        return [take(supply.id)]
+    return [drop(room.id), take(supply.id)]
 
 
 def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
@@ -80,7 +82,7 @@ def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
         if intents is None:
             return StateOutcome(None, f"no room for {label}", state=state)
         # The buy signal is consumed only when this Take lands (runner, sync_shop).
-        ctx.memory.shop_pending = (supply.id, supply.code, w.gems)
+        ctx.memory.shop_pending = (supply.id, supply.code, w.gems, supply.pos, w.map_id, w.tick)
         return StateOutcome(intents, f"buy {label}", state=state)
     step = _step_toward(w, ctx.memory, ctx, supply.pos)
     if step is None:

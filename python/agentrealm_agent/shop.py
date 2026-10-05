@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .states.base import PlayContext
 
 GOAL = "shop"
+SHOP_PENDING_TICKS = 10  # a Take not settled by then is stale (A21)
 
 
 def price_of(e: Entity, items: dict) -> int | None:
@@ -114,10 +115,27 @@ def note_shop_result(m: Memory, intent: dict | None, applied: bool) -> None:
         m.shop_pending = None
 
 
+def shop_pending_stale(w: WorldModel, pending: tuple) -> bool:
+    """The Take in flight can no longer land: we left the shop cell, or it timed out."""
+    _, _, _, pos, map_id, sent = pending
+    if w.pos is None or w.map_id != map_id or chebyshev(pos, w.pos) > 1:
+        return True
+    return w.tick - sent > SHOP_PENDING_TICKS
+
+
 def sync_shop(w: WorldModel, m: Memory) -> None:
-    """A gem drop since the Take was sent is the purchase landing (A21)."""
+    """A gem drop since the Take was sent is the purchase landing (A21).
+
+    A stale Take is forgotten first, so a later unrelated gem drop does not
+    consume a buy signal.
+    """
     pending = m.shop_pending
-    if pending is None or pending[2] is None or w.gems is None:
+    if pending is None:
+        return
+    if shop_pending_stale(w, pending):
+        m.shop_pending = None
+        return
+    if pending[2] is None or w.gems is None:
         return
     if w.gems < pending[2]:
         consume_buy_signal(m, pending[1])

@@ -1,9 +1,15 @@
 """A21: Shop state — priced supplies, plan buy, buy_signals, potion_reserve."""
 
 import random
+import tempfile
+import threading
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from agentrealm_agent.config import Policy
+from agentrealm_agent import config
+from agentrealm_agent.brain import Decision
+from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.healing import raise_buy_potion
 from agentrealm_agent.item_table import InventorySupply
@@ -11,7 +17,8 @@ from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan, goal_done
 from agentrealm_agent.pathing import replan as path_replan
-from agentrealm_agent.shop import note_shop_result, sync_shop
+from agentrealm_agent.runner import Runner
+from agentrealm_agent.shop import SHOP_PENDING_TICKS, note_shop_result, sync_shop
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.shop import ShopState
@@ -150,6 +157,37 @@ class ShopBuyTest(unittest.TestCase):
         note_shop_result(m, out.intents[0], applied=False)  # Drop refused: Take never ran
         self.assertIsNone(m.shop_pending)
 
+    def test_full_pack_keeps_held_supply_worth_more_than_purchase(self):
+        w = world()
+        w.carry_capacity = 1
+        w.held_supplies = [InventorySupply(9, "bronze_mail")]
+        w.entities = [Entity("supply", 5, (1, 2), "torch", gem_price=3)]
+        plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
+        m = Memory()
+        c = ctx(w, m=m, plan=plan)
+        c.knowledge.items["bronze_mail"] = {"gem_price": 50}
+        out = dispatch(w, c)
+        self.assertNotEqual(out.state, "Shop")
+        self.assertNotIn({"verb": "Drop", "supply_id": 9}, out.intents or [])
+        self.assertIsNone(m.shop_pending)
+
+    def test_pending_take_expires_on_leaving_shop_cell(self):
+        w, m, _ = self._sent_heal_take()
+        w.pos = (4, 4)
+        sync_shop(w, m)
+        self.assertIsNone(m.shop_pending)
+        w.pos, w.gems = (1, 1), 7  # an unrelated gem drop later
+        sync_shop(w, m)
+        self.assertEqual(len(m.buy_signals), 1)
+
+    def test_pending_take_expires_after_timeout(self):
+        w, m, _ = self._sent_heal_take()
+        w.tick += SHOP_PENDING_TICKS + 1
+        w.gems = 7
+        sync_shop(w, m)
+        self.assertIsNone(m.shop_pending)
+        self.assertEqual(len(m.buy_signals), 1)
+
     def test_buy_op_with_nothing_in_sight_is_dropped_after_stall(self):
         plan = Plan([{"op": "buy", "code": "torch"}, {"op": "explore_area", "x": 2, "y": 2, "radius": 2}],
                     dict(PARAM_DEFAULTS))
@@ -186,3 +224,36 @@ class ShopBuyTest(unittest.TestCase):
         w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
         out = dispatch(w, ctx(w))
         self.assertNotEqual(out.state, "Shop")
+
+
+class RunnerShopResultTest(unittest.TestCase):
+    """The runner feeds each Take result to note_shop_result (A21)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(kind="scripted", goals=["hold"]), Path("t.toml"))
+        self.r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
+        self.addCleanup(self.r.trace.close)
+        self.r.world = world()
+        self.r.world.health, self.r.world.max_health = 10, 10
+        self.r.world.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
+        self.r.mem = Memory(need_self=False, need_position=False)
+        raise_buy_potion(self.r.mem, why="test")
+        out = dispatch(self.r.world, ctx(self.r.world, m=self.r.mem))
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
+        self.r.intents_for(Decision(out.intents[0], "test"))
+
+    def test_applied_take_consumes_buy_signal(self):
+        self.assertFalse(self.r.on_result({"tick": 30, "outcome": "applied"}, 0))
+        self.assertEqual(self.r.mem.buy_signals, [])
+        self.assertIsNone(self.r.mem.shop_pending)
+
+    def test_rejected_take_keeps_buy_signal(self):
+        rejection = {"category": "state", "code": "insufficient_gems", "retryability": "permanent"}
+        self.assertTrue(self.r.on_result({"tick": 30, "outcome": "rejected", "rejection": rejection}, 0))
+        self.assertEqual(len(self.r.mem.buy_signals), 1)
+        self.assertIsNone(self.r.mem.shop_pending)

@@ -39,6 +39,7 @@ Decided. Do not cross without flagging prominently.
 - Cite backlog IDs (A1, A50, …) in commits and PR bodies.
 - Read the cited PLAN.md sections and this file before writing code.
 - Write for the newcomer who will copy this agent: plain names, a short docstring on each state, one obvious place to add a behavior. Reviews flag anything that makes the agent harder to read or extend, the same as a bug.
+- The agent is character-agnostic: it plays whatever character it is handed at run time (A59). Until A59 lands, add no new live character name or id and no new implicit create path; A59 removes the existing names and `acceptance.ensure_character`'s create. After that: no live character name or id anywhere (code, configs, scripts, README, docs, status.json notes, tests; fixtures use obviously fake names), and characters are created only by an explicit `create` command.
 - Keep PLAN.md and README.md matching the code. A behavior change that leaves them describing the old one is not done.
 - Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`. The `test` GitHub Actions workflow runs both on every PR.
 - Open PRs **ready for review, not draft**. If tooling defaults to draft, run `gh pr ready`.

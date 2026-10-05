@@ -15,6 +15,7 @@ from agentrealm_agent.break_memory import (
     capabilities_for_code,
     held_capabilities,
     nominate_on_path,
+    pick_supply_for_capability,
     record_attempt,
 )
 from agentrealm_agent.config import CharacterConfig, Policy
@@ -185,6 +186,29 @@ class RunnerBreakResultTest(unittest.TestCase):
         self.assertEqual(self.kb.breaks[break_key(7, (2, 0), "cut")]["block_after"], "dirt")
         self.assertEqual(att.level, nav_stuck.WALK)
         self.assertIsNone(nav_stuck.break_target(att))
+
+    def test_opened_break_files_the_capability_on_the_item_row_for_tool_choice(self):
+        # A46 through the real path: a break with an unlisted subtype armed
+        # opens its block, the item row learns the capability, and Break's
+        # tool choice uses it after the breaks row is overwritten.
+        r, w, m = self.r, self.r.world, self.r.mem
+        w.held_supplies = [InventorySupply(6, "iron_axe")]
+        w.armed_code = "iron_axe"
+        m.break_pending = (7, (2, 0), "chop")
+        self.assertIsNone(pick_supply_for_capability(w, "chop", self.kb), "unlisted code: no class yet")
+        self.assertFalse(r.on_result({"tick": 3, "outcome": "applied"}, 1))
+        w.view.tiles[(2, 0)] = "dirt"
+        w.changed_blocks = [(7, (2, 0))]
+        r._resolve_pending_break()
+        self.assertEqual(self.kb.items, {"iron_axe": {"capabilities": ["chop"]}})
+        # The block grows back and a later try fails: the item keeps what it proved.
+        record_attempt(self.kb, map_id=7, pos=(2, 0), capability="chop", result="applied_no_effect")
+        self.assertEqual(pick_supply_for_capability(w, "chop", self.kb), InventorySupply(6, "iron_axe"))
+        self.assertIsNone(pick_supply_for_capability(w, "cut", self.kb))
+
+    def test_failed_break_files_no_capability(self):
+        self.assertFalse(self.r.on_result({"tick": 3, "outcome": "applied_no_effect"}, 1))
+        self.assertEqual(self.kb.items, {})
 
     def test_death_drops_pending_so_a_later_change_is_not_ours(self):
         r, w = self.r, self.r.world

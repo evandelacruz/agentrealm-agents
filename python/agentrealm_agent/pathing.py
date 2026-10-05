@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import random
-from typing import Callable
+from typing import Callable, Collection
 
 from .break_memory import break_costs_for_planning, nominate_on_path
 from .clues import nearest_explore_target
@@ -85,7 +85,9 @@ def _nearest(p: Pos, hostiles: list[Entity]) -> int:
     return min(chebyshev(p, h.pos) for h in hostiles)
 
 
-def flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], safes: set[Pos] = frozenset()) -> Pos | None:
+def flee_step(
+    w: WorldModel, hostiles: list[Entity], blocked: set[Pos], safes: Collection[Pos] = frozenset()
+) -> Pos | None:
     """The best single step away from ``hostiles``, or None when standing still is best.
 
     Ranked by distance to the nearest hostile, then by distance to the

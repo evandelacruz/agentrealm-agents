@@ -271,6 +271,13 @@ class DetectorTest(unittest.TestCase):
         self.assertEqual(oscillation.take_escape(m, w), {A}, "the cell stood on is not escaped")
         self.assertEqual(oscillation.take_escape(m, w), set(), "read once")
 
+    def test_escape_cells_last_only_for_the_decision_the_guard_fired_on(self):
+        m, w = Memory(), world()
+        self._see(m, w, [A, B, A, B, A, B], move=("", "Flee"))
+        # Nothing took them on that decision (Explore ran); the next one starts clean.
+        self._see(m, w, [(4, 0)], move=("", "Explore"))
+        self.assertEqual(oscillation.take_escape(m, w), set())
+
     def test_pacing_with_any_other_state_forces_no_escape(self):
         m, w = Memory(), world()
         fired = self._see(m, w, [A, B, A, B, A, B], move=("", "Fight"))

@@ -21,9 +21,10 @@ their own back nothing off.
 
 Survival-only pacing is corrected here too, in the same one place. When
 only Flee and Retreat made the moves, the guard hands the paced cells to
-them (``take_escape``): the next Flee plans a fresh committed escape (A9)
-that may not step back onto either cell, and the next Retreat replans its
-path to safety around them. Neither state needs a pacing patch of its own.
+them (``take_escape``) for that decision only: Flee plans a fresh
+committed escape (A9) that may not step back onto either cell, or Retreat
+replans its path to safety around them. Neither state needs a pacing
+patch of its own.
 
 Standing still never counts: a cell is remembered only when it differs from
 the one before, so resting, fighting in place or a ``Use`` are not pacing.
@@ -73,17 +74,18 @@ def check(m: Memory, w: WorldModel) -> dict | None:
     backed off; the event still goes to the trace.
 
     When only Flee and Retreat did the moving, the paced cells are kept for
-    ``take_escape`` and the event carries ``escape: true``.
+    ``take_escape`` and the event carries ``escape: true``. They hold for
+    this decision only: the next ``check`` clears them, read or not.
 
     Returns the ``oscillation`` event (also queued on
     ``m.nav_stuck.oscillations`` for the trace), or None.
     """
     stuck = m.nav_stuck
+    stuck.escape_from = set()  # held only for the decision the guard fires on
     if w.pos is None or w.map_id is None:
         return None
     if stuck.cells_map != w.map_id:
         stuck.cells_map, stuck.recent_cells, stuck.recent_moves = w.map_id, [], []
-        stuck.escape_from = set()
     if not stuck.recent_cells or stuck.recent_cells[-1] != w.pos:
         stuck.recent_cells.append(w.pos)
         stuck.recent_moves.append(stuck.last_move)

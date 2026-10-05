@@ -67,6 +67,7 @@ def fake_runner(goals: list[str] | None = None) -> SimpleNamespace:
         knowledge=None,
         tick_hz=10,
         log=mock.MagicMock(),
+        acceptance=None,
     )
 
 

@@ -114,6 +114,7 @@ def break_outcome(
             m.path, m.goal = [], ""
         return reflex
 
+    from_plan = False  # the target is the plan's break_block, not stuck step 2 or an odd block
     if odd:
         choice = odd_choice(w, ctx)
         m.break_odd = (w.map_id, choice.pos) if choice is not None and w.map_id is not None else None
@@ -124,6 +125,7 @@ def break_outcome(
         op = None if goto_navigation_pending(w, m, ctx.policy) else break_op(plan)
         if op is not None:
             choice = _plan_choice(w, ctx, op)
+            from_plan = choice is not None
         elif (att := nav_stuck.active(m, w)) is not None and att.level == nav_stuck.BREAK:
             choice = _stuck_choice(w, ctx)
         else:
@@ -147,6 +149,7 @@ def break_outcome(
         return StateOutcome(None, "position unknown", state=state)
     if chebyshev(here, choice.pos) <= reach:
         m.break_pending = (w.map_id, choice.pos, choice.capability)
+        _plan_progress(plan, from_plan)
         return StateOutcome(intents + [use_block(choice.pos)], f"break {choice.capability} @ {choice.pos}", state=state)
 
     params = grid_params(
@@ -170,7 +173,15 @@ def break_outcome(
             note_odd_unreachable(m, w.map_id, choice.pos)
         return StateOutcome(None, f"cannot reach {choice.pos}", state=state)
     m.path, m.goal = path or [], GOAL
+    _plan_progress(plan, from_plan)
     return StateOutcome(intents + [set_position(step)], f"break → {choice.pos}", state=state)
+
+
+def _plan_progress(plan: Plan | None, from_plan: bool) -> None:
+    """A Use or step toward the plan's own ``break_block`` resets its stall clock (A34).
+    A reflex, stuck step 2 or an odd block does not, so a stuck op still drops."""
+    if from_plan and plan is not None:
+        plan.note_progress()
 
 
 class BreakState(State):

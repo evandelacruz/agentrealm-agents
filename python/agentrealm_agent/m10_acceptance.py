@@ -58,6 +58,7 @@ class M10AcceptanceMetrics(TimedRunHooks):
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
+        acted_op: dict | None = None,
     ) -> None:
         self._note_sight(w, knowledge)
         self._note_duplicate_break(w, m, intents, knowledge)

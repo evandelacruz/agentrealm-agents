@@ -34,7 +34,7 @@ API.
 ## Session 3 (A57 pass, 2026-10-05)
 
 Dedicated characters **loot-observer-fixture** (Olympuff, map 76), **smoke-character-a** (528,406,
-6 gems), **Pippin Thistledown** (386,395, 12 gems), and sandbox **CursorA18Armor8774** (map 14,
+6 gems), **smoke-character-c** (386,395, 12 gems), and sandbox **sandbox-character-fixture** (map 14,
 66,63). Tick POSTs only for movement and cuts where noted; entity reads spaced ≥1.2 s apart.
 
 - **Life code:** Hundreds of paced `Use` calls on grass at (364,381) and adjacent cells returned

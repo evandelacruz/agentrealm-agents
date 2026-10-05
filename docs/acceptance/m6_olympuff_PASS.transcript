@@ -3,616 +3,616 @@
 #
 # Accepted after the Say/Read intent-shape fix (PR #58). PASS with 0 API errors.
 M6 smoke (A4): [olympuff_walker] (***) on olympuff → 200 steps, base https://api.agentrealm.gg
-[[olympuff_walker]] t=0 @? world    olympuff open 10Hz
-[[olympuff_walker]] t=1 @? self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2 @76:415,401 position 
-[[olympuff_walker]] t=2800542 @76:415,401 terrain  2601 cells, 2601 known
-[[olympuff_walker]] t=2800544 @76:415,401 entities npc:125@415,385, npc:123@403,398, npc:129@413,398, npc:130@421,398, npc:131@413,402, npc:132@419,402, npc:133@420,402, npc:134@421,402, npc:135@425,402, npc:136@426,402, npc:124@399,406, npc:127@415,418, npc:128@425,425, supply:2894@393,381, supply:1586@414,398, supply:1322@415,398, supply:255@416,398, supply:1844@422,398, supply:2222@414,402, supply:1323@415,402, supply:259@416,402, supply:2905@413,414, supply:2904@414,414, supply:2906@415,414
-[[olympuff_walker]] t=2800547 @76:415,401 tick     Read (read sign @406,397)
-[[olympuff_walker]] t=2800549 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800550 @76:415,401 zone     @76:397,401 safe=True
-[[olympuff_walker]] t=2800552 @76:415,401 zone     @76:396,400 safe=True
-[[olympuff_walker]] t=2800554 @76:415,401 zone     @76:396,401 safe=True
-[[olympuff_walker]] t=2800556 @76:415,401 zone     @76:396,402 safe=True
-[[olympuff_walker]] t=2800559 @76:415,401 tick     Read (read sign @406,403)
-[[olympuff_walker]] t=2800561 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800562 @76:415,401 zone     @76:397,400 safe=True
-[[olympuff_walker]] t=2800564 @76:415,401 zone     @76:397,402 safe=True
-[[olympuff_walker]] t=2800566 @76:415,401 zone     @76:398,400 safe=True
-[[olympuff_walker]] t=2800568 @76:415,401 zone     @76:398,401 safe=True
-[[olympuff_walker]] t=2800570 @76:415,401 zone     @76:398,402 safe=True
-[[olympuff_walker]] t=2800573 @76:415,401 tick     Read (read sign @403,394)
-[[olympuff_walker]] t=2800575 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800576 @76:415,401 zone     @76:395,399 safe=True
-[[olympuff_walker]] t=2800578 @76:415,401 zone     @76:395,400 safe=True
-[[olympuff_walker]] t=2800580 @76:415,401 zone     @76:395,401 safe=True
-[[olympuff_walker]] t=2800582 @76:415,401 zone     @76:395,402 safe=True
-[[olympuff_walker]] t=2800584 @76:415,401 zone     @76:395,403 safe=True
-[[olympuff_walker]] t=2800587 @76:415,401 tick     Read (read sign @403,406)
-[[olympuff_walker]] t=2800589 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800590 @76:415,401 zone     @76:396,399 safe=True
-[[olympuff_walker]] t=2800592 @76:415,401 zone     @76:396,403 safe=True
-[[olympuff_walker]] t=2800594 @76:415,401 zone     @76:397,399 safe=True
-[[olympuff_walker]] t=2800596 @76:415,401 zone     @76:397,403 safe=True
-[[olympuff_walker]] t=2800598 @76:415,401 zone     @76:398,399 safe=True
-[[olympuff_walker]] t=2800601 @76:415,401 tick     Read (read sign @427,397)
-[[olympuff_walker]] t=2800603 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800604 @76:415,401 zone     @76:398,403 safe=True
-[[olympuff_walker]] t=2800606 @76:415,401 zone     @76:399,399 safe=True
-[[olympuff_walker]] t=2800608 @76:415,401 zone     @76:399,400 safe=True
-[[olympuff_walker]] t=2800610 @76:415,401 zone     @76:399,401 safe=True
-[[olympuff_walker]] t=2800612 @76:415,401 zone     @76:399,402 safe=True
-[[olympuff_walker]] t=2800615 @76:415,401 tick     Read (read sign @397,394)
-[[olympuff_walker]] t=2800617 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800618 @76:415,401 zone     @76:399,403 safe=True
-[[olympuff_walker]] t=2800620 @76:415,401 zone     @76:394,398 safe=True
-[[olympuff_walker]] t=2800622 @76:415,401 zone     @76:394,399 safe=True
-[[olympuff_walker]] t=2800624 @76:415,401 zone     @76:394,400 safe=True
-[[olympuff_walker]] t=2800626 @76:415,401 zone     @76:394,401 safe=True
-[[olympuff_walker]] t=2800629 @76:415,401 tick     Read (read sign @397,406)
-[[olympuff_walker]] t=2800631 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800632 @76:415,401 zone     @76:394,402 safe=True
-[[olympuff_walker]] t=2800634 @76:415,401 zone     @76:394,403 safe=True
-[[olympuff_walker]] t=2800636 @76:415,401 zone     @76:394,404 safe=True
-[[olympuff_walker]] t=2800638 @76:415,401 zone     @76:395,398 safe=True
-[[olympuff_walker]] t=2800640 @76:415,401 zone     @76:395,404 safe=True
-[[olympuff_walker]] t=2800643 @76:415,401 tick     Read (read sign @394,397)
-[[olympuff_walker]] t=2800645 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800646 @76:415,401 zone     @76:396,398 safe=True
-[[olympuff_walker]] t=2800648 @76:415,401 zone     @76:396,404 safe=True
-[[olympuff_walker]] t=2800650 @76:415,401 zone     @76:397,398 safe=True
-[[olympuff_walker]] t=2800652 @76:415,401 zone     @76:397,404 safe=True
-[[olympuff_walker]] t=2800654 @76:415,401 zone     @76:398,398 safe=True
-[[olympuff_walker]] t=2800657 @76:415,401 tick     Read (read sign @394,403)
-[[olympuff_walker]] t=2800659 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800660 @76:415,401 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2800662 @76:415,401 zone     @76:398,404 safe=True
-[[olympuff_walker]] t=2800664 @76:415,401 zone     @76:399,398 safe=True
-[[olympuff_walker]] t=2800666 @76:415,401 zone     @76:399,404 safe=True
-[[olympuff_walker]] t=2800668 @76:415,401 zone     @76:400,398 safe=True
-[[olympuff_walker]] t=2800671 @76:415,401 tick     Read (read sign @396,424)
-[[olympuff_walker]] t=2800673 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800674 @76:415,401 zone     @76:400,399 safe=True
-[[olympuff_walker]] t=2800676 @76:415,401 zone     @76:400,400 safe=True
-[[olympuff_walker]] t=2800678 @76:415,401 zone     @76:400,401 safe=True
-[[olympuff_walker]] t=2800680 @76:415,401 zone     @76:400,402 safe=True
-[[olympuff_walker]] t=2800682 @76:415,401 zone     @76:400,403 safe=True
-[[olympuff_walker]] t=2800685 @76:415,401 tick     Read (read sign @403,426)
-[[olympuff_walker]] t=2800687 @76:415,401 tick     — (queue held)
-[[olympuff_walker]] t=2800688 @76:415,401 zone     @76:400,404 safe=True
-[[olympuff_walker]] t=2800690 @76:415,401 zone     @76:393,397 safe=True
-[[olympuff_walker]] t=2800692 @76:415,401 zone     @76:393,398 safe=True
-[[olympuff_walker]] t=2800694 @76:415,401 zone     @76:393,399 safe=True
-[[olympuff_walker]] t=2800696 @76:415,401 zone     @76:393,400 safe=True
-[[olympuff_walker]] t=2800699 @76:415,401 tick     Say (say to npc 131)
-[[olympuff_walker]] t=2800701 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2800702 @76:415,401 zone     @76:393,401 safe=True
-[[olympuff_walker]] t=2800704 @76:415,401 zone     @76:393,402 safe=True
-[[olympuff_walker]] t=2800706 @76:415,401 zone     @76:393,403 safe=True
-[[olympuff_walker]] t=2800708 @76:415,401 zone     @76:393,404 safe=True
-[[olympuff_walker]] t=2800710 @76:415,401 zone     @76:393,405 safe=True
-[[olympuff_walker]] t=2800713 @76:415,401 tick     Say (say to npc 129)
-[[olympuff_walker]] t=2800715 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2800716 @76:415,401 zone     @76:394,397 safe=True
-[[olympuff_walker]] t=2800718 @76:415,401 zone     @76:394,405 safe=True
-[[olympuff_walker]] t=2800720 @76:415,401 zone     @76:395,397 safe=True
-[[olympuff_walker]] t=2800722 @76:415,401 zone     @76:395,405 safe=True
-[[olympuff_walker]] t=2800724 @76:415,401 zone     @76:396,397 safe=True
-[[olympuff_walker]] t=2800727 @76:415,401 tick     Say (say to npc 132)
-[[olympuff_walker]] t=2800729 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 132: "North-west, past the woods, there's a potato patch gone wild. Take matches. Lots."
-[[olympuff_walker]] t=2800730 @76:415,401 zone     @76:396,405 safe=True
-[[olympuff_walker]] t=2800732 @76:415,401 zone     @76:397,397 safe=True
-[[olympuff_walker]] t=2800734 @76:415,401 zone     @76:397,405 safe=True
-[[olympuff_walker]] t=2800736 @76:415,401 zone     @76:398,397 safe=True
-[[olympuff_walker]] t=2800738 @76:415,401 zone     @76:398,405 safe=True
-[[olympuff_walker]] t=2800741 @76:415,401 tick     Say (say to npc 133)
-[[olympuff_walker]] t=2800743 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 133: "Up in the moose hills there's a thicket where archers live and swordsmen don't."
-[[olympuff_walker]] t=2800744 @76:415,401 zone     @76:399,397 safe=True
-[[olympuff_walker]] t=2800746 @76:415,401 zone     @76:399,405 safe=True
-[[olympuff_walker]] t=2800748 @76:415,401 zone     @76:400,397 safe=True
-[[olympuff_walker]] t=2800750 @76:415,401 zone     @76:400,405 safe=True
-[[olympuff_walker]] t=2800752 @76:415,401 zone     @76:401,397 safe=True
-[[olympuff_walker]] t=2800755 @76:415,401 tick     Say (say to npc 130)
-[[olympuff_walker]] t=2800757 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2800758 @76:415,401 zone     @76:401,398 safe=True
-[[olympuff_walker]] t=2800760 @76:415,401 zone     @76:401,399 safe=True
-[[olympuff_walker]] t=2800762 @76:415,401 zone     @76:401,400 safe=True
-[[olympuff_walker]] t=2800764 @76:415,401 zone     @76:401,401 safe=True
-[[olympuff_walker]] t=2800766 @76:415,401 zone     @76:401,402 safe=True
-[[olympuff_walker]] t=2800769 @76:415,401 tick     Say (say to npc 134)
-[[olympuff_walker]] t=2800771 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 134: "South, past the fields, the ground steams. That door wants a key that sprouts."
-[[olympuff_walker]] t=2800772 @76:415,401 zone     @76:401,403 safe=True
-[[olympuff_walker]] t=2800774 @76:415,401 zone     @76:401,404 safe=True
-[[olympuff_walker]] t=2800776 @76:415,401 zone     @76:401,405 safe=True
-[[olympuff_walker]] t=2800778 @76:415,401 zone     @76:392,396 safe=True
-[[olympuff_walker]] t=2800780 @76:415,401 zone     @76:392,397 safe=True
-[[olympuff_walker]] t=2800781 @76:415,401 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2800785 @76:415,401 tick     Say (say to npc 135)
-[[olympuff_walker]] t=2800787 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 135: "There's a door on an island in the east lake. You can't swim to it. Nobody can."
-[[olympuff_walker]] t=2800788 @76:415,401 zone     @76:392,398 safe=True
-[[olympuff_walker]] t=2800790 @76:415,401 zone     @76:392,399 safe=True
-[[olympuff_walker]] t=2800792 @76:415,401 zone     @76:392,400 safe=True
-[[olympuff_walker]] t=2800794 @76:415,401 zone     @76:392,401 safe=True
-[[olympuff_walker]] t=2800797 @76:415,401 tick     queue 0×Step 1×Wait (say to npc 136)
-[[olympuff_walker]] t=2800798 @76:415,401 zone     @76:392,402 safe=True
-[[olympuff_walker]] t=2800801 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 136: "West there's a maze of hedges. Buy eyes at its door, or walk very slowly."
-[[olympuff_walker]] t=2800802 @76:415,401 zone     @76:392,403 safe=True
-[[olympuff_walker]] t=2800804 @76:415,401 zone     @76:392,404 safe=True
-[[olympuff_walker]] t=2800806 @76:415,401 zone     @76:392,405 safe=True
-[[olympuff_walker]] t=2800808 @76:415,401 zone     @76:392,406 safe=True
-[[olympuff_walker]] t=2800811 @76:415,401 tick     Say (say to npc 123)
-[[olympuff_walker]] t=2800813 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 123: "Eight gods keep eight temples, and each asks one thing of you. Three of them guard a piece of their father's bolt. Put the pieces together, and the last door opens."
-[[olympuff_walker]] t=2800814 @76:415,401 zone     @76:393,396 safe=True
-[[olympuff_walker]] t=2800816 @76:415,401 zone     @76:393,406 safe=True
-[[olympuff_walker]] t=2800818 @76:415,401 zone     @76:394,396 safe=True
-[[olympuff_walker]] t=2800820 @76:415,401 zone     @76:394,406 safe=True
-[[olympuff_walker]] t=2800822 @76:415,401 zone     @76:395,396 safe=True
-[[olympuff_walker]] t=2800825 @76:415,401 tick     Say (say to npc 124)
-[[olympuff_walker]] t=2800827 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 124: "I carved the eight in town. I carved one facing the wrong way. On purpose."
-[[olympuff_walker]] t=2800828 @76:415,401 zone     @76:395,406 safe=True
-[[olympuff_walker]] t=2800830 @76:415,401 zone     @76:396,396 safe=True
-[[olympuff_walker]] t=2800832 @76:415,401 zone     @76:396,406 safe=True
-[[olympuff_walker]] t=2800834 @76:415,401 zone     @76:397,396 safe=True
-[[olympuff_walker]] t=2800836 @76:415,401 zone     @76:397,406 safe=True
-[[olympuff_walker]] t=2800839 @76:415,401 tick     Say (say to npc 125)
-[[olympuff_walker]] t=2800841 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 125: ".ti dniheb kool .yawa secaf eno .seutats eht tnuoc"
-[[olympuff_walker]] t=2800842 @76:415,401 zone     @76:398,396 safe=True
-[[olympuff_walker]] t=2800844 @76:415,401 zone     @76:398,406 safe=True
-[[olympuff_walker]] t=2800846 @76:415,401 zone     @76:399,396 safe=True
-[[olympuff_walker]] t=2800848 @76:415,401 zone     @76:399,406 safe=True
-[[olympuff_walker]] t=2800850 @76:415,401 zone     @76:400,396 safe=True
-[[olympuff_walker]] t=2800853 @76:415,401 tick     Say (say to npc 127)
-[[olympuff_walker]] t=2800855 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 127: "My brother fishes the big lake east. He sells rafts. Folk say there are sandals too, made somewhere hot, that walk on water."
-[[olympuff_walker]] t=2800856 @76:415,401 zone     @76:400,406 safe=True
-[[olympuff_walker]] t=2800858 @76:415,401 zone     @76:401,396 safe=True
-[[olympuff_walker]] t=2800860 @76:415,401 zone     @76:401,406 safe=True
-[[olympuff_walker]] t=2800862 @76:415,401 zone     @76:402,396 safe=True
-[[olympuff_walker]] t=2800864 @76:415,401 zone     @76:402,397 safe=True
-[[olympuff_walker]] t=2800867 @76:415,401 tick     Say (say to npc 128)
-[[olympuff_walker]] t=2800869 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2800870 @76:415,401 zone     @76:402,398 safe=True
-[[olympuff_walker]] t=2800872 @76:415,401 zone     @76:402,399 safe=True
-[[olympuff_walker]] t=2800874 @76:415,401 zone     @76:402,400 safe=True
-[[olympuff_walker]] t=2800876 @76:415,401 zone     @76:402,401 safe=True
-[[olympuff_walker]] t=2800878 @76:415,401 zone     @76:402,402 safe=True
-[[olympuff_walker]] t=2800881 @76:415,401 tick     queue 10×Step 27×Wait (look entrance @300,316)
-[[olympuff_walker]] t=2800882 @76:415,401 zone     @76:402,403 safe=True
-[[olympuff_walker]] t=2800884 @76:415,401 zone     @76:402,404 safe=True
-[[olympuff_walker]] t=2800886 @76:415,401 zone     @76:402,405 safe=True
-[[olympuff_walker]] t=2800888 @76:415,401 zone     @76:402,406 safe=True
-[[olympuff_walker]] t=2800890 @76:415,401 zone     @76:391,395 safe=True
-[[olympuff_walker]] t=2800893 @76:412,398 tick     — (queue held)
-[[olympuff_walker]] t=2800894 @76:412,398 zone     @76:391,396 safe=True
-[[olympuff_walker]] t=2800896 @76:412,398 zone     @76:391,397 safe=True
-[[olympuff_walker]] t=2800899 @76:410,397 tick     — (queue held)
-[[olympuff_walker]] t=2800900 @76:410,397 zone     @76:391,398 safe=True
-[[olympuff_walker]] t=2800902 @76:410,397 zone     @76:391,399 safe=True
-[[olympuff_walker]] t=2800903 @76:410,397 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2800906 @76:410,397 zone     @76:391,400 safe=True
-[[olympuff_walker]] t=2800909 @76:408,395 tick     — (queue held)
-[[olympuff_walker]] t=2800910 @76:408,395 zone     @76:391,401 safe=True
-[[olympuff_walker]] t=2800912 @76:408,395 zone     @76:391,402 safe=True
-[[olympuff_walker]] t=2800914 @76:408,395 zone     @76:391,403 safe=True
-[[olympuff_walker]] t=2800916 @76:408,395 zone     @76:391,404 safe=True
-[[olympuff_walker]] t=2800918 @76:408,395 zone     @76:391,405 safe=True
-[[olympuff_walker]] t=2800921 @76:405,392 tick     — (queue held)
-[[olympuff_walker]] t=2800922 @76:405,392 zone     @76:391,406 safe=True
-[[olympuff_walker]] t=2800924 @76:405,392 zone     @76:391,407 safe=True
-[[olympuff_walker]] t=2800927 @76:405,392 tick     Say (say to npc 215)
-[[olympuff_walker]] t=2800929 @76:405,392 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2800930 @76:405,392 zone     @76:392,395 safe=True
-[[olympuff_walker]] t=2800932 @76:405,392 zone     @76:392,407 safe=True
-[[olympuff_walker]] t=2800934 @76:405,392 zone     @76:393,395 safe=True
-[[olympuff_walker]] t=2800936 @76:405,392 zone     @76:393,407 safe=True
-[[olympuff_walker]] t=2800939 @76:405,392 tick     queue 0×Step 1×Wait (say to npc 216)
-[[olympuff_walker]] t=2800940 @76:405,392 zone     @76:394,395 safe=True
-[[olympuff_walker]] t=2800943 @76:405,392 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2800944 @76:405,392 zone     @76:394,407 safe=True
-[[olympuff_walker]] t=2800946 @76:405,392 zone     @76:395,395 safe=True
-[[olympuff_walker]] t=2800948 @76:405,392 zone     @76:395,407 safe=True
-[[olympuff_walker]] t=2800950 @76:405,392 zone     @76:396,395 safe=True
-[[olympuff_walker]] t=2800953 @76:405,392 tick     queue 10×Step 27×Wait (look entrance @300,316)
-[[olympuff_walker]] t=2800954 @76:405,392 zone     @76:396,407 safe=True
-[[olympuff_walker]] t=2800956 @76:405,392 zone     @76:397,395 safe=True
-[[olympuff_walker]] t=2800958 @76:405,392 zone     @76:397,407 safe=True
-[[olympuff_walker]] t=2800960 @76:405,392 zone     @76:398,395 safe=True
-[[olympuff_walker]] t=2800962 @76:405,392 zone     @76:398,407 safe=True
-[[olympuff_walker]] t=2800965 @76:402,389 tick     — (queue held)
-[[olympuff_walker]] t=2800966 @76:402,389 terrain  2601 cells, 3720 known
-[[olympuff_walker]] t=2800968 @76:402,389 zone     @76:399,395 safe=True
-[[olympuff_walker]] t=2800970 @76:402,389 zone     @76:399,407 safe=True
-[[olympuff_walker]] t=2800972 @76:402,389 zone     @76:400,395 safe=True
-[[olympuff_walker]] t=2800974 @76:402,389 zone     @76:400,407 safe=True
-[[olympuff_walker]] t=2800977 @76:399,386 tick     — (queue held)
-[[olympuff_walker]] t=2800978 @76:399,386 zone     @76:401,395 safe=True
-[[olympuff_walker]] t=2800980 @76:399,386 zone     @76:401,407 safe=True
-[[olympuff_walker]] t=2800983 @76:397,384 tick     — (queue held)
-[[olympuff_walker]] t=2800984 @76:397,384 zone     @76:402,395 safe=True
-[[olympuff_walker]] t=2800986 @76:397,384 zone     @76:402,407 safe=True
-[[olympuff_walker]] t=2800988 @76:397,384 zone     @76:403,395 safe=True
-[[olympuff_walker]] t=2800990 @76:397,384 zone     @76:403,396 safe=True
-[[olympuff_walker]] t=2800993 @76:395,382 tick     — (queue held)
-[[olympuff_walker]] t=2800994 @76:395,382 zone     @76:403,397 safe=True
-[[olympuff_walker]] t=2800996 @76:395,382 zone     @76:403,398 safe=True
-[[olympuff_walker]] t=2800998 @76:395,382 zone     @76:403,399 safe=True
-[[olympuff_walker]] t=2801000 @76:395,382 zone     @76:403,400 safe=True
-[[olympuff_walker]] t=2801002 @76:395,382 zone     @76:403,401 safe=True
-[[olympuff_walker]] t=2801005 @76:395,382 tick     Read (read sign @397,373)
-[[olympuff_walker]] t=2801007 @76:395,382 tick     — (queue held)
-[[olympuff_walker]] t=2801008 @76:395,382 zone     @76:403,402 safe=True
-[[olympuff_walker]] t=2801010 @76:395,382 zone     @76:403,403 safe=True
-[[olympuff_walker]] t=2801012 @76:395,382 zone     @76:403,404 safe=True
-[[olympuff_walker]] t=2801014 @76:395,382 zone     @76:403,405 safe=True
-[[olympuff_walker]] t=2801016 @76:395,382 zone     @76:403,406 safe=True
-[[olympuff_walker]] t=2801019 @76:395,382 tick     Say (say to npc 126)
-[[olympuff_walker]] t=2801021 @76:395,382 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 126: "That rock in my garden rings hollow when you knock it. Always has."
-[[olympuff_walker]] t=2801022 @76:395,382 zone     @76:403,407 safe=True
-[[olympuff_walker]] t=2801024 @76:395,382 zone     @76:390,394 safe=True
-[[olympuff_walker]] t=2801025 @76:395,382 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801028 @76:395,382 zone     @76:390,395 safe=True
-[[olympuff_walker]] t=2801030 @76:395,382 zone     @76:390,396 safe=True
-[[olympuff_walker]] t=2801033 @76:395,382 tick     queue 5×Step 12×Wait (look entrance @300,316)
-[[olympuff_walker]] t=2801034 @76:395,382 zone     @76:390,397 safe=True
-[[olympuff_walker]] t=2801036 @76:395,382 zone     @76:390,398 safe=True
-[[olympuff_walker]] t=2801039 @76:393,380 tick     — (queue held)
-[[olympuff_walker]] t=2801040 @76:393,380 zone     @76:390,399 safe=True
-[[olympuff_walker]] t=2801042 @76:393,380 zone     @76:390,400 safe=True
-[[olympuff_walker]] t=2801044 @76:393,380 zone     @76:390,401 safe=True
-[[olympuff_walker]] t=2801046 @76:393,380 zone     @76:390,402 safe=True
-[[olympuff_walker]] t=2801049 @76:391,378 tick     — (queue held)
-[[olympuff_walker]] t=2801051 @76:390,377 tick     — (queue held)
-[[olympuff_walker]] t=2801052 @76:390,377 zone     @76:390,403 safe=True
-[[olympuff_walker]] t=2801054 @76:390,377 zone     @76:390,404 safe=True
-[[olympuff_walker]] t=2801056 @76:390,377 zone     @76:390,405 safe=True
-[[olympuff_walker]] t=2801058 @76:390,377 zone     @76:390,406 safe=True
-[[olympuff_walker]] t=2801060 @76:390,377 zone     @76:390,407 safe=True
-[[olympuff_walker]] t=2801063 @76:390,377 tick     Say (say to npc 240)
-[[olympuff_walker]] t=2801065 @76:390,377 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801066 @76:390,377 zone     @76:390,408 safe=True
-[[olympuff_walker]] t=2801068 @76:390,377 zone     @76:391,394 safe=True
-[[olympuff_walker]] t=2801070 @76:390,377 zone     @76:391,408 safe=True
-[[olympuff_walker]] t=2801072 @76:390,377 zone     @76:392,394 safe=True
-[[olympuff_walker]] t=2801074 @76:390,377 zone     @76:392,408 safe=True
-[[olympuff_walker]] t=2801077 @76:390,377 tick     queue 10×Step 27×Wait (look entrance @300,316)
-[[olympuff_walker]] t=2801078 @76:390,377 zone     @76:393,394 safe=True
-[[olympuff_walker]] t=2801080 @76:390,377 zone     @76:393,408 safe=True
-[[olympuff_walker]] t=2801082 @76:390,377 zone     @76:394,394 safe=True
-[[olympuff_walker]] t=2801084 @76:390,377 zone     @76:394,408 safe=True
-[[olympuff_walker]] t=2801086 @76:390,377 zone     @76:395,394 safe=True
-[[olympuff_walker]] t=2801089 @76:387,380 tick     — (queue held)
-[[olympuff_walker]] t=2801090 @76:387,380 terrain  2601 cells, 4809 known
-[[olympuff_walker]] t=2801092 @76:387,380 zone     @76:395,408 safe=True
-[[olympuff_walker]] t=2801095 @76:385,381 tick     — (queue held)
-[[olympuff_walker]] t=2801096 @76:385,381 zone     @76:396,394 safe=True
-[[olympuff_walker]] t=2801098 @76:385,381 zone     @76:396,408 safe=True
-[[olympuff_walker]] t=2801100 @76:385,381 zone     @76:397,394 safe=True
-[[olympuff_walker]] t=2801102 @76:385,381 zone     @76:397,408 safe=True
-[[olympuff_walker]] t=2801105 @76:383,381 tick     — (queue held)
-[[olympuff_walker]] t=2801106 @76:383,381 zone     @76:398,394 safe=True
-[[olympuff_walker]] t=2801108 @76:383,381 zone     @76:398,408 safe=True
-[[olympuff_walker]] t=2801110 @76:383,381 zone     @76:399,394 safe=True
-[[olympuff_walker]] t=2801112 @76:383,381 zone     @76:399,408 safe=True
-[[olympuff_walker]] t=2801114 @76:383,381 zone     @76:400,394 safe=True
-[[olympuff_walker]] t=2801117 @76:380,381 tick     — (queue held)
-[[olympuff_walker]] t=2801118 @76:380,381 zone     @76:400,408 safe=True
-[[olympuff_walker]] t=2801120 @76:380,381 zone     @76:401,394 safe=True
-[[olympuff_walker]] t=2801123 @76:380,381 tick     Read (read sign @373,397)
-[[olympuff_walker]] t=2801125 @76:380,381 tick     — (queue held)
-[[olympuff_walker]] t=2801126 @76:380,381 zone     @76:401,408 safe=True
-[[olympuff_walker]] t=2801128 @76:380,381 zone     @76:402,394 safe=True
-[[olympuff_walker]] t=2801130 @76:380,381 zone     @76:402,408 safe=True
-[[olympuff_walker]] t=2801132 @76:380,381 zone     @76:403,394 safe=True
-[[olympuff_walker]] t=2801135 @76:380,381 tick     Say (say to npc 164)
-[[olympuff_walker]] t=2801137 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801138 @76:380,381 zone     @76:403,408 safe=True
-[[olympuff_walker]] t=2801140 @76:380,381 zone     @76:404,394 safe=True
-[[olympuff_walker]] t=2801142 @76:380,381 zone     @76:404,395 safe=True
-[[olympuff_walker]] t=2801144 @76:380,381 zone     @76:404,396 safe=True
-[[olympuff_walker]] t=2801147 @76:380,381 tick     queue 0×Step 1×Wait (say to npc 168)
-[[olympuff_walker]] t=2801148 @76:380,381 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801151 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801152 @76:380,381 zone     @76:404,397 safe=True
-[[olympuff_walker]] t=2801154 @76:380,381 zone     @76:404,398 safe=True
-[[olympuff_walker]] t=2801156 @76:380,381 zone     @76:404,399 safe=True
-[[olympuff_walker]] t=2801158 @76:380,381 zone     @76:404,400 safe=True
-[[olympuff_walker]] t=2801161 @76:380,381 tick     Say (say to npc 170)
-[[olympuff_walker]] t=2801163 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801164 @76:380,381 zone     @76:404,401 safe=True
-[[olympuff_walker]] t=2801166 @76:380,381 zone     @76:404,402 safe=True
-[[olympuff_walker]] t=2801168 @76:380,381 zone     @76:404,403 safe=True
-[[olympuff_walker]] t=2801170 @76:380,381 zone     @76:404,404 safe=True
-[[olympuff_walker]] t=2801172 @76:380,381 zone     @76:404,405 safe=True
-[[olympuff_walker]] t=2801175 @76:380,381 tick     Say (say to npc 171)
-[[olympuff_walker]] t=2801177 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801178 @76:380,381 zone     @76:404,406 safe=True
-[[olympuff_walker]] t=2801180 @76:380,381 zone     @76:404,407 safe=True
-[[olympuff_walker]] t=2801182 @76:380,381 zone     @76:404,408 safe=True
-[[olympuff_walker]] t=2801184 @76:380,381 zone     @76:389,393 safe=True
-[[olympuff_walker]] t=2801186 @76:380,381 zone     @76:389,394 safe=True
-[[olympuff_walker]] t=2801189 @76:380,381 tick     Say (say to npc 166)
-[[olympuff_walker]] t=2801191 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801192 @76:380,381 zone     @76:389,395 safe=True
-[[olympuff_walker]] t=2801194 @76:380,381 zone     @76:389,396 safe=True
-[[olympuff_walker]] t=2801196 @76:380,381 zone     @76:389,397 safe=True
-[[olympuff_walker]] t=2801198 @76:380,381 zone     @76:389,398 safe=True
-[[olympuff_walker]] t=2801200 @76:380,381 zone     @76:389,399 safe=True
-[[olympuff_walker]] t=2801203 @76:380,381 tick     Say (say to npc 169)
-[[olympuff_walker]] t=2801205 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801206 @76:380,381 zone     @76:389,400 safe=True
-[[olympuff_walker]] t=2801208 @76:380,381 zone     @76:389,401 safe=True
-[[olympuff_walker]] t=2801210 @76:380,381 zone     @76:389,402 safe=True
-[[olympuff_walker]] t=2801212 @76:380,381 zone     @76:389,403 safe=True
-[[olympuff_walker]] t=2801214 @76:380,381 zone     @76:389,404 safe=True
-[[olympuff_walker]] t=2801220 @76:380,381 tick     queue 10×Step 27×Wait (explore_area → (372, 405))
-[[olympuff_walker]] t=2801221 @76:380,381 zone     @76:389,405 safe=True
-[[olympuff_walker]] t=2801223 @76:380,381 zone     @76:389,406 safe=True
-[[olympuff_walker]] t=2801225 @76:380,381 zone     @76:389,407 safe=True
-[[olympuff_walker]] t=2801231 @76:383,381 tick     — (queue held)
-[[olympuff_walker]] t=2801232 @76:383,381 zone     @76:389,408 safe=True
-[[olympuff_walker]] t=2801234 @76:383,381 zone     @76:389,409 safe=True
-[[olympuff_walker]] t=2801236 @76:383,381 zone     @76:390,393 safe=True
-[[olympuff_walker]] t=2801238 @76:383,381 zone     @76:390,409 safe=True
-[[olympuff_walker]] t=2801240 @76:383,381 zone     @76:391,393 safe=True
-[[olympuff_walker]] t=2801245 @76:385,383 tick     — (queue held)
-[[olympuff_walker]] t=2801246 @76:385,383 zone     @76:391,409 safe=True
-[[olympuff_walker]] t=2801248 @76:385,383 zone     @76:392,393 safe=True
-[[olympuff_walker]] t=2801250 @76:385,383 zone     @76:392,409 safe=True
-[[olympuff_walker]] t=2801252 @76:385,383 zone     @76:393,393 safe=True
-[[olympuff_walker]] t=2801254 @76:385,383 zone     @76:393,409 safe=True
-[[olympuff_walker]] t=2801257 @76:382,386 tick     — (queue held)
-[[olympuff_walker]] t=2801258 @76:382,386 zone     @76:394,393 safe=True
-[[olympuff_walker]] t=2801260 @76:382,386 zone     @76:394,409 safe=True
-[[olympuff_walker]] t=2801263 @76:382,386 tick     Say (say to npc 167)
-[[olympuff_walker]] t=2801265 @76:382,386 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801266 @76:382,386 zone     @76:395,393 safe=True
-[[olympuff_walker]] t=2801268 @76:382,386 zone     @76:395,409 safe=True
-[[olympuff_walker]] t=2801270 @76:382,386 zone     @76:396,393 safe=True
-[[olympuff_walker]] t=2801272 @76:382,386 zone     @76:396,409 safe=True
-[[olympuff_walker]] t=2801275 @76:382,386 tick     queue 0×Step 1×Wait (say to npc 165)
-[[olympuff_walker]] t=2801276 @76:382,386 zone     @76:397,393 safe=True
-[[olympuff_walker]] t=2801277 @76:382,386 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801281 @76:382,386 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801282 @76:382,386 zone     @76:397,409 safe=True
-[[olympuff_walker]] t=2801284 @76:382,386 zone     @76:398,393 safe=True
-[[olympuff_walker]] t=2801286 @76:382,386 zone     @76:398,409 safe=True
-[[olympuff_walker]] t=2801289 @76:382,386 tick     queue 10×Step 27×Wait (explore_area → (372, 405))
-[[olympuff_walker]] t=2801290 @76:382,386 zone     @76:399,393 safe=True
-[[olympuff_walker]] t=2801292 @76:382,386 zone     @76:399,409 safe=True
-[[olympuff_walker]] t=2801294 @76:382,386 zone     @76:400,393 safe=True
-[[olympuff_walker]] t=2801296 @76:382,386 zone     @76:400,409 safe=True
-[[olympuff_walker]] t=2801298 @76:382,386 zone     @76:401,393 safe=True
-[[olympuff_walker]] t=2801301 @76:382,389 tick     — (queue held)
-[[olympuff_walker]] t=2801302 @76:382,389 zone     @76:401,409 safe=True
-[[olympuff_walker]] t=2801304 @76:382,389 zone     @76:402,393 safe=True
-[[olympuff_walker]] t=2801306 @76:382,389 zone     @76:402,409 safe=True
-[[olympuff_walker]] t=2801308 @76:382,389 zone     @76:403,393 safe=True
-[[olympuff_walker]] t=2801310 @76:382,389 zone     @76:403,409 safe=True
-[[olympuff_walker]] t=2801313 @76:381,392 tick     — (queue held)
-[[olympuff_walker]] t=2801314 @76:381,392 zone     @76:404,393 safe=True
-[[olympuff_walker]] t=2801316 @76:381,392 zone     @76:404,409 safe=True
-[[olympuff_walker]] t=2801319 @76:379,394 tick     — (queue held)
-[[olympuff_walker]] t=2801320 @76:379,394 terrain  2601 cells, 5492 known
-[[olympuff_walker]] t=2801322 @76:379,394 zone     @76:405,393 safe=True
-[[olympuff_walker]] t=2801324 @76:379,394 zone     @76:405,394 safe=True
-[[olympuff_walker]] t=2801326 @76:379,394 zone     @76:405,395 safe=True
-[[olympuff_walker]] t=2801329 @76:377,396 tick     — (queue held)
-[[olympuff_walker]] t=2801330 @76:377,396 zone     @76:405,396 safe=True
-[[olympuff_walker]] t=2801332 @76:377,396 zone     @76:405,397 safe=True
-[[olympuff_walker]] t=2801334 @76:377,396 zone     @76:405,398 safe=True
-[[olympuff_walker]] t=2801336 @76:377,396 zone     @76:405,399 safe=True
-[[olympuff_walker]] t=2801338 @76:377,396 zone     @76:405,400 safe=True
-[[olympuff_walker]] t=2801341 @76:377,396 tick     queue 9×Step 24×Wait (explore_area → (372, 405))
-[[olympuff_walker]] t=2801342 @76:377,396 zone     @76:405,401 safe=True
-[[olympuff_walker]] t=2801344 @76:377,396 zone     @76:405,402 safe=True
-[[olympuff_walker]] t=2801347 @76:375,398 tick     — (queue held)
-[[olympuff_walker]] t=2801348 @76:375,398 zone     @76:405,403 safe=True
-[[olympuff_walker]] t=2801350 @76:375,398 zone     @76:405,404 safe=True
-[[olympuff_walker]] t=2801352 @76:375,398 zone     @76:405,405 safe=True
-[[olympuff_walker]] t=2801354 @76:375,398 zone     @76:405,406 safe=True
-[[olympuff_walker]] t=2801357 @76:373,400 tick     — (queue held)
-[[olympuff_walker]] t=2801358 @76:373,400 zone     @76:405,407 safe=True
-[[olympuff_walker]] t=2801360 @76:373,400 zone     @76:405,408 safe=True
-[[olympuff_walker]] t=2801362 @76:373,400 zone     @76:405,409 safe=True
-[[olympuff_walker]] t=2801369 @76:371,403 tick     — (queue held)
-[[olympuff_walker]] t=2801374 @76:372,405 tick     — (queue held)
-[[olympuff_walker]] t=2801380 @76:372,405 tick     queue 10×Step 30×Wait (explore_area → (377, 419))
-[[olympuff_walker]] t=2801381 @76:372,405 zone     @76:376,416 safe=True
-[[olympuff_walker]] t=2801383 @76:372,405 zone     @76:377,417 safe=True
-[[olympuff_walker]] t=2801385 @76:372,405 zone     @76:377,418 safe=True
-[[olympuff_walker]] t=2801387 @76:372,405 zone     @76:377,419 safe=True
-[[olympuff_walker]] t=2801388 @76:372,405 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801392 @76:371,408 tick     — (queue held)
-[[olympuff_walker]] t=2801393 @76:371,408 terrain  2601 cells, 6453 known
-[[olympuff_walker]] t=2801406 @76:371,411 tick     — (queue held)
-[[olympuff_walker]] t=2801419 @76:374,414 tick     — (queue held)
-[[olympuff_walker]] t=2801422 @76:375,415 tick     — (queue held)
-[[olympuff_walker]] t=2801432 @76:375,415 tick     queue 4×Step 10×Wait (explore_area → (377, 419))
-[[olympuff_walker]] t=2801439 @76:377,417 tick     — (queue held)
-[[olympuff_walker]] t=2801445 @76:377,418 tick     — (queue held)
-[[olympuff_walker]] t=2801448 @76:377,419 tick     — (queue held)
-[[olympuff_walker]] t=2801460 @76:377,419 tick     queue 10×Step 28×Wait (explore_area → (396, 426))
-[[olympuff_walker]] t=2801461 @76:377,419 zone     @76:388,418 safe=True
-[[olympuff_walker]] t=2801463 @76:377,419 zone     @76:389,419 safe=True
-[[olympuff_walker]] t=2801467 @76:379,420 tick     — (queue held)
-[[olympuff_walker]] t=2801468 @76:379,420 zone     @76:390,420 safe=True
-[[olympuff_walker]] t=2801470 @76:379,420 zone     @76:391,421 safe=True
-[[olympuff_walker]] t=2801474 @76:381,420 tick     — (queue held)
-[[olympuff_walker]] t=2801475 @76:381,420 zone     @76:392,422 safe=True
-[[olympuff_walker]] t=2801477 @76:381,420 zone     @76:393,423 safe=True
-[[olympuff_walker]] t=2801481 @76:382,419 tick     — (queue held)
-[[olympuff_walker]] t=2801482 @76:382,419 zone     @76:394,424 safe=True
-[[olympuff_walker]] t=2801483 @76:382,419 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801486 @76:382,419 zone     @76:395,425 safe=True
-[[olympuff_walker]] t=2801489 @76:384,417 tick     — (queue held)
-[[olympuff_walker]] t=2801490 @76:384,417 terrain  2601 cells, 7003 known
-[[olympuff_walker]] t=2801492 @76:384,417 zone     @76:396,426 safe=True
-[[olympuff_walker]] t=2801498 @76:387,417 tick     — (queue held)
-[[olympuff_walker]] t=2801505 @76:387,417 tick     Say (say to npc 256)
-[[olympuff_walker]] t=2801507 @76:387,417 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801513 @76:387,417 tick     queue 10×Step 27×Wait (look entrance @300,316)
-[[olympuff_walker]] t=2801514 @76:387,417 zone     @76:384,407 safe=True
-[[olympuff_walker]] t=2801516 @76:387,417 zone     @76:384,406 safe=True
-[[olympuff_walker]] t=2801518 @76:387,417 zone     @76:384,405 safe=True
-[[olympuff_walker]] t=2801520 @76:387,417 zone     @76:384,404 safe=True
-[[olympuff_walker]] t=2801522 @76:387,417 zone     @76:384,403 safe=True
-[[olympuff_walker]] t=2801525 @76:389,415 tick     — (queue held)
-[[olympuff_walker]] t=2801526 @76:389,415 zone     @76:384,402 safe=True
-[[olympuff_walker]] t=2801528 @76:389,415 zone     @76:384,401 safe=True
-[[olympuff_walker]] t=2801530 @76:389,415 zone     @76:384,400 safe=True
-[[olympuff_walker]] t=2801532 @76:389,415 zone     @76:383,399 safe=True
-[[olympuff_walker]] t=2801534 @76:389,415 zone     @76:382,398 safe=True
-[[olympuff_walker]] t=2801537 @76:387,412 tick     — (queue held)
-[[olympuff_walker]] t=2801538 @76:387,412 zone     @76:381,397 safe=True
-[[olympuff_walker]] t=2801540 @76:387,412 zone     @76:380,396 safe=True
-[[olympuff_walker]] t=2801543 @76:385,410 tick     — (queue held)
-[[olympuff_walker]] t=2801544 @76:385,410 zone     @76:379,395 safe=True
-[[olympuff_walker]] t=2801546 @76:385,410 zone     @76:378,394 safe=True
-[[olympuff_walker]] t=2801548 @76:385,410 zone     @76:377,393 safe=True
-[[olympuff_walker]] t=2801550 @76:385,410 zone     @76:376,392 safe=True
-[[olympuff_walker]] t=2801553 @76:384,408 tick     — (queue held)
-[[olympuff_walker]] t=2801564 @76:384,408 tick     queue 10×Step 27×Wait (look entrance @300,316)
-[[olympuff_walker]] t=2801573 @76:384,405 tick     — (queue held)
-[[olympuff_walker]] t=2801576 @76:384,405 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801582 @76:384,403 tick     — (queue held)
-[[olympuff_walker]] t=2801583 @76:384,403 terrain  2601 cells, 7003 known
-[[olympuff_walker]] t=2801590 @76:384,401 tick     — (queue held)
-[[olympuff_walker]] t=2801600 @76:383,399 tick     — (queue held) | BlockChanged, BlockChanged
-[[olympuff_walker]] t=2801602 @76:382,398 tick     — (queue held)
-[[olympuff_walker]] t=2801613 @76:382,398 tick     queue 10×Step 29×Wait (explore_area → (409, 426))
-[[olympuff_walker]] t=2801614 @76:382,398 zone     @76:393,410 safe=True
-[[olympuff_walker]] t=2801616 @76:382,398 zone     @76:394,411 safe=True
-[[olympuff_walker]] t=2801618 @76:382,398 zone     @76:395,412 safe=True
-[[olympuff_walker]] t=2801620 @76:382,398 zone     @76:396,413 safe=True
-[[olympuff_walker]] t=2801623 @76:383,400 tick     — (queue held)
-[[olympuff_walker]] t=2801624 @76:383,400 zone     @76:397,414 safe=True
-[[olympuff_walker]] t=2801626 @76:383,400 zone     @76:398,415 safe=True
-[[olympuff_walker]] t=2801628 @76:383,400 zone     @76:399,416 safe=True
-[[olympuff_walker]] t=2801630 @76:383,400 zone     @76:400,417 safe=True
-[[olympuff_walker]] t=2801632 @76:383,400 zone     @76:401,418 safe=True
-[[olympuff_walker]] t=2801635 @76:386,403 tick     — (queue held)
-[[olympuff_walker]] t=2801636 @76:386,403 zone     @76:402,419 safe=True
-[[olympuff_walker]] t=2801638 @76:386,403 zone     @76:403,420 safe=True
-[[olympuff_walker]] t=2801641 @76:388,405 tick     — (queue held)
-[[olympuff_walker]] t=2801642 @76:388,405 zone     @76:404,421 safe=True
-[[olympuff_walker]] t=2801644 @76:388,405 zone     @76:405,422 safe=True
-[[olympuff_walker]] t=2801646 @76:388,405 zone     @76:406,423 safe=True
-[[olympuff_walker]] t=2801648 @76:388,405 zone     @76:407,424 safe=True
-[[olympuff_walker]] t=2801651 @76:390,407 tick     — (queue held)
-[[olympuff_walker]] t=2801653 @76:391,408 tick     — (queue held)
-[[olympuff_walker]] t=2801654 @76:391,408 zone     @76:408,425 safe=True
-[[olympuff_walker]] t=2801656 @76:391,408 zone     @76:409,426 safe=True
-[[olympuff_walker]] t=2801664 @76:391,408 tick     queue 10×Step 27×Wait (look entrance @300,316)
-[[olympuff_walker]] t=2801665 @76:391,408 zone     @76:380,397 safe=True
-[[olympuff_walker]] t=2801667 @76:391,408 zone     @76:379,396 safe=True
-[[olympuff_walker]] t=2801668 @76:391,408 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801671 @76:391,408 zone     @76:378,395 safe=True
-[[olympuff_walker]] t=2801674 @76:388,405 tick     — (queue held)
-[[olympuff_walker]] t=2801675 @76:388,405 zone     @76:377,394 safe=True
-[[olympuff_walker]] t=2801677 @76:388,405 zone     @76:376,393 safe=True
-[[olympuff_walker]] t=2801679 @76:388,405 zone     @76:375,392 safe=True
-[[olympuff_walker]] t=2801681 @76:388,405 zone     @76:374,392 safe=True
-[[olympuff_walker]] t=2801683 @76:388,405 zone     @76:373,392 safe=True
-[[olympuff_walker]] t=2801686 @76:385,402 tick     — (queue held)
-[[olympuff_walker]] t=2801687 @76:385,402 zone     @76:372,391 safe=True
-[[olympuff_walker]] t=2801689 @76:385,402 zone     @76:371,388 safe=True
-[[olympuff_walker]] t=2801691 @76:385,402 zone     @76:371,389 safe=True
-[[olympuff_walker]] t=2801693 @76:385,402 zone     @76:371,390 safe=True
-[[olympuff_walker]] t=2801695 @76:385,402 zone     @76:371,387 safe=True
-[[olympuff_walker]] t=2801698 @76:382,399 tick     — (queue held)
-[[olympuff_walker]] t=2801702 @76:381,398 tick     — (queue held)
-[[olympuff_walker]] t=2801712 @76:381,398 tick     queue 10×Step 29×Wait (look entrance @300,316)
-[[olympuff_walker]] t=2801717 @76:380,397 tick     — (queue held)
-[[olympuff_walker]] t=2801723 @76:378,395 tick     — (queue held)
-[[olympuff_walker]] t=2801733 @76:376,393 tick     — (queue held)
-[[olympuff_walker]] t=2801738 @76:375,392 tick     — (queue held)
-[[olympuff_walker]] t=2801744 @76:373,392 tick     — (queue held)
-[[olympuff_walker]] t=2801752 @76:371,390 tick     — (queue held)
-[[olympuff_walker]] t=2801753 @76:371,390 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801755 @76:371,390 terrain  2601 cells, 7179 known
-[[olympuff_walker]] t=2801761 @76:371,390 tick     queue 10×Step 27×Wait (explore_area → (346, 395))
-[[olympuff_walker]] t=2801762 @76:371,390 zone     @76:366,395 safe=False
-[[olympuff_walker]] t=2801764 @76:371,390 zone     @76:365,394 safe=False
-[[olympuff_walker]] t=2801769 @76:371,392 tick     — (queue held)
-[[olympuff_walker]] t=2801770 @76:371,392 zone     @76:367,396 safe=False
-[[olympuff_walker]] t=2801772 @76:371,392 zone     @76:368,397 safe=False
-[[olympuff_walker]] t=2801774 @76:371,392 zone     @76:364,394 safe=False
-[[olympuff_walker]] t=2801776 @76:371,392 zone     @76:363,393 safe=False
-[[olympuff_walker]] t=2801780 @76:371,395 tick     — (queue held)
-[[olympuff_walker]] t=2801781 @76:371,395 zone     @76:362,392 safe=False
-[[olympuff_walker]] t=2801783 @76:371,395 zone     @76:361,391 safe=False
-[[olympuff_walker]] t=2801785 @76:371,395 zone     @76:360,391 safe=False
-[[olympuff_walker]] t=2801789 @76:371,397 tick     — (queue held)
-[[olympuff_walker]] t=2801790 @76:371,397 zone     @76:359,390 safe=False
-[[olympuff_walker]] t=2801792 @76:371,397 zone     @76:358,389 safe=False
-[[olympuff_walker]] t=2801796 @76:370,399 tick     — (queue held)
-[[olympuff_walker]] t=2801797 @76:370,399 zone     @76:357,388 safe=False
-[[olympuff_walker]] t=2801800 @76:369,398 tick     — (queue held)
-[[olympuff_walker]] t=2801801 @76:369,398 zone     @76:356,388 safe=False
-[[olympuff_walker]] t=2801803 @76:369,398 zone     @76:355,387 safe=False
-[[olympuff_walker]] t=2801805 @76:369,398 zone     @76:354,388 safe=False
-[[olympuff_walker]] t=2801807 @76:369,398 zone     @76:353,389 safe=False
-[[olympuff_walker]] t=2801809 @76:369,398 zone     @76:352,390 safe=False
-[[olympuff_walker]] t=2801812 @76:369,398 tick     queue 10×Step 27×Wait (explore_area → (346, 395))
-[[olympuff_walker]] t=2801813 @76:369,398 zone     @76:351,390 safe=False
-[[olympuff_walker]] t=2801815 @76:369,398 zone     @76:350,391 safe=False
-[[olympuff_walker]] t=2801817 @76:369,398 zone     @76:349,392 safe=False
-[[olympuff_walker]] t=2801819 @76:369,398 zone     @76:348,393 safe=False
-[[olympuff_walker]] t=2801821 @76:369,398 zone     @76:347,394 safe=False
-[[olympuff_walker]] t=2801824 @76:366,395 tick     — (queue held)
-[[olympuff_walker]] t=2801825 @76:366,395 zone     @76:346,395 safe=False
-[[olympuff_walker]] t=2801830 @76:364,394 tick     — (queue held)
-[[olympuff_walker]] t=2801839 @76:362,392 tick     — (queue held)
-[[olympuff_walker]] t=2801847 @76:360,391 tick     — (queue held)
-[[olympuff_walker]] t=2801850 @76:359,390 tick     — (queue held)
-[[olympuff_walker]] t=2801856 @76:359,390 tick     Say (say to npc 220)
-[[olympuff_walker]] t=2801858 @76:359,390 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801860 @76:359,390 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801868 @76:359,390 tick     queue 0×Step 8×Wait (say to npc 221)
-[[olympuff_walker]] t=2801878 @76:359,390 tick     — (queue held) | SpokenTo 9: "hello"
-[[olympuff_walker]] t=2801884 @76:359,390 tick     queue 10×Step 27×Wait (explore_area → (346, 395))
-[[olympuff_walker]] t=2801894 @76:356,388 tick     — (queue held)
-[[olympuff_walker]] t=2801895 @76:356,388 terrain  2601 cells, 7976 known
-[[olympuff_walker]] t=2801900 @76:355,387 tick     — (queue held)
-[[olympuff_walker]] t=2801909 @76:352,390 tick     — (queue held)
-[[olympuff_walker]] t=2801917 @76:350,391 tick     — (queue held)
-[[olympuff_walker]] t=2801922 @76:349,392 tick     — (queue held)
-[[olympuff_walker]] t=2801927 @76:349,392 tick     queue 3×Step 8×Wait (explore_area → (346, 395))
-[[olympuff_walker]] t=2801932 @76:349,392 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2801935 @76:347,394 tick     — (queue held)
-[[olympuff_walker]] t=2801939 @76:346,395 tick     — (queue held)
-[[olympuff_walker]] t=2801946 @76:346,395 tick     queue 10×Step 29×Wait (explore_area → (331, 401))
-[[olympuff_walker]] t=2801947 @76:346,395 zone     @76:335,398 safe=False
-[[olympuff_walker]] t=2801949 @76:346,395 zone     @76:334,399 safe=False
-[[olympuff_walker]] t=2801951 @76:346,395 zone     @76:333,399 safe=False
-[[olympuff_walker]] t=2801954 @76:344,394 tick     — (queue held)
-[[olympuff_walker]] t=2801955 @76:344,394 zone     @76:332,400 safe=False
-[[olympuff_walker]] t=2801957 @76:344,394 zone     @76:331,401 safe=False
-[[olympuff_walker]] t=2801965 @76:341,396 tick     — (queue held)
-[[olympuff_walker]] t=2801966 @76:341,396 terrain  2601 cells, 8861 known
-[[olympuff_walker]] t=2801974 @76:339,398 tick     — (queue held)
-[[olympuff_walker]] t=2801981 @76:337,397 tick     — (queue held)
-[[olympuff_walker]] t=2801986 @76:336,397 tick     — (queue held)
-[[olympuff_walker]] t=2801994 @76:336,397 tick     queue 5×Step 14×Wait (explore_area → (331, 401))
-[[olympuff_walker]] t=2802005 @76:333,399 tick     — (queue held)
-[[olympuff_walker]] t=2802010 @76:333,399 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2802015 @76:331,401 tick     — (queue held)
-[[olympuff_walker]] t=2802026 @76:331,401 tick     queue 10×Step 28×Wait (explore_area → (316, 399))
-[[olympuff_walker]] t=2802027 @76:331,401 zone     @76:320,397 safe=False
-[[olympuff_walker]] t=2802029 @76:331,401 zone     @76:319,397 safe=False
-[[olympuff_walker]] t=2802031 @76:331,401 zone     @76:318,397 safe=False
-[[olympuff_walker]] t=2802033 @76:331,401 zone     @76:317,398 safe=False
-[[olympuff_walker]] t=2802036 @76:328,398 tick     — (queue held)
-[[olympuff_walker]] t=2802037 @76:328,398 terrain  2601 cells, 9584 known
-[[olympuff_walker]] t=2802039 @76:328,398 zone     @76:316,399 safe=False
-[[olympuff_walker]] t=2802048 @76:325,395 tick     — (queue held)
-[[olympuff_walker]] t=2802053 @76:324,394 tick     — (queue held)
-[[olympuff_walker]] t=2802059 @76:323,394 tick     — (queue held)
-[[olympuff_walker]] t=2802065 @76:321,396 tick     — (queue held)
-[[olympuff_walker]] t=2802072 @76:321,396 tick     queue 5×Step 14×Wait (explore_area → (316, 399))
-[[olympuff_walker]] t=2802079 @76:319,397 tick     — (queue held)
-[[olympuff_walker]] t=2802086 @76:318,397 tick     — (queue held)
-[[olympuff_walker]] t=2802088 @76:318,397 self     lives=10 alive=True placed=True perception=25
-[[olympuff_walker]] t=2802093 @76:316,399 tick     — (queue held)
+[olympuff_walker] t=0 @? world    olympuff open 10Hz
+[olympuff_walker] t=1 @? self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2 @76:415,401 position 
+[olympuff_walker] t=2800542 @76:415,401 terrain  2601 cells, 2601 known
+[olympuff_walker] t=2800544 @76:415,401 entities npc:125@415,385, npc:123@403,398, npc:129@413,398, npc:130@421,398, npc:131@413,402, npc:132@419,402, npc:133@420,402, npc:134@421,402, npc:135@425,402, npc:136@426,402, npc:124@399,406, npc:127@415,418, npc:128@425,425, supply:2894@393,381, supply:1586@414,398, supply:1322@415,398, supply:255@416,398, supply:1844@422,398, supply:2222@414,402, supply:1323@415,402, supply:259@416,402, supply:2905@413,414, supply:2904@414,414, supply:2906@415,414
+[olympuff_walker] t=2800547 @76:415,401 tick     Read (read sign @406,397)
+[olympuff_walker] t=2800549 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800550 @76:415,401 zone     @76:397,401 safe=True
+[olympuff_walker] t=2800552 @76:415,401 zone     @76:396,400 safe=True
+[olympuff_walker] t=2800554 @76:415,401 zone     @76:396,401 safe=True
+[olympuff_walker] t=2800556 @76:415,401 zone     @76:396,402 safe=True
+[olympuff_walker] t=2800559 @76:415,401 tick     Read (read sign @406,403)
+[olympuff_walker] t=2800561 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800562 @76:415,401 zone     @76:397,400 safe=True
+[olympuff_walker] t=2800564 @76:415,401 zone     @76:397,402 safe=True
+[olympuff_walker] t=2800566 @76:415,401 zone     @76:398,400 safe=True
+[olympuff_walker] t=2800568 @76:415,401 zone     @76:398,401 safe=True
+[olympuff_walker] t=2800570 @76:415,401 zone     @76:398,402 safe=True
+[olympuff_walker] t=2800573 @76:415,401 tick     Read (read sign @403,394)
+[olympuff_walker] t=2800575 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800576 @76:415,401 zone     @76:395,399 safe=True
+[olympuff_walker] t=2800578 @76:415,401 zone     @76:395,400 safe=True
+[olympuff_walker] t=2800580 @76:415,401 zone     @76:395,401 safe=True
+[olympuff_walker] t=2800582 @76:415,401 zone     @76:395,402 safe=True
+[olympuff_walker] t=2800584 @76:415,401 zone     @76:395,403 safe=True
+[olympuff_walker] t=2800587 @76:415,401 tick     Read (read sign @403,406)
+[olympuff_walker] t=2800589 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800590 @76:415,401 zone     @76:396,399 safe=True
+[olympuff_walker] t=2800592 @76:415,401 zone     @76:396,403 safe=True
+[olympuff_walker] t=2800594 @76:415,401 zone     @76:397,399 safe=True
+[olympuff_walker] t=2800596 @76:415,401 zone     @76:397,403 safe=True
+[olympuff_walker] t=2800598 @76:415,401 zone     @76:398,399 safe=True
+[olympuff_walker] t=2800601 @76:415,401 tick     Read (read sign @427,397)
+[olympuff_walker] t=2800603 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800604 @76:415,401 zone     @76:398,403 safe=True
+[olympuff_walker] t=2800606 @76:415,401 zone     @76:399,399 safe=True
+[olympuff_walker] t=2800608 @76:415,401 zone     @76:399,400 safe=True
+[olympuff_walker] t=2800610 @76:415,401 zone     @76:399,401 safe=True
+[olympuff_walker] t=2800612 @76:415,401 zone     @76:399,402 safe=True
+[olympuff_walker] t=2800615 @76:415,401 tick     Read (read sign @397,394)
+[olympuff_walker] t=2800617 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800618 @76:415,401 zone     @76:399,403 safe=True
+[olympuff_walker] t=2800620 @76:415,401 zone     @76:394,398 safe=True
+[olympuff_walker] t=2800622 @76:415,401 zone     @76:394,399 safe=True
+[olympuff_walker] t=2800624 @76:415,401 zone     @76:394,400 safe=True
+[olympuff_walker] t=2800626 @76:415,401 zone     @76:394,401 safe=True
+[olympuff_walker] t=2800629 @76:415,401 tick     Read (read sign @397,406)
+[olympuff_walker] t=2800631 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800632 @76:415,401 zone     @76:394,402 safe=True
+[olympuff_walker] t=2800634 @76:415,401 zone     @76:394,403 safe=True
+[olympuff_walker] t=2800636 @76:415,401 zone     @76:394,404 safe=True
+[olympuff_walker] t=2800638 @76:415,401 zone     @76:395,398 safe=True
+[olympuff_walker] t=2800640 @76:415,401 zone     @76:395,404 safe=True
+[olympuff_walker] t=2800643 @76:415,401 tick     Read (read sign @394,397)
+[olympuff_walker] t=2800645 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800646 @76:415,401 zone     @76:396,398 safe=True
+[olympuff_walker] t=2800648 @76:415,401 zone     @76:396,404 safe=True
+[olympuff_walker] t=2800650 @76:415,401 zone     @76:397,398 safe=True
+[olympuff_walker] t=2800652 @76:415,401 zone     @76:397,404 safe=True
+[olympuff_walker] t=2800654 @76:415,401 zone     @76:398,398 safe=True
+[olympuff_walker] t=2800657 @76:415,401 tick     Read (read sign @394,403)
+[olympuff_walker] t=2800659 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800660 @76:415,401 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2800662 @76:415,401 zone     @76:398,404 safe=True
+[olympuff_walker] t=2800664 @76:415,401 zone     @76:399,398 safe=True
+[olympuff_walker] t=2800666 @76:415,401 zone     @76:399,404 safe=True
+[olympuff_walker] t=2800668 @76:415,401 zone     @76:400,398 safe=True
+[olympuff_walker] t=2800671 @76:415,401 tick     Read (read sign @396,424)
+[olympuff_walker] t=2800673 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800674 @76:415,401 zone     @76:400,399 safe=True
+[olympuff_walker] t=2800676 @76:415,401 zone     @76:400,400 safe=True
+[olympuff_walker] t=2800678 @76:415,401 zone     @76:400,401 safe=True
+[olympuff_walker] t=2800680 @76:415,401 zone     @76:400,402 safe=True
+[olympuff_walker] t=2800682 @76:415,401 zone     @76:400,403 safe=True
+[olympuff_walker] t=2800685 @76:415,401 tick     Read (read sign @403,426)
+[olympuff_walker] t=2800687 @76:415,401 tick     — (queue held)
+[olympuff_walker] t=2800688 @76:415,401 zone     @76:400,404 safe=True
+[olympuff_walker] t=2800690 @76:415,401 zone     @76:393,397 safe=True
+[olympuff_walker] t=2800692 @76:415,401 zone     @76:393,398 safe=True
+[olympuff_walker] t=2800694 @76:415,401 zone     @76:393,399 safe=True
+[olympuff_walker] t=2800696 @76:415,401 zone     @76:393,400 safe=True
+[olympuff_walker] t=2800699 @76:415,401 tick     Say (say to npc 131)
+[olympuff_walker] t=2800701 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2800702 @76:415,401 zone     @76:393,401 safe=True
+[olympuff_walker] t=2800704 @76:415,401 zone     @76:393,402 safe=True
+[olympuff_walker] t=2800706 @76:415,401 zone     @76:393,403 safe=True
+[olympuff_walker] t=2800708 @76:415,401 zone     @76:393,404 safe=True
+[olympuff_walker] t=2800710 @76:415,401 zone     @76:393,405 safe=True
+[olympuff_walker] t=2800713 @76:415,401 tick     Say (say to npc 129)
+[olympuff_walker] t=2800715 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2800716 @76:415,401 zone     @76:394,397 safe=True
+[olympuff_walker] t=2800718 @76:415,401 zone     @76:394,405 safe=True
+[olympuff_walker] t=2800720 @76:415,401 zone     @76:395,397 safe=True
+[olympuff_walker] t=2800722 @76:415,401 zone     @76:395,405 safe=True
+[olympuff_walker] t=2800724 @76:415,401 zone     @76:396,397 safe=True
+[olympuff_walker] t=2800727 @76:415,401 tick     Say (say to npc 132)
+[olympuff_walker] t=2800729 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 132: "North-west, past the woods, there's a potato patch gone wild. Take matches. Lots."
+[olympuff_walker] t=2800730 @76:415,401 zone     @76:396,405 safe=True
+[olympuff_walker] t=2800732 @76:415,401 zone     @76:397,397 safe=True
+[olympuff_walker] t=2800734 @76:415,401 zone     @76:397,405 safe=True
+[olympuff_walker] t=2800736 @76:415,401 zone     @76:398,397 safe=True
+[olympuff_walker] t=2800738 @76:415,401 zone     @76:398,405 safe=True
+[olympuff_walker] t=2800741 @76:415,401 tick     Say (say to npc 133)
+[olympuff_walker] t=2800743 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 133: "Up in the moose hills there's a thicket where archers live and swordsmen don't."
+[olympuff_walker] t=2800744 @76:415,401 zone     @76:399,397 safe=True
+[olympuff_walker] t=2800746 @76:415,401 zone     @76:399,405 safe=True
+[olympuff_walker] t=2800748 @76:415,401 zone     @76:400,397 safe=True
+[olympuff_walker] t=2800750 @76:415,401 zone     @76:400,405 safe=True
+[olympuff_walker] t=2800752 @76:415,401 zone     @76:401,397 safe=True
+[olympuff_walker] t=2800755 @76:415,401 tick     Say (say to npc 130)
+[olympuff_walker] t=2800757 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2800758 @76:415,401 zone     @76:401,398 safe=True
+[olympuff_walker] t=2800760 @76:415,401 zone     @76:401,399 safe=True
+[olympuff_walker] t=2800762 @76:415,401 zone     @76:401,400 safe=True
+[olympuff_walker] t=2800764 @76:415,401 zone     @76:401,401 safe=True
+[olympuff_walker] t=2800766 @76:415,401 zone     @76:401,402 safe=True
+[olympuff_walker] t=2800769 @76:415,401 tick     Say (say to npc 134)
+[olympuff_walker] t=2800771 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 134: "South, past the fields, the ground steams. That door wants a key that sprouts."
+[olympuff_walker] t=2800772 @76:415,401 zone     @76:401,403 safe=True
+[olympuff_walker] t=2800774 @76:415,401 zone     @76:401,404 safe=True
+[olympuff_walker] t=2800776 @76:415,401 zone     @76:401,405 safe=True
+[olympuff_walker] t=2800778 @76:415,401 zone     @76:392,396 safe=True
+[olympuff_walker] t=2800780 @76:415,401 zone     @76:392,397 safe=True
+[olympuff_walker] t=2800781 @76:415,401 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2800785 @76:415,401 tick     Say (say to npc 135)
+[olympuff_walker] t=2800787 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 135: "There's a door on an island in the east lake. You can't swim to it. Nobody can."
+[olympuff_walker] t=2800788 @76:415,401 zone     @76:392,398 safe=True
+[olympuff_walker] t=2800790 @76:415,401 zone     @76:392,399 safe=True
+[olympuff_walker] t=2800792 @76:415,401 zone     @76:392,400 safe=True
+[olympuff_walker] t=2800794 @76:415,401 zone     @76:392,401 safe=True
+[olympuff_walker] t=2800797 @76:415,401 tick     queue 0×Step 1×Wait (say to npc 136)
+[olympuff_walker] t=2800798 @76:415,401 zone     @76:392,402 safe=True
+[olympuff_walker] t=2800801 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 136: "West there's a maze of hedges. Buy eyes at its door, or walk very slowly."
+[olympuff_walker] t=2800802 @76:415,401 zone     @76:392,403 safe=True
+[olympuff_walker] t=2800804 @76:415,401 zone     @76:392,404 safe=True
+[olympuff_walker] t=2800806 @76:415,401 zone     @76:392,405 safe=True
+[olympuff_walker] t=2800808 @76:415,401 zone     @76:392,406 safe=True
+[olympuff_walker] t=2800811 @76:415,401 tick     Say (say to npc 123)
+[olympuff_walker] t=2800813 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 123: "Eight gods keep eight temples, and each asks one thing of you. Three of them guard a piece of their father's bolt. Put the pieces together, and the last door opens."
+[olympuff_walker] t=2800814 @76:415,401 zone     @76:393,396 safe=True
+[olympuff_walker] t=2800816 @76:415,401 zone     @76:393,406 safe=True
+[olympuff_walker] t=2800818 @76:415,401 zone     @76:394,396 safe=True
+[olympuff_walker] t=2800820 @76:415,401 zone     @76:394,406 safe=True
+[olympuff_walker] t=2800822 @76:415,401 zone     @76:395,396 safe=True
+[olympuff_walker] t=2800825 @76:415,401 tick     Say (say to npc 124)
+[olympuff_walker] t=2800827 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 124: "I carved the eight in town. I carved one facing the wrong way. On purpose."
+[olympuff_walker] t=2800828 @76:415,401 zone     @76:395,406 safe=True
+[olympuff_walker] t=2800830 @76:415,401 zone     @76:396,396 safe=True
+[olympuff_walker] t=2800832 @76:415,401 zone     @76:396,406 safe=True
+[olympuff_walker] t=2800834 @76:415,401 zone     @76:397,396 safe=True
+[olympuff_walker] t=2800836 @76:415,401 zone     @76:397,406 safe=True
+[olympuff_walker] t=2800839 @76:415,401 tick     Say (say to npc 125)
+[olympuff_walker] t=2800841 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 125: ".ti dniheb kool .yawa secaf eno .seutats eht tnuoc"
+[olympuff_walker] t=2800842 @76:415,401 zone     @76:398,396 safe=True
+[olympuff_walker] t=2800844 @76:415,401 zone     @76:398,406 safe=True
+[olympuff_walker] t=2800846 @76:415,401 zone     @76:399,396 safe=True
+[olympuff_walker] t=2800848 @76:415,401 zone     @76:399,406 safe=True
+[olympuff_walker] t=2800850 @76:415,401 zone     @76:400,396 safe=True
+[olympuff_walker] t=2800853 @76:415,401 tick     Say (say to npc 127)
+[olympuff_walker] t=2800855 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 127: "My brother fishes the big lake east. He sells rafts. Folk say there are sandals too, made somewhere hot, that walk on water."
+[olympuff_walker] t=2800856 @76:415,401 zone     @76:400,406 safe=True
+[olympuff_walker] t=2800858 @76:415,401 zone     @76:401,396 safe=True
+[olympuff_walker] t=2800860 @76:415,401 zone     @76:401,406 safe=True
+[olympuff_walker] t=2800862 @76:415,401 zone     @76:402,396 safe=True
+[olympuff_walker] t=2800864 @76:415,401 zone     @76:402,397 safe=True
+[olympuff_walker] t=2800867 @76:415,401 tick     Say (say to npc 128)
+[olympuff_walker] t=2800869 @76:415,401 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2800870 @76:415,401 zone     @76:402,398 safe=True
+[olympuff_walker] t=2800872 @76:415,401 zone     @76:402,399 safe=True
+[olympuff_walker] t=2800874 @76:415,401 zone     @76:402,400 safe=True
+[olympuff_walker] t=2800876 @76:415,401 zone     @76:402,401 safe=True
+[olympuff_walker] t=2800878 @76:415,401 zone     @76:402,402 safe=True
+[olympuff_walker] t=2800881 @76:415,401 tick     queue 10×Step 27×Wait (look entrance @300,316)
+[olympuff_walker] t=2800882 @76:415,401 zone     @76:402,403 safe=True
+[olympuff_walker] t=2800884 @76:415,401 zone     @76:402,404 safe=True
+[olympuff_walker] t=2800886 @76:415,401 zone     @76:402,405 safe=True
+[olympuff_walker] t=2800888 @76:415,401 zone     @76:402,406 safe=True
+[olympuff_walker] t=2800890 @76:415,401 zone     @76:391,395 safe=True
+[olympuff_walker] t=2800893 @76:412,398 tick     — (queue held)
+[olympuff_walker] t=2800894 @76:412,398 zone     @76:391,396 safe=True
+[olympuff_walker] t=2800896 @76:412,398 zone     @76:391,397 safe=True
+[olympuff_walker] t=2800899 @76:410,397 tick     — (queue held)
+[olympuff_walker] t=2800900 @76:410,397 zone     @76:391,398 safe=True
+[olympuff_walker] t=2800902 @76:410,397 zone     @76:391,399 safe=True
+[olympuff_walker] t=2800903 @76:410,397 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2800906 @76:410,397 zone     @76:391,400 safe=True
+[olympuff_walker] t=2800909 @76:408,395 tick     — (queue held)
+[olympuff_walker] t=2800910 @76:408,395 zone     @76:391,401 safe=True
+[olympuff_walker] t=2800912 @76:408,395 zone     @76:391,402 safe=True
+[olympuff_walker] t=2800914 @76:408,395 zone     @76:391,403 safe=True
+[olympuff_walker] t=2800916 @76:408,395 zone     @76:391,404 safe=True
+[olympuff_walker] t=2800918 @76:408,395 zone     @76:391,405 safe=True
+[olympuff_walker] t=2800921 @76:405,392 tick     — (queue held)
+[olympuff_walker] t=2800922 @76:405,392 zone     @76:391,406 safe=True
+[olympuff_walker] t=2800924 @76:405,392 zone     @76:391,407 safe=True
+[olympuff_walker] t=2800927 @76:405,392 tick     Say (say to npc 215)
+[olympuff_walker] t=2800929 @76:405,392 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2800930 @76:405,392 zone     @76:392,395 safe=True
+[olympuff_walker] t=2800932 @76:405,392 zone     @76:392,407 safe=True
+[olympuff_walker] t=2800934 @76:405,392 zone     @76:393,395 safe=True
+[olympuff_walker] t=2800936 @76:405,392 zone     @76:393,407 safe=True
+[olympuff_walker] t=2800939 @76:405,392 tick     queue 0×Step 1×Wait (say to npc 216)
+[olympuff_walker] t=2800940 @76:405,392 zone     @76:394,395 safe=True
+[olympuff_walker] t=2800943 @76:405,392 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2800944 @76:405,392 zone     @76:394,407 safe=True
+[olympuff_walker] t=2800946 @76:405,392 zone     @76:395,395 safe=True
+[olympuff_walker] t=2800948 @76:405,392 zone     @76:395,407 safe=True
+[olympuff_walker] t=2800950 @76:405,392 zone     @76:396,395 safe=True
+[olympuff_walker] t=2800953 @76:405,392 tick     queue 10×Step 27×Wait (look entrance @300,316)
+[olympuff_walker] t=2800954 @76:405,392 zone     @76:396,407 safe=True
+[olympuff_walker] t=2800956 @76:405,392 zone     @76:397,395 safe=True
+[olympuff_walker] t=2800958 @76:405,392 zone     @76:397,407 safe=True
+[olympuff_walker] t=2800960 @76:405,392 zone     @76:398,395 safe=True
+[olympuff_walker] t=2800962 @76:405,392 zone     @76:398,407 safe=True
+[olympuff_walker] t=2800965 @76:402,389 tick     — (queue held)
+[olympuff_walker] t=2800966 @76:402,389 terrain  2601 cells, 3720 known
+[olympuff_walker] t=2800968 @76:402,389 zone     @76:399,395 safe=True
+[olympuff_walker] t=2800970 @76:402,389 zone     @76:399,407 safe=True
+[olympuff_walker] t=2800972 @76:402,389 zone     @76:400,395 safe=True
+[olympuff_walker] t=2800974 @76:402,389 zone     @76:400,407 safe=True
+[olympuff_walker] t=2800977 @76:399,386 tick     — (queue held)
+[olympuff_walker] t=2800978 @76:399,386 zone     @76:401,395 safe=True
+[olympuff_walker] t=2800980 @76:399,386 zone     @76:401,407 safe=True
+[olympuff_walker] t=2800983 @76:397,384 tick     — (queue held)
+[olympuff_walker] t=2800984 @76:397,384 zone     @76:402,395 safe=True
+[olympuff_walker] t=2800986 @76:397,384 zone     @76:402,407 safe=True
+[olympuff_walker] t=2800988 @76:397,384 zone     @76:403,395 safe=True
+[olympuff_walker] t=2800990 @76:397,384 zone     @76:403,396 safe=True
+[olympuff_walker] t=2800993 @76:395,382 tick     — (queue held)
+[olympuff_walker] t=2800994 @76:395,382 zone     @76:403,397 safe=True
+[olympuff_walker] t=2800996 @76:395,382 zone     @76:403,398 safe=True
+[olympuff_walker] t=2800998 @76:395,382 zone     @76:403,399 safe=True
+[olympuff_walker] t=2801000 @76:395,382 zone     @76:403,400 safe=True
+[olympuff_walker] t=2801002 @76:395,382 zone     @76:403,401 safe=True
+[olympuff_walker] t=2801005 @76:395,382 tick     Read (read sign @397,373)
+[olympuff_walker] t=2801007 @76:395,382 tick     — (queue held)
+[olympuff_walker] t=2801008 @76:395,382 zone     @76:403,402 safe=True
+[olympuff_walker] t=2801010 @76:395,382 zone     @76:403,403 safe=True
+[olympuff_walker] t=2801012 @76:395,382 zone     @76:403,404 safe=True
+[olympuff_walker] t=2801014 @76:395,382 zone     @76:403,405 safe=True
+[olympuff_walker] t=2801016 @76:395,382 zone     @76:403,406 safe=True
+[olympuff_walker] t=2801019 @76:395,382 tick     Say (say to npc 126)
+[olympuff_walker] t=2801021 @76:395,382 tick     — (queue held) | SpokenTo 9: "hello", SpokenTo 126: "That rock in my garden rings hollow when you knock it. Always has."
+[olympuff_walker] t=2801022 @76:395,382 zone     @76:403,407 safe=True
+[olympuff_walker] t=2801024 @76:395,382 zone     @76:390,394 safe=True
+[olympuff_walker] t=2801025 @76:395,382 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801028 @76:395,382 zone     @76:390,395 safe=True
+[olympuff_walker] t=2801030 @76:395,382 zone     @76:390,396 safe=True
+[olympuff_walker] t=2801033 @76:395,382 tick     queue 5×Step 12×Wait (look entrance @300,316)
+[olympuff_walker] t=2801034 @76:395,382 zone     @76:390,397 safe=True
+[olympuff_walker] t=2801036 @76:395,382 zone     @76:390,398 safe=True
+[olympuff_walker] t=2801039 @76:393,380 tick     — (queue held)
+[olympuff_walker] t=2801040 @76:393,380 zone     @76:390,399 safe=True
+[olympuff_walker] t=2801042 @76:393,380 zone     @76:390,400 safe=True
+[olympuff_walker] t=2801044 @76:393,380 zone     @76:390,401 safe=True
+[olympuff_walker] t=2801046 @76:393,380 zone     @76:390,402 safe=True
+[olympuff_walker] t=2801049 @76:391,378 tick     — (queue held)
+[olympuff_walker] t=2801051 @76:390,377 tick     — (queue held)
+[olympuff_walker] t=2801052 @76:390,377 zone     @76:390,403 safe=True
+[olympuff_walker] t=2801054 @76:390,377 zone     @76:390,404 safe=True
+[olympuff_walker] t=2801056 @76:390,377 zone     @76:390,405 safe=True
+[olympuff_walker] t=2801058 @76:390,377 zone     @76:390,406 safe=True
+[olympuff_walker] t=2801060 @76:390,377 zone     @76:390,407 safe=True
+[olympuff_walker] t=2801063 @76:390,377 tick     Say (say to npc 240)
+[olympuff_walker] t=2801065 @76:390,377 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801066 @76:390,377 zone     @76:390,408 safe=True
+[olympuff_walker] t=2801068 @76:390,377 zone     @76:391,394 safe=True
+[olympuff_walker] t=2801070 @76:390,377 zone     @76:391,408 safe=True
+[olympuff_walker] t=2801072 @76:390,377 zone     @76:392,394 safe=True
+[olympuff_walker] t=2801074 @76:390,377 zone     @76:392,408 safe=True
+[olympuff_walker] t=2801077 @76:390,377 tick     queue 10×Step 27×Wait (look entrance @300,316)
+[olympuff_walker] t=2801078 @76:390,377 zone     @76:393,394 safe=True
+[olympuff_walker] t=2801080 @76:390,377 zone     @76:393,408 safe=True
+[olympuff_walker] t=2801082 @76:390,377 zone     @76:394,394 safe=True
+[olympuff_walker] t=2801084 @76:390,377 zone     @76:394,408 safe=True
+[olympuff_walker] t=2801086 @76:390,377 zone     @76:395,394 safe=True
+[olympuff_walker] t=2801089 @76:387,380 tick     — (queue held)
+[olympuff_walker] t=2801090 @76:387,380 terrain  2601 cells, 4809 known
+[olympuff_walker] t=2801092 @76:387,380 zone     @76:395,408 safe=True
+[olympuff_walker] t=2801095 @76:385,381 tick     — (queue held)
+[olympuff_walker] t=2801096 @76:385,381 zone     @76:396,394 safe=True
+[olympuff_walker] t=2801098 @76:385,381 zone     @76:396,408 safe=True
+[olympuff_walker] t=2801100 @76:385,381 zone     @76:397,394 safe=True
+[olympuff_walker] t=2801102 @76:385,381 zone     @76:397,408 safe=True
+[olympuff_walker] t=2801105 @76:383,381 tick     — (queue held)
+[olympuff_walker] t=2801106 @76:383,381 zone     @76:398,394 safe=True
+[olympuff_walker] t=2801108 @76:383,381 zone     @76:398,408 safe=True
+[olympuff_walker] t=2801110 @76:383,381 zone     @76:399,394 safe=True
+[olympuff_walker] t=2801112 @76:383,381 zone     @76:399,408 safe=True
+[olympuff_walker] t=2801114 @76:383,381 zone     @76:400,394 safe=True
+[olympuff_walker] t=2801117 @76:380,381 tick     — (queue held)
+[olympuff_walker] t=2801118 @76:380,381 zone     @76:400,408 safe=True
+[olympuff_walker] t=2801120 @76:380,381 zone     @76:401,394 safe=True
+[olympuff_walker] t=2801123 @76:380,381 tick     Read (read sign @373,397)
+[olympuff_walker] t=2801125 @76:380,381 tick     — (queue held)
+[olympuff_walker] t=2801126 @76:380,381 zone     @76:401,408 safe=True
+[olympuff_walker] t=2801128 @76:380,381 zone     @76:402,394 safe=True
+[olympuff_walker] t=2801130 @76:380,381 zone     @76:402,408 safe=True
+[olympuff_walker] t=2801132 @76:380,381 zone     @76:403,394 safe=True
+[olympuff_walker] t=2801135 @76:380,381 tick     Say (say to npc 164)
+[olympuff_walker] t=2801137 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801138 @76:380,381 zone     @76:403,408 safe=True
+[olympuff_walker] t=2801140 @76:380,381 zone     @76:404,394 safe=True
+[olympuff_walker] t=2801142 @76:380,381 zone     @76:404,395 safe=True
+[olympuff_walker] t=2801144 @76:380,381 zone     @76:404,396 safe=True
+[olympuff_walker] t=2801147 @76:380,381 tick     queue 0×Step 1×Wait (say to npc 168)
+[olympuff_walker] t=2801148 @76:380,381 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801151 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801152 @76:380,381 zone     @76:404,397 safe=True
+[olympuff_walker] t=2801154 @76:380,381 zone     @76:404,398 safe=True
+[olympuff_walker] t=2801156 @76:380,381 zone     @76:404,399 safe=True
+[olympuff_walker] t=2801158 @76:380,381 zone     @76:404,400 safe=True
+[olympuff_walker] t=2801161 @76:380,381 tick     Say (say to npc 170)
+[olympuff_walker] t=2801163 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801164 @76:380,381 zone     @76:404,401 safe=True
+[olympuff_walker] t=2801166 @76:380,381 zone     @76:404,402 safe=True
+[olympuff_walker] t=2801168 @76:380,381 zone     @76:404,403 safe=True
+[olympuff_walker] t=2801170 @76:380,381 zone     @76:404,404 safe=True
+[olympuff_walker] t=2801172 @76:380,381 zone     @76:404,405 safe=True
+[olympuff_walker] t=2801175 @76:380,381 tick     Say (say to npc 171)
+[olympuff_walker] t=2801177 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801178 @76:380,381 zone     @76:404,406 safe=True
+[olympuff_walker] t=2801180 @76:380,381 zone     @76:404,407 safe=True
+[olympuff_walker] t=2801182 @76:380,381 zone     @76:404,408 safe=True
+[olympuff_walker] t=2801184 @76:380,381 zone     @76:389,393 safe=True
+[olympuff_walker] t=2801186 @76:380,381 zone     @76:389,394 safe=True
+[olympuff_walker] t=2801189 @76:380,381 tick     Say (say to npc 166)
+[olympuff_walker] t=2801191 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801192 @76:380,381 zone     @76:389,395 safe=True
+[olympuff_walker] t=2801194 @76:380,381 zone     @76:389,396 safe=True
+[olympuff_walker] t=2801196 @76:380,381 zone     @76:389,397 safe=True
+[olympuff_walker] t=2801198 @76:380,381 zone     @76:389,398 safe=True
+[olympuff_walker] t=2801200 @76:380,381 zone     @76:389,399 safe=True
+[olympuff_walker] t=2801203 @76:380,381 tick     Say (say to npc 169)
+[olympuff_walker] t=2801205 @76:380,381 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801206 @76:380,381 zone     @76:389,400 safe=True
+[olympuff_walker] t=2801208 @76:380,381 zone     @76:389,401 safe=True
+[olympuff_walker] t=2801210 @76:380,381 zone     @76:389,402 safe=True
+[olympuff_walker] t=2801212 @76:380,381 zone     @76:389,403 safe=True
+[olympuff_walker] t=2801214 @76:380,381 zone     @76:389,404 safe=True
+[olympuff_walker] t=2801220 @76:380,381 tick     queue 10×Step 27×Wait (explore_area → (372, 405))
+[olympuff_walker] t=2801221 @76:380,381 zone     @76:389,405 safe=True
+[olympuff_walker] t=2801223 @76:380,381 zone     @76:389,406 safe=True
+[olympuff_walker] t=2801225 @76:380,381 zone     @76:389,407 safe=True
+[olympuff_walker] t=2801231 @76:383,381 tick     — (queue held)
+[olympuff_walker] t=2801232 @76:383,381 zone     @76:389,408 safe=True
+[olympuff_walker] t=2801234 @76:383,381 zone     @76:389,409 safe=True
+[olympuff_walker] t=2801236 @76:383,381 zone     @76:390,393 safe=True
+[olympuff_walker] t=2801238 @76:383,381 zone     @76:390,409 safe=True
+[olympuff_walker] t=2801240 @76:383,381 zone     @76:391,393 safe=True
+[olympuff_walker] t=2801245 @76:385,383 tick     — (queue held)
+[olympuff_walker] t=2801246 @76:385,383 zone     @76:391,409 safe=True
+[olympuff_walker] t=2801248 @76:385,383 zone     @76:392,393 safe=True
+[olympuff_walker] t=2801250 @76:385,383 zone     @76:392,409 safe=True
+[olympuff_walker] t=2801252 @76:385,383 zone     @76:393,393 safe=True
+[olympuff_walker] t=2801254 @76:385,383 zone     @76:393,409 safe=True
+[olympuff_walker] t=2801257 @76:382,386 tick     — (queue held)
+[olympuff_walker] t=2801258 @76:382,386 zone     @76:394,393 safe=True
+[olympuff_walker] t=2801260 @76:382,386 zone     @76:394,409 safe=True
+[olympuff_walker] t=2801263 @76:382,386 tick     Say (say to npc 167)
+[olympuff_walker] t=2801265 @76:382,386 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801266 @76:382,386 zone     @76:395,393 safe=True
+[olympuff_walker] t=2801268 @76:382,386 zone     @76:395,409 safe=True
+[olympuff_walker] t=2801270 @76:382,386 zone     @76:396,393 safe=True
+[olympuff_walker] t=2801272 @76:382,386 zone     @76:396,409 safe=True
+[olympuff_walker] t=2801275 @76:382,386 tick     queue 0×Step 1×Wait (say to npc 165)
+[olympuff_walker] t=2801276 @76:382,386 zone     @76:397,393 safe=True
+[olympuff_walker] t=2801277 @76:382,386 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801281 @76:382,386 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801282 @76:382,386 zone     @76:397,409 safe=True
+[olympuff_walker] t=2801284 @76:382,386 zone     @76:398,393 safe=True
+[olympuff_walker] t=2801286 @76:382,386 zone     @76:398,409 safe=True
+[olympuff_walker] t=2801289 @76:382,386 tick     queue 10×Step 27×Wait (explore_area → (372, 405))
+[olympuff_walker] t=2801290 @76:382,386 zone     @76:399,393 safe=True
+[olympuff_walker] t=2801292 @76:382,386 zone     @76:399,409 safe=True
+[olympuff_walker] t=2801294 @76:382,386 zone     @76:400,393 safe=True
+[olympuff_walker] t=2801296 @76:382,386 zone     @76:400,409 safe=True
+[olympuff_walker] t=2801298 @76:382,386 zone     @76:401,393 safe=True
+[olympuff_walker] t=2801301 @76:382,389 tick     — (queue held)
+[olympuff_walker] t=2801302 @76:382,389 zone     @76:401,409 safe=True
+[olympuff_walker] t=2801304 @76:382,389 zone     @76:402,393 safe=True
+[olympuff_walker] t=2801306 @76:382,389 zone     @76:402,409 safe=True
+[olympuff_walker] t=2801308 @76:382,389 zone     @76:403,393 safe=True
+[olympuff_walker] t=2801310 @76:382,389 zone     @76:403,409 safe=True
+[olympuff_walker] t=2801313 @76:381,392 tick     — (queue held)
+[olympuff_walker] t=2801314 @76:381,392 zone     @76:404,393 safe=True
+[olympuff_walker] t=2801316 @76:381,392 zone     @76:404,409 safe=True
+[olympuff_walker] t=2801319 @76:379,394 tick     — (queue held)
+[olympuff_walker] t=2801320 @76:379,394 terrain  2601 cells, 5492 known
+[olympuff_walker] t=2801322 @76:379,394 zone     @76:405,393 safe=True
+[olympuff_walker] t=2801324 @76:379,394 zone     @76:405,394 safe=True
+[olympuff_walker] t=2801326 @76:379,394 zone     @76:405,395 safe=True
+[olympuff_walker] t=2801329 @76:377,396 tick     — (queue held)
+[olympuff_walker] t=2801330 @76:377,396 zone     @76:405,396 safe=True
+[olympuff_walker] t=2801332 @76:377,396 zone     @76:405,397 safe=True
+[olympuff_walker] t=2801334 @76:377,396 zone     @76:405,398 safe=True
+[olympuff_walker] t=2801336 @76:377,396 zone     @76:405,399 safe=True
+[olympuff_walker] t=2801338 @76:377,396 zone     @76:405,400 safe=True
+[olympuff_walker] t=2801341 @76:377,396 tick     queue 9×Step 24×Wait (explore_area → (372, 405))
+[olympuff_walker] t=2801342 @76:377,396 zone     @76:405,401 safe=True
+[olympuff_walker] t=2801344 @76:377,396 zone     @76:405,402 safe=True
+[olympuff_walker] t=2801347 @76:375,398 tick     — (queue held)
+[olympuff_walker] t=2801348 @76:375,398 zone     @76:405,403 safe=True
+[olympuff_walker] t=2801350 @76:375,398 zone     @76:405,404 safe=True
+[olympuff_walker] t=2801352 @76:375,398 zone     @76:405,405 safe=True
+[olympuff_walker] t=2801354 @76:375,398 zone     @76:405,406 safe=True
+[olympuff_walker] t=2801357 @76:373,400 tick     — (queue held)
+[olympuff_walker] t=2801358 @76:373,400 zone     @76:405,407 safe=True
+[olympuff_walker] t=2801360 @76:373,400 zone     @76:405,408 safe=True
+[olympuff_walker] t=2801362 @76:373,400 zone     @76:405,409 safe=True
+[olympuff_walker] t=2801369 @76:371,403 tick     — (queue held)
+[olympuff_walker] t=2801374 @76:372,405 tick     — (queue held)
+[olympuff_walker] t=2801380 @76:372,405 tick     queue 10×Step 30×Wait (explore_area → (377, 419))
+[olympuff_walker] t=2801381 @76:372,405 zone     @76:376,416 safe=True
+[olympuff_walker] t=2801383 @76:372,405 zone     @76:377,417 safe=True
+[olympuff_walker] t=2801385 @76:372,405 zone     @76:377,418 safe=True
+[olympuff_walker] t=2801387 @76:372,405 zone     @76:377,419 safe=True
+[olympuff_walker] t=2801388 @76:372,405 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801392 @76:371,408 tick     — (queue held)
+[olympuff_walker] t=2801393 @76:371,408 terrain  2601 cells, 6453 known
+[olympuff_walker] t=2801406 @76:371,411 tick     — (queue held)
+[olympuff_walker] t=2801419 @76:374,414 tick     — (queue held)
+[olympuff_walker] t=2801422 @76:375,415 tick     — (queue held)
+[olympuff_walker] t=2801432 @76:375,415 tick     queue 4×Step 10×Wait (explore_area → (377, 419))
+[olympuff_walker] t=2801439 @76:377,417 tick     — (queue held)
+[olympuff_walker] t=2801445 @76:377,418 tick     — (queue held)
+[olympuff_walker] t=2801448 @76:377,419 tick     — (queue held)
+[olympuff_walker] t=2801460 @76:377,419 tick     queue 10×Step 28×Wait (explore_area → (396, 426))
+[olympuff_walker] t=2801461 @76:377,419 zone     @76:388,418 safe=True
+[olympuff_walker] t=2801463 @76:377,419 zone     @76:389,419 safe=True
+[olympuff_walker] t=2801467 @76:379,420 tick     — (queue held)
+[olympuff_walker] t=2801468 @76:379,420 zone     @76:390,420 safe=True
+[olympuff_walker] t=2801470 @76:379,420 zone     @76:391,421 safe=True
+[olympuff_walker] t=2801474 @76:381,420 tick     — (queue held)
+[olympuff_walker] t=2801475 @76:381,420 zone     @76:392,422 safe=True
+[olympuff_walker] t=2801477 @76:381,420 zone     @76:393,423 safe=True
+[olympuff_walker] t=2801481 @76:382,419 tick     — (queue held)
+[olympuff_walker] t=2801482 @76:382,419 zone     @76:394,424 safe=True
+[olympuff_walker] t=2801483 @76:382,419 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801486 @76:382,419 zone     @76:395,425 safe=True
+[olympuff_walker] t=2801489 @76:384,417 tick     — (queue held)
+[olympuff_walker] t=2801490 @76:384,417 terrain  2601 cells, 7003 known
+[olympuff_walker] t=2801492 @76:384,417 zone     @76:396,426 safe=True
+[olympuff_walker] t=2801498 @76:387,417 tick     — (queue held)
+[olympuff_walker] t=2801505 @76:387,417 tick     Say (say to npc 256)
+[olympuff_walker] t=2801507 @76:387,417 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801513 @76:387,417 tick     queue 10×Step 27×Wait (look entrance @300,316)
+[olympuff_walker] t=2801514 @76:387,417 zone     @76:384,407 safe=True
+[olympuff_walker] t=2801516 @76:387,417 zone     @76:384,406 safe=True
+[olympuff_walker] t=2801518 @76:387,417 zone     @76:384,405 safe=True
+[olympuff_walker] t=2801520 @76:387,417 zone     @76:384,404 safe=True
+[olympuff_walker] t=2801522 @76:387,417 zone     @76:384,403 safe=True
+[olympuff_walker] t=2801525 @76:389,415 tick     — (queue held)
+[olympuff_walker] t=2801526 @76:389,415 zone     @76:384,402 safe=True
+[olympuff_walker] t=2801528 @76:389,415 zone     @76:384,401 safe=True
+[olympuff_walker] t=2801530 @76:389,415 zone     @76:384,400 safe=True
+[olympuff_walker] t=2801532 @76:389,415 zone     @76:383,399 safe=True
+[olympuff_walker] t=2801534 @76:389,415 zone     @76:382,398 safe=True
+[olympuff_walker] t=2801537 @76:387,412 tick     — (queue held)
+[olympuff_walker] t=2801538 @76:387,412 zone     @76:381,397 safe=True
+[olympuff_walker] t=2801540 @76:387,412 zone     @76:380,396 safe=True
+[olympuff_walker] t=2801543 @76:385,410 tick     — (queue held)
+[olympuff_walker] t=2801544 @76:385,410 zone     @76:379,395 safe=True
+[olympuff_walker] t=2801546 @76:385,410 zone     @76:378,394 safe=True
+[olympuff_walker] t=2801548 @76:385,410 zone     @76:377,393 safe=True
+[olympuff_walker] t=2801550 @76:385,410 zone     @76:376,392 safe=True
+[olympuff_walker] t=2801553 @76:384,408 tick     — (queue held)
+[olympuff_walker] t=2801564 @76:384,408 tick     queue 10×Step 27×Wait (look entrance @300,316)
+[olympuff_walker] t=2801573 @76:384,405 tick     — (queue held)
+[olympuff_walker] t=2801576 @76:384,405 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801582 @76:384,403 tick     — (queue held)
+[olympuff_walker] t=2801583 @76:384,403 terrain  2601 cells, 7003 known
+[olympuff_walker] t=2801590 @76:384,401 tick     — (queue held)
+[olympuff_walker] t=2801600 @76:383,399 tick     — (queue held) | BlockChanged, BlockChanged
+[olympuff_walker] t=2801602 @76:382,398 tick     — (queue held)
+[olympuff_walker] t=2801613 @76:382,398 tick     queue 10×Step 29×Wait (explore_area → (409, 426))
+[olympuff_walker] t=2801614 @76:382,398 zone     @76:393,410 safe=True
+[olympuff_walker] t=2801616 @76:382,398 zone     @76:394,411 safe=True
+[olympuff_walker] t=2801618 @76:382,398 zone     @76:395,412 safe=True
+[olympuff_walker] t=2801620 @76:382,398 zone     @76:396,413 safe=True
+[olympuff_walker] t=2801623 @76:383,400 tick     — (queue held)
+[olympuff_walker] t=2801624 @76:383,400 zone     @76:397,414 safe=True
+[olympuff_walker] t=2801626 @76:383,400 zone     @76:398,415 safe=True
+[olympuff_walker] t=2801628 @76:383,400 zone     @76:399,416 safe=True
+[olympuff_walker] t=2801630 @76:383,400 zone     @76:400,417 safe=True
+[olympuff_walker] t=2801632 @76:383,400 zone     @76:401,418 safe=True
+[olympuff_walker] t=2801635 @76:386,403 tick     — (queue held)
+[olympuff_walker] t=2801636 @76:386,403 zone     @76:402,419 safe=True
+[olympuff_walker] t=2801638 @76:386,403 zone     @76:403,420 safe=True
+[olympuff_walker] t=2801641 @76:388,405 tick     — (queue held)
+[olympuff_walker] t=2801642 @76:388,405 zone     @76:404,421 safe=True
+[olympuff_walker] t=2801644 @76:388,405 zone     @76:405,422 safe=True
+[olympuff_walker] t=2801646 @76:388,405 zone     @76:406,423 safe=True
+[olympuff_walker] t=2801648 @76:388,405 zone     @76:407,424 safe=True
+[olympuff_walker] t=2801651 @76:390,407 tick     — (queue held)
+[olympuff_walker] t=2801653 @76:391,408 tick     — (queue held)
+[olympuff_walker] t=2801654 @76:391,408 zone     @76:408,425 safe=True
+[olympuff_walker] t=2801656 @76:391,408 zone     @76:409,426 safe=True
+[olympuff_walker] t=2801664 @76:391,408 tick     queue 10×Step 27×Wait (look entrance @300,316)
+[olympuff_walker] t=2801665 @76:391,408 zone     @76:380,397 safe=True
+[olympuff_walker] t=2801667 @76:391,408 zone     @76:379,396 safe=True
+[olympuff_walker] t=2801668 @76:391,408 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801671 @76:391,408 zone     @76:378,395 safe=True
+[olympuff_walker] t=2801674 @76:388,405 tick     — (queue held)
+[olympuff_walker] t=2801675 @76:388,405 zone     @76:377,394 safe=True
+[olympuff_walker] t=2801677 @76:388,405 zone     @76:376,393 safe=True
+[olympuff_walker] t=2801679 @76:388,405 zone     @76:375,392 safe=True
+[olympuff_walker] t=2801681 @76:388,405 zone     @76:374,392 safe=True
+[olympuff_walker] t=2801683 @76:388,405 zone     @76:373,392 safe=True
+[olympuff_walker] t=2801686 @76:385,402 tick     — (queue held)
+[olympuff_walker] t=2801687 @76:385,402 zone     @76:372,391 safe=True
+[olympuff_walker] t=2801689 @76:385,402 zone     @76:371,388 safe=True
+[olympuff_walker] t=2801691 @76:385,402 zone     @76:371,389 safe=True
+[olympuff_walker] t=2801693 @76:385,402 zone     @76:371,390 safe=True
+[olympuff_walker] t=2801695 @76:385,402 zone     @76:371,387 safe=True
+[olympuff_walker] t=2801698 @76:382,399 tick     — (queue held)
+[olympuff_walker] t=2801702 @76:381,398 tick     — (queue held)
+[olympuff_walker] t=2801712 @76:381,398 tick     queue 10×Step 29×Wait (look entrance @300,316)
+[olympuff_walker] t=2801717 @76:380,397 tick     — (queue held)
+[olympuff_walker] t=2801723 @76:378,395 tick     — (queue held)
+[olympuff_walker] t=2801733 @76:376,393 tick     — (queue held)
+[olympuff_walker] t=2801738 @76:375,392 tick     — (queue held)
+[olympuff_walker] t=2801744 @76:373,392 tick     — (queue held)
+[olympuff_walker] t=2801752 @76:371,390 tick     — (queue held)
+[olympuff_walker] t=2801753 @76:371,390 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801755 @76:371,390 terrain  2601 cells, 7179 known
+[olympuff_walker] t=2801761 @76:371,390 tick     queue 10×Step 27×Wait (explore_area → (346, 395))
+[olympuff_walker] t=2801762 @76:371,390 zone     @76:366,395 safe=False
+[olympuff_walker] t=2801764 @76:371,390 zone     @76:365,394 safe=False
+[olympuff_walker] t=2801769 @76:371,392 tick     — (queue held)
+[olympuff_walker] t=2801770 @76:371,392 zone     @76:367,396 safe=False
+[olympuff_walker] t=2801772 @76:371,392 zone     @76:368,397 safe=False
+[olympuff_walker] t=2801774 @76:371,392 zone     @76:364,394 safe=False
+[olympuff_walker] t=2801776 @76:371,392 zone     @76:363,393 safe=False
+[olympuff_walker] t=2801780 @76:371,395 tick     — (queue held)
+[olympuff_walker] t=2801781 @76:371,395 zone     @76:362,392 safe=False
+[olympuff_walker] t=2801783 @76:371,395 zone     @76:361,391 safe=False
+[olympuff_walker] t=2801785 @76:371,395 zone     @76:360,391 safe=False
+[olympuff_walker] t=2801789 @76:371,397 tick     — (queue held)
+[olympuff_walker] t=2801790 @76:371,397 zone     @76:359,390 safe=False
+[olympuff_walker] t=2801792 @76:371,397 zone     @76:358,389 safe=False
+[olympuff_walker] t=2801796 @76:370,399 tick     — (queue held)
+[olympuff_walker] t=2801797 @76:370,399 zone     @76:357,388 safe=False
+[olympuff_walker] t=2801800 @76:369,398 tick     — (queue held)
+[olympuff_walker] t=2801801 @76:369,398 zone     @76:356,388 safe=False
+[olympuff_walker] t=2801803 @76:369,398 zone     @76:355,387 safe=False
+[olympuff_walker] t=2801805 @76:369,398 zone     @76:354,388 safe=False
+[olympuff_walker] t=2801807 @76:369,398 zone     @76:353,389 safe=False
+[olympuff_walker] t=2801809 @76:369,398 zone     @76:352,390 safe=False
+[olympuff_walker] t=2801812 @76:369,398 tick     queue 10×Step 27×Wait (explore_area → (346, 395))
+[olympuff_walker] t=2801813 @76:369,398 zone     @76:351,390 safe=False
+[olympuff_walker] t=2801815 @76:369,398 zone     @76:350,391 safe=False
+[olympuff_walker] t=2801817 @76:369,398 zone     @76:349,392 safe=False
+[olympuff_walker] t=2801819 @76:369,398 zone     @76:348,393 safe=False
+[olympuff_walker] t=2801821 @76:369,398 zone     @76:347,394 safe=False
+[olympuff_walker] t=2801824 @76:366,395 tick     — (queue held)
+[olympuff_walker] t=2801825 @76:366,395 zone     @76:346,395 safe=False
+[olympuff_walker] t=2801830 @76:364,394 tick     — (queue held)
+[olympuff_walker] t=2801839 @76:362,392 tick     — (queue held)
+[olympuff_walker] t=2801847 @76:360,391 tick     — (queue held)
+[olympuff_walker] t=2801850 @76:359,390 tick     — (queue held)
+[olympuff_walker] t=2801856 @76:359,390 tick     Say (say to npc 220)
+[olympuff_walker] t=2801858 @76:359,390 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801860 @76:359,390 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801868 @76:359,390 tick     queue 0×Step 8×Wait (say to npc 221)
+[olympuff_walker] t=2801878 @76:359,390 tick     — (queue held) | SpokenTo 9: "hello"
+[olympuff_walker] t=2801884 @76:359,390 tick     queue 10×Step 27×Wait (explore_area → (346, 395))
+[olympuff_walker] t=2801894 @76:356,388 tick     — (queue held)
+[olympuff_walker] t=2801895 @76:356,388 terrain  2601 cells, 7976 known
+[olympuff_walker] t=2801900 @76:355,387 tick     — (queue held)
+[olympuff_walker] t=2801909 @76:352,390 tick     — (queue held)
+[olympuff_walker] t=2801917 @76:350,391 tick     — (queue held)
+[olympuff_walker] t=2801922 @76:349,392 tick     — (queue held)
+[olympuff_walker] t=2801927 @76:349,392 tick     queue 3×Step 8×Wait (explore_area → (346, 395))
+[olympuff_walker] t=2801932 @76:349,392 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2801935 @76:347,394 tick     — (queue held)
+[olympuff_walker] t=2801939 @76:346,395 tick     — (queue held)
+[olympuff_walker] t=2801946 @76:346,395 tick     queue 10×Step 29×Wait (explore_area → (331, 401))
+[olympuff_walker] t=2801947 @76:346,395 zone     @76:335,398 safe=False
+[olympuff_walker] t=2801949 @76:346,395 zone     @76:334,399 safe=False
+[olympuff_walker] t=2801951 @76:346,395 zone     @76:333,399 safe=False
+[olympuff_walker] t=2801954 @76:344,394 tick     — (queue held)
+[olympuff_walker] t=2801955 @76:344,394 zone     @76:332,400 safe=False
+[olympuff_walker] t=2801957 @76:344,394 zone     @76:331,401 safe=False
+[olympuff_walker] t=2801965 @76:341,396 tick     — (queue held)
+[olympuff_walker] t=2801966 @76:341,396 terrain  2601 cells, 8861 known
+[olympuff_walker] t=2801974 @76:339,398 tick     — (queue held)
+[olympuff_walker] t=2801981 @76:337,397 tick     — (queue held)
+[olympuff_walker] t=2801986 @76:336,397 tick     — (queue held)
+[olympuff_walker] t=2801994 @76:336,397 tick     queue 5×Step 14×Wait (explore_area → (331, 401))
+[olympuff_walker] t=2802005 @76:333,399 tick     — (queue held)
+[olympuff_walker] t=2802010 @76:333,399 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2802015 @76:331,401 tick     — (queue held)
+[olympuff_walker] t=2802026 @76:331,401 tick     queue 10×Step 28×Wait (explore_area → (316, 399))
+[olympuff_walker] t=2802027 @76:331,401 zone     @76:320,397 safe=False
+[olympuff_walker] t=2802029 @76:331,401 zone     @76:319,397 safe=False
+[olympuff_walker] t=2802031 @76:331,401 zone     @76:318,397 safe=False
+[olympuff_walker] t=2802033 @76:331,401 zone     @76:317,398 safe=False
+[olympuff_walker] t=2802036 @76:328,398 tick     — (queue held)
+[olympuff_walker] t=2802037 @76:328,398 terrain  2601 cells, 9584 known
+[olympuff_walker] t=2802039 @76:328,398 zone     @76:316,399 safe=False
+[olympuff_walker] t=2802048 @76:325,395 tick     — (queue held)
+[olympuff_walker] t=2802053 @76:324,394 tick     — (queue held)
+[olympuff_walker] t=2802059 @76:323,394 tick     — (queue held)
+[olympuff_walker] t=2802065 @76:321,396 tick     — (queue held)
+[olympuff_walker] t=2802072 @76:321,396 tick     queue 5×Step 14×Wait (explore_area → (316, 399))
+[olympuff_walker] t=2802079 @76:319,397 tick     — (queue held)
+[olympuff_walker] t=2802086 @76:318,397 tick     — (queue held)
+[olympuff_walker] t=2802088 @76:318,397 self     lives=10 alive=True placed=True perception=25
+[olympuff_walker] t=2802093 @76:316,399 tick     — (queue held)
 finished in 155.7s
 steps applied: 201 (target 200)
 movement_cooldown rejections: 0

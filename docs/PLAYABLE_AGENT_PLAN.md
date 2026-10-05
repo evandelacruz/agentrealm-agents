@@ -375,7 +375,7 @@ M6 and M7 come first whatever else changes. M8 to M11 now have known shapes. Wha
 
 ## Risks
 
-- **The early game is lethal.** Ten health against hostiles that gang up means one bad engagement costs a life. Lives are finite on live worlds (Pippin is down to 5). Mitigation: conservative defaults, an escape queued with every attack, and practice on the sandbox before Olympuff.
+- **The early game is lethal.** Ten health against hostiles that gang up means one bad engagement costs a life. Lives are finite on live worlds (the observer character is down to 5). Mitigation: conservative defaults, an escape queued with every attack, and practice on the sandbox before Olympuff.
 - **Latency kills.** Hand play through MCP lost a life to a 4 s round trip. The executor must poll every tick while threatened; this is an M6 requirement, not a tuning detail.
 - **Clue interpretation is the hard part.** Riddles and directions are written for people. Without the strategist the agent can still gear up, hunt and walk to entrances, but it will not know what a locked or hidden entrance wants. Keep the no-LLM path useful; accept that levels need the strategist.
 - **Spoilers.** Real-world clue text must never reach the repo, the tests or the PR text. Fixtures use invented worlds; the knowledge base stays in gitignored `.state/`.

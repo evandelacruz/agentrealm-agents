@@ -9,7 +9,7 @@ What the agent needs to know to play Agent Realm. Every fact names its source:
 | **Guide** | [Create a character agent](https://agentrealm.gg/docs/guides/create-a-character-agent) |
 | **SM** | [State machine agent guide](https://agentrealm.gg/guides/state-machine) |
 | **Tick** | The `tick` tool's description and intent schema on the Agent Realm MCP server (one call to `POST /characters/{id}/tick`) |
-| **Obs** | Observed in play with Pippin (character 1, Olympuff) on 2026-10-04, ticks 1835171–1839533 |
+| **Obs** | Observed in play with the observer character (Olympuff) on 2026-10-04, ticks 1835171–1839533 |
 
 ## No spoilers in this repo
 
@@ -28,7 +28,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **The world tells you how to progress through text:** signs, statues, scrolls and helper lines. Text read in town and at entrances describes what each level asks for (Obs). Capturing and interpreting that text is the strategist's main job.
 - **Compose** joins fragment supplies into the whole they belong to, once all pieces are held. There is no workbench and no recipe catalog (M §6; API Snapshots).
 - **There is no "build".** No verb places blocks. The world changes only by destroying blocks, which grow back, and by composing supplies (M §6, §11).
-- **Combat** uses published d20 rules. A new character has 10 health and attack and defense of 0, so gear decides fights. Two weak hostiles killed Pippin in about 6 s (Obs).
+- **Combat** uses published d20 rules. A new character has 10 health and attack and defense of 0, so gear decides fights. Two weak hostiles killed the observer character in about 6 s (Obs).
 
 ## Loop, budget and timing
 
@@ -48,7 +48,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Snapshot deltas only arrive against the current or the immediately previous version.** Anything older gets a complete snapshot (M §7.1). The version advances whenever anything in view changes, so a client polling every ~40 ticks while moving got a complete snapshot nearly every time (Obs). The executor must treat complete snapshots as normal, or poll every tick.
 - **Cache tiles.** Terrain and entity reads are versioned in 16×16-block cache tiles aligned to the map origin (API Reads).
 - **Snapshot shape.** `inventory` carries `armed`, `gems`, `held`, `worn` by slot, and `chest`. `levels_cleared` is absent while it is empty (API Snapshots; Obs).
-- **Hand play through MCP is too slow for combat.** Each MCP round trip took about 4 s of wall time (40–80 ticks), so Pippin's retreat landed after the death. A real executor must poll about every tick while threatened, and queue a retreat with every attack (Obs).
+- **Hand play through MCP is too slow for combat.** Each MCP round trip took about 4 s of wall time (40–80 ticks), so the observer character's retreat landed after the death. A real executor must poll about every tick while threatened, and queue a retreat with every attack (Obs).
 
 ## Movement and blocks
 
@@ -96,9 +96,9 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   | `gristlewick` | 1–2 | about 14–15 ticks |
 
   - Stepping next to the pair drew a hit on that same tick.
-  - Both attacked once Pippin was adjacent, though only one was attacked.
+  - Both attacked once the observer character was adjacent, though only one was attacked.
   - Seven hits took 10 health in 59 ticks.
-  - Pippin's bronze sword landed 2 of 3 swings, for 1 and 2 damage.
+  - The observer character's bronze sword landed 2 of 3 swings, for 1 and 2 damage.
 - **Hostiles stay near their spawn.** The pair stood just outside town for over 30 minutes, moving at most one block, and never followed into the safe zone (Obs).
 - **Lesson.** Several hostiles close together are one fight, not several. Never step next to a group with 10 health. Count every hostile within two blocks of the target before engaging (Obs).
 - **Combat events.** `NPCDamaged` shows damage dealt; a miss emits nothing. `NPCDied` marks a kill (M §8).
@@ -166,7 +166,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   - the carried chest drops with everything except gems and non-transferable items;
   - you respawn at full health in the nearest respawn zone, outside any level;
   - this is all M §11.
-- **Pippin's death** (Obs 1836830–80):
+- **The observer character's death** (Obs 1836830–80):
   - lives went 6 → 5 on the death tick;
   - `Died` named `chest_id` and its landing block, and listed the 4 dropped supplies;
   - `Respawned` came exactly 50 ticks later, on the town plaza;

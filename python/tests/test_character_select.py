@@ -29,6 +29,22 @@ class ResolveCharacterIdTest(unittest.TestCase):
         with mock.patch.dict("os.environ", {"AGENTREALM_CHARACTER_ID": "7"}):
             self.assertEqual(resolve_character_id(client, self.cfg(), character_id=None, character_name=None), 7)
 
+    def test_id_flag_overrides_environment(self):
+        env = {"AGENTREALM_CHARACTER_ID": "7"}
+        self.assertEqual(
+            resolve_character_id(mock.Mock(), self.cfg(), character_id=42, environ=env),
+            42,
+        )
+
+    def test_name_flag_overrides_environment(self):
+        client = mock.Mock()
+        client.list_characters.return_value = [{"id": 5, "name": "Pat", "world_code": "sandbox"}]
+        env = {"AGENTREALM_CHARACTER_ID": "7"}
+        self.assertEqual(
+            resolve_character_id(client, self.cfg(), character_name="Pat", environ=env),
+            5,
+        )
+
     def test_by_name_filters_world(self):
         client = mock.Mock()
         client.list_characters.return_value = [
@@ -87,6 +103,7 @@ class ProfileAndCliTest(unittest.TestCase):
             client = client_cls.return_value
             client.self_.return_value = {"lives": 1, "alive": True, "placed": True}
             client.create_character.return_value = {"id": 99}
+            client.list_characters.return_value = [{"id": 5, "name": "Pat", "world_code": "sandbox"}]
             runner = runner_cls.return_value
             runner.run.side_effect = lambda: None
             with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
@@ -125,6 +142,26 @@ class ProfileAndCliTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn('"gems": 5', out.getvalue())
         self.assertEqual(err.getvalue(), "")
+
+    def test_metrics_with_trace_path(self):
+        trace = self.dir / "any.trace.jsonl"
+        trace.write_text(json.dumps({"call": "tick", "gems": 2}) + "\n", encoding="utf-8")
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+                rc = cli.main(["metrics", str(trace)])
+        self.assertEqual(rc, 0)
+        self.assertIn('"gems": 2', out.getvalue())
+
+    def test_metrics_rejects_character_name(self):
+        with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+            cli.main(["metrics", str(self.toml), "--character-name", "Pat"])
+
+    def test_run_name_flag_beats_environment_id(self):
+        # main() exports AGENTREALM_CHARACTER_ID=42; the flag picks character 5.
+        rc, _, err, client = self.main("run", str(self.toml), "--character-name", "Pat")
+        self.assertEqual(rc, 0, err)
+        client.self_.assert_called_with(5)
 
     def test_legacy_name_field_rejected(self):
         bad = self.dir / "bad.toml"

@@ -41,7 +41,13 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from agentrealm_agent import config
-from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id
+from agentrealm_agent.character_select import (
+    DEFAULT_CREATE_AVATAR,
+    DEFAULT_CREATE_NAME,
+    CharacterSelectionError,
+    create,
+    resolve_character_id,
+)
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.executor import wait
 from agentrealm_agent.executor.movement import ticks_per_step
@@ -306,26 +312,9 @@ class StarterRunner:
             self.log("tick", f"{label}: {d.reason}")
 
 
-DEFAULT_CREATE_NAME = "Agent"
-DEFAULT_CREATE_AVATAR = "default"
-DEFAULT_CREATE_MODEL = "agentrealm-reference/scripted"
-
-
-def create(
-    client: Client,
-    cfg: config.CharacterConfig,
-    *,
-    name: str,
-    avatar: str,
-    model_agent: str,
-) -> int:
-    try:
-        s = client.create_character(cfg.world, name, avatar, model_agent)
-    except ApiError as e:
-        print(f"{cfg.profile}: {e}", file=sys.stderr)
-        return 1
-    print(s["id"])
-    return 0
+# Starter characters walk with the wander model agent (A52); name and avatar
+# defaults, and `create` itself, are shared with the reference runner.
+STARTER_CREATE_MODEL = "agentrealm-reference/wander"
 
 
 def run(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
@@ -358,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
     create_p.add_argument("profile", help="behavior profile .toml file")
     create_p.add_argument("--name", default=DEFAULT_CREATE_NAME)
     create_p.add_argument("--avatar", default=DEFAULT_CREATE_AVATAR)
-    create_p.add_argument("--model-agent", default=DEFAULT_CREATE_MODEL)
+    create_p.add_argument("--model-agent", default=STARTER_CREATE_MODEL)
     run_p = sub.add_parser("run")
     run_p.add_argument("profile", help="behavior profile .toml file")
     run_p.add_argument("--character-id", type=int, default=None)

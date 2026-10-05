@@ -11,7 +11,13 @@ import time
 from pathlib import Path
 
 from . import config
-from .character_select import CharacterSelectionError, resolve_character_id
+from .character_select import (
+    DEFAULT_CREATE_AVATAR,
+    DEFAULT_CREATE_NAME,
+    CharacterSelectionError,
+    create,
+    resolve_character_id,
+)
 from .client import ApiError, Client
 from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
 from .run_metrics import RunMetrics, compare_run_metrics, load_metrics_source, metrics_from_trace
@@ -20,30 +26,25 @@ from .runner import Runner
 # How long `run` waits for the driver thread to stop before saving.
 SHUTDOWN_JOIN_SECONDS = 5.0
 
-DEFAULT_CREATE_NAME = "Agent"
-DEFAULT_CREATE_AVATAR = "default"
+# The reference runner's characters play the scripted model agent.
 DEFAULT_CREATE_MODEL = "agentrealm-reference/scripted"
 
 
-def _add_character_id_flags(p: argparse.ArgumentParser, *, metrics: bool = False) -> None:
+def _profile_parser() -> argparse.ArgumentParser:
+    """The profile operand and the flags that pick the character to play."""
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("profile", help="behavior profile .toml file")
     p.add_argument(
         "--character-id",
         type=int,
         default=None,
-        help="character id to play (default: AGENTREALM_CHARACTER_ID)",
+        help="character id to play (overrides AGENTREALM_CHARACTER_ID)",
     )
-    if not metrics:
-        p.add_argument(
-            "--character-name",
-            default=None,
-            help="pick an existing character by name in the profile's world",
-        )
-
-
-def _profile_parser(name: str, help_: str) -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(add_help=False)
-    p.add_argument("profile", help="behavior profile .toml file")
-    _add_character_id_flags(p, metrics=(name == "metrics"))
+    p.add_argument(
+        "--character-name",
+        default=None,
+        help="pick an existing character by name in the profile's world (overrides AGENTREALM_CHARACTER_ID)",
+    )
     return p
 
 
@@ -59,12 +60,19 @@ def main(argv: list[str] | None = None) -> int:
     create_p.add_argument("--avatar", default=DEFAULT_CREATE_AVATAR, help="outfit code")
     create_p.add_argument("--model-agent", default=DEFAULT_CREATE_MODEL, help="model agent code")
 
-    for name, help_ in (
-        ("run", "drive one character until interrupted"),
-        ("status", "print the character's self and position"),
-        ("metrics", "summarize run metrics from the character's trace"),
-    ):
-        sub.add_parser(name, parents=[_profile_parser(name, help_)], help=help_)
+    sub.add_parser("run", parents=[_profile_parser()], help="drive one character until interrupted")
+    sub.add_parser("status", parents=[_profile_parser()], help="print the character's self and position")
+
+    # Offline: needs no key, so no --character-name. The operand is a trace, or
+    # a profile plus --character-id to build the keyed trace path.
+    metrics_p = sub.add_parser("metrics", help="summarize run metrics from a trace")
+    metrics_p.add_argument("source", help="trace (.jsonl), or behavior profile (.toml) with --character-id")
+    metrics_p.add_argument(
+        "--character-id",
+        type=int,
+        default=None,
+        help="with a profile: the character whose trace to read (overrides AGENTREALM_CHARACTER_ID)",
+    )
 
     cmp = sub.add_parser(
         "compare-metrics",
@@ -77,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "compare-metrics":
         return compare_metrics_cmd(args.baseline, args.candidate)
+    if args.cmd == "metrics":
+        return metrics(args.source, character_id=args.character_id)
 
     try:
         cfg = config.load(args.profile)
@@ -84,39 +94,23 @@ def main(argv: list[str] | None = None) -> int:
         print(e, file=sys.stderr)
         return 2
 
-    if args.cmd == "metrics":
-        return metrics(cfg, character_id=args.character_id)
-    if args.cmd == "create":
-        if not args.api_key:
-            print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
-            return 2
-        client = Client(args.base_url, args.api_key)
-        return create(client, cfg, name=args.name.strip(), avatar=args.avatar.strip(), model_agent=args.model_agent.strip())
     if not args.api_key:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
         return 2
     client = Client(args.base_url, args.api_key)
+    if args.cmd == "create":
+        return create(client, cfg, name=args.name.strip(), avatar=args.avatar.strip(), model_agent=args.model_agent.strip())
     try:
         cid = resolve_character_id(
             client,
             cfg,
             character_id=args.character_id,
-            character_name=getattr(args, "character_name", None),
+            character_name=args.character_name,
         )
     except CharacterSelectionError as e:
         print(e, file=sys.stderr)
         return 2
     return {"run": run, "status": status}[args.cmd](client, cfg, cid)
-
-
-def create(client: Client, cfg: config.CharacterConfig, *, name: str, avatar: str, model_agent: str) -> int:
-    try:
-        s = client.create_character(cfg.world, name, avatar, model_agent)
-    except ApiError as e:
-        print(f"{cfg.profile}: {e}", file=sys.stderr)
-        return 1
-    print(s["id"])
-    return 0
 
 
 def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
@@ -149,18 +143,28 @@ def compare_metrics_cmd(baseline: str, candidate: str) -> int:
     return 0
 
 
-def metrics(cfg: config.CharacterConfig, *, character_id: int | None) -> int:
-    try:
-        cid = resolve_character_id(None, cfg, character_id=character_id, character_name=None)
-    except CharacterSelectionError as e:
-        print(e, file=sys.stderr)
-        return 2
-    path = cfg.trace_path(cid)
+def metrics(source: str, *, character_id: int | None) -> int:
+    """Print the last run's metrics from a trace, or from a profile's keyed trace."""
+    path = Path(source)
+    if path.suffix == ".jsonl":
+        if character_id is not None:
+            print("--character-id goes with a profile, not a trace path", file=sys.stderr)
+            return 2
+        label = path.name
+    else:
+        try:
+            cfg = config.load(path)
+            cid = resolve_character_id(None, cfg, character_id=character_id)
+        except (config.ConfigError, OSError, CharacterSelectionError) as e:
+            print(e, file=sys.stderr)
+            return 2
+        path = cfg.trace_path(cid)
+        label = cfg.profile
     if not path.is_file():
-        print(f"{cfg.profile}: no trace at {path}", file=sys.stderr)
+        print(f"{label}: no trace at {path}", file=sys.stderr)
         return 1
     summary = metrics_from_trace(path).to_dict()
-    print(f"{cfg.profile}: {json.dumps(summary, sort_keys=True)}")
+    print(f"{label}: {json.dumps(summary, sort_keys=True)}")
     return 0
 
 

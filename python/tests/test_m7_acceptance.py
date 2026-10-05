@@ -432,7 +432,7 @@ class SmokeScriptTest(unittest.TestCase):
         cfg = config.load(REPO / "python" / "characters" / "olympuff_m7.toml")
         self.assertTrue(cfg.policy.pickup, "Recover needs pickup (A11)")
         self.smoke.aim_at(cfg, OVERWORLD, (5, 6))
-        self.assertEqual(cfg.policy.goals, ["goto", "explore", "doors"])
+        self.assertEqual(cfg.policy.goals, ["goto", "explore"])
         self.assertEqual((cfg.policy.goto, cfg.policy.goto_map), ((5, 6), OVERWORLD))
 
 

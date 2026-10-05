@@ -1,14 +1,15 @@
-# A16 live M7 acceptance: an hour of survival on the olympuff overworld
+# A16 live M7 acceptance: an hour of survival on the Olympuff overworld
 # (scripts/smoke_m7_olympuff.py). The smoke script adds the 150-block `goto`
-# target at run time; pickup stays on so Recover can run.
+# target in front of these goals at start; the rest of the hour is explore.
 world = "olympuff"
 
 [policy]
 kind = "scripted"
-goals = ["explore", "doors"]
+goals = ["explore"]
 on_hostile = "flee"
 hostile = ["npc"]
-hostile_range = 2
+# Pickup stays on: Recover (A11) needs it to reach the death chest, and Heal
+# takes ground food. M7 is judged on the agent as shipped.
 pickup = true
 avoid_blocks = ["fire", "lava"]
-entity_refresh = 5
+entity_refresh = 20

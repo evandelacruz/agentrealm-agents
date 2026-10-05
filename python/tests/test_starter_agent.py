@@ -278,6 +278,14 @@ class StarterCommandTest(unittest.TestCase):
             1,
         )
 
+    def test_create_defaults_to_wander_model(self):
+        client = mock.Mock()
+        client.create_character.return_value = {"id": 7}
+        with mock.patch("starter_agent.Client", return_value=client):
+            rc = self.quiet(main, ["--api-key", "k", "create", "characters/starter.toml"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(client.create_character.call_args.args[3], "agentrealm-reference/wander")
+
     def test_run_rejects_missing_character(self):
         client = FakeClient()
         client.self_ = mock.Mock(side_effect=ApiError(404, "character_not_found"))

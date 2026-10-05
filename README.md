@@ -23,11 +23,11 @@ Other commands:
 ```sh
 python3 -m agentrealm_agent run characters/wren.toml --character-name Wren
 python3 -m agentrealm_agent status characters/wren.toml --character-id ID
-python3 -m agentrealm_agent metrics characters/wren.toml --character-id ID
+python3 -m agentrealm_agent metrics characters/wren.toml --character-id ID   # or: metrics path/to/x.trace.jsonl
 python3 -m agentrealm_agent compare-metrics baseline.trace.jsonl candidate.trace.jsonl
 ```
 
-The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample profiles use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` prints a character id; `run` plays until Ctrl-C and appends a trace under `python/.state/<profile>.<character_id>.trace.jsonl`. Run one `run` process per world at a time. Optional strategist (A35): set `AGENTREALM_STRATEGIST_MODEL` and `AGENTREALM_STRATEGIST_API_KEY` or `OPENAI_API_KEY`; limits and triggers are in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) **Strategist**. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
+The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample profiles use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` prints a character id. `run` and `status` pick the character from `--character-id` or `--character-name`, else `AGENTREALM_CHARACTER_ID`; an explicit flag always overrides the environment. `run` plays until Ctrl-C and appends a trace under `python/.state/<profile>.<character_id>.trace.jsonl`. Run one `run` process per world at a time. Optional strategist (A35): set `AGENTREALM_STRATEGIST_MODEL` and `AGENTREALM_STRATEGIST_API_KEY` or `OPENAI_API_KEY`; limits and triggers are in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) **Strategist**. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
 
 Copy and edit a file in `python/characters/` to try different behavior (`policy.kind` can be `idle`, `wander`, or `scripted`).
 
@@ -44,7 +44,7 @@ Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_
 
 ## Make it yours
 
-This repo is meant for you to fork and extend, not only to run Wren and Kit as shipped. Start from [`python/starter_agent.py`](python/starter_agent.py): one file that syncs, flees, and explores on its own — copy it and grow your own loop before you touch the full reference agent. It moves one tile at a time with `SetPosition`, waiting out the movement cooldown between moves, where the reference agent sends paced `Step` queues.
+This repo is meant for you to fork and extend, not only to run the shipped profiles (`wren`, `kit`) on a character you choose. Start from [`python/starter_agent.py`](python/starter_agent.py): one file that syncs, flees, and explores on its own — copy it and grow your own loop before you touch the full reference agent. It moves one tile at a time with `SetPosition`, waiting out the movement cooldown between moves, where the reference agent sends paced `Step` queues.
 
 ```sh
 cd python

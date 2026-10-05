@@ -1,12 +1,15 @@
-# A4 live M6 acceptance: long calm walking on olympuff (scripts/smoke_m6_olympuff.py).
+# A4 live M6 acceptance: long calm walking on Olympuff (scripts/smoke_m6_olympuff.py).
 world = "olympuff"
 
 [policy]
 kind = "scripted"
 goals = ["explore"]
-on_hostile = "flee"
-hostile = ["npc"]
-hostile_range = 2
+# M6's done-when is the executor on calm walking (PLAYABLE_AGENT_PLAN Milestones,
+# M6): 200 Steps, no movement_cooldown, tick POSTs under a quarter of calm
+# windows. Flee and Fight are not under test, so hostiles are ignored. Damage
+# still lands, and Heal may walk to food; those Steps count.
+on_hostile = "ignore"
+hostile = []
 pickup = false
 avoid_blocks = ["fire", "lava"]
-entity_refresh = 5
+entity_refresh = 20

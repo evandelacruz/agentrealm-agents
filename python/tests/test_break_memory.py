@@ -33,7 +33,7 @@ from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.break_state import BreakState
 from agentrealm_agent.states.escape import EscapeState
 from agentrealm_agent.states.intents import arm, use_block
-from agentrealm_agent.world import WorldModel
+from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
 
 
@@ -349,14 +349,37 @@ class BreakRearmTest(unittest.TestCase):
         self.assertFalse(BreakState().guard(self.r.world, self.ctx))
 
 
+    def stalled_plan(self) -> Plan:
+        plan = Plan([{"op": "break_block", "x": 2, "y": 0, "capability": "smash"}], dict(PARAM_DEFAULTS))
+        plan.stalled_since_tick = 0
+        self.ctx.plan = plan
+        return plan
+
     def test_acting_on_the_plan_op_clears_its_stall(self):
         # Break, not plan pathing, makes progress on `break_block` (A34 stall rule, A36).
         self.att.level = nav_stuck.WALK
-        self.ctx.plan = Plan([{"op": "break_block", "x": 2, "y": 0, "capability": "smash"}], dict(PARAM_DEFAULTS))
-        self.ctx.plan.stalled_since_tick = 0
+        plan = self.stalled_plan()
         out = BreakState().act(self.r.world, self.ctx)
         self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
-        self.assertIsNone(self.ctx.plan.stalled_since_tick)
+        self.assertIsNone(plan.stalled_since_tick)
+
+    def test_a_reflex_in_break_keeps_the_stall(self):
+        w = self.r.world
+        w.entities = [Entity("supply", 77, (0, 0), "bronze_sword")]
+        self.ctx.policy = Policy(kind="scripted", goals=["hold"], pickup=True)
+        plan = self.stalled_plan()
+        out = BreakState().act(w, self.ctx)
+        self.assertTrue(out.intents)
+        self.assertNotEqual(out.reason, "break smash @ (2, 0)", "the pickup reflex took the round")
+        self.assertEqual(plan.stalled_since_tick, 0)
+
+    def test_the_goto_stuck_break_keeps_the_plan_ops_stall(self):
+        # While the goto is owed, Break opens the goto's own stuck target, not the plan op (A58).
+        self.ctx.policy = Policy(kind="scripted", goals=["goto"], goto=(4, 0), pickup=False)
+        plan = self.stalled_plan()
+        out = BreakState().act(self.r.world, self.ctx)
+        self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
+        self.assertEqual(plan.stalled_since_tick, 0)
 
 class InvestigateYieldsToBreakTest(unittest.TestCase):
     def test_stuck_door_look_reaches_break(self):

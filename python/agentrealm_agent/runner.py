@@ -431,6 +431,7 @@ class Runner:
             d = self._decide(w, m, plan=self.plan)
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
+        self.trace_oscillations()
         if self.acceptance is not None:
             # Before the response is applied, so it judges the world this decision saw.
             self.acceptance.before_tick(
@@ -524,6 +525,19 @@ class Runner:
         # The intent resolves at this sim window's boundary. Do not call
         # again until it has closed, so the next submit lands in a new tick.
         return time.time() + int(r.get("window_remaining_ms", 0)) / 1000.0 + WINDOW_MARGIN
+
+    def trace_oscillations(self) -> None:
+        """Write each ``oscillation`` the dispatch guard raised to the trace (A15)."""
+        stuck = self.mem.nav_stuck
+        events, stuck.oscillations = stuck.oscillations, []
+        for event in events:
+            if "goal" in event:
+                outcome = f"gave up {event['goal']} → {tuple(event['target'])}"
+            else:
+                outcome = f"nothing given up, moved by {', '.join(event.get('states') or []) or 'no state'}"
+            self.log("oscillation", f"pacing {event['cells']}: {outcome}", event)
+            if self.acceptance is not None:
+                self.acceptance.on_oscillation(event)
 
     def reflex_while_held(self) -> Decision | None:
         """A reflex (2–4b) that fires while a queue is held, else None.

@@ -6,6 +6,11 @@ Before the runner starts it reads the world and the character's position, and
 sends the agent to one ``goto`` target 150 blocks east of that start (or
 ``--target X,Y``); the rest of the hour it explores. Pass criteria are in
 ``agentrealm_agent/m7_acceptance.py`` and the README. Requires AGENTREALM_API_KEY.
+
+Sustained pacing aborts the run early with exit 1: more than
+``OSCILLATION_ABORT_COUNT`` oscillation-guard give-ups within
+``OSCILLATION_ABORT_TICKS`` stop the runner (m7_acceptance.py). Guard events
+that gave nothing up (survival states pacing) do not count.
 """
 
 from __future__ import annotations
@@ -118,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, log=print)
     print(f"finished in {elapsed:.1f}s", flush=True)
+    if metrics.oscillation_abort:
+        print(f"ABORT: {metrics.oscillation_abort}; the agent paced instead of playing", file=sys.stderr)
     for line in metrics.summary_lines():
         print(line, flush=True)
     # A shorter practice run still fails on deaths, misses, loops and API

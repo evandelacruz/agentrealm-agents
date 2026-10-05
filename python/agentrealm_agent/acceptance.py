@@ -54,6 +54,9 @@ class AcceptanceHooks:
     def on_events(self, events: list[dict]) -> None:
         """Tick events after the response is applied (for example ``NPCDied``)."""
 
+    def on_oscillation(self, event: dict) -> None:
+        """The dispatch guard caught the character pacing between two cells (A15)."""
+
 
 class CountingClient:
     """Forwards to a client, appending each failed request to ``errors`` and,

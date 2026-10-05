@@ -1,0 +1,9 @@
+# M8 smoke: gather gems, then buy gear; potion_reserve matches the gate default.
+goals = ["gather_gems:5", "buy:bronze_mail", "buy:bronze_sword", "buy:small_potion"]
+
+[params]
+potion_reserve = 2
+fight_margin = 1.5
+retreat_hits = 2
+lives_floor = 3
+risk = 0.5

@@ -33,12 +33,9 @@ nothing to heal.
 
 from __future__ import annotations
 
-import threading
-import time
 from dataclasses import dataclass, field
-from typing import Callable
 
-from .acceptance import AcceptanceHooks, CountingClient
+from .acceptance_run import TimedRunHooks
 from .config import Policy
 from .executor.movement import step_landing
 from .healing import regen_known
@@ -62,8 +59,8 @@ OSCILLATION_ABORT_TICKS = 6000
 SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee")
 
 
-@dataclass
-class M7AcceptanceMetrics(AcceptanceHooks):
+@dataclass(kw_only=True)
+class M7AcceptanceMetrics(TimedRunHooks):
     """Counts survival, navigation and API faults while the runner plays one hour.
 
     ``target`` is the overworld cell the agent is sent to (``policy.goto``),
@@ -75,14 +72,10 @@ class M7AcceptanceMetrics(AcceptanceHooks):
     origin: Pos
     target: Pos
     target_seconds: float = TARGET_SECONDS
-    stop: threading.Event | None = None
-    clock: Callable[[], float] = time.monotonic
-    started_at: float | None = None
     max_distance: int = 0
     target_reached: bool = False
     target_give_up: str | None = None  # stuck detection's reason for giving up on the target
     other_give_ups: int = 0  # give-ups on any other goal: reported, never a pass
-    deaths: int = 0
     lives_seen: int | None = None
     retreat_misses: int = 0
     recover_withdraws: int = 0
@@ -93,26 +86,9 @@ class M7AcceptanceMetrics(AcceptanceHooks):
     oscillation_ticks: list[int] = field(default_factory=list)  # each guard event's tick
     pacing_give_up_ticks: list[int] = field(default_factory=list)  # ticks of events that gave up a target
     oscillation_abort: str | None = None  # why the run was stopped for pacing
-    api_errors: list[str] = field(default_factory=list)
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
     _loop_key: tuple[Pos, str] | None = None
     _loop_streak: int = 0
-
-    def wrap(self, client):
-        return CountingClient(client, self.api_errors)
-
-    def on_window(self, *, urgent: bool, alive: bool = True) -> None:
-        now = self.clock()
-        if self.started_at is None:
-            self.started_at = now
-        if self.stop is not None and alive and now - self.started_at >= self.target_seconds:
-            self.stop.set()
-
-    def on_death(self) -> None:
-        """A death already fails the run, so end it rather than play on."""
-        self.deaths += 1
-        if self.stop is not None:
-            self.stop.set()
 
     def on_oscillation(self, event: dict) -> None:
         """Count the guard's events; sustained give-ups for pacing end the run.
@@ -204,9 +180,7 @@ class M7AcceptanceMetrics(AcceptanceHooks):
 
     def failures(self, *, full_hour: bool = True) -> list[str]:
         """What fails the run. Navigation and regen are judged only on a full hour."""
-        out: list[str] = []
-        if self.deaths:
-            out.append(f"{self.deaths} death(s) during run")
+        out = list(self.base_failures())
         if self.retreat_misses:
             out.append(f"{self.retreat_misses} tick(s) should_retreat held outside a survival state")
         if self.recover_unsafe:
@@ -219,8 +193,6 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             out.append(f"target {self.target} neither reached nor given up on (max distance {self.max_distance})")
         if full_hour and self.regen is None:
             out.append("safe-zone regen never measured")
-        if self.api_errors:
-            out.append(f"{len(self.api_errors)} API error(s): {', '.join(sorted(set(self.api_errors)))}")
         return out
 
     def summary_lines(self) -> list[str]:

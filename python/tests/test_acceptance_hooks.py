@@ -25,10 +25,21 @@ ARGS: dict[str, dict] = {
 }
 
 
+def metrics_classes() -> list[type]:
+    """Every concrete subclass of AcceptanceHooks, at any depth."""
+    out, todo = [], list(AcceptanceHooks.__subclasses__())
+    while todo:
+        cls = todo.pop()
+        todo.extend(cls.__subclasses__())
+        if cls.__module__.endswith("_acceptance"):
+            out.append(cls)
+    return out
+
+
 class EveryMetricsClassTest(RunnerCase):
     def test_runner_hooks_reach_each_metrics_class(self):
-        classes = AcceptanceHooks.__subclasses__()
-        self.assertGreaterEqual(len(classes), 4, "the *_acceptance modules were imported")
+        classes = metrics_classes()
+        self.assertGreaterEqual(len(classes), 5, "the *_acceptance modules were imported")
         for cls in classes:
             with self.subTest(cls.__name__):
                 stop = threading.Event()

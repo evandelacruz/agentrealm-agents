@@ -44,7 +44,7 @@ Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_
 
 ## Make it yours
 
-This repo is meant for you to fork and extend, not only to run Wren and Kit as shipped. Start from [`python/starter_agent.py`](python/starter_agent.py): one file that syncs, flees, and explores on its own — copy it and grow your own loop before you touch the full reference agent.
+This repo is meant for you to fork and extend, not only to run Wren and Kit as shipped. Start from [`python/starter_agent.py`](python/starter_agent.py): one file that syncs, flees, and explores on its own — copy it and grow your own loop before you touch the full reference agent. It moves one tile at a time with `SetPosition`, waiting out the movement cooldown between moves, where the reference agent sends paced `Step` queues.
 
 ```sh
 cd python

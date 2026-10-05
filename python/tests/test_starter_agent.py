@@ -120,6 +120,48 @@ class StarterWalkTest(unittest.TestCase):
         self.assertNotIn((3, 0), m.path)
 
 
+class StarterPacingTest(unittest.TestCase):
+    def test_paced_walk_follows_results_without_cooldown_rejections(self):
+        # 10 Hz at speed 2500: the server allows one move per 4 ticks.
+        w = world(["........", "........", "........"], at=(1, 1))
+        w.movement_speed = 2500
+        m, rng = StarterMemory(need_self=False, need_position=False, hz=10), random.Random(0)
+        sent_moves, applied_ticks, rejections = [], [], 0
+        in_flight = None  # (queue_id, target) the fake server runs on the next tick
+        for t in range(1, 21):
+            results = []
+            if in_flight is not None:
+                qid, target = in_flight
+                if applied_ticks and t - applied_ticks[-1] < 4:
+                    results.append({"queue_id": qid, "index": 0, "tick": t, "outcome": "rejected"})
+                    rejections += 1
+                else:
+                    results.append({"queue_id": qid, "index": 0, "tick": t, "outcome": "applied"})
+                    applied_ticks.append(t)
+                in_flight = None
+            d = decide(w, m, rng)
+            qid = f"q{t}" if d.intents else None
+            if d.intents:
+                target = (d.intents[0]["x"], d.intents[0]["y"])
+                sent_moves.append(target)
+                in_flight = (qid, target)
+            apply_tick(w, m, {"tick": t, "queue_id": qid, "intent_results": results}, sent=d.intents)
+        self.assertEqual(rejections, 0)
+        self.assertGreaterEqual(len(applied_ticks), 3)
+        self.assertTrue(all(b - a >= 4 for a, b in zip(applied_ticks, applied_ticks[1:])))
+        self.assertEqual(w.pos, sent_moves[-1] if in_flight is None else sent_moves[-2])
+        self.assertFalse(m.need_position)
+
+    def test_lost_move_result_rereads_position(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        m = StarterMemory(need_self=False, need_position=False)
+        apply_tick(w, m, {"tick": 1, "queue_id": "q1"}, sent=[{"verb": "SetPosition", "x": 2, "y": 1}])
+        self.assertEqual((m.move, m.need_position), ((2, 1), False))
+        apply_tick(w, m, {"tick": 7})
+        self.assertTrue(m.need_position)
+        self.assertIsNone(m.move)
+
+
 class StarterPolicyTest(unittest.TestCase):
     def test_hostile_range_and_kinds_come_from_policy(self):
         w = world([".......", ".......", "......."], at=(3, 1))

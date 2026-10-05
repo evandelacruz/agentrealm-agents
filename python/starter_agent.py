@@ -6,6 +6,12 @@ Priority each tick window:
   Explore — walk to the nearest frontier tile (a known tile next to unknown
             ones), else take a random open step
 
+It moves with one ``SetPosition`` per tick POST, to a neighbouring tile. A new
+move goes out only after the last one's result is back and the movement
+cooldown has passed (ticks per move at ``movement_speed``), and its position
+advances when that result says ``applied``. The reference agent instead sends
+paced ``Step``/``Wait`` queues (PLAN.md **Executor**).
+
 The reference agent in ``agentrealm_agent/`` adds dozens of states; this file
 keeps the same API contract with only the behaviors above.
 
@@ -37,11 +43,13 @@ from dataclasses import dataclass, field
 from agentrealm_agent import config
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.executor import wait
+from agentrealm_agent.executor.movement import ticks_per_step
 from agentrealm_agent.pathing import flee_step, hostiles_in_range
 from agentrealm_agent.world import Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60
 WINDOW_MARGIN = 0.05
+MOVE_RESULT_TIMEOUT = 5  # ticks to wait for a move's result before rereading position
 
 
 @dataclass
@@ -51,10 +59,26 @@ class StarterMemory:
     need_position: bool = True
     windows_since_self: int = 0
     policy: config.Policy = field(default_factory=config.Policy)
+    hz: int = 1  # world tick rate, from GET world
+    server_tick: int = 0  # latest tick a tick response reported
+    move: Pos | None = None  # SetPosition sent; its result is not back yet
+    move_queue: str | None = None  # queue_id the server gave that move
+    move_sent_tick: int = 0
+    last_move_tick: int | None = None  # tick our last move applied
 
 
 def set_position(p: Pos) -> dict:
     return {"verb": "SetPosition", "x": p[0], "y": p[1]}
+
+
+def move_ready(world: WorldModel, mem: StarterMemory) -> bool:
+    """True when a move now would not be rejected with ``movement_cooldown``."""
+    if mem.move is not None:
+        return False
+    if mem.last_move_tick is None:
+        return True
+    wait_ticks = ticks_per_step(tick_rate_hz=mem.hz, movement_speed_milli=world.movement_speed)
+    return mem.server_tick - mem.last_move_tick >= wait_ticks
 
 
 def blocked_tiles(world: WorldModel, policy: config.Policy) -> set[Pos]:
@@ -137,6 +161,8 @@ def decide(world: WorldModel, mem: StarterMemory, rng: random.Random) -> Starter
         return StarterDecision([wait()], "wake", "Sync")
 
     hostiles = hostiles_in_range(world, mem.policy)
+    if not move_ready(world, mem):
+        return StarterDecision(None, "move cooldown", "Flee" if hostiles else "Explore")
     if hostiles:
         away = flee_step(world, hostiles, blocked_tiles(world, mem.policy))
         if away is not None:
@@ -154,19 +180,34 @@ def resync(mem: StarterMemory) -> None:
     """Forget the plan and reread self and position (death, respawn, unplaced)."""
     mem.need_self = mem.need_position = True
     mem.path = []
+    mem.move = None
 
 
-def apply_tick(world: WorldModel, mem: StarterMemory, response: dict) -> None:
-    world.tick = int(response.get("tick", world.tick))
+def apply_tick(world: WorldModel, mem: StarterMemory, response: dict, sent: list[dict] | None = None) -> None:
+    """Fold one tick response; ``sent`` is the intents that POST carried."""
+    world.tick = mem.server_tick = int(response.get("tick", world.tick))
     events = world.apply_events(response.get("events_by_tick") or [])
     world.apply_observation(response.get("observation"))
     if any(ev.get("kind") in ("Died", "Respawned") for ev in events):
         resync(mem)
+    if sent and sent[0]["verb"] == "SetPosition":
+        mem.move = (sent[0]["x"], sent[0]["y"])
+        mem.move_queue, mem.move_sent_tick = response.get("queue_id"), mem.server_tick
     for res in response.get("intent_results") or []:
         if res.get("outcome") == "rejected":
             mem.need_position = True
             mem.path = []
+            mem.move = None
             break
+        if mem.move is not None and res.get("queue_id") == mem.move_queue:
+            # The tick response comes back before our intent runs, so the
+            # position moves when the result arrives, not when we send.
+            if res.get("outcome") == "applied":
+                world.pos = mem.move
+            mem.last_move_tick = int(res.get("tick", mem.server_tick))
+            mem.move = None
+    if mem.move is not None and mem.server_tick - mem.move_sent_tick > MOVE_RESULT_TIMEOUT:
+        mem.need_position, mem.path, mem.move = True, [], None  # result lost; we may have moved
 
 
 class StarterRunner:
@@ -197,6 +238,7 @@ class StarterRunner:
         try:
             world_body = self.client.world(self.cid)
             hz = max(1, int(world_body.get("tick_rate_hz", 1)))
+            self.mem.hz = hz
             self.log("world", f"{world_body.get('code')} {hz}Hz")
         except ApiError as e:
             self.out(f"[{self.cfg.name}] world read failed: {e}")
@@ -257,7 +299,7 @@ class StarterRunner:
             d = decide(w, m, self.rng)
             intents = d.intents
             r = c.tick(self.cid, intents, snapshot_version=w.snapshot_version)
-            apply_tick(w, m, r)
+            apply_tick(w, m, r, sent=intents)
             label = d.mode if intents else "hold"
             self.log("tick", f"{label}: {d.reason}")
 

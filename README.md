@@ -44,7 +44,7 @@ Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_
 
 ## Make it yours
 
-This repo is meant for you to fork and extend, not only to run Wren and Kit as shipped. [`PLAN.md`](PLAN.md) **M13: Make it yours** tracks a step-by-step guide to adding your own state (A51) and a small starter agent to copy and grow (A52). Until they land, start from `python/characters/` and the modules under `python/agentrealm_agent/states/`.
+This repo is meant for you to fork and extend, not only to run Wren and Kit as shipped. [`docs/MAKE_IT_YOURS.md`](docs/MAKE_IT_YOURS.md) walks through adding your own state: guard and act, where it goes in the dispatcher, and how to test it, with a tiny greet example. A small starter agent to copy and grow (A52) is still tracked in [`PLAN.md`](PLAN.md) **M13: Make it yours**.
 
 ## Tests
 

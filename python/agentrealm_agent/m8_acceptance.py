@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .acceptance_run import TimedRunHooks
+from .acceptance_run import FULL_RUN_FRACTION, TimedRunHooks  # FULL_RUN_FRACTION: re-exported for the smoke script
 from .config import Policy
 from .equip import is_consumable, is_weapon, wear_slot
 from .healing import FOOD_CODES, POTION_CODES, potion_count, self_use_code

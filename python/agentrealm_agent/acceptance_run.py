@@ -1,4 +1,4 @@
-"""Shared pieces of timed live acceptance runs (M7 A16, M8 A25)."""
+"""Shared pieces of timed live acceptance runs (M7 A16, M8 A25, M10 A33)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from .acceptance import AcceptanceHooks, CountingClient
+
+# A run at least this share of its target duration is judged on the full gate.
+FULL_RUN_FRACTION = 0.95
 
 
 @dataclass(kw_only=True)

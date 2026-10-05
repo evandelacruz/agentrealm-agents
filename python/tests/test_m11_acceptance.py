@@ -13,7 +13,7 @@ from unittest import mock
 
 from agentrealm_agent import acceptance_smoke, config
 from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics
-from agentrealm_agent.acceptance_common import OSCILLATION_ABORT_COUNT
+from agentrealm_agent.acceptance_survival import OSCILLATION_ABORT_COUNT
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.world import Entity, WorldModel
 from tests.test_m7_acceptance import OVERWORLD, decide, gave_up, metrics as m7_metrics, open_world
@@ -278,7 +278,7 @@ class RunnerHookTest(unittest.TestCase):
         """The runner always passes ``plan_op``; a ``before_tick`` without it breaks that gate's runs."""
         import inspect
 
-        from agentrealm_agent import m6_acceptance, m7_acceptance, m8_acceptance, m10_acceptance  # noqa: F401
+        from agentrealm_agent import m6_acceptance, m7_acceptance, m8_acceptance, m9_acceptance, m10_acceptance  # noqa: F401
         from agentrealm_agent.acceptance import AcceptanceHooks
 
         def subclasses(cls):
@@ -293,7 +293,7 @@ class RunnerHookTest(unittest.TestCase):
                 continue
             inspect.signature(cls.before_tick).bind(None, None, None, **kwargs)
             checked.add(cls.__name__)
-        self.assertTrue({"M7AcceptanceMetrics", "M8AcceptanceMetrics", "M10AcceptanceMetrics", "M11AcceptanceMetrics"} <= checked)
+        self.assertTrue({"M7AcceptanceMetrics", "M8AcceptanceMetrics", "M9AcceptanceMetrics", "M10AcceptanceMetrics", "M11AcceptanceMetrics"} <= checked)
 
     def test_runner_forwards_level_clear_ceremony(self):
         from agentrealm_agent.runner import Runner

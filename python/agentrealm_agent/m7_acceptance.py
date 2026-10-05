@@ -35,16 +35,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .acceptance_common import (
+from .acceptance_survival import (
     LOOP_STEP_LIMIT,
+    OSCILLATION_ABORT_COUNT,
+    OSCILLATION_ABORT_TICKS,
     OscillationAbortTracker,
-    StepLoopTracker,
-    recover_withdraws,
-    retreat_missed,
+    SurvivalAcceptanceMetrics,
+    withdraw_cells,
 )
-from .acceptance_run import TimedRunHooks
 from .config import Policy
-from .healing import regen_known
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .world import Pos, WorldModel, chebyshev
@@ -52,12 +51,19 @@ from .world import Pos, WorldModel, chebyshev
 TARGET_SECONDS = 3600.0
 TARGET_DISTANCE = 150
 
-# States that are already the right answer when should_retreat holds.
-SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee")
+__all__ = [
+    "LOOP_STEP_LIMIT",
+    "OSCILLATION_ABORT_COUNT",
+    "OSCILLATION_ABORT_TICKS",
+    "TARGET_DISTANCE",
+    "TARGET_SECONDS",
+    "M7AcceptanceMetrics",
+    "withdraw_cells",
+]
 
 
 @dataclass(kw_only=True)
-class M7AcceptanceMetrics(TimedRunHooks):
+class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
     """Counts survival, navigation and API faults while the runner plays one hour.
 
     ``target`` is the overworld cell the agent is sent to (``policy.goto``),
@@ -74,18 +80,9 @@ class M7AcceptanceMetrics(TimedRunHooks):
     target_give_up: str | None = None  # stuck detection's reason for giving up on the target
     other_give_ups: int = 0  # give-ups on any other goal: reported, never a pass
     lives_seen: int | None = None
-    retreat_misses: int = 0
-    recover_withdraws: int = 0
-    recover_unsafe: int = 0
-    heal_actions: int = 0
     regen: str | None = None  # "yes" or "no" once measured
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
-    _loop: StepLoopTracker = field(default_factory=StepLoopTracker)
     _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
-
-    @property
-    def loop_detected(self) -> bool:
-        return self._loop.loop_detected
 
     @property
     def oscillation_ticks(self) -> list[int]:
@@ -121,17 +118,18 @@ class M7AcceptanceMetrics(TimedRunHooks):
             self.lives_seen = w.lives
         self._note_navigation(w)
         self._note_give_ups(m)
-        if retreat_missed(w, policy, params, state=state, survival_states=SURVIVAL_STATES):
-            self.retreat_misses += 1
-        if intents and state == "Heal":
-            self.heal_actions += 1
-        if intents and state == "Recover":
-            withdraws, unsafe = recover_withdraws(w, intents)
-            self.recover_withdraws += withdraws
-            self.recover_unsafe += unsafe
-        self.regen = regen_known(knowledge, m) or self.regen
-        if intents is not None:
-            self._loop.note(w, reason, intents)
+        regen = self.note_survival_tick(
+            w,
+            m,
+            state=state,
+            reason=reason,
+            intents=intents,
+            policy=policy,
+            params=params,
+            knowledge=knowledge,
+            track_regen=True,
+        )
+        self.regen = regen or self.regen
 
     def _note_navigation(self, w: WorldModel) -> None:
         if w.pos is None or w.map_id != self.overworld_map_id:
@@ -159,13 +157,7 @@ class M7AcceptanceMetrics(TimedRunHooks):
 
     def failures(self, *, full_hour: bool = True) -> list[str]:
         """What fails the run. Navigation and regen are judged only on a full hour."""
-        out = list(self.base_failures())
-        if self.retreat_misses:
-            out.append(f"{self.retreat_misses} tick(s) should_retreat held outside a survival state")
-        if self.recover_unsafe:
-            out.append(f"{self.recover_unsafe} Recover withdraw(s) from a cell not known safe")
-        if self.loop_detected:
-            out.append(f"loop: {LOOP_STEP_LIMIT} Steps in a row at one cell with one reason")
+        out = list(self.survival_failures())
         if self.oscillation_abort:
             out.append(self.oscillation_abort)
         if full_hour and not self.navigation_ok():
@@ -185,14 +177,8 @@ class M7AcceptanceMetrics(TimedRunHooks):
             f"navigation target {self.target} from {self.origin}: {nav}",
             f"max chebyshev distance from origin: {self.max_distance}",
             f"give-ups on other goals: {self.other_give_ups}",
-            f"deaths: {self.deaths}",
-            f"retreat misses: {self.retreat_misses}",
-            f"recover withdraws: {self.recover_withdraws} (from a cell not known safe: {self.recover_unsafe})",
-            f"heal actions: {self.heal_actions}",
+            *self.survival_summary_lines(),
             f"safe-zone regen: {self.regen or 'not measured'}",
-            f"loop detected: {self.loop_detected}",
             f"oscillation events: {len(self.oscillation_ticks)} (gave up a target: {len(self.pacing_give_up_ticks)})",
-            f"API errors: {len(self.api_errors)}",
             f"lives last seen: {self.lives_seen}",
         ]
-

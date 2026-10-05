@@ -12,7 +12,8 @@ module checks:
   ``enter_level`` or ``fight_boss`` while it stands on the overworld map. The
   op that was on top when a clear arrived never counts: it is the fight that
   produced the clear. It is matched by door (``x``, ``y``), so another
-  ``enter_level`` or ``fight_boss`` at that door does not count either. Only the overworld counts as having left the level.
+  ``enter_level`` or ``fight_boss`` at that door does not count either. Only
+  the overworld counts as having left the level.
 
 Shared survival gates (same as M7 A16 where they apply during a long unattended
 run): no death; no retreat miss; Recover withdraws only on known safe tiles; no
@@ -23,14 +24,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .acceptance_common import (
-    LOOP_STEP_LIMIT,
-    OscillationAbortTracker,
-    StepLoopTracker,
-    recover_withdraws,
-    retreat_missed,
-)
-from .acceptance_run import TimedRunHooks
+from .acceptance_survival import SURVIVAL_STATES as M7_SURVIVAL_STATES
+from .acceptance_survival import OscillationAbortTracker, SurvivalAcceptanceMetrics
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -41,30 +36,23 @@ TARGET_SECONDS = 7200.0  # default max wall-clock before the smoke script stops
 
 # M7's survival states plus Boss: during a boss fight Retreat stands down and
 # Boss walks back toward the door itself (A38).
-SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee", "Boss")
+SURVIVAL_STATES = (*M7_SURVIVAL_STATES, "Boss")
 
 
 @dataclass(kw_only=True)
-class M11AcceptanceMetrics(TimedRunHooks):
+class M11AcceptanceMetrics(SurvivalAcceptanceMetrics):
     """Counts level clears, the follow-on attempt, and shared survival faults."""
 
     overworld_map_id: int  # "left the level" means back on this map
     target_seconds: float = TARGET_SECONDS
     cleared_levels: set[int] = field(default_factory=set)
     next_level_attempted: bool = False
+    survival_states = SURVIVAL_STATES
     lives_seen: int | None = None
-    retreat_misses: int = 0
-    recover_withdraws: int = 0
-    recover_unsafe: int = 0
-    _loop: StepLoopTracker = field(default_factory=StepLoopTracker)
     _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
     _outside_after_first_clear: bool = False
     _last_plan_op: dict | None = None  # the plan's top op on the tick just sent
     _cleared_doors: set[tuple[int, int]] = field(default_factory=set)  # (x, y) of the top op on each tick that brought a clear
-
-    @property
-    def loop_detected(self) -> bool:
-        return self._loop.loop_detected
 
     @property
     def oscillation_ticks(self) -> list[int]:
@@ -112,14 +100,16 @@ class M11AcceptanceMetrics(TimedRunHooks):
     ) -> None:
         if w.lives is not None:
             self.lives_seen = w.lives
-        if retreat_missed(w, policy, params, state=state, survival_states=SURVIVAL_STATES):
-            self.retreat_misses += 1
-        if intents and state == "Recover":
-            withdraws, unsafe = recover_withdraws(w, intents)
-            self.recover_withdraws += withdraws
-            self.recover_unsafe += unsafe
-        if intents is not None:
-            self._loop.note(w, reason, intents)
+        self.note_survival_tick(
+            w,
+            m,
+            state=state,
+            reason=reason,
+            intents=intents,
+            policy=policy,
+            params=params,
+            knowledge=knowledge,
+        )
         self._note_level_attempt(w, plan_op)
         self._last_plan_op = plan_op
 
@@ -150,13 +140,7 @@ class M11AcceptanceMetrics(TimedRunHooks):
         return bool(self.cleared_levels) and self.next_level_attempted
 
     def failures(self, *, full_run: bool = True) -> list[str]:
-        out = list(self.base_failures())
-        if self.retreat_misses:
-            out.append(f"{self.retreat_misses} tick(s) should_retreat held outside a survival state")
-        if self.recover_unsafe:
-            out.append(f"{self.recover_unsafe} Recover withdraw(s) from a cell not known safe")
-        if self.loop_detected:
-            out.append(f"loop: {LOOP_STEP_LIMIT} Steps in a row at one cell with one reason")
+        out = list(self.survival_failures())
         if self.oscillation_abort:
             out.append(self.oscillation_abort)
         if full_run and not self.cleared_levels:
@@ -172,12 +156,8 @@ class M11AcceptanceMetrics(TimedRunHooks):
         return [
             f"levels cleared: {sorted(self.cleared_levels) or 'none'}",
             f"next level attempted: {self.next_level_attempted}",
-            f"deaths: {self.deaths}",
-            f"retreat misses: {self.retreat_misses}",
-            f"recover withdraws: {self.recover_withdraws} (from a cell not known safe: {self.recover_unsafe})",
-            f"loop detected: {self.loop_detected}",
+            *self.survival_summary_lines(),
             f"oscillation events: {len(self.oscillation_ticks)} (gave up a target: {len(self.pacing_give_up_ticks)})",
-            f"API errors: {len(self.api_errors)}",
             f"lives last seen: {self.lives_seen}",
         ]
 

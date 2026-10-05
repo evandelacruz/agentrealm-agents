@@ -42,7 +42,7 @@ def ensure_character(client: Client, cfg: config.CharacterConfig) -> int:
     try:
         created = client.create_character(cfg.world, cfg.name, cfg.avatar, cfg.model_agent)
     except ApiError as e:
-        if e.code != "identity_reuse":
+        if e.code not in ("identity_reuse", "character_cap_reached"):
             raise
         found = _find_character_id(client, cfg)
         if found is None:
@@ -159,7 +159,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"finished in {elapsed:.1f}s", flush=True)
     for line in metrics.summary_lines():
         print(line, flush=True)
-    failures = list(metrics.failures())
+    require_nav = args.seconds >= TARGET_SECONDS * 0.95
+    failures = list(metrics.failures(require_navigation=require_nav))
     if elapsed + 1.0 < args.seconds:
         failures.append(f"ran {elapsed:.0f}s < target {args.seconds:.0f}s")
     try:

@@ -136,11 +136,16 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("PASS", out)
 
-    def test_fail_when_navigation_missing(self):
+    def test_fail_when_navigation_missing_on_full_hour(self):
         m = M7AcceptanceMetrics(target_distance=150)
-        code, _, err = self.exit_code_for(m, elapsed=3600.0)
+        with mock.patch.object(self.smoke, "Client") as Client, \
+                mock.patch.object(self.smoke, "ensure_character", return_value=9), \
+                mock.patch.object(self.smoke, "run_smoke", return_value=(m, 3600.0)):
+            Client.return_value.self_.return_value = {"alive": True}
+            code, _, err = self.main(["--api-key", "k", "--seconds", "3600"])
         self.assertEqual(code, 1)
         self.assertIn("FAIL", err)
+        self.assertIn("distance", err)
 
 
 if __name__ == "__main__":

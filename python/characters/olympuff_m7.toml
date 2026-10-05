@@ -1,5 +1,6 @@
 # A16 live M7 acceptance: survival hour and overworld navigation on Olympuff.
-name = "OlympuffM7Accept4fa0"
+# Reuses an existing Olympuff slot (account character cap); policy below is M7.
+name = "OlympuffM6Walk5d4e"
 avatar = "default"
 model_agent = "agentrealm-reference/scripted"
 world = "olympuff"

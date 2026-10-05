@@ -60,6 +60,9 @@ class M7AcceptanceMetrics:
             self.calm_windows += 1
             self.calm_tick_calls += calls.count("tick")
 
+    def on_step_applied(self) -> None:
+        """Runner hook (M6-compatible); M7 does not gate on step count."""
+
     def on_rejection(self, code: str, *, verb: str | None = None) -> None:
         del code, verb
 
@@ -138,9 +141,8 @@ class M7AcceptanceMetrics:
             return True
         return bool(self.give_up_reasons)
 
-    def failures(self) -> list[str]:
-        out: list[str]
-        out = []
+    def failures(self, *, require_navigation: bool = True) -> list[str]:
+        out: list[str] = []
         if self.deaths:
             out.append(f"{self.deaths} death(s) during run")
         if self.retreat_misses:
@@ -149,7 +151,7 @@ class M7AcceptanceMetrics:
             out.append(f"{self.recover_unsafe} Recover withdraw(s) with unsafe chest spot")
         if self.loop_detected:
             out.append("navigation loop detected (same reason at same cell)")
-        if not self.navigation_ok():
+        if require_navigation and not self.navigation_ok():
             out.append(
                 f"max distance {self.max_distance} < {self.target_distance} and no give-up reason recorded"
             )

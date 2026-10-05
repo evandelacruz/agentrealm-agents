@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -27,68 +26,19 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance import navigation_start, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import navigation_start, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
-from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
-from agentrealm_agent.runner import Runner  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m7.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
+
 
 def aim_at(cfg: config.CharacterConfig, overworld: int, target: tuple[int, int]) -> None:
     """Send the agent to ``target`` first, then let it explore for the rest of the hour."""
     cfg.policy.goto, cfg.policy.goto_map = target, overworld
     cfg.policy.goals = ["goto"] + [g for g in cfg.policy.goals if g != "goto"]
-
-
-def run_smoke(
-    client: Client,
-    cfg: config.CharacterConfig,
-    cid: int,
-    metrics: M7AcceptanceMetrics,
-    *,
-    timeout_s: float,
-) -> tuple[M7AcceptanceMetrics, float]:
-    stop = threading.Event()
-    metrics.stop = stop
-    started = time.monotonic()
-    knowledge: KnowledgeBase = load_knowledge(cfg.world)
-
-    def out(line: str) -> None:
-        print(line, flush=True)
-
-    runner = Runner(
-        cfg,
-        metrics.wrap(client),
-        cid,
-        stop,
-        out,
-        knowledge=knowledge,
-        acceptance=metrics,
-    )
-
-    def watchdog() -> None:
-        if timeout_s <= 0:
-            return
-        if stop.wait(timeout_s):
-            return
-        out(f"[{cfg.profile}] timeout after {timeout_s:.0f}s")
-        stop.set()
-
-    thread = threading.Thread(target=runner.run, daemon=True)
-    wd = threading.Thread(target=watchdog, daemon=True)
-    thread.start()
-    wd.start()
-    thread.join()
-    stop.set()
-    elapsed = time.monotonic() - started
-    try:
-        save_knowledge(knowledge)
-    except OSError as e:
-        out(f"knowledge base {knowledge.world_code}: not saved: {e}")
-    return metrics, elapsed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -171,7 +121,11 @@ def main(argv: list[str] | None = None) -> int:
         target=target,
         target_seconds=args.seconds,
     )
-    metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout)
+
+    def out(line: str) -> None:
+        print(line, flush=True)
+
+    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out)
     print(f"finished in {elapsed:.1f}s", flush=True)
     if metrics.oscillation_abort:
         print(f"ABORT: {metrics.oscillation_abort}; the agent paced instead of playing", file=sys.stderr)

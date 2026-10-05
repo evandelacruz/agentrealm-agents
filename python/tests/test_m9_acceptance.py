@@ -11,7 +11,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_agent import acceptance_smoke, config
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, load_directives
 from agentrealm_agent.knowledge_base import KnowledgeBase
@@ -290,7 +290,7 @@ class SmokeScriptTest(unittest.TestCase):
                 self.metrics.on_entrances_done()
                 seen.append(load_directives(cfg.directives_path).goals)
 
-        with mock.patch.object(self.smoke, "Runner", FakeRunner), \
+        with mock.patch.object(acceptance_smoke, "Runner", FakeRunner), \
                 mock.patch.object(self.smoke, "clear_entrance_looks", return_value=0) as clear, \
                 redirect_stdout(io.StringIO()):
             self.smoke.run_smoke(mock.Mock(), cfg, 9, M9AcceptanceMetrics(), timeout_s=0)

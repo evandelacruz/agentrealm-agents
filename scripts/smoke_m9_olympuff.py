@@ -17,7 +17,6 @@ import argparse
 import json
 import os
 import sys
-import threading
 import time
 import tomllib
 from pathlib import Path
@@ -27,13 +26,12 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance import navigation_start, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import navigation_start, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.directives import Directives, default_directives, load_directives  # noqa: E402
-from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
+from agentrealm_agent.knowledge_base import KnowledgeBase  # noqa: E402
 from agentrealm_agent.m9_acceptance import TARGET_SECONDS, M9AcceptanceMetrics, clear_entrance_looks  # noqa: E402
-from agentrealm_agent.runner import Runner  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m9.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
@@ -84,57 +82,26 @@ def run_smoke(
     *,
     timeout_s: float,
 ) -> tuple[M9AcceptanceMetrics, float]:
-    stop = threading.Event()
-    metrics.stop = stop
     directives_path = cfg.directives_path
     original = directives_path.read_bytes() if directives_path.is_file() else None
-    started = time.monotonic()
-    knowledge: KnowledgeBase = load_knowledge(cfg.world)
 
     def out(line: str) -> None:
         print(line, flush=True)
 
-    cleared = clear_entrance_looks(knowledge)
-    if cleared:
-        out(f"[{cfg.profile}] cleared {cleared} entrance look(s) from earlier runs: only this run's looks count")
+    def prepare(knowledge: KnowledgeBase) -> None:
+        cleared = clear_entrance_looks(knowledge)
+        if cleared:
+            out(f"[{cfg.profile}] cleared {cleared} entrance look(s) from earlier runs: only this run's looks count")
 
     def entrances_done() -> None:
         out(f"[{cfg.profile}] entrance catalog complete: {TOWN_GOAL} via {directives_path.name}")
         send_to_town(directives_path)
 
     metrics.on_entrances_done = entrances_done
-    runner = Runner(
-        cfg,
-        metrics.wrap(client),
-        cid,
-        stop,
-        out,
-        knowledge=knowledge,
-        acceptance=metrics,
-    )
-
-    def watchdog() -> None:
-        if timeout_s <= 0:
-            return
-        if stop.wait(timeout_s):
-            return
-        out(f"[{cfg.profile}] timeout after {timeout_s:.0f}s")
-        stop.set()
-
-    thread = threading.Thread(target=runner.run, daemon=True)
-    wd = threading.Thread(target=watchdog, daemon=True)
-    thread.start()
-    wd.start()
     try:
-        thread.join()
+        elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=timeout_s, out=out, prepare=prepare)
     finally:
-        stop.set()
         restore_file(directives_path, original)
-    elapsed = time.monotonic() - started
-    try:
-        save_knowledge(knowledge)
-    except OSError as e:
-        out(f"knowledge base {knowledge.world_code}: not saved: {e}")
     return metrics, elapsed
 
 

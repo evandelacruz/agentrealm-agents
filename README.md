@@ -98,3 +98,17 @@ Pass criteria (PLAN.md A29, checked in [`m9_acceptance.py`](python/agentrealm_ag
 - on a run of at least 95% of the default time budget (two hours): every entrance mark within strength looked during this run with its `block_type` (and `needs: key` when locked); looks from a persisted knowledge base do not count, so the script clears them before the run and Investigate looks again, and the character on the town cell at the last decision (passing over town earlier does not count).
 
 Marks skipped because the strength bracket closed the cell under `over_strength_ceiling` are counted in the summary, not required; when the bracket closed every mark, nothing is required ("no entrance catalog" means the minimap listed none). Heal actions are reported, not gated. No live M9 pass yet; CI covers the gate in `python/tests/test_m9_acceptance.py` without live keys.
+
+Live M10 smoke: `make smoke-m10-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set explores for one hour on olympuff via [`scripts/smoke_m10_olympuff.py`](scripts/smoke_m10_olympuff.py), using profile `python/characters/olympuff_m10.toml` and a character you choose at run time. A sleeping character is woken with one `Wait` first.
+
+Pass criteria (PLAN.md A33, checked in [`m10_acceptance.py`](python/agentrealm_agent/m10_acceptance.py)):
+
+- no death, and alive at the end of the run;
+- no Break attempt on a (block, capability) pair already failed in the knowledge base (re-breaking a regrown block a pair opened is fine);
+- no API error;
+- on a run of at least 95% of the default hour, every readable sign that came into sight along the route has been read, and every NPC that came within 25 blocks has been spoken to;
+- the odd-block clause is covered offline by the `ODD_BUSH` fixture in `python/tests/test_m10_acceptance.py`.
+
+Break memory sees a `Use` only through `Memory.break_pending`, which only Break and OddBreak set. Gather's `cut bush` and Solve's `use_block` never set it, so their uses are neither recorded in `kb.breaks` nor counted by the duplicate-break gate.
+
+No live M10 pass yet (A33 partial); CI covers the gate, the odd-bush fixture and the smoke script in `python/tests/test_m10_acceptance.py` without live keys.

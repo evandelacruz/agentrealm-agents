@@ -12,6 +12,7 @@ from .config import Policy
 from .directives import PARAM_DEFAULTS, _valid_param
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
+from .item_table import CAPABILITIES
 from .world import DOORS, Pos, WorldModel, chebyshev
 
 log = logging.getLogger(__name__)
@@ -19,7 +20,6 @@ log = logging.getLogger(__name__)
 GoalOp = dict[str, Any]
 
 TRAVEL_TO = frozenset({"entrance", "town", "hunting_ground", "shop", "point"})
-CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
 ALL_PARAMS = frozenset(PARAM_DEFAULTS)
 
 # Op name -> owning state (docs/PLAYABLE_AGENT_PLAN.md Operations table).

@@ -18,6 +18,7 @@ from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .plan import Plan
 from .item_table import (
+    absorb_inventory_capabilities,
     AppliedUse,
     absorb_attack_range,
     absorb_damaged_worn,
@@ -825,8 +826,11 @@ class Runner:
         def learn(items: dict) -> None:
             if obs and not obs.get("unchanged"):
                 body = obs.get("snapshot") if obs.get("complete") else obs.get("delta")
-                if isinstance(body, dict) and "entities" in body:
-                    absorb_entities_payload(items, body.get("entities"))
+                if isinstance(body, dict):
+                    if "entities" in body:
+                        absorb_entities_payload(items, body.get("entities"))
+                    if "inventory" in body:
+                        absorb_inventory_capabilities(items, body.get("inventory"))
             absorb_attack_range(items, w.armed_code, reach)
             absorb_npc_damaged(
                 items,

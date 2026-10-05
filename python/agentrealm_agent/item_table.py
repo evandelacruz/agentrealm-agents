@@ -27,7 +27,10 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   only while both exist and the gap is positive. It estimates how far the item
   lowers that type's best hit, not the item's defense stat.
 
-Capabilities are not stored: see PLAN.md A46 (Server gaps).
+- ``capabilities``: sorted tags ``cut``, ``chop``, ``smash``, ``burn``, ``blast``
+  (A46). Union-merged from the manual's per-class rules (docs/GAME_NOTES.md
+  Movement and blocks), from a successful break filed under the armed subtype,
+  and from capability tags when a supply read serves them (PLAN.md Server gaps).
 """
 
 from __future__ import annotations
@@ -38,6 +41,109 @@ from typing import Any, Iterable
 from .threat import damage_amount, type_key_from_damaged
 
 Pos = tuple[int, int]
+
+# Keep in sync with ``plan.CAPABILITIES`` (break_block validation).
+CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
+_CAPABILITY_ORDER = ("cut", "chop", "smash", "burn", "blast")
+
+
+def capabilities_for_subtype(code: str) -> frozenset[str]:
+    """Capabilities a subtype carries by manual class rules (GAME_NOTES § Movement)."""
+    if not code:
+        return frozenset()
+    lower = code.lower()
+    if "knife" in lower or "sword" in lower:
+        return frozenset({"cut", "chop"})
+    if "mallet" in lower:
+        return frozenset({"smash"})
+    if "match" in lower or "torch" in lower:
+        return frozenset({"burn"})
+    if "bomb" in lower:
+        return frozenset({"blast"})
+    return frozenset()
+
+
+def _normalize_capabilities(raw: Any) -> frozenset[str]:
+    if raw is None:
+        return frozenset()
+    if isinstance(raw, str):
+        return frozenset({raw}) if raw in CAPABILITIES else frozenset()
+    if isinstance(raw, (list, tuple, set, frozenset)):
+        return frozenset(c for c in raw if isinstance(c, str) and c in CAPABILITIES)
+    return frozenset()
+
+
+def _sorted_capabilities(caps: Iterable[str]) -> list[str]:
+    order = {c: i for i, c in enumerate(_CAPABILITY_ORDER)}
+    return sorted(set(caps), key=lambda c: (order.get(c, 99), c))
+
+
+def merge_capabilities(items: dict[str, dict[str, Any]], code: str | None, caps: Iterable[str]) -> None:
+    """Union ``caps`` onto ``code``'s ``capabilities`` list (in place)."""
+    add = _normalize_capabilities(list(caps))
+    if not code or not add:
+        return
+    row = items.setdefault(code, {})
+    existing = _normalize_capabilities(row.get("capabilities"))
+    merged = _sorted_capabilities(existing | add)
+    if merged:
+        row["capabilities"] = merged
+
+
+def merge_manual_capabilities(items: dict[str, dict[str, Any]], code: str | None) -> None:
+    """Apply GAME_NOTES class rules for ``code`` when they name capabilities."""
+    manual = capabilities_for_subtype(code or "")
+    if manual:
+        merge_capabilities(items, code, manual)
+
+
+def file_break_capability(
+    items: dict[str, dict[str, Any]], armed_code: str | None, capability: str
+) -> None:
+    """Record that ``armed_code`` successfully broke a block with ``capability``."""
+    if armed_code and capability in CAPABILITIES:
+        merge_capabilities(items, armed_code, [capability])
+
+
+def _capability_from_break_key(key: str) -> str | None:
+    if "," not in key:
+        return None
+    cap = key.rsplit(",", 1)[-1]
+    return cap if cap in CAPABILITIES else None
+
+
+def absorb_capabilities_from_breaks(items: dict[str, dict[str, Any]], breaks: dict[str, Any]) -> None:
+    """Merge capabilities from opened breaks that name the armed ``supply_subtype_code``."""
+    for key, row in breaks.items():
+        if not isinstance(row, dict) or row.get("result") != "opened":
+            continue
+        code = row.get("supply_subtype_code")
+        if not isinstance(code, str) or not code:
+            continue
+        cap = _capability_from_break_key(key)
+        if cap:
+            merge_capabilities(items, code, [cap])
+
+
+def reconcile_item_capabilities(items: dict[str, dict[str, Any]], breaks: dict[str, Any]) -> None:
+    """Refresh manual rules for every row and merge opened break evidence (A46)."""
+    for code in list(items):
+        merge_manual_capabilities(items, code)
+    absorb_capabilities_from_breaks(items, breaks)
+
+
+def absorb_inventory_capabilities(items: dict[str, dict[str, Any]], inv: dict | None) -> None:
+    """Manual capability rules for every subtype named in a snapshot ``inventory``."""
+    if not inv:
+        return
+    held, chest, armed, worn = carried_from_inventory(inv)
+    codes = [s.code for s in held + chest if s.code]
+    if armed:
+        codes.append(armed)
+    codes.extend(c for c in worn.values() if c)
+    for code in codes:
+        merge_manual_capabilities(items, code)
+
 
 # A new character's carried chest holds 10 (Manual §11, "a new, empty blue
 # chest (10)"). The snapshot serves no capacity field, and how a bigger chest
@@ -210,7 +316,7 @@ def merge_item(items: dict[str, dict[str, Any]], code: str | None, **facts: Any)
     """Merge observed facts into the per-world item table (in place).
 
     Invalid or missing values are ignored, and a row is created only when at
-    least one fact is kept.
+    least one fact is kept. ``capabilities`` are union-merged (A46).
     """
     if not code:
         return
@@ -219,8 +325,11 @@ def merge_item(items: dict[str, dict[str, Any]], code: str | None, **facts: Any)
         n = _positive_int(facts.get(key))
         if n is not None:
             kept[key] = n
+    caps = _normalize_capabilities(facts.get("capabilities"))
     if kept:
         items.setdefault(code, {}).update(kept)
+    if caps:
+        merge_capabilities(items, code, caps)
 
 
 def _merge_max_per_npc(row: dict[str, Any], field: str, npc_type: str, amount: int) -> None:
@@ -282,7 +391,12 @@ def merge_weapon_hit(items: dict[str, dict[str, Any]], code: str | None, npc_typ
 
 
 def absorb_supply_entry(items: dict[str, dict[str, Any]], entry: dict) -> None:
-    merge_item(items, _supply_code(entry), gem_price=entry.get("gem_price"))
+    code = _supply_code(entry)
+    merge_item(items, code, gem_price=entry.get("gem_price"))
+    merge_manual_capabilities(items, code)
+    served = _normalize_capabilities(entry.get("capabilities"))
+    if served:
+        merge_capabilities(items, code, served)
 
 
 def _entity_kind_entries(entities: dict, kind: str) -> Iterable[dict]:

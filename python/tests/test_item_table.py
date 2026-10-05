@@ -25,6 +25,44 @@ OUT_OF_RANGE = {
 }
 
 
+class CapabilityTest(unittest.TestCase):
+    def test_manual_class_rules(self):
+        self.assertEqual(it.capabilities_for_subtype("bronze_sword"), frozenset({"cut", "chop"}))
+        self.assertEqual(it.capabilities_for_subtype("pocket_knife"), frozenset({"cut", "chop"}))
+        self.assertEqual(it.capabilities_for_subtype("bronze_mallet"), frozenset({"smash"}))
+        self.assertEqual(it.capabilities_for_subtype("matches"), frozenset({"burn"}))
+        self.assertEqual(it.capabilities_for_subtype("torch"), frozenset({"burn"}))
+        self.assertEqual(it.capabilities_for_subtype("bomb"), frozenset({"blast"}))
+        self.assertEqual(it.capabilities_for_subtype("potion"), frozenset())
+
+    def test_capabilities_union_and_sort(self):
+        items: dict = {}
+        it.merge_capabilities(items, "bronze_sword", ["chop"])
+        it.merge_capabilities(items, "bronze_sword", ["cut", "smash"])
+        self.assertEqual(items, {"bronze_sword": {"capabilities": ["cut", "chop", "smash"]}})
+
+    def test_supply_read_merges_served_and_manual(self):
+        items: dict = {}
+        it.absorb_supply_entry(items, {"id": 1, "supply_subtype_code": "bronze_sword", "capabilities": ["cut"]})
+        self.assertEqual(items["bronze_sword"]["capabilities"], ["cut", "chop"])
+
+    def test_break_opened_with_supply_code(self):
+        items: dict = {}
+        breaks = {"1,3,4,cut": {"result": "opened", "supply_subtype_code": "pocket_knife"}}
+        it.absorb_capabilities_from_breaks(items, breaks)
+        self.assertEqual(items, {"pocket_knife": {"capabilities": ["cut"]}})
+
+    def test_break_opened_without_supply_code_is_skipped(self):
+        items: dict = {}
+        it.absorb_capabilities_from_breaks(items, {"1,3,4,cut": {"result": "opened"}})
+        self.assertEqual(items, {})
+
+    def test_file_break_capability(self):
+        items: dict = {}
+        it.file_break_capability(items, "bronze_mallet", "smash")
+        self.assertEqual(items, {"bronze_mallet": {"capabilities": ["smash"]}})
+
+
 class MergeTest(unittest.TestCase):
     def test_latest_value_overwrites(self):
         items: dict = {}
@@ -45,7 +83,7 @@ class MergeTest(unittest.TestCase):
     def test_unknown_facts_are_not_stored(self):
         items: dict = {}
         it.merge_item(items, "bronze_sword", weapon_damage=3, damage_taken=2, capabilities=["cut"], attack_range=1)
-        self.assertEqual(items, {"bronze_sword": {"attack_range": 1}})
+        self.assertEqual(items, {"bronze_sword": {"attack_range": 1, "capabilities": ["cut"]}})
 
     def test_weapon_hit_keeps_the_max_per_npc_type(self):
         items: dict = {"bronze_sword": {"attack_range": 1}}
@@ -93,7 +131,10 @@ class EntitiesTest(unittest.TestCase):
                 }
             },
         )
-        self.assertEqual(items, {"potion": {"gem_price": 5}, "mallet": {"gem_price": 20}})
+        self.assertEqual(
+            items,
+            {"potion": {"gem_price": 5}, "mallet": {"gem_price": 20, "capabilities": ["smash"]}},
+        )
 
 
 def _npc_damaged(tick=11, amount=4, x=3, y=4, map_id=1, npc_id=9):
@@ -439,7 +480,10 @@ class RunnerItemLearningTest(unittest.TestCase):
         obs = {"version": 2, "delta": {"inventory": inv}}
         r.world.apply_observation(obs)
         r._learn_items_from_tick(obs, events)
-        self.assertEqual(kb.items, {"pocket_knife": {"weapon_damage": {"rat": 2}}})
+        self.assertEqual(
+            kb.items,
+            {"pocket_knife": {"weapon_damage": {"rat": 2}, "capabilities": ["cut", "chop"]}},
+        )
 
     @staticmethod
     def _wear(r, worn):

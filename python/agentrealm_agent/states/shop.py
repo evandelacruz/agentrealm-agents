@@ -6,7 +6,7 @@ from ..knowledge_base import knowledge_items
 from ..loot import Pickup, loot_score, pickup_room
 from ..memory import Memory
 from ..navigation import cost_path
-from ..pathing import grid_params, nav_search, next_step
+from ..pathing import goto_navigation_pending, grid_params, nav_search, next_step
 from ..shop import (
     GOAL,
     can_afford,
@@ -29,6 +29,8 @@ class ShopState(State):
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
+            return False
+        if goto_navigation_pending(world, ctx.memory, ctx.policy):
             return False
         return _target(world, ctx) is not None
 

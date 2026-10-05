@@ -28,6 +28,7 @@ from agentrealm_agent.loot import (
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
+from agentrealm_agent.states.loot import loot_outcome
 from agentrealm_agent.world import Entity, WorldModel
 
 
@@ -543,6 +544,29 @@ class RunnerLootLearningTest(unittest.TestCase):
             lives_after=10,
         )
         self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
+
+
+class GotoDefersFarLootTest(unittest.TestCase):
+    def test_far_gem_walk_yields_while_goto_target_is_still_owed(self):
+        w = world(["....", "....", "....", "...."], at=(0, 0))
+        w.entities = [Entity("supply", 3, (3, 0), code="gem")]
+        policy = scripted(
+            pickup=True,
+            goals=["goto", "explore"],
+            goto=(10, 0),
+            goto_map=7,
+        )
+        c = ctx(policy)
+        self.assertIsNone(loot_outcome(w, c, "Loot"))
+
+    def test_far_gem_walk_runs_when_only_explore_is_left(self):
+        w = world(["....", "....", "....", "...."], at=(0, 0))
+        w.entities = [Entity("supply", 3, (3, 0), code="gem")]
+        policy = scripted(pickup=True, goals=["explore"])
+        c = ctx(policy)
+        out = loot_outcome(w, c, "Loot")
+        self.assertIsNotNone(out)
+        self.assertIn("loot", out.reason)
 
 
 if __name__ == "__main__":

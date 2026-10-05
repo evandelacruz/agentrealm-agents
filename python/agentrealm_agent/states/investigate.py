@@ -10,7 +10,7 @@ from ..door_look import apply_door_look, approach_pos, ready_to_look
 from ..interest_list import pick_interest_tick
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, guided_step, nav_search
+from ..pathing import goto_navigation_pending, grid_params, guided_step, nav_search
 from ..world import Pos, WorldModel
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
@@ -25,6 +25,8 @@ class InvestigateState(State):
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
+            return False
+        if goto_navigation_pending(world, ctx.memory, ctx.policy):
             return False
         return pick_interest_tick(world, ctx.knowledge, ctx.policy, ctx.memory, params=ctx.params) is not None
 

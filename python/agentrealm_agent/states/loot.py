@@ -6,7 +6,7 @@ from ..knowledge_base import knowledge_items
 from ..loot import worthwhile_pickups
 from ..memory import Memory
 from ..navigation import cost_path
-from ..pathing import grid_params, nav_search, next_step
+from ..pathing import goto_navigation_pending, grid_params, nav_search, next_step
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome
@@ -51,6 +51,8 @@ def loot_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | 
     near = pickup_outcome(w, ctx.knowledge, state=state)
     if near is not None:
         return near
+    if goto_navigation_pending(w, ctx.memory, ctx.policy):
+        return None
     _, plan_avoid, plan_costly = plan_sets(w, ctx.memory, ctx.policy, ctx.knowledge)
     far = [p for p in worthwhile_pickups(w, knowledge_items(ctx.knowledge)) if chebyshev(p.pos, here) > 1]
     for p in far[:MAX_WALK_TARGETS]:

@@ -28,6 +28,7 @@ from agentrealm_agent.states.solve import SolveState
 from agentrealm_agent.world import WorldModel, chebyshev
 
 dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")
+break_state_module = importlib.import_module("agentrealm_agent.states.break_state")
 
 
 def _tiles(rows: list[str], glyph: dict[str, str] | None = None) -> dict[tuple[int, int], str]:
@@ -271,6 +272,39 @@ class BreakOddDispatchTest(unittest.TestCase):
         out = dispatch(w, ctx)
         self.assertEqual(out.state, "OddBreak")
         self.assertEqual(out.intents, [use_block((10, 4))])
+
+    def test_preempted_odd_walk_restores_the_swapped_weapon(self):
+        # OddBreak armed the knife and is walking; Solve takes the round. The
+        # priority-4 Break then restores the mallet instead of waiting on OddBreak.
+        rows = ["............."] * 9
+        rows[4] = "..........b.."
+        w = WorldModel(character_id=1, map_id=1, pos=(4, 4), perception=8)
+        w.view.tiles = _tiles(rows)
+        w.terrain_center, w.terrain_map = (4, 4), 1
+        w.held_supplies = [InventorySupply(1, "bronze_mallet"), InventorySupply(2, "pocket_knife")]
+        w.armed_code = "bronze_mallet"
+        ctx = PlayContext(Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0))
+        out = dispatch(w, ctx)
+        self.assertEqual((out.state, out.intents[0]), ("OddBreak", arm(2)))
+        w.armed_code = "pocket_knife"
+        self.assertFalse(BreakState().guard(w, ctx), "OddBreak holds the round: no re-arm")
+        step = {"verb": "Step", "direction": "up"}
+        with mock.patch.object(SolveState, "guard", return_value=True), mock.patch.object(
+            SolveState, "act", return_value=StateOutcome([step], "goal", state="Solve")
+        ):
+            out = dispatch(w, ctx)
+            self.assertEqual(out.state, "Solve")
+            out = dispatch(w, ctx)
+        self.assertEqual((out.state, out.intents), ("Break", [arm(1)]))
+        self.assertIsNone(ctx.memory.break_rearm)
+
+    def test_odd_pick_runs_once_per_decision(self):
+        w = _odd_world()
+        ctx = PlayContext(Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0))
+        with mock.patch.object(break_state_module, "pick_odd_break", wraps=break_state_module.pick_odd_break) as pick:
+            out = dispatch(w, ctx)
+        self.assertEqual(out.state, "OddBreak")
+        self.assertEqual(pick.call_count, 1)
 
     def test_odd_break_sits_below_solve_boss_and_level(self):
         names = [type(s).__name__ for s in dispatch_module.STATES]

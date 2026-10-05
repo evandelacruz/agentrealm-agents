@@ -70,9 +70,28 @@ def _plan_choice(w: WorldModel, ctx: PlayContext, op: GoalOp) -> BreakChoice | N
 
 
 def odd_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
-    """The odd block Break would take now (A31); reads memory only."""
+    """The odd block OddBreak would take now (A31).
+
+    Break's and OddBreak's guards, ``done`` and ``act`` all ask in one window,
+    so the pick is cached on the inputs it reads from memory and the world.
+    """
     m = ctx.memory
-    return pick_odd_break(w, ctx.knowledge, ctx.policy, m, params=ctx.params, stick_to=m.break_odd)
+    key = (
+        id(ctx),
+        w.tick,
+        w.map_id,
+        w.pos,
+        w.armed_code,
+        tuple(w.held_supplies),
+        m.break_odd,
+        sum(m.break_odd_refusals.values()),
+        len(m.curiosity_spans),
+    )
+    if m.break_odd_pick is not None and m.break_odd_pick[0] == key:
+        return m.break_odd_pick[1]
+    choice = pick_odd_break(w, ctx.knowledge, ctx.policy, m, params=ctx.params, stick_to=m.break_odd)
+    m.break_odd_pick = (key, choice)
+    return choice
 
 
 def break_outcome(
@@ -171,8 +190,11 @@ class BreakState(State):
         m = ctx.memory
         # A break opened its block and the attempt went back to walking: the
         # weapon armed before it is still to be restored. Not while OddBreak
-        # still has a block to walk to, or the two would swap supplies every tick.
-        return m.break_rearm is not None and m.break_pending is None and odd_choice(world, ctx) is None
+        # holds the round and still has a block to walk to, or the two would
+        # swap supplies every tick; once another state preempts it, restore.
+        if m.break_rearm is None or m.break_pending is not None:
+            return False
+        return not (m.state == OddBreakState.name and odd_choice(world, ctx) is not None)
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)

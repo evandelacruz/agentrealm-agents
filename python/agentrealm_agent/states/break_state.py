@@ -19,7 +19,7 @@ from ..odd_block import note_odd_unreachable, pick_odd_break
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, nav_search, next_step
+from ..pathing import goto_navigation_pending, grid_params, nav_search, next_step
 from ..plan import GoalOp, Plan
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -182,9 +182,14 @@ class BreakState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
+        att = nav_stuck.active(ctx.memory, world)
+        if goto_navigation_pending(world, ctx.memory, ctx.policy):
+            if break_op(ctx.plan) is not None:
+                return False
+            if att is None or att.goal != "goto" or att.level != nav_stuck.BREAK:
+                return False
         if break_op(ctx.plan) is not None:
             return True
-        att = nav_stuck.active(ctx.memory, world)
         if att is not None and att.level == nav_stuck.BREAK:
             return True
         m = ctx.memory
@@ -231,5 +236,7 @@ class OddBreakState(BreakState):
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
+            return False
+        if goto_navigation_pending(world, ctx.memory, ctx.policy):
             return False
         return odd_choice(world, ctx) is not None

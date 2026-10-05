@@ -34,12 +34,7 @@ def safe(w: WorldModel, *cells) -> None:
 
 def ctx(w: WorldModel, goals: list[str], m: Memory | None = None, **policy_kw) -> PlayContext:
     kw = {"pickup": False, "on_hostile": "ignore", "goals": ["explore"], **policy_kw}
-    return PlayContext(
-        m or Memory(heal_regen_absent=True),
-        Policy(kind="scripted", **kw),
-        random.Random(0),
-        directives=Directives(goals=goals),
-    )
+    return PlayContext(m or Memory(), Policy(kind="scripted", **kw), random.Random(0), directives=Directives(goals=goals))
 
 
 def outcome(w: WorldModel, m: Memory | None = None, **policy_kw):

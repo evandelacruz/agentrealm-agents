@@ -174,17 +174,17 @@ class DeathChestTest(unittest.TestCase):
         w.map_id, w.pos = 7, (4, 0)  # respawned along the strip
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
 
-        m = Memory(heal_regen_absent=True)
+        m = Memory()
         d = decide(w, m, scripted(goals=["hold"]), random.Random(0))
         self.assertEqual((d.intent["verb"], d.intent["x"]), ("SetPosition", 3))
 
         # Next to it, the contents are not known until a snapshot lists them.
         w.pos = (1, 0)
-        self.assertIsNone(decide(w, Memory(heal_regen_absent=True), scripted(goals=["hold"]), random.Random(0)).intent)
+        self.assertIsNone(decide(w, Memory(), scripted(goals=["hold"]), random.Random(0)).intent)
         w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": [
             {"id": 80, "x": 0, "y": 0, "contents": [{"id": 1321, "supply_subtype_code": "bronze_sword"}]},
         ]}}})
-        d = decide(w, Memory(heal_regen_absent=True), scripted(goals=["hold"]), random.Random(0))
+        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
         self.assertEqual(d.intent, {"verb": "WithdrawFromChest", "chest_id": 80})
 
         # Emptied, a dropped chest leaves the world (B116): gone from the

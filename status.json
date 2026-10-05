@@ -41,7 +41,7 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 
-  "A58": {"state": "partial", "remaining": "Live hour reached navigation with 0 deaths but failed regen on first full run; regen-at-full-health fix and second hour blocked while reused character is not placed (see docs/observations/A58_live_play.md). Re-run make smoke-m7-olympuff when OlympuffM6Walk5d4e or OlympuffSurvivor is on the overworld."},
+  "A58": {"state": "partial", "remaining": "First live hour reached navigation with 0 deaths but regen was never measured (never hurt in a safe zone); the second hour was blocked while the reused character was not placed (see docs/observations/A58_live_play.md). Re-run make smoke-m7-olympuff when OlympuffM6Walk5d4e or OlympuffSurvivor is on the overworld; a PASS still needs a hurt window in a safe zone."},
 
   "A17": {"state": "done"},
 

@@ -78,23 +78,21 @@ def scripted_outcome(
     if reflex is not None:
         return reflex
 
-    if goto_navigation_pending(w, m, policy) and m.goal == "goto" and m.path:
-        step = next_step(w, plan_avoid, m.path)
-        if step is not None:
-            att = nav_stuck.active(m, w)
-            label = m.path[-1]
-            note = nav_stuck.level_note(att) if att is not None and att.goal == m.goal else ""
-            return StateOutcome([set_position(step)], f"{m.goal} → {label}{note}", state=state)
-
+    # While the policy ``goto`` is still owed (A58), the plan's moves wait:
+    # no ``wait`` hold here, and ``replan`` skips its ops. The goto path is
+    # kept like a plan-owned one, so stuck detection (A15) still escalates
+    # and gives up on it.
+    walking_goto = goto_navigation_pending(w, m, policy)
     if plan is not None:
         plan.advance(w, m)
         op = plan.current()
-        if op is not None and op["op"] == "wait":
+        if op is not None and op["op"] == "wait" and not walking_goto:
             return StateOutcome(None, "plan wait", state=state)
 
-    owned = path_owned_by_plan(plan, m, policy.goals)
-    if goto_navigation_pending(w, m, policy) and m.goal != "goto":
-        owned = False
+    if walking_goto:
+        owned = m.goal == "goto"
+    else:
+        owned = path_owned_by_plan(plan, m, policy.goals)
     target_plan = attempt_plan(m, w, policy, plan_avoid, plan_costly, knowledge)
     step = _escalated_step(w, m, plan_avoid, target_plan, knowledge) if owned else None
     if step is None and owned:

@@ -120,7 +120,8 @@ def break_outcome(
         if choice is None:
             return StateOutcome(None, "nothing to break", state=state)
     else:
-        op = break_op(plan)
+        # A plan break op waits while the policy goto is owed (A58).
+        op = None if goto_navigation_pending(w, m, ctx.policy) else break_op(plan)
         if op is not None:
             choice = _plan_choice(w, ctx, op)
         elif (att := nav_stuck.active(m, w)) is not None and att.level == nav_stuck.BREAK:
@@ -182,15 +183,13 @@ class BreakState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        att = nav_stuck.active(ctx.memory, world)
-        if goto_navigation_pending(world, ctx.memory, ctx.policy):
-            if break_op(ctx.plan) is not None:
-                return False
-            if att is None or att.goal != "goto" or att.level != nav_stuck.BREAK:
-                return False
-        if break_op(ctx.plan) is not None:
+        # While the policy goto is owed, only its own stuck escalation breaks a
+        # block; plan break ops and other goals' escalations wait (A58).
+        walking_goto = goto_navigation_pending(world, ctx.memory, ctx.policy)
+        if break_op(ctx.plan) is not None and not walking_goto:
             return True
-        if att is not None and att.level == nav_stuck.BREAK:
+        att = nav_stuck.active(ctx.memory, world)
+        if att is not None and att.level == nav_stuck.BREAK and (not walking_goto or att.goal == "goto"):
             return True
         m = ctx.memory
         # A break opened its block and the attempt went back to walking: the

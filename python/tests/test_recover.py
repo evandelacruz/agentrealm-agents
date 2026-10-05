@@ -53,7 +53,7 @@ def died_at(w: WorldModel, x: int, y: int, *, map_id=7, chest_id=80) -> None:
 
 
 def ctx(policy: Policy, m: Memory | None = None, kb: KnowledgeBase | None = None) -> PlayContext:
-    return PlayContext(m or Memory(heal_regen_absent=True), policy, random.Random(0), knowledge=kb)
+    return PlayContext(m or Memory(), policy, random.Random(0), knowledge=kb)
 
 
 class RecoverSafetyTest(unittest.TestCase):
@@ -190,7 +190,7 @@ class RecoverDispatchTest(unittest.TestCase):
         w = world(["....."], at=(1, 0))
         died_at(w, 0, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
-        m = Memory(heal_regen_absent=True)
+        m = Memory()
         w.chest_contents[80] = [5]
         self.assertEqual(dispatch(w, ctx(scripted(goals=["hold"]), m)).state, "Recover")
         w.chest_contents[80] = []

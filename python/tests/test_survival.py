@@ -18,7 +18,8 @@ from agentrealm_agent.survival import (
     should_retreat,
     would_lose,
 )
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_agent.pathing import FLEE_RUN_STEPS, flee_run
+from agentrealm_agent.world import Entity, WorldModel, chebyshev
 from agentrealm_agent.zone_discovery import apply_zone
 
 
@@ -255,6 +256,26 @@ class FleeTest(unittest.TestCase):
         w.entities = [Entity("npc", 5, (4, 1))]
         # An NPC in speech range but out of hostile range is greeted (A30).
         self.assertEqual(dispatch(w, ctx(hostile_range=2)).state, "Investigate")
+
+
+class FleeRunTest(unittest.TestCase):
+    """``pathing.flee_run``: the committed run away from the hostiles when no safe tile is known (A9)."""
+
+    def test_stops_at_flee_run_steps_past_the_first(self):
+        w = world(["." * 12], at=(0, 0))
+        run = flee_run(w, [Entity("npc", 1, (-2, 0))], set(), (1, 0))
+        self.assertEqual(len(run), FLEE_RUN_STEPS + 1)
+        self.assertEqual(run, [(x, 0) for x in range(1, FLEE_RUN_STEPS + 2)])
+
+    def test_never_runs_past_a_hostile_that_reaches_the_cell_first(self):
+        # The corridor east runs 7 cells but passes beside the NPC at (4, 0);
+        # it would reach (3, 1)-(5, 1) no later than the agent does.
+        w = world(["#########", ".........", "#.#####.#", "#.......#", "#########"], at=(1, 1))
+        hostiles = [Entity("npc", 1, (-3, 1)), Entity("npc", 2, (4, 0))]
+        run = flee_run(w, hostiles, set(), (2, 1))
+        self.assertNotIn((4, 1), run)
+        for depth, cell in enumerate(run[1:], start=2):
+            self.assertGreater(min(chebyshev(cell, h.pos) for h in hostiles), depth, run)
 
 
 class OnHostileTest(unittest.TestCase):

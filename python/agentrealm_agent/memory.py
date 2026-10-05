@@ -59,6 +59,11 @@ class Memory:
     curiosity_spans: list[tuple[int, int]] = field(default_factory=list)  # (start tick, length) charged Investigate/Break queues (A30)
     gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass", cell) Gather is walking toward (A22)
     gather_backoff_until: int = -1  # Gather yields to Explore until this tick (A22)
+    flee_path: list[Pos] = field(default_factory=list)  # Flee's committed escape, kept until it arrives, is blocked or Flee stops (A9, A58)
+    # Cells the escape the oscillation guard forced keeps off: the ones it paced on (A15).
+    # The planned flee_path already excludes them; this only keeps them shut for
+    # _committed_step's open check and its best-step comparison while that escape runs.
+    flee_avoid: set[Pos] = field(default_factory=set)
     travel_ops: list[TravelOp] = field(default_factory=list)  # parsed travel:* directives goals (A27)
     travel_index: int = 0
     strength: StrengthBracket = field(default_factory=StrengthBracket)

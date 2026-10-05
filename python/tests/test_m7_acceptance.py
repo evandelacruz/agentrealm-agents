@@ -291,6 +291,39 @@ class NavigationFixtureTest(unittest.TestCase):
         self.assertIn("escalation", r.signal or {})
 
 
+class FakeSleeper:
+    """A client whose character starts asleep (placed: false) and wakes on an intent."""
+
+    def __init__(self, *, asleep=True, wakes=True, refusal=None, downed_reads=0):
+        self.asleep, self.wakes, self.refusal = asleep, wakes, refusal
+        self.downed_reads = downed_reads
+        self.ticks: list = []
+        self.on_position = lambda: None
+
+    def self_(self, cid):
+        if self.downed_reads:
+            self.downed_reads -= 1
+            return {"alive": False}
+        return {"alive": True, "asleep": self.asleep}
+
+    def tick(self, cid, intents=None):
+        self.ticks.append(intents)
+        if self.refusal:
+            return {"intent_results": [{"outcome": "rejected", "rejection": {"code": self.refusal}}]}
+        if self.wakes:
+            self.asleep = False
+        return {"asleep": self.asleep}
+
+    def world(self, cid):
+        return {"town": {"map_id": OVERWORLD, "x": 0, "y": 0}}
+
+    def position(self, cid):
+        if self.asleep:
+            raise ApiError(409, "not_on_map")
+        self.on_position()
+        return {"map_id": OVERWORLD, "x": 10, "y": 20}
+
+
 class SmokeScriptTest(unittest.TestCase):
     def setUp(self):
         self.smoke = load_smoke()
@@ -359,6 +392,41 @@ class SmokeScriptTest(unittest.TestCase):
         client.position.return_value = {"map_id": 12, "x": 0, "y": 0}
         with self.assertRaises(ValueError):
             self.smoke.navigation_start(client, 9)
+
+    def test_start_wakes_a_sleeping_character_before_reading_position(self):
+        client = FakeSleeper()
+        self.smoke.wake(client, 9, pause=lambda s: None)
+        self.assertEqual(client.ticks, [[{"verb": "Wait"}]], "one Wait wakes it")
+        self.assertEqual(client.self_(9), {"alive": True, "asleep": False})
+
+    def test_start_waits_out_a_respawn(self):
+        client = FakeSleeper(asleep=False, downed_reads=2)
+        self.smoke.wake(client, 9, pause=lambda s: None)
+        self.assertEqual(client.ticks, [], "nothing sent while downed")
+
+    def test_start_exits_with_the_wake_refusal(self):
+        for code in ("alive_cap_full", "block_occupied"):
+            client = FakeSleeper(refusal=code)
+            with self.assertRaisesRegex(ValueError, code):
+                self.smoke.wake(client, 9, pause=lambda s: None)
+
+    def test_start_gives_up_on_a_character_that_never_wakes(self):
+        client = FakeSleeper(wakes=False)
+        with self.assertRaisesRegex(ValueError, "still asleep"):
+            self.smoke.wake(client, 9, pause=lambda s: None)
+
+    def test_main_wakes_then_reads_position(self):
+        seen = []
+        with mock.patch.object(self.smoke, "Client") as Client, \
+                mock.patch.object(self.smoke, "ensure_character", return_value=9), \
+                mock.patch.object(self.smoke.time, "sleep"), \
+                mock.patch.object(self.smoke, "run_smoke", side_effect=lambda c, cfg, cid, m, **kw: (m, 10)):
+            fake = FakeSleeper()
+            Client.return_value = fake
+            fake.on_position = lambda: seen.append(list(fake.ticks))
+            code, out, _ = self.main(["--api-key", "k", "--seconds", "10"])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(seen, [[[{"verb": "Wait"}]]], "position read only after the Wait")
 
     def test_aim_at_puts_goto_first(self):
         cfg = config.load(REPO / "python" / "characters" / "olympuff_m7.toml")

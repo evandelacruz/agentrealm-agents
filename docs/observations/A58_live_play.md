@@ -15,7 +15,7 @@ Live runs against agentrealm.gg with `scripts/smoke_m7_olympuff.py` and the A16 
 
 ## Run 2 — blocked at start
 
-A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map` — the reused character was **`placed: false`** (off the map / asleep). Re-run once the slot is back on the overworld.
+A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The reused character was **asleep** (`placed: false`: auto-sleep after 10 idle minutes), so it had no position. That was a smoke-script bug, not a game blocker: `navigation_start()` read the position before sending any intent, and any intent wakes a sleeping character. The script now reads self first, sends one `Wait` while asleep and re-reads until it is awake, waits out a respawn while downed, and exits with a clear message on `alive_cap_full` or `block_occupied`.
 
 ## Agent changes this pass (for the next live hour)
 

@@ -24,12 +24,47 @@ sys.path.insert(0, str(PYTHON))
 from agentrealm_agent import config  # noqa: E402
 from agentrealm_agent.acceptance import ensure_character  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
+from agentrealm_agent.executor.intents import wait  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
 
 DEFAULT_CHARACTER = PYTHON / "characters" / "olympuff_m7.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
+
+# Self reads before giving up on a character that stays asleep or downed, one
+# a second: well inside the call budget, and longer than the 5 s respawn delay.
+WAKE_READS = 30
+# Wake rejections that leave the character asleep (GAME_NOTES Sleep).
+WAKE_REFUSALS = {
+    "alive_cap_full": "the world's alive cap is full; wait for a slot and re-run",
+    "block_occupied": "no free block to wake on; wait and re-run",
+}
+
+
+def wake(client: Client, cid: int, *, pause=time.sleep) -> None:
+    """Get the character awake and alive before its position is read.
+
+    A sleeping character (asleep after 10 idle minutes) is off the map and
+    has no position. Any intent wakes it; ``Wait`` is the one that does
+    nothing else (GAME_NOTES Sleep). A downed one respawns after
+    ``respawn_delay_seconds``, so this reads self until it is alive.
+    Raises ValueError saying why it could not.
+    """
+    for _ in range(WAKE_READS):
+        s = client.self_(cid)
+        if not s.get("alive", True):
+            pause(1.0)
+            continue
+        if not s.get("asleep"):
+            return
+        reply = client.tick(cid, [wait()])
+        for result in reply.get("intent_results") or []:
+            code = (result.get("rejection") or {}).get("code")
+            if result.get("outcome") == "rejected" and code in WAKE_REFUSALS:
+                raise ValueError(f"cannot wake: {code}: {WAKE_REFUSALS[code]}")
+        pause(1.0)
+    raise ValueError(f"still asleep or downed after {WAKE_READS} self reads")
 
 
 def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
@@ -147,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        wake(client, cid)
         overworld, origin = navigation_start(client, cid)
     except (ApiError, ValueError) as e:
         print(f"start: {e}", file=sys.stderr)

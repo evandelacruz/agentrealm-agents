@@ -33,6 +33,7 @@ from .item_table import (
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .loot import learn_loot_rejection
+from .shop import note_shop_result
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.ops import refresh_travel_stack
 from .travel.strength import loadout_key
@@ -699,6 +700,7 @@ class Runner:
         """Applies one intent result. True when it was rejected."""
         w, m = self.world, self.mem
         intent = self._intent_at(index)
+        note_shop_result(m, intent, result.get("outcome") != "rejected")
         if result.get("outcome") != "rejected":
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])

@@ -117,13 +117,12 @@ class GoalStackTest(unittest.TestCase):
         self.assertEqual(plan.params["curiosity"], 0.0)
         self.assertIsNone(plan.current())
 
-    def test_buy_skipped_without_shop_state(self):
+    def test_buy_stays_on_stack_for_shop(self):
         plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
         m = Memory()
-        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
-            replan(open_world(), m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
-                   set(), set(), plan=plan)
-        self.assertIsNone(plan.current())
+        replan(open_world(), m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
+               set(), set(), plan=plan)
+        self.assertEqual(plan.current(), {"op": "buy", "code": "torch"})
         self.assertEqual(m.goal, "explore")
 
     def test_travel_to_an_unpathed_destination_is_dropped_at_once(self):

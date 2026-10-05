@@ -28,6 +28,7 @@ from .plan import (
     EXPLORE_PATH_OPS,
     OP_STATE,
     PLAN_STALL_SECONDS,
+    SHOP_PLAN_OPS,
     TRAVEL_PATHED,
     GoalOp,
     Plan,
@@ -177,6 +178,7 @@ def plan_step(
     path yet, are dropped and logged. An op that finds no path for
     ``PLAN_STALL_SECONDS`` is dropped too, so the stack never stalls; until
     then ``policy.goals`` get the move. A ``wait`` decides the round with no move.
+    A ``buy`` belongs to **Shop**, which clears the stall when it steps or takes.
     ``compose`` and ``use_block`` belong to **Solve**, which drops them itself
     when they stall (A39), so they are left on the stack here.
     """
@@ -189,6 +191,13 @@ def plan_step(
             return False
         if op["op"] not in EXPLORE_PATH_OPS:
             if op["op"] in BOSS_PLAN_OPS:
+                return False
+            if op["op"] in SHOP_PLAN_OPS:
+                # Shop runs `buy`; while it has nothing in sight to take, the
+                # op stalls here and is dropped like any other (A21).
+                if plan.note_stalled(w.tick):
+                    plan.drop_current(f"nothing to buy for {PLAN_STALL_SECONDS}s")
+                    continue
                 return False
             plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet")
             continue

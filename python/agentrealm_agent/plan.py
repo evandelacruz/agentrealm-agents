@@ -10,6 +10,7 @@ from typing import Any
 
 from .config import Policy
 from .directives import PARAM_DEFAULTS, _valid_param
+from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .world import DOORS, Pos, WorldModel, chebyshev
@@ -46,8 +47,9 @@ OP_STATE: dict[str, str | None] = {
 # with a log line when it reaches the top of the stack (A34 slice).
 EXPLORE_PATH_OPS = frozenset({"explore_area", "travel", "wait"})
 BOSS_PLAN_OPS = frozenset({"fight_boss"})
+SHOP_PLAN_OPS = frozenset({"buy"})
 SOLVE_OPS = frozenset({"compose", "use_block"})
-# `travel` destinations with a path today; `hunting_ground` and `shop` wait on A20/Shop.
+# `travel` destinations with a path today; `hunting_ground` waits on knowledge.
 TRAVEL_PATHED = frozenset({"entrance", "town", "point"})
 
 # Built-in `explore` explores the whole map: no center, no radius bound.
@@ -579,8 +581,9 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         # does not lose the change.
         tile = world.view.tiles.get((op["x"], op["y"]))
         return plan.use_block_before is not None and tile is not None and tile != plan.use_block_before
-    # `fight_boss` finishes in Boss, which sees the defeat (A38). Ops whose
-    # states are not shipped never finish here; replan drops them.
+    if name == "buy":
+        return any(supply_matches(op["code"], s.code) for s in world.held_supplies + world.chest_supplies)
+    # `fight_boss` finishes in Boss, which sees the defeat (A38).
     return False
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..knowledge_base import knowledge_items
 from ..loot import worthwhile_pickups
 from ..memory import Memory
 from ..navigation import cost_path
@@ -10,7 +11,7 @@ from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome
 from .intents import set_position
-from .pickup import knowledge_items, pickup_outcome
+from .pickup import pickup_outcome
 
 # Walk targets tried per decision, best first; each is one budgeted search (A13).
 MAX_WALK_TARGETS = 3

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import dataclasses
 import random
 from typing import Callable
 
+from .break_memory import break_costs_for_planning, nominate_on_path
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import (
     CostGridParams,
     NavSearchState,
+    alt_route_path,
     cost_path,
     doors_goal_path,
     known_prefix,
@@ -127,11 +130,15 @@ def path_for_plan_op(
             targets = {center}
             if nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
                 return None
-        found = nearest_target(w, targets, grid_params(policy, blocked, costly, m=m))
+        found = nearest_target(
+            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+        )
         return (found[1], label, Leg(found[0])) if found and found[1] else None
     if op["op"] != "travel":
         return None
-    params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m)
+    params = grid_params(
+        policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge
+    )
     if op["to"] == "point":
         target = (op["x"], op["y"])
         dest_map = op.get("map_id", w.map_id)
@@ -171,6 +178,7 @@ def plan_step(
     path yet, are dropped and logged. An op that finds no path for
     ``PLAN_STALL_SECONDS`` is dropped too, so the stack never stalls; until
     then ``policy.goals`` get the move. A ``wait`` decides the round with no move.
+    A ``buy`` belongs to **Shop**, which clears the stall when it steps or takes.
     ``compose`` and ``use_block`` belong to **Solve**, which drops them itself
     when they stall (A39), so they are left on the stack here.
     """
@@ -182,7 +190,14 @@ def plan_step(
         if op["op"] in SOLVE_OPS:
             return False
         if op["op"] not in EXPLORE_PATH_OPS:
-            if op["op"] in BOSS_PLAN_OPS or op["op"] in SHOP_PLAN_OPS:
+            if op["op"] in BOSS_PLAN_OPS:
+                return False
+            if op["op"] in SHOP_PLAN_OPS:
+                # Shop runs `buy`; while it has nothing in sight to take, the
+                # op stalls here and is dropped like any other (A21).
+                if plan.note_stalled(w.tick):
+                    plan.drop_current(f"nothing to buy for {PLAN_STALL_SECONDS}s")
+                    continue
                 return False
             plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet")
             continue
@@ -250,6 +265,10 @@ def grid_params(
     costly: set[Pos],
     allow_goal_door: bool = False,
     m: Memory | None = None,
+    *,
+    w: WorldModel | None = None,
+    knowledge: KnowledgeBase | None = None,
+    break_goal: Pos | None = None,
 ) -> CostGridParams:
     base = CostGridParams(
         avoid=set(avoid),
@@ -257,7 +276,23 @@ def grid_params(
         hostile_kinds=frozenset(policy.hostile),
         allow_goal_door=allow_goal_door,
     )
-    return nav_stuck.planning_params(m, base) if m is not None else base
+    params = nav_stuck.planning_params(m, base) if m is not None else base
+    if w is None or w.pos is None:
+        return params
+    # Breakables are priced only at break time (A15 step 2, A28): for **Break**
+    # walking to the cell it opens (``break_goal``), or for an attempt at the
+    # BREAK level. Below it they stay impassable, so a plan never routes into
+    # a block nothing is going to open.
+    goal = break_goal
+    if goal is None:
+        att = nav_stuck.active(m, w) if m is not None else None
+        if att is None or att.level != nav_stuck.BREAK:
+            return params
+        goal = att.target
+    costs = break_costs_for_planning(w, knowledge, goal)
+    if not costs:
+        return params
+    return dataclasses.replace(params, break_nominated=set(costs), break_costs=costs)
 
 
 def _store_path(m: Memory, w: WorldModel, goal: str, path: list[Pos], leg: Leg | None) -> None:
@@ -296,6 +331,7 @@ def escalation_step(
     avoid: set[Pos],
     plan: AttemptPlan,
     reason: str | None,
+    knowledge: KnowledgeBase | None = None,
 ) -> Pos | None:
     """Climb the A15 ladder from a failed window (``reason``), or carry on a reveal.
 
@@ -307,6 +343,24 @@ def escalation_step(
     None when waiting or given up.
     """
     while True:
+        if att.level == nav_stuck.BREAK:
+            return None
+        if att.level == nav_stuck.ALT_ROUTE:
+            if reason:
+                if not nav_stuck.escalate(m, w, att, reason):
+                    return None
+                reason = None
+                continue
+            found = plan(att)
+            if next_step(w, avoid, found):
+                att.level = nav_stuck.WALK
+                nav_stuck.clear_break_target(att)
+                return _walk(m, w, att, avoid, found)
+            if found:
+                return _wait(m, att, found)
+            if not nav_stuck.escalate(m, w, att, "no_path"):
+                return None
+            continue
         if att.level == nav_stuck.REVEAL:
             found = plan(att)
             if next_step(w, avoid, found) and nav_stuck.reveal_found_way(att, w, found):
@@ -314,11 +368,22 @@ def escalation_step(
             step = nav_stuck.reveal_step(w, att, avoid)
             if step is None:
                 spent = att.reveal_left <= 0
-                nav_stuck.give_up(m, w, att, "reveal_spent" if spent else "no_frontier")
-                return None
+                if not nav_stuck.escalate(m, w, att, "reveal_spent" if spent else "no_frontier"):
+                    return None
+                reason = "no_path"
+                continue
             m.path, m.goal = [], att.goal
             return step
         if not nav_stuck.escalate(m, w, att, reason or "stuck"):
+            return None
+        if att.level == nav_stuck.BREAK:
+            choice = nominate_on_path(w, knowledge, w.pos, att.target) if w.pos else None
+            if choice is not None:
+                att.break_x, att.break_y, att.break_cap = choice.pos[0], choice.pos[1], choice.capability
+            else:
+                if not nav_stuck.escalate(m, w, att, "no_break"):
+                    return None
+                continue
             return None
         if att.level == nav_stuck.CAUTIOUS:
             found = plan(att)
@@ -336,6 +401,7 @@ def guided_step(
     target: Pos | Leg,
     avoid: set[Pos],
     plan: AttemptPlan,
+    knowledge: KnowledgeBase | None = None,
 ) -> Pos | None:
     """One move toward ``target`` on this map, with stuck detection and escalation (A15).
 
@@ -357,8 +423,8 @@ def guided_step(
     if w.pos == leg.target:
         nav_stuck.finish(m, att)
         return None
-    reason = None if att.level == nav_stuck.REVEAL else nav_stuck.stuck_reason(att, w.tick)
-    if reason is None and att.level != nav_stuck.REVEAL:
+    reason = None if att.level in (nav_stuck.REVEAL, nav_stuck.BREAK) else nav_stuck.stuck_reason(att, w.tick)
+    if reason is None and att.level not in (nav_stuck.REVEAL, nav_stuck.BREAK):
         if m.goal == goal and next_step(w, avoid, m.path):
             nav_stuck.observe(att, w, m.path)
             return next_step(w, avoid, m.path)
@@ -368,7 +434,7 @@ def guided_step(
         if found:
             return _wait(m, att, found)
         reason = "no_path"
-    return escalation_step(m, w, att, avoid, plan, reason)
+    return escalation_step(m, w, att, avoid, plan, reason, knowledge)
 
 
 def attempt_plan(
@@ -377,11 +443,26 @@ def attempt_plan(
     policy: Policy,
     avoid: set[Pos],
     costly: set[Pos],
+    knowledge: KnowledgeBase | None = None,
 ) -> AttemptPlan:
     """Plan straight to an attempt's target on this map, at its escalation's fog price."""
 
     def plan(att: NavAttempt) -> list[Pos] | None:
-        params = grid_params(policy, avoid, costly, allow_goal_door=True, m=m)
+        params = grid_params(
+            policy,
+            avoid,
+            costly,
+            allow_goal_door=True,
+            m=m,
+            w=w,
+            knowledge=knowledge,
+        )
+        if att.level == nav_stuck.ALT_ROUTE:
+            params = dataclasses.replace(params, break_costs={}, break_nominated=set())
+            dest_map = att.map_id if att.map_id is not None else w.map_id
+            if dest_map is None:
+                return None
+            return alt_route_path(w, knowledge, dest_map, att.target, params)
         return cost_path(w, att.target, params, nav=nav_search(m, w, att.goal, att.target))
 
     return plan
@@ -412,17 +493,23 @@ def plan_goal(
         target = tuple(policy.goto)
         if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
             return None, None
-        params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m)
+        params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
         nav = nav_search(m, w, "goto", target) if dest_map == w.map_id else None
         path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav) or None
         return path, nav_stuck.leg_toward(m, w, "goto", dest_map, target, path)
     if goal == "doors":
-        path = doors_goal_path(w, knowledge, grid_params(policy, blocked, costly, allow_goal_door=True, m=m))
+        path = doors_goal_path(
+            w,
+            knowledge,
+            grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge),
+        )
         if not path or nav_stuck.backed_off(m, "doors", w.map_id, path[-1], w.tick):
             return None, None
         return path, Leg(path[-1])
     if goal == "explore":
         targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, view.frontier() - {w.pos}, w.tick)
-        found = nearest_target(w, targets, grid_params(policy, blocked, costly, m=m))
+        found = nearest_target(
+            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+        )
         return (found[1], Leg(found[0])) if found and found[1] else (None, None)
     return None, None

@@ -15,8 +15,10 @@ from .heal import HealState
 from .idle import IdleState
 from .boss import BossState, sync_boss
 from .level import LevelState
+from .break_state import BreakState
 from .investigate import InvestigateState
 from .loot import LootState
+from ..shop import sync_shop
 from .shop import ShopState
 from .recover import RecoverState
 from .retreat import RetreatState
@@ -42,6 +44,7 @@ STATES: tuple[State, ...] = (
     LootState(),
     ShopState(),
     InvestigateState(),
+    BreakState(),
     SolveState(),
     GatherState(),
     TravelState(),
@@ -60,11 +63,13 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     holds) but whose ``act`` sends no intent falls through to the next state (A44),
     unless it sets ``StateOutcome.wait``. Each call is one decision window:
     it ages what Step rejections taught the map (A14), and starts, ends or
-    finishes the boss fight before any guard reads it (A38).
+    finishes the boss fight before any guard reads it (A38), and settles
+    a Shop purchase whose gems were spent (A21).
     """
     m = ctx.memory
     yielded: list[str] = []
     sync_boss(world, m, ctx.plan)
+    sync_shop(world, m)
     try:
         for state in STATES:
             active = state.name == m.state and not state.done(world, ctx)

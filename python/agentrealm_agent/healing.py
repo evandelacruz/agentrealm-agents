@@ -28,6 +28,12 @@ def potion_count(w: WorldModel) -> int:
     n += sum(1 for s in w.chest_supplies if s.code in codes)
     return n
 
+
+def supply_matches(want: str, code: str) -> bool:
+    """``code`` satisfies a want for ``want``: the same code, or any potion for a potion (A21)."""
+    return want == code or (want in POTION_CODES and code in POTION_CODES)
+
+
 # Ticks at 10 Hz in a safe zone with no health back before this run counts
 # safe-zone regen as absent (~20 s).
 REGEN_MEASURE_TICKS = 200

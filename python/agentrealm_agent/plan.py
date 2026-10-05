@@ -10,7 +10,7 @@ from typing import Any
 
 from .config import Policy
 from .directives import PARAM_DEFAULTS, _valid_param
-from .healing import POTION_CODES
+from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .world import DOORS, Pos, WorldModel, chebyshev
@@ -582,11 +582,7 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         tile = world.view.tiles.get((op["x"], op["y"]))
         return plan.use_block_before is not None and tile is not None and tile != plan.use_block_before
     if name == "buy":
-        code = op["code"]
-        for s in world.held_supplies + world.chest_supplies:
-            if s.code == code or (code in POTION_CODES and s.code in POTION_CODES):
-                return True
-        return False
+        return any(supply_matches(op["code"], s.code) for s in world.held_supplies + world.chest_supplies)
     # `fight_boss` finishes in Boss, which sees the defeat (A38).
     return False
 

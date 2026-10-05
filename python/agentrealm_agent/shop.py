@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .directives import PARAM_DEFAULTS
-from .healing import DEFAULT_BUY_POTION, POTION_CODES, potion_count
+from .healing import DEFAULT_BUY_POTION, potion_count, supply_matches
 from .knowledge_base import KnowledgeBase
-from .loot import inventory_full, worst_droppable
 from .memory import Memory
-from .plan import Plan, goal_done
-from .states.base import PlayContext
+from .plan import goal_done
 from .world import Entity, WorldModel, chebyshev
+
+if TYPE_CHECKING:
+    from .states.base import PlayContext
 
 GOAL = "shop"
 
 
-def _price(e: Entity, items: dict) -> int | None:
+def price_of(e: Entity, items: dict) -> int | None:
     if isinstance(e.gem_price, int) and e.gem_price > 0:
         return e.gem_price
     row = items.get(e.code) or {}
@@ -26,19 +29,9 @@ def can_afford(w: WorldModel, price: int) -> bool:
     return w.gems is not None and w.gems >= price
 
 
-def supply_matches(want: str, code: str) -> bool:
-    if want == code:
-        return True
-    if want in POTION_CODES and code in POTION_CODES:
-        return True
-    return False
-
-
-def holds_code(w: WorldModel, code: str) -> bool:
-    for s in w.held_supplies + w.chest_supplies:
-        if supply_matches(code, s.code):
-            return True
-    return False
+def carries_code(w: WorldModel, code: str) -> bool:
+    """Held only: Heal drinks carried supplies, not stowed ones (A10, GAME_NOTES)."""
+    return any(supply_matches(code, h.code) for h in w.held_supplies)
 
 
 def plan_buy_op(ctx: PlayContext, w: WorldModel) -> dict | None:
@@ -69,7 +62,7 @@ def wanted_codes(w: WorldModel, ctx: PlayContext) -> list[str]:
 
     for sig in ctx.memory.buy_signals:
         code = sig.get("code")
-        if isinstance(code, str) and not holds_code(w, code):
+        if isinstance(code, str) and not carries_code(w, code):
             add(code)
 
     reserve = int(ctx.params.get("potion_reserve", PARAM_DEFAULTS["potion_reserve"]))
@@ -79,28 +72,18 @@ def wanted_codes(w: WorldModel, ctx: PlayContext) -> list[str]:
     return out
 
 
-def priced_in_sight(w: WorldModel, items: dict) -> list[Entity]:
-    out: list[Entity] = []
-    for e in w.entities:
-        if e.kind != "supply":
-            continue
-        price = _price(e, items)
-        if price is not None and can_afford(w, price):
-            out.append(e)
-    return out
-
-
 def pick_supply(w: WorldModel, wants: list[str], items: dict) -> Entity | None:
-    """Best priced supply matching a wanted code: nearest, then cheapest."""
+    """Best affordable priced supply matching a wanted code: nearest, then cheapest."""
     here = w.pos
     if here is None or not wants:
         return None
     candidates: list[tuple[tuple[int, int, int], Entity]] = []
-    for e in priced_in_sight(w, items):
-        if not any(supply_matches(want, e.code) for want in wants):
+    for e in w.entities:
+        if e.kind != "supply" or not any(supply_matches(want, e.code) for want in wants):
             continue
-        price = _price(e, items)
-        assert price is not None
+        price = price_of(e, items)
+        if price is None or not can_afford(w, price):
+            continue
         candidates.append(((chebyshev(e.pos, here), price, e.id), e))
     if not candidates:
         return None
@@ -109,35 +92,36 @@ def pick_supply(w: WorldModel, wants: list[str], items: dict) -> Entity | None:
 
 
 def consume_buy_signal(m: Memory, code: str) -> None:
-    """Drop Heal's first matching ``buy`` op once Shop acts on it (A10, A21)."""
+    """Drop Heal's first matching ``buy`` op once a purchase lands (A10, A21)."""
     for i, sig in enumerate(m.buy_signals):
         c = sig.get("code")
-        if c == code or (isinstance(c, str) and code in POTION_CODES and c in POTION_CODES):
+        if isinstance(c, str) and supply_matches(c, code):
             del m.buy_signals[i]
             return
 
 
-def shop_take_intents(
-    w: WorldModel,
-    items: dict,
-    supply: Entity,
-) -> list[dict] | None:
-    """``Drop`` junk when full, then ``Take`` the priced supply."""
-    from .states.intents import drop, take
-
-    price = _price(supply, items)
-    if price is None or not can_afford(w, price):
-        return None
-    if inventory_full(w):
-        shed = worst_droppable(w, items)
-        if shed is None:
-            return None
-        return [drop(shed.id), take(supply.id)]
-    return [take(supply.id)]
+def note_shop_result(m: Memory, intent: dict | None, applied: bool) -> None:
+    """Settle the Take in flight from its result: applied consumes the signal,
+    a rejection (of it or a ``Drop`` queued before it) keeps it."""
+    pending = m.shop_pending
+    if pending is None:
+        return
+    if not applied:
+        m.shop_pending = None
+        return
+    if intent and intent.get("verb") == "Take" and intent.get("supply_id") == pending[0]:
+        consume_buy_signal(m, pending[1])
+        m.shop_pending = None
 
 
-def note_shop_purchase(m: Memory, code: str) -> None:
-    consume_buy_signal(m, code)
+def sync_shop(w: WorldModel, m: Memory) -> None:
+    """A gem drop since the Take was sent is the purchase landing (A21)."""
+    pending = m.shop_pending
+    if pending is None or pending[2] is None or w.gems is None:
+        return
+    if w.gems < pending[2]:
+        consume_buy_signal(m, pending[1])
+        m.shop_pending = None
 
 
 def knowledge_items(knowledge: KnowledgeBase | None) -> dict:

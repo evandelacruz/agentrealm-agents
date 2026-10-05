@@ -49,7 +49,7 @@
 
   "A20": {"state": "partial", "remaining": "Hearts first until a life's ground supply_subtype_code is known; stowed Drop and middle_chest carry capacity (GAME_NOTES open questions). Gems-first uses code gem."},
 
-  "A21": {"state": "done"},
+  "A21": {"state": "partial", "remaining": "travel:shop has no path yet, so Shop buys only priced supplies already in sight."},
 
   "A22": {"state": "done"},
 
@@ -63,7 +63,7 @@
 
   "A27": {"state": "done"},
 
-  "A28": {"state": "open"},
+  "A28": {"state": "done"},
 
   "A29": {"state": "open"},
 

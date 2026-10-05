@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
+from ..loot import inventory_full, worst_droppable
 from ..memory import Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
 from ..shop import (
     GOAL,
+    can_afford,
     knowledge_items,
-    note_shop_purchase,
     pick_supply,
-    shop_take_intents,
+    plan_buy_op,
+    price_of,
     wanted_codes,
 )
-from ..world import WorldModel, chebyshev
+from ..world import Entity, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome
-from .intents import set_position
+from .intents import drop, set_position, take
 
 
 class ShopState(State):
@@ -28,7 +30,7 @@ class ShopState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        return shop_outcome(world, ctx, self.name) is not None
+        return _target(world, ctx) is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
@@ -40,29 +42,49 @@ class ShopState(State):
         if reflex is not None:
             return reflex
         out = shop_outcome(world, ctx, self.name)
-        return out if out is not None else StateOutcome(None, "nothing to buy", state=self.name)
+        if out.intents and ctx.plan is not None and plan_buy_op(ctx, world) is not None:
+            ctx.plan.stalled_since_tick = None  # progress on the plan's buy (A34 stall rule)
+        return out
 
 
-def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | None:
+def _target(w: WorldModel, ctx: PlayContext) -> Entity | None:
+    """The priced supply Shop would buy now. Pure: guard calls it."""
     wants = wanted_codes(w, ctx)
     if not wants:
         return None
-    items = knowledge_items(ctx.knowledge)
-    supply = pick_supply(w, wants, items)
-    if supply is None:
+    return pick_supply(w, wants, knowledge_items(ctx.knowledge))
+
+
+def shop_take_intents(w: WorldModel, items: dict, supply: Entity) -> list[dict] | None:
+    """``Drop`` junk when full, then ``Take`` the priced supply."""
+    price = price_of(supply, items)
+    if price is None or not can_afford(w, price):
         return None
+    if inventory_full(w):
+        shed = worst_droppable(w, items)
+        if shed is None:
+            return None
+        return [drop(shed.id), take(supply.id)]
+    return [take(supply.id)]
+
+
+def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
+    supply = _target(w, ctx)
+    if supply is None:
+        return StateOutcome(None, "nothing to buy", state=state)
     here = w.pos
     assert here is not None
     label = supply.code or str(supply.id)
     if chebyshev(supply.pos, here) <= 1:
-        intents = shop_take_intents(w, items, supply)
+        intents = shop_take_intents(w, knowledge_items(ctx.knowledge), supply)
         if intents is None:
-            return None
-        note_shop_purchase(ctx.memory, supply.code)
+            return StateOutcome(None, f"no room for {label}", state=state)
+        # The buy signal is consumed only when this Take lands (runner, sync_shop).
+        ctx.memory.shop_pending = (supply.id, supply.code, w.gems)
         return StateOutcome(intents, f"buy {label}", state=state)
     step = _step_toward(w, ctx.memory, ctx, supply.pos)
     if step is None:
-        return None
+        return StateOutcome(None, f"no step toward {label}", state=state)
     return StateOutcome([set_position(step)], f"shop {label} → {supply.pos}", state=state)
 
 

@@ -40,7 +40,7 @@ Copy and edit a file in `python/characters/` to try different behavior (`policy.
 - **Dispatcher** walks the states in a fixed priority order: survival first, then loot and recovery, then puzzles, travel and bosses, then explore and idle. A state with nothing to send falls through to the next, so the agent never stalls.
 - **Plan** is the path being walked: goals from the character file or live directives, A* over known tiles, around fog and hazards.
 
-Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md). Scheduler, reflex and plan tables: [`PLAN.md`](PLAN.md).
+Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md). Tables in [`PLAN.md`](PLAN.md): [Scheduler](PLAN.md#scheduler-which-call-this-window), [Reflexes](PLAN.md#reflexes-every-round-trip-no-model), [Plan](PLAN.md#plan-goal-and-path).
 
 ## Make it yours
 

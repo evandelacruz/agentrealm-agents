@@ -67,7 +67,7 @@
 
   "A29": {"state": "open"},
 
-  "A30": {"state": "partial", "remaining": "Scroll reads (needs a sourced way to tell a scroll supply, GAME_NOTES open questions) and door and entrance looks on other maps."},
+  "A30": {"state": "partial", "remaining": "Scroll reads (needs observed scroll supply_subtype_code; GAME_NOTES open questions; live play blocked — docs/observations/A30_live_play.md)."},
 
   "A31": {"state": "open"},
 

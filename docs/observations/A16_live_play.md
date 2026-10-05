@@ -1,31 +1,34 @@
-# A16 live play (redacted)
+# A16 live probe (redacted): not a PASS
 
-M7 acceptance on `olympuff` via the public API. Character name `OlympuffM6Walk5d4e` (existing Olympuff slot; account character cap blocked a new create). Character id omitted.
+An hour on `olympuff` through the public API with an earlier version of the M7 smoke script. It exited 0, but that gate was too loose: it passed navigation on any give-up and never required regen. Against the A16 gate as it stands now (PLAN.md A16, README **Tests**), this run **fails**. The live hour that passes is A58.
 
 ## Run
 
-- **Command:** `python3 scripts/smoke_m7_olympuff.py` (3600 s wall clock, default).
-- **Policy:** `python/characters/olympuff_m7.toml` — scripted `explore`, `on_hostile = flee`, `pickup = false`.
-- **Outcome:** PASS (smoke exit 0).
+- **Character:** `OlympuffM6Walk5d4e`, a reused M6-era slot, because the account was at its character cap. Character id omitted. The acceptance config now uses its own character, `OlympuffSurvivor`.
+- **Policy:** scripted `explore`, `on_hostile = flee`, `pickup = false`. Pickup had been switched off with no recorded reason; it is back on, since Recover (A11) needs it.
+- **Navigation:** explore only. There was no `goto` target, so nothing could reach or give up on a point 150 blocks away.
 
 ## Metrics (final summary)
 
 | Metric | Value |
 |---|---|
 | Wall clock | 3600.1 s |
-| Max chebyshev distance from overworld origin | 126 (target 150 or documented give-up) |
+| Max chebyshev distance from overworld origin | 126 |
 | Deaths | 0 |
-| Retreat misses | 0 |
+| Retreat misses (counted after the tick, an old bug) | 0 |
 | Recover withdraws (unsafe) | 0 |
-| Heal actions (food / path fallbacks) | 65 |
-| Safe-zone regen measured | no (not saved this run) |
+| Heal actions | 65 |
+| Safe-zone regen measured | no answer |
 | Loop detected | no |
 | API errors | 0 |
 | Lives | 10 throughout |
 
+## Against the current gate
+
+- **Navigation fails.** 126 of 150 blocks, and the give-ups that passed it were on explore frontier cells, not on a 150-block target.
+- **Regen fails.** No yes or no answer was recorded.
+- Survival held: no deaths, no API errors, no loop.
+
 ## Notes
 
-- Navigation satisfied the smoke check via stuck-detection give-up signals recorded during the hour while explore pushed outward from the town pocket (max distance 126 before escalation/backoff).
-- Shop steps appeared late in the hour when the agent routed toward priced potions; no purchase required for M7 (M8).
-- Prior probe runs on the same character exercised Heal heavily while hurt; this PASS run stayed mostly on explore/flee with modest Heal use.
-- Full console log: `/opt/cursor/artifacts/m7_smoke_final.log` on the acceptance runner (not committed; transcript-sized).
+- Shop steps appeared late in the hour when the agent routed toward priced potions; no purchase is needed for M7 (that is M8).

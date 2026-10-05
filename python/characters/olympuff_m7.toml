@@ -1,6 +1,7 @@
-# A16 live M7 acceptance: survival hour and overworld navigation on Olympuff.
-# Reuses an existing Olympuff slot (account character cap); policy below is M7.
-name = "OlympuffM6Walk5d4e"
+# A16 live M7 acceptance: an hour of survival on the Olympuff overworld
+# (scripts/smoke_m7_olympuff.py). The smoke script adds the 150-block `goto`
+# target in front of these goals at start; the rest of the hour is explore.
+name = "OlympuffSurvivor"
 avatar = "default"
 model_agent = "agentrealm-reference/scripted"
 world = "olympuff"
@@ -10,6 +11,8 @@ kind = "scripted"
 goals = ["explore"]
 on_hostile = "flee"
 hostile = ["npc"]
-pickup = false
+# Pickup stays on: Recover (A11) needs it to reach the death chest, and Heal
+# takes ground food. M7 is judged on the agent as shipped.
+pickup = true
 avoid_blocks = ["fire", "lava"]
 entity_refresh = 20

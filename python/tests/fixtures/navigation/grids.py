@@ -158,9 +158,6 @@ CROSS_MAP_OPEN = Scenario(
     perception=3,
 )
 
-# Inside a level: the door is in sight across a wall whose far end is fog, so
-# Level plans round it; the wall runs the map's whole height, so the door is
-# abandoned once the fog clears.
 # Straight corridor: fog beyond perception; goto walks 150+ blocks (A16 / M7).
 OPEN_CORRIDOR_150 = Scenario(
     "open_corridor_150",
@@ -168,6 +165,9 @@ OPEN_CORRIDOR_150 = Scenario(
     perception=2,
 )
 
+# Inside a level: the door is in sight across a wall whose far end is fog, so
+# Level plans round it; the wall runs the map's whole height, so the door is
+# abandoned once the fog clears.
 LEVEL_WALLED_DOOR = Scenario(
     "level_walled_door",
     (

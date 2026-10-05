@@ -12,12 +12,16 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import config
-from agentrealm_agent.m7_acceptance import (
-    LOOP_SAME_REASON_LIMIT,
-    M7AcceptanceMetrics,
-    TARGET_DISTANCE,
-)
+from agentrealm_agent.acceptance import AcceptanceHooks
+from agentrealm_agent.client import ApiError
+from agentrealm_agent.config import Policy
+from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_agent.m7_acceptance import LOOP_STEP_LIMIT, TARGET_DISTANCE, M7AcceptanceMetrics
+from agentrealm_agent.memory import Memory
+from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_agent.zone_discovery import apply_zone
 from tests.fixtures.navigation import grids, sim
+from tests.test_m6_acceptance import FakeMovementServer, RunnerCase
 
 REPO = Path(__file__).resolve().parents[2]
 SMOKE_PATH = REPO / "scripts" / "smoke_m7_olympuff.py"
@@ -30,56 +34,223 @@ def load_smoke():
     return mod
 
 
-class M7AcceptanceMetricsTest(unittest.TestCase):
-    def test_navigation_ok_at_distance_or_give_up(self):
-        m = M7AcceptanceMetrics(target_distance=150)
+OVERWORLD = 7
+
+
+def metrics(**kw) -> M7AcceptanceMetrics:
+    kw.setdefault("overworld_map_id", OVERWORLD)
+    kw.setdefault("origin", (0, 0))
+    kw.setdefault("target", (TARGET_DISTANCE, 0))
+    return M7AcceptanceMetrics(**kw)
+
+
+def open_world(pos=(0, 0)) -> WorldModel:
+    w = WorldModel(character_id=1, map_id=OVERWORLD, pos=pos, perception=5, tick=1)
+    for y in range(-3, 4):
+        for x in range(-3, 6):
+            w.view.tiles[(x, y)] = "dirt"
+    w.terrain_center, w.terrain_map = pos, OVERWORLD
+    return w
+
+
+STEP = [{"verb": "Step", "x": 1, "y": 0}]
+
+
+def decide(m, w, mem=None, *, state="Explore", reason="explore", intents=STEP, knowledge=None):
+    """One ``before_tick`` call; ``intents=None`` is a held queue, nothing new sent."""
+    m.before_tick(
+        w,
+        mem or Memory(),
+        state=state,
+        reason=reason,
+        intents=intents,
+        policy=Policy(hostile=["npc"]),
+        params=dict(PARAM_DEFAULTS),
+        knowledge=knowledge,
+    )
+
+
+def give_up_signal(target, *, map_id=OVERWORLD, tick=5, goal="plan_travel", reason="no_path"):
+    return {
+        "trigger": "stuck",
+        "reason": reason,
+        "escalation": [reason, "no_frontier"],
+        "goal": goal,
+        "goal_key": f"{goal}:{map_id}:{target[0]},{target[1]}",
+        "target": list(target),
+        "map_id": map_id,
+        "tick": tick,
+    }
+
+
+class NavigationGateTest(unittest.TestCase):
+    def test_fails_until_target_reached_or_given_up(self):
+        m = metrics()
         self.assertFalse(m.navigation_ok())
-        m.max_distance = 150
-        self.assertTrue(m.navigation_ok())
-        m.max_distance = 0
-        m.give_up_reasons.append("no_path")
-        self.assertTrue(m.navigation_ok())
-        m.give_up_reasons.clear()
-        m.stuck_signals = 1
+        self.assertTrue(any("neither reached nor given up" in f for f in m.failures()))
+
+    def test_reaching_the_target_passes(self):
+        m = metrics(target=(2, 0))
+        decide(m, open_world((1, 0)))
+        self.assertFalse(m.navigation_ok())
+        self.assertEqual(m.max_distance, 1)
+        decide(m, open_world((2, 0)))
         self.assertTrue(m.navigation_ok())
 
-    def test_loop_detection(self):
-        from agentrealm_agent.brain import Memory
-        from agentrealm_agent.config import Policy
-        from agentrealm_agent.world import WorldModel
+    def test_far_from_origin_without_the_target_does_not_pass(self):
+        m = metrics()
+        decide(m, open_world((-TARGET_DISTANCE, 0)))
+        self.assertEqual(m.max_distance, TARGET_DISTANCE)
+        self.assertFalse(m.navigation_ok())
 
-        m = M7AcceptanceMetrics()
-        w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=5, tick=1)
+    def test_give_up_on_the_target_passes_with_its_reason(self):
+        m, mem = metrics(), Memory()
+        mem.nav_stuck.stuck_signals.append(give_up_signal((TARGET_DISTANCE, 0), reason="no_break"))
+        decide(m, open_world(), mem)
+        self.assertTrue(m.navigation_ok())
+        self.assertEqual(m.target_give_up, "no_break", "the reason string, not the escalation list")
+
+    def test_give_up_on_another_goal_is_counted_but_never_passes(self):
+        m, mem = metrics(), Memory()
+        mem.nav_stuck.stuck_signals.append(give_up_signal((4, 4), goal="explore_area"))
+        mem.nav_stuck.stuck_signals.append(give_up_signal((TARGET_DISTANCE, 0), map_id=99))
+        decide(m, open_world(), mem)
+        decide(m, open_world(), mem)  # the same signals, read again before a drain
+        self.assertFalse(m.navigation_ok())
+        self.assertEqual(m.other_give_ups, 2)
+
+
+class SurvivalGateTest(unittest.TestCase):
+    def threatened(self) -> WorldModel:
+        w = open_world()
+        w.health, w.lives = 3, 6
+        w.entities = [Entity("npc", 1, (1, 0), code="gnawer")]
+        w.threat.record(("npc", "gnawer"), 5)
+        return w
+
+    def test_retreat_miss_when_the_decision_saw_the_threat_and_did_not_retreat(self):
+        m = metrics()
+        decide(m, self.threatened(), state="Explore")
+        self.assertEqual(m.retreat_misses, 1)
+        self.assertTrue(any("should_retreat" in f for f in m.failures()))
+
+    def test_no_retreat_miss_from_a_survival_state(self):
+        m = metrics()
+        for state in ("Retreat", "Flee", "Heal"):
+            decide(m, self.threatened(), state=state)
+        self.assertEqual(m.retreat_misses, 0)
+
+    def test_recover_withdraw_counts_an_unsafe_chest_spot(self):
+        m = metrics()
+        w = open_world()
+        w.death_chest = (OVERWORLD, (2, 0), 11)
+        decide(m, w, state="Recover", intents=[{"verb": "WithdrawFromChest"}])
+        self.assertEqual((m.recover_withdraws, m.recover_unsafe), (1, 1))
+        apply_zone(w, OVERWORLD, 2, 0, {"safe": True})
+        decide(m, w, state="Recover", intents=[{"verb": "WithdrawFromChest"}])
+        self.assertEqual((m.recover_withdraws, m.recover_unsafe), (2, 1))
+
+    def test_regen_must_be_measured_on_a_full_hour(self):
+        m = metrics(target=(0, 0))
+        decide(m, open_world())
+        self.assertIn("safe-zone regen never measured", m.failures())
+        self.assertNotIn("safe-zone regen never measured", m.failures(full_hour=False))
         mem = Memory()
-        policy = Policy()
-        params = {"retreat_hits": 2, "risk": 0.5, "lives_floor": 3, "fight_margin": 1.5}
-        m.note_overworld(7)
-        for _ in range(LOOP_SAME_REASON_LIMIT):
-            m.on_decision(
-                w,
-                mem,
-                reason="explore → (1,0)",
-                state="Explore",
-                policy=policy,
-                params=params,
-                intents=[{"verb": "Step", "direction": "east"}],
-            )
+        mem.heal_regen_absent = True
+        decide(m, open_world(), mem)
+        self.assertEqual(m.regen, "no")
+        self.assertEqual(m.failures(), [])
+
+    def test_a_death_fails_the_run(self):
+        m = metrics()
+        m.on_death()
+        self.assertIn("1 death(s) during run", m.failures(full_hour=False))
+
+
+class LoopGateTest(unittest.TestCase):
+    def test_steps_at_one_cell_with_one_reason_are_a_loop(self):
+        m = metrics()
+        for _ in range(LOOP_STEP_LIMIT):
+            decide(m, open_world(), reason="explore → (1,0)")
         self.assertTrue(m.loop_detected)
-        self.assertIn("loop", m.failures()[0])
+        self.assertTrue(any("loop" in f for f in m.failures(full_hour=False)))
 
+    def test_heal_resting_in_place_is_not_a_loop(self):
+        m = metrics()
+        for _ in range(LOOP_STEP_LIMIT * 3):
+            decide(m, open_world(), state="Heal", reason="rest in safe zone", intents=[{"verb": "Wait"}])
+        self.assertFalse(m.loop_detected)
+
+    def test_a_held_queue_neither_counts_nor_resets(self):
+        m = metrics()
+        for _ in range(LOOP_STEP_LIMIT):
+            decide(m, open_world(), reason="explore → (1,0)")
+            decide(m, open_world(), reason="queue held", intents=None)
+        self.assertTrue(m.loop_detected)
+
+
+class ApiErrorTest(unittest.TestCase):
     def test_api_errors_fail_the_run(self):
-        from agentrealm_agent.client import ApiError
-
         class Reads:
             def tick(self, *a, **k):
                 raise ApiError(429, "rate_limited")
 
-        metrics = M7AcceptanceMetrics()
-        client = metrics.wrap(Reads())
+        m = metrics()
+        client = m.wrap(Reads())
         with self.assertRaises(ApiError):
             client.tick(1, None)
-        metrics.on_window(urgent=False)
-        self.assertTrue(any("API error" in f for f in metrics.failures()))
+        self.assertTrue(any("API error" in f for f in m.failures(full_hour=False)))
+
+
+class TownServer(FakeMovementServer):
+    """The M6 fake server, with a town on map 7 so the runner knows the overworld."""
+
+    def world(self, cid):
+        return {**super().world(cid), "town": {"map_id": OVERWORLD, "x": 0, "y": 0}}
+
+
+class RunnerHookTest(RunnerCase):
+    def test_walks_to_the_target_and_stops_when_the_clock_runs_out(self):
+        stop = threading.Event()
+        ticks = iter(range(10**6))
+        m = metrics(target=(80, 0), target_seconds=600, stop=stop, clock=lambda: float(next(ticks)))
+        server = TownServer(5000, stop)
+        self.run_against(server, self.make_runner(server, stop, m))
+        self.assertTrue(stop.is_set())
+        self.assertGreater(server.windows, 0, "stopped by the clock, not when the windows ran out")
+        self.assertTrue(m.target_reached)
+        self.assertEqual(m.max_distance, 80)
+        self.assertFalse(m.loop_detected)
+        self.assertEqual(m.failures(full_hour=False), [])
+
+    def test_hooks_see_the_world_before_the_tick_response(self):
+        calls: list[str] = []
+
+        class Hooks(AcceptanceHooks):
+            def before_tick(self, w, m, **kw):
+                calls.append(f"before_tick health={w.health}")
+
+        class Server(TownServer):
+            def tick(self, cid, intents, *, snapshot_version=None):
+                calls.append("tick")
+                r = super().tick(cid, intents, snapshot_version=snapshot_version)
+                r["observation"] = {"health": 1}
+                return r
+
+        stop = threading.Event()
+        server = Server(10, stop)
+        r = self.make_runner(server, stop, Hooks())
+        r.world.health = 10
+        r.tick()
+        self.assertEqual(calls, ["before_tick health=10", "tick"])
+
+    def test_died_event_reaches_on_death(self):
+        stop = threading.Event()
+        m = metrics()
+        server = TownServer(10, stop)
+        r = self.make_runner(server, stop, m)
+        r.on_events([{"kind": "Died", "cause": "killed"}])
+        self.assertEqual(m.deaths, 1)
 
 
 class NavigationFixtureTest(unittest.TestCase):
@@ -121,34 +292,60 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("AGENTREALM_API_KEY", err)
 
-    def exit_code_for(self, metrics, elapsed: float = 3600.0):
-        stop = threading.Event()
-        stop.set()
-        metrics.stop = stop
+    def run_main(self, seconds: float, played):
+        """``main`` against a fake client; ``played(metrics)`` stands in for the hour."""
+
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s):
+            played(metrics)
+            return metrics, seconds
+
         with mock.patch.object(self.smoke, "Client") as Client, \
                 mock.patch.object(self.smoke, "ensure_character", return_value=9), \
-                mock.patch.object(self.smoke, "run_smoke", return_value=(metrics, elapsed)):
+                mock.patch.object(self.smoke.time, "sleep"), \
+                mock.patch.object(self.smoke, "run_smoke", side_effect=run_smoke):
             client = Client.return_value
+            client.world.return_value = {"town": {"map_id": OVERWORLD, "x": 0, "y": 0}}
+            client.position.return_value = {"map_id": OVERWORLD, "x": 10, "y": 20}
             client.self_.return_value = {"alive": True}
-            return self.main(["--api-key", "k", "--seconds", "10"])
+            return self.main(["--api-key", "k", "--seconds", str(seconds)])
 
-    def test_pass_when_criteria_hold(self):
-        m = M7AcceptanceMetrics(target_distance=10)
-        m.max_distance = 20
-        code, out, _ = self.exit_code_for(m, elapsed=10.0)
+    def test_target_is_150_east_of_the_start(self):
+        seen = []
+        self.run_main(10, seen.append)
+        self.assertEqual((seen[0].origin, seen[0].target), ((10, 20), (10 + TARGET_DISTANCE, 20)))
+
+    def test_short_run_passes_without_navigation(self):
+        code, out, _ = self.run_main(10, lambda m: None)
         self.assertEqual(code, 0)
         self.assertIn("PASS", out)
 
-    def test_fail_when_navigation_missing_on_full_hour(self):
-        m = M7AcceptanceMetrics(target_distance=150)
-        with mock.patch.object(self.smoke, "Client") as Client, \
-                mock.patch.object(self.smoke, "ensure_character", return_value=9), \
-                mock.patch.object(self.smoke, "run_smoke", return_value=(m, 3600.0)):
-            Client.return_value.self_.return_value = {"alive": True}
-            code, _, err = self.main(["--api-key", "k", "--seconds", "3600"])
+    def test_full_hour_fails_without_navigation_or_regen(self):
+        code, _, err = self.run_main(3600, lambda m: None)
         self.assertEqual(code, 1)
-        self.assertIn("FAIL", err)
-        self.assertIn("distance", err)
+        self.assertIn("neither reached nor given up", err)
+        self.assertIn("regen never measured", err)
+
+    def test_full_hour_passes_on_a_give_up_with_a_reason(self):
+        def played(m):
+            m.target_give_up, m.regen = "no_path", "yes"
+
+        code, out, _ = self.run_main(3600, played)
+        self.assertEqual(code, 0, out)
+        self.assertIn("gave up (no_path)", out)
+
+    def test_start_off_the_overworld_exits_2(self):
+        client = mock.Mock()
+        client.world.return_value = {"town": {"map_id": OVERWORLD}}
+        client.position.return_value = {"map_id": 12, "x": 0, "y": 0}
+        with self.assertRaises(ValueError):
+            self.smoke.navigation_start(client, 9)
+
+    def test_aim_at_puts_goto_first(self):
+        cfg = config.load(REPO / "python" / "characters" / "olympuff_m7.toml")
+        self.assertTrue(cfg.policy.pickup, "Recover needs pickup (A11)")
+        self.smoke.aim_at(cfg, OVERWORLD, (5, 6))
+        self.assertEqual(cfg.policy.goals, ["goto", "explore"])
+        self.assertEqual((cfg.policy.goto, cfg.policy.goto_map), ((5, 6), OVERWORLD))
 
 
 if __name__ == "__main__":

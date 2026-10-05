@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 
+from .acceptance import AcceptanceHooks
 from .client import ApiError
 
 TARGET_STEPS = 200
@@ -12,7 +13,7 @@ CALM_BUDGET_FRACTION = 0.25
 
 
 @dataclass
-class M6AcceptanceMetrics:
+class M6AcceptanceMetrics(AcceptanceHooks):
     """Counts windows, API calls and steps while the runner drives a character.
 
     Calls are counted on the client itself (``wrap``), so every request a
@@ -38,7 +39,7 @@ class M6AcceptanceMetrics:
         """``client`` with every method call recorded against the current window."""
         return _CountingClient(client, self.window_calls, self.api_errors)
 
-    def on_window(self, *, urgent: bool) -> None:
+    def on_window(self, *, urgent: bool, alive: bool = True) -> None:
         """Close one window: file the calls it made as urgent or calm."""
         calls, self.window_calls[:] = list(self.window_calls), []
         if urgent:

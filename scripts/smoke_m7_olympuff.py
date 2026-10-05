@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """A16: Live M7 acceptance on Olympuff (docs/PLAYABLE_AGENT_PLAN.md M7 done-when).
 
-Runs on the overworld for one hour (default), recording survival and navigation
-metrics. Requires AGENTREALM_API_KEY and AGENTREALM_BASE_URL.
+Plays one hour (default) from wherever the character stands on the overworld.
+Before the runner starts it reads the world and the character's position, and
+sends the agent to one ``goto`` target 150 blocks east of that start (or
+``--target X,Y``); the rest of the hour it explores. Pass criteria are in
+``agentrealm_agent/m7_acceptance.py`` and the README. Requires AGENTREALM_API_KEY.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ sys.path.insert(0, str(PYTHON))
 from agentrealm_agent import config  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
-from agentrealm_agent.m7_acceptance import M7AcceptanceMetrics, TARGET_SECONDS  # noqa: E402
+from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
 
 DEFAULT_CHARACTER = PYTHON / "characters" / "olympuff_m7.toml"
@@ -53,17 +56,35 @@ def ensure_character(client: Client, cfg: config.CharacterConfig) -> int:
     return int(created["id"])
 
 
+def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
+    """The overworld's map id and where the character stands on it.
+
+    Raises ValueError when the character is not on the overworld: M7 is judged there.
+    """
+    town = client.world(cid).get("town") or {}
+    p = client.position(cid)
+    if town.get("map_id") is None or p.get("map_id") != town["map_id"]:
+        raise ValueError(f"character is on map {p.get('map_id')}, not the overworld {town.get('map_id')}")
+    return int(town["map_id"]), (int(p["x"]), int(p["y"]))
+
+
+def aim_at(cfg: config.CharacterConfig, overworld: int, target: tuple[int, int]) -> None:
+    """Send the agent to ``target`` first, then let it explore for the rest of the hour."""
+    cfg.policy.goto, cfg.policy.goto_map = target, overworld
+    cfg.policy.goals = ["goto"] + [g for g in cfg.policy.goals if g != "goto"]
+
+
 def run_smoke(
     client: Client,
     cfg: config.CharacterConfig,
     cid: int,
+    metrics: M7AcceptanceMetrics,
     *,
-    target_seconds: float,
     timeout_s: float,
 ) -> tuple[M7AcceptanceMetrics, float]:
     stop = threading.Event()
-    metrics = M7AcceptanceMetrics(target_seconds=target_seconds, stop=stop)
-    metrics.started_monotonic = time.monotonic()
+    metrics.stop = stop
+    started = time.monotonic()
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
 
     def out(line: str) -> None:
@@ -93,7 +114,7 @@ def run_smoke(
     wd.start()
     thread.join()
     stop.set()
-    elapsed = time.monotonic() - metrics.started_monotonic
+    elapsed = time.monotonic() - started
     try:
         save_knowledge(knowledge)
     except OSError as e:
@@ -123,6 +144,11 @@ def main(argv: list[str] | None = None) -> int:
         default=TARGET_SECONDS + 600.0,
         help="hard timeout seconds (0 = no limit)",
     )
+    ap.add_argument(
+        "--target",
+        default="",
+        help=f"overworld goto target X,Y (default: {TARGET_DISTANCE} blocks east of the start)",
+    )
     args = ap.parse_args(argv)
 
     if not args.api_key:
@@ -144,23 +170,38 @@ def main(argv: list[str] | None = None) -> int:
         print(f"create: {e}", file=sys.stderr)
         return 2
 
+    try:
+        overworld, origin = navigation_start(client, cid)
+    except (ApiError, ValueError) as e:
+        print(f"start: {e}", file=sys.stderr)
+        return 2
+    if args.target:
+        x, y = (int(v) for v in args.target.split(","))
+        target = (x, y)
+    else:
+        target = (origin[0] + TARGET_DISTANCE, origin[1])
+    aim_at(cfg, overworld, target)
+    time.sleep(1.0)  # the runner's own world read follows: stay inside the burst of 3
+
     print(
         f"M7 smoke (A16): {cfg.name} ({cid}) on {cfg.world} "
-        f"→ {args.seconds:.0f}s, base {args.base_url}",
+        f"→ {args.seconds:.0f}s, goto {target} from {origin}, base {args.base_url}",
         flush=True,
     )
-    metrics, elapsed = run_smoke(
-        client,
-        cfg,
-        cid,
+    metrics = M7AcceptanceMetrics(
+        overworld_map_id=overworld,
+        origin=origin,
+        target=target,
         target_seconds=args.seconds,
-        timeout_s=args.timeout,
     )
+    metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout)
     print(f"finished in {elapsed:.1f}s", flush=True)
     for line in metrics.summary_lines():
         print(line, flush=True)
-    require_nav = args.seconds >= TARGET_SECONDS * 0.95
-    failures = list(metrics.failures(require_navigation=require_nav))
+    # A shorter practice run still fails on deaths, misses, loops and API
+    # errors; navigation and regen are judged only on (nearly) the full hour.
+    full_hour = args.seconds >= TARGET_SECONDS * 0.95
+    failures = list(metrics.failures(full_hour=full_hour))
     if elapsed + 1.0 < args.seconds:
         failures.append(f"ran {elapsed:.0f}s < target {args.seconds:.0f}s")
     try:

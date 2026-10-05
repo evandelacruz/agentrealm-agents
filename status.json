@@ -39,7 +39,9 @@
 
   "A15": {"state": "done"},
 
-  "A16": {"state": "done"},
+  "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
+
+  "A58": {"state": "open"},
 
   "A17": {"state": "done"},
 

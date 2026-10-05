@@ -1,4 +1,4 @@
-"""A20: Loot state: Take, WithdrawFromChest, Drop junk when full; hearts first."""
+"""A20: Loot state: Take, WithdrawFromChest, Drop junk when full; gems first (hearts first is A47)."""
 
 import random
 import tempfile
@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_agent import config, knowledge_base
 
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.brain import Decision
@@ -15,10 +15,14 @@ from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.loot import (
+    LIFE_SCORE,
     carry_slots_used,
+    droppable_supplies,
     inventory_full,
     is_counter_supply,
+    learn_life_code,
     learn_loot_rejection,
+    loot_score,
     worst_droppable,
 )
 from agentrealm_agent.runner import Runner
@@ -42,7 +46,8 @@ def scripted(**kw) -> Policy:
 
 
 def ctx(policy=None, kb=None) -> PlayContext:
-    return PlayContext(Memory(), policy or scripted(), random.Random(0), knowledge=kb)
+    # Equip has already tried the junk torch on and got not_wearable (A55), so it leaves Loot the round.
+    return PlayContext(Memory(equip_not_wearable={"torch"}), policy or scripted(), random.Random(0), knowledge=kb)
 
 
 def priced(**prices) -> KnowledgeBase:
@@ -62,8 +67,8 @@ def full_inventory(w: WorldModel, *, junk: str = "torch") -> None:
 
 class LootPriorityTest(unittest.TestCase):
     def test_gem_is_a_counter_supply(self):
-        self.assertTrue(is_counter_supply("gem"))
-        self.assertFalse(is_counter_supply("heart"))
+        self.assertTrue(is_counter_supply("gem", {}))
+        self.assertFalse(is_counter_supply("heart", {}))
 
     def test_gem_beats_sword(self):
         w = world(["...", "...", "..."], at=(1, 1))
@@ -356,6 +361,52 @@ class RejectionTest(unittest.TestCase):
         self.assertEqual(w.carry_capacity, DEFAULT_CARRY_CAPACITY)
 
 
+class LifeCodeTest(unittest.TestCase):
+    """A47: a life's ground code is learned only when one Take explains the rise."""
+
+    def test_one_take_and_lives_up_files_the_code(self):
+        kb = KnowledgeBase("sandbox")
+        self.assertEqual(learn_life_code(kb, ["heart"], 10, 11), "heart")
+        self.assertEqual(kb.items, {"heart": {"life_on_pickup": True}})
+
+    def test_two_takes_in_one_response_learn_nothing(self):
+        kb = KnowledgeBase("sandbox")
+        self.assertIsNone(learn_life_code(kb, ["heart", "berry"], 10, 11))
+        self.assertEqual(kb.items, {})
+
+    def test_lives_unchanged_or_down_learn_nothing(self):
+        kb = KnowledgeBase("sandbox")
+        self.assertIsNone(learn_life_code(kb, ["berry"], 10, 10))
+        self.assertIsNone(learn_life_code(kb, ["berry"], 10, 9))
+        self.assertEqual(kb.items, {})
+
+    def test_a_gem_or_unknown_code_is_never_a_life(self):
+        kb = KnowledgeBase("sandbox")
+        self.assertIsNone(learn_life_code(kb, ["gem"], 10, 11))
+        self.assertIsNone(learn_life_code(kb, [None], 10, 11))
+        self.assertEqual(kb.items, {})
+
+    def test_a_learned_life_scores_above_gems_and_takes_no_slot(self):
+        items = {"heart": {"life_on_pickup": True}}
+        self.assertEqual(loot_score("heart", items), LIFE_SCORE)
+        self.assertTrue(is_counter_supply("heart", items))
+        self.assertFalse(is_counter_supply("berry", items))
+
+    def test_a_learned_life_survives_a_save_and_load(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("agentrealm_agent.knowledge_base.WORLDS_DIR", Path(tmp)):
+            kb = KnowledgeBase("sandbox")
+            learn_life_code(kb, ["heart"], 10, 11)
+            knowledge_base.save(kb)
+            loaded = knowledge_base.load("sandbox")
+        self.assertTrue(is_counter_supply("heart", loaded.items))
+
+    def test_stowed_supplies_are_never_dropped(self):
+        w = WorldModel(character_id=1)
+        w.held_supplies = [InventorySupply(1, "torch")]
+        w.chest_supplies = [InventorySupply(2, "apple")]
+        self.assertEqual([s.id for s in droppable_supplies(w)], [1])
+
+
 class RunnerRejectionTest(unittest.TestCase):
     """The runner feeds each rejected intent to learn_loot_rejection."""
 
@@ -386,6 +437,112 @@ class RunnerRejectionTest(unittest.TestCase):
         self.r.world.held_supplies = [InventorySupply(i, "torch") for i in range(1, 4)]
         self.reject({"verb": "WithdrawFromChest", "chest_id": 50, "supply_ids": [71]}, "carry_capacity_full")
         self.assertEqual(self.r.world.carry_capacity, 4)
+
+
+class FakeClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+
+    def tick(self, cid, intents, snapshot_version=None):
+        return self.responses.pop(0)
+
+
+class RunnerLootLearningTest(unittest.TestCase):
+    """A47 through the runner's full tick: results, events, then the observation."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.kb = KnowledgeBase("sandbox")
+
+    def run_tick(self, queue: list[dict], results: list[dict], *, lives_after: int, events=None) -> Runner:
+        """Send ``queue`` as q1 and fold one response with ``results`` and the new lives."""
+        response = {
+            "tick": 11,
+            "queue_id": "q1",
+            "intent_results": results,
+            "events_by_tick": events or [],
+            "observation": {"version": 2, "delta": {"lives": lives_after}},
+        }
+        cfg = CharacterConfig("T", "default", "test", "sandbox", scripted(goals=["hold"]), Path("t.toml"))
+        r = Runner(cfg, FakeClient([response]), 1, threading.Event(), out=lambda _: None, knowledge=self.kb)
+        self.addCleanup(r.trace.close)
+        r.world = world(["....."], at=(1, 0))
+        r.world.lives = 10
+        r.world.entities = [
+            Entity("supply", 7, (2, 0), "heart"),
+            Entity("supply", 8, (0, 0), "berry"),
+            Entity("supply", 9, (2, 0), "middle_chest", gem_price=50),
+        ]
+        r.mem = Memory(need_self=False, need_position=False)
+
+        def send(_d):
+            r.mem.pending_intents, r.mem.pending_queue, r.mem.pending_next_index = queue, None, 0
+            return queue
+
+        r.intents_for = send
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(queue[0], "test")):
+            r.tick()
+        return r
+
+    def test_one_applied_take_that_raises_lives_files_its_code(self):
+        self.run_tick(
+            [{"verb": "Take", "supply_id": 7}],
+            [{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}],
+            lives_after=11,
+        )
+        self.assertEqual(self.kb.items.get("heart"), {"life_on_pickup": True})
+
+    def test_two_applied_takes_with_lives_up_file_nothing(self):
+        self.run_tick(
+            [{"verb": "Take", "supply_id": 7}, {"verb": "Take", "supply_id": 8}],
+            [
+                {"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"},
+                {"queue_id": "q1", "index": 1, "tick": 12, "outcome": "applied"},
+            ],
+            lives_after=11,
+        )
+        self.assertNotIn("heart", self.kb.items)
+        self.assertNotIn("berry", self.kb.items)
+
+    def test_a_result_from_another_queue_is_not_ours(self):
+        # A stale result from an older queue must not be read against this queue's Take.
+        self.run_tick(
+            [{"verb": "Take", "supply_id": 8}],
+            [{"queue_id": "q0", "index": 0, "tick": 11, "outcome": "applied"}],
+            lives_after=11,
+        )
+        self.assertEqual(self.kb.items, {})
+
+    def test_take_with_lives_unchanged_files_nothing(self):
+        self.run_tick(
+            [{"verb": "Take", "supply_id": 8}],
+            [{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}],
+            lives_after=10,
+        )
+        self.assertEqual(self.kb.items, {})
+
+    def test_middle_chest_raises_capacity_to_the_manual_default_until_respawn(self):
+        r = self.run_tick(
+            [{"verb": "Take", "supply_id": 9}],
+            [{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}],
+            lives_after=10,
+        )
+        self.assertEqual(r.world.carry_capacity, 30)
+        r.world.apply_events([{"tick": 20, "events": [{"kind": "Respawned", "map_id": 1, "x": 2, "y": 3}]}])
+        self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
+
+    def test_rejected_middle_chest_take_leaves_capacity_alone(self):
+        rejection = {"category": "state", "code": "insufficient_gems", "retryability": "permanent"}
+        r = self.run_tick(
+            [{"verb": "Take", "supply_id": 9}],
+            [{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "rejected", "rejection": rejection}],
+            lives_after=10,
+        )
+        self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
 
 
 if __name__ == "__main__":

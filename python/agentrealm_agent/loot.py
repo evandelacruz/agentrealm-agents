@@ -12,8 +12,11 @@ Sourced rules (docs/GAME_NOTES.md, Items, slots and gear):
 - Gems and lives are consumed on pickup into counters, so they take no slot
   (Manual §11).
 
-Ground gems use ``supply_subtype_code`` ``gem`` (GAME_NOTES, Obs). Lives on
-the ground are still unknown, so hearts first stays off (PLAN.md A20 partial).
+Ground gems use ``supply_subtype_code`` ``gem`` (GAME_NOTES, Obs). Which
+code a life has on the ground is still unknown. A47 learns it in play: when
+``lives`` rises in a response whose only applied ``Take`` was one supply,
+that supply's code is filed as ``life_on_pickup`` in the item table, and
+from then on scores above gems (``learn_life_code``).
 """
 
 from __future__ import annotations
@@ -21,15 +24,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from typing import TYPE_CHECKING
+
 from .item_table import InventorySupply
-from .world import Pos, WorldModel, chebyshev
+from .world import Entity, Pos, WorldModel, chebyshev
+
+if TYPE_CHECKING:
+    from .knowledge_base import KnowledgeBase
 
 # The Olympuff starting kit's pocket knife cannot change hands (Manual §5.3, §11).
 NON_TRANSFERABLE = frozenset({"pocket_knife"})
 # Observed on the wire (GAME_NOTES.md, docs/observations/A20_live_play.md).
 GEM_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
-# Open question: which code a heart/life pickup uses (GAME_NOTES.md).
+# A life's ground code once live play confirms it (A47). Until then the item
+# table's ``life_on_pickup`` rows, learned by ``learn_life_code``, stand in.
 LIFE_SUPPLY_CODES: frozenset[str] = frozenset()
+# Carry caps the Manual §16 gear table gives for the shop's chest upgrades.
+# Assumed, not measured (GAME_NOTES "Assumed until measured"): an applied
+# ``Take`` of one raises capacity to this, and ``carry_capacity_full`` still
+# lowers it to what was really carried (A47).
+MANUAL_CHEST_CAPACITY: dict[str, int] = {"middle_chest": 30, "red_chest": 100}
 # Food GAME_NOTES names (Manual §16; Obs).
 FOOD_CODES = frozenset({"golden_cap", "apple", "berry"})
 
@@ -38,16 +52,23 @@ GEM_SCORE = 5_000
 UNKNOWN_SCORE = 50
 
 
-def is_counter_supply(code: str | None) -> bool:
+def is_life_supply(code: str | None, items: dict[str, dict[str, Any]]) -> bool:
+    """A life on the ground: a confirmed code, or one the item table learned (A47)."""
+    if not code:
+        return False
+    return code in LIFE_SUPPLY_CODES or (items.get(code) or {}).get("life_on_pickup") is True
+
+
+def is_counter_supply(code: str | None, items: dict[str, dict[str, Any]]) -> bool:
     """Gems and lives are consumed on pickup into counters (Manual §11)."""
-    return bool(code) and (code in LIFE_SUPPLY_CODES or code in GEM_SUPPLY_CODES)
+    return bool(code) and (code in GEM_SUPPLY_CODES or is_life_supply(code, items))
 
 
 def loot_score(code: str | None, items: dict[str, dict[str, Any]]) -> int:
-    """Higher is more worth carrying; lives first, then gems (PLAYABLE_AGENT_PLAN)."""
+    """Higher is more worth carrying: lives, then gems, then priced gear, potions and food."""
     if not code:
         return UNKNOWN_SCORE
-    if code in LIFE_SUPPLY_CODES:
+    if is_life_supply(code, items):
         return LIFE_SCORE
     if code in GEM_SUPPLY_CODES:
         return GEM_SCORE
@@ -72,7 +93,7 @@ def droppable_supplies(w: WorldModel) -> list[InventorySupply]:
     """Held supplies ``Drop`` may shed.
 
     Stowed supplies (``inventory.chest``) are left out: whether ``Drop`` takes
-    one is not documented (GAME_NOTES open questions).
+    one is not documented and not yet observed (GAME_NOTES open questions, A57).
     """
     return [s for s in w.held_supplies if s.code not in NON_TRANSFERABLE and s.id not in w.undroppable]
 
@@ -100,7 +121,7 @@ def pickup_room(w: WorldModel, p: Pickup, items: dict[str, dict[str, Any]]) -> I
 
     A full pack skips a pickup that does not beat the worst droppable supply.
     """
-    if p.chest_id is None and is_counter_supply(p.code):
+    if p.chest_id is None and is_counter_supply(p.code, items):
         return True
     if not inventory_full(w):
         return True
@@ -137,6 +158,52 @@ def worthwhile_pickups(w: WorldModel, items: dict[str, dict[str, Any]]) -> list[
     keep = [p for p in pickups(w, items) if pickup_room(w, p, items) is not False]
     keep.sort(key=lambda p: (-p.score, chebyshev(p.pos, here), p.supply_id))
     return keep
+
+
+def supply_code_for_take(intent: dict | None, entities: list[Entity]) -> str | None:
+    """Subtype of the supply a ``Take`` names, from the pre-tick entity list."""
+    if not intent or intent.get("verb") != "Take":
+        return None
+    sid = intent.get("supply_id")
+    if not isinstance(sid, int):
+        return None
+    for e in entities:
+        if e.kind == "supply" and e.id == sid:
+            return e.code or None
+    return None
+
+
+def learn_chest_upgrade(w: WorldModel, code: str | None) -> None:
+    """An applied ``Take`` of a chest upgrade raises carry capacity to the
+    Manual §16 cap (assumed, not measured; A47)."""
+    cap = MANUAL_CHEST_CAPACITY.get(code or "")
+    if cap is not None:
+        w.carry_capacity = max(w.carry_capacity, cap)
+
+
+def learn_life_code(
+    knowledge: KnowledgeBase | None,
+    take_codes: list[str | None],
+    lives_before: int,
+    lives_after: int,
+) -> str | None:
+    """File a life's ground code after a response where ``lives`` rose (A47).
+
+    ``take_codes`` are the codes of this response's applied ``Take``s of our
+    own queue. Only when exactly one could explain the rise is its code filed
+    as ``life_on_pickup``; with two or more, or none, nothing is learned, since
+    a wrong guess would score that supply above gems for good. Returns the
+    code filed, so the runner can log it for promotion to
+    ``LIFE_SUPPLY_CODES``.
+    """
+    if knowledge is None or lives_after <= lives_before or len(take_codes) != 1:
+        return None
+    code = take_codes[0]
+    if not code or code in GEM_SUPPLY_CODES:
+        return None
+    with knowledge.lock:
+        knowledge.items.setdefault(code, {})["life_on_pickup"] = True
+    return code
 
 
 def learn_loot_rejection(w: WorldModel, intent: dict | None, code: str | None) -> None:

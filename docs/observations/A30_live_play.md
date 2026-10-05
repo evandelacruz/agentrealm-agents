@@ -18,5 +18,14 @@ that are not `nothing_to_read`).
   `OlympuffWalker` returned `not_on_map` on `GET …/position` (and could not
   be walked). `OlympuffWalker` returned `rate_limited` on repeated reads.
 
-Until a dedicated character can tick on-map, or observation notes a scroll
-code, **Investigate** still does not nominate scroll reads (PLAN.md A30).
+## 2026-10-05 (A56 implementation pass)
+
+- **Code shipped:** Investigate logs seen subtype codes, probes each logged
+  code once with `Read {kind: supply}` (ground supplies preferred over carried),
+  stores scroll codes that apply, and nominates unread scrolls for free read.
+- **Live confirmation:** `create` for `OlympuffWalker` still returned
+  `character_cap_reached`; sandbox `Wren` returned `open_character_cap_reached`.
+  No scroll subtype code was confirmed on the wire in this pass.
+- **When live play opens:** Spot a scroll on the map or in a pack, note its
+  `supply_subtype_code` here after a confirming `Read`, then remove the
+  GAME_NOTES open question once a code is recorded.

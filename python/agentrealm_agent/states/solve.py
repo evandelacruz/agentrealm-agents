@@ -57,7 +57,7 @@ def solve_outcome(
     knowledge: KnowledgeBase | None = None,
     state: str = "Solve",
 ) -> StateOutcome:
-    plan.advance(w)
+    plan.advance(w, m)
     op = plan.current()
     if op is None or op["op"] not in SOLVE_OPS:
         return _rearm_outcome(w, m, state)
@@ -92,7 +92,7 @@ def _track_progress(
         return out
     if not plan.note_stalled(w.tick):
         return out
-    plan.drop_current(f"{out.reason}; no progress for {PLAN_STALL_SECONDS}s")
+    plan.drop_current(f"{out.reason}; no progress for {PLAN_STALL_SECONDS}s", memory=m)
     if m.goal == GOAL:
         m.path, m.goal = [], ""
     return StateOutcome(None, f"dropped {op['op']}: {out.reason}", state=state)

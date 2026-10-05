@@ -1,4 +1,8 @@
-"""Single intents the states build (A5)."""
+"""Intent dict builders for ``POST tick`` (A5).
+
+Each helper returns one API intent; states usually return a one-element list.
+Field names match https://agentrealm.gg/docs/api — wrong shapes are rejected at ingest.
+"""
 
 from __future__ import annotations
 
@@ -36,6 +40,10 @@ def read_block(pos: Pos) -> dict:
     # A sign target is exactly {kind, x, y} on the character's own map; a field
     # the verb does not take is malformed_intent at ingest (API rules § Read).
     return {"verb": "Read", "target": {"kind": "block", "x": pos[0], "y": pos[1]}}
+
+
+def read_supply(supply_id: int) -> dict:
+    return {"verb": "Read", "target": {"kind": "supply", "supply_id": supply_id}}
 
 
 def say_to(npc: Entity, text: str = "hello") -> dict:

@@ -12,6 +12,12 @@ from .base import PlayContext, State, StateOutcome
 
 
 class ExampleGreetState(State):
+    """Teaching state (A51): ``Say`` hello once per other player in sight.
+
+    Not in shipped ``STATES``; opt in via ``dispatch.py``. Guards when scripted,
+    alive, and an ungreeted player is visible.
+    """
+
     name = "ExampleGreet"
 
     def __init__(self) -> None:

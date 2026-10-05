@@ -92,7 +92,7 @@ States are checked in priority order once per round trip: after each `POST tick`
 | 0 | `Downed` | `Died` | Waits for `Respawned`, then queues `Recover` |
 | 1 | `Escape` | Standing on damage, or trapped | Steps off; crosses as little hazard as possible |
 | 1 | `Retreat` | The next `retreat_hits` expected hits could kill (per-type damage from the threat table), or the threat outclasses us | Goes to the nearest known safe tile, then `Heal` (see Health and lives) |
-| 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Food in reach: walk onto it or `Take` it; food eaten on pickup heals there, carried food is then `Arm` + `Use` self. Else a carried potion: `Arm` + `Use` self, then re-`Arm` the weapon (A24; until then A10 leaves it unarmed). Else, only if safe-zone regeneration has been measured, rests in a safe zone. Else goes to town and waits in the safe zone for the next goal to need less, raising a `buy` for potions (`Shop`, M8) |
+| 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Food in reach: walk onto it or `Take` it; food eaten on pickup heals there, carried food is then `Arm` + `Use` self. Else a carried potion: `Arm` + `Use` self. Once nothing is left to drink, re-`Arm` the weapon the drink swapped out, even at full health or with a hostile in range. Else, only if safe-zone regeneration has been measured, rests in a safe zone. Else goes to town and waits in the safe zone for the next goal to need less, raising a `buy` for potions (`Shop`, M8) |
 | 2 | `Fight` | A hostile is in range, it is not of a kind in `never_attack`, and the win estimate clears the margin, counting every hostile within 2 blocks of it | Closes to `attack_range`, `Use` on the NPC by id (its block on the tick the swing runs), with the retreat queued behind |
 | 2 | `Flee` | A hostile is in range and we would lose | Opens distance toward safety; safe zones stop all damage |
 | 3 | `Recover` | Our death chest is on a reachable map | Walks next to it (a safe tile next to it is enough), `WithdrawFromChest` |
@@ -185,7 +185,7 @@ Progress in this game is hidden behind things a player has to poke at. Helpers d
 | Thing | Action | Notes |
 |---|---|---|
 | Unread `readable` cell (sign, statue, plinth) | `Read` | While it is in sight (perception × zone brightness, plus light, capped at perception), so no walk is needed once seen. Free: no speech cost, one per tick |
-| Unread scroll, carried or in sight | `Read` | |
+| Unread scroll, carried or in sight | `Read` | Free like readable cells once the subtype is known; unseen codes are probed once (PLAN.md A56) |
 | NPC id never spoken to | `Say` once | Works from 25 blocks. A helper replies with its line; a hostile stays silent, which also tells us it is not a helper. Spaced 1 s apart |
 | Supply type never seen | Walk over or `Take`, if free and safe | Fills the item table |
 | Odd block out | Try each capability we hold, cheapest first | Detector below |
@@ -247,7 +247,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 **Raising health and protection over time:**
 - **Armor first.** Defense counts twice: it lowers the chance to be hit and the damage of each hit. `Equip` scores armor by the damage it would have saved against the threats in the item and threat tables, and the gem budget puts armor and potions ahead of curiosity spending.
 - **Max health rises on a level's first clear** (`level_clear_ceremony.max_health_gain`), so clearing levels is also how the agent grows. Whether any supply raises max health permanently is an open question in GAME_NOTES; the plan counts on none.
-- **Extra lives** are hearts, consumed on pickup into the lives counter (M §11). In Olympuff they drop from cut grass and bushes (M §16). A heart in sight and safe to reach is a top `Loot` target.
+- **Extra lives** are hearts, consumed on pickup into the lives counter (M §11). In Olympuff they drop from cut grass and bushes (M §16). A heart in sight and safe to reach is a top `Loot` target once its ground code is observed (A47 learns it in play, A57 confirms it); until then Loot scores gems first.
 
 **After a death.** `Recover` runs only when the chest's spot is safe enough at full health: no group of hostiles still there, and not deep in fog. Otherwise the agent re-equips from town and gets the chest later, or writes it off. Every death is logged with its cause and the decision that led to it, and it tightens the risk level for that hostile type.
 
@@ -263,7 +263,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Gear and items
 
-- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, the largest weapon hit per NPC type, and for armor worn alone `damage_taken`, `damage_without` (nothing worn, after that item came off) and `damage_saved` (their difference) per NPC type; A46 stores the capabilities a subtype has opened a block with; served capability tags wait on reads (PLAN.md A46).
+- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, the largest weapon hit per NPC type, and for armor worn alone `damage_taken`, `damage_without` (nothing worn, after that item came off) and `damage_saved` (their difference) per NPC type; A46 stores the capabilities a subtype has opened a block with; capability tags from the Manual's Supplies reference (saims B132) are A54.
 - **Equip** scores each slot and swaps when a carried item beats the worn one. Consumables (potions, food) are kept for `Heal`.
 - **Budget.** Gems are kept through death and gear is not, so the plan spends gems on what most raises survival first (weapon, armor, potions), then on tools a clue asks for.
 - **Compose.** When any fragment is held, its `fragment` field names the whole and the missing slots. The plan tracks it as a goal, and `Solve` composes when the set is complete.
@@ -273,11 +273,12 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, shared by every character of that world run from this checkout. It sits apart from the per-character `python/.state/<name>.json` and trace files:
 
 - Revealed terrain per map, entrance marks, doors and where they lead, safe tiles, hunting grounds and ceilings, shops and prices.
-- Clues: the text of every sign, statue, scroll and helper line, with where it was found and when.
+- Clues: the text of every sign, statue, scroll and helper line, with where it was found and when. `clues` is a list of `{kind, text, map_id, x, y, tick}` rows, plus `speaker_id` on a helper line or `supply_id` on a scroll; a sign is stored once per cell, a scroll once per supply, a helper line once per speaker and text (PLAN.md A32, A56). Each new row also queues `{"trigger": "clue", …row}` on the character's `Memory.clue_signals`, which the strategist drains (A35).
 - `read_cells`: `{"<map_id>": ["x,y", …]}`, readable cells whose `Read` applied, and `spoken_npcs`: NPC ids whose `Say` applied, so `Investigate` never repeats one (PLAN.md A30). Each grows by one entry per sign or NPC in the world.
+- Scroll discovery (A56): `seen_supply_codes`, `probed_supply_codes`, `scroll_subtype_codes`, and `read_supplies` so subtype codes are learned once and scroll text is not re-read.
 - Break attempts per (block, capability), and the result.
 - NPC type stats, item stats, compose results, and what each entrance turned out to need.
-- `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value; `weapon_damage`, the max observed hit per `npc_type_code` from an `NPCDamaged` matched to our `Use`; and for armor, `damage_taken` (worn alone), `damage_without` (nothing worn, filed under the item that just came off) and `damage_saved` (their difference) per `npc_type_code` from `Damaged`, skipping any response whose worn loadout changed (PLAN.md A18).
+- `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value; `heal_amount` (largest health gain seen from a `Take` or self-`Use`) and `heal_on_pickup` (whether pickup healed while hurt, A24); `weapon_damage`, the max observed hit per `npc_type_code` from an `NPCDamaged` matched to our `Use`; and for armor, `damage_taken` (worn alone), `damage_without` (nothing worn, filed under the item that just came off) and `damage_saved` (their difference) per `npc_type_code` from `Damaged`, skipping any response whose worn loadout changed (PLAN.md A18).
 - Level progress: which levels are cleared, and the route and solution for each.
 
 This is what makes a second run better than the first, and it is what the strategist reads. None of it is committed.
@@ -285,7 +286,7 @@ This is what makes a second run better than the first, and it is what the strate
 ### Strategist (LLM, optional)
 
 - **Runs** in its own thread. The state machine keeps the old plan until a new one lands.
-- **Triggers:** a new clue, an NPC reply, entering a level, no progress for N minutes, a goal finished or failed, a death. Calls are rate-limited and capped by a cost budget.
+- **Triggers:** a new clue, an NPC reply, entering a level, no progress for N minutes, a goal finished or failed, a death. Calls are rate-limited and capped by a token budget (`AGENTREALM_STRATEGIST_MAX_TOKENS`, PLAN.md A35): tokens times the model's price is the cost, so the cap holds whatever the model costs.
 - **Input:** a compact state summary, relevant knowledge-base entries, all clue text, the current plan, and the operator's directives.
 - **Its main job** is interpretation: turn clue text (riddles and directions) into concrete goals, such as which entrance mark matches a clue, what tool an entrance needs, or which odd block to try.
 - **Output:** JSON checked against a schema. The example uses an invented world:

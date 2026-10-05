@@ -61,7 +61,7 @@ SHARED_KEYS = {"explore": "frontier", "explore_area": "frontier", "level:frontie
 FRONTIER_GOALS = frozenset(g for g, kind in SHARED_KEYS.items() if kind == "frontier")
 
 ATTEMPTS_KEPT = 32
-SIGNALS_KEPT = 16  # nothing drains them until the strategist (A35)
+SIGNALS_KEPT = 16  # newest kept until the strategist drains them (A35)
 
 
 @dataclass

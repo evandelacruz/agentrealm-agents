@@ -150,7 +150,7 @@ class ShopBuyTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(9, "stick")]
         w.entities = [Entity("supply", 5, (1, 2), "torch", gem_price=3)]
         plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
-        m = Memory()
+        m = Memory(equip_not_wearable={"stick"})  # Equip already tried the stick on (A55)
         out = dispatch(w, ctx(w, m=m, plan=plan))
         self.assertEqual(out.state, "Shop")
         self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": 9}, {"verb": "Take", "supply_id": 5}])

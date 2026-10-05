@@ -1,4 +1,8 @@
-"""Investigate: reads, speech, and door or entrance looks (A30)."""
+"""Investigate: reads, NPC hellos, and door or entrance looks (A30).
+
+Priority 4. Runs when ``pick_interest_tick`` names a readable cell, unseen NPC,
+or minimap mark within the curiosity budget.
+"""
 
 from __future__ import annotations
 
@@ -10,11 +14,13 @@ from ..pathing import grid_params, guided_step, nav_search
 from ..world import Pos, WorldModel
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
-from .intents import read_block, say_to, set_position
+from .intents import read_block, read_supply, say_to, set_position
 from .travel import route_step
 
 
 class InvestigateState(State):
+    """Priority 4. ``Read``, ``Say``, or walks to look at a door or entrance mark."""
+
     name = "Investigate"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
@@ -31,6 +37,8 @@ class InvestigateState(State):
             return StateOutcome(None, "nothing to investigate", state=self.name)
         if item.kind == "read_block" and item.map_id is not None and item.pos is not None:
             return StateOutcome([read_block(item.pos)], item.reason, state=self.name)
+        if item.kind == "read_supply" and item.supply_id is not None:
+            return StateOutcome([read_supply(item.supply_id)], item.reason, state=self.name)
         if item.kind == "say" and item.npc is not None:
             return StateOutcome([say_to(item.npc)], item.reason, state=self.name)
         if item.kind == "look_door" and item.map_id is not None and item.pos is not None:

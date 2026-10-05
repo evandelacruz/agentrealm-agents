@@ -123,6 +123,11 @@ class KnowledgeBase:
         return cls(world_code=world_code)
 
 
+def knowledge_items(knowledge: KnowledgeBase | None) -> dict[str, dict[str, Any]]:
+    """The ``items`` section (weapon stats, shop prices, armor trials), or ``{}``."""
+    return (knowledge.items if knowledge else {}) or {}
+
+
 def _migrate_entrance_keys(entrances: dict[str, Any]) -> None:
     """Rekey old cell-only ``"x,y"`` entrance rows to ``"<map_id>:<x>,<y>"`` from
     their ``map_id``, once at load. A row with no usable ``map_id`` keeps its old

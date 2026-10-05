@@ -45,17 +45,23 @@
 
   "A18": {"state": "done"},
 
-  "A19": {"state": "partial", "remaining": "Wearing a subtype never yet worn: no read serves its slot (PLAN.md Server gaps)."},
+  "A19": {"state": "done"},
 
-  "A20": {"state": "partial", "remaining": "Hearts first until a life's ground supply_subtype_code is observed (Olympuff live play: 1500+ grass cuts at map 76 town, codes gem/berry only — docs/observations/A20_live_play.md). Stowed Drop and middle_chest carry capacity (GAME_NOTES open questions). Gems-first uses code gem."},
+  "A55": {"state": "done"},
 
-  "A21": {"state": "partial", "remaining": "travel:shop has no path yet, so Shop buys only priced supplies already in sight."},
+  "A20": {"state": "done"},
+
+  "A47": {"state": "done"},
+
+  "A57": {"state": "open", "note": "Live play still needed: confirm a life's ground code, probe stowed Drop on inventory.chest, measure middle_chest capacity at carry_capacity_full. Observers had no stowed supplies and under 50 gems; see docs/observations/A47_live_play.md (session 3)."},
+
+  "A21": {"state": "done"},
 
   "A22": {"state": "done"},
 
   "A23": {"state": "done"},
 
-  "A24": {"state": "open"},
+  "A24": {"state": "done"},
 
   "A25": {"state": "open"},
 
@@ -67,17 +73,19 @@
 
   "A29": {"state": "open"},
 
-  "A30": {"state": "partial", "remaining": "Scroll reads (needs observed scroll supply_subtype_code; GAME_NOTES open questions; live play blocked — docs/observations/A30_live_play.md)."},
+  "A30": {"state": "done"},
 
-  "A31": {"state": "open"},
+  "A56": {"state": "done"},
 
-  "A32": {"state": "open"},
+  "A31": {"state": "done"},
+
+  "A32": {"state": "done"},
 
   "A33": {"state": "open"},
 
   "A34": {"state": "done"},
 
-  "A35": {"state": "open"},
+  "A35": {"state": "done"},
 
   "A36": {"state": "open"},
 
@@ -99,13 +107,15 @@
 
   "A45": {"state": "done"},
 
-  "A46": {"state": "partial", "remaining": "Merge capability tags from supply reads onto items rows once a read serves them (PLAN.md Server gaps)."},
+  "A46": {"state": "done"},
+
+  "A54": {"state": "open", "note": "Waiting on the Manual Supplies reference (saims B132)."},
 
   "A50": {"state": "done"},
 
   "A51": {"state": "done"},
 
-  "A52": {"state": "open"},
+  "A52": {"state": "done"},
 
-  "A53": {"state": "open"}
+  "A53": {"state": "done"}
 }

@@ -13,6 +13,8 @@ from .directives import PARAM_DEFAULTS, _valid_param
 from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
+from .memory import Memory, note_goal_done, note_goal_failed
+from .travel.ops import travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
 
 log = logging.getLogger(__name__)
@@ -50,7 +52,7 @@ BOSS_PLAN_OPS = frozenset({"fight_boss"})
 SHOP_PLAN_OPS = frozenset({"buy"})
 SOLVE_OPS = frozenset({"compose", "use_block"})
 # `travel` destinations with a path today; `hunting_ground` waits on knowledge.
-TRAVEL_PATHED = frozenset({"entrance", "town", "point"})
+TRAVEL_PATHED = frozenset({"entrance", "town", "point", "shop"})
 
 # Built-in `explore` explores the whole map: no center, no radius bound.
 EXPLORE_ANYWHERE = 1 << 30
@@ -334,11 +336,22 @@ def parse_directives_goals(lines: list[str]) -> list[GoalOp]:
     return out
 
 
-def parse_plan_payload(raw: object, *, floor_params: dict[str, float | int]) -> tuple[list[GoalOp], dict[str, float | int], str]:
-    """Parse strategist JSON: goals, params, notes. Drops invalid ops and params."""
+def parse_plan_payload(
+    raw: object,
+    *,
+    floor_params: dict[str, float | int],
+    current_params: dict[str, float | int] | None = None,
+) -> tuple[list[GoalOp], dict[str, float | int], str]:
+    """Parse strategist JSON: goals, params, notes. Drops invalid ops and params.
+
+    Incoming ``params`` merge onto ``current_params`` (the floor when not given),
+    so a reply naming one key leaves the others as they were. Each key is still
+    bounded by ``floor_params``.
+    """
+    current = dict(floor_params if current_params is None else current_params)
     if not isinstance(raw, dict):
         log.warning("plan: payload is not an object")
-        return [], dict(floor_params), ""
+        return [], current, ""
     extra = set(raw) - {"goals", "params", "notes"}
     if extra:
         log.warning("plan: dropped unknown top-level keys %s", sorted(extra))
@@ -355,7 +368,7 @@ def parse_plan_payload(raw: object, *, floor_params: dict[str, float | int]) -> 
     if not isinstance(notes, str):
         log.warning("plan: `notes` must be a string")
         notes = ""
-    params = dict(floor_params)
+    params = current
     incoming = raw.get("params")
     if incoming is not None:
         if not isinstance(incoming, dict):
@@ -408,8 +421,8 @@ def apply_set_param(
 class Plan:
     """Validated goal stack plus effective params (A34).
 
-    ``params`` holds the effective survival params for the strategist; the
-    survival states read the directives' params (A9). ``current`` and ``goal_done`` only read;
+    ``params`` holds the effective survival params the states read (A9): the
+    directives' values, tightened by ``set_param`` or the strategist (A35). ``current`` and ``goal_done`` only read;
     ``advance``, ``drop_current`` and ``finish_current`` are the only calls that move the stack.
     """
 
@@ -452,7 +465,7 @@ class Plan:
         """The op at the top of the stack, or None when it is empty."""
         return self.goals[self.index] if self.index < len(self.goals) else None
 
-    def advance(self, world: WorldModel) -> None:
+    def advance(self, world: WorldModel, memory: Memory | None = None) -> None:
         """Apply ``set_param`` ops reached in order and pop finished goals."""
         while (op := self.current()) is not None:
             if op["op"] == "set_param":
@@ -465,19 +478,22 @@ class Plan:
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
                 return
+            note_goal_done(memory, op, "goal_done")
             self._pop_current()
 
-    def drop_current(self, reason: str) -> None:
+    def drop_current(self, reason: str, memory: Memory | None = None) -> None:
         op = self.current()
         if op is not None:
             log.warning("plan: dropped op %r: %s", op, reason)
+            note_goal_failed(memory, op, reason)
         self._pop_current()
 
-    def finish_current(self, reason: str) -> None:
+    def finish_current(self, reason: str, memory: Memory | None = None) -> None:
         """Pop an op whose state saw it finish (``fight_boss``, A38)."""
         op = self.current()
         if op is not None:
             log.info("plan: finished op %r: %s", op, reason)
+            note_goal_done(memory, op, reason)
         self._pop_current()
 
     def note_stalled(self, tick: int) -> bool:
@@ -499,10 +515,9 @@ class Plan:
         directive_goals: list[str],
         directive_params: dict[str, float | int],
     ) -> Plan | None:
-        stack_goals = [g for g in directive_goals if not is_travel_goal(g)]
-        if not stack_goals:
+        if not any(not is_travel_goal(g) for g in directive_goals):
             return None
-        ops = parse_directives_goals(stack_goals)
+        ops = directive_stack_ops(directive_goals)
         if not ops:
             log.warning("plan: no valid directives goal in %r; using the built-in plan", directive_goals)
             return None
@@ -512,6 +527,14 @@ class Plan:
     @classmethod
     def from_policy(cls, policy: Policy, directive_params: dict[str, float | int]) -> Plan:
         return cls(list(builtin_goals(policy)), dict(directive_params), floor_params=dict(directive_params))
+
+
+def directive_stack_ops(directive_goals: list[str]) -> list[GoalOp]:
+    """The stack ops directives ``goals`` set; ``travel:*`` entries belong to Travel (A27).
+
+    Non-empty means the directives file owns the goal stack, so the strategist leaves it alone (A35).
+    """
+    return parse_directives_goals([g for g in directive_goals if not is_travel_goal(g)])
 
 
 def builtin_goals(policy: Policy) -> list[GoalOp]:
@@ -571,6 +594,23 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
             return world.view.tiles.get(world.pos) in DOORS
         if op["to"] == "town":
             return (world.map_id, world.pos) in world.respawn_anchors
+        if op["to"] == "shop":
+            here = world.pos
+            if here is None:
+                return False
+            t = travel_op_from_plan_goal(op)
+            if t.x is not None and t.y is not None:
+                dest_map = t.map_id if t.map_id is not None else world.map_id
+                return dest_map == world.map_id and here == (t.x, t.y)
+            # Any shop: a priced supply underfoot is one. A bought-out known
+            # cell is arrival too; `plan_step` pops that one, it needs the KB.
+            return any(
+                e.kind == "supply"
+                and isinstance(e.gem_price, int)
+                and e.gem_price > 0
+                and e.pos == here
+                for e in world.entities
+            )
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
     if name == "use_block":

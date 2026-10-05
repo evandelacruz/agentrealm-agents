@@ -7,8 +7,8 @@ top-level knowledge-base keys of its own (PLAYABLE_AGENT_PLAN Knowledge base):
   ``Read`` applied;
 - ``spoken_npcs``: NPC ids whose ``Say`` applied.
 
-Both grow only with what the world holds, one entry per sign or NPC. The text
-read or heard, with place and time, is A32.
+Both grow only with what the world holds, one entry per sign or NPC. Clue
+text with place and time lives in ``kb.clues`` (``clues.py``, A32).
 """
 
 from __future__ import annotations

@@ -33,7 +33,8 @@ from .item_table import (
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
-from .loot import learn_loot_rejection
+from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
+from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending
 from .shop import note_shop_result
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.ops import refresh_travel_stack
@@ -56,9 +57,22 @@ from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
 from .curiosity_budget import record_curiosity_queue
-from .interest_list import read_key, say_key
+from .interest_list import read_key, read_supply_key, say_key
+from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
 from .investigation import mark_cell_read, mark_npc_spoken
+from .scroll_investigation import (
+    codes_from_entities_payload,
+    codes_from_inventory_supplies,
+    log_supply_codes_seen,
+    mark_code_probed,
+    mark_scroll_subtype,
+    mark_supply_read,
+    scroll_subtype_codes,
+    supply_code_on_world,
+)
 from .zone_discovery import apply_town, apply_zone, zone_failed
+from .memory import queue_signal
+from .strategist import Strategist
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
@@ -106,6 +120,7 @@ class Runner:
         self.knowledge = knowledge
         self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
+        self._applied_take_codes: list[str | None] = []  # A47: codes of this response's applied Takes
         self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
         self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
         self._removed_map: int | None = None  # A18: map the character was on when it was taken off
@@ -126,6 +141,7 @@ class Runner:
         self.acceptance = acceptance
         self.plan = self._build_plan()
         self._level_timer = LevelTimer()
+        self.strategist: Strategist | None = None
 
     def _build_plan(self) -> Plan:
         d = self.directives.directives
@@ -171,7 +187,7 @@ class Runner:
             self.cfg.policy,
             self.rng,
             never_attack=self.directives.directives.never_attack,
-            params=self.directives.directives.params,
+            params=self.plan.params,  # directives params, tightened by the strategist or a set_param op (A34, A35)
             knowledge=self.knowledge,
             directives=self.directives.directives,
             plan=plan,
@@ -204,6 +220,9 @@ class Runner:
             sync_town(self.knowledge, world.get("town"))
             self._sync_minimap()
         refresh_travel_stack(self.mem, self.directives.directives.goals)
+        self.strategist = Strategist.from_env(tick_hz=hz)
+        self.strategist.start()
+        self.mem.strategist_progress_tick = self.world.tick
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:
@@ -218,6 +237,7 @@ class Runner:
                 old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():
                     self.reload_directives(old_goals)
+                self.strategist.on_window(self)
                 call = choose_call(self.world, self.mem, self.cfg.policy)
                 urgent = self.acceptance is not None and is_urgent(self.world, self.mem, self.cfg.policy)
                 if call == "skip":
@@ -237,6 +257,8 @@ class Runner:
                                 alive=self.world.alive,
                             )
         finally:
+            if self.strategist is not None:
+                self.strategist.stop()
             if self.knowledge is not None:
                 # Tiles learned from tick deltas, which terrain reads did not merge.
                 sync_world_maps(self.knowledge, self.world)
@@ -430,12 +452,16 @@ class Runner:
             record_curiosity_queue(m, w.tick, intents, m.state)
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
+        lives_before = w.lives
         rejected = self.apply_intent_results(r.get("intent_results") or [])
         earlier = w.entities
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        absorb_heal_pending(m, w, self.knowledge, events)
+        self._learn_life_code(lives_before)
         w.note_level_clear(r.get("level_clear_ceremony"))
+        self._log_inventory_supply_codes()
         self._sync_loadout()
         sync_refusals(m, w)
         w.learn_threat(events, earlier)
@@ -673,6 +699,7 @@ class Runner:
         """Fold intent results since the last call. True if the last one rejected."""
         w, m = self.world, self.mem
         self._applied_uses = []
+        self._applied_take_codes = []
         self._loadout_verbs = []
         if not results:
             return False
@@ -718,12 +745,14 @@ class Runner:
         intent = self._intent_at(index)
         note_shop_result(m, intent, result.get("outcome") != "rejected")
         if m.state == "Equip":
-            note_equip_result(m, w, intent, result.get("outcome") == "rejected")
+            code = (result.get("rejection") or {}).get("code")
+            note_equip_result(m, w, intent, result.get("outcome") == "rejected", code)
         if result.get("outcome") != "rejected":
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
                 nav_on_step(m, w)
+                m.strategist_progress_tick = w.tick  # idle trigger (A35)
                 if self.acceptance is not None:
                     self.acceptance.on_step_applied()
                 if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:
@@ -745,6 +774,11 @@ class Runner:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
+            if intent and intent.get("verb") == "Take":
+                code = supply_code_for_take(intent, w.entities)
+                self._applied_take_codes.append(code)
+                learn_chest_upgrade(w, code)
+            self._note_heal_intent(intent, index)
             self._note_investigation(intent, result)
             if m.pending is not None and index == 0:
                 m.pending = None
@@ -777,6 +811,54 @@ class Runner:
             m.need_self = True
         return True
 
+    def _learn_life_code(self, lives_before: int) -> None:
+        """After the observation, file a life's ground code if one Take raised lives (A47)."""
+        code = learn_life_code(self.knowledge, self._applied_take_codes, lives_before, self.world.lives)
+        if code is not None:
+            self.log(
+                "loot",
+                f"learned life ground code {code!r} (promote to LIFE_SUPPLY_CODES once confirmed)",
+                {"life_supply_code": code, "lives_before": lives_before, "lives": self.world.lives},
+            )
+
+    def _note_heal_intent(self, intent: dict | None, index: int) -> None:
+        """Remember health before a food ``Take`` or self-``Use`` for item-table learning (A24)."""
+        if not intent:
+            return
+        w, m = self.world, self.mem
+        verb = intent.get("verb")
+        if verb == "Take":
+            sid = intent.get("supply_id")
+            for e in w.entities:
+                if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
+                    note_heal_pending(m, w, e.code, "take")
+            return
+        if verb != "Use":
+            return
+        target = intent.get("target") or {}
+        if target.get("kind") != "character" or int(target.get("character_id", -1)) != w.character_id:
+            return
+        code = self._used_on_self_code(index)
+        if code in FOOD_CODES | POTION_CODES:
+            note_heal_pending(m, w, code, "use")
+
+    def _used_on_self_code(self, index: int) -> str | None:
+        """The code a self-``Use`` at ``index`` drinks or eats.
+
+        Heal sends ``[Arm item, Use self]`` in one queue, and both results are
+        applied before the observation updates ``armed_code``. So the ``Arm``
+        just before the ``Use`` names the item; with no ``Arm`` there, the item
+        was already armed.
+        """
+        w = self.world
+        before = self._intent_at(index - 1) if index > 0 else None
+        if before and before.get("verb") == "Arm":
+            for h in w.held_supplies:
+                if h.id == before.get("supply_id"):
+                    return h.code
+            return None
+        return w.armed_code
+
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
         """Remember an applied Read/Say in the knowledge base; count a refused one."""
         if not intent or intent.get("verb") not in ("Read", "Say"):
@@ -789,6 +871,31 @@ class Runner:
             key = read_key(map_id, pos)
             if applied:
                 mark_cell_read(self.knowledge, map_id, pos)
+                note_read_clue(
+                    self.knowledge,
+                    self.mem,
+                    result,
+                    map_id,
+                    pos,
+                    int(result.get("tick", self.world.tick)),
+                )
+        elif target.get("kind") == "supply" and target.get("supply_id") is not None:
+            sid = int(target["supply_id"])
+            key = read_supply_key(sid)
+            code = supply_code_on_world(self.world, sid)
+            rej = result.get("rejection") or {}
+            if applied:
+                mark_supply_read(self.knowledge, sid)
+                if code:
+                    mark_scroll_subtype(self.knowledge, code)
+                note_scroll_clue(self.knowledge, self.mem, self.world, result, sid)
+            elif rej.get("code") == "nothing_to_read":
+                if code and code not in scroll_subtype_codes(self.knowledge):
+                    # A probe answered: this code is not a scroll. Nothing was refused.
+                    mark_code_probed(self.knowledge, code)
+                    return
+                # A scroll with no text (or a code learned wrong): never read it again.
+                mark_supply_read(self.knowledge, sid)
         elif intent["verb"] == "Say" and intent.get("npc_id") is not None:
             key = say_key(int(intent["npc_id"]))
             if applied:
@@ -808,6 +915,14 @@ class Runner:
 
     def _learn_items_from_entities(self, payload: dict) -> None:
         self._with_item_table(lambda items: absorb_entities_payload(items, payload))
+        log_supply_codes_seen(self.knowledge, codes_from_entities_payload(payload))
+
+    def _log_inventory_supply_codes(self) -> None:
+        w = self.world
+        log_supply_codes_seen(
+            self.knowledge,
+            codes_from_inventory_supplies(w.held_supplies + w.chest_supplies),
+        )
 
     def _note_reach(self, result: dict, intent: dict | None) -> None:
         # Held until the same response's observation is applied: an Arm that
@@ -850,11 +965,15 @@ class Runner:
             # The baseline holds only until the next loadout change, death or map change.
             self._removed_code = None
 
+        seen_codes: list[str] = []
+
         def learn(items: dict) -> None:
             if obs and not obs.get("unchanged"):
                 body = obs.get("snapshot") if obs.get("complete") else obs.get("delta")
                 if isinstance(body, dict) and "entities" in body:
-                    absorb_entities_payload(items, body.get("entities"))
+                    entities = body.get("entities")
+                    absorb_entities_payload(items, entities)
+                    seen_codes.extend(codes_from_entities_payload(entities))
             absorb_attack_range(items, w.armed_code, reach)
             absorb_npc_damaged(
                 items,
@@ -868,6 +987,7 @@ class Runner:
                 absorb_damaged_worn(items, events, w.worn_codes, self._removed_code, w.entities, earlier_entities)
 
         self._with_item_table(learn)
+        log_supply_codes_seen(self.knowledge, seen_codes)
 
     def _note_break_use(self, intent: dict | None, result: dict, block, index: int) -> None:
         """Settle the Break ``Use`` in flight (A28).
@@ -934,6 +1054,8 @@ class Runner:
                     code=w.armed_code,
                 )
                 m.break_pending = None
+                if m.break_odd == (map_id, pos):
+                    m.break_odd = None
                 on_break_opened(m, w, nav_active(m, w))
                 return
 
@@ -941,12 +1063,23 @@ class Runner:
         w, m = self.world, self.mem
         for ev in events:
             kind = ev.get("kind")
+            if kind == "SpokenTo":
+                note_spoken_clue(self.knowledge, m, w, ev, w.tick)
             # These happen to the queue owner and carry no subject_id (docs/API.md, Events).
             if kind in ("Damaged", "Attacked"):
                 m.alarm = True
             if kind == "Died":
                 if self.acceptance is not None and hasattr(self.acceptance, "on_death"):
                     self.acceptance.on_death()
+                queue_signal(
+                    m,
+                    {
+                        "trigger": "death",
+                        "tick": w.tick,
+                        "cause": ev.get("cause"),
+                        "chest_id": ev.get("chest_id"),
+                    },
+                )
                 m.need_self = m.need_position = True
                 m.path, m.last_step_tick = [], None
                 m.last_use_tick = m.last_speech_tick = None

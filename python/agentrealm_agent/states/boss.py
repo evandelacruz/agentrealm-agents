@@ -85,7 +85,7 @@ def sync_boss(w: WorldModel, m: Memory, plan: Plan | None) -> None:
         m.boss = BossFight(op, boss.id, w.tick)
     if boss_defeated(w, m.boss):
         assert plan is not None
-        plan.finish_current(f"boss {m.boss.boss_id} defeated")
+        plan.finish_current(f"boss {m.boss.boss_id} defeated", memory=m)
         m.boss = None
         return
     if boss_entity(w, m.boss) is None and not w.in_boss_fight():

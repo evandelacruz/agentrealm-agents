@@ -7,6 +7,7 @@ import random
 from typing import Callable
 
 from .break_memory import break_costs_for_planning, nominate_on_path
+from .clues import nearest_explore_target
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -35,6 +36,8 @@ from .plan import (
     SOLVE_OPS,
     explore_targets,
 )
+from .travel.ops import travel_op_from_plan_goal
+from .travel.resolve import at_destination, resolve_travel
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -81,8 +84,13 @@ def plan_op_goal(op: GoalOp) -> str:
     """The ``Memory.goal`` label a path for ``op`` carries, or "" when no path serves it (A34)."""
     if op["op"] == "explore_area":
         return "explore_area"
-    if op["op"] == "travel" and op["to"] in ("point", "entrance", "town"):
-        return {"point": "plan_travel", "entrance": "plan_entrance", "town": "plan_town"}[op["to"]]
+    if op["op"] == "travel" and op["to"] in ("point", "entrance", "town", "shop"):
+        return {
+            "point": "plan_travel",
+            "entrance": "plan_entrance",
+            "town": "plan_town",
+            "shop": "plan_shop",
+        }[op["to"]]
     return ""
 
 
@@ -130,8 +138,8 @@ def path_for_plan_op(
             targets = {center}
             if nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
                 return None
-        found = nearest_target(
-            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+        found = nearest_explore_target(
+            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge), knowledge
         )
         return (found[1], label, Leg(found[0])) if found and found[1] else None
     if op["op"] != "travel":
@@ -160,6 +168,17 @@ def path_for_plan_op(
                 path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav_search(m, w, label, pos))
                 if path:
                     return path, label, Leg(pos)
+    if op["to"] == "shop":
+        dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
+        if dest is None:
+            return None
+        target, dest_map = dest.pos, dest.map_id
+        if nav_stuck.backed_off(m, label, dest_map, target, w.tick):
+            return None
+        nav = nav_search(m, w, label, target) if dest_map == w.map_id else None
+        path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
+        if path:
+            return path, label, nav_stuck.leg_toward(m, w, label, dest_map, target, path)
     return None
 
 
@@ -183,7 +202,7 @@ def plan_step(
     when they stall (A39), so they are left on the stack here.
     """
     while True:
-        plan.advance(w)
+        plan.advance(w, m)
         op = plan.current()
         if op is None:
             return False
@@ -196,16 +215,23 @@ def plan_step(
                 # Shop runs `buy`; while it has nothing in sight to take, the
                 # op stalls here and is dropped like any other (A21).
                 if plan.note_stalled(w.tick):
-                    plan.drop_current(f"nothing to buy for {PLAN_STALL_SECONDS}s")
+                    plan.drop_current(f"nothing to buy for {PLAN_STALL_SECONDS}s", memory=m)
                     continue
                 return False
-            plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet")
+            plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet", memory=m)
             continue
         if op["op"] == "wait":
             return True
         if op["op"] == "travel" and op["to"] not in TRAVEL_PATHED:
-            plan.drop_current(f"no path to a {op['to']} yet")
+            plan.drop_current(f"no path to a {op['to']} yet", memory=m)
             continue
+        if op["op"] == "travel" and op["to"] == "shop":
+            # A known shop cell stays listed when bought out (A27), so standing
+            # on the resolved cell is arrival even with nothing priced in sight.
+            dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
+            if dest is not None and at_destination(w, dest):
+                plan.finish_current("at shop cell", memory=m)
+                continue
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
         if found and next_step(w, blocked, found[0]):
             plan.stalled_since_tick = None
@@ -213,7 +239,7 @@ def plan_step(
             m.goal_op = dict(op)
             return True
         if plan.note_stalled(w.tick):
-            plan.drop_current(f"no path for {PLAN_STALL_SECONDS}s")
+            plan.drop_current(f"no path for {PLAN_STALL_SECONDS}s", memory=m)
             continue
         return False
 
@@ -508,8 +534,8 @@ def plan_goal(
         return path, Leg(path[-1])
     if goal == "explore":
         targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, view.frontier() - {w.pos}, w.tick)
-        found = nearest_target(
-            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+        found = nearest_explore_target(
+            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge), knowledge
         )
         return (found[1], Leg(found[0])) if found and found[1] else (None, None)
     return None, None

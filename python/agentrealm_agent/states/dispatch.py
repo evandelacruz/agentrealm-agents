@@ -7,6 +7,7 @@ each class in this package and in ``docs/CHARACTER_AND_STATES.md``.
 
 from __future__ import annotations
 
+from ..navigation import oscillation
 from ..navigation.rejection import end_decision
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
@@ -75,24 +76,39 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     it ages what Step rejections taught the map (A14), and starts, ends or
     finishes the boss fight before any guard reads it (A38), and settles
     a Shop purchase whose gems were spent (A21).
+
+    Before any state runs, the oscillation guard checks whether the character
+    is pacing between two cells, whichever states are doing it, and if so
+    gives up the target it walks to; after the pick, ``note_move`` tells it
+    which walk the move belongs to (``navigation/oscillation.py``, A15).
     """
     m = ctx.memory
     yielded: list[str] = []
+    if oscillation.check(m, world) is not None:
+        yielded.append("oscillation: paced between two cells")
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
     try:
-        for state in STATES:
-            active = state.name == m.state and not state.done(world, ctx)
-            if not (active or state.guard(world, ctx)):
-                continue
-            outcome = state.act(world, ctx)
-            if outcome.intents or outcome.wait:
-                m.state = state.name
-                outcome.yielded = yielded
-                return outcome
-            yielded.append(f"{state.name}: {outcome.reason}")
-        m.state = ""
-        reason = f"no state ({'; '.join(yielded)})" if yielded else "no state"
-        return StateOutcome(None, reason, yielded=yielded)
+        outcome = _run_states(world, ctx, yielded)
     finally:
         end_decision(m.nav, world.tick)
+    oscillation.note_move(m, outcome.intents, m.state)
+    return outcome
+
+
+def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> StateOutcome:
+    """The first state, in ``STATES`` order, that runs and sends an intent or waits."""
+    m = ctx.memory
+    for state in STATES:
+        active = state.name == m.state and not state.done(world, ctx)
+        if not (active or state.guard(world, ctx)):
+            continue
+        outcome = state.act(world, ctx)
+        if outcome.intents or outcome.wait:
+            m.state = state.name
+            outcome.yielded = yielded
+            return outcome
+        yielded.append(f"{state.name}: {outcome.reason}")
+    m.state = ""
+    reason = f"no state ({'; '.join(yielded)})" if yielded else "no state"
+    return StateOutcome(None, reason, yielded=yielded)

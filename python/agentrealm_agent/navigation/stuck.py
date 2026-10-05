@@ -104,6 +104,14 @@ class NavStuckMemory:
     backoff_until: dict[str, int] = field(default_factory=dict)
     backoff_power: dict[str, int] = field(default_factory=dict)
     stuck_signals: list[dict] = field(default_factory=list)
+    # The oscillation guard (navigation/oscillation.py): cells stood on at
+    # recent decisions, the (walk goal, state) of the move into each, the
+    # last decision's move, and its events waiting for the trace.
+    recent_cells: list[Pos] = field(default_factory=list)
+    recent_moves: list[tuple[str, str]] = field(default_factory=list)
+    last_move: tuple[str, str] = ("", "")
+    cells_map: int | None = None
+    oscillations: list[dict] = field(default_factory=list)
 
 
 def goal_key(goal: str, map_id: int | None, target: Pos) -> str:

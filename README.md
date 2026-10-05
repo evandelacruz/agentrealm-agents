@@ -70,12 +70,15 @@ Live M7 smoke: `make smoke-m7-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…
 
 While the `goto` target is still owed, the walk comes first: Loot, Shop, Investigate and Travel do not walk anywhere else, Break opens only a block the goto's own stuck escalation picked, and the strategist plan's moves and `wait` hold are skipped. Heal is not deferred, so a hurt character still walks to safety. The deferral lifts while the agent stands on the target, or while stuck detection is backed off from it after a give-up; it comes back when the agent steps off the target or the backoff ends, because `goto` stays first in the goals. Stuck detection keeps running on the kept goto path, so it still escalates and gives up.
 
+If two states take turns moving the character so it paces between two cells (6 cell changes over at most 2 cells), the oscillation guard in dispatch gives up the target it was walking to, backs it off like any stuck give-up (reason `pacing`), and writes an `oscillation` event to the trace; survival states pacing on their own back nothing off; dispatch then picks something else (`navigation/oscillation.py`). The smoke script aborts with exit 1 and an `ABORT: sustained oscillation` message when the guard gives up a target more than 3 times in 6000 ticks, so a live run never spends its hour pacing. Guard events that gave nothing up (survival states doing the moving) are reported, never an abort.
+
 Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_agent/m7_acceptance.py)):
 
 - no death (the first one ends the run), and alive at the end of the hour;
 - no tick where `should_retreat` held, on the world the decision saw, while a non-survival state ran;
 - Recover withdraws only while standing on a known safe tile (the cell the queue puts it on when the `WithdrawFromChest` runs);
 - no loop: 24 Step-sending decisions in a row at one cell with one reason (waiting, such as Heal resting, is not a loop);
+- no sustained oscillation: more than 3 `oscillation` events that gave up a target within 6000 ticks stops the run at once (events where survival states did the moving and nothing was given up do not count);
 - no API error;
 - on a run of at least 95% of an hour, safe-zone regen measured (yes or no), and the navigation target reached or given up on.
 

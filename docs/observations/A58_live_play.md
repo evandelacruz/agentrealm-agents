@@ -23,7 +23,18 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - Let policy `goto` outrank plan travel during the 150-block walk; keep an in-flight goto path instead of replan ping-pong.
 - Heal is not deferred: a hurt character still walks to safety mid-goto.
 - The goto path is kept through Explore's normal flow, so stuck detection still escalates and gives up on it.
+- The pacing seen in run 3 is fixed by the dispatch oscillation guard, not by more goto deferrals (see Run 3 below).
 - A full-health regen probe was tried and dropped: health cannot rise at full health, so it could only ever report "no". Regen is measured only while hurt; the gate's regen check still needs a run that is hurt in a safe zone.
+
+## Run 3 — aborted: pacing between two cells
+
+- **Character:** chosen at run time, as in run 1 (not committed).
+- **Gate focus:** safe-zone regen must get a yes/no verdict during a hurt window in a safe tile; navigation already passed on run 1.
+- **Run 3a (stopped after ~5 min):** during the goto walk the character paced back and forth between two cells around x≈616–617 while the goto's stuck escalation was at step 2 (Break). Stopped by hand, so the gate never ran: no verdict, regen not measured.
+- **Run 3b (stopped after ~3 min):** the same pacing, now with an Equip `Wear` and Break walks taking turns with the goto walk. Stopped by hand, so the gate never ran: no verdict, regen not measured.
+- **What was wrong:** each fix after 3a patched one more state (relabel Break's walk as `goto`, skip replan, defer Equip, hold Break while a `Use` was pending). That was the bug: any two states that take turns moving the character can pace, so a fix per state never ends. Those patches are removed again.
+- **Fix:** one oscillation guard in dispatch (A15, `navigation/oscillation.py`). When the character's last 6 cell changes stayed on at most 2 cells, it gives up the target it walks to through stuck detection's step 5 (reason `pacing`) and traces an `oscillation` event, whichever states caused it. The smoke script now aborts with exit 1 on sustained oscillation (more than 3 give-ups in 6000 ticks; events where survival states did the moving do not count), so a live run cannot burn the hour pacing.
+- **Status:** tested offline only. The next live hour waits on this fix being merged.
 
 ## Done-when
 

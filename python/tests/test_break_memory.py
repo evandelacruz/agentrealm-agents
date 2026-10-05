@@ -21,7 +21,7 @@ from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
-from agentrealm_agent.door_look import LOOK_GOAL, approach_pos
+from agentrealm_agent.door_look import approach_pos, look_key
 from agentrealm_agent.knowledge_maps import sync_tiles
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import grid_params
@@ -332,7 +332,7 @@ class InvestigateYieldsToBreakTest(unittest.TestCase):
         w.view.tiles[(0, 0)] = "framed_door"
         stand = approach_pos(w, (0, 0))
         m = Memory()
-        att = nav_stuck.track(m, w, LOOK_GOAL, stand)
+        att = nav_stuck.track(m, w, look_key(7, (0, 0)), stand)
         att.level = nav_stuck.BREAK
         att.break_x, att.break_y, att.break_cap = 4, 0, "cut"
         c = PlayContext(m, Policy(kind="scripted", goals=["hold"], pickup=False), random.Random(0), knowledge=kb)

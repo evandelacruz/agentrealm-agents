@@ -9,6 +9,8 @@ Shape, under ``kb.maps["<map_id>"]``:
   was refused ``door_locked`` (A14). The API never names a door's destination.
 - ``"hunting"``: ``{"x,y": {"strength_ceiling"?, "closed"?}}`` from ``get_zone``
   reads and ``over_strength_ceiling`` rejections (A14, A27).
+- ``"level"``: the ``level`` a position read named on this map, once one has
+  (Manual §5.3). Positive on level interiors, which Level owns (A37).
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from .world import DOORS, MapView, Pos, WorldModel
 TERRAIN = "terrain"
 DOORS_KEY = "doors"
 HUNTING = "hunting"
+LEVEL = "level"
 
 
 def _cell_key(p: Pos) -> str:
@@ -67,6 +70,22 @@ def sync_world_maps(kb: KnowledgeBase, w: WorldModel) -> None:
     """Merge every map this character has seen into the knowledge base."""
     for map_id, view in w.maps.items():
         sync_map_from_view(kb, map_id, view)
+    record_map_level(kb, w)
+
+
+def record_map_level(kb: KnowledgeBase, w: WorldModel) -> None:
+    """Remember the current map's ``level`` once a position read has named it."""
+    if w.map_id is None or w.map_level is None:
+        return
+    with kb.lock:
+        _entry(kb, w.map_id)[LEVEL] = w.map_level
+
+
+def is_level_interior(kb: KnowledgeBase, map_id: int) -> bool:
+    """True when a position read on ``map_id`` named a positive ``level`` (A37)."""
+    with kb.lock:
+        level = kb.maps.get(str(map_id), {}).get(LEVEL)
+    return isinstance(level, int) and not isinstance(level, bool) and level > 0
 
 
 def view_from_kb(kb: KnowledgeBase, map_id: int) -> MapView:

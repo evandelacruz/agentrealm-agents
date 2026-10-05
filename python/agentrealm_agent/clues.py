@@ -29,7 +29,7 @@ from .memory import Memory
 from .navigation.planner import CostGridParams, nearest_target
 from .world import Pos, WorldModel, chebyshev
 
-SIGNALS_KEPT = 16  # nothing drains them until the strategist (A35)
+SIGNALS_KEPT = 16  # newest kept until the strategist drains them (A35)
 
 # A direction clue steers Explore for this many game ticks after it was found
 # (5 minutes at 10 Hz), and only on the map it was found on.

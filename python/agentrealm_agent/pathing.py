@@ -202,7 +202,7 @@ def plan_step(
     when they stall (A39), so they are left on the stack here.
     """
     while True:
-        plan.advance(w)
+        plan.advance(w, m)
         op = plan.current()
         if op is None:
             return False
@@ -215,22 +215,22 @@ def plan_step(
                 # Shop runs `buy`; while it has nothing in sight to take, the
                 # op stalls here and is dropped like any other (A21).
                 if plan.note_stalled(w.tick):
-                    plan.drop_current(f"nothing to buy for {PLAN_STALL_SECONDS}s")
+                    plan.drop_current(f"nothing to buy for {PLAN_STALL_SECONDS}s", memory=m)
                     continue
                 return False
-            plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet")
+            plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet", memory=m)
             continue
         if op["op"] == "wait":
             return True
         if op["op"] == "travel" and op["to"] not in TRAVEL_PATHED:
-            plan.drop_current(f"no path to a {op['to']} yet")
+            plan.drop_current(f"no path to a {op['to']} yet", memory=m)
             continue
         if op["op"] == "travel" and op["to"] == "shop":
             # A known shop cell stays listed when bought out (A27), so standing
             # on the resolved cell is arrival even with nothing priced in sight.
             dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
             if dest is not None and at_destination(w, dest):
-                plan.finish_current("at shop cell")
+                plan.finish_current("at shop cell", memory=m)
                 continue
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
         if found and next_step(w, blocked, found[0]):
@@ -239,7 +239,7 @@ def plan_step(
             m.goal_op = dict(op)
             return True
         if plan.note_stalled(w.tick):
-            plan.drop_current(f"no path for {PLAN_STALL_SECONDS}s")
+            plan.drop_current(f"no path for {PLAN_STALL_SECONDS}s", memory=m)
             continue
         return False
 

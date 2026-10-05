@@ -70,6 +70,8 @@ from .scroll_investigation import (
     supply_code_on_world,
 )
 from .zone_discovery import apply_town, apply_zone, zone_failed
+from .memory import queue_signal
+from .strategist import Strategist
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
@@ -138,6 +140,7 @@ class Runner:
         self.acceptance = acceptance
         self.plan = self._build_plan()
         self._level_timer = LevelTimer()
+        self.strategist: Strategist | None = None
 
     def _build_plan(self) -> Plan:
         d = self.directives.directives
@@ -183,7 +186,7 @@ class Runner:
             self.cfg.policy,
             self.rng,
             never_attack=self.directives.directives.never_attack,
-            params=self.directives.directives.params,
+            params=self.plan.params,  # directives params, tightened by the strategist or a set_param op (A34, A35)
             knowledge=self.knowledge,
             directives=self.directives.directives,
             plan=plan,
@@ -214,6 +217,9 @@ class Runner:
             sync_town(self.knowledge, world.get("town"))
             self._sync_minimap()
         refresh_travel_stack(self.mem, self.directives.directives.goals)
+        self.strategist = Strategist.from_env(tick_hz=hz)
+        self.strategist.start()
+        self.mem.strategist_progress_tick = self.world.tick
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:
@@ -228,6 +234,7 @@ class Runner:
                 old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():
                     self.reload_directives(old_goals)
+                self.strategist.on_window(self)
                 call = choose_call(self.world, self.mem, self.cfg.policy)
                 urgent = self.acceptance is not None and is_urgent(self.world, self.mem, self.cfg.policy)
                 if call == "skip":
@@ -240,6 +247,8 @@ class Runner:
                 if self.acceptance is not None:
                     self.acceptance.on_window(urgent=urgent)
         finally:
+            if self.strategist is not None:
+                self.strategist.stop()
             if self.knowledge is not None:
                 # Tiles learned from tick deltas, which terrain reads did not merge.
                 sync_world_maps(self.knowledge, self.world)
@@ -729,6 +738,7 @@ class Runner:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
                 nav_on_step(m, w)
+                m.strategist_progress_tick = w.tick  # idle trigger (A35)
                 if self.acceptance is not None:
                     self.acceptance.on_step_applied()
                 if w.view.tiles.get(w.pos) in DOORS and w.map_id is not None:
@@ -1045,6 +1055,15 @@ class Runner:
             if kind in ("Damaged", "Attacked"):
                 m.alarm = True
             if kind == "Died":
+                queue_signal(
+                    m,
+                    {
+                        "trigger": "death",
+                        "tick": w.tick,
+                        "cause": ev.get("cause"),
+                        "chest_id": ev.get("chest_id"),
+                    },
+                )
                 m.need_self = m.need_position = True
                 m.path, m.last_step_tick = [], None
                 m.last_use_tick = m.last_speech_tick = None

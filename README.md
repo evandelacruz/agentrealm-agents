@@ -44,7 +44,15 @@ Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_
 
 ## Make it yours
 
-This repo is meant for you to fork and extend, not only to run Wren and Kit as shipped. [`docs/MAKE_IT_YOURS.md`](docs/MAKE_IT_YOURS.md) walks through adding your own state: guard and act, where it goes in the dispatcher, and how to test it, with a tiny greet example. A small starter agent to copy and grow (A52) is still tracked in [`PLAN.md`](PLAN.md) **M13: Make it yours**.
+This repo is meant for you to fork and extend, not only to run Wren and Kit as shipped. Start from [`python/starter_agent.py`](python/starter_agent.py): one file that syncs, flees, and explores on its own — copy it and grow your own loop before you touch the full reference agent.
+
+```sh
+cd python
+python3 starter_agent.py create characters/starter.toml
+python3 starter_agent.py run characters/starter.toml
+```
+
+[`docs/MAKE_IT_YOURS.md`](docs/MAKE_IT_YOURS.md) walks through adding a state to the reference agent: guard and act, where it goes in the dispatcher, and how to test it, with a tiny greet example.
 
 ## Tests
 

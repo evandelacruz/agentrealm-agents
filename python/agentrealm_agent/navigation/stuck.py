@@ -227,6 +227,16 @@ def on_break_opened(m: Memory, w: WorldModel, att: NavAttempt | None) -> None:
     _drop_path(m, att)
 
 
+def awaiting_break(m: Memory, w: WorldModel, goal: str) -> bool:
+    """``goal``'s attempt is at step 2: ``guided_step`` sends nothing and **Break** acts.
+
+    A state walking with ``guided_step`` above Break in dispatch yields the
+    round instead of falling back, so dispatch reaches Break (A28).
+    """
+    att = active(m, w)
+    return att is not None and att.goal == goal and att.level == BREAK
+
+
 def break_target(att: NavAttempt) -> Pos | None:
     if att.break_x is None or att.break_y is None:
         return None

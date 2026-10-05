@@ -4,18 +4,21 @@ from __future__ import annotations
 
 from ..break_memory import (
     BreakChoice,
+    attempt_failed,
     break_step_cost,
     nominate_on_path,
     pick_supply_for_capability,
 )
 from ..memory import Memory
+from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
+from ..pathing import grid_params, nav_search, next_step
 from ..plan import GoalOp, Plan
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome
 from .intents import arm, set_position, use_block
-from .solve import use_reach
+from .solve import held_supply, use_reach
 
 GOAL = "break"
 
@@ -35,6 +38,10 @@ def _stuck_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
         return None
     if att.break_x is not None and att.break_y is not None and att.break_cap:
         pos = (att.break_x, att.break_y)
+        if attempt_failed(ctx.knowledge, w.map_id, pos, att.break_cap):
+            # That pair failed or was refused: nominate afresh, or escalate past step 2.
+            nav_stuck.clear_break_target(att)
+            return nominate_on_path(w, ctx.knowledge, w.pos, att.target) if w.pos is not None else None
         supply = pick_supply_for_capability(w, att.break_cap)
         if supply is None:
             return None
@@ -47,6 +54,8 @@ def _stuck_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
 def _plan_choice(w: WorldModel, ctx: PlayContext, op: GoalOp) -> BreakChoice | None:
     pos = (op["x"], op["y"])
     cap = op["capability"]
+    if attempt_failed(ctx.knowledge, w.map_id, pos, cap):
+        return None
     supply = pick_supply_for_capability(w, cap)
     if supply is None:
         return None
@@ -88,14 +97,11 @@ def break_outcome(
             intents.append(arm(choice.supply.id))
 
     here = w.pos
-    if here is None:
+    if here is None or w.map_id is None:
         return StateOutcome(None, "position unknown", state=state)
     if chebyshev(here, choice.pos) <= reach:
-        m.break_pending = (choice.pos, choice.capability)
+        m.break_pending = (w.map_id, choice.pos, choice.capability)
         return StateOutcome(intents + [use_block(choice.pos)], f"break {choice.capability} @ {choice.pos}", state=state)
-
-    from ..pathing import grid_params, nav_search, next_step
-    from ..navigation import cost_path
 
     params = grid_params(
         ctx.policy,
@@ -147,8 +153,6 @@ class BreakState(State):
         code, ctx.memory.break_rearm = ctx.memory.break_rearm, None
         if code is None or world.armed_code == code:
             return out
-        from .solve import held_supply
-
         supply = held_supply(world, code)
         if supply is not None:
             return StateOutcome([arm(supply.id)], f"re-arm {code}", state=self.name)

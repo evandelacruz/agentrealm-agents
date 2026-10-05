@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .break_memory import record_attempt
+from .break_memory import TRANSIENT_BREAK_REJECTIONS, record_attempt
 from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
 from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
@@ -717,7 +717,7 @@ class Runner:
                     npc_type = use_npc_type(intent, block, w.entities)
                     others = any(e.kind == "character" for e in w.entities)
                     self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type, others))
-                self._note_break_use(intent, result, block)
+                self._note_break_use(intent, result, block, index)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
@@ -738,6 +738,8 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
+        target = use_target_block(intent, w.entities) if intent and intent.get("verb") == "Use" else None
+        self._note_break_use(intent, result, target, index)
         if self.acceptance is not None:
             code = (result.get("rejection") or {}).get("code", "?")
             self.acceptance.on_rejection(code, verb=(intent or {}).get("verb"))
@@ -843,19 +845,40 @@ class Runner:
 
         self._with_item_table(learn)
 
-    def _note_break_use(self, intent: dict | None, result: dict, block) -> None:
+    def _note_break_use(self, intent: dict | None, result: dict, block, index: int) -> None:
+        """Settle the Break ``Use`` in flight (A28).
+
+        ``applied_no_effect`` marks the pair failed. A rejection at or before
+        the pending ``Use`` in its queue drops it: a refused ``Arm`` or ``Use``
+        for it marks the pair failed too, unless the refusal was a cooldown,
+        and pending is cleared either way so Break picks again.
+        """
         m, w = self.mem, self.world
         pending = m.break_pending
-        if pending is None or intent is None or intent.get("verb") != "Use" or block is None:
+        if pending is None:
             return
-        pos, cap = pending
-        if block != pos:
-            return
+        map_id, pos, cap = pending
         tick = int(result.get("tick", w.tick))
-        if result.get("outcome") == "applied_no_effect":
+        outcome = result.get("outcome")
+        if outcome == "rejected":
+            ahead = [self._intent_at(i) for i in range(index, max(index + 1, len(m.pending_intents or [])))]
+            if not any(
+                i is not None and i.get("verb") == "Use" and use_target_block(i, w.entities) == pos for i in ahead
+            ):
+                return  # the break Use already ran: its BlockChanged may still come
+            m.break_pending = None
+            code = (result.get("rejection") or {}).get("code")
+            verb = (intent or {}).get("verb")
+            ours = verb == "Arm" or (verb == "Use" and block == pos)
+            if ours and code not in TRANSIENT_BREAK_REJECTIONS:
+                record_attempt(self.knowledge, map_id=map_id, pos=pos, capability=cap, result="failed", tick=tick)
+            return
+        if intent is None or intent.get("verb") != "Use" or block != pos:
+            return
+        if outcome == "applied_no_effect":
             record_attempt(
                 self.knowledge,
-                map_id=w.map_id,
+                map_id=map_id,
                 pos=pos,
                 capability=cap,
                 result="applied_no_effect",
@@ -866,15 +889,19 @@ class Runner:
     def _resolve_pending_break(self) -> None:
         m, w = self.mem, self.world
         pending = m.break_pending
-        if pending is None or w.map_id is None:
+        if pending is None:
             return
-        pos, cap = pending
-        for map_id, p in w.changed_blocks:
-            if map_id == w.map_id and p == pos:
+        map_id, pos, cap = pending
+        if not w.alive or w.map_id != map_id:
+            # Died or left the map: a later change at that cell is not our break.
+            m.break_pending = None
+            return
+        for changed_map, p in w.changed_blocks:
+            if changed_map == map_id and p == pos:
                 block_after = w.view.tiles.get(pos, "")
                 record_attempt(
                     self.knowledge,
-                    map_id=w.map_id,
+                    map_id=map_id,
                     pos=pos,
                     capability=cap,
                     result="opened",

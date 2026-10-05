@@ -133,7 +133,6 @@ class RevealTest(unittest.TestCase):
             moves += 1
             step = escalation_step(m, w, att, set(), stale, None)
         self.assertEqual(moves, nav_stuck.REVEAL_MOVE_BUDGET)
-        self.assertEqual(moves, nav_stuck.REVEAL_MOVE_BUDGET)
         self.assertIn(att.level, (nav_stuck.ALT_ROUTE, nav_stuck.WALK))
 
     def test_reveal_that_finds_a_shorter_plan_walks_it(self):

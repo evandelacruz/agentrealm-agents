@@ -75,4 +75,4 @@ class Memory:
     boss: BossFight | None = None
     solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)
     break_rearm: str | None = None  # code armed before Break, restored when break finishes (A28)
-    break_pending: tuple[Pos, str] | None = None  # block and capability a Use in flight targets (A28)
+    break_pending: tuple[int, Pos, str] | None = None  # map, block and capability a Use in flight targets (A28)

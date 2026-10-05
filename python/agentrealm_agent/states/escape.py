@@ -1,13 +1,12 @@
-"""Escape: step off damaging ground, or break out when trapped (A9, A28)."""
+"""Escape: step off damaging ground (A9)."""
 
 from __future__ import annotations
 
-from ..break_memory import enclosing_break_choice
 from ..pathing import next_step, replan
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
-from .intents import arm, set_position, use_block
+from .intents import set_position
 
 
 class EscapeState(State):
@@ -17,17 +16,12 @@ class EscapeState(State):
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
         block = world.view.tiles.get(world.pos, "")
-        if block in ctx.policy.avoid_blocks:
-            return True
-        return enclosing_break_choice(world, ctx.knowledge) is not None
+        return block in ctx.policy.avoid_blocks
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         if world.pos is None:
             return True
-        block = world.view.tiles.get(world.pos, "")
-        on_hazard = block in ctx.policy.avoid_blocks
-        trapped = enclosing_break_choice(world, ctx.knowledge) is not None
-        return not on_hazard and not trapped
+        return world.view.tiles.get(world.pos, "") not in ctx.policy.avoid_blocks
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         w, m, policy = world, ctx.memory, ctx.policy
@@ -41,20 +35,6 @@ class EscapeState(State):
             return StateOutcome(
                 [set_position(p)],
                 f"off {w.view.tiles.get(here)}",
-                reflex=True,
-                state=self.name,
-            )
-        choice = enclosing_break_choice(w, ctx.knowledge)
-        if choice is not None:
-            intents: list[dict] = []
-            if w.armed_code != choice.supply.code and choice.supply.id >= 0:
-                if m.break_rearm is None and w.armed_code:
-                    m.break_rearm = w.armed_code
-                intents.append(arm(choice.supply.id))
-            m.break_pending = (choice.pos, choice.capability)
-            return StateOutcome(
-                intents + [use_block(choice.pos)],
-                f"break out {choice.capability} @ {choice.pos}",
                 reflex=True,
                 state=self.name,
             )

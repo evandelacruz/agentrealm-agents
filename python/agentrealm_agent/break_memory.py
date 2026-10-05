@@ -14,11 +14,13 @@ from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
 from .plan import CAPABILITIES
-from .world import Pos, WorldModel, chebyshev
+from .world import Pos, WorldModel
 
 BREAKABLE = frozenset({"bush", "tree", "rock", "mountain", "wall"})
 REGROWTH_TICKS = 600  # cut bush grew back in 60 s (GAME_NOTES Breaking blocks)
 BREAK_BASE_COST = DEFAULT_WEAPON_COOLDOWN_TICKS + 1
+# Refusals of a break that say "not yet", not "cannot": the pair is not marked failed.
+TRANSIENT_BREAK_REJECTIONS = frozenset({"attack_cooldown"})
 
 # Manual §11, §16 (GAME_NOTES Movement and blocks).
 _WEAPON_CUT = frozenset({"cut", "chop"})
@@ -176,9 +178,7 @@ def _step_toward(p: Pos, goal: Pos) -> Pos:
     return nx, ny
 
 
-def _choice_at(
-    w: WorldModel, kb: KnowledgeBase | None, pos: Pos, held: set[str], start: Pos
-) -> BreakChoice | None:
+def _choice_at(w: WorldModel, kb: KnowledgeBase | None, pos: Pos, held: set[str]) -> BreakChoice | None:
     if w.map_id is None or breakable_block(w, pos) is None:
         return None
     for cap in untried_capabilities(kb, w.map_id, pos, held):
@@ -195,55 +195,21 @@ def nominate_on_path(
     start: Pos,
     goal: Pos,
 ) -> BreakChoice | None:
-    """A breakable cell on the best route toward ``goal`` we can still try."""
+    """The first breakable on the straight route from ``start`` to ``goal`` we can still try.
+
+    Only cells on that route are candidates: a breakable beside or behind us
+    does not open the way to ``goal``.
+    """
     held = held_capabilities(w)
     if not held or w.map_id is None:
         return None
-    best: BreakChoice | None = None
-    best_rank: tuple[int, int] | None = None
-
-    def consider(p: Pos) -> None:
-        nonlocal best, best_rank
-        choice = _choice_at(w, kb, p, held, start)
-        if choice is None:
-            return
-        rank = (chebyshev(start, p), choice.cost)
-        if best_rank is None or rank < best_rank:
-            best, best_rank = choice, rank
-
-    for p, block in w.view.tiles.items():
-        if block in BREAKABLE:
-            consider(p)
     p = start
     while p != goal:
         p = _step_toward(p, goal)
-        consider(p)
-    return best
-
-
-def enclosing_break_choice(w: WorldModel, kb: KnowledgeBase | None) -> BreakChoice | None:
-    """Breakable neighbour when every walkable neighbour is blocked or occupied."""
-    here = w.pos
-    if here is None or w.map_id is None:
-        return None
-    open_n = w.open_neighbours(here, set())
-    if open_n:
-        return None
-    held = held_capabilities(w)
-    if not held:
-        return None
-    best: BreakChoice | None = None
-    for p in w.neighbours(here):
-        if breakable_block(w, p) is None:
-            continue
-        for cap in untried_capabilities(kb, w.map_id, p, held):
-            supply = pick_supply_for_capability(w, cap)
-            if supply is None:
-                continue
-            choice = BreakChoice(p, cap, supply, break_step_cost(kb, supply.code))
-            if best is None or choice.cost < best.cost:
-                best = choice
-    return best
+        choice = _choice_at(w, kb, p, held)
+        if choice is not None:
+            return choice
+    return None
 
 
 def break_costs_for_planning(

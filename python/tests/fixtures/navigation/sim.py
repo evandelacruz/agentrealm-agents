@@ -118,7 +118,7 @@ def apply_use(
     block = use_target_block(intent, w.entities)
     if block is None or w.map_id is None:
         return False
-    cap = m.break_pending[1] if m.break_pending else None
+    cap = m.break_pending[2] if m.break_pending else None
     armed = w.armed_code or ""
     caps = capabilities_for_code(armed)
     if cap and cap in caps:

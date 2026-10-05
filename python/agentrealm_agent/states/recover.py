@@ -125,7 +125,7 @@ def recover_outcome(
         return cost_path(w, target, params, nav=nav_search(m, w, "chest", target))
 
     # Stuck detection and escalation drive the walk; a chest given up on is backed off (A15).
-    step = guided_step(m, w, "chest", target, plan_avoid, plan)
+    step = guided_step(m, w, "chest", target, plan_avoid, plan, knowledge)
     if step is not None:
         note = nav_stuck.level_note(nav_stuck.active(m, w))
         return StateOutcome([set_position(step)], f"chest → {target}{note}", state=state)
@@ -170,6 +170,8 @@ class RecoverState(State):
         )
         if out is not None:
             return out
+        if nav_stuck.awaiting_break(m, world, "chest"):
+            return StateOutcome(None, "chest walk stuck: break", state=self.name)
         # No step toward the chest: fall back to Explore's goals this round.
         fallback = scripted_outcome(
             world, m, policy, ctx.rng, never_attack=ctx.never_attack, knowledge=ctx.knowledge, plan=ctx.plan, state=self.name

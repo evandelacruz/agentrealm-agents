@@ -51,6 +51,7 @@ from .executor import (
     wait,
 )
 from .m6_acceptance import M6AcceptanceMetrics
+from .m7_acceptance import M7AcceptanceMetrics, params_with_defaults
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
@@ -95,7 +96,7 @@ class Runner:
         stop: threading.Event,
         out=print,
         knowledge: KnowledgeBase | None = None,
-        acceptance: M6AcceptanceMetrics | None = None,
+        acceptance: M6AcceptanceMetrics | M7AcceptanceMetrics | None = None,
     ):
         self.cfg = cfg
         self.client = client
@@ -197,6 +198,8 @@ class Runner:
         if town.get("map_id") is not None:
             # The town is on the overworld, so leaving its map enters a level (A41).
             self._level_timer.overworld = int(town["map_id"])
+        if self.acceptance is not None and hasattr(self.acceptance, "note_overworld"):
+            self.acceptance.note_overworld(self._level_timer.overworld)
         if self.knowledge is not None:
             sync_town(self.knowledge, world.get("town"))
             self._sync_minimap()
@@ -226,6 +229,13 @@ class Runner:
                         not_before = self.on_error(call, e)
                 if self.acceptance is not None:
                     self.acceptance.on_window(urgent=urgent)
+                    if hasattr(self.acceptance, "on_time"):
+                        t0 = getattr(self.acceptance, "started_monotonic", None)
+                        if t0 is not None:
+                            self.acceptance.on_time(
+                                time.monotonic() - t0,
+                                alive=self.world.alive,
+                            )
         finally:
             if self.knowledge is not None:
                 # Tiles learned from tick deltas, which terrain reads did not merge.
@@ -330,6 +340,9 @@ class Runner:
             self._level_timer.note_map(w.map_id, w.tick, time.time())
             self.note_warp_landing()
             m.need_position, m.path = False, []
+            if self.acceptance is not None and hasattr(self.acceptance, "on_position"):
+                self.acceptance.note_overworld(self._level_timer.overworld)
+                self.acceptance.on_position(w)
             self.log(call, "", {"position": p})
         elif call == "terrain":
             t = c.terrain(self.cid, w.map_id, *w.perception_rect())
@@ -481,6 +494,7 @@ class Runner:
             )
         )
         self._level_timer.note_map(w.map_id, w.tick, now)
+        self._acceptance_after_tick(d, intents)
         self.log("tick", detail, record)
         # The intent resolves at this sim window's boundary. Do not call
         # again until it has closed, so the next submit lands in a new tick.
@@ -931,6 +945,8 @@ class Runner:
             if kind in ("Damaged", "Attacked"):
                 m.alarm = True
             if kind == "Died":
+                if self.acceptance is not None and hasattr(self.acceptance, "on_death"):
+                    self.acceptance.on_death()
                 m.need_self = m.need_position = True
                 m.path, m.last_step_tick = [], None
                 m.last_use_tick = m.last_speech_tick = None
@@ -942,6 +958,22 @@ class Runner:
         # WorldModel.apply_events already parsed BlockChanged (A14).
         for map_id, p in w.changed_blocks:
             on_block_changed(m, map_id, p)
+
+    def _acceptance_after_tick(self, d: Decision, intents: list[dict] | None) -> None:
+        acc = self.acceptance
+        if acc is None or not hasattr(acc, "on_decision"):
+            return
+        dparams = params_with_defaults(self.directives.directives.params)
+        acc.on_decision(
+            self.world,
+            self.mem,
+            reason=d.reason,
+            state=self.mem.state,
+            policy=self.cfg.policy,
+            params=dparams,
+            intents=intents,
+            knowledge=self.knowledge,
+        )
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})

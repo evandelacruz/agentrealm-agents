@@ -1,0 +1,14 @@
+# A16 live M7 acceptance: survival hour and overworld navigation on Olympuff.
+name = "OlympuffM7Accept4fa0"
+avatar = "default"
+model_agent = "agentrealm-reference/scripted"
+world = "olympuff"
+
+[policy]
+kind = "scripted"
+goals = ["explore"]
+on_hostile = "flee"
+hostile = ["npc"]
+pickup = true
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 20

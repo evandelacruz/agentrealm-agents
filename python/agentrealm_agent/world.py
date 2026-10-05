@@ -120,6 +120,7 @@ class WorldModel:
     attack_range: int | None = None  # armed weapon reach from get_self (B100)
     armed_code: str | None = None
     worn_codes: dict[str, str] = field(default_factory=dict)
+    worn_slots: dict[str, str] = field(default_factory=dict)  # subtype -> slot a snapshot served it worn in, for the run (A19)
     held_supplies: list[InventorySupply] = field(default_factory=list)  # inventory held[] (A10, A20)
     chest_supplies: list[InventorySupply] = field(default_factory=list)
     # Lowered by a carry_capacity_full rejection; back to the default on respawn,
@@ -434,6 +435,7 @@ class WorldModel:
             if gems is not None and gems >= 0:
                 self.gems = gems
         self.held_supplies, self.chest_supplies, self.armed_code, self.worn_codes = carried_from_inventory(inv)
+        self.worn_slots.update((code, slot) for slot, code in self.worn_codes.items())
 
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)

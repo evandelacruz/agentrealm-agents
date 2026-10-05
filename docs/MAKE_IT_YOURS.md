@@ -70,7 +70,7 @@ That one line in `STATES` is the switch: a state that is not in the tuple never 
 - `ctx.directives` — hot-reloaded `characters/<name>.directives.toml`
 - `ctx.plan` — strategist goal stack when present
 
-**Knowledge base** — survives across runs for the same world. Example: `investigation.spoken_npc_ids(kb)` and `mark_npc_spoken` (called by the runner after a successful `Say`) so you do not greet the same NPC twice. Door warps and read cells work the same way (`knowledge_maps.py`, `investigation.py`).
+**Knowledge base** — survives across runs for the same world (`python/agentrealm_agent/knowledge_base.py`). Use `knowledge_items(kb)` for the shared `items` section (weapon stats, shop prices). Example: `investigation.spoken_npc_ids(kb)` and `mark_npc_spoken` (called by the runner after a successful `Say`) so you do not greet the same NPC twice. Door warps and read cells work the same way (`knowledge_maps.py`, `investigation.py`).
 
 Pathing helpers (`navigation/`, `pathing.py`, `explore.py`) build steps when you need to walk somewhere; reuse `set_position(step)` from `states/intents.py`.
 

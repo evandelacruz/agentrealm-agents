@@ -54,6 +54,10 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
 
 
 class FleeState(State):
+    """Priority 2, after **Fight**. Opens distance per ``policy.on_hostile`` when
+    hostiles are in range and we are not on a safe tile; stands down during a
+    boss fight (A38)."""
+
     name = "Flee"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

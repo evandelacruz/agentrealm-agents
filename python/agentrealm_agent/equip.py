@@ -7,9 +7,8 @@ Only sourced facts decide what goes where:
 - **Worn slots** come from the snapshot's ``worn`` by slot: the world model
   files a subtype seen worn in a slot there for the run (``WorldModel.worn_slots``).
   A held subtype never seen worn has no slot for scoring until Equip tries
-  ``Wear`` once (A55) and reads which slot ``worn`` shows. Slot-learn tries
-  skip weapons, manual break tools, capability-tagged subtypes, and anything
-  with no shop price in the item table (keys and junk stay for Solve and Loot).
+  ``Wear`` once (A55) and reads which slot ``worn`` shows. Any held candidate
+  that is not a weapon gets that one try, priced or not.
 
 Each slot compares like with like, never across units: learned per-NPC-type
 hits (``weapon_damage`` for weapons, ``damage_saved`` for armor) on the hostile
@@ -31,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .break_memory import MANUAL_CAPABILITIES, WEAPONS
+from .break_memory import WEAPONS
 from .healing import FOOD_CODES, POTION_CODES
 from .item_table import InventorySupply
 from .loot import NON_TRANSFERABLE
@@ -188,26 +187,14 @@ def best_equip_upgrade(
         if s is None:
             continue
         return EquipUpgrade(slot, s.id, s.code, remove_first=worn is not None)
-    return _best_learn_wear(w, m, items)
+    return _best_learn_wear(w, m)
 
 
-def _learn_wear_subtype(code: str, items: dict[str, dict[str, Any]]) -> bool:
-    """Held shop-priced armor-like gear that is not a sourced break tool (A55)."""
-    if not code or is_weapon(code) or code in MANUAL_CAPABILITIES:
-        return False
-    row = items.get(code) or {}
-    if row.get("capabilities"):
-        return False
-    return _price(code, items) is not None
-
-
-def _best_learn_wear(w: WorldModel, m: Memory, items: dict[str, dict[str, Any]]) -> EquipUpgrade | None:
-    """One held armor subtype with no known slot to try ``Wear`` on (A55)."""
+def _best_learn_wear(w: WorldModel, m: Memory) -> EquipUpgrade | None:
+    """The lowest-id held non-weapon with no known slot, to try ``Wear`` on once (A55)."""
     for s in sorted(_candidates(w), key=lambda h: h.id):
         code = s.code
-        if wear_slot(code, w) is not None:
-            continue
-        if not _learn_wear_subtype(code, items):
+        if is_weapon(code) or wear_slot(code, w) is not None:
             continue
         if code in m.equip_not_wearable or code in m.equip_try_refused:
             continue

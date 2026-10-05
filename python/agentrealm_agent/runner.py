@@ -706,8 +706,7 @@ class Runner:
         intent = self._intent_at(index)
         note_shop_result(m, intent, result.get("outcome") != "rejected")
         if m.state == "Equip":
-            rej = result.get("rejection")
-            code = rej.get("code") if isinstance(rej, dict) else None
+            code = (result.get("rejection") or {}).get("code")
             note_equip_result(m, w, intent, result.get("outcome") == "rejected", code)
         if result.get("outcome") != "rejected":
             if intent and intent.get("verb") == "Step" and w.pos is not None:

@@ -271,6 +271,19 @@ class RunnerEquipResultTest(unittest.TestCase):
         self.assertEqual(self.r.mem.equip_refused, set())
 
 
+    def test_learn_wear_rejection_code_reaches_memory(self):
+        w = self.r.world
+        w.held_supplies = [InventorySupply(3, "legend_map"), InventorySupply(4, "odd_hat")]
+        self.r.mem.pending_intents = [{"verb": "Wear", "supply_id": 3}]
+        res = {"tick": 3, "outcome": "rejected", "rejection": {"category": "state", "code": "not_wearable"}}
+        self.assertTrue(self.r.on_result(res, 0))
+        self.r.mem.pending_intents = [{"verb": "Wear", "supply_id": 4}]
+        res = {"tick": 4, "outcome": "rejected", "rejection": {"category": "state", "code": "worn_slot_occupied"}}
+        self.assertTrue(self.r.on_result(res, 0))
+        self.assertEqual(self.r.mem.equip_not_wearable, {"legend_map"})
+        self.assertEqual(self.r.mem.equip_try_refused, {"odd_hat"})
+
+
 class LearnWearTest(unittest.TestCase):
     """A55: discover worn slot by trying Wear from Equip."""
 
@@ -283,6 +296,13 @@ class LearnWearTest(unittest.TestCase):
         out = dispatch(w, ctx(kb))
         self.assertEqual(out.state, "Equip")
         self.assertEqual(out.intents, [{"verb": "Wear", "supply_id": 8}])
+
+    def test_unpriced_loot_is_tried(self):
+        w = world()
+        w.held_supplies = [InventorySupply(8, "looted_helm")]
+        up = best_equip_upgrade(w, {}, w.threat, Memory())
+        assert up is not None
+        self.assertEqual((up.learn_slot, up.code), (True, "looted_helm"))
 
     def test_not_wearable_never_retried(self):
         m = Memory()

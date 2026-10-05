@@ -41,7 +41,9 @@ def frag(
 
 
 def ctx(w: WorldModel, plan: Plan | None) -> PlayContext:
-    return PlayContext(Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0), plan=plan)
+    # Equip has already tried the key on and got not_wearable (A55), so it leaves Solve the round.
+    m = Memory(equip_not_wearable={"rusty_key"})
+    return PlayContext(m, Policy(kind="scripted", goals=["explore"]), random.Random(0), plan=plan)
 
 
 class FragmentMetaTest(unittest.TestCase):

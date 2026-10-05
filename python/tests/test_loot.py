@@ -42,7 +42,8 @@ def scripted(**kw) -> Policy:
 
 
 def ctx(policy=None, kb=None) -> PlayContext:
-    return PlayContext(Memory(), policy or scripted(), random.Random(0), knowledge=kb)
+    # Equip has already tried the junk torch on and got not_wearable (A55), so it leaves Loot the round.
+    return PlayContext(Memory(equip_not_wearable={"torch"}), policy or scripted(), random.Random(0), knowledge=kb)
 
 
 def priced(**prices) -> KnowledgeBase:

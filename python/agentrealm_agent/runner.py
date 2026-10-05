@@ -33,7 +33,7 @@ from .item_table import (
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
-from .loot import learn_loot_rejection
+from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
 from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending
 from .shop import note_shop_result
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
@@ -108,6 +108,7 @@ class Runner:
         self.knowledge = knowledge
         self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
+        self._applied_take_codes: list[str | None] = []  # A47: codes of this response's applied Takes
         self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
         self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
         self._removed_map: int | None = None  # A18: map the character was on when it was taken off
@@ -431,12 +432,14 @@ class Runner:
             record_curiosity_queue(m, w.tick, intents, m.state)
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
+        lives_before = w.lives
         rejected = self.apply_intent_results(r.get("intent_results") or [])
         earlier = w.entities
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
         absorb_heal_pending(m, w, self.knowledge, events)
+        self._learn_life_code(lives_before)
         w.note_level_clear(r.get("level_clear_ceremony"))
         self._sync_loadout()
         sync_refusals(m, w)
@@ -676,6 +679,7 @@ class Runner:
         """Fold intent results since the last call. True if the last one rejected."""
         w, m = self.world, self.mem
         self._applied_uses = []
+        self._applied_take_codes = []
         self._loadout_verbs = []
         if not results:
             return False
@@ -751,6 +755,10 @@ class Runner:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
+            if intent and intent.get("verb") == "Take":
+                code = supply_code_for_take(intent, w.entities)
+                self._applied_take_codes.append(code)
+                learn_chest_upgrade(w, code)
             self._note_heal_intent(intent, index)
             self._note_investigation(intent, result)
             if m.pending is not None and index == 0:
@@ -783,6 +791,16 @@ class Runner:
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
+
+    def _learn_life_code(self, lives_before: int) -> None:
+        """After the observation, file a life's ground code if one Take raised lives (A47)."""
+        code = learn_life_code(self.knowledge, self._applied_take_codes, lives_before, self.world.lives)
+        if code is not None:
+            self.log(
+                "loot",
+                f"learned life ground code {code!r} (promote to LIFE_SUPPLY_CODES once confirmed)",
+                {"life_supply_code": code, "lives_before": lives_before, "lives": self.world.lives},
+            )
 
     def _note_heal_intent(self, intent: dict | None, index: int) -> None:
         """Remember health before a food ``Take`` or self-``Use`` for item-table learning (A24)."""

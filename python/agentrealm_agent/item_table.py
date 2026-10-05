@@ -35,6 +35,9 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   blocks), so it removes nothing. No read serves capabilities (PLAN.md Server
   gaps), and the manual's per-class rules are not stored here: they are
   applied at read time in ``break_memory.MANUAL_CAPABILITIES``.
+- ``life_on_pickup``: ``True`` once ``lives`` rose in a response whose only
+  applied ``Take`` was this subtype (A47, ``loot.learn_life_code``). Loot then
+  scores it as a life.
 """
 
 from __future__ import annotations

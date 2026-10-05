@@ -247,7 +247,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 **Raising health and protection over time:**
 - **Armor first.** Defense counts twice: it lowers the chance to be hit and the damage of each hit. `Equip` scores armor by the damage it would have saved against the threats in the item and threat tables, and the gem budget puts armor and potions ahead of curiosity spending.
 - **Max health rises on a level's first clear** (`level_clear_ceremony.max_health_gain`), so clearing levels is also how the agent grows. Whether any supply raises max health permanently is an open question in GAME_NOTES; the plan counts on none.
-- **Extra lives** are hearts, consumed on pickup into the lives counter (M §11). In Olympuff they drop from cut grass and bushes (M §16). A heart in sight and safe to reach is a top `Loot` target once its ground code is observed (A47); until then Loot scores gems first.
+- **Extra lives** are hearts, consumed on pickup into the lives counter (M §11). In Olympuff they drop from cut grass and bushes (M §16). A heart in sight and safe to reach is a top `Loot` target once its ground code is observed (A47 learns it in play, A57 confirms it); until then Loot scores gems first.
 
 **After a death.** `Recover` runs only when the chest's spot is safe enough at full health: no group of hostiles still there, and not deep in fog. Otherwise the agent re-equips from town and gets the chest later, or writes it off. Every death is logged with its cause and the decision that led to it, and it tightens the risk level for that hostile type.
 

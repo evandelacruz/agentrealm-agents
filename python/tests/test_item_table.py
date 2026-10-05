@@ -9,6 +9,7 @@ from unittest import mock
 from agentrealm_agent import config, item_table as it
 from agentrealm_agent.brain import Decision
 from agentrealm_agent.config import CharacterConfig, Policy
+from agentrealm_agent.healing import absorb_heal_pending
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.world import Entity, WorldModel
@@ -441,6 +442,37 @@ class RunnerItemLearningTest(unittest.TestCase):
         r._learn_items_from_tick({"version": 2, "complete": True, "snapshot": {"entities": {"supplies": []}}})
         r._learn_items_from_entities({"supplies": [{"id": 1, "supply_subtype_code": "potion", "gem_price": 5}]})
         self.assertIsNone(r._reach_seen)
+
+    def test_potion_heal_learned_from_arm_and_use_in_one_response(self):
+        # Heal sends [Arm potion, Use self]; both results land before the
+        # observation names the potion as armed (A24).
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._runner(kb)
+        r.world.character_id, r.world.health, r.world.max_health = 1, 5, 20
+        r.world.armed_code = "pocket_knife"
+        r.world.held_supplies = [it.InventorySupply(1, "pocket_knife"), it.InventorySupply(4, "small_potion")]
+        use = {"verb": "Use", "target": {"kind": "character", "character_id": 1}}
+        self._queue(r, [{"verb": "Arm", "supply_id": 4}, use])
+        r.apply_intent_results(
+            [
+                {"queue_id": "q1", "index": 0, "tick": 10, "outcome": "applied"},
+                {"queue_id": "q1", "index": 1, "tick": 11, "outcome": "applied"},
+            ]
+        )
+        r.world.health = 15
+        absorb_heal_pending(r.mem, r.world, kb, [])
+        self.assertEqual(kb.items, {"small_potion": {"heal_amount": 10}})
+
+    def test_heal_learned_from_use_of_item_already_armed(self):
+        kb = KnowledgeBase.empty("sandbox")
+        r = self._runner(kb)
+        r.world.character_id, r.world.health, r.world.max_health = 1, 5, 20
+        r.world.armed_code = "berry"
+        self._queue(r, [{"verb": "Use", "target": {"kind": "character", "character_id": 1}}])
+        r.apply_intent_results([{"queue_id": "q1", "index": 0, "tick": 10, "outcome": "applied"}])
+        r.world.health = 7
+        absorb_heal_pending(r.mem, r.world, kb, [])
+        self.assertEqual(kb.items, {"berry": {"heal_amount": 2}})
 
     def test_weapon_damage_from_matched_npc_damaged(self):
         kb = KnowledgeBase.empty("sandbox")

@@ -1,4 +1,5 @@
-"""Heal: food, carried food or potion, safe-zone rest, town wait and buy signal (A10)."""
+"""Heal: food, carried food or potion, safe-zone rest, town wait and buy signal (A10);
+re-arm the weapon a drink swapped out (A24)."""
 
 from __future__ import annotations
 
@@ -7,7 +8,6 @@ from ..healing import (
     back_off,
     carried_heal,
     food_in_sight,
-    food_worth_pickup,
     hurt,
     nearest_known_safe,
     note_regen_sample,
@@ -34,28 +34,34 @@ FOOD_CANDIDATES = 3
 class HealState(State):
     """Above Explore. Every branch that sends nothing is bounded: no reachable
     safe tile yields at once, and a wait with no health back yields after
-    ``HEAL_WAIT_TICKS``; Heal then stays out for ``HEAL_BACKOFF_TICKS``."""
+    ``HEAL_WAIT_TICKS``; Heal then stays out for ``HEAL_BACKOFF_TICKS``.
+
+    Heal also runs, even at full health or with a hostile in range, while the
+    weapon a drink swapped out is still to be re-armed (A24). That is one
+    ``Arm``, sent once."""
 
     name = "Heal"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
-        return (
-            ctx.policy.kind == "scripted"
-            and world.alive
-            and world.pos is not None
-            and world.tick >= ctx.memory.heal_backoff_until
-            and hurt(world)
-            and not hostiles_in_range(world, ctx.policy)
-        )
+        if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
+            return False
+        return _wants_heal(world, ctx) or ctx.memory.heal_rearm is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
+        if not _wants_heal(world, ctx):
+            return _rearm_weapon(world, ctx.memory)
         out = _choose(world, ctx)
         if out.intents:
             ctx.memory.heal_wait = None
         return out
+
+
+def _wants_heal(w: WorldModel, ctx: PlayContext) -> bool:
+    """Hurt, out of combat, and not backing off after a fruitless wait."""
+    return w.tick >= ctx.memory.heal_backoff_until and hurt(w) and not hostiles_in_range(w, ctx.policy)
 
 
 def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
@@ -69,6 +75,9 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     if out := _act_carried(w, m):
         m.heal_regen_sample = None
         return out
+    # Nothing left to drink: put the weapon back before resting or walking.
+    if m.heal_rearm is not None:
+        return _rearm_weapon(w, m)
 
     known = regen_known(ctx.knowledge, m)
     if not standing_in_safe_zone(w):
@@ -132,8 +141,6 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
     here = w.pos
     assert here is not None
     for food in food_in_sight(w, m)[:FOOD_CANDIDATES]:
-        if not food_worth_pickup(w, ctx.knowledge, food.code):
-            continue
         if chebyshev(food.pos, here) <= 1:
             note_try(m, "take", food.id)
             return _out([take(food.id)], f"take food {food.code}")
@@ -144,20 +151,28 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
 
 
 def _act_carried(w: WorldModel, m: Memory) -> StateOutcome | None:
-    """``Arm`` + ``Use`` self on carried food or a potion, then re-``Arm`` the weapon (A24)."""
-    if m.heal_rearm and w.armed_code != m.heal_rearm:
-        code = m.heal_rearm
-        if intents := rearm_after_drink(w, m):
-            return _out(intents, f"re-arm {code}")
+    """``Arm`` + ``Use`` self on carried food or a potion (API Use).
+
+    The weapon armed before the first drink is remembered in ``heal_rearm``
+    and put back by ``_rearm_weapon`` once there is nothing left to drink
+    (A24), so a second potion does not cost a re-arm in between. A rejected
+    ``Use`` is retried at most ``HEAL_MAX_TRIES`` times per supply.
+    """
     item = carried_heal(w, m)
     if item is None:
         return None
     note_try(m, "use", item.id)
-    intents: list[dict] = []
-    if w.armed_code != item.code:
-        if m.heal_rearm is None and w.armed_code is not None:
-            m.heal_rearm = w.armed_code
-        intents.append(arm(item.id))
-    intents.append(use_self(w.character_id))
-    label = "use" if len(intents) == 1 else "arm and use"
-    return _out(intents, f"{label} {item.code}")
+    if w.armed_code == item.code:
+        return _out([use_self(w.character_id)], f"use {item.code}")
+    if m.heal_rearm is None and w.armed_code is not None:
+        m.heal_rearm = w.armed_code
+    return _out([arm(item.id), use_self(w.character_id)], f"arm and use {item.code}")
+
+
+def _rearm_weapon(w: WorldModel, m: Memory) -> StateOutcome:
+    """Re-``Arm`` the weapon a drink swapped out (A24). Sends nothing when it is
+    already armed or no longer in hand."""
+    code = m.heal_rearm
+    if intents := rearm_after_drink(w, m):
+        return _out(intents, f"re-arm {code}")
+    return _out(None, f"no re-arm needed for {code}")

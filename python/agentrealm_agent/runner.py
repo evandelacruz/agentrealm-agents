@@ -733,7 +733,7 @@ class Runner:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
-            self._note_heal_intent(intent)
+            self._note_heal_intent(intent, index)
             self._note_investigation(intent, result)
             if m.pending is not None and index == 0:
                 m.pending = None
@@ -766,7 +766,7 @@ class Runner:
             m.need_self = True
         return True
 
-    def _note_heal_intent(self, intent: dict | None) -> None:
+    def _note_heal_intent(self, intent: dict | None, index: int) -> None:
         """Remember health before a food ``Take`` or self-``Use`` for item-table learning (A24)."""
         if not intent:
             return
@@ -774,20 +774,35 @@ class Runner:
         verb = intent.get("verb")
         if verb == "Take":
             sid = intent.get("supply_id")
-            if sid is None:
-                return
             for e in w.entities:
                 if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
                     note_heal_pending(m, w, e.code, "take")
-                    return
+            return
         if verb != "Use":
             return
         target = intent.get("target") or {}
         if target.get("kind") != "character" or int(target.get("character_id", -1)) != w.character_id:
             return
-        code = w.armed_code
+        code = self._used_on_self_code(index)
         if code in FOOD_CODES | POTION_CODES:
             note_heal_pending(m, w, code, "use")
+
+    def _used_on_self_code(self, index: int) -> str | None:
+        """The code a self-``Use`` at ``index`` drinks or eats.
+
+        Heal sends ``[Arm item, Use self]`` in one queue, and both results are
+        applied before the observation updates ``armed_code``. So the ``Arm``
+        just before the ``Use`` names the item; with no ``Arm`` there, the item
+        was already armed.
+        """
+        w = self.world
+        before = self._intent_at(index - 1) if index > 0 else None
+        if before and before.get("verb") == "Arm":
+            for h in w.held_supplies:
+                if h.id == before.get("supply_id"):
+                    return h.code
+            return None
+        return w.armed_code
 
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
         """Remember an applied Read/Say in the knowledge base; count a refused one."""

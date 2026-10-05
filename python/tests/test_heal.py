@@ -12,7 +12,7 @@ from agentrealm_agent.healing import (
     REGEN_MEASURE_TICKS,
     SURVIVAL_KEY,
     absorb_heal_pending,
-    food_worth_pickup,
+    note_heal_pending,
     hurt,
     regen_known,
     save_regen_yes,
@@ -122,15 +122,57 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(verbs(out), ["Arm"])
         self.assertIsNone(m.heal_rearm)
 
-    def test_skips_food_when_missing_health_below_learned_heal(self):
+    def test_rearms_weapon_once_the_drink_heals_to_full(self):
+        # A potion that fills health ends the hurt guard; the re-arm still runs.
+        w = grid()
+        w.armed_code = "small_potion"
+        w.health = 10
+        w.held_supplies = [InventorySupply(1, "pocket_knife")]
+        m = Memory(heal_rearm="pocket_knife")
+        out = dispatch(w, ctx(m))
+        self.assertEqual(out.state, "Heal")
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 1}])
+        self.assertIsNone(m.heal_rearm)
+        w.armed_code = "pocket_knife"
+        self.assertNotEqual(dispatch(w, ctx(m)).state, "Heal")
+
+    def test_rearms_weapon_with_a_hostile_in_range(self):
+        w = grid()
+        w.health = 10
+        w.armed_code = "small_potion"
+        w.held_supplies = [InventorySupply(1, "pocket_knife")]
+        w.entities = [Entity("npc", 3, (2, 2), "slime")]
+        m = Memory(heal_rearm="pocket_knife")
+        out = dispatch(w, ctx(m))
+        self.assertEqual(out.state, "Heal")
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 1}])
+
+    def test_second_potion_is_drunk_before_the_rearm(self):
+        w = grid()
+        w.armed_code = "small_potion"
+        w.held_supplies = [InventorySupply(1, "pocket_knife"), InventorySupply(4, "small_potion")]
+        m = Memory(heal_rearm="pocket_knife")
+        out = dispatch(w, ctx(m))
+        self.assertEqual(verbs(out), ["Use"])
+        self.assertEqual(m.heal_rearm, "pocket_knife")
+
+    def test_weapon_gone_clears_rearm(self):
+        w = grid()
+        w.health = 10
+        m = Memory(heal_rearm="pocket_knife")
+        self.assertNotEqual(dispatch(w, ctx(m)).state, "Heal")
+        self.assertIsNone(m.heal_rearm)
+
+    def test_takes_food_even_when_it_would_overheal(self):
+        # Free food beats a potion or a walk to town, whatever its heal.
         w = grid(at=(1, 1))
         w.health = 9
         w.entities = [Entity("supply", 8, (2, 1), "apple")]
+        w.held_supplies = [InventorySupply(4, "small_potion")]
         kb = KnowledgeBase.empty("sandbox")
         kb.items["apple"] = {"heal_amount": 5}
-        self.assertFalse(food_worth_pickup(w, kb, "apple"))
         out = dispatch(w, ctx(kb=kb))
-        self.assertNotIn("Take", verbs(out))
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 8}])
 
     def test_learns_heal_from_applied_take(self):
         kb = KnowledgeBase.empty("sandbox")
@@ -140,6 +182,13 @@ class HealStateTest(unittest.TestCase):
         absorb_heal_pending(m, w, kb, [])
         self.assertEqual(kb.items["apple"]["heal_amount"], 3)
         self.assertTrue(kb.items["apple"]["heal_on_pickup"])
+
+    def test_nothing_learned_at_full_health(self):
+        # Loot also Takes food; at full health it cannot show a heal.
+        m, w = Memory(), grid()
+        w.health = 10
+        note_heal_pending(m, w, "apple", "take")
+        self.assertIsNone(m.heal_pending)
 
     def test_walks_to_known_safe_tile(self):
         w = grid(at=(2, 2))

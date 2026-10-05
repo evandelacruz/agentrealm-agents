@@ -26,6 +26,14 @@ OUT_OF_RANGE = {
 
 
 class MergeTest(unittest.TestCase):
+    def test_capability_is_filed_once_and_sorted(self):
+        items: dict = {"iron_axe": {"gem_price": 9}}
+        it.merge_capability(items, "iron_axe", "smash")
+        it.merge_capability(items, "iron_axe", "chop")
+        it.merge_capability(items, "iron_axe", "chop")
+        it.merge_capability(items, None, "cut")
+        self.assertEqual(items, {"iron_axe": {"gem_price": 9, "capabilities": ["chop", "smash"]}})
+
     def test_latest_value_overwrites(self):
         items: dict = {}
         it.merge_item(items, "potion", gem_price=5)

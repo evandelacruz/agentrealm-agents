@@ -2,8 +2,9 @@
 
 A30 nominates what can be done from where the agent stands: unread readable
 cells in sight (``Read``) and NPCs within 25 blocks never spoken to (``Say``).
-It also walks next to unlooked doors and A27 minimap entrance marks on the
-current map to record what they show (``door_look``). Unknown zones are read by A7's spare-window
+It also walks next to unlooked doors and A27 minimap entrance marks on any
+map the knowledge base knows, through known door warps when needed
+(``door_look``). Unknown zones are read by A7's spare-window
 probes (respawn ring first, then the path). Scroll reads stay deferred (PLAN.md A30).
 """
 
@@ -15,7 +16,7 @@ from typing import Literal
 
 from .config import Policy
 from .curiosity_budget import curiosity_room
-from .door_look import iter_unlooked, look_key
+from .door_look import iter_unlooked_targets, look_key
 from .investigation import cell_was_read, spoken_npc_ids
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -106,23 +107,25 @@ def _say_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, here: Pos) ->
     return out
 
 
-def _look_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, map_id: int, here: Pos) -> list[InterestItem]:
-    # Overworld only: Level owns interior doors (A37). Current map only.
+def _look_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, here_map: int, here: Pos) -> list[InterestItem]:
+    # Overworld only: Level owns interior doors (A37).
     if w.map_level is not None and w.map_level > 0:
         return []
     out: list[InterestItem] = []
-    for pos in iter_unlooked(kb, map_id):
+    for map_id, pos in iter_unlooked_targets(kb):
         lk = look_key(map_id, pos)
         if _gave_up(m, lk):
             continue
+        on_map = map_id == here_map
+        dist = chebyshev(here, pos) if on_map else 0
         out.append(
             InterestItem(
                 "look_door",
-                f"look entrance @{pos[0]},{pos[1]}",
+                f"look entrance map {map_id} @{pos[0]},{pos[1]}",
                 lk,
                 map_id=map_id,
                 pos=pos,
-                sort_key=(2, chebyshev(here, pos), pos),
+                sort_key=(2, 0 if on_map else 1, dist, map_id, pos),
                 charges_budget=True,
             )
         )

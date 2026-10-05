@@ -31,7 +31,7 @@ from .item_table import (
     use_target_block,
 )
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import record_hunting_zone, record_warp, sync_tiles, sync_world_maps
+from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import learn_equip_rejection
 from .loot import learn_loot_rejection
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
@@ -259,6 +259,7 @@ class Runner:
             if (x, y) in view.tiles
         }
         sync_tiles(self.knowledge, map_id, tiles)
+        record_map_level(self.knowledge, self.world)
 
     def _sync_minimap(self) -> None:
         """Entrance marks into the knowledge base (A27). Read once at startup:

@@ -1,10 +1,10 @@
 """Break memory per (block, capability) and grid break costs (A28).
 
 A supply's capabilities come only from sourced facts: the manual's per-class
-rules applied to the exact subtype codes docs/GAME_NOTES.md names, plus any
-capability a break with that subtype armed has opened, as learned in
-``KnowledgeBase.breaks``. No read serves an item's class, so an unlisted code
-carries none (PLAN.md Server gaps). Break attempts are stored with keys
+rules applied to the exact subtype codes docs/GAME_NOTES.md names (applied at
+read time, never stored), plus any capability a break with that subtype armed
+has opened, filed on its ``items`` row (A46). No read serves an item's class,
+so an unlisted code carries none until it opens a block (PLAN.md Server gaps). Break attempts are stored with keys
 ``"<map_id>,<x>,<y>,<capability>"``.
 """
 
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
-from .item_table import InventorySupply
+from .item_table import InventorySupply, merge_capability
 from .knowledge_base import KnowledgeBase
 from .plan import CAPABILITIES
 from .world import Pos, WorldModel
@@ -50,12 +50,9 @@ def capabilities_for_code(code: str, kb: KnowledgeBase | None = None) -> frozens
     caps = set(MANUAL_CAPABILITIES.get(code, ()))
     if kb is not None:
         with kb.lock:
-            rows = list(kb.breaks.values())
-        for row in rows:
-            if isinstance(row, dict) and row.get("result") == "opened" and row.get("code") == code:
-                cap = row.get("capability")
-                if cap in CAPABILITIES:
-                    caps.add(cap)
+            row = kb.items.get(code)
+            learned = list(row.get("capabilities") or []) if isinstance(row, dict) else []
+        caps.update(c for c in learned if c in CAPABILITIES)
     return frozenset(caps)
 
 
@@ -106,6 +103,10 @@ def record_attempt(
         entry["tick"] = tick
     with kb.lock:
         kb.breaks[break_key(map_id, pos, capability)] = entry
+        if result == "opened" and code:
+            # The breaks row is overwritten by the next try on this block; the
+            # item row keeps what the subtype has proven it can do (A46).
+            merge_capability(kb.items, code, capability)
 
 
 def held_supplies(w: WorldModel) -> list[InventorySupply]:

@@ -102,37 +102,59 @@ def _travel_step(
     toward a known door on another map (A15); escalation step 4 is M9.
     """
     goal = f"travel:{dest.label}"
-    plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest, goal)
-    leg = _travel_leg(m, w, goal, dest, plan_avoid, plan)
-    if leg is None:  # no known route to another map: yield, nothing to back off
-        if m.goal == goal:
-            m.path, m.goal = [], ""
-        return None
-    step = guided_step(m, w, goal, leg, plan_avoid, plan, knowledge)
+    step = route_step(w, m, policy, knowledge, plan_avoid, plan_costly, dest.map_id, dest.pos, goal)
     if step is None:
         return None
     note = nav_stuck.level_note(nav_stuck.active(m, w))
-    label = m.path[-1] if m.path else leg.target
+    label = m.path[-1] if m.path else step
     return StateOutcome([set_position(step)], f"{goal} → {label}{note}", state=TravelState.name)
 
 
-def _travel_leg(
+def route_step(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    knowledge: KnowledgeBase | None,
+    plan_avoid: set[Pos],
+    plan_costly: set[Pos],
+    dest_map: int,
+    dest: Pos,
+    goal: str,
+) -> Pos | None:
+    """One step toward ``dest_map:dest`` under ``goal``, across maps through
+    known door warps (A26), with stuck escalation on this map's leg (A15).
+
+    None when no step can be planned. With no known route to another map the
+    goal's path is cleared and nothing backs off. Travel and Investigate's
+    cross-map looks (A30) both walk with this.
+    """
+    plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest_map, dest, goal)
+    leg = _map_leg(m, w, goal, dest_map, dest, plan_avoid, plan)
+    if leg is None:
+        if m.goal == goal:
+            m.path, m.goal = [], ""
+        return None
+    return guided_step(m, w, goal, leg, plan_avoid, plan, knowledge)
+
+
+def _map_leg(
     m: Memory,
     w: WorldModel,
     goal: str,
-    dest: ResolvedDestination,
+    dest_map: int,
+    dest: Pos,
     plan_avoid: set[Pos],
     plan,
 ) -> nav_stuck.Leg | None:
     """What this map's leg toward ``dest`` tracks: ``dest`` itself on its own
     map, else the door the route walks to (A15). A kept path to that door
     needs no new route search."""
-    if dest.map_id == w.map_id:
-        return nav_stuck.Leg(dest.pos)
-    kept = nav_stuck.leg_toward(m, w, goal, dest.map_id, dest.pos, None)
+    if dest_map == w.map_id:
+        return nav_stuck.Leg(dest)
+    kept = nav_stuck.leg_toward(m, w, goal, dest_map, dest, None)
     if kept is not None and m.goal == goal and next_step(w, plan_avoid, m.path):
         return kept
-    return nav_stuck.leg_toward(m, w, goal, dest.map_id, dest.pos, plan(None))
+    return nav_stuck.leg_toward(m, w, goal, dest_map, dest, plan(None))
 
 
 def _route_plan(
@@ -142,7 +164,8 @@ def _route_plan(
     knowledge: KnowledgeBase | None,
     plan_avoid: set[Pos],
     plan_costly: set[Pos],
-    dest: ResolvedDestination,
+    dest_map: int,
+    dest: Pos,
     goal: str,
 ):
     """Plan the current map leg toward ``dest`` (A26), at the attempt's fog price.
@@ -157,8 +180,8 @@ def _route_plan(
             policy, plan_avoid, plan_costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge
         )
         if params.fog_cost not in routes:
-            nav = nav_search(m, w, goal, dest.pos) if dest.map_id == w.map_id else None
-            routes[params.fog_cost] = route_first_leg(w, knowledge, dest.map_id, dest.pos, params, nav=nav)
+            nav = nav_search(m, w, goal, dest) if dest_map == w.map_id else None
+            routes[params.fog_cost] = route_first_leg(w, knowledge, dest_map, dest, params, nav=nav)
         return routes[params.fog_cost]
 
     return plan

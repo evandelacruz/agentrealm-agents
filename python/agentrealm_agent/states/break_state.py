@@ -1,4 +1,10 @@
-"""Break: open blocks from the plan or stuck escalation step 2 (A28), or odd blocks out of curiosity (A31)."""
+"""Break: arm a capability and ``Use`` a nominated block (A28, A31).
+
+Module ``break_state`` (``break`` is reserved). ``BreakState`` is priority 4
+and runs for a ``break_block`` plan op, stuck navigation at escalation step 2,
+or to re-arm after a successful break. ``OddBreakState`` sits below Level and
+breaks odd blocks out of curiosity (A31).
+"""
 
 from __future__ import annotations
 
@@ -146,7 +152,8 @@ def break_outcome(
 
 
 class BreakState(State):
-    """Plan ``break_block`` and stuck step 2, at priority 4. Odd blocks are OddBreakState's."""
+    """Priority 4. Opens breakables from the plan or stuck escalation; re-arms
+    the weapon that was swapped out for the break. Odd blocks are OddBreakState's."""
 
     name = "Break"
     curious = False

@@ -28,6 +28,9 @@ GATHER_BACKOFF_TICKS = 10
 
 
 class GatherState(State):
+    """Priority 5. ``Use`` grass and bushes or ``Take`` gem piles while a
+    ``gather_gems:N`` directive is active and targets exist in safe-ish ground."""
+
     name = "Gather"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

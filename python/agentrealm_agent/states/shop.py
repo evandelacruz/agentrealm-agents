@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..knowledge_base import knowledge_items
 from ..loot import Pickup, loot_score, pickup_room
 from ..memory import Memory
 from ..navigation import cost_path
@@ -9,7 +10,6 @@ from ..pathing import grid_params, nav_search, next_step
 from ..shop import (
     GOAL,
     can_afford,
-    knowledge_items,
     pick_supply,
     plan_buy_op,
     price_of,

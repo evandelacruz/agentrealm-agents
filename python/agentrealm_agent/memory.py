@@ -85,6 +85,7 @@ class Memory:
     solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)
     break_rearm: str | None = None  # code armed before Break, restored when break finishes (A28)
     break_pending: tuple[int, Pos, str] | None = None  # map, block and capability a Use in flight targets (A28)
-    break_odd: Pos | None = None  # odd-block detector target Break is walking toward (A31)
+    break_odd: tuple[int, Pos] | None = None  # map and odd block Break is walking toward (A31)
+    break_odd_refusals: dict[tuple[int, Pos], int] = field(default_factory=dict)  # (map, odd block) -> times Break found no route to it (A31)
     equip_refused: set[tuple[str | None, str]] = field(default_factory=set)  # (subtype, slot) Equip was refused; (None, slot) for Remove (A19)
     equip_refused_sig: tuple | None = None  # loadout and inventory the refusals hold for; None until the next observation syncs it (A19)

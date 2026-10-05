@@ -21,7 +21,7 @@ from .break_memory import (
     untried_capabilities,
 )
 from .curiosity_budget import curiosity_room
-from .interest_list import investigate_blocked, sight_range
+from .interest_list import MAX_REJECTIONS, investigate_blocked, sight_range
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .world import DOORS, Pos, WorldModel, chebyshev
@@ -29,8 +29,6 @@ from .world import DOORS, Pos, WorldModel, chebyshev
 RADIUS = 3  # 7×7 neighbourhood
 RARE_MAX = 2  # at most this many cells of the same type (including self)
 DOMINANT_FRAC = 0.55  # most neighbours share one other type
-# Consumable tools are tried only when a clue names the block or the score is high.
-TOOL_MIN_SCORE = 2.0
 
 
 @dataclass(frozen=True)
@@ -93,7 +91,15 @@ def is_odd_block(tiles: dict[Pos, str], pos: Pos) -> bool:
     return dominant / len(neighbours) >= DOMINANT_FRAC
 
 
-def _clue_boost(kb: KnowledgeBase | None, block: str) -> float:
+def _clue_on_map(clue: dict, map_id: int) -> bool:
+    try:
+        return int(clue.get("map_id")) == map_id
+    except (TypeError, ValueError):
+        return False
+
+
+def _clue_boost(kb: KnowledgeBase | None, block: str, map_id: int) -> float:
+    """One per clue on ``map_id`` that names ``block``; clues on other maps do not count."""
     if kb is None or not block:
         return 0.0
     needle = block.lower()
@@ -101,6 +107,8 @@ def _clue_boost(kb: KnowledgeBase | None, block: str) -> float:
     with kb.lock:
         clues = list(kb.clues)
     for clue in clues:
+        if not _clue_on_map(clue, map_id):
+            continue
         text = (clue.get("text") or "").lower()
         if needle in text:
             boost += 1.0
@@ -125,6 +133,7 @@ def list_odd_blocks(
     w: WorldModel,
     kb: KnowledgeBase | None,
     policy,
+    m: Memory | None = None,
     *,
     at: Pos | None = None,
 ) -> list[OddNomination]:
@@ -139,7 +148,9 @@ def list_odd_blocks(
             continue
         if chebyshev(here, p) > sr:
             continue
-        boost = _clue_boost(kb, block)
+        if _gave_up(m, w.map_id, p):
+            continue
+        boost = _clue_boost(kb, block, w.map_id)
         score = odd_score(tiles, p, boost)
         if score <= 0:
             continue
@@ -156,7 +167,8 @@ def _choice_at_odd(
 ) -> BreakChoice | None:
     if w.map_id is None:
         return None
-    allow_tools = nomination.clue_boost > 0 or nomination.score >= TOOL_MIN_SCORE
+    # Consumable tools only when a clue on this map names the block.
+    allow_tools = nomination.clue_boost > 0
     for cap in untried_capabilities(kb, w.map_id, pos, held_capabilities(w, kb)):
         supply = pick_supply_for_capability(w, cap, kb)
         if supply is None:
@@ -167,6 +179,41 @@ def _choice_at_odd(
     return None
 
 
+def _stick_choice(
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    m: Memory,
+    stick_to: tuple[int, Pos],
+) -> BreakChoice | None:
+    """The sticky target, while it is on this map, in sight, still odd and not given up."""
+    map_id, pos = stick_to
+    if map_id != w.map_id or w.pos is None or _gave_up(m, map_id, pos):
+        return None
+    if chebyshev(w.pos, pos) > sight_range(w, map_id, w.pos):
+        return None
+    tiles = _map_tiles(w, kb, map_id)
+    block = tiles.get(pos)
+    if block is None:
+        return None
+    boost = _clue_boost(kb, block, map_id)
+    score = odd_score(tiles, pos, boost)
+    if score <= 0:
+        return None
+    return _choice_at_odd(w, kb, pos, OddNomination(pos, score, boost))
+
+
+def _gave_up(m: Memory | None, map_id: int, pos: Pos) -> bool:
+    return m is not None and m.break_odd_refusals.get((map_id, pos), 0) >= MAX_REJECTIONS
+
+
+def note_odd_unreachable(m: Memory, map_id: int, pos: Pos) -> None:
+    """Break found no route to an odd block: count it, and drop the sticky target."""
+    key = (map_id, pos)
+    m.break_odd_refusals[key] = m.break_odd_refusals.get(key, 0) + 1
+    if m.break_odd == key:
+        m.break_odd = None
+
+
 def pick_odd_break(
     w: WorldModel,
     kb: KnowledgeBase | None,
@@ -174,27 +221,22 @@ def pick_odd_break(
     m: Memory,
     *,
     params: dict[str, float | int],
-    stick_to: Pos | None = None,
+    stick_to: tuple[int, Pos] | None = None,
 ) -> BreakChoice | None:
     """Best odd block we can still try, when curiosity allows (A31)."""
-    if w.pos is None or investigate_blocked(w, policy) or w.in_boss_fight():
+    if w.pos is None or w.map_id is None or investigate_blocked(w, policy) or w.in_boss_fight():
         return None
     if not curiosity_room(params, m, w.tick):
         return None
     if stick_to is not None:
-        tiles = _map_tiles(w, kb, w.map_id)
-        block = tiles.get(stick_to)
-        if block is not None and block in BREAKABLE:
-            boost = _clue_boost(kb, block)
-            nom = OddNomination(stick_to, odd_score(tiles, stick_to, boost), boost)
-            choice = _choice_at_odd(w, kb, stick_to, nom)
-            if choice is not None:
-                return choice
+        choice = _stick_choice(w, kb, m, stick_to)
+        if choice is not None:
+            return choice
         m.break_odd = None
-    for nom in list_odd_blocks(w, kb, policy):
+    for nom in list_odd_blocks(w, kb, policy, m):
         choice = _choice_at_odd(w, kb, nom.pos, nom)
         if choice is not None:
-            m.break_odd = nom.pos
+            m.break_odd = (w.map_id, nom.pos)
             return choice
     m.break_odd = None
     return None

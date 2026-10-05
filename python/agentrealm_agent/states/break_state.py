@@ -9,7 +9,7 @@ from ..break_memory import (
     nominate_on_path,
     pick_supply_for_capability,
 )
-from ..odd_block import pick_odd_break
+from ..odd_block import note_odd_unreachable, pick_odd_break
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
@@ -82,11 +82,13 @@ def break_outcome(
         return reflex
 
     op = break_op(plan)
+    odd = False
     if op is not None:
         choice = _plan_choice(w, ctx, op)
     elif (att := nav_stuck.active(m, w)) is not None and att.level == nav_stuck.BREAK:
         choice = _stuck_choice(w, ctx)
     else:
+        odd = True
         choice = pick_odd_break(
             w,
             ctx.knowledge,
@@ -133,6 +135,8 @@ def break_outcome(
             stuck_reason = nav_stuck.stuck_reason(att, w.tick)
             if stuck_reason:
                 nav_stuck.escalate(m, w, att, stuck_reason)
+        if odd:
+            note_odd_unreachable(m, w.map_id, choice.pos)
         return StateOutcome(None, f"cannot reach {choice.pos}", state=state)
     m.path, m.goal = path or [], GOAL
     return StateOutcome(intents + [set_position(step)], f"break → {choice.pos}", state=state)

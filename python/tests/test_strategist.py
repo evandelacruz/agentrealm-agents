@@ -167,14 +167,48 @@ class AnswerTest(unittest.TestCase):
         queue_signal(r.mem, {"trigger": "death"})
         round_trip(s, r)
         self.assertEqual(r.plan.current()["op"], "explore_area")
-        self.assertEqual(logged_events(r), ["ask", "ignored"])
+        self.assertEqual(logged_events(r), ["ask", "kept"])
 
     def test_directives_goals_keep_the_stack(self):
         s, r = make(FakeLLM(WAIT_ANSWER)), fake_runner(goals=["gather_gems:5"])
         queue_signal(r.mem, {"trigger": "death"})
         round_trip(s, r)
         self.assertEqual(r.plan.current()["op"], "explore_area")
-        self.assertEqual(logged_events(r), ["ask", "ignored"])
+        self.assertEqual(logged_events(r), ["ask", "kept"])
+
+
+class ParamsTest(unittest.TestCase):
+    def test_params_only_reply_applies_params_and_keeps_stack(self):
+        s, r = make(FakeLLM({"goals": [], "params": {"retreat_hits": 4, "risk": 0.9}})), fake_runner()
+        queue_signal(r.mem, {"trigger": "death"})
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["op"], "explore_area")
+        self.assertEqual(r.plan.params["retreat_hits"], 4)  # tightened
+        self.assertEqual(r.plan.params["risk"], PARAM_DEFAULTS["risk"])  # loosening dropped
+        self.assertEqual(logged_events(r), ["ask", "kept"])
+
+    def test_params_apply_while_directives_own_stack(self):
+        reply = {"goals": [{"op": "wait", "seconds": 1}], "params": {"retreat_hits": 3}}
+        s, r = make(FakeLLM(reply)), fake_runner(goals=["gather_gems:5"])
+        queue_signal(r.mem, {"trigger": "death"})
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["op"], "explore_area")
+        self.assertEqual(r.plan.params["retreat_hits"], 3)
+
+    def test_params_carry_into_a_replaced_stack(self):
+        reply = {"goals": [{"op": "wait", "seconds": 1}], "params": {"retreat_hits": 3}}
+        s, r = make(FakeLLM(reply)), fake_runner()
+        queue_signal(r.mem, {"trigger": "death"})
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["op"], "wait")
+        self.assertEqual(r.plan.params["retreat_hits"], 3)
+
+    def test_reply_without_params_keeps_earlier_ones(self):
+        s, r = make(FakeLLM(WAIT_ANSWER)), fake_runner()
+        r.plan.params["retreat_hits"] = 3
+        queue_signal(r.mem, {"trigger": "death"})
+        round_trip(s, r)
+        self.assertEqual(r.plan.params["retreat_hits"], 3)
 
 
 class FailureTest(unittest.TestCase):

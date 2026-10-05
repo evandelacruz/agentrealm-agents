@@ -6,7 +6,7 @@ clue rules (A32) stay in charge.
 
 Two threads, one rule: everything that reads or writes the world, the plan,
 ``Memory`` or the trace runs on the tick thread, in :meth:`Strategist.on_window`.
-The background thread only sends a prompt and parses the reply. The two
+The background thread only sends a prompt and waits for the reply. The two
 threads talk through two queues, a request and an answer, so a slow model
 never costs a tick and nothing needs a lock.
 
@@ -14,8 +14,10 @@ One window, on the tick thread:
 
 1. Move new triggers (clue, stuck, death, goal done or failed, level, idle)
    from ``Memory`` into the strategist's inbox.
-2. If an answer came back, apply it. A failed call puts its triggers back in
-   the inbox; an answer with no valid goals keeps the current plan.
+2. If an answer came back, apply it. A failed call or a reply that is not
+   JSON puts its triggers back in the inbox. Its ``params`` apply at once; its
+   ``goals`` replace the stack only when at least one is valid and directives
+   ``goals`` do not own the stack.
 3. If nothing is in flight, the inbox has triggers and the limits allow it,
    build the prompt, log it to the trace, and hand it to the background thread.
 
@@ -52,7 +54,7 @@ from typing import Any, Callable, Protocol
 from .directives import Directives
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .plan import GoalOp, Plan, is_travel_goal, parse_directives_goals, parse_plan_payload
+from .plan import Plan, directive_stack_ops, parse_plan_payload
 from .world import WorldModel
 
 log = logging.getLogger(__name__)
@@ -225,10 +227,7 @@ class Answer:
 
     raw: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
-    goals: list[GoalOp] = field(default_factory=list)
-    params: dict[str, float | int] = field(default_factory=dict)
-    notes: str = ""
-    error: str = ""  # set when the call or the JSON failed
+    error: str = ""  # set when the call failed
 
 
 @dataclass
@@ -280,20 +279,17 @@ class Strategist:
     def serve_one(self, timeout: float | None = None) -> None:
         """Answer one waiting request, if any. Touches nothing but the two queues."""
         try:
-            messages, floor = self._requests.get(timeout=timeout)
+            messages = self._requests.get(timeout=timeout)
         except queue.Empty:
             return
-        self._answers.put(self._ask(messages, floor))
+        self._answers.put(self._ask(messages))
 
-    def _ask(self, messages: list[dict[str, str]], floor: dict[str, float | int]) -> Answer:
+    def _ask(self, messages: list[dict[str, str]]) -> Answer:
         assert self.client is not None
         answer = Answer()
         try:
             answer.raw, answer.usage = self.client.complete(messages)
-            answer.goals, answer.params, answer.notes = parse_plan_payload(
-                json.loads(answer.raw), floor_params=floor
-            )
-        except Exception as e:  # network, HTTP status, or a reply that is not JSON
+        except Exception as e:  # network or HTTP status
             answer.error = str(e) or type(e).__name__
         return answer
 
@@ -367,10 +363,15 @@ class Strategist:
             f"ask (call {self.calls}, {len(self.in_flight)} trigger(s))",
             {"strategist": {"event": "ask", "call": self.calls, "triggers": self.in_flight, "messages": messages}},
         )
-        self._requests.put((messages, dict(runner.directives.directives.params)))
+        self._requests.put(messages)
 
     def _settle(self, runner: Any, answer: Answer) -> None:
-        """Charge the real token count, then apply the answer or put its triggers back."""
+        """Charge the real token count, then apply the answer or put its triggers back.
+
+        ``params`` apply at once, checked against the directives floor as it is now.
+        ``goals`` replace the stack only when there is at least one valid goal and
+        directives ``goals`` do not own the stack.
+        """
         triggers, self.in_flight = self.in_flight or [], None
         reported = tokens_used(answer.usage)
         if reported is not None:
@@ -382,33 +383,35 @@ class Strategist:
             "usage": answer.usage,
             "tokens_total": self.tokens,
         }
+        reply = None
+        if not answer.error:
+            try:
+                reply = json.loads(answer.raw)
+            except ValueError as e:
+                answer.error = f"reply is not JSON: {e}"
         if answer.error:
             # Retry these triggers on the next allowed call.
             self.inbox = (triggers + self.inbox)[-INBOX_KEPT:]
             log.warning("strategist: call failed: %s", answer.error)
             runner.log("strategist", f"failed: {answer.error}", {"strategist": {"event": "error", "error": answer.error, **record}})
             return
-        record.update(goals=answer.goals, params=answer.params, notes=answer.notes)
-        if not answer.goals:
-            runner.log("strategist", "answer had no valid goals; plan kept", {"strategist": {"event": "ignored", **record}})
-            return
         d = runner.directives.directives
-        if _operator_plan_active(d):
-            runner.log("strategist", "directives goals own the stack; plan kept", {"strategist": {"event": "ignored", **record}})
+        goals, params, notes = parse_plan_payload(reply, floor_params=dict(d.params))
+        if isinstance(reply, dict) and "params" in reply:
+            runner.plan.params = params
+        record.update(goals=goals, params=runner.plan.params, notes=notes)
+        if not goals:
+            runner.log("strategist", "answer had no valid goals; stack kept", {"strategist": {"event": "kept", **record}})
+            return
+        if directive_stack_ops(d.goals):
+            runner.log("strategist", "directives goals own the stack; stack kept", {"strategist": {"event": "kept", **record}})
             return
         runner.plan = Plan(
-            list(answer.goals),
-            dict(answer.params),
-            notes=answer.notes,
+            list(goals),
+            dict(runner.plan.params),
+            notes=notes,
             floor_params=dict(d.params),
             tick_hz=runner.tick_hz,
         )
         runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
-        runner.log("strategist", f"plan replaced ({len(answer.goals)} goals)", {"strategist": {"event": "applied", **record}})
-
-
-def _operator_plan_active(directives: Directives) -> bool:
-    stack = [g for g in directives.goals if not is_travel_goal(g)]
-    if not stack:
-        return False
-    return bool(parse_directives_goals(stack))
+        runner.log("strategist", f"plan replaced ({len(goals)} goals)", {"strategist": {"event": "applied", **record}})

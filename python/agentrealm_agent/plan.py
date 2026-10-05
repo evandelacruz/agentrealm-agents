@@ -504,10 +504,9 @@ class Plan:
         directive_goals: list[str],
         directive_params: dict[str, float | int],
     ) -> Plan | None:
-        stack_goals = [g for g in directive_goals if not is_travel_goal(g)]
-        if not stack_goals:
+        if not any(not is_travel_goal(g) for g in directive_goals):
             return None
-        ops = parse_directives_goals(stack_goals)
+        ops = directive_stack_ops(directive_goals)
         if not ops:
             log.warning("plan: no valid directives goal in %r; using the built-in plan", directive_goals)
             return None
@@ -517,6 +516,14 @@ class Plan:
     @classmethod
     def from_policy(cls, policy: Policy, directive_params: dict[str, float | int]) -> Plan:
         return cls(list(builtin_goals(policy)), dict(directive_params), floor_params=dict(directive_params))
+
+
+def directive_stack_ops(directive_goals: list[str]) -> list[GoalOp]:
+    """The stack ops directives ``goals`` set; ``travel:*`` entries belong to Travel (A27).
+
+    Non-empty means the directives file owns the goal stack, so the strategist leaves it alone (A35).
+    """
+    return parse_directives_goals([g for g in directive_goals if not is_travel_goal(g)])
 
 
 def builtin_goals(policy: Policy) -> list[GoalOp]:

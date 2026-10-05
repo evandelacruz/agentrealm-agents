@@ -8,6 +8,13 @@ Priority each tick window:
 The reference agent in ``agentrealm_agent/`` adds dozens of states; this file
 keeps the same API contract with only the behaviors above.
 
+From the character file's ``[policy]`` it reads only ``hostile``,
+``hostile_range``, ``avoid_blocks``, ``entity_refresh``, and ``seed``. Other
+keys (``goals``, ``goto``, ``on_hostile``, ``pickup``) are ignored here.
+
+On 401/403 it stops with a message. After a death, or while unplaced, it drops
+its path and rereads self and position.
+
 Run (from ``python/``, after ``export AGENTREALM_API_KEY=...``):
 
   python3 starter_agent.py create characters/starter.toml
@@ -28,12 +35,10 @@ from dataclasses import dataclass, field
 from agentrealm_agent import config
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.executor import wait
+from agentrealm_agent.pathing import flee_step, hostiles_in_range
 from agentrealm_agent.world import Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60
-HOSTILE_RANGE = 2
-HOSTILE_KINDS = frozenset({"npc"})
-AVOID_BLOCKS = frozenset({"fire", "lava"})
 WINDOW_MARGIN = 0.05
 
 
@@ -43,49 +48,22 @@ class StarterMemory:
     need_self: bool = True
     need_position: bool = True
     windows_since_self: int = 0
-    entity_refresh: int = 5
+    policy: config.Policy = field(default_factory=config.Policy)
 
 
 def set_position(p: Pos) -> dict:
     return {"verb": "SetPosition", "x": p[0], "y": p[1]}
 
 
-def hostiles_in_range(world: WorldModel) -> list:
-    if world.pos is None:
-        return []
-    here = world.pos
-    return [e for e in world.entities if e.kind in HOSTILE_KINDS and chebyshev(e.pos, here) <= HOSTILE_RANGE]
-
-
-def blocked_tiles(world: WorldModel) -> set[Pos]:
-    avoid: set[Pos] = set()
-    for p, block in world.view.tiles.items():
-        if block in AVOID_BLOCKS:
-            avoid.add(p)
-    return avoid
-
-
-def flee_step(world: WorldModel, hostiles: list) -> Pos | None:
-    """One step that increases distance from the nearest hostile."""
-    here = world.pos
-    assert here is not None
-    blocked = blocked_tiles(world)
-    options = world.open_neighbours(here, blocked) + [here]
-
-    def safety(p: Pos) -> tuple[int, int]:
-        nearest = min(chebyshev(p, h.pos) for h in hostiles)
-        total = sum(chebyshev(p, h.pos) for h in hostiles)
-        return nearest, total
-
-    best = max(options, key=lambda p: (safety(p), p))
-    return None if best == here else best
+def blocked_tiles(world: WorldModel, policy: config.Policy) -> set[Pos]:
+    return {p for p, block in world.view.tiles.items() if block in policy.avoid_blocks}
 
 
 def walk_step(world: WorldModel, mem: StarterMemory, rng: random.Random) -> Pos | None:
     """Follow ``mem.path``, or pick a frontier target and step toward it."""
     if world.pos is None:
         return None
-    blocked = blocked_tiles(world)
+    blocked = blocked_tiles(world, mem.policy)
     if mem.path:
         nxt = mem.path[0]
         if chebyshev(world.pos, nxt) <= world.movement and nxt not in blocked and world.view.walkable(nxt):
@@ -136,7 +114,7 @@ def choose_call(world: WorldModel, mem: StarterMemory) -> str:
         return "position"
     if world.terrain_stale():
         return "terrain"
-    if world.tick - world.entities_tick >= mem.entity_refresh:
+    if world.tick - world.entities_tick >= mem.policy.entity_refresh:
         return "entities"
     return "tick"
 
@@ -154,9 +132,9 @@ def decide(world: WorldModel, mem: StarterMemory, rng: random.Random) -> Starter
         mem.need_self = True
         return StarterDecision([wait()], "wake", "Sync")
 
-    hostiles = hostiles_in_range(world)
+    hostiles = hostiles_in_range(world, mem.policy)
     if hostiles:
-        away = flee_step(world, hostiles)
+        away = flee_step(world, hostiles, blocked_tiles(world, mem.policy))
         if away is not None:
             mem.path = []
             return StarterDecision([set_position(away)], "flee hostile", "Flee")
@@ -168,10 +146,18 @@ def decide(world: WorldModel, mem: StarterMemory, rng: random.Random) -> Starter
     return StarterDecision(None, "nothing to do", "Explore")
 
 
-def apply_tick(world: WorldModel, mem: StarterMemory, response: dict, sent: list[dict] | None) -> None:
+def resync(mem: StarterMemory) -> None:
+    """Forget the plan and reread self and position (death, respawn, unplaced)."""
+    mem.need_self = mem.need_position = True
+    mem.path = []
+
+
+def apply_tick(world: WorldModel, mem: StarterMemory, response: dict) -> None:
     world.tick = int(response.get("tick", world.tick))
-    world.apply_events(response.get("events_by_tick") or [])
+    events = world.apply_events(response.get("events_by_tick") or [])
     world.apply_observation(response.get("observation"))
+    if any(ev.get("kind") in ("Died", "Respawned") for ev in events):
+        resync(mem)
     for res in response.get("intent_results") or []:
         if res.get("outcome") == "rejected":
             mem.need_position = True
@@ -187,7 +173,7 @@ class StarterRunner:
         self.stop = stop
         self.out = out
         self.world = WorldModel(cid)
-        self.mem = StarterMemory(entity_refresh=cfg.policy.entity_refresh)
+        self.mem = StarterMemory(policy=cfg.policy)
         seed = cfg.policy.seed if cfg.policy.seed is not None else cid
         self.rng = random.Random(seed)
         cfg.trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -224,11 +210,21 @@ class StarterRunner:
                 try:
                     self.step(call)
                 except ApiError as e:
-                    self.out(f"[{self.cfg.name}] {call}: {e}")
-                    if e.retry_after:
-                        time.sleep(e.retry_after)
+                    if not self.on_error(call, e):
+                        return
         finally:
             self.trace.close()
+
+    def on_error(self, call: str, e: ApiError) -> bool:
+        """Log an API error and react; False means stop this character."""
+        self.out(f"[{self.cfg.name}] {call}: {e}")
+        if e.status in (401, 403):
+            self.out(f"[{self.cfg.name}] stopping: API key rejected or not allowed to play this character")
+            return False
+        if e.code in ("not_on_map", "character_not_live"):
+            resync(self.mem)  # dead, respawning, or not placed yet
+        self.stop.wait(e.retry_after or 0)
+        return True
 
     def step(self, call: str) -> None:
         w, m, c = self.world, self.mem, self.client
@@ -254,7 +250,7 @@ class StarterRunner:
             d = decide(w, m, self.rng)
             intents = d.intents
             r = c.tick(self.cid, intents, snapshot_version=w.snapshot_version)
-            apply_tick(w, m, r, intents)
+            apply_tick(w, m, r)
             label = d.mode if intents else "hold"
             self.log("tick", f"{label}: {d.reason}")
 

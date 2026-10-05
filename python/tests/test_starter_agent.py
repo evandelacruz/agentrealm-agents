@@ -1,10 +1,22 @@
 """A52: starter agent decide order and explore/flee behavior."""
 
 import random
+import threading
 import unittest
+from pathlib import Path
 
+from agentrealm_agent.client import ApiError
+from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.world import Entity
-from starter_agent import StarterDecision, StarterMemory, choose_call, decide, hostiles_in_range, walk_step
+from starter_agent import (
+    StarterDecision,
+    StarterMemory,
+    StarterRunner,
+    apply_tick,
+    choose_call,
+    decide,
+    walk_step,
+)
 from tests.test_states import world
 
 
@@ -55,9 +67,50 @@ class StarterWalkTest(unittest.TestCase):
         self.assertIsNotNone(step)
         self.assertNotEqual(step, w.pos)
 
-    def test_hostiles_in_range_respects_chebyshev(self):
-        w = world([".......", ".......", "......."], at=(3, 3))
-        w.entities = [Entity("npc", 1, (3, 6))]
-        self.assertEqual(hostiles_in_range(w), [])
-        w.entities = [Entity("npc", 1, (3, 5))]
-        self.assertEqual(len(hostiles_in_range(w)), 1)
+
+class StarterPolicyTest(unittest.TestCase):
+    def test_hostile_range_and_kinds_come_from_policy(self):
+        w = world([".......", ".......", "......."], at=(3, 1))
+        w.entities = [Entity("npc", 1, (6, 1))]
+        self.assertEqual(decide(w, StarterMemory(), random.Random(0)).mode, "Explore")
+        self.assertEqual(decide(w, StarterMemory(policy=Policy(hostile_range=3)), random.Random(0)).mode, "Flee")
+        self.assertNotEqual(decide(w, StarterMemory(policy=Policy(hostile=["character"])), random.Random(0)).mode, "Flee")
+
+    def test_avoid_blocks_come_from_policy(self):
+        w = world(["~~~", "~.~", "~~~"], at=(1, 1))
+        self.assertIsNone(walk_step(w, StarterMemory(policy=Policy(avoid_blocks=["lava"])), random.Random(0)))
+        self.assertIsNotNone(walk_step(w, StarterMemory(policy=Policy(avoid_blocks=[])), random.Random(0)))
+
+
+class StarterResyncTest(unittest.TestCase):
+    def test_died_event_forces_resync(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        m = StarterMemory(need_self=False, need_position=False, path=[(2, 2)])
+        apply_tick(w, m, {"tick": 5, "events_by_tick": [{"tick": 5, "events": [{"kind": "Died"}]}]})
+        self.assertTrue(m.need_self and m.need_position)
+        self.assertEqual(m.path, [])
+        self.assertEqual(choose_call(w, m), "self")
+
+
+class StarterErrorTest(unittest.TestCase):
+    def runner(self):
+        # on_error needs only cfg, out, mem, and stop; skip __init__ so no trace file opens.
+        r = StarterRunner.__new__(StarterRunner)
+        r.cfg = CharacterConfig("T", "default", "x", "sandbox", Policy(), Path("t.toml"))
+        r.lines, r.stop = [], threading.Event()
+        r.out = r.lines.append
+        r.mem = StarterMemory(need_self=False, need_position=False, path=[(1, 1)])
+        return r
+
+    def test_auth_failure_stops(self):
+        for status in (401, 403):
+            r = self.runner()
+            self.assertFalse(r.on_error("tick", ApiError(status, "unauthorized")))
+            self.assertIn("stopping", r.lines[-1])
+
+    def test_not_live_resyncs_and_keeps_going(self):
+        for code in ("not_on_map", "character_not_live"):
+            r = self.runner()
+            self.assertTrue(r.on_error("tick", ApiError(409, code)))
+            self.assertTrue(r.mem.need_self and r.mem.need_position)
+            self.assertEqual(r.mem.path, [])

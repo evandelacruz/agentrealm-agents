@@ -405,7 +405,7 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertEqual(client.ticks, [], "nothing sent while downed")
 
     def test_start_exits_with_the_wake_refusal(self):
-        for code in ("alive_cap_full", "block_occupied"):
+        for code in ("alive_cap_full", "block_occupied", "something_new"):
             client = FakeSleeper(refusal=code)
             with self.assertRaisesRegex(ValueError, code):
                 self.smoke.wake(client, 9, pause=lambda s: None)

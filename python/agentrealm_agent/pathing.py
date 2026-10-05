@@ -55,9 +55,12 @@ def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
     While it is, the walk comes first: Loot, Shop, Investigate, Travel and
     OddBreak stay out, Break runs only for the goto's own stuck escalation,
     and the plan's moves and ``wait`` hold are skipped (``replan``, Explore).
-    Heal is not deferred: survival beats navigation, so a hurt character
-    still walks to safety. Reaching the target, or stuck detection giving up
-    on it, clears the deferral.
+    Heal is not deferred, so a hurt character still walks to safety.
+
+    The deferral lifts while the agent stands on the target, or while stuck
+    detection is backed off from it after a give-up; it comes back when the
+    agent steps off the target or the backoff ends, because ``goto`` stays
+    first in the goals.
     """
     if policy.goto is None or "goto" not in policy.goals:
         return False

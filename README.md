@@ -68,7 +68,7 @@ Live M6 smoke against Olympuff: `make smoke-m6-olympuff` with `AGENTREALM_API_KE
 
 Live M7 smoke: `make smoke-m7-olympuff` with `AGENTREALM_API_KEY` set plays one hour on the Olympuff overworld via [`scripts/smoke_m7_olympuff.py`](scripts/smoke_m7_olympuff.py), on its own character, `python/characters/olympuff_m7.toml` (`OlympuffSurvivor`). Start it with the character on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out): the script sends the agent to one `goto` target 150 blocks east of where it stands (`--target X,Y` overrides), then explores.
 
-While the `goto` target is still owed, the walk comes first: Loot, Shop, Investigate and Travel do not walk anywhere else, Break opens only a block the goto's own stuck escalation picked, and the strategist plan's moves and `wait` hold are skipped. Heal is the exception: a hurt character still walks to food or a safe tile. Stuck detection keeps running on the goto path, so a give-up still ends the deferral.
+While the `goto` target is still owed, the walk comes first: Loot, Shop, Investigate and Travel do not walk anywhere else, Break opens only a block the goto's own stuck escalation picked, and the strategist plan's moves and `wait` hold are skipped. Heal is not deferred, so a hurt character still walks to safety. The deferral lifts while the agent stands on the target, or while stuck detection is backed off from it after a give-up; it comes back when the agent steps off the target or the backoff ends, because `goto` stays first in the goals. Stuck detection keeps running on the kept goto path, so it still escalates and gives up.
 
 Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_agent/m7_acceptance.py)):
 

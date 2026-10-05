@@ -57,16 +57,25 @@ def ctx(*, goto: bool, m: Memory | None = None, plan: Plan | None = None) -> Pla
 
 
 class GotoPendingTest(unittest.TestCase):
-    def test_pending_until_reached_or_given_up(self):
+    def test_pending_unless_on_the_target_or_backed_off(self):
         w = world()
         c = ctx(goto=True)
         self.assertTrue(goto_navigation_pending(w, c.memory, c.policy))
         self.assertFalse(goto_navigation_pending(w, c.memory, ctx(goto=False).policy))
-        att = nav_stuck.track(c.memory, w, "goto", GOTO)
-        nav_stuck.give_up(c.memory, w, att, "no_path")
-        self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), "backed off")
+
+    def test_lifts_on_the_target_and_comes_back_off_it(self):
+        w, c = world(), ctx(goto=True)
         w.pos = GOTO
-        self.assertFalse(goto_navigation_pending(w, Memory(), c.policy), "reached")
+        self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), "standing on it")
+        w.pos = (10, 0)
+        self.assertTrue(goto_navigation_pending(w, c.memory, c.policy), "goto stays first in the goals")
+
+    def test_lifts_during_the_backoff_and_comes_back_after_it(self):
+        w, c = world(), ctx(goto=True)
+        nav_stuck.give_up(c.memory, w, nav_stuck.track(c.memory, w, "goto", GOTO), "no_path")
+        self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), "backed off")
+        w.tick += nav_stuck.BACKOFF_BASE_TICKS
+        self.assertTrue(goto_navigation_pending(w, c.memory, c.policy), "backoff ended")
 
 
 class GotoDefersStatesTest(unittest.TestCase):

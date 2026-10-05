@@ -34,7 +34,7 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Run 3b (stopped after ~3 min):** the same pacing, now with an Equip `Wear` and Break walks taking turns with the goto walk. Stopped by hand, so the gate never ran: no verdict, regen not measured.
 - **What was wrong:** each fix after 3a patched one more state (relabel Break's walk as `goto`, skip replan, defer Equip, hold Break while a `Use` was pending). That was the bug: any two states that take turns moving the character can pace, so a fix per state never ends. Those patches are removed again.
 - **Fix:** one oscillation guard in dispatch (A15, `navigation/oscillation.py`). When the character's last 6 cell changes stayed on at most 2 cells, it gives up the target it walks to through stuck detection's step 5 (reason `pacing`) and traces an `oscillation` event, whichever states caused it. The smoke script now aborts with exit 1 on sustained oscillation (more than 3 give-ups in 6000 ticks; events where survival states did the moving do not count), so a live run cannot burn the hour pacing.
-- **Status:** tested offline only. The next live hour waits on this fix being merged.
+- **Status:** tested offline only. **Next:** rerun the full live hour.
 
 ## Done-when
 

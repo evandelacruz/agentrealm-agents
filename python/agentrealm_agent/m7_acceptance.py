@@ -39,27 +39,24 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from .acceptance import AcceptanceHooks, CountingClient
+from .acceptance_common import (
+    LOOP_STEP_LIMIT,
+    OSCILLATION_ABORT_COUNT,
+    OSCILLATION_ABORT_TICKS,
+    OscillationAbortTracker,
+    StepLoopTracker,
+    note_recover_withdraws,
+    note_retreat_miss,
+    withdraw_cells,
+)
 from .config import Policy
-from .executor.movement import step_landing
 from .healing import regen_known
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .survival import should_retreat
 from .world import Pos, WorldModel, chebyshev
-from .zone_discovery import safe_tiles
 
 TARGET_SECONDS = 3600.0
 TARGET_DISTANCE = 150
-LOOP_STEP_LIMIT = 24  # Step-sending decisions in a row at one cell with one reason
-# Sustained pacing: the guard gave up a target more than this many times in
-# this many ticks (10 minutes at 10 ticks/s); events that gave nothing up do
-# not count. Its backoffs double (30 s, 60 s, 120 s),
-# so a target that keeps making the agent pace trips this within minutes.
-OSCILLATION_ABORT_COUNT = 3
-OSCILLATION_ABORT_TICKS = 6000
-
-# States that are already the right answer when should_retreat holds.
-SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee")
 
 
 @dataclass
@@ -90,13 +87,16 @@ class M7AcceptanceMetrics(AcceptanceHooks):
     heal_actions: int = 0
     regen: str | None = None  # "yes" or "no" once measured
     loop_detected: bool = False
-    oscillation_ticks: list[int] = field(default_factory=list)  # each guard event's tick
-    pacing_give_up_ticks: list[int] = field(default_factory=list)  # ticks of events that gave up a target
-    oscillation_abort: str | None = None  # why the run was stopped for pacing
+    oscillation_ticks: list[int] = field(default_factory=list)
+    pacing_give_up_ticks: list[int] = field(default_factory=list)
+    oscillation_abort: str | None = None
     api_errors: list[str] = field(default_factory=list)
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
-    _loop_key: tuple[Pos, str] | None = None
-    _loop_streak: int = 0
+    _loop: StepLoopTracker = field(default_factory=StepLoopTracker)
+    _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
+
+    def __post_init__(self) -> None:
+        self._oscillation.stop = self.stop
 
     def wrap(self, client):
         return CountingClient(client, self.api_errors)
@@ -115,26 +115,10 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             self.stop.set()
 
     def on_oscillation(self, event: dict) -> None:
-        """Count the guard's events; sustained give-ups for pacing end the run.
-
-        Only an event that gave up a target (it carries ``goal``) counts
-        toward the abort; survival states pacing on their own do not.
-        """
-        tick = int(event.get("tick") or 0)
-        self.oscillation_ticks.append(tick)
-        if "goal" not in event:
-            return
-        self.pacing_give_up_ticks.append(tick)
-        recent = [t for t in self.pacing_give_up_ticks if tick - t < OSCILLATION_ABORT_TICKS]
-        if len(recent) > OSCILLATION_ABORT_COUNT and self.oscillation_abort is None:
-            self.oscillation_abort = (
-                f"sustained oscillation: gave up {len(recent)} targets for pacing in "
-                f"{OSCILLATION_ABORT_TICKS} ticks (last at tick {tick}: {event['goal']} → "
-                f"{tuple(event.get('target') or ())}, cells {event.get('cells')}, moved by "
-                f"{', '.join(event.get('states') or []) or 'no state'})"
-            )
-            if self.stop is not None:
-                self.stop.set()
+        self._oscillation.on_oscillation(event)
+        self.oscillation_ticks = self._oscillation.oscillation_ticks
+        self.pacing_give_up_ticks = self._oscillation.pacing_give_up_ticks
+        self.oscillation_abort = self._oscillation.oscillation_abort
 
     def before_tick(
         self,
@@ -152,19 +136,15 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             self.lives_seen = w.lives
         self._note_navigation(w)
         self._note_give_ups(m)
-        if should_retreat(w, policy, params) and state not in SURVIVAL_STATES:
-            self.retreat_misses += 1
+        note_retreat_miss(self, w, policy, params, state=state)
         if intents and state == "Heal":
             self.heal_actions += 1
         if intents and state == "Recover":
-            safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
-            for cell in withdraw_cells(w.pos, intents):
-                self.recover_withdraws += 1
-                if cell not in safe:
-                    self.recover_unsafe += 1
+            note_recover_withdraws(self, w, intents)
         self.regen = regen_known(knowledge, m) or self.regen
         if intents is not None:
-            self._note_loop(w, reason, intents)
+            self._loop.note(w, reason, intents)
+            self.loop_detected = self._loop.loop_detected
 
     def _note_navigation(self, w: WorldModel) -> None:
         if w.pos is None or w.map_id != self.overworld_map_id:
@@ -185,17 +165,6 @@ class M7AcceptanceMetrics(AcceptanceHooks):
                 self.target_give_up = str(sig.get("reason") or "stuck")
             elif not on_target:
                 self.other_give_ups += 1
-
-    def _note_loop(self, w: WorldModel, reason: str, intents: list[dict]) -> None:
-        moving = any(i.get("verb") == "Step" for i in intents)
-        if not moving or w.pos is None:
-            self._loop_key, self._loop_streak = None, 0
-            return
-        key = (w.pos, reason)
-        self._loop_streak = self._loop_streak + 1 if key == self._loop_key else 1
-        self._loop_key = key
-        if self._loop_streak >= LOOP_STEP_LIMIT:
-            self.loop_detected = True
 
     def navigation_ok(self) -> bool:
         """Stood on the target, or stuck detection gave up on that target with a reason."""
@@ -245,19 +214,12 @@ class M7AcceptanceMetrics(AcceptanceHooks):
         ]
 
 
-def withdraw_cells(pos: Pos | None, intents: list[dict]) -> list[Pos | None]:
-    """Where the agent stands when each ``WithdrawFromChest`` in the queue runs.
-
-    Walks the queue from ``pos``: a ``Step`` moves one block, a ``SetPosition``
-    moves to its cell. None when the start is unknown.
-    """
-    cells: list[Pos | None] = []
-    for intent in intents:
-        verb = intent.get("verb")
-        if pos is not None and verb == "Step":
-            pos = step_landing(pos, intent["direction"])
-        elif verb == "SetPosition":
-            pos = (int(intent["x"]), int(intent["y"]))
-        elif verb == "WithdrawFromChest":
-            cells.append(pos)
-    return cells
+__all__ = [
+    "LOOP_STEP_LIMIT",
+    "M7AcceptanceMetrics",
+    "OSCILLATION_ABORT_COUNT",
+    "OSCILLATION_ABORT_TICKS",
+    "TARGET_DISTANCE",
+    "TARGET_SECONDS",
+    "withdraw_cells",
+]

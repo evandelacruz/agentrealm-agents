@@ -99,7 +99,7 @@
 
   "A39": {"state": "done"},
 
-  "A40": {"state": "open"},
+  "A40": {"state": "partial", "remaining": "Gate shipped (m11_acceptance.py, smoke_m11_olympuff.py, tests, Makefile); live Olympuff pass pending A58 and earlier gates."},
 
   "A41": {"state": "done"},
 

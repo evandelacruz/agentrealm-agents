@@ -51,6 +51,9 @@ class AcceptanceHooks:
     def on_death(self) -> None:
         """A ``Died`` event arrived for our character."""
 
+    def on_level_clear(self, ceremony: dict) -> None:
+        """A round trip carried a one-shot ``level_clear_ceremony`` (A38, A40)."""
+
     def on_oscillation(self, event: dict) -> None:
         """The dispatch guard caught the character pacing between two cells (A15)."""
 

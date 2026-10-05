@@ -461,7 +461,10 @@ class Runner:
         w.apply_observation(r.get("observation"))
         absorb_heal_pending(m, w, self.knowledge, events)
         self._learn_life_code(lives_before)
-        w.note_level_clear(r.get("level_clear_ceremony"))
+        ceremony = r.get("level_clear_ceremony")
+        w.note_level_clear(ceremony)
+        if ceremony and self.acceptance is not None:
+            self.acceptance.on_level_clear(ceremony)
         self._log_inventory_supply_codes()
         self._sync_loadout()
         sync_refusals(m, w)

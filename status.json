@@ -99,9 +99,9 @@
 
   "A45": {"state": "done"},
 
-  "A46": {"state": "open"},
+  "A46": {"state": "partial", "remaining": "Merge capability tags from supply reads onto items rows once a read serves them (PLAN.md Server gaps)."},
 
-  "A50": {"state": "open"},
+  "A50": {"state": "done"},
 
   "A51": {"state": "open"},
 

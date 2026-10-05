@@ -27,7 +27,14 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   only while both exist and the gap is positive. It estimates how far the item
   lowers that type's best hit, not the item's defense stat.
 
-Capabilities are not stored: see PLAN.md A46 (Server gaps).
+- ``capabilities``: sorted list of the capabilities (``cut``, ``chop``,
+  ``smash``, ``burn``, ``blast``) this subtype has opened a block with: the
+  ``BlockChanged`` a break waited for, with this subtype armed after that
+  response's observation (A28, A46). Only ever grows. A failed break proves
+  nothing about the item (the block decides, docs/GAME_NOTES.md Breaking
+  blocks), so it removes nothing. No read serves capabilities (PLAN.md Server
+  gaps), and the manual's per-class rules are not stored here: they are
+  applied at read time in ``break_memory.MANUAL_CAPABILITIES``.
 """
 
 from __future__ import annotations
@@ -221,6 +228,17 @@ def merge_item(items: dict[str, dict[str, Any]], code: str | None, **facts: Any)
             kept[key] = n
     if kept:
         items.setdefault(code, {}).update(kept)
+
+
+def merge_capability(items: dict[str, dict[str, Any]], code: str | None, capability: str) -> None:
+    """File ``capability`` under ``code`` after a break with it armed opened a block (A46)."""
+    if not code or not capability:
+        return
+    row = items.setdefault(code, {})
+    have = row.get("capabilities")
+    caps = {c for c in have if isinstance(c, str)} if isinstance(have, list) else set()
+    if capability not in caps:
+        row["capabilities"] = sorted(caps | {capability})
 
 
 def _merge_max_per_npc(row: dict[str, Any], field: str, npc_type: str, amount: int) -> None:

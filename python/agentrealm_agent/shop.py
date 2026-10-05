@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from .directives import PARAM_DEFAULTS
 from .healing import DEFAULT_BUY_POTION, potion_count, supply_matches
-from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .plan import goal_done
 from .travel.strength import loadout_key
@@ -154,7 +153,3 @@ def sync_shop(w: WorldModel, m: Memory) -> None:
     if w.gems < pending[2]:
         consume_buy_signal(m, pending[1])
         m.shop_pending = None
-
-
-def knowledge_items(knowledge: KnowledgeBase | None) -> dict:
-    return (knowledge.items if knowledge else {}) or {}

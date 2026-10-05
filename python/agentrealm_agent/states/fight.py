@@ -138,6 +138,11 @@ def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
 
 
 class FightState(State):
+    """Priority 2, before **Flee**. Swings or closes on the nearest allowed hostile
+    when ``on_hostile = fight``, the win estimate passes ``fight_margin``, and we
+    are not on a safe tile; queues retreat steps behind ``Use`` when a safe tile
+    is known."""
+
     name = "Fight"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

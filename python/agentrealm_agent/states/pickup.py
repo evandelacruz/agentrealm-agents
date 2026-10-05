@@ -1,17 +1,18 @@
-"""Reflex 4: the best worthwhile pickup within one block (A20)."""
+"""Reflex 4 pickup helper (A20): not a ``STATES`` entry.
+
+``reflex_outcome`` (explore.py) calls ``pickup_outcome`` when ``policy.pickup``
+is on, so Explore and every state that runs the reflexes first take a
+worthwhile supply within one block. **Loot** also calls it directly.
+"""
 
 from __future__ import annotations
 
 from ..item_table import InventorySupply
-from ..knowledge_base import KnowledgeBase
+from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..loot import pickup_room, worthwhile_pickups
 from ..world import WorldModel, chebyshev
 from .base import StateOutcome
 from .intents import drop, take, withdraw
-
-
-def knowledge_items(knowledge: KnowledgeBase | None) -> dict:
-    return (knowledge.items if knowledge else {}) or {}
 
 
 def pickup_outcome(w: WorldModel, knowledge: KnowledgeBase | None, *, state: str) -> StateOutcome | None:

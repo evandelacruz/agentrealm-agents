@@ -1,4 +1,8 @@
-"""Investigate: reads, speech, and door or entrance looks (A30)."""
+"""Investigate: reads, NPC hellos, and door or entrance looks (A30).
+
+Priority 4. Runs when ``pick_interest_tick`` names a readable cell, unseen NPC,
+or minimap mark within the curiosity budget.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,8 @@ from .travel import route_step
 
 
 class InvestigateState(State):
+    """Priority 4. ``Read``, ``Say``, or walks to look at a door or entrance mark."""
+
     name = "Investigate"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

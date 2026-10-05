@@ -1,4 +1,9 @@
-"""Which ground qualifies for field work (A22)."""
+"""Which ground counts as safe-ish for **Gather** (A22). Not a ``STATES`` entry.
+
+``GatherState`` targets a gem pile, grass or bush only where ``is_safe_ish``
+holds: it guards on one being in view, plans paths only to those, ``Take``s
+such a pile and ``Use``s such grass or bush.
+"""
 
 from __future__ import annotations
 

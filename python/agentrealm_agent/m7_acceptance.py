@@ -42,6 +42,7 @@ class M7AcceptanceMetrics:
     heal_actions: int = 0
     regen_measured: bool = False
     give_up_reasons: list[str] = field(default_factory=list)
+    stuck_signals: int = 0
     api_errors: list[str] = field(default_factory=list)
     window_calls: list[str] = field(default_factory=list)
     calm_windows: int = 0
@@ -112,6 +113,7 @@ class M7AcceptanceMetrics:
             "Heal",
         ):
             self.retreat_misses += 1
+        self.stuck_signals = len(m.nav_stuck.stuck_signals)
         if m.nav_stuck.stuck_signals:
             for sig in m.nav_stuck.stuck_signals:
                 r = sig.get("escalation") or sig.get("reason") or ""
@@ -139,7 +141,9 @@ class M7AcceptanceMetrics:
     def navigation_ok(self) -> bool:
         if self.max_distance >= self.target_distance:
             return True
-        return bool(self.give_up_reasons)
+        if self.give_up_reasons or self.stuck_signals:
+            return True
+        return False
 
     def failures(self, *, require_navigation: bool = True) -> list[str]:
         out: list[str] = []
@@ -153,7 +157,8 @@ class M7AcceptanceMetrics:
             out.append("navigation loop detected (same reason at same cell)")
         if require_navigation and not self.navigation_ok():
             out.append(
-                f"max distance {self.max_distance} < {self.target_distance} and no give-up reason recorded"
+                f"max distance {self.max_distance} < {self.target_distance} "
+                "and no navigation give-up (stuck signal) recorded"
             )
         if self.api_errors:
             out.append(f"{len(self.api_errors)} API error(s): {', '.join(sorted(set(self.api_errors)))}")

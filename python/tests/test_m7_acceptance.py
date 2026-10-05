@@ -39,6 +39,9 @@ class M7AcceptanceMetricsTest(unittest.TestCase):
         m.max_distance = 0
         m.give_up_reasons.append("no_path")
         self.assertTrue(m.navigation_ok())
+        m.give_up_reasons.clear()
+        m.stuck_signals = 1
+        self.assertTrue(m.navigation_ok())
 
     def test_loop_detection(self):
         from agentrealm_agent.brain import Memory

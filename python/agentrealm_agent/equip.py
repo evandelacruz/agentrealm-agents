@@ -1,12 +1,15 @@
-"""Equip scoring and upgrade selection (A19, M8).
+"""Equip scoring and upgrade selection (A19, A55, M8).
 
 Only sourced facts decide what goes where:
 
 - **Weapons** are the exact codes GAME_NOTES names as weapons
   (``break_memory.WEAPONS``). Nothing else is armed by Equip.
 - **Worn slots** come from the snapshot's ``worn`` by slot: the world model
-  files a subtype seen worn in a slot there for the run (``WorldModel.worn_slots``). A held subtype never seen worn has
-  no known slot and is not worn (supply reads serve no slot; PLAN.md Server gaps).
+  files a subtype seen worn in a slot there for the run (``WorldModel.worn_slots``).
+  A held subtype never seen worn has no slot for scoring until Equip tries
+  ``Wear`` once (A55) and reads which slot ``worn`` shows. Slot-learn tries
+  skip weapons, manual break tools, capability-tagged subtypes, and anything
+  with no shop price in the item table (keys and junk stay for Solve and Loot).
 
 Each slot compares like with like, never across units: learned per-NPC-type
 hits (``weapon_damage`` for weapons, ``damage_saved`` for armor) on the hostile
@@ -17,8 +20,10 @@ swap needs a clear gain (``MIN_GAIN_RATIO``), so ties and noise never swap.
 
 A refused ``Arm``, ``Wear`` or ``Remove`` marks its (subtype, slot) pair, and
 Equip does not try that pair again until the loadout or inventory changes.
-Consumables and compose fragments are never equipped; they stay for Heal and
-Solve (PLAYABLE_AGENT_PLAN Gear).
+A slot-learn ``Wear`` that gets ``not_wearable`` is never retried for that
+subtype; any other refusal on a try is cleared when the loadout or inventory
+changes. Consumables and compose fragments are never equipped; they stay for
+Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .break_memory import WEAPONS
+from .break_memory import MANUAL_CAPABILITIES, WEAPONS
 from .healing import FOOD_CODES, POTION_CODES
 from .item_table import InventorySupply
 from .loot import NON_TRANSFERABLE
@@ -36,6 +41,7 @@ from .world import WorldModel
 
 ARMED = "armed"
 WEAR_SLOTS = ("head", "body", "legs", "feet", "accessory")
+NOT_WEARABLE = "not_wearable"
 
 # A swap must beat what is in the slot by more than this factor: equal or near-equal
 # scores (one rolled hit apart, or a re-price) keep what is equipped.
@@ -116,6 +122,7 @@ class EquipUpgrade:
     supply_id: int
     code: str
     remove_first: bool = False
+    learn_slot: bool = False  # A55: Wear with no slot arg to discover where the subtype goes
 
 
 def _candidates(w: WorldModel) -> list[InventorySupply]:
@@ -181,6 +188,30 @@ def best_equip_upgrade(
         if s is None:
             continue
         return EquipUpgrade(slot, s.id, s.code, remove_first=worn is not None)
+    return _best_learn_wear(w, m, items)
+
+
+def _learn_wear_subtype(code: str, items: dict[str, dict[str, Any]]) -> bool:
+    """Held shop-priced armor-like gear that is not a sourced break tool (A55)."""
+    if not code or is_weapon(code) or code in MANUAL_CAPABILITIES:
+        return False
+    row = items.get(code) or {}
+    if row.get("capabilities"):
+        return False
+    return _price(code, items) is not None
+
+
+def _best_learn_wear(w: WorldModel, m: Memory, items: dict[str, dict[str, Any]]) -> EquipUpgrade | None:
+    """One held armor subtype with no known slot to try ``Wear`` on (A55)."""
+    for s in sorted(_candidates(w), key=lambda h: h.id):
+        code = s.code
+        if wear_slot(code, w) is not None:
+            continue
+        if not _learn_wear_subtype(code, items):
+            continue
+        if code in m.equip_not_wearable or code in m.equip_try_refused:
+            continue
+        return EquipUpgrade("", s.id, code, learn_slot=True)
     return None
 
 
@@ -199,10 +230,17 @@ def sync_refusals(m: Memory, w: WorldModel) -> None:
         m.equip_refused_sig = sig
     elif m.equip_refused_sig != sig:
         m.equip_refused.clear()
+        m.equip_try_refused.clear()
         m.equip_refused_sig = sig
 
 
-def note_equip_result(m: Memory, w: WorldModel, intent: dict | None, rejected: bool) -> None:
+def note_equip_result(
+    m: Memory,
+    w: WorldModel,
+    intent: dict | None,
+    rejected: bool,
+    rejection_code: str | None = None,
+) -> None:
     """Mark the (subtype, slot) an Equip ``Arm``, ``Wear`` or ``Remove`` was refused for.
 
     Only a rejection is marked. An applied ``Remove`` clears an earlier refused
@@ -226,9 +264,16 @@ def note_equip_result(m: Memory, w: WorldModel, intent: dict | None, rejected: b
         code = next((s.code for s in w.held_supplies if s.id == sid), None)
         if code is None:
             return
-        slot = ARMED if verb == "Arm" else wear_slot(code, w)
-        if slot is not None:
-            m.equip_refused.add((code, slot))
+        if verb == "Arm":
+            m.equip_refused.add((code, ARMED))
+        else:
+            slot = wear_slot(code, w)
+            if slot is not None:
+                m.equip_refused.add((code, slot))
+            elif rejection_code == NOT_WEARABLE:
+                m.equip_not_wearable.add(code)
+            else:
+                m.equip_try_refused.add(code)
     else:
         return
     m.equip_refused_sig = None

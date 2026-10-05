@@ -1,4 +1,4 @@
-"""Equip: arm and wear better gear from held supplies (A19)."""
+"""Equip: arm and wear better gear from held supplies (A19, A55)."""
 
 from __future__ import annotations
 
@@ -29,6 +29,8 @@ class EquipState(State):
         up = _upgrade(world, ctx)
         if up is None:
             return StateOutcome(None, "nothing to equip", state=self.name)
+        if up.learn_slot:
+            return StateOutcome([wear(up.supply_id)], f"learn wear {up.code}", state=self.name)
         if up.slot == ARMED:
             return StateOutcome([arm(up.supply_id)], f"arm {up.code}", state=self.name)
         intents = [remove_slot(up.slot)] if up.remove_first else []

@@ -288,4 +288,4 @@ The playable plan's strategist (M4) replaces the planner sketched in **Planner**
 
 ## Tests
 
-Standard library `unittest`, no server. They cover what the agent decides, not the wire: pathing, frontier choice, reflex order, and the scheduler's choice of call. Run with `python -m unittest` from `python`.
+Standard library `unittest`, no server. They cover what the agent decides, not the wire: pathing, frontier choice, reflex order, and the scheduler's choice of call. `tests/test_starter_agent.py` covers the starter agent (A52) the same way: its call choice, Sync/Flee/Explore order, pathing around walls, resync, error handling, and the `create`/`run` commands. Run with `python -m unittest` from `python`.

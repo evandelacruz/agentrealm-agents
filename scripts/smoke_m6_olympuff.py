@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""A4: Live M6 acceptance on Olympuff (docs/PLAYABLE_AGENT_PLAN.md M6 done-when).
+"""A4: Live M6 acceptance on olympuff (docs/PLAYABLE_AGENT_PLAN.md M6 done-when).
 
 Walks until 200 Steps apply with no movement_cooldown rejections and
 POST tick goes out in under a quarter of calm windows. Requires network access,
 AGENTREALM_API_KEY, and AGENTREALM_BASE_URL (default https://api.agentrealm.gg).
-Lives on live worlds are permanent; this uses a dedicated character name.
+Pass --character-id or --character-name to pick the character to play (A59).
 """
 
 from __future__ import annotations
@@ -21,13 +21,13 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance import ensure_character  # noqa: E402
-from agentrealm_agent.client import ApiError, Client  # noqa: E402
+from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
+from agentrealm_agent.client import Client  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
 from agentrealm_agent.m6_acceptance import M6AcceptanceMetrics, TARGET_STEPS  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
 
-DEFAULT_CHARACTER = PYTHON / "characters" / "olympuff_walker.toml"
+DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_walker.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
 
 
@@ -61,7 +61,7 @@ def run_smoke(
             return
         if stop.wait(timeout_s):
             return
-        out(f"[{cfg.name}] timeout after {timeout_s:.0f}s with {metrics.steps_applied} steps")
+        out(f"[{cfg.profile}] timeout after {timeout_s:.0f}s with {metrics.steps_applied} steps")
         stop.set()
 
     thread = threading.Thread(target=runner.run, daemon=True)
@@ -78,13 +78,15 @@ def run_smoke(
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="M6 acceptance smoke test on Olympuff (A4).")
+    ap = argparse.ArgumentParser(description="M6 acceptance smoke test on olympuff (A4).")
     ap.add_argument(
-        "--character",
+        "--profile",
         type=Path,
-        default=DEFAULT_CHARACTER,
-        help="character TOML (default: python/characters/olympuff_walker.toml)",
+        default=DEFAULT_PROFILE,
+        help="behavior profile TOML (default: python/characters/olympuff_walker.toml)",
     )
+    ap.add_argument("--character-id", type=int, default=None)
+    ap.add_argument("--character-name", default=None)
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     ap.add_argument("--steps", type=int, default=TARGET_STEPS, help="applied Step count to reach")
@@ -100,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
         return 2
     try:
-        cfg = config.load(args.character)
+        cfg = config.load(args.profile)
     except (config.ConfigError, OSError) as e:
         print(e, file=sys.stderr)
         return 2
@@ -110,13 +112,18 @@ def main(argv: list[str] | None = None) -> int:
 
     client = Client(args.base_url, args.api_key)
     try:
-        cid = ensure_character(client, cfg)
-    except ApiError as e:
-        print(f"create: {e}", file=sys.stderr)
+        cid = resolve_character_id(
+            client,
+            cfg,
+            character_id=args.character_id,
+            character_name=args.character_name,
+        )
+    except CharacterSelectionError as e:
+        print(e, file=sys.stderr)
         return 2
 
     print(
-        f"M6 smoke (A4): {cfg.name} ({cid}) on {cfg.world} "
+        f"M6 smoke (A4): profile {cfg.profile} character {cid} on {cfg.world} "
         f"→ {args.steps} steps, base {args.base_url}",
         flush=True,
     )

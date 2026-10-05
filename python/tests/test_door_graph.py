@@ -135,7 +135,7 @@ class DoorGraphRoutingTest(KbTestCase):
     def test_goto_map_rejected_without_goto(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "c.toml"
-            p.write_text('name = "A"\navatar = "default"\nmodel_agent = "m"\n[policy]\ngoto_map = 2\n')
+            p.write_text('world = "sandbox"\n[policy]\ngoto_map = 2\n')
             with self.assertRaisesRegex(config.ConfigError, "goto_map"):
                 config.load(p)
 
@@ -153,7 +153,7 @@ class FakeReads:
 
 class RunnerWarpRecordingTest(KbTestCase):
     def runner(self, client) -> Runner:
-        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(pickup=False), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(pickup=False), Path("t.toml"))
         r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None, knowledge=self.kb)
         self.addCleanup(r.trace.close)
         r.world = _grid(["..D"], map_id=1)

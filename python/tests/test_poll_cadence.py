@@ -127,7 +127,7 @@ class RunnerCadenceTest(unittest.TestCase):
     def run_windows(self, pol: Policy, windows: int, events_at=None) -> FakeServer:
         stop = threading.Event()
         server = FakeServer(windows, stop, events_at)
-        cfg = CharacterConfig("T", "default", "test", "sandbox", pol, Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", pol, Path("t.toml"))
         r = runner.Runner(cfg, server, 1, stop, out=lambda _: None)
         w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=25, tick=100)
         for y in range(-3, 4):

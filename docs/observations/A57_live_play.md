@@ -1,6 +1,6 @@
 # A57 live play (redacted)
 
-Characters **OlympuffM6Walk5d4e** (Olympuff map 76) and **GemPileObserver0c52**.
+Characters **smoke-character-a** (Olympuff map 76) and **gem-pile-observer-fixture**.
 Sessions on 2026-10-05 against the public API. Supply ids are omitted.
 
 ## Technique
@@ -11,7 +11,7 @@ before re-queuing. Space `GET …/entity-tiles` at least ~1 s from burst movemen
 
 ## Ground life (`supply_subtype_code`)
 
-- **Not confirmed.** On **OlympuffM6Walk5d4e** in ring-1 fields (~471,328 then ~430,392), 250+
+- **Not confirmed.** On **smoke-character-a** in ring-1 fields (~471,328 then ~430,392), 250+
   paced `Use` calls on adjacent `grass` cells produced ground supplies with codes `gem`, `berry`, and
   once `small_potion` in snapshot entities; `lives` stayed 10 throughout.
 - **Take** of adjacent `gem` supplies raised the gems counter (6→10 over the session); no pickup
@@ -22,8 +22,8 @@ before re-queuing. Space `GET …/entity-tiles` at least ~1 s from burst movemen
 ## Stowed `Drop`
 
 - **Not observed.** No run filled `inventory.chest` with a droppable supply. Town `apple` `Take`s
-  from **GemPileObserver0c52** did not add `held` or `chest` rows in the snapshot. Why is
-  unconfirmed: `health` and `lives` were not read before and after. Shop priced supplies were in sight from **OlympuffM6Walk5d4e** at
+  from **gem-pile-observer-fixture** did not add `held` or `chest` rows in the snapshot. Why is
+  unconfirmed: `health` and `lives` were not read before and after. Shop priced supplies were in sight from **smoke-character-a** at
   (439,404) and (430,395) — e.g. `matches` 5 gems at (414,402), `middle_chest` 50 at (416,402) —
   but walking onto shop cells from town/plaza rows was often blocked by `wall` tiles; buys were not
   completed in this pass.
@@ -32,7 +32,7 @@ before re-queuing. Space `GET …/entity-tiles` at least ~1 s from burst movemen
 
 ## Larger chest (`middle_chest`)
 
-- **Not measured.** **OlympuffM6Walk5d4e** held 10 gems at the end of the pass; no character
+- **Not measured.** **smoke-character-a** held 10 gems at the end of the pass; no character
   reached 50 gems or applied a `Take` of `middle_chest`. Manual §16 cap (30) remains the assumed
   default in code until measured.
 - **Still open (A57):** buy `middle_chest`, fill until `carry_capacity_full`, and replace

@@ -198,7 +198,7 @@ class StarterErrorTest(unittest.TestCase):
     def runner(self):
         # on_error needs only cfg, out, mem, and stop; skip __init__ so no trace file opens.
         r = StarterRunner.__new__(StarterRunner)
-        r.cfg = CharacterConfig("T", "default", "x", "sandbox", Policy(), Path("t.toml"))
+        r.cfg = CharacterConfig("T", "sandbox", Policy(), Path("t.toml"))
         r.lines, r.stop = [], threading.Event()
         r.out = r.lines.append
         r.mem = StarterMemory(need_self=False, need_position=False, path=[(1, 1)])
@@ -237,6 +237,9 @@ class FakeClient:
             raise self.create_error
         return {"id": 42}
 
+    def self_(self, cid):
+        return {"lives": 1, "alive": True, "placed": True}
+
 
 class StarterCommandTest(unittest.TestCase):
     def setUp(self):
@@ -245,29 +248,51 @@ class StarterCommandTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        self.cfg = CharacterConfig("T", "default", "x", "sandbox", Policy(), Path("t.toml"))
+        self.cfg = CharacterConfig("T", "sandbox", Policy(), Path("t.toml"))
         self.out = io.StringIO()
 
     def quiet(self, fn, *args):
         with redirect_stdout(self.out), redirect_stderr(self.out):
             return fn(*args)
 
-    def test_create_saves_id_then_skips(self):
-        self.assertEqual(self.quiet(create, FakeClient(), [self.cfg]), 0)
-        self.assertEqual(config.load_state(self.cfg)["character_id"], 42)
-        self.assertEqual(self.quiet(create, FakeClient(create_error=ApiError(500, "x")), [self.cfg]), 0)
-        self.assertIn("already created", self.out.getvalue())
+    def test_create_prints_character_id(self):
+        self.assertEqual(
+            self.quiet(
+                lambda: create(FakeClient(), self.cfg, name="Pat", avatar="default", model_agent="m"),
+            ),
+            0,
+        )
+        self.assertEqual(self.out.getvalue().strip(), "42")
 
     def test_create_failure_exits_nonzero(self):
-        self.assertEqual(self.quiet(create, FakeClient(create_error=ApiError(400, "bad")), [self.cfg]), 1)
-        self.assertIsNone(config.load_state(self.cfg))
+        self.assertEqual(
+            self.quiet(
+                lambda: create(
+                    FakeClient(create_error=ApiError(400, "bad")),
+                    self.cfg,
+                    name="Pat",
+                    avatar="a",
+                    model_agent="m",
+                ),
+            ),
+            1,
+        )
 
-    def test_run_needs_create_first(self):
-        self.assertEqual(self.quiet(run, FakeClient(), [self.cfg]), 2)
+    def test_create_defaults_to_wander_model(self):
+        client = mock.Mock()
+        client.create_character.return_value = {"id": 7}
+        with mock.patch("starter_agent.Client", return_value=client):
+            rc = self.quiet(main, ["--api-key", "k", "create", "characters/starter.toml"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(client.create_character.call_args.args[3], "agentrealm-reference/wander")
+
+    def test_run_rejects_missing_character(self):
+        client = FakeClient()
+        client.self_ = mock.Mock(side_effect=ApiError(404, "character_not_found"))
+        self.assertEqual(self.quiet(run, client, self.cfg, 42), 2)
 
     def test_run_exits_nonzero_when_a_character_stops_on_error(self):
-        config.save_state(self.cfg, {"character_id": 42, "world": "sandbox"})
-        self.assertEqual(self.quiet(run, FakeClient(world_error=ApiError(401, "unauthorized")), [self.cfg]), 1)
+        self.assertEqual(self.quiet(run, FakeClient(world_error=ApiError(401, "unauthorized")), self.cfg, 42), 1)
 
     def test_main_needs_api_key_and_readable_file(self):
         with mock.patch.dict("os.environ", {"AGENTREALM_API_KEY": ""}):

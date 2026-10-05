@@ -398,7 +398,7 @@ class RunnerPlanTest(unittest.TestCase):
 
     def runner(self, directives: str, goals: list[str]) -> Runner:
         (self.dir / "T.directives.toml").write_text(directives)
-        cfg = CharacterConfig("T", "default", "test", "sandbox",
+        cfg = CharacterConfig("T", "sandbox",
                               Policy(kind="scripted", goals=goals, pickup=False), self.dir / "T.toml")
         r = Runner(cfg, FakeClient([]), 1, threading.Event(), out=lambda _: None)
         self.addCleanup(r.trace.close)

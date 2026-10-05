@@ -25,7 +25,7 @@ its path and rereads self and position.
 Run (from ``python/``, after ``export AGENTREALM_API_KEY=...``):
 
   python3 starter_agent.py create characters/starter.toml
-  python3 starter_agent.py run characters/starter.toml
+  python3 starter_agent.py run characters/starter.toml --character-id ID
 """
 
 from __future__ import annotations
@@ -41,6 +41,13 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from agentrealm_agent import config
+from agentrealm_agent.character_select import (
+    DEFAULT_CREATE_AVATAR,
+    DEFAULT_CREATE_NAME,
+    CharacterSelectionError,
+    create,
+    resolve_character_id,
+)
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.executor import wait
 from agentrealm_agent.executor.movement import ticks_per_step
@@ -222,13 +229,14 @@ class StarterRunner:
         self.mem = StarterMemory(policy=cfg.policy)
         seed = cfg.policy.seed if cfg.policy.seed is not None else cid
         self.rng = random.Random(seed)
-        cfg.trace_path.parent.mkdir(parents=True, exist_ok=True)
-        self.trace = open(cfg.trace_path, "a", buffering=1)
+        trace = cfg.trace_path(cid)
+        trace.parent.mkdir(parents=True, exist_ok=True)
+        self.trace = open(trace, "a", buffering=1)
 
     def log(self, call: str, detail: str) -> None:
         w = self.world
         pos = f"{w.map_id}:{w.pos[0]},{w.pos[1]}" if w.pos else "?"
-        self.out(f"[{self.cfg.name}] t={w.tick} @{pos} {call:<8} {detail}")
+        self.out(f"[{self.cfg.profile}] t={w.tick} @{pos} {call:<8} {detail}")
         self.trace.write(
             json.dumps({"tick": w.tick, "pos": w.pos, "map": w.map_id, "call": call, "detail": detail}) + "\n"
         )
@@ -241,7 +249,7 @@ class StarterRunner:
             self.mem.hz = hz
             self.log("world", f"{world_body.get('code')} {hz}Hz")
         except ApiError as e:
-            self.out(f"[{self.cfg.name}] world read failed: {e}")
+            self.out(f"[{self.cfg.profile}] world read failed: {e}")
             self.failed = True
             self.trace.close()
             return
@@ -266,9 +274,9 @@ class StarterRunner:
 
     def on_error(self, call: str, e: ApiError) -> bool:
         """Log an API error and react; False means stop this character."""
-        self.out(f"[{self.cfg.name}] {call}: {e}")
+        self.out(f"[{self.cfg.profile}] {call}: {e}")
         if e.status in (401, 403):
-            self.out(f"[{self.cfg.name}] stopping: API key rejected or not allowed to play this character")
+            self.out(f"[{self.cfg.profile}] stopping: API key rejected or not allowed to play this character")
             return False
         if e.code in ("not_on_map", "character_not_live"):
             resync(self.mem)  # dead, respawning, or not placed yet
@@ -304,46 +312,30 @@ class StarterRunner:
             self.log("tick", f"{label}: {d.reason}")
 
 
-def create(client: Client, cfgs: list[config.CharacterConfig]) -> int:
-    failed = 0
-    for cfg in cfgs:
-        if (state := config.load_state(cfg)) is not None:
-            print(f"{cfg.name}: already created as {state['character_id']}")
-            continue
-        try:
-            s = client.create_character(cfg.world, cfg.name, cfg.avatar, cfg.model_agent)
-        except ApiError as e:
-            print(f"{cfg.name}: {e}", file=sys.stderr)
-            failed += 1
-            continue
-        config.save_state(cfg, {"character_id": s["id"], "world": cfg.world})
-        print(f"{cfg.name}: created {s['id']} in {cfg.world}")
-    return 1 if failed else 0
+# Starter characters walk with the wander model agent (A52); name and avatar
+# defaults, and `create` itself, are shared with the reference runner.
+STARTER_CREATE_MODEL = "agentrealm-reference/wander"
 
 
-def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
-    ids: list[tuple[config.CharacterConfig, int]] = []
-    for cfg in cfgs:
-        state = config.load_state(cfg)
-        if state is None:
-            print(f"{cfg.name}: not created yet; run `create` first", file=sys.stderr)
-            return 2
-        ids.append((cfg, int(state["character_id"])))
-    stop = threading.Event()
-    runners = [StarterRunner(cfg, client, cid, stop) for cfg, cid in ids]
-    threads = [threading.Thread(target=r.run, daemon=True) for r in runners]
-    for t in threads:
-        t.start()
+def run(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
     try:
-        while any(t.is_alive() for t in threads):
-            for t in threads:
-                t.join(0.5)
+        client.self_(cid)
+    except ApiError as e:
+        print(f"{cfg.profile} ({cid}): {e}", file=sys.stderr)
+        return 2
+    stop = threading.Event()
+    runner = StarterRunner(cfg, client, cid, stop)
+    thread = threading.Thread(target=runner.run, daemon=True)
+    thread.start()
+    try:
+        while thread.is_alive():
+            thread.join(0.5)
     except KeyboardInterrupt:
         stop.set()
         print("stopping")
     finally:
         stop.set()
-    return 1 if any(r.failed for r in runners) else 0
+    return 1 if runner.failed else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -351,12 +343,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", "https://api.agentrealm.gg"))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("create", "run"):
-        p = sub.add_parser(name)
-        p.add_argument("characters", nargs="+", help="character .toml files")
+    create_p = sub.add_parser("create")
+    create_p.add_argument("profile", help="behavior profile .toml file")
+    create_p.add_argument("--name", default=DEFAULT_CREATE_NAME)
+    create_p.add_argument("--avatar", default=DEFAULT_CREATE_AVATAR)
+    create_p.add_argument("--model-agent", default=STARTER_CREATE_MODEL)
+    run_p = sub.add_parser("run")
+    run_p.add_argument("profile", help="behavior profile .toml file")
+    run_p.add_argument("--character-id", type=int, default=None)
+    run_p.add_argument("--character-name", default=None)
     args = ap.parse_args(argv)
     try:
-        cfgs = [config.load(p) for p in args.characters]
+        cfg = config.load(args.profile)
     except (config.ConfigError, OSError) as e:
         print(e, file=sys.stderr)
         return 2
@@ -364,7 +362,25 @@ def main(argv: list[str] | None = None) -> int:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
         return 2
     client = Client(args.base_url, args.api_key)
-    return {"create": create, "run": run}[args.cmd](client, cfgs)
+    if args.cmd == "create":
+        return create(
+            client,
+            cfg,
+            name=args.name.strip(),
+            avatar=args.avatar.strip(),
+            model_agent=args.model_agent.strip(),
+        )
+    try:
+        cid = resolve_character_id(
+            client,
+            cfg,
+            character_id=args.character_id,
+            character_name=args.character_name,
+        )
+    except CharacterSelectionError as e:
+        print(e, file=sys.stderr)
+        return 2
+    return run(client, cfg, cid)
 
 
 if __name__ == "__main__":

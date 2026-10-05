@@ -395,7 +395,7 @@ class RunnerClearsOddTargetTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
         kb = KnowledgeBase.empty("sandbox")
         r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=kb)
         self.addCleanup(r.trace.close)

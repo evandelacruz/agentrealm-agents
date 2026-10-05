@@ -270,7 +270,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Knowledge base
 
-A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, shared by every character of that world run from this checkout. It sits apart from the per-character `python/.state/<name>.json` and trace files:
+A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, shared by every character of that world run from this checkout. It sits apart from the per-run trace files (`python/.state/<profile>.<character_id>.trace.jsonl`, A59):
 
 - Revealed terrain per map, entrance marks, doors and where they lead, safe tiles, hunting grounds and ceilings, shops and prices.
 - Clues: the text of every sign, statue, scroll and helper line, with where it was found and when. `clues` is a list of `{kind, text, map_id, x, y, tick}` rows, plus `speaker_id` on a helper line or `supply_id` on a scroll; a sign is stored once per cell, a scroll once per supply, a helper line once per speaker and text (PLAN.md A32, A56). Each new row also queues `{"trigger": "clue", …row}` on the character's `Memory.clue_signals`, which the strategist drains (A35).
@@ -375,7 +375,7 @@ M6 and M7 come first whatever else changes. M8 to M11 now have known shapes. Wha
 
 ## Risks
 
-- **The early game is lethal.** Ten health against hostiles that gang up means one bad engagement costs a life. Lives are finite on live worlds (Pippin is down to 5). Mitigation: conservative defaults, an escape queued with every attack, and practice on the sandbox before Olympuff.
+- **The early game is lethal.** Ten health against hostiles that gang up means one bad engagement costs a life. Lives are finite on live worlds (the observer character is down to 5). Mitigation: conservative defaults, an escape queued with every attack, and practice on the sandbox before Olympuff.
 - **Latency kills.** Hand play through MCP lost a life to a 4 s round trip. The executor must poll every tick while threatened; this is an M6 requirement, not a tuning detail.
 - **Clue interpretation is the hard part.** Riddles and directions are written for people. Without the strategist the agent can still gear up, hunt and walk to entrances, but it will not know what a locked or hidden entrance wants. Keep the no-LLM path useful; accept that levels need the strategist.
 - **Spoilers.** Real-world clue text must never reach the repo, the tests or the PR text. Fixtures use invented worlds; the knowledge base stays in gitignored `.state/`.

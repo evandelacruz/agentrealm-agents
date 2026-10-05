@@ -1,9 +1,6 @@
 # A16 live M7 acceptance: an hour of survival on the Olympuff overworld
 # (scripts/smoke_m7_olympuff.py). The smoke script adds the 150-block `goto`
 # target in front of these goals at start; the rest of the hour is explore.
-name = "OlympuffSurvivor"
-avatar = "default"
-model_agent = "agentrealm-reference/scripted"
 world = "olympuff"
 
 [policy]

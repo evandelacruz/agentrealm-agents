@@ -5,8 +5,12 @@ test: ## Run unit tests (no server)
 conductor-test: ## Build and test tools/conductor (Node 22+)
 	cd tools/conductor && npm ci && npm test
 
-smoke-m6-olympuff: ## Live M6 acceptance on Olympuff (A4; needs AGENTREALM_API_KEY)
-	python3 scripts/smoke_m6_olympuff.py
+# The character to play (A59): `make smoke-m7-olympuff CHARACTER_ID=123` or
+# CHARACTER_NAME=Pat. With neither, the scripts read AGENTREALM_CHARACTER_ID.
+CHARACTER_FLAGS = $(if $(CHARACTER_ID),--character-id $(CHARACTER_ID)) $(if $(CHARACTER_NAME),--character-name "$(CHARACTER_NAME)")
 
-smoke-m7-olympuff: ## Live M7 acceptance on Olympuff (A16; needs AGENTREALM_API_KEY)
-	python3 scripts/smoke_m7_olympuff.py
+smoke-m6-olympuff: ## Live M6 acceptance on Olympuff (A4; needs AGENTREALM_API_KEY and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID)
+	python3 scripts/smoke_m6_olympuff.py $(CHARACTER_FLAGS)
+
+smoke-m7-olympuff: ## Live M7 acceptance on Olympuff (A16; needs AGENTREALM_API_KEY and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID)
+	python3 scripts/smoke_m7_olympuff.py $(CHARACTER_FLAGS)

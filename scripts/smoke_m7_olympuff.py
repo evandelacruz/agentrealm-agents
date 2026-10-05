@@ -22,14 +22,14 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance import ensure_character  # noqa: E402
+from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.executor.intents import wait  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
 
-DEFAULT_CHARACTER = PYTHON / "characters" / "olympuff_m7.toml"
+DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m7.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
 
 # Self reads before giving up on a character that stays asleep or downed, one
@@ -120,7 +120,7 @@ def run_smoke(
             return
         if stop.wait(timeout_s):
             return
-        out(f"[{cfg.name}] timeout after {timeout_s:.0f}s")
+        out(f"[{cfg.profile}] timeout after {timeout_s:.0f}s")
         stop.set()
 
     thread = threading.Thread(target=runner.run, daemon=True)
@@ -140,11 +140,13 @@ def run_smoke(
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="M7 acceptance smoke test on Olympuff (A16).")
     ap.add_argument(
-        "--character",
+        "--profile",
         type=Path,
-        default=DEFAULT_CHARACTER,
-        help="character TOML (default: python/characters/olympuff_m7.toml)",
+        default=DEFAULT_PROFILE,
+        help="behavior profile TOML (default: python/characters/olympuff_m7.toml)",
     )
+    ap.add_argument("--character-id", type=int, default=None)
+    ap.add_argument("--character-name", default=None)
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     ap.add_argument(
@@ -170,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
         return 2
     try:
-        cfg = config.load(args.character)
+        cfg = config.load(args.profile)
     except (config.ConfigError, OSError) as e:
         print(e, file=sys.stderr)
         return 2
@@ -180,9 +182,14 @@ def main(argv: list[str] | None = None) -> int:
 
     client = Client(args.base_url, args.api_key)
     try:
-        cid = ensure_character(client, cfg)
-    except ApiError as e:
-        print(f"create: {e}", file=sys.stderr)
+        cid = resolve_character_id(
+            client,
+            cfg,
+            character_id=args.character_id,
+            character_name=args.character_name,
+        )
+    except CharacterSelectionError as e:
+        print(e, file=sys.stderr)
         return 2
 
     try:
@@ -200,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     time.sleep(1.0)  # the runner's own world read follows: stay inside the burst of 3
 
     print(
-        f"M7 smoke (A16): {cfg.name} ({cid}) on {cfg.world} "
+        f"M7 smoke (A16): profile {cfg.profile} character {cid} on {cfg.world} "
         f"→ {args.seconds:.0f}s, goto {target} from {origin}, base {args.base_url}",
         flush=True,
     )

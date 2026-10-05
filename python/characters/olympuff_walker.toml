@@ -1,7 +1,4 @@
 # A4 live M6 acceptance: long calm walking on Olympuff (scripts/smoke_m6_olympuff.py).
-name = "OlympuffWalker"
-avatar = "default"
-model_agent = "agentrealm-reference/scripted"
 world = "olympuff"
 
 [policy]

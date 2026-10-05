@@ -51,7 +51,7 @@ class RunnerTest(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def runner(self, client, pol: Policy) -> Runner:
-        cfg = CharacterConfig("T", "default", "test", "sandbox", pol, Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", pol, Path("t.toml"))
         r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None)
         self.addCleanup(r.trace.close)
         w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)
@@ -272,7 +272,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(r.intents_for(Decision(use, "test")))
         self.assertIsNone(r.mem.pending)
         self.assertIsNone(r.mem.pending_intents)
-        trace = r.cfg.trace_path.read_text()
+        trace = r.cfg.trace_path(r.cid).read_text()
         self.assertIn('"call": "pace"', trace)
         self.assertIn('"held": {"verb": "Use"', trace)
         # Once the cooldown is within reach, the Use goes.
@@ -624,7 +624,7 @@ class RunnerTest(unittest.TestCase):
         r.tick()
         r.world.tick = 20
         r.tick()
-        last = json.loads(r.cfg.trace_path.read_text().splitlines()[-1])
+        last = json.loads(r.cfg.trace_path(r.cid).read_text().splitlines()[-1])
         self.assertEqual(last["gems"], 6)
         self.assertEqual(last["level_clear_ceremony"], ceremony)
         self.assertIn("level_duration_s", last)
@@ -639,7 +639,7 @@ class NeverAttackRunnerTest(RunnerTest):
         path = Path(tmp.name) / "T.directives.toml"
         if text is not None:
             path.write_text(text)
-        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(goals=["hold"]),
+        cfg = CharacterConfig("T", "sandbox", Policy(goals=["hold"]),
                               Path(tmp.name) / "T.toml")
         r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None)
         self.addCleanup(r.trace.close)
@@ -718,7 +718,7 @@ class NetworkTest(unittest.TestCase):
         stop.set()
         fake = FakeClient([])
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "STATE_DIR", Path(tmp)):
-            cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(), Path("t.toml"))
+            cfg = CharacterConfig("T", "sandbox", Policy(), Path("t.toml"))
             r = Runner(cfg, fake, 1, stop, out=lambda _: None)
             retry_at = r.on_error("tick", cm.exception)
             r.trace.close()

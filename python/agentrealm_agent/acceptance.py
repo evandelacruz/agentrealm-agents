@@ -3,14 +3,13 @@
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
 measures. ``CountingClient`` records failed requests (and optionally every
-call), and ``ensure_character`` finds or creates the smoke script's character.
+call).
 """
 
 from __future__ import annotations
 
-from . import config
-from .client import ApiError
 from .config import Policy
+from .client import ApiError
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .world import WorldModel
@@ -77,35 +76,3 @@ class CountingClient:
                 raise
 
         return call
-
-
-def _find_character_id(client, cfg: config.CharacterConfig) -> int | None:
-    # GET /characters: {"characters": [{"id", "name", "world_code", ...}]}
-    # (API, Characters; https://agentrealm.gg/docs/api).
-    for row in client.list_characters():
-        if row.get("name") == cfg.name and row.get("world_code") == cfg.world:
-            return int(row["id"])
-    return None
-
-
-def ensure_character(client, cfg: config.CharacterConfig) -> int:
-    """The character id from ``.state``, else a new character, saved to ``.state``."""
-    state = config.load_state(cfg)
-    if state is not None:
-        return int(state["character_id"])
-    try:
-        created = client.create_character(cfg.world, cfg.name, cfg.avatar, cfg.model_agent)
-    except ApiError as e:
-        # 409 identity_reuse: this name already lived in this world, so a lost
-        # .state file is the likely cause. character_cap_reached: the account
-        # is full, but the character may still be one of its own. Look it up
-        # by name; any other failure, or no match, is real.
-        if e.code not in ("identity_reuse", "character_cap_reached"):
-            raise
-        found = _find_character_id(client, cfg)
-        if found is None:
-            raise
-        config.save_state(cfg, {"character_id": found, "world": cfg.world})
-        return found
-    config.save_state(cfg, {"character_id": created["id"], "world": cfg.world})
-    return int(created["id"])

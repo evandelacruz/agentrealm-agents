@@ -175,7 +175,7 @@ class RunnerZoneTest(unittest.TestCase):
         stop = threading.Event()
         server = FakeServer(windows, stop, refuse)
         pol = Policy(goals=["hold"], entity_refresh=1000)
-        cfg = CharacterConfig("T", "default", "test", "sandbox", pol, Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", pol, Path("t.toml"))
         r = runner.Runner(cfg, server, 1, stop, out=lambda _: None)
         w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=25, tick=100)
         for y in range(-1, 2):

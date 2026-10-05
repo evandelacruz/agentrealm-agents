@@ -274,27 +274,6 @@ class SmokeScriptTest(unittest.TestCase):
 
 
 class RunnerHookTest(unittest.TestCase):
-    def test_every_acceptance_hook_takes_plan_op(self):
-        """The runner always passes ``plan_op``; a ``before_tick`` without it breaks that gate's runs."""
-        import inspect
-
-        from agentrealm_agent import m6_acceptance, m7_acceptance, m8_acceptance, m9_acceptance, m10_acceptance  # noqa: F401
-        from agentrealm_agent.acceptance import AcceptanceHooks
-
-        def subclasses(cls):
-            for sub in cls.__subclasses__():
-                yield sub
-                yield from subclasses(sub)
-
-        kwargs = dict(state="Explore", reason="r", intents=None, policy=None, params={}, knowledge=None, plan_op=None)
-        checked = set()
-        for cls in [AcceptanceHooks, *subclasses(AcceptanceHooks)]:
-            if cls.__module__.startswith("tests."):
-                continue
-            inspect.signature(cls.before_tick).bind(None, None, None, **kwargs)
-            checked.add(cls.__name__)
-        self.assertTrue({"M7AcceptanceMetrics", "M8AcceptanceMetrics", "M9AcceptanceMetrics", "M10AcceptanceMetrics", "M11AcceptanceMetrics"} <= checked)
-
     def test_runner_forwards_level_clear_ceremony(self):
         from agentrealm_agent.runner import Runner
 

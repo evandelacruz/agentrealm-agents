@@ -126,6 +126,14 @@ Break memory sees a `Use` only through `Memory.break_pending`, which only Break 
 
 No live M10 pass yet (A33 partial); CI covers the gate, the odd-bush fixture and the smoke script in `python/tests/test_m10_acceptance.py` without live keys.
 
+M4 (strategist) acceptance is offline: `make test` runs [`python/tests/test_m4_acceptance.py`](python/tests/test_m4_acceptance.py), where the real runner and states play an invented test world against a fake server, with a fake model in place of the LLM. The agent reads a sign, the clue reaches the strategist, and its answer (buy a torch, travel to a hedge, burn it, travel to the entrance behind it) has to be carried out.
+
+Pass criteria (PLAN.md A36, checked in [`m4_acceptance.py`](python/agentrealm_agent/m4_acceptance.py)):
+
+- at least one clue trigger reaches the strategist;
+- no API error;
+- each required op is planned by an applied strategist answer, run by the state that owns it (`Shop` for `buy`, `Break` for `break_block`, plan pathing for `travel`, in Explore or in Travel's fallback) with a new queue that acts on it, and finished (popped as done).
+
 Live M11 smoke: `make smoke-m11-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M11 done-when via [`scripts/smoke_m11_olympuff.py`](scripts/smoke_m11_olympuff.py), using profile `python/characters/olympuff_m11.toml` and a character you choose at run time. It also needs the strategist: set `AGENTREALM_STRATEGIST_MODEL` and `AGENTREALM_STRATEGIST_API_KEY` (or `OPENAI_API_KEY`), or the script exits 2, since only the strategist pushes the `fight_boss` op that clears a level. Start on the overworld (same wake and respawn wait as M7). The runner plays until it clears a level and attempts the next one, or until the default two-hour wall clock (`--seconds` overrides).
 
 Pass criteria (PLAN.md A40, checked in [`m11_acceptance.py`](python/agentrealm_agent/m11_acceptance.py)):

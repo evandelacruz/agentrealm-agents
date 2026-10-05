@@ -112,6 +112,7 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
+        acted_op: dict | None = None,
         plan_op: dict | None = None,
     ) -> None:
         if w.lives is not None:

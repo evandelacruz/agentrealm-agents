@@ -41,9 +41,9 @@ def _upgrade(world: WorldModel, ctx: PlayContext) -> EquipUpgrade | None:
 
 
 def _armed_owned(world: WorldModel, ctx: PlayContext) -> bool:
-    """Solve or Break holds the armed slot: it armed a tool, or is about to."""
+    """Heal, Solve or Break holds the armed slot: it armed a drink or tool, or is about to."""
     m = ctx.memory
-    if m.solve_rearm is not None or m.break_rearm is not None:
+    if m.solve_rearm is not None or m.break_rearm is not None or m.heal_rearm is not None:
         return True
     if solve_op(ctx.plan) is not None or break_op(ctx.plan) is not None:
         return True

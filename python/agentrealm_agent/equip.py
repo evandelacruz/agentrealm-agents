@@ -158,8 +158,8 @@ def best_equip_upgrade(
 ) -> EquipUpgrade | None:
     """The first slot with a clear upgrade, weapon first, then worn slots in order.
 
-    ``armed_owned`` is True while another state (Solve, Break) holds the armed
-    slot. Heal, Solve and Break arm potions and tools on purpose, so the armed
+    ``armed_owned`` is True while another state (Heal, Solve, Break) holds the armed
+    slot. Those states arm potions and tools on purpose, so the armed
     slot is only touched while it holds a weapon or nothing.
     """
     refused = m.equip_refused

@@ -222,12 +222,43 @@ def merge_item(items: dict[str, dict[str, Any]], code: str | None, **facts: Any)
     if not code:
         return
     kept: dict[str, int] = {}
-    for key in ("attack_range", "gem_price"):
+    for key in ("attack_range", "gem_price", "heal_amount"):
         n = _positive_int(facts.get(key))
         if n is not None:
             kept[key] = n
+    on_pickup = facts.get("heal_on_pickup")
+    if on_pickup is True or on_pickup is False:
+        kept["heal_on_pickup"] = on_pickup
     if kept:
         items.setdefault(code, {}).update(kept)
+
+
+def merge_heal(
+    items: dict[str, dict[str, Any]],
+    code: str | None,
+    amount: Any,
+    *,
+    on_pickup: bool | None = None,
+) -> None:
+    """File heal observed from a ``Take`` or self-``Use`` (A24).
+
+    ``heal_amount`` keeps the largest positive heal seen. ``heal_on_pickup`` is
+    set when pickup heal is measured; a ``Take`` that heals nothing while hurt
+    files ``False``.
+    """
+    n = _positive_int(amount)
+    if code and n is not None and n > 0:
+        row = items.setdefault(code, {})
+        old = _positive_int(row.get("heal_amount"))
+        if old is None or n > old:
+            row["heal_amount"] = n
+    if not code or on_pickup is None:
+        return
+    row = items.setdefault(code, {})
+    if on_pickup is True:
+        row["heal_on_pickup"] = True
+    elif on_pickup is False and row.get("heal_on_pickup") is not True:
+        row["heal_on_pickup"] = False
 
 
 def merge_capability(items: dict[str, dict[str, Any]], code: str | None, capability: str) -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .item_table import InventorySupply
+from .item_table import InventorySupply, merge_heal
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import safe_tiles
 
@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
 # GAME_NOTES.md Items: golden cap (M §16), apples and berries on the ground
 # in town (Obs). Whether apples and berries heal on pickup or carried and
-# `Use`d is unmeasured (GAME_NOTES open measurements), so Heal tries both.
+# `Use`d is unmeasured (GAME_NOTES open measurements), so Heal tries both and
+# files what each did in the item table (A24).
 FOOD_CODES = frozenset({"apple", "berry", "golden_cap"})
 # GAME_NOTES.md Items: small potion +10, large +30 (M §16).
 POTION_CODES = frozenset({"small_potion", "large_potion"})
@@ -174,6 +175,57 @@ def nearest_known_safe(w: WorldModel) -> tuple[int, Pos] | None:
         return None
     candidates.sort()
     return map_id, candidates[0][2]
+
+
+def note_heal_pending(m: Memory, w: WorldModel, code: str, kind: str) -> None:
+    """Remember health before a food ``Take`` or self-``Use`` (``kind`` is
+    "take" or "use"), so the next observation can show what it healed (A24).
+
+    Only while hurt: at full health nothing can heal, so nothing is learned.
+    """
+    if not hurt(w) or code not in FOOD_CODES | POTION_CODES:
+        return
+    assert w.health is not None
+    m.heal_pending = (w.health, code, kind)
+
+
+def absorb_heal_pending(
+    m: Memory,
+    w: WorldModel,
+    knowledge: KnowledgeBase | None,
+    events: list[dict],
+) -> None:
+    """File the health change after a food ``Take`` or self-``Use`` (A24).
+
+    A response that also took damage is skipped: the change is not the
+    item's alone. A ``Take`` that healed files ``heal_on_pickup`` True, one
+    that healed nothing files False. A ``Use`` says nothing about pickup.
+    """
+    pending, m.heal_pending = m.heal_pending, None
+    if pending is None or w.health is None or knowledge is None:
+        return
+    start_health, code, kind = pending
+    if any(e.get("kind") == "Damaged" for e in events):
+        return
+    healed = w.health - start_health
+    on_pickup = (healed > 0) if kind == "take" else None
+    with knowledge.lock:
+        merge_heal(knowledge.items, code, healed, on_pickup=on_pickup)
+
+
+def rearm_after_drink(w: WorldModel, m: Memory) -> list[dict] | None:
+    """One ``Arm`` for the weapon a drink swapped out, sent once (A24).
+
+    Clears ``heal_rearm`` either way, so a rejected ``Arm`` or a weapon no
+    longer in hand cannot keep Heal (or Equip, which waits on it) stuck.
+    """
+    code, m.heal_rearm = m.heal_rearm, None
+    if code is None or w.armed_code == code:
+        return None
+    for h in w.held_supplies:
+        if h.code == code:
+            return [{"verb": "Arm", "supply_id": h.id}]
+    return None
 
 
 def raise_buy_potion(m: Memory, *, why: str, code: str = DEFAULT_BUY_POTION) -> None:

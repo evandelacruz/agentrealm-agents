@@ -80,6 +80,8 @@ class Memory:
     heal_wait: tuple[int, int] | None = None  # (tick, health) Heal began sending nothing, reset when health rises
     heal_backoff_until: int = -1  # Heal yields to Explore until this tick
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
+    heal_rearm: str | None = None  # weapon code armed before a drink; restored once (A24)
+    heal_pending: tuple[int, str, str] | None = None  # (health before, supply code, "take"|"use") awaiting observation
     # Boss (A38): the fight under way, or None. Set and cleared only by states/boss.sync_boss.
     boss: BossFight | None = None
     solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)

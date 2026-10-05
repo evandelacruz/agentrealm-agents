@@ -122,7 +122,7 @@ Invalid params are ignored with a log line; a broken file keeps the last good di
 
 ## Worked example: say hello to other players
 
-The repo ships **`ExampleGreetState`** in `python/agentrealm_agent/states/example_greet.py` (about 50 lines). It says hello once to each other player in sight. No shipped state talks to players (Investigate says hello to **NPCs**), so it adds behavior instead of shadowing a state that already runs.
+The repo ships **`ExampleGreetState`** in `python/agentrealm_agent/states/example_greet.py` (about 40 lines). It says hello once to each other player in sight. No shipped state talks to players (Investigate says hello to **NPCs**), so it adds behavior instead of shadowing a state that already runs.
 
 It is **not** in the shipped `STATES`, so the reference agent never runs it. To try it in your copy, add one line to `STATES` in `states/dispatch.py`, above Explore:
 

@@ -1,4 +1,4 @@
-"""Shared helpers for live acceptance smoke scripts (M7 A16, M10 A33)."""
+"""Shared helpers for live acceptance smoke scripts (M7 A16, M8 A25, M10 A33)."""
 
 from __future__ import annotations
 
@@ -50,6 +50,19 @@ def wake(client: Client, cid: int, *, pause: Callable[[float], None] = time.slee
                 raise ValueError(f"cannot wake: {code}: {WAKE_REFUSALS.get(code, 'wake Wait rejected')}")
         pause(1.0)
     raise ValueError(f"still asleep or downed after {WAKE_READS} self reads")
+
+
+def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
+    """The overworld's map id and where the character stands on it.
+
+    Raises ValueError when the character is not on the overworld, where M7 and M8
+    are judged.
+    """
+    town = client.world(cid).get("town") or {}
+    p = client.position(cid)
+    if town.get("map_id") is None or p.get("map_id") != town["map_id"]:
+        raise ValueError(f"character is on map {p.get('map_id')}, not the overworld {town.get('map_id')}")
+    return int(town["map_id"]), (int(p["x"]), int(p["y"]))
 
 
 def run_acceptance_smoke(

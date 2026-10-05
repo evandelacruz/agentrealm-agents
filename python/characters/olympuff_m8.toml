@@ -1,0 +1,13 @@
+# A25 live M8 acceptance: gear, economy and combat on the Olympuff overworld
+# (scripts/smoke_m8_olympuff.py). Directives beside this file set gather and
+# shop goals; the smoke script does not inject a goto target.
+world = "olympuff"
+
+[policy]
+kind = "scripted"
+goals = ["explore"]
+on_hostile = "fight"
+hostile = ["npc"]
+pickup = true
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 20

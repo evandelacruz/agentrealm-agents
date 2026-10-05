@@ -65,6 +65,7 @@ class Memory:
     # Heal (A10): strategist buy ops; Shop (A21) consumes them later.
     buy_signals: list[dict] = field(default_factory=list)
     buy_signals_seen: set[tuple[str, str]] = field(default_factory=set)
+    clue_signals: list[dict] = field(default_factory=list)  # strategist clue triggers (A32)
     # Shop (A21): (supply id, code, gems before, supply pos, map id, tick sent)
     # of the Take in flight. Its buy signal is consumed on an applied Take or a
     # gem drop, kept on a rejection; it expires on leaving the shop cell or a timeout.

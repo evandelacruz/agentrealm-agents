@@ -108,6 +108,18 @@ class PickOddBreakTest(unittest.TestCase):
         self.assertIsNotNone(choice)
         self.assertEqual(choice.capability, "burn")
 
+    def test_clue_naming_capability_allows_matches_without_block_type(self):
+        rows = ["........."] * 9
+        rows[4] = "....b...."
+        w = self._world(rows, at=(4, 4))
+        w.held_supplies = [InventorySupply(2, "matches")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.clues.append({"text": "take matches to the thicket", "map_id": 1, "x": 0, "y": 0})
+        m = Memory()
+        choice = pick_odd_break(w, kb, Policy(kind="scripted"), m, params={"curiosity": 0.2})
+        self.assertIsNotNone(choice)
+        self.assertEqual(choice.capability, "burn")
+
     def test_clue_on_another_map_does_not_allow_matches(self):
         rows = ["........."] * 9
         rows[4] = "....b...."

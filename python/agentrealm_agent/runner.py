@@ -57,6 +57,7 @@ from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
 from .curiosity_budget import record_curiosity_queue
 from .interest_list import read_key, say_key
+from .clues import note_read_clue, note_spoken_clue
 from .investigation import mark_cell_read, mark_npc_spoken
 from .zone_discovery import apply_town, apply_zone, zone_failed
 
@@ -816,6 +817,27 @@ class Runner:
             key = read_key(map_id, pos)
             if applied:
                 mark_cell_read(self.knowledge, map_id, pos)
+                note_read_clue(
+                    self.knowledge,
+                    self.mem,
+                    result,
+                    map_id,
+                    pos,
+                    int(result.get("tick", self.world.tick)),
+                )
+        elif target.get("kind") == "supply" and applied and target.get("supply_id") is not None:
+            map_id = self.world.map_id
+            pos = self.world.pos
+            if map_id is not None and pos is not None:
+                note_read_clue(
+                    self.knowledge,
+                    self.mem,
+                    result,
+                    int(map_id),
+                    pos,
+                    int(result.get("tick", self.world.tick)),
+                    kind="scroll",
+                )
         elif intent["verb"] == "Say" and intent.get("npc_id") is not None:
             key = say_key(int(intent["npc_id"]))
             if applied:
@@ -970,6 +992,8 @@ class Runner:
         w, m = self.world, self.mem
         for ev in events:
             kind = ev.get("kind")
+            if kind == "SpokenTo":
+                note_spoken_clue(self.knowledge, m, w, ev, w.tick)
             # These happen to the queue owner and carry no subject_id (docs/API.md, Events).
             if kind in ("Damaged", "Attacked"):
                 m.alarm = True

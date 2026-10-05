@@ -503,7 +503,11 @@ def cost_path(
 
 
 def nearest_target(
-    w: WorldModel, targets: set[Pos], params: CostGridParams | None = None
+    w: WorldModel,
+    targets: set[Pos],
+    params: CostGridParams | None = None,
+    *,
+    try_order: list[Pos] | None = None,
 ) -> tuple[Pos, list[Pos]] | None:
     """Closest target by cost-grid path cost, with its path.
 
@@ -511,12 +515,25 @@ def nearest_target(
     the next target's cost (Chebyshev distance * KNOWN_WALKABLE) cannot beat
     the best path cost found. Targets are known tiles, so this stays the one
     unbudgeted A* of A12 rather than the two-level search.
+
+    When ``try_order`` is set, those targets are tried first (still subject to
+    the cost early-stop), then any remaining targets by distance.
     """
     assert w.pos is not None
     params = params or CostGridParams()
     best: tuple[Pos, list[Pos]] | None = None
     best_cost = 0
-    for t in sorted(targets, key=lambda p: chebyshev(w.pos, p)):
+    if try_order is None:
+        ordered = sorted(targets, key=lambda p: chebyshev(w.pos, p))
+    else:
+        seen: set[Pos] = set()
+        ordered = []
+        for p in try_order:
+            if p in targets and p not in seen:
+                seen.add(p)
+                ordered.append(p)
+        ordered.extend(p for p in sorted(targets, key=lambda p: chebyshev(w.pos, p)) if p not in seen)
+    for t in ordered:
         if best is not None and chebyshev(w.pos, t) * KNOWN_WALKABLE >= best_cost:
             break
         found = _search(w, t, params)

@@ -4,7 +4,7 @@ PLAYABLE_AGENT_PLAN Curiosity **Odd-block detector**: one rock in a garden, one
 bush in a wheat field. A block is odd when its type is rare in a 7×7
 neighbourhood (one or two of it), most surrounding cells share one other type,
 and it is breakable in principle. Clue text that names the block type adds a
-boost (full clue rules land in A32).
+boost; capability and tool rules live in ``clues`` (A32).
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from .break_memory import (
     BREAKABLE,
     CAPABILITIES,
     WEAPONS,
+    _capability_order,
     attempt_failed,
     attempt_open,
     BreakChoice,
@@ -24,6 +25,7 @@ from .break_memory import (
     pick_supply_for_capability,
     untried_capabilities,
 )
+from .clues import capability_priority, clue_allows_tools
 from .curiosity_budget import curiosity_room
 from .interest_list import MAX_REJECTIONS, investigate_blocked, sight_range
 from .knowledge_base import KnowledgeBase
@@ -180,9 +182,10 @@ def _choice_at_odd(
 ) -> BreakChoice | None:
     if w.map_id is None:
         return None
-    # Consumable tools only when a clue on this map names the block.
-    allow_tools = nomination.clue_boost > 0
-    for cap in untried_capabilities(kb, w.map_id, nomination.pos, held_capabilities(w, kb)):
+    allow_tools = clue_allows_tools(kb, w.map_id, nomination.clue_boost)
+    caps = untried_capabilities(kb, w.map_id, nomination.pos, held_capabilities(w, kb))
+    caps.sort(key=lambda c: (capability_priority(c, kb, w.map_id), *_capability_order(c)))
+    for cap in caps:
         supply = pick_supply_for_capability(w, cap, kb)
         if supply is None:
             continue

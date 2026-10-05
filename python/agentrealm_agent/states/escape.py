@@ -1,4 +1,8 @@
-"""Escape: step off damaging ground (A9)."""
+"""Escape: step off ``avoid_blocks`` ground (priority 1, A9).
+
+Runs while standing on a block type listed in ``policy.avoid_blocks``; sends
+one reflex ``SetPosition`` to a safe neighbour or replans toward safety.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,8 @@ from .intents import set_position
 
 
 class EscapeState(State):
+    """Priority 1. Active on damaging or forbidden ground until we step off."""
+
     name = "Escape"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

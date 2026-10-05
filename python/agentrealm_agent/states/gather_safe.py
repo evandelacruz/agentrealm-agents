@@ -1,4 +1,7 @@
-"""Which ground qualifies for field work (A22)."""
+"""Safe-ish ground checks for **Gather** (A22).
+
+``GatherState`` only ``Use``s grass or bushes on cells that pass ``is_safe_ish``.
+"""
 
 from __future__ import annotations
 

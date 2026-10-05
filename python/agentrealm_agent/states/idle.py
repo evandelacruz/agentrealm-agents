@@ -1,4 +1,8 @@
-"""Idle and wander: send nothing or a random step."""
+"""Idle and wander: non-scripted policies (lowest priority).
+
+Runs when ``policy.kind`` is ``idle`` (wait forever) or ``wander`` (random step).
+Scripted characters reach here only if every other state fell through.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,8 @@ from .intents import set_position
 
 
 class IdleState(State):
+    """Last in ``STATES``. ``idle`` waits; ``wander`` picks a random open neighbour."""
+
     name = "Idle"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

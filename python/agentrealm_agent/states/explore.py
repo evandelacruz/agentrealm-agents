@@ -1,4 +1,9 @@
-"""Explore: scripted reflexes and policy goals (M3 pathing, A12 cost grid)."""
+"""Explore: default scripted behavior — reflexes and policy goals (priority last).
+
+Runs for every alive scripted character with a known position when no higher
+state sends an intent. Handles rejection lessons, pickup reflex, hostile
+steps, and walking the current plan path (M3, A12).
+"""
 
 from __future__ import annotations
 
@@ -18,6 +23,9 @@ from .pickup import pickup_outcome
 
 
 class ExploreState(State):
+    """Lowest scripted priority (above **Idle**). Fallback when survival, economy,
+    travel, and curiosity states fall through or never guard."""
+
     name = "Explore"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

@@ -1,4 +1,8 @@
-"""Sync: wait while self or position are unknown (reads are choose_call)."""
+"""Sync: hold the round until placement is known (priority 0).
+
+Runs when ``world.pos`` is missing; ``choose_call`` normally fills self and
+position first. Sends ``Wait`` to wake from sleep, else ``wait=True``.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,8 @@ from .base import PlayContext, State, StateOutcome
 
 
 class SyncState(State):
+    """Priority 0. Active while the runner has no position; yields once placed."""
+
     name = "Sync"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

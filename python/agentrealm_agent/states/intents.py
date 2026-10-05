@@ -1,4 +1,8 @@
-"""Single intents the states build (A5)."""
+"""Intent dict builders for ``POST tick`` (A5).
+
+Each helper returns one API intent; states usually return a one-element list.
+Field names match https://agentrealm.gg/docs/api — wrong shapes are rejected at ingest.
+"""
 
 from __future__ import annotations
 

@@ -55,7 +55,7 @@
 
   "A47": {"state": "done"},
 
-  "A57": {"state": "open", "note": "Live play still needed: confirm a life's ground code, probe stowed Drop on inventory.chest, measure middle_chest capacity at carry_capacity_full. Observers had no stowed supplies and under 50 gems; see docs/observations/A47_live_play.md (session 3)."},
+  "A57": {"state": "partial", "remaining": "All three facts still unconfirmed and no code changed: a life's ground supply_subtype_code for LIFE_SUPPLY_CODES (field cuts saw only gem, berry, small_potion), whether Drop takes a supply stowed in inventory.chest (no stowed supply yet), and middle_chest capacity at carry_capacity_full (no character reached 50 gems). Session notes in docs/observations/A57_live_play.md."},
 
   "A21": {"state": "done"},
 

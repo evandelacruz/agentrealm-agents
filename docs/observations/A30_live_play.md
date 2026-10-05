@@ -19,4 +19,4 @@ that are not `nothing_to_read`).
   be walked). `OlympuffWalker` returned `rate_limited` on repeated reads.
 
 Until a dedicated character can tick on-map, or observation notes a scroll
-code, **Investigate** still does not nominate scroll reads (PLAN.md A54).
+code, **Investigate** still does not nominate scroll reads (PLAN.md A56).

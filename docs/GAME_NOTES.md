@@ -217,10 +217,10 @@ Each has a test the agent or a hand session can run.
 | How ground food other than the golden cap heals (apples, berries): on pickup, or carried and `Use`d on self | `Take` one while hurt and read `health`; if unchanged, `Arm` + `Use` self |
 | Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
 | How to tell a scroll supply from others before reading it. Nothing sourced names scroll subtype codes, so `Investigate` reads no scrolls yet (PLAN.md A56) | Log `supply_subtype_code` of every supply seen; `Read` one of each once and keep the codes that do not answer `nothing_to_read` |
-| Which `supply_subtype_code` a life (heart) has on the ground. Until known, A20's hearts first is off | On Olympuff, keep cutting grass and bushes and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16) |
-| Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? A20 drops held only | `Drop` a stowed supply and read the result |
-| Is the armed supply also listed in `held`? A20 counts held, worn, armed and stowed separately | Compare `inventory` before and after an `Arm` |
-| Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full` | Carry one and fill until `carry_capacity_full` |
+| Which `supply_subtype_code` a life (heart) has on the ground. Until known, A47's hearts first is off (A20 ships gems-first only) | On Olympuff, keep cutting grass and bushes and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16; Obs [`A20_live_play.md`](observations/A20_live_play.md)) |
+| Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? A47 extends A20's held-only drops once known | `Drop` a stowed supply and read the result |
+| Is the armed supply also listed in `held`? Loot counts held, worn, armed and stowed separately (A20) | Compare `inventory` before and after an `Arm` |
+| Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 learns the authored cap once measured | Carry one and fill until `carry_capacity_full` |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 
 ### Assumed until measured

@@ -13,7 +13,7 @@ Sourced rules (docs/GAME_NOTES.md, Items, slots and gear):
   (Manual §11).
 
 Ground gems use ``supply_subtype_code`` ``gem`` (GAME_NOTES, Obs). Lives on
-the ground are still unknown, so hearts first stays off (PLAN.md A20 partial).
+the ground are still unknown, so hearts first stays off until A47 observes one.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def is_counter_supply(code: str | None) -> bool:
 
 
 def loot_score(code: str | None, items: dict[str, dict[str, Any]]) -> int:
-    """Higher is more worth carrying; lives first, then gems (PLAYABLE_AGENT_PLAN)."""
+    """Higher is more worth carrying; lives first once A47 fills LIFE_SUPPLY_CODES, then gems."""
     if not code:
         return UNKNOWN_SCORE
     if code in LIFE_SUPPLY_CODES:

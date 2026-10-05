@@ -1,4 +1,4 @@
-"""A20: Loot state: Take, WithdrawFromChest, Drop junk when full; hearts first."""
+"""A20: Loot state: Take, WithdrawFromChest, Drop junk when full; gems first (hearts first is A47)."""
 
 import random
 import tempfile

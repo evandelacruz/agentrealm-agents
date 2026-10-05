@@ -6,8 +6,8 @@ module checks:
 - Clears the easiest open level unattended: at least one ``level_clear_ceremony``
   with a ``level_number`` (boss defeat observed, never inferred from absence).
 - Uses what it learned to attempt the next: after the first clear, the character
-  is back on the overworld map and then enters a level interior again (a
-  positive ``level`` on the position read), or the plan's top op
+  is back on the overworld map and then enters the interior of a level not
+  yet cleared (a positive ``level`` on the position read), or the plan's top op
   (``Plan.current()``, passed to ``before_tick`` as ``plan_op``) is
   ``enter_level`` or ``fight_boss`` while it stands on the overworld map. The
   op that was on top when a clear arrived never counts: it is the fight that
@@ -160,7 +160,7 @@ class M11AcceptanceMetrics(AcceptanceHooks):
                 and plan_op not in self._clearing_ops
             ):
                 self.next_level_attempted = True
-        elif inside_level(w) and self._outside_after_first_clear:
+        elif inside_level(w) and self._outside_after_first_clear and w.map_level not in self.cleared_levels:
             self.next_level_attempted = True
 
     def milestone_ok(self) -> bool:

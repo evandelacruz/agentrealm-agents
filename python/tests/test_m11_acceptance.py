@@ -65,6 +65,13 @@ class LevelGateTest(unittest.TestCase):
         self.assertTrue(m.milestone_ok())
         self.assertEqual(m.failures(), [])
 
+    def test_re_entering_the_cleared_level_does_not_count(self):
+        m = metrics()
+        m.on_level_clear({"level_number": 1, "max_health_gain": 5})
+        decide(m, open_world(), Memory())
+        decide(m, level_world(1), Memory())
+        self.assertFalse(m.milestone_ok())
+
     def test_enter_level_on_the_stack_after_clear_passes(self):
         m = metrics()
         m.on_level_clear({"level_number": 1, "max_health_gain": 5})

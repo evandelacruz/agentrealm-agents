@@ -362,6 +362,15 @@ class TownHandoffTest(unittest.TestCase):
         self.assertEqual(d.instructions, 'be "careful"')
         self.assertEqual(d.params["risk"], 0.25)
 
+    def test_send_to_town_keeps_non_bmp_text(self):
+        self.path.write_text(
+            'goals = ["gather \U0001F48E"]\ninstructions = "stay safe \U0001F6E1"\n', encoding="utf-8"
+        )
+        self.smoke.send_to_town(self.path)
+        d = load_directives(self.path)
+        self.assertEqual(d.goals, ["gather \U0001F48E", "travel:town"])
+        self.assertEqual(d.instructions, "stay safe \U0001F6E1")
+
     def test_send_to_town_with_no_file_writes_defaults(self):
         self.smoke.send_to_town(self.path)
         d = load_directives(self.path)

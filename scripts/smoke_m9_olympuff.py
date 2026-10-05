@@ -40,15 +40,19 @@ TOWN_GOAL = "travel:town"
 
 
 def directives_toml(d: Directives) -> str:
-    """``d`` as a directives file. JSON strings and numbers are valid TOML values."""
+    """``d`` as a directives file. JSON strings and numbers are valid TOML values.
+
+    ``ensure_ascii=False`` keeps non-BMP characters literal; their JSON surrogate
+    pair escapes are not valid TOML.
+    """
     lines = ["[params]"]
-    lines += [f"{k} = {json.dumps(v)}" for k, v in d.params.items()]
+    lines += [f"{k} = {json.dumps(v, ensure_ascii=False)}" for k, v in d.params.items()]
     head = [
-        f"never_attack = {json.dumps(d.never_attack)}",
-        f"goals = {json.dumps(d.goals)}",
+        f"never_attack = {json.dumps(d.never_attack, ensure_ascii=False)}",
+        f"goals = {json.dumps(d.goals, ensure_ascii=False)}",
     ]
     if d.instructions:
-        head.append(f"instructions = {json.dumps(d.instructions)}")
+        head.append(f"instructions = {json.dumps(d.instructions, ensure_ascii=False)}")
     return "\n".join(head + [""] + lines) + "\n"
 
 
@@ -64,7 +68,7 @@ def send_to_town(path: Path) -> None:
     except (OSError, tomllib.TOMLDecodeError):
         d = default_directives()
     d.goals = [g for g in d.goals if not g.strip().startswith("travel:")] + [TOWN_GOAL]
-    path.write_text(directives_toml(d))
+    path.write_text(directives_toml(d), encoding="utf-8")
 
 
 def restore_file(path: Path, original: bytes | None) -> None:

@@ -8,9 +8,9 @@ module checks:
   under ``over_strength_ceiling`` for this loadout, must be looked.
 - Records what each needs: ``looked`` with a ``block_type``; a locked mark
   also has ``needs: key`` (Manual §9.2, §11). Only looks made during this run
-  count: a mark already recorded when the gate first sees it (a persisted
-  knowledge base from an earlier run) never counts, so the smoke script clears
-  those looks with ``clear_entrance_looks`` before the runner starts.
+  count. Before the runner starts, the smoke script clears earlier runs' looks
+  with ``clear_entrance_looks`` and then calls ``snapshot``; a mark recorded
+  at that snapshot never counts.
 - Returns to town: the character stands on the town cell from the knowledge
   base when the run ends. ``on_entrances_done`` fires once when the catalog
   is complete; the smoke script uses it to put ``travel:town`` in the
@@ -114,9 +114,9 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
     ``stop`` is set once every required entrance is recorded and the character
     stands on town, or when ``target_seconds`` have passed with the character
     alive (whichever comes first). ``at_town_end`` is the last decision's
-    position, so leaving town after a visit clears it. A required mark that
-    is already recorded the first time the gate sees it is ``pre_recorded``
-    and never counts toward ``entrances_recorded``.
+    position, so leaving town after a visit clears it. Call ``snapshot``
+    before the runner starts: marks recorded at that point are
+    ``pre_recorded`` and never count toward ``entrances_recorded``.
     """
 
     target_seconds: float = TARGET_SECONDS
@@ -129,9 +129,15 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
     entrances_recorded: int = 0
     strength_closed_skipped: int = 0
     pre_recorded: set[tuple[int, Pos]] = field(default_factory=set)
-    _seen_marks: set[tuple[int, Pos]] = field(default_factory=set)
     at_town_end: bool = False
     _entrances_done_sent: bool = False
+
+    def snapshot(self, kb: KnowledgeBase | None) -> None:
+        """Record which entrance marks are already recorded at run start."""
+        self.pre_recorded = set()
+        for map_id, pos, row in iter_entrances(kb):
+            if entrance_row_recorded(row):
+                self.pre_recorded.add((map_id, pos))
 
     def on_window(self, *, urgent: bool, alive: bool = True) -> None:
         now = self.clock()
@@ -188,10 +194,6 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
         self.strength_closed_skipped = len(all_marks - required)
         self.catalog_size = len(required)
         missing = set(_unrecorded(kb, required))
-        for mark in required - self._seen_marks:
-            if mark not in missing:
-                self.pre_recorded.add(mark)
-        self._seen_marks |= required
         self.entrances_recorded = len(required - missing - self.pre_recorded)
 
     def entrances_ok(self) -> bool:

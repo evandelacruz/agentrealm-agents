@@ -95,7 +95,7 @@ Pass criteria (PLAN.md A29, checked in [`m9_acceptance.py`](python/agentrealm_ag
 - Recover withdraws only on a known safe tile;
 - no loop (24 Steps in a row at one cell with one reason);
 - no API error;
-- on a run of at least 95% of the default time budget (two hours): every entrance mark within strength looked during this run with its `block_type` (and `needs: key` when locked); looks from a persisted knowledge base do not count, so the script clears them before the run and Investigate looks again, and the character on the town cell at the last decision (passing over town earlier does not count).
+- on a run of at least 95% of the default time budget (two hours): every entrance mark within strength looked during this run with its `block_type` (and `needs: key` when locked); looks from a persisted knowledge base do not count: the script clears them and snapshots what is still recorded at run start, before the runner starts, so Investigate looks again and only marks recorded after the snapshot count, and the character on the town cell at the last decision (passing over town earlier does not count).
 
 Marks skipped because the strength bracket closed the cell under `over_strength_ceiling` are counted in the summary, not required; when the bracket closed every mark, nothing is required ("no entrance catalog" means the minimap listed none). Heal actions are reported, not gated. No live M9 pass yet; CI covers the gate in `python/tests/test_m9_acceptance.py` without live keys.
 

@@ -92,6 +92,7 @@ def run_smoke(
         cleared = clear_entrance_looks(knowledge)
         if cleared:
             out(f"[{cfg.profile}] cleared {cleared} entrance look(s) from earlier runs: only this run's looks count")
+        metrics.snapshot(knowledge)
 
     def entrances_done() -> None:
         out(f"[{cfg.profile}] entrance catalog complete: {TOWN_GOAL} via {directives_path.name}")

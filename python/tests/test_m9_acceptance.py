@@ -129,6 +129,7 @@ class M9GateTest(unittest.TestCase):
         calls = []
         stop = threading.Event()
         m = M9AcceptanceMetrics(stop=stop, on_entrances_done=lambda: calls.append(1))
+        m.snapshot(kb)
         decide(m, self.open_world((0, 0)), kb)
         self.assertEqual((m.entrances_recorded, len(m.pre_recorded)), (0, 2))
         self.assertFalse(m.entrances_ok())
@@ -137,6 +138,33 @@ class M9GateTest(unittest.TestCase):
         self.assertIn("2 entrance mark(s) not looked and recorded this run", m.failures())
         decide(m, self.open_world((0, 0)), kb)
         self.assertEqual(m.entrances_recorded, 0, "a pre-recorded mark stays uncounted")
+
+    def test_a_look_made_by_the_first_decision_counts(self):
+        # before_tick runs after the decision, so Investigate can record a
+        # mark before the gate's first look at the knowledge base.
+        kb = kb_with_entrances()
+        m = M9AcceptanceMetrics()
+        m.snapshot(kb)
+        self.record(kb, "7:10,20")
+        decide(m, self.open_world((3, 3)), kb)
+        self.assertEqual((m.entrances_recorded, m.pre_recorded), (1, set()))
+        self.record(kb, "7:30,40")
+        decide(m, self.open_world((0, 0)), kb)
+        self.assertTrue(m.entrances_ok())
+
+    def test_a_mark_reopened_by_the_bracket_counts_once_looked(self):
+        kb = kb_with_entrances()
+        mem = Memory()
+        mem.strength = StrengthBracket(closed={(7, (30, 40))})
+        m = M9AcceptanceMetrics()
+        m.snapshot(kb)
+        self.record(kb, "7:10,20")
+        decide(m, self.open_world((3, 3)), kb, mem)
+        self.record(kb, "7:30,40")  # looked while closed: no route, but a look is a look
+        mem.strength = StrengthBracket()  # loadout change reopens it
+        decide(m, self.open_world((0, 0)), kb, mem)
+        self.assertEqual((m.catalog_size, m.entrances_recorded), (2, 2))
+        self.assertTrue(m.entrances_ok())
 
     def test_cleared_looks_count_once_looked_again(self):
         kb = kb_with_entrances()
@@ -150,8 +178,9 @@ class M9GateTest(unittest.TestCase):
             self.assertNotIn("block_type", row)
             self.assertNotIn("needs", row)
         m = M9AcceptanceMetrics()
-        decide(m, self.open_world((3, 3)), kb)
+        m.snapshot(kb)
         self.assertEqual(m.pre_recorded, set())
+        decide(m, self.open_world((3, 3)), kb)
         self.record(kb, "7:30,40")
         with kb.lock:
             kb.entrances["7:10,20"].update({"looked": True, "block_type": "framed_door", "needs": "key"})
@@ -293,8 +322,12 @@ class SmokeScriptTest(unittest.TestCase):
         with mock.patch.object(acceptance_smoke, "Runner", FakeRunner), \
                 mock.patch.object(self.smoke, "clear_entrance_looks", return_value=0) as clear, \
                 redirect_stdout(io.StringIO()):
-            self.smoke.run_smoke(mock.Mock(), cfg, 9, M9AcceptanceMetrics(), timeout_s=0)
-        clear.assert_called_once()
+            metrics = M9AcceptanceMetrics()
+            order = []
+            clear.side_effect = lambda kb: order.append("clear") or 0
+            metrics.snapshot = lambda kb: order.append("snapshot")
+            self.smoke.run_smoke(mock.Mock(), cfg, 9, metrics, timeout_s=0)
+        self.assertEqual(order, ["clear", "snapshot"], "snapshot after clearing, before the runner")
         self.assertEqual(seen, [["gather_gems", "travel:town"]])
         self.assertEqual(cfg.directives_path.read_text(), 'goals = ["gather_gems"]\n')
 

@@ -3,7 +3,8 @@
 Priority each tick window:
   Sync    — wake or wait until position is known (reads handle the rest)
   Flee    — step away from hostile NPCs in range
-  Explore — walk toward map edge (frontier), else a random open step (walk)
+  Explore — walk to the nearest frontier tile (a known tile next to unknown
+            ones), else take a random open step
 
 The reference agent in ``agentrealm_agent/`` adds dozens of states; this file
 keeps the same API contract with only the behaviors above.
@@ -30,6 +31,7 @@ import random
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 from agentrealm_agent import config
@@ -60,7 +62,7 @@ def blocked_tiles(world: WorldModel, policy: config.Policy) -> set[Pos]:
 
 
 def walk_step(world: WorldModel, mem: StarterMemory, rng: random.Random) -> Pos | None:
-    """Follow ``mem.path``, or pick a frontier target and step toward it."""
+    """Follow ``mem.path``, or plan a new one to the nearest frontier tile."""
     if world.pos is None:
         return None
     blocked = blocked_tiles(world, mem.policy)
@@ -72,14 +74,11 @@ def walk_step(world: WorldModel, mem: StarterMemory, rng: random.Random) -> Pos 
                 return nxt
         mem.path = []
 
-    frontier = world.view.frontier()
-    if frontier:
-        target = min(frontier, key=lambda p: (chebyshev(p, world.pos), p))
-        mem.path = _greedy_path(world, target, blocked)
-        if mem.path:
-            nxt = mem.path[0]
-            mem.path = mem.path[1:]
-            return nxt
+    mem.path = _path_to_frontier(world, blocked)
+    if mem.path:
+        nxt = mem.path[0]
+        mem.path = mem.path[1:]
+        return nxt
 
     options = world.open_neighbours(world.pos, blocked)
     if not options:
@@ -87,21 +86,26 @@ def walk_step(world: WorldModel, mem: StarterMemory, rng: random.Random) -> Pos 
     return rng.choice(sorted(options))
 
 
-def _greedy_path(world: WorldModel, target: Pos, blocked: set[Pos]) -> list[Pos]:
-    """Short list of steps toward ``target`` (not full A* — easy to read)."""
-    if world.pos is None:
-        return []
-    path: list[Pos] = []
-    here = world.pos
-    for _ in range(8):
-        if here == target:
-            break
-        options = world.open_neighbours(here, blocked)
-        if not options:
-            break
-        here = min(options, key=lambda p: (chebyshev(p, target), p))
-        path.append(here)
-    return path
+def _path_to_frontier(world: WorldModel, blocked: set[Pos]) -> list[Pos]:
+    """Steps to the nearest reachable frontier tile, by breadth-first search
+    over known walkable tiles, so walls never trap it the way a greedy step can."""
+    start = world.pos
+    frontier = world.view.frontier() - {start}
+    came_from: dict[Pos, Pos | None] = {start: None}
+    queue = deque([start])
+    while queue:
+        here = queue.popleft()
+        if here in frontier:
+            path = []
+            while here != start:
+                path.append(here)
+                here = came_from[here]
+            return path[::-1]
+        for n in sorted(world.open_neighbours(here, blocked)):
+            if n not in came_from:
+                came_from[n] = here
+                queue.append(n)
+    return []
 
 
 def choose_call(world: WorldModel, mem: StarterMemory) -> str:
@@ -172,6 +176,7 @@ class StarterRunner:
         self.cid = cid
         self.stop = stop
         self.out = out
+        self.failed = False  # set when it stopped on an error, not on Ctrl-C
         self.world = WorldModel(cid)
         self.mem = StarterMemory(policy=cfg.policy)
         seed = cfg.policy.seed if cfg.policy.seed is not None else cid
@@ -195,6 +200,7 @@ class StarterRunner:
             self.log("world", f"{world_body.get('code')} {hz}Hz")
         except ApiError as e:
             self.out(f"[{self.cfg.name}] world read failed: {e}")
+            self.failed = True
             self.trace.close()
             return
 
@@ -211,6 +217,7 @@ class StarterRunner:
                     self.step(call)
                 except ApiError as e:
                     if not self.on_error(call, e):
+                        self.failed = True
                         return
         finally:
             self.trace.close()
@@ -281,10 +288,8 @@ def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
             return 2
         ids.append((cfg, int(state["character_id"])))
     stop = threading.Event()
-    threads = [
-        threading.Thread(target=lambda cfg=cfg, cid=cid: StarterRunner(cfg, client, cid, stop).run(), daemon=True)
-        for cfg, cid in ids
-    ]
+    runners = [StarterRunner(cfg, client, cid, stop) for cfg, cid in ids]
+    threads = [threading.Thread(target=r.run, daemon=True) for r in runners]
     for t in threads:
         t.start()
     try:
@@ -296,7 +301,7 @@ def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
         print("stopping")
     finally:
         stop.set()
-    return 0
+    return 1 if any(r.failed for r in runners) else 0
 
 
 def main(argv: list[str] | None = None) -> int:

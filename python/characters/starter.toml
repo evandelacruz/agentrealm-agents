@@ -4,6 +4,10 @@ avatar = "default"
 model_agent = "agentrealm-reference/wander"
 world = "sandbox"
 
+# The starter reads only these policy keys; the reference agent's
+# kind, goals, goto, on_hostile, and pickup do nothing here.
 [policy]
-kind = "scripted"
-goals = ["explore"]
+hostile = ["npc"]
+hostile_range = 2
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 5

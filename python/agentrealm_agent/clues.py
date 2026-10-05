@@ -1,6 +1,6 @@
 """Clue capture and no-LLM clue rules (A32).
 
-Every sign read and helper line heard is stored in the knowledge base with
+Every sign or scroll read and helper line heard is stored in the knowledge base with
 where and when it was found, and a ``clue`` signal is queued for the
 strategist (A35). Without an LLM, two simple rules use the text:
 
@@ -10,10 +10,12 @@ strategist (A35). Without an LLM, two simple rules use the text:
   lets a consumable tool with that capability be spent there.
 
 A row in ``kb.clues`` is ``{kind, text, map_id, x, y, tick}``, plus
-``speaker_id`` for a helper line. ``kind`` is ``"sign"`` (cell is the sign) or
-``"npc"`` (cell is the helper when in sight, else where we stood: ``Say``
-reaches 25 blocks, further than sight). A sign is stored once per cell; a
-helper line once per speaker and text.
+``speaker_id`` for a helper line or ``supply_id`` for a scroll. ``kind`` is
+``"sign"`` (cell is the sign), ``"scroll"`` (cell is the scroll on the ground,
+else where we stood; A56) or ``"npc"`` (cell is the helper when in sight, else
+where we stood: ``Say`` reaches 25 blocks, further than sight). A sign is
+stored once per cell, a scroll once per supply, and a helper line once per
+speaker and text.
 """
 
 from __future__ import annotations
@@ -69,9 +71,12 @@ _WORD = re.compile(r"[a-z]+")
 
 
 def _dedup_key(row: dict[str, Any]) -> tuple:
-    """A helper line is the same clue when the same speaker says the same text; a sign, at the same cell."""
+    """A helper line is the same clue when the same speaker says the same text; a scroll, the same
+    supply; a sign, at the same cell."""
     if row.get("speaker_id") is not None:
         return ("npc", row.get("speaker_id"), row.get("text"))
+    if row.get("supply_id") is not None:
+        return ("scroll", row.get("supply_id"))
     return (row.get("kind"), row.get("map_id"), row.get("x"), row.get("y"))
 
 
@@ -86,6 +91,7 @@ def record_clue(
     y: int,
     tick: int,
     speaker_id: int | None = None,
+    supply_id: int | None = None,
 ) -> bool:
     """Append one clue and queue a strategist trigger. Returns True when new."""
     cleaned = (text or "").strip()
@@ -94,6 +100,8 @@ def record_clue(
     row: dict[str, Any] = {"kind": kind, "text": cleaned, "map_id": map_id, "x": x, "y": y, "tick": tick}
     if speaker_id is not None:
         row["speaker_id"] = speaker_id
+    if supply_id is not None:
+        row["supply_id"] = supply_id
     key = _dedup_key(row)
     with kb.lock:
         if any(_dedup_key(existing) == key for existing in kb.clues):
@@ -114,6 +122,28 @@ def note_read_clue(
     text = result.get("text")
     if isinstance(text, str):
         record_clue(kb, m, kind="sign", text=text, map_id=map_id, x=pos[0], y=pos[1], tick=tick)
+
+
+def note_scroll_clue(
+    kb: KnowledgeBase | None, m: Memory | None, w: WorldModel, result: dict, supply_id: int
+) -> None:
+    """Store the scroll text from an applied ``Read {kind: supply}`` result (A56).
+
+    The cell is the scroll's when it lies on the ground in sight, else where we
+    stood (a carried scroll).
+    """
+    if result.get("outcome") != "applied" or w.map_id is None:
+        return
+    text = result.get("text")
+    if not isinstance(text, str):
+        return
+    pos = next((e.pos for e in w.entities if e.id == supply_id and e.kind == "supply"), w.pos)
+    if pos is None:
+        return
+    tick = int(result.get("tick", w.tick))
+    record_clue(
+        kb, m, kind="scroll", text=text, map_id=w.map_id, x=pos[0], y=pos[1], tick=tick, supply_id=supply_id
+    )
 
 
 def note_spoken_clue(

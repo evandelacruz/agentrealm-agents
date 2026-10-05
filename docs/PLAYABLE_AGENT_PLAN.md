@@ -185,7 +185,7 @@ Progress in this game is hidden behind things a player has to poke at. Helpers d
 | Thing | Action | Notes |
 |---|---|---|
 | Unread `readable` cell (sign, statue, plinth) | `Read` | While it is in sight (perception × zone brightness, plus light, capped at perception), so no walk is needed once seen. Free: no speech cost, one per tick |
-| Unread scroll, carried or in sight | `Read` | Not shipped until scroll subtype codes are learned (PLAN.md A56) |
+| Unread scroll, carried or in sight | `Read` | Free like readable cells once the subtype is known; unseen codes are probed once (PLAN.md A56) |
 | NPC id never spoken to | `Say` once | Works from 25 blocks. A helper replies with its line; a hostile stays silent, which also tells us it is not a helper. Spaced 1 s apart |
 | Supply type never seen | Walk over or `Take`, if free and safe | Fills the item table |
 | Odd block out | Try each capability we hold, cheapest first | Detector below |
@@ -273,8 +273,9 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, shared by every character of that world run from this checkout. It sits apart from the per-character `python/.state/<name>.json` and trace files:
 
 - Revealed terrain per map, entrance marks, doors and where they lead, safe tiles, hunting grounds and ceilings, shops and prices.
-- Clues: the text of every sign, statue, scroll and helper line, with where it was found and when. `clues` is a list of `{kind, text, map_id, x, y, tick}` rows, plus `speaker_id` on a helper line; a sign is stored once per cell, a helper line once per speaker and text (PLAN.md A32). Each new row also queues `{"trigger": "clue", …row}` on the character's `Memory.clue_signals`, which the strategist drains (A35).
+- Clues: the text of every sign, statue, scroll and helper line, with where it was found and when. `clues` is a list of `{kind, text, map_id, x, y, tick}` rows, plus `speaker_id` on a helper line or `supply_id` on a scroll; a sign is stored once per cell, a scroll once per supply, a helper line once per speaker and text (PLAN.md A32, A56). Each new row also queues `{"trigger": "clue", …row}` on the character's `Memory.clue_signals`, which the strategist drains (A35).
 - `read_cells`: `{"<map_id>": ["x,y", …]}`, readable cells whose `Read` applied, and `spoken_npcs`: NPC ids whose `Say` applied, so `Investigate` never repeats one (PLAN.md A30). Each grows by one entry per sign or NPC in the world.
+- Scroll discovery (A56): `seen_supply_codes`, `probed_supply_codes`, `scroll_subtype_codes`, and `read_supplies` so subtype codes are learned once and scroll text is not re-read.
 - Break attempts per (block, capability), and the result.
 - NPC type stats, item stats, compose results, and what each entrance turned out to need.
 - `items`: one row per `supply_subtype_code` with `attack_range` (from a `target_out_of_range` rejection, under the weapon armed in that response) and `gem_price` (from supplies seen), each overwritten by the latest value; `heal_amount` (largest health gain seen from a `Take` or self-`Use`) and `heal_on_pickup` (whether pickup healed while hurt, A24); `weapon_damage`, the max observed hit per `npc_type_code` from an `NPCDamaged` matched to our `Use`; and for armor, `damage_taken` (worn alone), `damage_without` (nothing worn, filed under the item that just came off) and `damage_saved` (their difference) per `npc_type_code` from `Damaged`, skipping any response whose worn loadout changed (PLAN.md A18).

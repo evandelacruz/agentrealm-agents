@@ -15,6 +15,7 @@ from .heal import HealState
 from .idle import IdleState
 from .boss import BossState, sync_boss
 from .level import LevelState
+from .break_state import BreakState
 from .investigate import InvestigateState
 from .loot import LootState
 from .recover import RecoverState
@@ -40,6 +41,7 @@ STATES: tuple[State, ...] = (
     RecoverState(),
     LootState(),
     InvestigateState(),
+    BreakState(),
     SolveState(),
     GatherState(),
     TravelState(),

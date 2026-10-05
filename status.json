@@ -7,7 +7,7 @@
 
   "M3": {"state": "done"},
 
-  "M5": {"state": "done", "note": "Retired: the agents target agentrealm.gg; no local stack. Seed script removed."},
+  "M5": {"state": "done", "note": "Retired; counts as done. The agents target agentrealm.gg; no local stack. Seed script removed."},
 
   "A1": {"state": "done"},
 

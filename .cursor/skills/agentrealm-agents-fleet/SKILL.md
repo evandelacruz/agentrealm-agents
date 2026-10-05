@@ -55,9 +55,9 @@ Repo: `evandelacruz/agentrealm-agents`.
    ```json
    [
      {
-       "ids": ["M5"],
-       "scope": "Seed script for an account and a key only. The playable sandbox map stays deferred.",
-       "why": "the next item cannot start until it lands."
+       "ids": ["A50"],
+       "scope": "README for newcomers only. The starter agent (A52) stays a separate PR.",
+       "why": "A52 cannot start until it lands."
      }
    ]
    ```

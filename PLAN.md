@@ -171,9 +171,9 @@ Environment: `AGENTREALM_API_KEY` (from the account page on agentrealm.gg) and `
 
 This table is the backlog. Each row is one PR-sized item with a stable ID; IDs are never reused. Cite the ID in commits and PR bodies. Per-ID state lives in [`status.json`](status.json), which is not a source of truth: where it disagrees with this file, status is wrong. An item is ready when its state is not `done`, every ID in **Depends on** is `done`, its note does not start with "Waiting on", and no open pull request already covers it.
 
-Items are grouped into milestones (M0–M12). A milestone is a heading, not a work item: it is done when all its items are. The scope and done-when of M4 and M6–M12 are in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) **Milestones**, with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). Each milestone ends with an acceptance item that runs its done-when.
+Items are grouped into milestones (M0–M13). A milestone is a heading, not a work item: it is done when all its items are. The scope and done-when of M4 and M6–M12 are in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) **Milestones**, with the game facts and their sources in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md). Each milestone ends with an acceptance item that runs its done-when.
 
-**Built (M0–M3). M5 is retired.**
+**Built (M0–M3). M5 is retired; it counts as done.**
 
 | ID | Item | Depends on |
 |---|---|---|
@@ -181,7 +181,7 @@ Items are grouped into milestones (M0–M12). A milestone is a heading, not a wo
 | M1 | **Client and loop.** HTTP client, call scheduler, wall-clock pacing, 429/503 handling, `create`/`run`/`status`, `idle` and `wander`. | |
 | M2 | **World model and pathing.** Tile and entity cache per map, local position tracking, A*, `explore`, `doors`, `goto`. | M1 |
 | M3 | **Reflexes and scripted characters.** The reflex list, the full character file, the trace. | M2 |
-| M5 | **Retired.** Was a local-stack seed script. The agents target the public API at agentrealm.gg; there is no local stack for users of this repo. | M1 |
+| M5 | **Retired; counts as done.** Was a local-stack seed script; nothing was built. `status.json` keeps it `done` so it is never picked up as ready work. The agents target the public API at agentrealm.gg; there is no local stack for users of this repo. | M1 |
 
 **M6: Executor.** Merged on `main`: paced `Step`/`Wait` movement in the runner, `Use` and `Say`/`Broadcast` through `executor/pacing.py` with cooldowns carried across queues (A1), multi-intent queues, the two poll cadences, queue invalidation on reflexes (A2) and on path changes (A43), applying snapshot versions, deltas and health in the world model, and tick POSTs that carry the last applied observation version (A3). The live Olympuff acceptance script [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py) runs the done-when (A4); A4 stays open until a live PASS is recorded.
 

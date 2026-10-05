@@ -78,6 +78,14 @@ def scripted_outcome(
     if reflex is not None:
         return reflex
 
+    if goto_navigation_pending(w, m, policy) and m.goal == "goto" and m.path:
+        step = next_step(w, plan_avoid, m.path)
+        if step is not None:
+            att = nav_stuck.active(m, w)
+            label = m.path[-1]
+            note = nav_stuck.level_note(att) if att is not None and att.goal == m.goal else ""
+            return StateOutcome([set_position(step)], f"{m.goal} → {label}{note}", state=state)
+
     if plan is not None:
         plan.advance(w, m)
         op = plan.current()

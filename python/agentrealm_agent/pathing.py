@@ -75,17 +75,45 @@ def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
     return True
 
 
-def flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:
-    here = w.pos
-    options = w.open_neighbours(here, blocked) + [here]
+def flee_step(
+    w: WorldModel,
+    hostiles: list[Entity],
+    blocked: set[Pos],
+    *,
+    avoid: Pos | None = None,
+    safes: set[Pos] | None = None,
+) -> Pos | None:
+    """One step away from hostiles; ``safes`` breaks ties toward safety.
 
-    def safety(p: Pos) -> tuple[int, int]:
+    When two hostiles pin the agent between two cells, the greedy best step
+    can ping-pong forever. Skip ``avoid`` (the cell just left) when another
+    step scores as well, so flee keeps opening distance.
+    """
+    here = w.pos
+    move_options = [p for p in w.open_neighbours(here, blocked) if p != here]
+    if not move_options:
+        return None
+
+    def safety(p: Pos) -> tuple:
         nearest = min(chebyshev(p, h.pos) for h in hostiles)
         total = sum(chebyshev(p, h.pos) for h in hostiles)
-        return nearest, total
+        if safes:
+            to_safe = min((chebyshev(p, s) for s in safes), default=0)
+            return (nearest, total, -to_safe, p)
+        return (nearest, total, p)
 
-    best = max(options, key=lambda p: (safety(p), p))
-    return None if best == here else best
+    ranked = sorted(move_options, key=safety, reverse=True)
+    best_score = safety(ranked[0])[:3] if safes else safety(ranked[0])[:2]
+
+    def scores_as_well(p: Pos) -> bool:
+        s = safety(p)
+        return s[:3] == best_score if safes else s[:2] == best_score
+
+    for p in ranked:
+        if avoid is not None and p == avoid and any(scores_as_well(q) and q != avoid for q in ranked):
+            continue
+        return p
+    return ranked[0]
 
 
 def step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:

@@ -168,6 +168,18 @@ class FleeTest(unittest.TestCase):
         w.threat.record(("npc", "snotling"), 1)
         self.assertEqual(dispatch(w, ctx()).state, "Flee")
 
+    def test_two_hostiles_does_not_immediately_step_back(self):
+        """Greedy flee ping-pongs between two cells when two hostiles pin it (A58)."""
+        w = world([".....", ".....", ".....", ".....", "....."], at=(2, 2))
+        w.entities = [Entity("npc", 1, (2, 3)), Entity("npc", 2, (3, 2))]
+        m = Memory()
+        c = ctx(m=m, on_hostile="flee", hostile=["npc"], hostile_range=3)
+        first = step(dispatch(w, c))
+        w.pos = first
+        m.nav_stuck.recent_cells = [(2, 2), first]
+        second = step(dispatch(w, c))
+        self.assertNotEqual(second, (2, 2), "flee should not bounce straight back")
+
     def test_ties_break_toward_a_known_safe_tile(self):
         w = world([".....", ".....", "....."], at=(2, 1))
         w.entities = [Entity("npc", 5, (2, 0))]

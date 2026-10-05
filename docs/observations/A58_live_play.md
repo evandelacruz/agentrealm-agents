@@ -36,6 +36,14 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Fix:** one oscillation guard in dispatch (A15, `navigation/oscillation.py`). When the character's last 6 cell changes stayed on at most 2 cells, it gives up the target it walks to through stuck detection's step 5 (reason `pacing`) and traces an `oscillation` event, whichever states caused it. The smoke script now aborts with exit 1 on sustained oscillation (more than 3 give-ups in 6000 ticks; events where survival states did the moving do not count), so a live run cannot burn the hour pacing.
 - **Status:** tested offline only. **Next:** rerun the full live hour.
 
+## Run 4 — stopped (~10 min): Flee ping-pong between two cells
+
+- **Character:** chosen at run time via `CHARACTER_NAME` (not committed).
+- **Gate:** navigation gave up on the 150-block `goto` with reason `pacing` between two cells near the start (~613–614 on x); regen never measured; 0 deaths; smoke did not abort (Flee pacing has no `goal` on oscillation events).
+- **Trace:** from roughly tick 3428289 the agent paced between two diagonal neighbours (`614,398` ↔ `615,397`) under **Flee**, alternating `flee npc 140` and `flee npc 142`. No Heal, no regen verdict, no progress toward explore or the goto target for ~10 minutes; run stopped by hand.
+- **Cause:** with two hostiles in range, greedy `flee_step` maximised distance to the nearest NPC each tick, so the best step from each cell was back to the other.
+- **Fix:** `flee_step` skips stepping back to the cell just left when another step scores as well (`states/flee.py`, `pathing.py`); offline test `test_two_hostiles_does_not_immediately_step_back`.
+
 ## Done-when
 
 A58 stays open until a live hour exits 0 on the A16 gate and a redacted PASS transcript is committed under `docs/acceptance/m7_olympuff_PASS.transcript`.

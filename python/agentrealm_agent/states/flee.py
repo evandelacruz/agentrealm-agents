@@ -13,19 +13,12 @@ from .fight import can_engage, fight_target
 from .intents import set_position
 
 
-def _toward_safety(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], safes: set[Pos]) -> Pos | None:
-    """``flee_step``, breaking ties toward the nearest known safe tile."""
-    here = w.pos
-    assert here is not None
-    options = w.open_neighbours(here, blocked) + [here]
-
-    def score(p: Pos) -> tuple[int, int, Pos]:
-        nearest = min(chebyshev(p, h.pos) for h in hostiles)
-        to_safe = min(chebyshev(p, s) for s in safes)
-        return (nearest, -to_safe, p)
-
-    best = max(options, key=score)
-    return None if best == here else best
+def _flee_avoid(m, w: WorldModel) -> Pos | None:
+    """The cell the agent just left, when it is still standing on the last one."""
+    cells = m.nav_stuck.recent_cells
+    if w.pos is None or len(cells) < 2 or cells[-1] != w.pos:
+        return None
+    return cells[-2]
 
 
 def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
@@ -74,7 +67,8 @@ class FleeState(State):
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, w.pos), e.id))
         blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
         safes = safe_tiles(w, w.map_id) if w.map_id is not None else set()
-        away = _toward_safety(w, hostiles, blocked, safes) if safes else flee_step(w, hostiles, blocked)
+        avoid = _flee_avoid(m, w)
+        away = flee_step(w, hostiles, blocked, avoid=avoid, safes=safes or None)
         if away is None:
             return StateOutcome(None, "nowhere to flee", state=self.name, wait=True)
         m.path = []

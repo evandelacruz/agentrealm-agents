@@ -51,7 +51,7 @@ from .executor import (
     trim_to_horizon,
     wait,
 )
-from .m6_acceptance import M6AcceptanceMetrics
+from .acceptance import AcceptanceHooks
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
@@ -109,7 +109,7 @@ class Runner:
         stop: threading.Event,
         out=print,
         knowledge: KnowledgeBase | None = None,
-        acceptance: M6AcceptanceMetrics | None = None,
+        acceptance: AcceptanceHooks | None = None,
     ):
         self.cfg = cfg
         self.client = client
@@ -245,7 +245,7 @@ class Runner:
                     except ApiError as e:
                         not_before = self.on_error(call, e)
                 if self.acceptance is not None:
-                    self.acceptance.on_window(urgent=urgent)
+                    self.acceptance.on_window(urgent=urgent, alive=self.world.alive)
         finally:
             if self.strategist is not None:
                 self.strategist.stop()
@@ -430,6 +430,18 @@ class Runner:
             d = self._decide(w, m, plan=self.plan)
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
+        if self.acceptance is not None:
+            # Before the response is applied, so it judges the world this decision saw.
+            self.acceptance.before_tick(
+                w,
+                m,
+                state=m.state,
+                reason=d.reason,
+                intents=intents,
+                policy=self.cfg.policy,
+                params=self.plan.params,
+                knowledge=self.knowledge,
+            )
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))
         if "tick" in r:
@@ -1055,6 +1067,8 @@ class Runner:
             if kind in ("Damaged", "Attacked"):
                 m.alarm = True
             if kind == "Died":
+                if self.acceptance is not None:
+                    self.acceptance.on_death()
                 queue_signal(
                     m,
                     {

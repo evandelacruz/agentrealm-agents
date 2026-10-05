@@ -1,7 +1,8 @@
 """Reflex 4 pickup helper (A20): not a ``STATES`` entry.
 
-``ExploreState`` calls ``pickup_outcome`` from ``scripted_outcome`` when
-``policy.pickup`` is on and a supply within one block beats what we carry.
+``reflex_outcome`` (explore.py) calls ``pickup_outcome`` when ``policy.pickup``
+is on, so Explore and every state that runs the reflexes first take a
+worthwhile supply within one block. **Loot** also calls it directly.
 """
 
 from __future__ import annotations

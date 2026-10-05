@@ -6,18 +6,16 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .config import Policy
 from .directives import PARAM_DEFAULTS, _valid_param
 from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
+from .memory import Memory, note_goal_done, note_goal_failed
 from .travel.ops import travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
-
-if TYPE_CHECKING:
-    from .memory import Memory
 
 log = logging.getLogger(__name__)
 
@@ -458,8 +456,6 @@ class Plan:
 
     def advance(self, world: WorldModel, memory: Memory | None = None) -> None:
         """Apply ``set_param`` ops reached in order and pop finished goals."""
-        from .strategist import note_goal_done
-
         while (op := self.current()) is not None:
             if op["op"] == "set_param":
                 self.params = apply_set_param(self.floor_params, self.params, op)
@@ -475,8 +471,6 @@ class Plan:
             self._pop_current()
 
     def drop_current(self, reason: str, memory: Memory | None = None) -> None:
-        from .strategist import note_goal_failed
-
         op = self.current()
         if op is not None:
             log.warning("plan: dropped op %r: %s", op, reason)
@@ -485,8 +479,6 @@ class Plan:
 
     def finish_current(self, reason: str, memory: Memory | None = None) -> None:
         """Pop an op whose state saw it finish (``fight_boss``, A38)."""
-        from .strategist import note_goal_done
-
         op = self.current()
         if op is not None:
             log.info("plan: finished op %r: %s", op, reason)

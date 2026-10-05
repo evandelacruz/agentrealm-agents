@@ -1,14 +1,39 @@
-"""Background strategist thread with optional LLM (A35).
+"""Strategist: an optional LLM that rewrites the goal stack (A35).
 
-Runs off the tick loop. The runner keeps the current plan until a validated
-strategist answer lands, then replaces the goal stack (unless directives
-``goals`` own the stack). With no model configured, signals are drained and
-the built-in plan plus no-LLM clue rules (A32) stay in charge.
+Off unless ``AGENTREALM_STRATEGIST_MODEL`` and an API key are set. With it
+off, triggers are drained and logged, and the built-in plan plus the no-LLM
+clue rules (A32) stay in charge.
 
-Configure with ``AGENTREALM_STRATEGIST_MODEL`` and
-``AGENTREALM_STRATEGIST_API_KEY`` (or ``OPENAI_API_KEY``). Optional limits:
-``AGENTREALM_STRATEGIST_MIN_INTERVAL_S``, ``AGENTREALM_STRATEGIST_MAX_CALLS``,
-``AGENTREALM_STRATEGIST_MAX_USD``, ``AGENTREALM_STRATEGIST_IDLE_MINUTES``.
+Two threads, one rule: everything that reads or writes the world, the plan,
+``Memory`` or the trace runs on the tick thread, in :meth:`Strategist.on_window`.
+The background thread only sends a prompt and parses the reply. The two
+threads talk through two queues, a request and an answer, so a slow model
+never costs a tick and nothing needs a lock.
+
+One window, on the tick thread:
+
+1. Move new triggers (clue, stuck, death, goal done or failed, level, idle)
+   from ``Memory`` into the strategist's inbox.
+2. If an answer came back, apply it. A failed call puts its triggers back in
+   the inbox; an answer with no valid goals keeps the current plan.
+3. If nothing is in flight, the inbox has triggers and the limits allow it,
+   build the prompt, log it to the trace, and hand it to the background thread.
+
+Limits (environment variables, defaults in brackets). Every attempt counts,
+failed ones included:
+
+- ``AGENTREALM_STRATEGIST_MIN_INTERVAL_S`` [60]: seconds between calls.
+- ``AGENTREALM_STRATEGIST_MAX_CALLS`` [48]: calls per run.
+- ``AGENTREALM_STRATEGIST_MAX_TOKENS`` [200000]: prompt plus answer tokens
+  per run, as the API reports them. A call that reports no usage is charged
+  an estimate of its prompt (4 characters a token). Tokens, not dollars, so
+  the cap holds whatever the model costs: multiply by your model's price.
+- ``AGENTREALM_STRATEGIST_IDLE_MINUTES`` [10]: no applied Step for this long
+  raises the ``idle`` trigger.
+
+The client speaks the OpenAI chat completions API (stdlib ``urllib``), with
+the key from ``AGENTREALM_STRATEGIST_API_KEY`` or ``OPENAI_API_KEY``. Another
+provider is a class with the same ``complete`` method (``LLMClient``).
 """
 
 from __future__ import annotations
@@ -16,6 +41,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import threading
 import time
 import urllib.error
@@ -31,10 +57,11 @@ from .world import WorldModel
 
 log = logging.getLogger(__name__)
 
-SIGNALS_KEPT = 16
+INBOX_KEPT = 48  # newest triggers kept while waiting for a call
+CHARS_PER_TOKEN = 4  # estimate for a call that reports no usage
 DEFAULT_MIN_INTERVAL_S = 60.0
 DEFAULT_MAX_CALLS = 48
-DEFAULT_MAX_USD = 2.0
+DEFAULT_MAX_TOKENS = 200_000
 DEFAULT_IDLE_MINUTES = 10
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
@@ -60,7 +87,7 @@ class StrategistConfig:
     api_key: str = ""
     min_interval_s: float = DEFAULT_MIN_INTERVAL_S
     max_calls: int = DEFAULT_MAX_CALLS
-    max_usd: float = DEFAULT_MAX_USD
+    max_tokens: int = DEFAULT_MAX_TOKENS
     idle_ticks: int = DEFAULT_IDLE_MINUTES * 600  # 10 Hz default
 
     @property
@@ -75,7 +102,7 @@ class StrategistConfig:
             or os.environ.get("OPENAI_API_KEY", "").strip()
         )
 
-        def _float(name: str, default: float) -> float:
+        def number(name: str, default: float) -> float:
             raw = os.environ.get(name, "").strip()
             if not raw:
                 return default
@@ -85,54 +112,21 @@ class StrategistConfig:
                 log.warning("strategist: ignoring bad %s=%r", name, raw)
                 return default
 
-        def _int(name: str, default: int) -> int:
-            raw = os.environ.get(name, "").strip()
-            if not raw:
-                return default
-            try:
-                return int(raw)
-            except ValueError:
-                log.warning("strategist: ignoring bad %s=%r", name, raw)
-                return default
-
-        idle_min = _float("AGENTREALM_STRATEGIST_IDLE_MINUTES", DEFAULT_IDLE_MINUTES)
+        idle_min = number("AGENTREALM_STRATEGIST_IDLE_MINUTES", DEFAULT_IDLE_MINUTES)
         return cls(
             model=model,
             api_key=api_key,
-            min_interval_s=_float("AGENTREALM_STRATEGIST_MIN_INTERVAL_S", DEFAULT_MIN_INTERVAL_S),
-            max_calls=_int("AGENTREALM_STRATEGIST_MAX_CALLS", DEFAULT_MAX_CALLS),
-            max_usd=_float("AGENTREALM_STRATEGIST_MAX_USD", DEFAULT_MAX_USD),
+            min_interval_s=number("AGENTREALM_STRATEGIST_MIN_INTERVAL_S", DEFAULT_MIN_INTERVAL_S),
+            max_calls=int(number("AGENTREALM_STRATEGIST_MAX_CALLS", DEFAULT_MAX_CALLS)),
+            max_tokens=int(number("AGENTREALM_STRATEGIST_MAX_TOKENS", DEFAULT_MAX_TOKENS)),
             idle_ticks=max(1, int(idle_min * 60 * tick_hz)),
         )
 
 
-def queue_signal(m: Memory, payload: dict[str, Any]) -> None:
-    """Append one strategist trigger; keep the last ``SIGNALS_KEPT``."""
-    m.strategist_signals.append(payload)
-    del m.strategist_signals[:-SIGNALS_KEPT]
-
-
-def note_goal_done(m: Memory | None, op: GoalOp | None, reason: str) -> None:
-    if m is None or op is None:
-        return
-    queue_signal(m, {"trigger": "goal_done", "op": dict(op), "reason": reason})
-
-
-def note_goal_failed(m: Memory | None, op: GoalOp | None, reason: str) -> None:
-    if m is None or op is None:
-        return
-    queue_signal(m, {"trigger": "goal_failed", "op": dict(op), "reason": reason})
-
-
 def drain_triggers(m: Memory) -> list[dict[str, Any]]:
-    """Take every queued trigger (clue, stuck, and strategist signals)."""
-    out: list[dict[str, Any]] = []
-    out.extend(m.clue_signals)
-    m.clue_signals.clear()
-    out.extend(m.nav_stuck.stuck_signals)
-    m.nav_stuck.stuck_signals.clear()
-    out.extend(m.strategist_signals)
-    m.strategist_signals.clear()
+    """Take every queued trigger (clue, stuck, and strategist signals). Tick thread only."""
+    out = m.clue_signals + m.nav_stuck.stuck_signals + m.strategist_signals
+    m.clue_signals, m.nav_stuck.stuck_signals, m.strategist_signals = [], [], []
     return out
 
 
@@ -179,15 +173,17 @@ class OpenAIChatClient:
         return content.strip(), usage
 
 
-def _estimate_usd(usage: dict[str, Any]) -> float:
-    """Rough cost from token counts when the response omits a price."""
+def tokens_used(usage: dict[str, Any]) -> int | None:
+    """Prompt plus answer tokens the API reported, or None when it reported none."""
     try:
-        prompt = int(usage.get("prompt_tokens", 0))
-        completion = int(usage.get("completion_tokens", 0))
+        total = int(usage.get("prompt_tokens", 0)) + int(usage.get("completion_tokens", 0))
     except (TypeError, ValueError):
-        return 0.0
-    # Placeholder rates; trace shows tokens even when this is zero.
-    return (prompt * 0.15 + completion * 0.6) / 1_000_000.0
+        return None
+    return total or None
+
+
+def estimate_tokens(messages: list[dict[str, str]]) -> int:
+    return sum(len(msg["content"]) for msg in messages) // CHARS_PER_TOKEN + 1
 
 
 def build_prompt(
@@ -198,24 +194,23 @@ def build_prompt(
     directives: Directives,
     knowledge: KnowledgeBase | None,
 ) -> list[dict[str, str]]:
+    """The model's input: triggers, state, the remaining plan, every clue, and instructions."""
     pos = f"{w.map_id}:{w.pos[0]},{w.pos[1]}" if w.pos and w.map_id is not None else "unknown"
     state_lines = [
         f"tick={w.tick} pos={pos} alive={w.alive} health={w.health}/{w.max_health} gems={w.gems}",
         f"map_level={w.map_level} armed={w.armed_code} lives={w.lives}",
     ]
-    head = plan.current()
-    if head is not None:
-        state_lines.append(f"plan_head={json.dumps(head, sort_keys=True)}")
     if plan.notes:
         state_lines.append(f"plan_notes={plan.notes!r}")
     clues: list[dict[str, Any]] = []
     if knowledge is not None:
         with knowledge.lock:
-            clues = list(knowledge.clues)[-12:]
+            clues = list(knowledge.clues)
     user_parts = [
         "Triggers:\n" + json.dumps(triggers, sort_keys=True),
         "State:\n" + "\n".join(state_lines),
-        "Clues (newest last):\n" + json.dumps(clues, sort_keys=True),
+        "Current plan (top first):\n" + json.dumps(plan.goals[plan.index :], sort_keys=True),
+        "Clues (oldest first):\n" + json.dumps(clues, sort_keys=True),
         "Directives instructions:\n" + (directives.instructions or "(none)"),
     ]
     return [
@@ -225,184 +220,191 @@ def build_prompt(
 
 
 @dataclass
+class Answer:
+    """What the background thread hands back for one call."""
+
+    raw: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
+    goals: list[GoalOp] = field(default_factory=list)
+    params: dict[str, float | int] = field(default_factory=dict)
+    notes: str = ""
+    error: str = ""  # set when the call or the JSON failed
+
+
+@dataclass
 class Strategist:
-    """Async strategist: drains triggers and optionally calls a model."""
+    """Asks the model for a new goal stack when a trigger fires (see module docstring)."""
 
     config: StrategistConfig
-    lock: threading.Lock
-    _client: LLMClient | None = None
-    _thread: threading.Thread | None = field(default=None, repr=False)
-    _stop: threading.Event = field(default_factory=threading.Event, repr=False)
-    _wake: threading.Event = field(default_factory=threading.Event, repr=False)
-    _runner_getter: Callable[[], Any] | None = field(default=None, repr=False)
-    _log: Callable[[str, str, dict], None] | None = field(default=None, repr=False)
-    _pending: tuple[list[GoalOp], dict[str, float | int], str] | None = field(default=None, repr=False)
-    _calls: int = 0
-    _spent_usd: float = 0.0
-    _last_call_at: float = 0.0
-    _last_level_key: tuple[int, int] | None = field(default=None, repr=False)
+    client: LLMClient | None = None
+    clock: Callable[[], float] = time.monotonic
+    inbox: list[dict[str, Any]] = field(default_factory=list)  # triggers not yet sent
+    in_flight: list[dict[str, Any]] | None = None  # triggers of the call being answered
+    calls: int = 0
+    tokens: int = 0
+    last_call_at: float | None = None
+    _charged: int = 0  # tokens charged up front for the call in flight
+    _last_level_key: tuple[int, int] | None = None
     _idle_sent_for_tick: int = -1
+    _requests: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=1), repr=False)
+    _answers: queue.Queue = field(default_factory=queue.Queue, repr=False)
+    _stop: threading.Event = field(default_factory=threading.Event, repr=False)
+    _thread: threading.Thread | None = field(default=None, repr=False)
 
     @classmethod
-    def from_env(cls, lock: threading.Lock, *, tick_hz: int = 10) -> Strategist:
+    def from_env(cls, *, tick_hz: int = 10) -> Strategist:
         cfg = StrategistConfig.from_env(tick_hz=tick_hz)
         client = OpenAIChatClient(cfg.api_key, cfg.model) if cfg.enabled else None
-        return cls(config=cfg, lock=lock, _client=client)
+        return cls(config=cfg, client=client)
 
-    def start(self, runner: Any) -> None:
-        self._runner_getter = lambda: runner
-        self._log = runner.log
+    # --- background thread: send the prompt, parse the reply ---
+
+    def start(self) -> None:
+        """Start the background thread; with no model there is nothing to start."""
+        if not self.config.enabled:
+            return
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="strategist", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop the thread. A call still running is abandoned; its answer is never applied."""
         self._stop.set()
-        self._wake.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
 
-    def notify(self) -> None:
-        self._wake.set()
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            self.serve_one(timeout=1.0)
 
-    def apply_pending(self, runner: Any) -> bool:
-        """Replace the runner plan when a strategist answer is ready."""
-        pending = self._pending
-        if pending is None:
-            return False
-        if _operator_plan_active(runner.directives.directives):
-            self._pending = None
-            return False
-        goals, params, notes = pending
-        self._pending = None
-        d = runner.directives.directives
-        runner.plan = Plan(
-            list(goals),
-            dict(params),
-            notes=notes,
-            floor_params=dict(d.params),
-            tick_hz=runner.tick_hz,
-        )
-        runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
-        if self._log:
-            self._log(
-                "strategist",
-                f"plan replaced ({len(goals)} goals)",
-                {"strategist": {"event": "applied", "goals": goals, "params": params, "notes": notes}},
+    def serve_one(self, timeout: float | None = None) -> None:
+        """Answer one waiting request, if any. Touches nothing but the two queues."""
+        try:
+            messages, floor = self._requests.get(timeout=timeout)
+        except queue.Empty:
+            return
+        self._answers.put(self._ask(messages, floor))
+
+    def _ask(self, messages: list[dict[str, str]], floor: dict[str, float | int]) -> Answer:
+        assert self.client is not None
+        answer = Answer()
+        try:
+            answer.raw, answer.usage = self.client.complete(messages)
+            answer.goals, answer.params, answer.notes = parse_plan_payload(
+                json.loads(answer.raw), floor_params=floor
             )
-        return True
+        except Exception as e:  # network, HTTP status, or a reply that is not JSON
+            answer.error = str(e) or type(e).__name__
+        return answer
 
-    def track_window(self, runner: Any) -> None:
-        """Queue level and idle triggers; nudge the background thread."""
+    # --- tick thread: everything else ---
+
+    def on_window(self, runner: Any) -> None:
+        """Collect triggers, apply an answer that came back, maybe send the next call."""
+        self._collect(runner)
+        try:
+            answer = self._answers.get_nowait()
+        except queue.Empty:
+            answer = None
+        if answer is not None:
+            self._settle(runner, answer)
+        if not self.inbox:
+            return
+        if not self.config.enabled:
+            runner.log(
+                "strategist",
+                f"drained {len(self.inbox)} trigger(s), no model",
+                {"strategist": {"event": "drain", "triggers": self.inbox}},
+            )
+            self.inbox = []
+            return
+        if self.in_flight is None and not self.limit_reached():
+            self._send(runner)
+
+    def limit_reached(self) -> str:
+        """Why no call may start now, or "" when one may."""
+        if self.calls >= self.config.max_calls:
+            return "max_calls"
+        if self.tokens >= self.config.max_tokens:
+            return "max_tokens"
+        if self.last_call_at is not None and self.clock() - self.last_call_at < self.config.min_interval_s:
+            return "min_interval"
+        return ""
+
+    def _collect(self, runner: Any) -> None:
+        """Move queued signals into the inbox and raise the level and idle triggers."""
         w, m = runner.world, runner.mem
         if w.map_id is not None and w.map_level is not None and w.map_level > 0:
             key = (w.map_id, w.map_level)
             if key != self._last_level_key:
                 self._last_level_key = key
-                queue_signal(
-                    m,
-                    {"trigger": "level", "map_id": w.map_id, "level": w.map_level, "tick": w.tick},
-                )
-                self.notify()
-        progress_tick = m.strategist_progress_tick
-        if progress_tick >= 0 and w.tick - progress_tick >= self.config.idle_ticks:
-            if self._idle_sent_for_tick != progress_tick:
-                self._idle_sent_for_tick = progress_tick
-                queue_signal(
-                    m,
-                    {
-                        "trigger": "idle",
-                        "since_tick": progress_tick,
-                        "tick": w.tick,
-                        "idle_ticks": self.config.idle_ticks,
-                    },
-                )
-                self.notify()
+                self.inbox.append({"trigger": "level", "map_id": w.map_id, "level": w.map_level, "tick": w.tick})
+        since = m.strategist_progress_tick
+        if since >= 0 and w.tick - since >= self.config.idle_ticks and self._idle_sent_for_tick != since:
+            self._idle_sent_for_tick = since
+            self.inbox.append(
+                {"trigger": "idle", "since_tick": since, "tick": w.tick, "idle_ticks": self.config.idle_ticks}
+            )
+        self.inbox.extend(drain_triggers(m))
+        del self.inbox[:-INBOX_KEPT]
 
-    def note_progress(self, m: Memory, tick: int) -> None:
-        m.strategist_progress_tick = tick
+    def _send(self, runner: Any) -> None:
+        messages = build_prompt(
+            triggers=self.inbox,
+            w=runner.world,
+            plan=runner.plan,
+            directives=runner.directives.directives,
+            knowledge=runner.knowledge,
+        )
+        # Count the attempt now, so a call that fails still uses up the limits.
+        self.calls += 1
+        self.last_call_at = self.clock()
+        self._charged = estimate_tokens(messages)
+        self.tokens += self._charged
+        self.in_flight, self.inbox = self.inbox, []
+        runner.log(
+            "strategist",
+            f"ask (call {self.calls}, {len(self.in_flight)} trigger(s))",
+            {"strategist": {"event": "ask", "call": self.calls, "triggers": self.in_flight, "messages": messages}},
+        )
+        self._requests.put((messages, dict(runner.directives.directives.params)))
 
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            self._wake.wait(timeout=1.0)
-            self._wake.clear()
-            if self._stop.is_set():
-                break
-            runner = self._runner_getter() if self._runner_getter else None
-            if runner is None:
-                continue
-            with self.lock:
-                triggers = drain_triggers(runner.mem)
-            if not triggers:
-                continue
-            if not self.config.enabled:
-                if self._log:
-                    self._log(
-                        "strategist",
-                        f"drained {len(triggers)} trigger(s), no model",
-                        {"strategist": {"event": "drain", "triggers": triggers}},
-                    )
-                continue
-            if not self._rate_ok():
-                # Put triggers back so a later window can use them.
-                with self.lock:
-                    for t in triggers:
-                        _requeue(runner.mem, t)
-                continue
-            try:
-                with self.lock:
-                    messages = build_prompt(
-                        triggers=triggers,
-                        w=runner.world,
-                        plan=runner.plan,
-                        directives=runner.directives.directives,
-                        knowledge=runner.knowledge,
-                    )
-                assert self._client is not None
-                raw_text, usage = self._client.complete(messages)
-                raw_obj = json.loads(raw_text)
-                floor = dict(runner.directives.directives.params)
-                goals, params, notes = parse_plan_payload(raw_obj, floor_params=floor)
-                cost = _estimate_usd(usage)
-                self._calls += 1
-                self._spent_usd += cost
-                self._last_call_at = time.time()
-                with self.lock:
-                    self._pending = (goals, params, notes)
-                if self._log:
-                    self._log(
-                        "strategist",
-                        f"answer ({len(goals)} goals, call {self._calls})",
-                        {
-                            "strategist": {
-                                "event": "answer",
-                                "triggers": triggers,
-                                "raw": raw_text,
-                                "goals": goals,
-                                "params": params,
-                                "notes": notes,
-                                "usage": usage,
-                                "spent_usd": round(self._spent_usd, 6),
-                            }
-                        },
-                    )
-            except Exception as e:
-                log.warning("strategist: call failed: %s", e)
-                if self._log:
-                    self._log(
-                        "strategist",
-                        f"failed: {e}",
-                        {"strategist": {"event": "error", "triggers": triggers, "error": str(e)}},
-                    )
-
-    def _rate_ok(self) -> bool:
-        if self._calls >= self.config.max_calls:
-            return False
-        if self._spent_usd >= self.config.max_usd:
-            return False
-        if self._last_call_at and time.time() - self._last_call_at < self.config.min_interval_s:
-            return False
-        return True
+    def _settle(self, runner: Any, answer: Answer) -> None:
+        """Charge the real token count, then apply the answer or put its triggers back."""
+        triggers, self.in_flight = self.in_flight or [], None
+        reported = tokens_used(answer.usage)
+        if reported is not None:
+            self.tokens += reported - self._charged
+        self._charged = 0
+        record: dict[str, Any] = {
+            "call": self.calls,
+            "raw": answer.raw,
+            "usage": answer.usage,
+            "tokens_total": self.tokens,
+        }
+        if answer.error:
+            # Retry these triggers on the next allowed call.
+            self.inbox = (triggers + self.inbox)[-INBOX_KEPT:]
+            log.warning("strategist: call failed: %s", answer.error)
+            runner.log("strategist", f"failed: {answer.error}", {"strategist": {"event": "error", "error": answer.error, **record}})
+            return
+        record.update(goals=answer.goals, params=answer.params, notes=answer.notes)
+        if not answer.goals:
+            runner.log("strategist", "answer had no valid goals; plan kept", {"strategist": {"event": "ignored", **record}})
+            return
+        d = runner.directives.directives
+        if _operator_plan_active(d):
+            runner.log("strategist", "directives goals own the stack; plan kept", {"strategist": {"event": "ignored", **record}})
+            return
+        runner.plan = Plan(
+            list(answer.goals),
+            dict(answer.params),
+            notes=answer.notes,
+            floor_params=dict(d.params),
+            tick_hz=runner.tick_hz,
+        )
+        runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
+        runner.log("strategist", f"plan replaced ({len(answer.goals)} goals)", {"strategist": {"event": "applied", **record}})
 
 
 def _operator_plan_active(directives: Directives) -> bool:
@@ -410,15 +412,3 @@ def _operator_plan_active(directives: Directives) -> bool:
     if not stack:
         return False
     return bool(parse_directives_goals(stack))
-
-
-def _requeue(m: Memory, trigger: dict[str, Any]) -> None:
-    kind = trigger.get("trigger")
-    if kind == "clue":
-        m.clue_signals.append(trigger)
-        del m.clue_signals[:-SIGNALS_KEPT]
-    elif kind == "stuck":
-        m.nav_stuck.stuck_signals.append(trigger)
-        del m.nav_stuck.stuck_signals[:-SIGNALS_KEPT]
-    else:
-        queue_signal(m, trigger)

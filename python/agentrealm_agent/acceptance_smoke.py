@@ -1,4 +1,4 @@
-"""Shared helpers for live acceptance smoke scripts (M7 A16, M8 A25, M10 A33)."""
+"""Shared helpers for live acceptance smoke scripts (M7 A16, M8 A25, M9 A29, M10 A33)."""
 
 from __future__ import annotations
 
@@ -55,8 +55,8 @@ def wake(client: Client, cid: int, *, pause: Callable[[float], None] = time.slee
 def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
     """The overworld's map id and where the character stands on it.
 
-    Raises ValueError when the character is not on the overworld, where M7 and M8
-    are judged.
+    Raises ValueError when the character is not on the overworld, where M7, M8
+    and M9 are judged.
     """
     town = client.world(cid).get("town") or {}
     p = client.position(cid)
@@ -73,8 +73,12 @@ def run_acceptance_smoke(
     *,
     timeout_s: float,
     out: Callable[[str], None] | None = None,
+    prepare: Callable[[KnowledgeBase], None] | None = None,
 ) -> tuple[float, KnowledgeBase]:
     """Run the runner with ``metrics`` until it stops or ``timeout_s`` elapses.
+
+    ``prepare``, when given, runs on the loaded knowledge base before the
+    runner starts (M9 clears earlier runs' entrance looks with it).
 
     Returns the seconds played and the knowledge base the runner wrote to; judge
     the run on that one, not a reload, which misses the run if the save failed.
@@ -83,6 +87,8 @@ def run_acceptance_smoke(
     metrics.stop = stop
     started = time.monotonic()
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
+    if prepare is not None:
+        prepare(knowledge)
 
     def emit(line: str) -> None:
         if out is not None:

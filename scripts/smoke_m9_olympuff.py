@@ -26,6 +26,7 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
+from agentrealm_agent.acceptance_run import FULL_RUN_FRACTION  # noqa: E402
 from agentrealm_agent.acceptance_smoke import navigation_start, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
@@ -176,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     for line in metrics.summary_lines():
         print(line, flush=True)
 
-    full_run = args.seconds >= TARGET_SECONDS * 0.95
+    full_run = args.seconds >= TARGET_SECONDS * FULL_RUN_FRACTION
     failures = list(metrics.failures(full_run=full_run))
     if full_run and elapsed + 1.0 < args.seconds and not metrics.entrances_ok():
         failures.append(f"ran {elapsed:.0f}s < target {args.seconds:.0f}s without finishing entrances")

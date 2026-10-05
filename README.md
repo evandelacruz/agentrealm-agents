@@ -86,6 +86,17 @@ Give-up rule: navigation passes on a give-up only when stuck detection gave up o
 
 No live hour has passed yet (A58); runs that did not are in [`docs/observations/A16_live_play.md`](docs/observations/A16_live_play.md) and [`docs/observations/A58_live_play.md`](docs/observations/A58_live_play.md). CI covers the gate, the runner hooks and the navigation fixtures in `python/tests/test_m7_acceptance.py` without live keys.
 
+Live M8 smoke: `make smoke-m8-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m8_olympuff.py`](scripts/smoke_m8_olympuff.py), using profile `python/characters/olympuff_m8.toml` and a character you choose at run time. Start on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out).
+
+Pass criteria (PLAN.md A25, checked in [`m8_acceptance.py`](python/agentrealm_agent/m8_acceptance.py)):
+
+- no death (the first one ends the run), and alive at the end of the run;
+- no fight started below the health floor (`would_lose` at the first attack after entering **Fight**);
+- no API error;
+- on a run of at least 95% of an hour: gems earned at least once; armor worn; a shop weapon armed; potion reserve reached; **Heal** took ground food and drank a carried potion; at least one lone weak hostile kill (`NPCDied` for the NPC **Fight** attacked while it was the lone hostile, of a measured type hitting at most 2).
+
+No live M8 pass has run yet; the gate and `python/tests/test_m8_acceptance.py` cover the metrics and smoke script without live keys.
+
 Live M9 smoke: `make smoke-m9-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M9 done-when via [`scripts/smoke_m9_olympuff.py`](scripts/smoke_m9_olympuff.py), using profile `python/characters/olympuff_m9.toml`. Start on the overworld. Investigate (A30) walks next to each minimap entrance mark and records the look; the profile's `doors` goal walks door tiles in view, not minimap marks, and `explore` fills the map. Once every required mark is recorded, the script adds `travel:town` to the profile's directives file (`python/characters/olympuff_m9.directives.toml`, re-read on change, A8), so Travel (A27) walks the agent to the knowledge-base town cell; the file's original contents (or its absence) are restored when the run ends. The run ends when every required mark is recorded and the character stands on town, or when the time budget is reached.
 
 Pass criteria (PLAN.md A29, checked in [`m9_acceptance.py`](python/agentrealm_agent/m9_acceptance.py)):

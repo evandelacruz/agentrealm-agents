@@ -1,9 +1,9 @@
-"""What the live acceptance runs (M6 A4, M7 A16, M9 A29, M10 A33) share.
+"""What the live acceptance runs (M6 A4, M7 A16, M8 A25, M9 A29, M10 A33) share.
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
-measures. ``CountingClient`` records failed requests (and optionally every
-call).
+measures; M8 also reads tick events (``NPCDied``) through ``on_events``.
+``CountingClient`` records failed requests (and optionally every call).
 """
 
 from __future__ import annotations
@@ -58,6 +58,9 @@ class AcceptanceHooks:
 
     def on_death(self) -> None:
         """A ``Died`` event arrived for our character."""
+
+    def on_events(self, events: list[dict]) -> None:
+        """Tick events after the response is applied (for example ``NPCDied``)."""
 
     def on_oscillation(self, event: dict) -> None:
         """The dispatch guard caught the character pacing between two cells (A15)."""

@@ -6,9 +6,9 @@ judged the same way on long exploration runs as on the M7 hour.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from .acceptance import AcceptanceHooks, CountingClient
+from .acceptance_run import TimedRunHooks
 from .config import Policy
 from .executor.movement import step_landing
 from .healing import regen_known
@@ -25,25 +25,17 @@ SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee")
 
 
 @dataclass(kw_only=True)
-class SurvivalAcceptanceMetrics(AcceptanceHooks):
-    """Counts deaths, retreat misses, unsafe Recover, loops and API faults."""
+class SurvivalAcceptanceMetrics(TimedRunHooks):
+    """Retreat misses, unsafe Recover and loops, on top of ``TimedRunHooks``'
+    deaths, API errors and wall-clock stop."""
 
-    deaths: int = 0
     retreat_misses: int = 0
     recover_withdraws: int = 0
     recover_unsafe: int = 0
     heal_actions: int = 0
     loop_detected: bool = False
-    api_errors: list[str] = field(default_factory=list)
     _loop_key: tuple[Pos, str] | None = None
     _loop_streak: int = 0
-
-    def wrap(self, client):
-        return CountingClient(client, self.api_errors)
-
-    def on_death(self) -> None:
-        """A death already fails the run, so end it rather than play on."""
-        self.deaths += 1
 
     def note_survival_tick(
         self,
@@ -87,17 +79,13 @@ class SurvivalAcceptanceMetrics(AcceptanceHooks):
             self.loop_detected = True
 
     def survival_failures(self) -> list[str]:
-        out: list[str] = []
-        if self.deaths:
-            out.append(f"{self.deaths} death(s) during run")
+        out = list(self.base_failures())
         if self.retreat_misses:
             out.append(f"{self.retreat_misses} tick(s) should_retreat held outside a survival state")
         if self.recover_unsafe:
             out.append(f"{self.recover_unsafe} Recover withdraw(s) from a cell not known safe")
         if self.loop_detected:
             out.append(f"loop: {LOOP_STEP_LIMIT} Steps in a row at one cell with one reason")
-        if self.api_errors:
-            out.append(f"{len(self.api_errors)} API error(s): {', '.join(sorted(set(self.api_errors)))}")
         return out
 
     def survival_summary_lines(self) -> list[str]:

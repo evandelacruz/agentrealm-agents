@@ -23,8 +23,6 @@ reported, not gated.
 
 from __future__ import annotations
 
-import threading
-import time
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -120,9 +118,6 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
     """
 
     target_seconds: float = TARGET_SECONDS
-    stop: threading.Event | None = None
-    clock: Callable[[], float] = time.monotonic
-    started_at: float | None = None
     on_entrances_done: Callable[[], None] | None = None
     marks_known: int = 0
     catalog_size: int = 0
@@ -138,18 +133,6 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
         for map_id, pos, row in iter_entrances(kb):
             if entrance_row_recorded(row):
                 self.pre_recorded.add((map_id, pos))
-
-    def on_window(self, *, urgent: bool, alive: bool = True) -> None:
-        now = self.clock()
-        if self.started_at is None:
-            self.started_at = now
-        if self.stop is not None and alive and now - self.started_at >= self.target_seconds:
-            self.stop.set()
-
-    def on_death(self) -> None:
-        super().on_death()
-        if self.stop is not None:
-            self.stop.set()
 
     def before_tick(
         self,

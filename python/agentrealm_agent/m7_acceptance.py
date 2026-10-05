@@ -33,10 +33,7 @@ nothing to heal.
 
 from __future__ import annotations
 
-import threading
-import time
 from dataclasses import dataclass, field
-from typing import Callable
 
 from .acceptance_survival import LOOP_STEP_LIMIT, SurvivalAcceptanceMetrics, withdraw_cells
 from .config import Policy
@@ -77,9 +74,6 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
     origin: Pos
     target: Pos
     target_seconds: float = TARGET_SECONDS
-    stop: threading.Event | None = None
-    clock: Callable[[], float] = time.monotonic
-    started_at: float | None = None
     max_distance: int = 0
     target_reached: bool = False
     target_give_up: str | None = None  # stuck detection's reason for giving up on the target
@@ -90,18 +84,6 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
     pacing_give_up_ticks: list[int] = field(default_factory=list)  # ticks of events that gave up a target
     oscillation_abort: str | None = None  # why the run was stopped for pacing
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
-
-    def on_window(self, *, urgent: bool, alive: bool = True) -> None:
-        now = self.clock()
-        if self.started_at is None:
-            self.started_at = now
-        if self.stop is not None and alive and now - self.started_at >= self.target_seconds:
-            self.stop.set()
-
-    def on_death(self) -> None:
-        super().on_death()
-        if self.stop is not None:
-            self.stop.set()
 
     def on_oscillation(self, event: dict) -> None:
         """Count the guard's events; sustained give-ups for pacing end the run.

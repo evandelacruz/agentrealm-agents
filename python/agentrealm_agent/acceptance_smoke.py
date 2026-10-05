@@ -1,4 +1,4 @@
-"""Shared helpers for live acceptance smoke scripts (M7 A16, M9 A29, M10 A33)."""
+"""Shared helpers for live acceptance smoke scripts (M7 A16, M8 A25, M9 A29, M10 A33)."""
 
 from __future__ import annotations
 
@@ -55,8 +55,8 @@ def wake(client: Client, cid: int, *, pause: Callable[[float], None] = time.slee
 def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
     """The overworld's map id and where the character stands on it.
 
-    Raises ValueError when the character is not on the overworld, where the
-    M7 and M9 gates are judged.
+    Raises ValueError when the character is not on the overworld, where M7, M8
+    and M9 are judged.
     """
     town = client.world(cid).get("town") or {}
     p = client.position(cid)

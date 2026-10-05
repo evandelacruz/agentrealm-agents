@@ -52,7 +52,7 @@ def _target(w: WorldModel, ctx: PlayContext) -> Entity | None:
     wants = wanted_codes(w, ctx)
     if not wants:
         return None
-    return pick_supply(w, wants, knowledge_items(ctx.knowledge))
+    return pick_supply(w, wants, knowledge_items(ctx.knowledge), ctx.memory.shop_refusals)
 
 
 def shop_take_intents(w: WorldModel, items: dict, supply: Entity) -> list[dict] | None:

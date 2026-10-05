@@ -9,6 +9,7 @@ from .healing import DEFAULT_BUY_POTION, potion_count, supply_matches
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .plan import goal_done
+from .travel.strength import loadout_key
 from .world import Entity, WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
 GOAL = "shop"
 SHOP_PENDING_TICKS = 10  # a Take not settled by then is stale (A21)
+SHOP_MAX_REFUSALS = 3  # rejected Takes of one supply before Shop skips it (A21)
 
 
 def price_of(e: Entity, items: dict) -> int | None:
@@ -73,14 +75,20 @@ def wanted_codes(w: WorldModel, ctx: PlayContext) -> list[str]:
     return out
 
 
-def pick_supply(w: WorldModel, wants: list[str], items: dict) -> Entity | None:
-    """Best affordable priced supply matching a wanted code: nearest, then cheapest."""
+def pick_supply(
+    w: WorldModel, wants: list[str], items: dict, refusals: dict[int, int] | None = None
+) -> Entity | None:
+    """Best affordable priced supply matching a wanted code: nearest, then cheapest.
+    A supply refused ``SHOP_MAX_REFUSALS`` times is skipped."""
+    refusals = refusals or {}
     here = w.pos
     if here is None or not wants:
         return None
     candidates: list[tuple[tuple[int, int, int], Entity]] = []
     for e in w.entities:
         if e.kind != "supply" or not any(supply_matches(want, e.code) for want in wants):
+            continue
+        if refusals.get(e.id, 0) >= SHOP_MAX_REFUSALS:
             continue
         price = price_of(e, items)
         if price is None or not can_afford(w, price):
@@ -103,11 +111,13 @@ def consume_buy_signal(m: Memory, code: str) -> None:
 
 def note_shop_result(m: Memory, intent: dict | None, applied: bool) -> None:
     """Settle the Take in flight from its result: applied consumes the signal,
-    a rejection (of it or a ``Drop`` queued before it) keeps it."""
+    a rejection (of it or a ``Drop`` queued before it) keeps it and counts
+    against that supply (``SHOP_MAX_REFUSALS``)."""
     pending = m.shop_pending
     if pending is None:
         return
     if not applied:
+        m.shop_refusals[pending[0]] = m.shop_refusals.get(pending[0], 0) + 1
         m.shop_pending = None
         return
     if intent and intent.get("verb") == "Take" and intent.get("supply_id") == pending[0]:
@@ -127,8 +137,12 @@ def sync_shop(w: WorldModel, m: Memory) -> None:
     """A gem drop since the Take was sent is the purchase landing (A21).
 
     A stale Take is forgotten first, so a later unrelated gem drop does not
-    consume a buy signal.
+    consume a buy signal. A loadout, gem or map change clears the refusal counts.
     """
+    key = (loadout_key(w), w.gems, w.map_id)
+    if key != m.shop_refusal_key:
+        m.shop_refusal_key = key
+        m.shop_refusals.clear()
     pending = m.shop_pending
     if pending is None:
         return

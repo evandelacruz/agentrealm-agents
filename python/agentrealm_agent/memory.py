@@ -69,6 +69,10 @@ class Memory:
     # of the Take in flight. Its buy signal is consumed on an applied Take or a
     # gem drop, kept on a rejection; it expires on leaving the shop cell or a timeout.
     shop_pending: tuple[int, str, int | None, tuple[int, int], int | None, int] | None = None
+    # Shop (A21): supply id -> rejected Take count; cleared when shop_refusal_key
+    # (loadout, gems, map) changes, since any of those can turn a refusal around.
+    shop_refusals: dict[int, int] = field(default_factory=dict)
+    shop_refusal_key: tuple = ()
     # Safe-zone regen sample: (start tick, start health, last tick seen). Only a
     # "yes" is saved to the knowledge base; a "no" holds for this run only.
     heal_regen_sample: tuple[int, int, int] | None = None

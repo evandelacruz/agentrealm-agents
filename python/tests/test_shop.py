@@ -18,7 +18,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan, goal_done
 from agentrealm_agent.pathing import replan as path_replan
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.shop import SHOP_PENDING_TICKS, note_shop_result, sync_shop
+from agentrealm_agent.shop import SHOP_MAX_REFUSALS, SHOP_PENDING_TICKS, note_shop_result, sync_shop
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.shop import ShopState
@@ -224,6 +224,52 @@ class ShopBuyTest(unittest.TestCase):
         w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
         out = dispatch(w, ctx(w))
         self.assertNotEqual(out.state, "Shop")
+
+
+class ShopRefusalCapTest(unittest.TestCase):
+    """A supply whose Take is rejected SHOP_MAX_REFUSALS times is skipped until
+    the loadout, gems or map change (A21)."""
+
+    def refuse_until_skipped(self, w, m):
+        for _ in range(SHOP_MAX_REFUSALS):
+            out = dispatch(w, ctx(w, m=m))
+            self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
+            note_shop_result(m, out.intents[0], applied=False)
+        out = dispatch(w, ctx(w, m=m))
+        self.assertNotEqual(out.state, "Shop")
+        self.assertEqual(len(m.buy_signals), 1)
+
+    def setUp(self):
+        self.w = world()
+        self.w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
+        self.m = Memory()
+        raise_buy_potion(self.m, why="test")
+
+    def test_skips_supply_after_max_refusals(self):
+        self.refuse_until_skipped(self.w, self.m)
+
+    def test_other_supply_still_bought(self):
+        self.refuse_until_skipped(self.w, self.m)
+        self.w.entities.append(Entity("supply", 6, (2, 2), "small_potion", gem_price=3))
+        out = dispatch(self.w, ctx(self.w, m=self.m))
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 6}])
+
+    def test_gem_change_clears_refusals(self):
+        self.refuse_until_skipped(self.w, self.m)
+        self.w.gems += 5
+        out = dispatch(self.w, ctx(self.w, m=self.m))
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
+
+    def test_loadout_change_clears_refusals(self):
+        self.refuse_until_skipped(self.w, self.m)
+        self.w.armed_code = "wooden_sword"
+        out = dispatch(self.w, ctx(self.w, m=self.m))
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
+
+    def test_map_change_clears_refusals(self):
+        self.refuse_until_skipped(self.w, self.m)
+        sync_shop(self.w.__class__(character_id=1, map_id=2, pos=(1, 1), gems=self.w.gems), self.m)
+        self.assertEqual(self.m.shop_refusals, {})
 
 
 class RunnerShopResultTest(unittest.TestCase):

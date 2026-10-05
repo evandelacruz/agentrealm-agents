@@ -16,7 +16,7 @@ Usage:
   npm --prefix tools/conductor run prs
 
 spawn options:
-  --ids A8,M5               Backlog IDs from PLAN.md (comma-separated)
+  --ids A8,A50              Backlog IDs from PLAN.md (comma-separated)
   --name "LLM planner"      Agent display name
   --model composer-2.5      Model id (default: ${DEFAULT_MODEL})
   --env ${DEFAULT_ENV_NAME} Named cloud environment (default)

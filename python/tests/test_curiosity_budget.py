@@ -25,7 +25,7 @@ class CuriosityBudgetTest(unittest.TestCase):
 
     def test_read_and_say_queues_do_not_charge(self):
         m = Memory()
-        record_curiosity_queue(m, 50, [read_block(7, (1, 1))], "Investigate")
+        record_curiosity_queue(m, 50, [read_block((1, 1))], "Investigate")
         record_curiosity_queue(
             m,
             51,
@@ -64,8 +64,8 @@ class CuriosityBudgetTest(unittest.TestCase):
         self.assertEqual(picked.pos, (1, 0))
 
     def test_charged_ticks_in_queue(self):
-        self.assertEqual(charged_ticks_in_queue([read_block(7, (1, 1))]), 0)
-        self.assertEqual(charged_ticks_in_queue([set_position((1, 1)), read_block(7, (1, 1))]), 1)
+        self.assertEqual(charged_ticks_in_queue([read_block((1, 1))]), 0)
+        self.assertEqual(charged_ticks_in_queue([set_position((1, 1)), read_block((1, 1))]), 1)
 
 
 if __name__ == "__main__":

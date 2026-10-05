@@ -49,7 +49,9 @@
 
   "A55": {"state": "open", "note": "Waiting on a served wear slot for never-worn subtypes (PLAN.md Server gaps)."},
 
-  "A20": {"state": "partial", "remaining": "Hearts first until a life's ground supply_subtype_code is observed (Olympuff live play: 1500+ grass cuts at map 76 town, codes gem/berry only — docs/observations/A20_live_play.md). Stowed Drop and middle_chest carry capacity (GAME_NOTES open questions). Gems-first uses code gem."},
+  "A20": {"state": "done"},
+
+  "A47": {"state": "open", "note": "Observable in live play: life ground code, stowed Drop, middle_chest capacity (steps in PLAN.md A47; docs/observations/A20_live_play.md)."},
 
   "A21": {"state": "done"},
 
@@ -69,7 +71,9 @@
 
   "A29": {"state": "open"},
 
-  "A30": {"state": "partial", "remaining": "Scroll reads (needs observed scroll supply_subtype_code; GAME_NOTES open questions; live play blocked — docs/observations/A30_live_play.md)."},
+  "A30": {"state": "done"},
+
+  "A56": {"state": "open"},
 
   "A31": {"state": "done"},
 
@@ -109,7 +113,7 @@
 
   "A51": {"state": "done"},
 
-  "A52": {"state": "open"},
+  "A52": {"state": "done"},
 
   "A53": {"state": "done"}
 }

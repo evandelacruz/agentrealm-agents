@@ -133,9 +133,11 @@ def main(argv: list[str] | None = None) -> int:
         target=target,
         target_seconds=args.seconds,
     )
-    metrics, elapsed = run_acceptance_smoke(
-        client, cfg, cid, metrics, timeout_s=args.timeout, out=print
-    )
+
+    def out(line: str) -> None:
+        print(line, flush=True)
+
+    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out)
     print(f"finished in {elapsed:.1f}s", flush=True)
     if metrics.oscillation_abort:
         print(f"ABORT: {metrics.oscillation_abort}; the agent paced instead of playing", file=sys.stderr)

@@ -8,6 +8,8 @@ call).
 
 from __future__ import annotations
 
+import threading
+
 from .config import Policy
 from .client import ApiError
 from .knowledge_base import KnowledgeBase
@@ -16,7 +18,13 @@ from .world import WorldModel
 
 
 class AcceptanceHooks:
-    """No-op base for acceptance metrics. Override the hooks you need."""
+    """No-op base for acceptance metrics. Override the hooks you need.
+
+    ``stop``, when set, is the runner's stop event: a metrics class sets it to
+    end the run early (clock done, death, a goal reached).
+    """
+
+    stop: threading.Event | None = None
 
     def wrap(self, client):
         """The client the runner should call through (to count requests or errors)."""

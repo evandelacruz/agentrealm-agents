@@ -6,8 +6,9 @@ import threading
 import time
 from typing import Callable
 
+from . import config
 from .acceptance import AcceptanceHooks
-from .client import ApiError, Client
+from .client import Client
 from .executor.intents import wait
 from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
 from .runner import Runner
@@ -53,17 +54,20 @@ def wake(client: Client, cid: int, *, pause: Callable[[float], None] = time.slee
 
 def run_acceptance_smoke(
     client: Client,
-    cfg,
+    cfg: config.CharacterConfig,
     cid: int,
     metrics: AcceptanceHooks,
     *,
     timeout_s: float,
     out: Callable[[str], None] | None = None,
-) -> tuple[AcceptanceHooks, float]:
-    """Run the runner with ``metrics`` until it stops or ``timeout_s`` elapses."""
+) -> tuple[float, KnowledgeBase]:
+    """Run the runner with ``metrics`` until it stops or ``timeout_s`` elapses.
+
+    Returns the seconds played and the knowledge base the runner wrote to; judge
+    the run on that one, not a reload, which misses the run if the save failed.
+    """
     stop = threading.Event()
-    if hasattr(metrics, "stop"):
-        metrics.stop = stop  # M7/M10 set a clock stop on the metrics object
+    metrics.stop = stop
     started = time.monotonic()
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
 
@@ -100,4 +104,4 @@ def run_acceptance_smoke(
         save_knowledge(knowledge)
     except OSError as e:
         emit(f"knowledge base {knowledge.world_code}: not saved: {e}")
-    return metrics, elapsed
+    return elapsed, knowledge

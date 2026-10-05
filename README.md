@@ -91,7 +91,7 @@ Live M10 smoke: `make smoke-m10-olympuff CHARACTER_ID=â€¦` (or `CHARACTER_NAME=â
 Pass criteria (PLAN.md A33, checked in [`m10_acceptance.py`](python/agentrealm_agent/m10_acceptance.py)):
 
 - no death, and alive at the end of the run;
-- no Break attempt on a (block, capability) pair already recorded in the knowledge base;
+- no Break attempt on a (block, capability) pair already failed in the knowledge base (re-breaking a regrown block a pair opened is fine);
 - no API error;
 - on a run of at least 95% of the default hour, every readable sign that came into sight along the route has been read, and every NPC that came within 25 blocks has been spoken to;
 - the odd-block clause is covered offline by the `ODD_BUSH` fixture in `python/tests/test_m10_acceptance.py`.

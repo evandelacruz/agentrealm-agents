@@ -10,7 +10,8 @@ module checks:
 - Odd block: on the navigation fixture map ``ODD_BUSH`` (``grids.py``), the
   agent finds and opens the lone bush; CI runs that offline, not the live smoke.
 - Break memory: the agent never sends a Break ``Use`` on a (block, capability)
-  pair that already has an entry in ``kb.breaks`` (a failed pair is not retried).
+  pair the knowledge base already holds as failed. An opened pair may be
+  broken again once the block regrows.
 
 Live smoke runs explore for ``TARGET_SECONDS``; unread signs and unspoken NPCs
 are gated only on a run of at least 95% of that target, like M7 navigation.
@@ -24,11 +25,13 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from .acceptance import AcceptanceHooks, CountingClient
-from .break_memory import attempt_open, break_key
+from .break_memory import attempt_failed, attempt_open
 from .config import Policy
 from .interest_list import SPEECH_RANGE, cell_was_read, in_sight, spoken_npc_ids
+from .item_table import use_target_block
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
+from .plan import CAPABILITIES
 from .world import Pos, WorldModel, chebyshev
 
 TARGET_SECONDS = 3600.0
@@ -81,7 +84,7 @@ class M10AcceptanceMetrics(AcceptanceHooks):
         knowledge: KnowledgeBase | None,
     ) -> None:
         self._note_sight(w, knowledge)
-        self._note_duplicate_break(m, knowledge)
+        self._note_duplicate_break(w, m, intents, knowledge)
 
     def _note_sight(self, w: WorldModel, knowledge: KnowledgeBase | None) -> None:
         if w.pos is None or w.map_id is None:
@@ -94,15 +97,17 @@ class M10AcceptanceMetrics(AcceptanceHooks):
             if ent.kind == "npc" and chebyshev(here, ent.pos) <= SPEECH_RANGE:
                 self._seen_npcs.add(ent.id)
 
-    def _note_duplicate_break(self, m: Memory, knowledge: KnowledgeBase | None) -> None:
+    def _note_duplicate_break(
+        self, w: WorldModel, m: Memory, intents: list[dict] | None, knowledge: KnowledgeBase | None
+    ) -> None:
+        """Count a Break ``Use`` sent on a pair already failed; a held queue sends nothing."""
         pending = m.break_pending
-        if pending is None or knowledge is None:
+        if pending is None or not intents:
             return
         map_id, pos, cap = pending
-        key = break_key(map_id, pos, cap)
-        with knowledge.lock:
-            if key in knowledge.breaks:
-                self.duplicate_break_attempts += 1
+        sends_use = any(i.get("verb") == "Use" and use_target_block(i, w.entities) == pos for i in intents)
+        if sends_use and attempt_failed(knowledge, map_id, pos, cap):
+            self.duplicate_break_attempts += 1
 
     def missed_reads(self, knowledge: KnowledgeBase | None) -> list[tuple[int, Pos]]:
         return sorted(
@@ -121,7 +126,7 @@ class M10AcceptanceMetrics(AcceptanceHooks):
             out.append(f"{self.deaths} death(s) during run")
         if self.duplicate_break_attempts:
             out.append(
-                f"{self.duplicate_break_attempts} Break attempt(s) on a (block, capability) already tried"
+                f"{self.duplicate_break_attempts} Break attempt(s) on a (block, capability) already failed"
             )
         if full_run:
             missed = self.missed_reads(knowledge)
@@ -148,7 +153,7 @@ class M10AcceptanceMetrics(AcceptanceHooks):
 
 def odd_block_opened(kb: KnowledgeBase | None, map_id: int, pos: Pos) -> bool:
     """True when a break opened the odd block at ``pos`` on ``map_id`` (fixture gate)."""
-    for cap in ("cut", "chop", "smash", "burn"):
+    for cap in sorted(CAPABILITIES):
         if attempt_open(kb, map_id, pos, cap):
             return True
     return False

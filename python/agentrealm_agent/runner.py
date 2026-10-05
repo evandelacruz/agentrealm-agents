@@ -443,6 +443,7 @@ class Runner:
                 policy=self.cfg.policy,
                 params=self.plan.params,
                 knowledge=self.knowledge,
+                plan_op=self.plan.current(),
             )
         r = self.client.tick(self.cid, intents, snapshot_version=w.snapshot_version)
         w.tick = int(r.get("tick", w.tick))

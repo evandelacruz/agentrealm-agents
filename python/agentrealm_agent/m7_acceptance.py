@@ -41,13 +41,10 @@ from typing import Callable
 from .acceptance import AcceptanceHooks, CountingClient
 from .acceptance_common import (
     LOOP_STEP_LIMIT,
-    OSCILLATION_ABORT_COUNT,
-    OSCILLATION_ABORT_TICKS,
     OscillationAbortTracker,
     StepLoopTracker,
     recover_withdraws,
     retreat_missed,
-    withdraw_cells,
 )
 from .config import Policy
 from .healing import regen_known
@@ -142,6 +139,7 @@ class M7AcceptanceMetrics(AcceptanceHooks):
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
+        plan_op: dict | None = None,
     ) -> None:
         if w.lives is not None:
             self.lives_seen = w.lives
@@ -226,14 +224,3 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             f"lives last seen: {self.lives_seen}",
         ]
 
-
-__all__ = [
-    "LOOP_STEP_LIMIT",
-    "M7AcceptanceMetrics",
-    "OSCILLATION_ABORT_COUNT",
-    "OSCILLATION_ABORT_TICKS",
-    "SURVIVAL_STATES",
-    "TARGET_DISTANCE",
-    "TARGET_SECONDS",
-    "withdraw_cells",
-]

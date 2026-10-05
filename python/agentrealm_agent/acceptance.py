@@ -44,10 +44,12 @@ class AcceptanceHooks:
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
+        plan_op: dict | None = None,
     ) -> None:
         """A tick is about to be sent. ``w`` is the world the decision saw.
 
         ``intents`` is None when a held queue keeps running and nothing new is sent.
+        ``plan_op`` is the plan stack's top op (``Plan.current()``), or None.
         """
 
     def on_step_applied(self) -> None:

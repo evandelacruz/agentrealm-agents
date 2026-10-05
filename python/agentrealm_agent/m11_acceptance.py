@@ -7,9 +7,11 @@ module checks:
   with a ``level_number`` (boss defeat observed, never inferred from absence).
 - Uses what it learned to attempt the next: after the first clear, the character
   is back on the overworld map and then enters a level interior again (a
-  positive ``level`` on the position read), or the plan's top op is
-  ``enter_level`` or ``fight_boss`` while it stands on the overworld map.
-  Only the overworld counts as having left the level.
+  positive ``level`` on the position read), or the plan's top op
+  (``Plan.current()``, passed to ``before_tick`` as ``plan_op``) is
+  ``enter_level`` or ``fight_boss`` while it stands on the overworld map. The
+  op that was on top when a clear arrived never counts: it is the fight that
+  produced the clear. Only the overworld counts as having left the level.
 
 Shared survival gates (same as M7 A16 where they apply during a long unattended
 run): no death; no retreat miss; Recover withdraws only on known safe tiles; no
@@ -64,6 +66,8 @@ class M11AcceptanceMetrics(AcceptanceHooks):
     _loop: StepLoopTracker = field(default_factory=StepLoopTracker)
     _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
     _outside_after_first_clear: bool = False
+    _last_plan_op: dict | None = None  # the plan's top op on the tick just sent
+    _clearing_ops: list[dict] = field(default_factory=list)  # top op on each tick that brought a clear
 
     @property
     def loop_detected(self) -> bool:
@@ -105,6 +109,8 @@ class M11AcceptanceMetrics(AcceptanceHooks):
         if isinstance(level, bool) or not isinstance(level, int):
             return
         self.cleared_levels.add(int(level))
+        if self._last_plan_op is not None:
+            self._clearing_ops.append(self._last_plan_op)
 
     def on_oscillation(self, event: dict) -> None:
         if self._oscillation.on_oscillation(event) and self.stop is not None:
@@ -121,6 +127,7 @@ class M11AcceptanceMetrics(AcceptanceHooks):
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
+        plan_op: dict | None = None,
     ) -> None:
         if w.lives is not None:
             self.lives_seen = w.lives
@@ -132,9 +139,10 @@ class M11AcceptanceMetrics(AcceptanceHooks):
             self.recover_unsafe += unsafe
         if intents is not None:
             self._loop.note(w, reason, intents)
-        self._note_level_attempt(w, m)
+        self._note_level_attempt(w, plan_op)
+        self._last_plan_op = plan_op
 
-    def _note_level_attempt(self, w: WorldModel, m: Memory) -> None:
+    def _note_level_attempt(self, w: WorldModel, plan_op: dict | None) -> None:
         if not self.cleared_levels:
             return
         # Left the level means back on the overworld map. Any other map counts
@@ -143,7 +151,14 @@ class M11AcceptanceMetrics(AcceptanceHooks):
         on_overworld = w.map_id == self.overworld_map_id
         if on_overworld:
             self._outside_after_first_clear = True
-            if m.goal_op is not None and m.goal_op.get("op") in ("enter_level", "fight_boss"):
+            # The plan's own top op, not ``m.goal_op`` (the op the current path
+            # was built for, which nothing clears). The op whose fight brought
+            # the clear stays on top until Boss pops it, so it never counts.
+            if (
+                plan_op is not None
+                and plan_op.get("op") in ("enter_level", "fight_boss")
+                and plan_op not in self._clearing_ops
+            ):
                 self.next_level_attempted = True
         elif inside_level(w) and self._outside_after_first_clear:
             self.next_level_attempted = True

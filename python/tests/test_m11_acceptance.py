@@ -13,7 +13,7 @@ from unittest import mock
 
 from agentrealm_agent import acceptance_smoke, config
 from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics
-from agentrealm_agent.m7_acceptance import OSCILLATION_ABORT_COUNT
+from agentrealm_agent.acceptance_common import OSCILLATION_ABORT_COUNT
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.world import Entity, WorldModel
 from tests.test_m7_acceptance import OVERWORLD, decide, gave_up, metrics as m7_metrics, open_world
@@ -66,20 +66,33 @@ class LevelGateTest(unittest.TestCase):
         self.assertEqual(m.failures(), [])
 
     def test_enter_level_on_the_stack_after_clear_passes(self):
-        m, mem = metrics(), Memory()
+        m = metrics()
         m.on_level_clear({"level_number": 1, "max_health_gain": 5})
-        mem.goal_op = {"op": "enter_level", "x": 3, "y": 4}
-        decide(m, open_world(), mem)
+        decide(m, open_world(), plan_op={"op": "enter_level", "x": 3, "y": 4})
         self.assertTrue(m.milestone_ok())
 
-    def test_plan_op_inside_the_cleared_level_does_not_count(self):
+    def test_the_op_that_produced_the_clear_never_counts(self):
+        m = metrics()
+        fight = {"op": "fight_boss", "x": 3, "y": 4}
+        decide(m, level_world(1), plan_op=fight)
+        m.on_level_clear({"level_number": 1, "max_health_gain": 5})  # that tick's response
+        decide(m, open_world(), plan_op=fight)  # warped out, op not popped yet
+        self.assertFalse(m.milestone_ok())
+        decide(m, open_world(), plan_op={"op": "fight_boss", "x": 30, "y": 40})
+        self.assertTrue(m.milestone_ok(), "a different op on the overworld is the follow-on attempt")
+
+    def test_stale_goal_op_does_not_count(self):
         m, mem = metrics(), Memory()
         m.on_level_clear({"level_number": 1, "max_health_gain": 5})
-        mem.goal_op = {"op": "fight_boss", "x": 3, "y": 4}
-        decide(m, level_world(1), mem)
-        self.assertFalse(m.milestone_ok())
+        mem.goal_op = {"op": "fight_boss", "x": 3, "y": 4}  # the path's op, not the plan's
         decide(m, open_world(), mem)
-        self.assertTrue(m.milestone_ok(), "the same op counts once outside the level")
+        self.assertFalse(m.milestone_ok())
+
+    def test_plan_op_inside_the_cleared_level_does_not_count(self):
+        m = metrics()
+        m.on_level_clear({"level_number": 1, "max_health_gain": 5})
+        decide(m, level_world(1), plan_op={"op": "fight_boss", "x": 30, "y": 40})
+        self.assertFalse(m.milestone_ok())
 
     def test_a_map_change_inside_the_cleared_level_is_not_leaving_it(self):
         m = metrics()
@@ -89,10 +102,9 @@ class LevelGateTest(unittest.TestCase):
         self.assertFalse(m.milestone_ok())
 
     def test_plan_op_on_an_interior_map_with_no_level_yet_does_not_count(self):
-        m, mem = metrics(), Memory()
+        m = metrics()
         m.on_level_clear({"level_number": 1, "max_health_gain": 5})
-        mem.goal_op = {"op": "fight_boss", "x": 3, "y": 4}
-        decide(m, level_world(None), mem)
+        decide(m, level_world(None), plan_op={"op": "fight_boss", "x": 30, "y": 40})
         self.assertFalse(m.milestone_ok())
 
     def test_short_run_skips_level_criteria(self):
@@ -277,6 +289,37 @@ class RunnerHookTest(unittest.TestCase):
         r.mem.state = "Explore"
         r.tick()
         self.assertEqual(m.cleared_levels, {1})
+
+    def test_runner_passes_the_plan_top_op_and_the_clear_excludes_it(self):
+        from agentrealm_agent.runner import Runner
+
+        cfg = config.load(REPO / "python" / "characters" / "olympuff_m11.toml")
+        m = M11AcceptanceMetrics(overworld_map_id=OVERWORLD)
+        seen = []
+        before = m.before_tick
+
+        def spy(w, mem, **kw):
+            seen.append(kw.get("plan_op"))
+            before(w, mem, **kw)
+
+        m.before_tick = spy
+        ticks = iter([{"level_number": 1, "max_health_gain": 2}, None])
+
+        class Client:
+            def tick(self, cid, intents, *, snapshot_version=None):
+                return {"tick": 4, "level_clear_ceremony": next(ticks), "intent_results": []}
+
+        r = Runner(cfg, Client(), 1, threading.Event(), lambda s: None, acceptance=m)
+        r.world.apply_self({"alive": True, "perception_range": 5, "movement_range": 1})
+        r.world.apply_position({"map_id": OVERWORLD, "x": 0, "y": 0})
+        fight = {"op": "fight_boss", "x": 30, "y": 40}
+        r.plan.goals, r.plan.index = [fight], 0
+        r.mem.state = "Explore"
+        r.tick()
+        r.tick()
+        self.assertEqual(seen[0], fight)
+        self.assertEqual(m.cleared_levels, {1})
+        self.assertFalse(m.milestone_ok(), "the op on top when the clear came is the clearing fight")
 
 
 if __name__ == "__main__":

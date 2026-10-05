@@ -17,6 +17,7 @@ from agentrealm_agent.directives import PARAM_DEFAULTS, load_directives
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.m9_acceptance import (
     M9AcceptanceMetrics,
+    clear_entrance_looks,
     entrance_row_recorded,
     missing_entrance_marks,
     required_entrance_marks,
@@ -96,10 +97,11 @@ class M9GateTest(unittest.TestCase):
 
     def test_passes_when_all_recorded_and_on_town(self):
         kb = kb_with_entrances()
+        m = M9AcceptanceMetrics()
+        decide(m, self.open_world((3, 3)), kb)
         with kb.lock:
             for key in list(kb.entrances):
                 kb.entrances[key].update({"looked": True, "block_type": "grass"})
-        m = M9AcceptanceMetrics()
         decide(m, self.open_world((0, 0), map_id=7), kb)
         self.assertTrue(m.entrances_ok())
         self.assertTrue(m.at_town_end)
@@ -112,13 +114,50 @@ class M9GateTest(unittest.TestCase):
 
     def test_failure_counts_the_marks_the_gate_still_misses(self):
         kb = kb_with_entrances()
+        m = M9AcceptanceMetrics()
+        decide(m, self.open_world(), kb)
         self.record(kb, "7:10,20")
         with kb.lock:
             kb.entrances["7:30,40"]["looked"] = True  # looked, but no block_type filed
-        m = M9AcceptanceMetrics()
         decide(m, self.open_world(), kb)
         self.assertEqual(m.entrances_recorded, 1)
-        self.assertIn("1 entrance mark(s) not looked and recorded", m.failures())
+        self.assertIn("1 entrance mark(s) not looked and recorded this run", m.failures())
+
+    def test_looks_from_an_earlier_run_do_not_count(self):
+        kb = kb_with_entrances()
+        self.record(kb)  # persisted knowledge base: every mark already looked
+        calls = []
+        stop = threading.Event()
+        m = M9AcceptanceMetrics(stop=stop, on_entrances_done=lambda: calls.append(1))
+        decide(m, self.open_world((0, 0)), kb)
+        self.assertEqual((m.entrances_recorded, len(m.pre_recorded)), (0, 2))
+        self.assertFalse(m.entrances_ok())
+        self.assertEqual(calls, [])
+        self.assertFalse(stop.is_set())
+        self.assertIn("2 entrance mark(s) not looked and recorded this run", m.failures())
+        decide(m, self.open_world((0, 0)), kb)
+        self.assertEqual(m.entrances_recorded, 0, "a pre-recorded mark stays uncounted")
+
+    def test_cleared_looks_count_once_looked_again(self):
+        kb = kb_with_entrances()
+        self.record(kb)
+        with kb.lock:
+            kb.entrances["7:10,20"].update({"locked": True, "needs": "key"})
+        self.assertEqual(clear_entrance_looks(kb), 2)
+        with kb.lock:
+            row = kb.entrances["7:10,20"]
+            self.assertNotIn("looked", row)
+            self.assertNotIn("block_type", row)
+            self.assertNotIn("needs", row)
+        m = M9AcceptanceMetrics()
+        decide(m, self.open_world((3, 3)), kb)
+        self.assertEqual(m.pre_recorded, set())
+        self.record(kb, "7:30,40")
+        with kb.lock:
+            kb.entrances["7:10,20"].update({"looked": True, "block_type": "framed_door", "needs": "key"})
+        decide(m, self.open_world((0, 0)), kb)
+        self.assertTrue(m.entrances_ok())
+        self.assertEqual(m.failures(), [])
 
     def test_leaving_town_after_a_visit_fails_town_at_end(self):
         kb = kb_with_entrances()
@@ -251,8 +290,11 @@ class SmokeScriptTest(unittest.TestCase):
                 self.metrics.on_entrances_done()
                 seen.append(load_directives(cfg.directives_path).goals)
 
-        with mock.patch.object(self.smoke, "Runner", FakeRunner), redirect_stdout(io.StringIO()):
+        with mock.patch.object(self.smoke, "Runner", FakeRunner), \
+                mock.patch.object(self.smoke, "clear_entrance_looks", return_value=0) as clear, \
+                redirect_stdout(io.StringIO()):
             self.smoke.run_smoke(mock.Mock(), cfg, 9, M9AcceptanceMetrics(), timeout_s=0)
+        clear.assert_called_once()
         self.assertEqual(seen, [["gather_gems", "travel:town"]])
         self.assertEqual(cfg.directives_path.read_text(), 'goals = ["gather_gems"]\n')
 

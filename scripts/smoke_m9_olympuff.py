@@ -32,7 +32,7 @@ from agentrealm_agent.character_select import CharacterSelectionError, resolve_c
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.directives import Directives, default_directives, load_directives  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
-from agentrealm_agent.m9_acceptance import TARGET_SECONDS, M9AcceptanceMetrics  # noqa: E402
+from agentrealm_agent.m9_acceptance import TARGET_SECONDS, M9AcceptanceMetrics, clear_entrance_looks  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m9.toml"
@@ -93,6 +93,10 @@ def run_smoke(
 
     def out(line: str) -> None:
         print(line, flush=True)
+
+    cleared = clear_entrance_looks(knowledge)
+    if cleared:
+        out(f"[{cfg.profile}] cleared {cleared} entrance look(s) from earlier runs: only this run's looks count")
 
     def entrances_done() -> None:
         out(f"[{cfg.profile}] entrance catalog complete: {TOWN_GOAL} via {directives_path.name}")

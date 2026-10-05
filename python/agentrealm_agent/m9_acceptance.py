@@ -7,7 +7,10 @@ module checks:
   on a non-level-interior map, except a cell the strength bracket closed
   under ``over_strength_ceiling`` for this loadout, must be looked.
 - Records what each needs: ``looked`` with a ``block_type``; a locked mark
-  also has ``needs: key`` (Manual §9.2, §11).
+  also has ``needs: key`` (Manual §9.2, §11). Only looks made during this run
+  count: a mark already recorded when the gate first sees it (a persisted
+  knowledge base from an earlier run) never counts, so the smoke script clears
+  those looks with ``clear_entrance_looks`` before the runner starts.
 - Returns to town: the character stands on the town cell from the knowledge
   base when the run ends. ``on_entrances_done`` fires once when the catalog
   is complete; the smoke script uses it to put ``travel:town`` in the
@@ -22,7 +25,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from .acceptance_survival import SurvivalAcceptanceMetrics
@@ -30,7 +33,7 @@ from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import is_level_interior
 from .memory import Memory
-from .travel.knowledge import iter_entrances, town_from_kb
+from .travel.knowledge import entrance_key, iter_entrances, town_from_kb
 from .travel.strength import StrengthBracket
 from .world import Pos, WorldModel
 
@@ -75,11 +78,30 @@ def missing_entrance_marks(
     return _unrecorded(kb, required_entrance_marks(kb, bracket))
 
 
+LOOK_FIELDS = ("looked", "block_type", "needs")
+
+
+def clear_entrance_looks(kb: KnowledgeBase | None) -> int:
+    """Drop the look fields from every entrance row, so Investigate (A30) looks
+    at each mark again and the gate can count it. Returns how many rows had a look."""
+    if kb is None:
+        return 0
+    cleared = 0
+    with kb.lock:
+        for row in kb.entrances.values():
+            if isinstance(row, dict) and row.get("looked"):
+                cleared += 1
+            if isinstance(row, dict):
+                for f in LOOK_FIELDS:
+                    row.pop(f, None)
+    return cleared
+
+
 def _unrecorded(kb: KnowledgeBase, required: set[tuple[int, Pos]]) -> list[tuple[int, Pos]]:
     missing: list[tuple[int, Pos]] = []
     with kb.lock:
         for map_id, pos in sorted(required):
-            row = kb.entrances.get(f"{map_id}:{pos[0]},{pos[1]}", {})
+            row = kb.entrances.get(entrance_key(map_id, pos), {})
             if not isinstance(row, dict) or not entrance_row_recorded(row):
                 missing.append((map_id, pos))
     return missing
@@ -92,7 +114,9 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
     ``stop`` is set once every required entrance is recorded and the character
     stands on town, or when ``target_seconds`` have passed with the character
     alive (whichever comes first). ``at_town_end`` is the last decision's
-    position, so leaving town after a visit clears it.
+    position, so leaving town after a visit clears it. A required mark that
+    is already recorded the first time the gate sees it is ``pre_recorded``
+    and never counts toward ``entrances_recorded``.
     """
 
     target_seconds: float = TARGET_SECONDS
@@ -104,6 +128,8 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
     catalog_size: int = 0
     entrances_recorded: int = 0
     strength_closed_skipped: int = 0
+    pre_recorded: set[tuple[int, Pos]] = field(default_factory=set)
+    _seen_marks: set[tuple[int, Pos]] = field(default_factory=set)
     at_town_end: bool = False
     _entrances_done_sent: bool = False
 
@@ -161,7 +187,12 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
         self.marks_known = len(all_marks)
         self.strength_closed_skipped = len(all_marks - required)
         self.catalog_size = len(required)
-        self.entrances_recorded = len(required) - len(_unrecorded(kb, required))
+        missing = set(_unrecorded(kb, required))
+        for mark in required - self._seen_marks:
+            if mark not in missing:
+                self.pre_recorded.add(mark)
+        self._seen_marks |= required
+        self.entrances_recorded = len(required - missing - self.pre_recorded)
 
     def entrances_ok(self) -> bool:
         """Every required mark recorded. Vacuously true when the minimap listed
@@ -175,7 +206,7 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
                 out.append("no entrance catalog from minimap")
             elif not self.entrances_ok():
                 missing = self.catalog_size - self.entrances_recorded
-                out.append(f"{missing} entrance mark(s) not looked and recorded")
+                out.append(f"{missing} entrance mark(s) not looked and recorded this run")
             if not self.at_town_end:
                 out.append("character not on town at end")
         return out
@@ -184,7 +215,8 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
         lines = [
             f"entrance marks known: {self.marks_known}",
             f"entrance marks required: {self.catalog_size} (skipped as over-strength: {self.strength_closed_skipped})",
-            f"entrance marks recorded: {self.entrances_recorded}",
+            f"entrance marks recorded this run: {self.entrances_recorded}",
+            f"entrance marks recorded before this run (not counted): {len(self.pre_recorded)}",
             f"on town at end: {self.at_town_end}",
         ]
         lines.extend(self.survival_summary_lines())

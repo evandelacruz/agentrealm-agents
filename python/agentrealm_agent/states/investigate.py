@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from ..door_look import LOOK_GOAL, apply_door_look, approach_pos, ready_to_look
+from ..door_look import apply_door_look, approach_pos, ready_to_look
 from ..interest_list import pick_interest_tick
-from ..navigation import cost_path
-from ..pathing import grid_params, guided_step, nav_search
-from ..world import WorldModel
+from ..navigation import cost_path, route_first_leg
+from ..navigation import stuck as nav_stuck
+from ..pathing import grid_params, guided_step, nav_search, next_step
+from ..world import Pos, WorldModel
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
 from .intents import read_block, say_to, set_position
@@ -40,19 +41,33 @@ def _look_outcome(
     w: WorldModel,
     ctx: PlayContext,
     map_id: int,
-    pos: tuple[int, int],
+    pos: Pos,
     reason: str,
     reject_key: str,
 ) -> StateOutcome:
     kb = ctx.knowledge
+    goal = reject_key
     if ready_to_look(w, map_id, pos):
         if apply_door_look(kb, w, map_id, pos):
-            if ctx.memory.goal == LOOK_GOAL:
+            if ctx.memory.goal == goal:
                 ctx.memory.path, ctx.memory.goal = [], ""
             return StateOutcome(None, f"looked {pos}", state=InvestigateState.name)
-        # Adjacent but the cell is still unread: count a refusal so it cannot pin Investigate.
         _count_refusal(ctx, reject_key)
         return StateOutcome(None, "door not revealed yet", state=InvestigateState.name)
+    if w.map_id == map_id:
+        return _look_on_map(w, ctx, pos, reason, reject_key, goal)
+    return _look_cross_map(w, ctx, map_id, pos, reason, reject_key, goal)
+
+
+def _look_on_map(
+    w: WorldModel,
+    ctx: PlayContext,
+    pos: Pos,
+    reason: str,
+    reject_key: str,
+    goal: str,
+) -> StateOutcome:
+    kb = ctx.knowledge
     stand = approach_pos(w, pos)
     step = None
     if stand is not None:
@@ -60,14 +75,78 @@ def _look_outcome(
 
         def plan(att):
             params = grid_params(ctx.policy, plan_avoid, plan_costly, allow_goal_door=False, m=ctx.memory)
-            return cost_path(w, stand, params, nav=nav_search(ctx.memory, w, LOOK_GOAL, stand))
+            return cost_path(w, stand, params, nav=nav_search(ctx.memory, w, goal, stand))
 
-        step = guided_step(ctx.memory, w, LOOK_GOAL, stand, plan_avoid, plan)
+        step = guided_step(ctx.memory, w, goal, stand, plan_avoid, plan)
     if step is not None:
         return StateOutcome([set_position(step)], reason, state=InvestigateState.name)
-    # No route: count a refusal so an unreachable mark does not pin Investigate forever.
     _count_refusal(ctx, reject_key)
     return StateOutcome(None, f"{reason}; no path", state=InvestigateState.name)
+
+
+def _look_cross_map(
+    w: WorldModel,
+    ctx: PlayContext,
+    map_id: int,
+    pos: Pos,
+    reason: str,
+    reject_key: str,
+    goal: str,
+) -> StateOutcome:
+    kb = ctx.knowledge
+    m = ctx.memory
+    _, plan_avoid, plan_costly = plan_sets(w, m, ctx.policy, kb)
+    plan = _look_route_plan(m, w, ctx.policy, kb, plan_avoid, plan_costly, map_id, pos, goal)
+    leg = _look_leg(m, w, goal, map_id, pos, plan_avoid, plan)
+    if leg is None:
+        _count_refusal(ctx, reject_key)
+        return StateOutcome(None, f"{reason}; no route", state=InvestigateState.name)
+    step = guided_step(m, w, goal, leg, plan_avoid, plan)
+    if step is not None:
+        note = nav_stuck.level_note(nav_stuck.active(m, w))
+        return StateOutcome([set_position(step)], f"{reason}{note}", state=InvestigateState.name)
+    _count_refusal(ctx, reject_key)
+    return StateOutcome(None, f"{reason}; no path", state=InvestigateState.name)
+
+
+def _look_leg(
+    m,
+    w: WorldModel,
+    goal: str,
+    dest_map: int,
+    dest: Pos,
+    plan_avoid,
+    plan,
+) -> nav_stuck.Leg | None:
+    if dest_map == w.map_id:
+        return nav_stuck.Leg(dest)
+    kept = nav_stuck.leg_toward(m, w, goal, dest_map, dest, None)
+    if kept is not None and m.goal == goal and next_step(w, plan_avoid, m.path):
+        return kept
+    return nav_stuck.leg_toward(m, w, goal, dest_map, dest, plan(None))
+
+
+def _look_route_plan(
+    m,
+    w: WorldModel,
+    policy,
+    knowledge,
+    plan_avoid,
+    plan_costly,
+    dest_map: int,
+    dest: Pos,
+    goal: str,
+):
+    routes: dict[int, list[Pos] | None] = {}
+
+    def plan(att):
+        params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
+        if params.fog_cost not in routes:
+            nav = nav_search(m, w, goal, dest) if dest_map == w.map_id else None
+            routes[params.fog_cost] = route_first_leg(w, knowledge, dest_map, dest, params, nav=nav)
+        return routes[params.fog_cost]
+
+    return plan
 
 
 def _count_refusal(ctx: PlayContext, reject_key: str) -> None:

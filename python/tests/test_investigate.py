@@ -14,7 +14,7 @@ from agentrealm_agent.door_look import apply_door_look, infer_needs, look_key, r
 from agentrealm_agent.interest_list import MAX_REJECTIONS, list_interest, pick_interest_tick, sight_range
 from agentrealm_agent.investigation import cell_was_read, mark_cell_read, mark_npc_spoken, spoken_npc_ids
 from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import iter_doors, sync_tiles
+from agentrealm_agent.knowledge_maps import iter_doors, record_warp, sync_map_from_view, sync_tiles
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
@@ -91,11 +91,12 @@ class InterestListTest(unittest.TestCase):
         kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1, "looked": True}
         self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
 
-    def test_other_map_entrance_is_not_nominated(self):
+    def test_other_map_entrance_is_nominated(self):
         w = world(["...", "...", "..."], at=(0, 0))
         kb = KnowledgeBase.empty("sandbox")
         kb.entrances["9:1,1"] = {"map_id": 9, "x": 1, "y": 1}
-        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([(it.kind, it.map_id, it.pos) for it in items], [("look_door", 9, (1, 1))])
 
     def test_unlooked_door_is_nominated_and_visited_door_is_not(self):
         w = world(["....", "....", "...."], at=(0, 0))
@@ -217,6 +218,28 @@ class InvestigateStateTest(unittest.TestCase):
         dispatch(w, ctx)
         after = kb.to_dict()
         self.assertEqual(before, after, "only an applied result marks the knowledge base")
+
+    def test_investigate_routes_to_other_map_entrance(self):
+        w = WorldModel(1, map_id=1, pos=(0, 0), perception=8)
+        for y in range(4):
+            for x in range(4):
+                w.view.tiles[(x, y)] = "dirt"
+        w.view.tiles[(2, 0)] = "framed_door"
+        w.maps[1] = w.view
+        kb = KnowledgeBase.empty("sandbox")
+        sync_map_from_view(kb, 1, w.view)
+        record_warp(kb, 1, (2, 0), "framed_door", 2, (0, 0))
+        other = WorldModel(1, map_id=2, pos=(0, 0), perception=8)
+        for y in range(4):
+            for x in range(4):
+                other.view.tiles[(x, y)] = "dirt"
+        sync_map_from_view(kb, 2, other.view)
+        kb.entrances["2:3,3"] = {"map_id": 2, "x": 3, "y": 3}
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        out = dispatch(w, ctx)
+        self.assertEqual(out.state, "Investigate")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertEqual(ctx.memory.goal, look_key(2, (3, 3)))
 
     def test_investigate_walks_to_entrance_mark(self):
         rows = ["." * 8 for _ in range(8)]

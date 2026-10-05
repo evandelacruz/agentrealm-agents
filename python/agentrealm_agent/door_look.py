@@ -1,6 +1,7 @@
 """Door and entrance looks for Investigate (A30, A27 entrance marks).
 
-Walk next to a minimap entrance mark or an unlooked door on the current map,
+Walk next to a minimap entrance mark or an unlooked door on any map the
+knowledge base knows (through known door warps when needed),
 read what the cell shows (``block_type``, ``locked`` from terrain reads,
 Manual §9.2), and store it on ``kb.entrances`` and the map's door list
 (PLAYABLE_AGENT_PLAN Knowledge base).
@@ -141,3 +142,23 @@ def iter_unlooked(kb: KnowledgeBase | None, map_id: int) -> list[Pos]:
         except (KeyError, TypeError, ValueError):
             continue
     return sorted(out)
+
+
+def iter_unlooked_targets(kb: KnowledgeBase | None) -> list[tuple[int, Pos]]:
+    """Every unlooked entrance mark or door on any map in the knowledge base."""
+    if kb is None:
+        return []
+    map_ids: set[int] = set()
+    for mid, _pos, _row in iter_entrances(kb):
+        map_ids.add(mid)
+    with kb.lock:
+        for mid_str in kb.maps:
+            try:
+                map_ids.add(int(mid_str))
+            except (TypeError, ValueError):
+                continue
+    out: list[tuple[int, Pos]] = []
+    for mid in sorted(map_ids):
+        for pos in iter_unlooked(kb, mid):
+            out.append((mid, pos))
+    return out

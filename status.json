@@ -15,7 +15,7 @@
 
   "A3": {"state": "done"},
 
-  "A4": {"state": "partial", "remaining": "Run scripts/smoke_m6_olympuff.py against Olympuff and record a redacted PASS transcript."},
+  "A4": {"state": "partial", "remaining": "Re-run scripts/smoke_m6_olympuff.py against Olympuff after the Say/Read intent-shape fix and replace docs/acceptance/m6_olympuff_PASS.transcript with a run that prints PASS with 0 API errors."},
 
   "A5": {"state": "done"},
 

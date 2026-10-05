@@ -32,12 +32,16 @@ def withdraw_all(chest_id: int) -> dict:
     return {"verb": "WithdrawFromChest", "chest_id": chest_id}
 
 
-def read_block(map_id: int, pos: Pos) -> dict:
-    return {"verb": "Read", "target": {"kind": "block", "map_id": map_id, "x": pos[0], "y": pos[1]}}
+def read_block(pos: Pos) -> dict:
+    # A sign target is exactly {kind, x, y} on the character's own map; a field
+    # the verb does not take is malformed_intent at ingest (API rules § Read).
+    return {"verb": "Read", "target": {"kind": "block", "x": pos[0], "y": pos[1]}}
 
 
 def say_to(npc: Entity, text: str = "hello") -> dict:
-    return {"verb": "Say", "text": text, "target": {"kind": "npc", "npc_id": npc.id}}
+    # Say names its recipient by a top-level npc_id (or character_id), not a
+    # target; anything else is malformed_intent at ingest (API rules § Say).
+    return {"verb": "Say", "npc_id": npc.id, "text": text}
 
 
 def drop(supply_id: int) -> dict:

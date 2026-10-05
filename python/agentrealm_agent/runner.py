@@ -49,6 +49,7 @@ from .m6_acceptance import M6AcceptanceMetrics
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
+from .curiosity_budget import record_curiosity_queue
 from .interest_list import read_key, say_key
 from .investigation import mark_cell_read, mark_npc_spoken
 from .zone_discovery import apply_town, apply_zone, zone_failed
@@ -407,6 +408,7 @@ class Runner:
             self.server_tick = w.tick
         if intents:
             m.queue_sent_tick = w.tick
+            record_curiosity_queue(m, w.tick, intents, m.state)
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
         rejected = self.apply_intent_results(r.get("intent_results") or [])

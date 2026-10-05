@@ -338,6 +338,22 @@ class ZoneProbeOrderTest(unittest.TestCase):
         self.assertEqual(choose_call(w, m, Policy()), "zone")
         self.assertEqual(m.zone_probe, (7, (10, 10)), "A7 safety probe first")
 
+    def test_directive_curiosity_sets_the_cap_through_the_state(self):
+        def outcome(curiosity: float):
+            w = world(["." * 8 for _ in range(8)], at=(0, 0), perception=8)
+            w.view.tiles[(5, 5)] = "framed_door"
+            w.tick = 600
+            kb = KnowledgeBase.empty("sandbox")
+            kb.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
+            # 60 charged ticks already in the window.
+            m = Memory(curiosity_spans=[(500, 60)])
+            ctx = PlayContext(m, Policy(kind="scripted"), random.Random(0), knowledge=kb)
+            ctx.params["curiosity"] = curiosity
+            return dispatch(w, ctx)
+
+        self.assertEqual(outcome(0.2).state, "Investigate", "cap 120 leaves room")
+        self.assertNotEqual(outcome(0.05).state, "Investigate", "cap 30 is spent")
+
 
 class RunnerInvestigationTest(unittest.TestCase):
     def setUp(self):
@@ -368,14 +384,28 @@ class RunnerInvestigationTest(unittest.TestCase):
         r = self.runner([])
         intent = read_block(7, (1, 1))
         for _ in range(MAX_REJECTIONS):
-            self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem).kind, "read_block")
+            self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=r.directives.directives.params).kind, "read_block")
             r.mem.pending = intent
             self.assertTrue(r.on_result({"outcome": "rejected", "tick": 5,
                                          "rejection": {"category": "target", "code": "nothing_to_read"}}, 0))
         self.assertFalse(cell_was_read(r.knowledge, 7, (1, 1)))
-        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem),
+        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=r.directives.directives.params),
                           "a refused read stops holding Investigate above Explore")
 
+
+    def test_sent_look_walk_is_charged_and_then_refused(self):
+        r = self.runner([{"tick": 100}])
+        r.world = world(["." * 8 for _ in range(8)], at=(0, 0), perception=8)
+        r.world.view.tiles[(5, 5)] = "framed_door"
+        r.knowledge.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
+        params = r.directives.directives.params
+        params["curiosity"] = 1 / 600  # cap of one tick
+        r.tick()
+        self.assertEqual(r.mem.state, "Investigate")
+        self.assertTrue(r.mem.curiosity_spans)
+        self.assertEqual(r.mem.curiosity_spans[0][0], 100)
+        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=params),
+                          "the spent budget refuses the look")
 
 if __name__ == "__main__":
     unittest.main()

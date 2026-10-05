@@ -25,6 +25,12 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - The goto path is kept through Explore's normal flow, so stuck detection still escalates and gives up on it.
 - A full-health regen probe was tried and dropped: health cannot rise at full health, so it could only ever report "no". Regen is measured only while hurt; the gate's regen check still needs a run that is hurt in a safe zone.
 
+## Run 3 — rerun (cursor/a58-live-hour-rerun)
+
+- **Started:** 2026-10-05 (UTC). Reuses the same M6-walk slot as run 1 (`CHARACTER_NAME`, not committed).
+- **Gate focus:** safe-zone regen must get a yes/no verdict during a hurt window in a safe tile; navigation already passed on run 1.
+- **Status:** in progress.
+
 ## Done-when
 
 A58 stays open until a live hour exits 0 on the A16 gate and a redacted PASS transcript is committed under `docs/acceptance/m7_olympuff_PASS.transcript`.

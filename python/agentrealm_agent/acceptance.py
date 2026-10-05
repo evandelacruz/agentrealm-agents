@@ -1,4 +1,4 @@
-"""What the live acceptance runs (M6 A4, M7 A16) share.
+"""What the live acceptance runs (M6 A4, M7 A16, M4 A36) share.
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
@@ -36,11 +36,16 @@ class AcceptanceHooks:
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
+        plan_op: dict | None = None,
     ) -> None:
         """A tick is about to be sent. ``w`` is the world the decision saw.
 
         ``intents`` is None when a held queue keeps running and nothing new is sent.
+        ``plan_op`` is the stack's current goal, when the runner knows it (A36).
         """
+
+    def on_strategist_applied(self, goals: list[dict]) -> None:
+        """The strategist replaced the goal stack with ``goals`` (A36)."""
 
     def on_step_applied(self) -> None:
         """One of our Steps applied."""

@@ -1,0 +1,13 @@
+# A36 live M4 acceptance on sandbox (scripts/smoke_m4_strategist.py).
+# Clues come from the world; the strategist must plan buy/travel/break_block
+# ops from them. Requires AGENTREALM_STRATEGIST_MODEL and an API key.
+world = "sandbox"
+
+[policy]
+kind = "scripted"
+goals = ["explore"]
+on_hostile = "flee"
+hostile = ["npc"]
+pickup = true
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 20

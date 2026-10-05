@@ -91,7 +91,7 @@
 
   "A35": {"state": "done"},
 
-  "A36": {"state": "open"},
+  "A36": {"state": "partial", "remaining": "Gate shipped (m4_acceptance.py, scripts/smoke_m4_strategist.py, CI tests). Live pass pending A33, A58 and earlier acceptance gates; no redacted PASS transcript yet."},
 
   "A37": {"state": "done"},
 

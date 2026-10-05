@@ -343,7 +343,13 @@ class Strategist:
             self.inbox.append(
                 {"trigger": "idle", "since_tick": since, "tick": w.tick, "idle_ticks": self.config.idle_ticks}
             )
-        self.inbox.extend(drain_triggers(m))
+        drained = drain_triggers(m)
+        acc = getattr(runner, "acceptance", None)
+        if acc is not None and hasattr(acc, "note_clue_trigger"):
+            for trigger in drained:
+                if trigger.get("trigger") == "clue":
+                    acc.note_clue_trigger()
+        self.inbox.extend(drained)
         del self.inbox[:-INBOX_KEPT]
 
     def _send(self, runner: Any) -> None:
@@ -418,3 +424,6 @@ class Strategist:
         )
         runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
         runner.log("strategist", f"plan replaced ({len(goals)} goals)", {"strategist": {"event": "applied", **record}})
+        acc = getattr(runner, "acceptance", None)
+        if acc is not None:
+            acc.on_strategist_applied(goals)

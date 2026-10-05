@@ -85,3 +85,14 @@ Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_ag
 Give-up rule: navigation passes on a give-up only when stuck detection gave up on that target itself, with a reason (for example, a route that needs a block broken). Give-ups on other goals, such as frontier cells while exploring, are counted in the summary but never pass. Heal actions are reported, not gated.
 
 No live hour has passed yet (A58); runs that did not are in [`docs/observations/A16_live_play.md`](docs/observations/A16_live_play.md) and [`docs/observations/A58_live_play.md`](docs/observations/A58_live_play.md). CI covers the gate, the runner hooks and the navigation fixtures in `python/tests/test_m7_acceptance.py` without live keys.
+
+Live M4 smoke: `make smoke-m4-strategist CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY`, `AGENTREALM_STRATEGIST_MODEL`, and `AGENTREALM_STRATEGIST_API_KEY` or `OPENAI_API_KEY` set runs the M4 done-when on sandbox via [`scripts/smoke_m4_strategist.py`](scripts/smoke_m4_strategist.py), using profile `python/characters/strategist_gate.toml` and a character you choose at run time.
+
+Pass criteria (PLAN.md A36, checked in [`m4_acceptance.py`](python/agentrealm_agent/m4_acceptance.py)):
+
+- no API error;
+- on a run of at least 95% of an hour, at least one clue trigger reaches the strategist;
+- the strategist plans each gate op from the invented test-world example in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) (`buy` torch, `travel` to entrance 120,40, `break_block` 118,41 with `burn`);
+- the state machine carries each one out in `Shop`, `Travel`, or `Break` while that op is on top and a new queue is sent.
+
+No live sandbox pass has exited 0 on this gate yet (A36 partial); the live run waits on A33, A58 and earlier acceptance gates. CI covers the gate and smoke script in `python/tests/test_m4_acceptance.py` without live keys.

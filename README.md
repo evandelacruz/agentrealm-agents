@@ -122,7 +122,7 @@ Pass criteria (PLAN.md A40, checked in [`m11_acceptance.py`](python/agentrealm_a
 - Recover withdraws only on a known safe tile;
 - no loop or sustained oscillation (same thresholds as M7);
 - no API error;
-- on a run of at least 95% of the default limit: at least one `level_clear_ceremony`, then a follow-on attempt: back on the overworld map, then into the interior of a level not yet cleared, or `enter_level` / `fight_boss` on top of the plan while on the overworld map. The gate reads the plan's top op from `Plan.current()` (passed to `before_tick` as `plan_op`), and the op that was on top when the clear arrived never counts, since that fight produced the clear. Only the overworld map counts as having left the level.
+- on a run of at least 95% of the default limit: at least one `level_clear_ceremony`, then a follow-on attempt: back on the overworld map, then into the interior of a level not yet cleared, or `enter_level` / `fight_boss` on top of the plan while on the overworld map. The gate reads the plan's top op from `Plan.current()` (passed to `before_tick` as `plan_op`), and the op that was on top when the clear arrived never counts, since that fight produced the clear; nor does any `enter_level` / `fight_boss` at that op's door. Only the overworld map counts as having left the level.
 
 A shorter run (`--seconds` under 95% of 7200) judges survival only and prints `PASS (survival only; milestone not judged)`.
 

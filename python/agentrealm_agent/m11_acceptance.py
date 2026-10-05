@@ -11,7 +11,8 @@ module checks:
   (``Plan.current()``, passed to ``before_tick`` as ``plan_op``) is
   ``enter_level`` or ``fight_boss`` while it stands on the overworld map. The
   op that was on top when a clear arrived never counts: it is the fight that
-  produced the clear. Only the overworld counts as having left the level.
+  produced the clear. It is matched by door (``x``, ``y``), so another
+  ``enter_level`` or ``fight_boss`` at that door does not count either. Only the overworld counts as having left the level.
 
 Shared survival gates (same as M7 A16 where they apply during a long unattended
 run): no death; no retreat miss; Recover withdraws only on known safe tiles; no
@@ -59,7 +60,7 @@ class M11AcceptanceMetrics(TimedRunHooks):
     _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
     _outside_after_first_clear: bool = False
     _last_plan_op: dict | None = None  # the plan's top op on the tick just sent
-    _clearing_ops: list[dict] = field(default_factory=list)  # top op on each tick that brought a clear
+    _cleared_doors: set[tuple[int, int]] = field(default_factory=set)  # (x, y) of the top op on each tick that brought a clear
 
     @property
     def loop_detected(self) -> bool:
@@ -88,8 +89,9 @@ class M11AcceptanceMetrics(TimedRunHooks):
         if isinstance(level, bool) or not isinstance(level, int):
             return
         self.cleared_levels.add(int(level))
-        if self._last_plan_op is not None:
-            self._clearing_ops.append(self._last_plan_op)
+        door = _op_door(self._last_plan_op)
+        if door is not None:
+            self._cleared_doors.add(door)
 
     def on_oscillation(self, event: dict) -> None:
         if self._oscillation.on_oscillation(event) and self.stop is not None:
@@ -132,11 +134,13 @@ class M11AcceptanceMetrics(TimedRunHooks):
             self._outside_after_first_clear = True
             # The plan's own top op, not ``m.goal_op`` (the op the current path
             # was built for, which nothing clears). The op whose fight brought
-            # the clear stays on top until Boss pops it, so it never counts.
+            # the clear stays on top until Boss pops it, so it never counts, nor
+            # does any enter_level or fight_boss at that same door (x, y): it
+            # leads back into the level just cleared.
             if (
                 plan_op is not None
                 and plan_op.get("op") in ("enter_level", "fight_boss")
-                and plan_op not in self._clearing_ops
+                and _op_door(plan_op) not in self._cleared_doors
             ):
                 self.next_level_attempted = True
         elif inside_level(w) and self._outside_after_first_clear and w.map_level not in self.cleared_levels:
@@ -176,3 +180,10 @@ class M11AcceptanceMetrics(TimedRunHooks):
             f"API errors: {len(self.api_errors)}",
             f"lives last seen: {self.lives_seen}",
         ]
+
+
+def _op_door(op: dict | None) -> tuple[int, int] | None:
+    """The door an ``enter_level`` or ``fight_boss`` op names, as ``(x, y)``."""
+    if op is None or not isinstance(op.get("x"), int) or not isinstance(op.get("y"), int):
+        return None
+    return int(op["x"]), int(op["y"])

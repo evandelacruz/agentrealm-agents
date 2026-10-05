@@ -88,6 +88,15 @@ class LevelGateTest(unittest.TestCase):
         decide(m, open_world(), plan_op={"op": "fight_boss", "x": 30, "y": 40})
         self.assertTrue(m.milestone_ok(), "a different op on the overworld is the follow-on attempt")
 
+    def test_another_op_at_the_cleared_door_does_not_count(self):
+        m = metrics()
+        decide(m, level_world(1), plan_op={"op": "fight_boss", "x": 3, "y": 4})
+        m.on_level_clear({"level_number": 1, "max_health_gain": 5})
+        decide(m, open_world(), plan_op={"op": "enter_level", "x": 3, "y": 4})
+        self.assertFalse(m.milestone_ok())
+        decide(m, open_world(), plan_op={"op": "fight_boss", "x": 3, "y": 4, "min_health": 8})
+        self.assertFalse(m.milestone_ok(), "a re-pushed fight_boss at the same door is the same level")
+
     def test_stale_goal_op_does_not_count(self):
         m, mem = metrics(), Memory()
         m.on_level_clear({"level_number": 1, "max_health_gain": 5})

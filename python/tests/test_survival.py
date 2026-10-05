@@ -222,6 +222,16 @@ class FleeTest(unittest.TestCase):
         self.assertEqual(step(out), (3, 2))
         self.assertTrue(m.nav_stuck.oscillations[-1]["escape"])
 
+    def test_never_steps_next_to_a_hostile_to_avoid_the_cell_behind(self):
+        """Only the cell behind is open away from the hostile: Flee takes it."""
+        w = world(["#####", ".....", "#####"], at=(2, 1))
+        w.entities = [Entity("npc", 5, (0, 1))]
+        m = Memory()
+        m.nav_stuck.cells_map = w.map_id
+        m.nav_stuck.recent_cells = [(3, 1), (2, 1)]
+        out = dispatch(w, ctx(m=m, hostile_range=3))
+        self.assertEqual(step(out), (3, 1))
+
     def test_ties_break_toward_a_known_safe_tile(self):
         w = world([".....", ".....", "....."], at=(2, 1))
         w.entities = [Entity("npc", 5, (2, 0))]

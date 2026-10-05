@@ -7,6 +7,7 @@ import random
 from typing import Callable
 
 from .break_memory import break_costs_for_planning, nominate_on_path
+from .clues import nearest_explore_target
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -137,8 +138,8 @@ def path_for_plan_op(
             targets = {center}
             if nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
                 return None
-        found = nearest_target(
-            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+        found = nearest_explore_target(
+            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge), knowledge
         )
         return (found[1], label, Leg(found[0])) if found and found[1] else None
     if op["op"] != "travel":
@@ -533,8 +534,8 @@ def plan_goal(
         return path, Leg(path[-1])
     if goal == "explore":
         targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, view.frontier() - {w.pos}, w.tick)
-        found = nearest_target(
-            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+        found = nearest_explore_target(
+            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge), knowledge
         )
         return (found[1], Leg(found[0])) if found and found[1] else (None, None)
     return None, None

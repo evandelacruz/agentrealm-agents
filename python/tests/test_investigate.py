@@ -101,6 +101,25 @@ class InterestListTest(unittest.TestCase):
         items = list_interest(w, kb, Policy(kind="scripted"), Memory())
         self.assertEqual([it.kind for it in items], ["read_block", "read_supply", "say"])
 
+    def test_sign_and_supply_reads_at_same_distance_sort_without_error(self):
+        # Standing on a sign while holding a scroll and an unprobed supply: all three are
+        # at distance 0, so their sort keys must never compare a cell with a supply id.
+        w = world(["...", ".S.", "..."], at=(1, 1))
+        w.held_supplies = [InventorySupply(9, "clue_scroll"), InventorySupply(4, "mystery")]
+        kb = KnowledgeBase.empty("sandbox")
+        mark_scroll_subtype(kb, "clue_scroll")
+        log_supply_codes_seen(kb, ["mystery"])
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([(it.kind, it.supply_id) for it in items],
+                         [("read_block", None), ("read_supply", 4), ("read_supply", 9)])
+
+    def test_chest_supplies_are_not_read(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.chest_supplies = [InventorySupply(9, "clue_scroll")]
+        kb = KnowledgeBase.empty("sandbox")
+        mark_scroll_subtype(kb, "clue_scroll")
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
+
     def test_readable_out_of_sight_waits(self):
         w = world(["S....."], at=(5, 0), perception=3)
         self.assertEqual(list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), Memory()), [])
@@ -556,6 +575,31 @@ class RunnerInvestigationTest(unittest.TestCase):
         r.on_result({"outcome": "applied", "tick": 5}, 0)
         self.assertTrue(supply_was_read(r.knowledge, 12))
         self.assertIn("clue_scroll", scroll_subtype_codes(r.knowledge))
+
+    def test_applied_scroll_read_stores_its_text_as_a_clue(self):
+        r = self.runner([])
+        r.world.held_supplies = [InventorySupply(12, "clue_scroll"), InventorySupply(13, "clue_scroll")]
+        for sid, text in ((12, "Go north"), (13, "Go north")):
+            r.mem.pending = read_supply(sid)
+            r.on_result({"outcome": "applied", "tick": 5, "text": text}, 0)
+        rows = [c for c in r.knowledge.clues if c["kind"] == "scroll"]
+        self.assertEqual([(c["supply_id"], c["text"], c["x"], c["y"]) for c in rows],
+                         [(12, "Go north", 0, 1), (13, "Go north", 0, 1)],
+                         "two carried scrolls read from one cell are two clues")
+
+    def test_known_scroll_answering_nothing_to_read_is_not_read_again(self):
+        r = self.runner([])
+        r.world.held_supplies = [InventorySupply(12, "clue_scroll")]
+        mark_scroll_subtype(r.knowledge, "clue_scroll")
+        mark_cell_read(r.knowledge, 7, (1, 1))
+        params = r.directives.directives.params
+        self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=params).supply_id, 12)
+        r.mem.pending = read_supply(12)
+        r.on_result({"outcome": "rejected", "tick": 5,
+                     "rejection": {"category": "target", "code": "nothing_to_read"}}, 0)
+        self.assertTrue(supply_was_read(r.knowledge, 12))
+        self.assertIn("clue_scroll", scroll_subtype_codes(r.knowledge), "one blank scroll keeps its code")
+        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=params))
 
 
     def test_sent_look_walk_is_charged_and_then_refused(self):

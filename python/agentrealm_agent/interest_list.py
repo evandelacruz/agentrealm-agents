@@ -32,6 +32,10 @@ from .memory import Memory
 from .world import Entity, Pos, WorldModel, chebyshev
 
 SPEECH_RANGE = 25
+# Reads from where the agent stands sort first (rank 0), then by this sub-rank,
+# then nearest. Each kind keeps its own sub-rank so the tie-breakers after the
+# distance (a cell for signs, a supply id for supplies) are never compared.
+READ_SIGN, PROBE_SUPPLY, READ_SCROLL = 0, 1, 2
 # A Read or Say refused this many times is dropped from the list for the run,
 # so a target the server will not serve cannot hold Investigate above Explore.
 MAX_REJECTIONS = 3
@@ -102,7 +106,7 @@ def _unread_blocks(w: WorldModel, kb: KnowledgeBase | None, m: Memory, map_id: i
             continue
         out.append(
             InterestItem("read_block", f"read sign @{p[0]},{p[1]}", key, map_id=map_id, pos=p,
-                         sort_key=(0, chebyshev(here, p), p))
+                         sort_key=(0, READ_SIGN, chebyshev(here, p), p))
         )
     return out
 
@@ -130,7 +134,7 @@ def _supply_read_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, map_i
                     map_id=map_id,
                     pos=t.pos,
                     supply_id=t.supply_id,
-                    sort_key=(0, 1, dist, t.supply_id),
+                    sort_key=(0, READ_SCROLL, dist, t.supply_id),
                 )
             )
             continue
@@ -153,7 +157,7 @@ def _supply_read_items(w: WorldModel, kb: KnowledgeBase | None, m: Memory, map_i
                 map_id=map_id,
                 pos=pos,
                 supply_id=sid,
-                sort_key=(0, 0, dist, sid),
+                sort_key=(0, PROBE_SUPPLY, dist, sid),
             )
         )
     return out

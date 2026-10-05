@@ -10,7 +10,8 @@ Knowledge-base keys in ``kb.extra`` (PLAYABLE_AGENT_PLAN Knowledge base):
 - ``seen_supply_codes``: every subtype code logged from entity reads and inventory;
 - ``probed_supply_codes``: codes probed once with ``Read {kind: supply}``;
 - ``scroll_subtype_codes``: probed codes whose read applied (scrolls);
-- ``read_supplies``: supply ids whose scroll ``Read`` applied.
+- ``read_supplies``: supply ids whose scroll ``Read`` applied, or that answered
+  ``nothing_to_read`` although their code is a scroll's (never read again).
 """
 
 from __future__ import annotations
@@ -168,18 +169,22 @@ def supply_code_on_world(w: WorldModel, supply_id: int) -> str:
 class SupplyReadTarget:
     supply_id: int
     code: str
-    pos: Pos | None  # None when carried in held or chest
+    pos: Pos | None  # None when carried
 
 
 def iter_supply_targets(
     w: WorldModel,
     in_sight_fn: Callable[..., bool],
 ) -> list[SupplyReadTarget]:
-    """Carried supplies and ground supplies in sight, with subtype codes."""
+    """Carried supplies and ground supplies in sight, with subtype codes.
+
+    Chest contents are left out: ``Read {kind: supply}`` takes a carried scroll
+    or one on the ground in sight (GAME_NOTES NPCs, signs and scrolls).
+    """
     out: list[SupplyReadTarget] = []
     here = w.pos
     map_id = w.map_id
-    for s in w.held_supplies + w.chest_supplies:
+    for s in w.held_supplies:
         if s.code:
             out.append(SupplyReadTarget(s.id, s.code, None))
     if here is not None and map_id is not None:

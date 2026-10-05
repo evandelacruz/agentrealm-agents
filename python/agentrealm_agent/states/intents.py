@@ -57,6 +57,14 @@ def arm(supply_id: int) -> dict:
     return {"verb": "Arm", "supply_id": supply_id}
 
 
+def wear(supply_id: int) -> dict:
+    return {"verb": "Wear", "supply_id": supply_id}
+
+
+def remove_slot(slot: str) -> dict:
+    return {"verb": "Remove", "slot": slot}
+
+
 def compose(supply_ids: list[int]) -> dict:
     return {"verb": "Compose", "supply_ids": list(supply_ids)}
 

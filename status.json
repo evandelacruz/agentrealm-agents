@@ -45,7 +45,7 @@
 
   "A18": {"state": "done"},
 
-  "A19": {"state": "open"},
+  "A19": {"state": "done"},
 
   "A20": {"state": "partial", "remaining": "Hearts first until a life's ground supply_subtype_code is known; stowed Drop and middle_chest carry capacity (GAME_NOTES open questions). Gems-first uses code gem."},
 

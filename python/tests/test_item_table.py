@@ -352,7 +352,7 @@ class RunnerItemLearningTest(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def _runner(self, kb: KnowledgeBase | None, client=None) -> Runner:
-        cfg = CharacterConfig("t", "default", "test", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("t", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
         r = Runner(cfg, client=client or object(), character_id=1, stop=threading.Event(), out=lambda _: None, knowledge=kb)
         self.addCleanup(r.trace.close)
         return r

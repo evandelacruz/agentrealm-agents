@@ -4,7 +4,7 @@ An hour on `olympuff` through the public API with an earlier version of the M7 s
 
 ## Run
 
-- **Character:** `OlympuffM6Walk5d4e`, a reused M6-era slot, because the account was at its character cap. Character id omitted. The acceptance config now uses its own character, `OlympuffSurvivor`.
+- **Character:** `smoke-character-a`, a reused M6-era slot, because the account was at its character cap. Character id omitted. The acceptance config now uses its own character, `smoke-character-b`.
 - **Policy:** scripted `explore`, `on_hostile = flee`, `pickup = false`. Pickup had been switched off with no recorded reason; it is back on, since Recover (A11) needs it.
 - **Navigation:** explore only. There was no `goto` target, so nothing could reach or give up on a point 150 blocks away.
 

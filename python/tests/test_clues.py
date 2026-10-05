@@ -57,7 +57,7 @@ class ClueCaptureTest(unittest.TestCase):
         self.assertEqual(self.kb.clues[0]["kind"], "sign")
 
     def test_runner_read_stores_clue(self):
-        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(kind="scripted"), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted"), Path("t.toml"))
         r = Runner(cfg, mock.Mock(), 1, mock.Mock(), out=lambda _: None, knowledge=self.kb)
         r.world = world(["....."], at=(0, 0))
         r.mem = Memory()

@@ -1,6 +1,6 @@
 # A47 live play (redacted)
 
-Dedicated character **A20LootObserver** (Olympuff, map 76) and **OlympuffM6Walk5d4e** (shop
+Dedicated character **loot-observer-fixture** (Olympuff, map 76) and **smoke-character-a** (shop
 area). Supply and entity ids are omitted where noted. Sessions on 2026-10-05 against the public
 API.
 
@@ -33,7 +33,7 @@ API.
 
 ## Session 3 (A57 pass, 2026-10-05)
 
-Dedicated characters **A20LootObserver** (Olympuff, map 76), **OlympuffM6Walk5d4e** (528,406,
+Dedicated characters **loot-observer-fixture** (Olympuff, map 76), **smoke-character-a** (528,406,
 6 gems), **Pippin Thistledown** (386,395, 12 gems), and sandbox **CursorA18Armor8774** (map 14,
 66,63). Tick POSTs only for movement and cuts where noted; entity reads spaced ≥1.2 s apart.
 

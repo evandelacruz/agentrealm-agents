@@ -43,7 +43,7 @@
 
   "A58": {"state": "partial", "remaining": "First live hour reached the 150-block target with 0 deaths but never measured safe-zone regen; the regen fix and sleep-wake are merged (#89). Rerun the full hour on a character chosen at run time once A59 lands. Notes in docs/observations/A58_live_play.md."},
 
-  "A59": {"state": "open"},
+  "A59": {"state": "done"},
 
   "A17": {"state": "done"},
 

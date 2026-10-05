@@ -281,7 +281,7 @@ class RunnerShopResultTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(kind="scripted", goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=["hold"]), Path("t.toml"))
         self.r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
         self.addCleanup(self.r.trace.close)
         self.r.world = world()

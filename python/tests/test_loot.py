@@ -417,7 +417,7 @@ class RunnerRejectionTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        cfg = CharacterConfig("T", "default", "test", "sandbox", scripted(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", scripted(goals=["hold"]), Path("t.toml"))
         self.r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
         self.addCleanup(self.r.trace.close)
         self.r.world = world(["..."], at=(1, 0))
@@ -468,7 +468,7 @@ class RunnerLootLearningTest(unittest.TestCase):
             "events_by_tick": events or [],
             "observation": {"version": 2, "delta": {"lives": lives_after}},
         }
-        cfg = CharacterConfig("T", "default", "test", "sandbox", scripted(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", scripted(goals=["hold"]), Path("t.toml"))
         r = Runner(cfg, FakeClient([response]), 1, threading.Event(), out=lambda _: None, knowledge=self.kb)
         self.addCleanup(r.trace.close)
         r.world = world(["....."], at=(1, 0))

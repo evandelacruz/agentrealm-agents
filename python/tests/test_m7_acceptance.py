@@ -353,14 +353,14 @@ class SmokeScriptTest(unittest.TestCase):
             return metrics, seconds
 
         with mock.patch.object(self.smoke, "Client") as Client, \
-                mock.patch.object(self.smoke, "ensure_character", return_value=9), \
+                mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
                 mock.patch.object(self.smoke.time, "sleep"), \
                 mock.patch.object(self.smoke, "run_smoke", side_effect=run_smoke):
             client = Client.return_value
             client.world.return_value = {"town": {"map_id": OVERWORLD, "x": 0, "y": 0}}
             client.position.return_value = {"map_id": OVERWORLD, "x": 10, "y": 20}
             client.self_.return_value = {"alive": True}
-            return self.main(["--api-key", "k", "--seconds", str(seconds)])
+            return self.main(["--api-key", "k", "--character-id", "9", "--seconds", str(seconds)])
 
     def test_target_is_150_east_of_the_start(self):
         seen = []
@@ -418,13 +418,13 @@ class SmokeScriptTest(unittest.TestCase):
     def test_main_wakes_then_reads_position(self):
         seen = []
         with mock.patch.object(self.smoke, "Client") as Client, \
-                mock.patch.object(self.smoke, "ensure_character", return_value=9), \
+                mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
                 mock.patch.object(self.smoke.time, "sleep"), \
                 mock.patch.object(self.smoke, "run_smoke", side_effect=lambda c, cfg, cid, m, **kw: (m, 10)):
             fake = FakeSleeper()
             Client.return_value = fake
             fake.on_position = lambda: seen.append(list(fake.ticks))
-            code, out, _ = self.main(["--api-key", "k", "--seconds", "10"])
+            code, out, _ = self.main(["--api-key", "k", "--character-id", "9", "--seconds", "10"])
         self.assertEqual(code, 0, out)
         self.assertEqual(seen, [[[{"verb": "Wait"}]]], "position read only after the Wait")
 
@@ -432,7 +432,7 @@ class SmokeScriptTest(unittest.TestCase):
         cfg = config.load(REPO / "python" / "characters" / "olympuff_m7.toml")
         self.assertTrue(cfg.policy.pickup, "Recover needs pickup (A11)")
         self.smoke.aim_at(cfg, OVERWORLD, (5, 6))
-        self.assertEqual(cfg.policy.goals, ["goto", "explore"])
+        self.assertEqual(cfg.policy.goals, ["goto", "explore", "doors"])
         self.assertEqual((cfg.policy.goto, cfg.policy.goto_map), ((5, 6), OVERWORLD))
 
 

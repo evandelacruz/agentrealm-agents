@@ -132,7 +132,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Gear tiers:** bronze in town, iron at waystations, adamant at the Last Camp and from bosses (M §16).
 - **Gems come from** cutting grass and bushes (10% in ring 1, 15% farther), felling trees, gem piles that return on an interval, and gem caches. Field work earns about 3 gems a minute (M §16). Gems are kept on death.
 - **Food and gems on the ground.** Apples, berries and gem piles lie around town, free to pick up (Obs).
-- **Authored gem piles on the wire.** In Olympuff town, a pile ready to pick up is three adjacent ground supplies on one row, each with `supply_subtype_code` `gem` and no `gem_price` (Obs: GemPileObserver0c52, map 76, supplies 266–268 at 377–379,377 and 2226–2228 at 359–361,360, ticks ~2578415). No separate `gem_pile` code appeared on entity reads. Grass and bush drops use the same code when a gem lands on the ground.
+- **Authored gem piles on the wire.** In Olympuff town, a pile ready to pick up is three adjacent ground supplies on one row, each with `supply_subtype_code` `gem` and no `gem_price` (Obs: fake fixture observer, map 76, supplies 266–268 at 377–379,377 and 2226–2228 at 359–361,360, ticks ~2578415). No separate `gem_pile` code appeared on entity reads. Grass and bush drops use the same code when a gem lands on the ground.
 
 ## Compose
 

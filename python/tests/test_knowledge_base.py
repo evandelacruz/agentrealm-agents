@@ -157,29 +157,33 @@ class RunWiringTest(unittest.TestCase):
                 self.cfg, self.knowledge = cfg, knowledge
 
             def run(self) -> None:
-                seen.append((self.cfg.name, self.knowledge))
+                seen.append((self.cfg.profile, self.knowledge))
                 with self.knowledge.lock:
-                    self.knowledge.clues.append({"kind": "sign", "text": self.cfg.name})
+                    self.knowledge.clues.append({"kind": "sign", "text": self.cfg.profile})
 
         patch = mock.patch.object(cli, "Runner", FakeRunner)
         patch.start()
         self.addCleanup(patch.stop)
 
-    def _run(self, worlds: list[str]) -> tuple[int, str, str]:
-        ids = [(SimpleNamespace(name=f"c{i}", world=w), i) for i, w in enumerate(worlds)]
+    def _run(self, world: str, profile: str = "c0") -> tuple[int, str, str]:
+        cfg = SimpleNamespace(profile=profile, world=world)
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(cli, "_ids", return_value=ids), redirect_stdout(out), redirect_stderr(err):
-            code = cli.run(mock.Mock(), [])
+        client = mock.Mock()
+        client.self_.return_value = {"lives": 1, "alive": True, "placed": True}
+        with mock.patch.object(cli, "resolve_character_id", return_value=1), \
+                mock.patch.object(cli, "config") as cfg_mod:
+            cfg_mod.load.return_value = cfg
+            with redirect_stdout(out), redirect_stderr(err):
+                code = cli.run(client, cfg, 1)
         return code, out.getvalue(), err.getvalue()
 
     def test_one_base_per_world_saved_at_exit(self) -> None:
         with mock.patch.object(cli, "load_knowledge", wraps=kb.load) as load:
-            code, _, _ = self._run(["sandbox", "sandbox", "olympuff"])
-        self.assertEqual(code, 0)
-        self.assertEqual(sorted(c.args[0] for c in load.call_args_list), ["olympuff", "sandbox"])
-        by_name = dict(self.seen)
-        self.assertIs(by_name["c0"], by_name["c1"])
-        self.assertIsNot(by_name["c0"], by_name["c2"])
+            code, _, _ = self._run("sandbox", "c0")
+            code2, _, _ = self._run("sandbox", "c1")
+            code3, _, _ = self._run("olympuff", "c2")
+        self.assertEqual((code, code2, code3), (0, 0, 0))
+        self.assertEqual(load.call_count, 3)
         self.assertEqual(sorted(c["text"] for c in kb.load("sandbox").clues), ["c0", "c1"])
         self.assertEqual([c["text"] for c in kb.load("olympuff").clues], ["c2"])
 
@@ -187,19 +191,24 @@ class RunWiringTest(unittest.TestCase):
         path = kb.world_path("sandbox")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{not json")
-        code, _, err = self._run(["sandbox"])
+        code, _, err = self._run("sandbox")
         self.assertEqual(code, 2)
         self.assertIn("invalid JSON", err)
         self.assertEqual(self.seen, [])
         self.assertEqual(path.read_text(), "{not json")
 
     def test_bad_world_code_stops_before_any_character_runs(self) -> None:
-        code, _, err = self._run(["../escape"])
+        cfg = SimpleNamespace(profile="bad", world="../escape")
+        client = mock.Mock()
+        client.self_.return_value = {"lives": 1, "alive": True, "placed": True}
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli.run(client, cfg, 1)
         self.assertEqual(code, 2)
-        self.assertIn("invalid world code", err)
+        self.assertIn("invalid world code", err.getvalue())
         self.assertEqual(self.seen, [])
 
-    def test_save_error_is_reported_per_world(self) -> None:
+    def test_save_error_is_reported(self) -> None:
         real_save = kb.save
 
         def save(base: kb.KnowledgeBase) -> None:
@@ -208,10 +217,9 @@ class RunWiringTest(unittest.TestCase):
             real_save(base)
 
         with mock.patch.object(cli, "save_knowledge", side_effect=save):
-            code, out, _ = self._run(["sandbox", "olympuff"])
+            code, out, _ = self._run("sandbox")
         self.assertEqual(code, 0)
         self.assertIn("knowledge base sandbox: not saved: disk full", out)
-        self.assertEqual(len(kb.load("olympuff").clues), 1)
 
 
 if __name__ == "__main__":

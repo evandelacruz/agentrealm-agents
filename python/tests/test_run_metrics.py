@@ -121,7 +121,8 @@ class MetricsCliTest(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
         self.toml = self.dir / "wren.toml"
-        self.toml.write_text('name = "wren"\navatar = "default"\nmodel_agent = "test"\n', encoding="utf-8")
+        self.toml.write_text('world = "sandbox"\n', encoding="utf-8")
+        self.cid = 42
 
     def main(self, *argv):
         out, err = io.StringIO(), io.StringIO()
@@ -131,20 +132,22 @@ class MetricsCliTest(unittest.TestCase):
         return rc, out.getvalue(), err.getvalue()
 
     def test_metrics_needs_no_api_key(self):
-        (self.dir / "wren.trace.jsonl").write_text(json.dumps({"call": "tick", "gems": 3}) + "\n", encoding="utf-8")
-        rc, out, _ = self.main("metrics", str(self.toml))
+        (self.dir / f"wren.{self.cid}.trace.jsonl").write_text(
+            json.dumps({"call": "tick", "gems": 3}) + "\n", encoding="utf-8"
+        )
+        rc, out, _ = self.main("metrics", str(self.toml), "--character-id", str(self.cid))
         self.assertEqual(rc, 0)
         self.assertTrue(out.startswith("wren: "))
         self.assertEqual(json.loads(out[len("wren: "):])["gems"], 3)
 
     def test_missing_trace_fails(self):
-        rc, out, err = self.main("metrics", str(self.toml))
+        rc, out, err = self.main("metrics", str(self.toml), "--character-id", str(self.cid))
         self.assertEqual(rc, 1)
         self.assertEqual(out, "")
         self.assertIn("no trace", err)
 
     def test_other_commands_still_need_a_key(self):
-        rc, _, err = self.main("status", str(self.toml))
+        rc, _, err = self.main("status", str(self.toml), "--character-id", str(self.cid))
         self.assertEqual(rc, 2)
         self.assertIn("AGENTREALM_API_KEY", err)
 
@@ -162,23 +165,12 @@ class MetricsCliTest(unittest.TestCase):
         self.assertEqual(diff["kills"], 1)
         self.assertEqual(diff["gems"], 3)
 
-    def test_compare_metrics_from_toml_and_json(self):
-        (self.dir / "wren.trace.jsonl").write_text(
-            json.dumps({"call": "tick", "events": [{"kind": "Died"}], "gems": 2}) + "\n", encoding="utf-8"
-        )
-        snap = self.dir / "cand.json"
-        snap.write_text(json.dumps(SNAPSHOT), encoding="utf-8")
-        rc, out, _ = self.main("compare-metrics", str(self.toml), str(snap))
-        self.assertEqual(rc, 0)
-        diff = json.loads(out)
-        self.assertEqual((diff["deaths"], diff["kills"], diff["gems"]), (-1, 1, 3))
-
     def test_compare_metrics_errors_exit_2(self):
         good = self.dir / "good.json"
         good.write_text(json.dumps(SNAPSHOT), encoding="utf-8")
         cases = {
             "missing": (str(self.dir / "nope.json"), "no such file"),
-            "toml without trace": (str(self.toml), "no trace"),
+            "not metrics json": (str(self.toml), "not metrics JSON"),
             "bad json": (self._write("bad.json", "{not json"), "not metrics JSON"),
             "not an object": (self._write("list.json", "[1, 2]"), "JSON object"),
             "missing keys": (self._write("partial.json", '{"deaths": 1}'), "missing"),

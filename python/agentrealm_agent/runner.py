@@ -133,8 +133,9 @@ class Runner:
         # The latest tick a server response reported. w.tick also counts
         # windows locally and can run ahead of it; cooldowns count from this.
         self.server_tick: int | None = None
-        cfg.trace_path.parent.mkdir(parents=True, exist_ok=True)
-        self.trace = open(cfg.trace_path, "a", buffering=1)
+        trace = cfg.trace_path(character_id)
+        trace.parent.mkdir(parents=True, exist_ok=True)
+        self.trace = open(trace, "a", buffering=1)
         self.directives = DirectivesWatch(cfg.directives_path)
         self.directives.ensure_loaded()
         self.acceptance = acceptance
@@ -195,7 +196,7 @@ class Runner:
     def log(self, call: str, detail: str, record: dict) -> None:
         w = self.world
         pos = f"{w.map_id}:{w.pos[0]},{w.pos[1]}" if w.pos else "?"
-        self.out(f"[{self.cfg.name}] t={w.tick} @{pos} {call:<8} {detail}")
+        self.out(f"[{self.cfg.profile}] t={w.tick} @{pos} {call:<8} {detail}")
         self.trace.write(json.dumps({"t": time.time(), "tick": w.tick, "pos": w.pos, "map": w.map_id, "call": call, **record}) + "\n")
 
     def run(self) -> None:

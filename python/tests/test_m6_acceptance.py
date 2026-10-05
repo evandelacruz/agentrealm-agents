@@ -189,8 +189,6 @@ class RunnerCase(unittest.TestCase):
     def make_runner(self, client, stop: threading.Event, metrics=None) -> runner.Runner:
         cfg = CharacterConfig(
             "T",
-            "default",
-            "test",
             "sandbox",
             Policy(goals=["goto"], goto=(80, 0), pickup=False, entity_refresh=1000),
             Path("t.toml"),
@@ -305,60 +303,21 @@ class SmokeScriptTest(unittest.TestCase):
 
     def test_a_character_off_olympuff_exits_2(self):
         toml = self.tmp / "elsewhere.toml"
-        toml.write_text(self.smoke.DEFAULT_CHARACTER.read_text().replace('"olympuff"', '"sandbox"'))
-        code, _, err = self.main(["--api-key", "k", "--character", str(toml)])
+        toml.write_text(self.smoke.DEFAULT_PROFILE.read_text().replace('"olympuff"', '"sandbox"'))
+        code, _, err = self.main(["--api-key", "k", "--character-id", "1", "--profile", str(toml)])
         self.assertEqual(code, 2)
         self.assertIn("olympuff", err)
 
-    def test_ensure_character_creates_once_then_reuses_the_state(self):
-        cfg = config.load(self.smoke.DEFAULT_CHARACTER)
-        client = mock.Mock()
-        client.create_character.return_value = {"id": 9}
-        self.assertEqual(self.smoke.ensure_character(client, cfg), 9)
-        self.assertEqual(self.smoke.ensure_character(client, cfg), 9)
-        client.create_character.assert_called_once_with("olympuff", cfg.name, cfg.avatar, cfg.model_agent)
-
-    def test_ensure_character_reuses_listing_when_the_name_was_used(self):
-        from agentrealm_agent.client import ApiError
-
-        cfg = config.load(self.smoke.DEFAULT_CHARACTER)
-        client = mock.Mock()
-        client.create_character.side_effect = ApiError(409, "identity_reuse")
-        client.list_characters.return_value = [
-            {"id": 4, "name": cfg.name, "world_code": "sandbox"},
-            {"id": 7, "name": cfg.name, "world_code": cfg.world},
-        ]
-        self.assertEqual(self.smoke.ensure_character(client, cfg), 7)
-        self.assertEqual(config.load_state(cfg)["character_id"], 7)
-
-    def test_ensure_character_raises_other_create_failures(self):
-        from agentrealm_agent.client import ApiError
-
-        cfg = config.load(self.smoke.DEFAULT_CHARACTER)
-        for err in (ApiError(401, "unauthorized"), ApiError(500, "internal"), ApiError(400, "name_invalid")):
-            with self.subTest(code=err.code):
-                client = mock.Mock()
-                client.create_character.side_effect = err
-                with self.assertRaises(ApiError):
-                    self.smoke.ensure_character(client, cfg)
-                client.list_characters.assert_not_called()
-                self.assertIsNone(config.load_state(cfg))
-
-    def test_ensure_character_raises_when_no_listed_character_matches(self):
-        from agentrealm_agent.client import ApiError
-
-        cfg = config.load(self.smoke.DEFAULT_CHARACTER)
-        client = mock.Mock()
-        client.create_character.side_effect = ApiError(409, "identity_reuse")
-        client.list_characters.return_value = [{"id": 4, "name": cfg.name, "world_code": "sandbox"}]
-        with self.assertRaises(ApiError):
-            self.smoke.ensure_character(client, cfg)
+    def test_missing_character_selection_exits_2(self):
+        code, _, err = self.main(["--api-key", "k"])
+        self.assertEqual(code, 2)
+        self.assertIn("AGENTREALM_CHARACTER_ID", err)
 
     def exit_code_for(self, metrics):
         with mock.patch.object(self.smoke, "Client"), \
-                mock.patch.object(self.smoke, "ensure_character", return_value=9), \
+                mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
                 mock.patch.object(self.smoke, "run_smoke", return_value=metrics):
-            return self.main(["--api-key", "k"])
+            return self.main(["--api-key", "k", "--character-id", "9"])
 
     def test_exit_0_and_pass_when_the_criteria_hold(self):
         code, out, _ = self.exit_code_for(M6AcceptanceMetrics(target_steps=0))

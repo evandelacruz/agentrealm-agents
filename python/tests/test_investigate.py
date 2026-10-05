@@ -531,7 +531,7 @@ class RunnerInvestigationTest(unittest.TestCase):
     def runner(self, ticks: list[dict]) -> Runner:
         client = mock.Mock()
         client.tick.side_effect = [dict(t, queue_id=f"q{i + 1}") for i, t in enumerate(ticks)]
-        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(kind="scripted", goals=["explore"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=["explore"]), Path("t.toml"))
         r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
         self.addCleanup(r.trace.close)
         r.world = world([".....", ".S...", "....."], at=(0, 1))

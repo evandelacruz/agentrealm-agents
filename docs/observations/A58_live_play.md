@@ -4,7 +4,7 @@ Live runs against agentrealm.gg with `scripts/smoke_m7_olympuff.py` and the A16 
 
 ## Account / character
 
-- **Character cap:** `OlympuffSurvivor` could not be created (`character_cap_reached`). The run reused **`OlympuffM6Walk5d4e`** via a local TOML copy (not committed). Free a slot or delete an unused Olympuff observer before expecting the dedicated M7 character from `python/characters/olympuff_m7.toml`.
+- **Character cap:** `smoke-character-b` could not be created (`character_cap_reached`). The run reused **`smoke-character-a`** via a local TOML copy (not committed). Free a slot or delete an unused Olympuff observer before expecting the dedicated M7 character from `python/characters/olympuff_m7.toml`.
 - **Lives:** 8 at the end of the long run (one death in an earlier 20-minute diagnostic).
 
 ## Run 1 — full wall clock (~3600 s)

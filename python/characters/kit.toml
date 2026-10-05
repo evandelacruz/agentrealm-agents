@@ -1,7 +1,4 @@
 # A brawler: holds its ground and swings at any character that comes close.
-name = "Kit"
-avatar = "default"
-model_agent = "agentrealm-reference/scripted"
 world = "sandbox"
 
 [policy]

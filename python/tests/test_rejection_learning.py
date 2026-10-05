@@ -141,7 +141,7 @@ class RunnerRejectionTest(unittest.TestCase):
 
     def runner(self, client, knowledge=None) -> Runner:
         pol = Policy(goals=["goto"], goto=(4, 0), pickup=False)
-        cfg = CharacterConfig("T", "default", "test", "sandbox", pol, Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", pol, Path("t.toml"))
         r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None, knowledge=knowledge)
         self.addCleanup(r.trace.close)
         w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)

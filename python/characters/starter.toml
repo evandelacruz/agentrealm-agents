@@ -1,7 +1,4 @@
-# Minimal character for python/starter_agent.py (A52).
-name = "Starter"
-avatar = "default"
-model_agent = "agentrealm-reference/wander"
+# Minimal profile for python/starter_agent.py (A52).
 world = "sandbox"
 
 # The starter reads only these policy keys; the reference agent's

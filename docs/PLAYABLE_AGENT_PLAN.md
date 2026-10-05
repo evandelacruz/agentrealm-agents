@@ -270,7 +270,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Knowledge base
 
-A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, shared by every character of that world run from this checkout. It sits apart from the per-character `python/.state/<name>.json` and trace files:
+A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, shared by every character of that world run from this checkout. It sits apart from the per-run trace files (`python/.state/<profile>.<character_id>.trace.jsonl`, A59):
 
 - Revealed terrain per map, entrance marks, doors and where they lead, safe tiles, hunting grounds and ceilings, shops and prices.
 - Clues: the text of every sign, statue, scroll and helper line, with where it was found and when. `clues` is a list of `{kind, text, map_id, x, y, tick}` rows, plus `speaker_id` on a helper line or `supply_id` on a scroll; a sign is stored once per cell, a scroll once per supply, a helper line once per speaker and text (PLAN.md A32, A56). Each new row also queues `{"trigger": "clue", …row}` on the character's `Memory.clue_signals`, which the strategist drains (A35).

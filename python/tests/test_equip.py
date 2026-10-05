@@ -239,7 +239,7 @@ class RunnerEquipResultTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
         r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
         self.addCleanup(r.trace.close)
         w = world()

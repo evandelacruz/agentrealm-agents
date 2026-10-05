@@ -210,7 +210,7 @@ class RunnerTravelTest(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def runner(self, client) -> Runner:
-        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(kind="scripted"), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted"), Path("t.toml"))
         r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
         self.addCleanup(r.trace.close)
         r.world = grid(["....."])

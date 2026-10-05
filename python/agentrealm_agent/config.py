@@ -1,8 +1,7 @@
-"""Character files (TOML) and the per-character state file."""
+"""Behavior profiles (TOML) and local trace paths keyed by profile plus character id."""
 
 from __future__ import annotations
 
-import json
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +11,7 @@ GOALS = ("explore", "doors", "goto", "hold", "wander")
 ON_HOSTILE = ("flee", "fight", "ignore")
 HOSTILE_KINDS = ("npc", "character")
 
-# Created character IDs and traces, next to the package (gitignored).
+# Traces and the shared world knowledge base live here (gitignored).
 STATE_DIR = Path(__file__).resolve().parent.parent / ".state"
 
 
@@ -33,25 +32,20 @@ class Policy:
 
 @dataclass
 class CharacterConfig:
-    name: str
-    avatar: str
-    model_agent: str
+    """A behavior profile: policy and world. The file stem is ``profile``."""
+
+    profile: str
     world: str
     policy: Policy
     path: Path
 
-    @property
-    def state_path(self) -> Path:
-        return STATE_DIR / f"{self.name}.json"
-
-    @property
-    def trace_path(self) -> Path:
-        return STATE_DIR / f"{self.name}.trace.jsonl"
+    def trace_path(self, character_id: int) -> Path:
+        return STATE_DIR / f"{self.profile}.{character_id}.trace.jsonl"
 
     @property
     def directives_path(self) -> Path:
-        """``characters/<name>.directives.toml`` beside the character file (A8)."""
-        return self.path.parent / f"{self.name}.directives.toml"
+        """``characters/<profile>.directives.toml`` beside the profile file (A8)."""
+        return self.path.parent / f"{self.profile}.directives.toml"
 
 
 class ConfigError(ValueError):
@@ -62,9 +56,11 @@ def load(path: str | Path) -> CharacterConfig:
     path = Path(path).resolve()
     with open(path, "rb") as f:
         raw = tomllib.load(f)
-    for key in ("name", "avatar", "model_agent"):
-        if not isinstance(raw.get(key), str) or not raw[key].strip():
-            raise ConfigError(f"{path.name}: `{key}` is required")
+    for legacy in ("name", "avatar", "model_agent"):
+        if legacy in raw:
+            raise ConfigError(
+                f"{path.name}: `{legacy}` belongs on `create`, not in the profile file (A59)"
+            )
     pol = raw.get("policy", {})
     policy = Policy()
     for key, value in pol.items():
@@ -100,9 +96,7 @@ def load(path: str | Path) -> CharacterConfig:
     if policy.goto_map is not None and policy.goto is None:
         raise ConfigError(f"{path.name}: `policy.goto_map` needs `policy.goto = [x, y]`")
     return CharacterConfig(
-        name=raw["name"].strip(),
-        avatar=raw["avatar"].strip(),
-        model_agent=raw["model_agent"].strip(),
+        profile=path.stem,
         world=raw.get("world", "sandbox"),
         policy=policy,
         path=path,
@@ -113,15 +107,3 @@ def _check(path: Path, key: str, values: list, allowed: tuple) -> None:
     for v in values:
         if v not in allowed:
             raise ConfigError(f"{path.name}: `{key}` has `{v}`; allowed: {', '.join(allowed)}")
-
-
-def load_state(cfg: CharacterConfig) -> dict | None:
-    try:
-        return json.loads(cfg.state_path.read_text())
-    except FileNotFoundError:
-        return None
-
-
-def save_state(cfg: CharacterConfig, state: dict) -> None:
-    cfg.state_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg.state_path.write_text(json.dumps(state, indent=2) + "\n")

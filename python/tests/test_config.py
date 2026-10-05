@@ -24,7 +24,7 @@ class ConfigTest(unittest.TestCase):
         for body, key in cases:
             with self.subTest(key), tempfile.TemporaryDirectory() as tmp:
                 p = Path(tmp) / "c.toml"
-                p.write_text(f'name = "A"\navatar = "default"\nmodel_agent = "m"\n[policy]\n{body}\n')
+                p.write_text(f'world = "sandbox"\n[policy]\n{body}\n')
                 with self.assertRaisesRegex(config.ConfigError, key):
                     config.load(p)
 

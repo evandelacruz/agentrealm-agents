@@ -47,7 +47,7 @@
 
   "A19": {"state": "done"},
 
-  "A55": {"state": "open", "note": "Waiting on a served wear slot for never-worn subtypes (PLAN.md Server gaps)."},
+  "A55": {"state": "open"},
 
   "A20": {"state": "done"},
 
@@ -75,7 +75,7 @@
 
   "A56": {"state": "open"},
 
-  "A31": {"state": "open"},
+  "A31": {"state": "done"},
 
   "A32": {"state": "open"},
 
@@ -107,7 +107,7 @@
 
   "A46": {"state": "done"},
 
-  "A54": {"state": "open"},
+  "A54": {"state": "open", "note": "Waiting on the Manual Supplies reference (saims B132)."},
 
   "A50": {"state": "done"},
 

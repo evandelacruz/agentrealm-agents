@@ -961,6 +961,8 @@ class Runner:
                     code=w.armed_code,
                 )
                 m.break_pending = None
+                if m.break_odd == (map_id, pos):
+                    m.break_odd = None
                 on_break_opened(m, w, nav_active(m, w))
                 return
 

@@ -30,11 +30,31 @@ DEFAULT_CHARACTER = PYTHON / "characters" / "olympuff_walker.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
 
 
+def _find_character_id(client: Client, cfg: config.CharacterConfig) -> int | None:
+    # GET /characters: {"characters": [{"id", "name", "world_code", ...}]}
+    # (API, Characters; https://agentrealm.gg/docs/api).
+    for row in client.list_characters():
+        if row.get("name") == cfg.name and row.get("world_code") == cfg.world:
+            return int(row["id"])
+    return None
+
+
 def ensure_character(client: Client, cfg: config.CharacterConfig) -> int:
     state = config.load_state(cfg)
     if state is not None:
         return int(state["character_id"])
-    created = client.create_character(cfg.world, cfg.name, cfg.avatar, cfg.model_agent)
+    try:
+        created = client.create_character(cfg.world, cfg.name, cfg.avatar, cfg.model_agent)
+    except ApiError as e:
+        # 409 identity_reuse: this name already lived in this world, so a lost
+        # .state file is the likely cause. Any other failure is real.
+        if e.code != "identity_reuse":
+            raise
+        found = _find_character_id(client, cfg)
+        if found is None:
+            raise
+        config.save_state(cfg, {"character_id": found, "world": cfg.world})
+        return found
     config.save_state(cfg, {"character_id": created["id"], "world": cfg.world})
     return int(created["id"])
 

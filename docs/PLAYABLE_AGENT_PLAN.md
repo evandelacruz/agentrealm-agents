@@ -38,7 +38,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 
 | API surface | Used today | Needed for |
 |---|---|---|
-| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. Not measured on a live world yet; M0's paced `Step` queues drew no `movement_cooldown`. `scripts/smoke_m6_olympuff.py` (A4) runs the check; no PASS is recorded yet | Moving at a steady pace without spending a request per step |
+| `Step` + `Wait` pacing (base 2.5 blocks/s means a step every 4 ticks) | Yes for movement: the path goes as a `Step`, `Wait`×n queue cut at the horizon, the next queue carries the waits still owed, and a rejection clears the path. A first live Olympuff run (A4) drew no `movement_cooldown` over 200 applied Steps with calm tick POSTs at 18% of calm windows, but is not accepted: it also drew API errors (`docs/acceptance/m6_olympuff_PASS.transcript`). A re-run is pending | Moving at a steady pace without spending a request per step |
 | Multi-intent queues | Movement, and `Use`/`Say`/`Broadcast` behind the `Wait`s their cooldown still owes; every other intent is sent alone; a reflex that fires replaces a running queue | Freeing the request budget; queuing a retreat with an attack |
 | Snapshot deltas (`snapshot_version`), health in the observation | Health and max health tracked from observations; tick POSTs send the last applied version so the server can answer with deltas; **Retreat** (A9) reads health with the threat table; **Heal** (A10) uses them when hurt and out of combat; entity layer still from separate reads | Perception, retreat |
 | `Arm`, `Wear`, `Remove`, `Drop`, `attack_range` | No | Gear |
@@ -190,7 +190,7 @@ Progress in this game is hidden behind things a player has to poke at. Helpers d
 | Supply type never seen | Walk over or `Take`, if free and safe | Fills the item table |
 | Odd block out | Try each capability we hold, cheapest first | Detector below |
 | Cell with unusual art, or a statue `facing` differently from its neighbours | Investigate the cells around it | Unsourced guess: the manual says art is a picture only and behaviour comes from `block_type` (M §9.2). Lowest priority until GAME_NOTES open questions confirm it |
-| Unvisited door or entrance mark | Walk to it, look | A locked or hidden door gets recorded with what it shows; a locked one needs a key. Current map only until the curiosity cap (A30) |
+| Unvisited door or entrance mark | Walk to it, look | A locked or hidden door gets recorded with what it shows; a locked one needs a key. Current map only for now; looks on other maps are deferred (PLAN.md A30) |
 | Unknown zone | `get_zone` once | Finds safe zones and hunting grounds |
 
 **Odd-block detector.** This is the manual's motif: one rock in a garden, one bush in a wheat field, one tree in a maze (M §16). A block is odd when:
@@ -263,7 +263,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Gear and items
 
-- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, the largest weapon hit per NPC type, and for armor worn alone `damage_taken`, `damage_without` (nothing worn, after that item came off) and `damage_saved` (their difference) per NPC type; capabilities wait on reads (PLAN.md A18).
+- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, the largest weapon hit per NPC type, and for armor worn alone `damage_taken`, `damage_without` (nothing worn, after that item came off) and `damage_saved` (their difference) per NPC type; capabilities wait on reads (PLAN.md A46).
 - **Equip** scores each slot and swaps when a carried item beats the worn one. Consumables (potions, food) are kept for `Heal`.
 - **Budget.** Gems are kept through death and gear is not, so the plan spends gems on what most raises survival first (weapon, armor, potions), then on tools a clue asks for.
 - **Compose.** When any fragment is held, its `fragment` field names the whole and the missing slots. The plan tracks it as a goal, and `Solve` composes when the set is complete.

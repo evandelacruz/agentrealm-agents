@@ -15,7 +15,7 @@
 
   "A3": {"state": "done"},
 
-  "A4": {"state": "partial", "remaining": "Run scripts/smoke_m6_olympuff.py against Olympuff and record a redacted PASS transcript."},
+  "A4": {"state": "partial", "remaining": "Re-run scripts/smoke_m6_olympuff.py against Olympuff after the Say/Read intent-shape fix and replace docs/acceptance/m6_olympuff_PASS.transcript with a run that prints PASS with 0 API errors."},
 
   "A5": {"state": "done"},
 
@@ -43,11 +43,11 @@
 
   "A17": {"state": "done"},
 
-  "A18": {"state": "partial", "remaining": "Capabilities once they can be sourced (not served on reads; PLAN.md Server gaps, A28 break results)."},
+  "A18": {"state": "done"},
 
   "A19": {"state": "open"},
 
-  "A20": {"state": "partial", "remaining": "Hearts and gems first, off until their supply codes are known; Drop of stowed supplies and larger-chest capacity are undocumented (GAME_NOTES open questions)."},
+  "A20": {"state": "partial", "remaining": "Hearts first until a life's ground supply_subtype_code is known; stowed Drop and middle_chest carry capacity (GAME_NOTES open questions). Gems-first uses code gem."},
 
   "A21": {"state": "open"},
 
@@ -67,7 +67,7 @@
 
   "A29": {"state": "open"},
 
-  "A30": {"state": "partial", "remaining": "Scroll reads (needs a sourced way to tell a scroll supply, GAME_NOTES open questions), the curiosity cap (A32), and door and entrance looks on other maps (with the cap)."},
+  "A30": {"state": "partial", "remaining": "Scroll reads (needs a sourced way to tell a scroll supply, GAME_NOTES open questions) and door and entrance looks on other maps."},
 
   "A31": {"state": "open"},
 
@@ -97,5 +97,7 @@
 
   "A44": {"state": "done"},
 
-  "A45": {"state": "done"}
+  "A45": {"state": "done"},
+
+  "A46": {"state": "open"}
 }

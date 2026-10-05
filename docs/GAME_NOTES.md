@@ -175,6 +175,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Dying in a boss room** puts the chest outside the level, within 20 blocks of its perimeter (M §11).
 - **Sleep.** `Sleep` needs 10 s with no damage dealt or taken (`recent_damage`) and is refused inside a level (`sleep_not_allowed_in_level`). A character with no intent for 10 minutes falls asleep (M §11).
 - **Sleeping in town worked** (Obs 1839492): the round trip then carries only `asleep: true` and results.
+- **Waking.** A sleeping character is off the map and perceives nothing; `GetSelf` reports whether it is asleep. Any intent from it wakes it on the block it slept on (or the nearest free one) on the tick that intent resolves, and the intent also acts; `Wait` is the one that does nothing else. A full alive cap is `alive_cap_full`, no free block is `block_occupied`, both transient, and the character stays asleep (API Wait and Sleep, GetSelf). The agent's **Sync** sends one `Wait` while `asleep`, then re-reads self.
 
 ## Levels and bosses
 

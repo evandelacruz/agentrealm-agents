@@ -12,9 +12,8 @@ Sourced rules (docs/GAME_NOTES.md, Items, slots and gear):
 - Gems and lives are consumed on pickup into counters, so they take no slot
   (Manual §11).
 
-Unknown, so disabled: which ``supply_subtype_code`` a life or a gem has. Until
-it is observed, no supply is treated as a counter, so "hearts first" does not
-fire (PLAN.md A20 partial).
+Ground gems use ``supply_subtype_code`` ``gem`` (GAME_NOTES, Obs). Lives on
+the ground are still unknown, so hearts first stays off (PLAN.md A20 partial).
 """
 
 from __future__ import annotations
@@ -27,9 +26,10 @@ from .world import Pos, WorldModel, chebyshev
 
 # The Olympuff starting kit's pocket knife cannot change hands (Manual §5.3, §11).
 NON_TRANSFERABLE = frozenset({"pocket_knife"})
-# Unknown: no doc or observation names these codes yet (GAME_NOTES open questions).
-UNKNOWN_LIFE_SUPPLY_CODES: frozenset[str] = frozenset()
-UNKNOWN_GEM_SUPPLY_CODES: frozenset[str] = frozenset()
+# Observed on the wire (GAME_NOTES.md, docs/observations/A20_live_play.md).
+GEM_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
+# Open question: which code a heart/life pickup uses (GAME_NOTES.md).
+LIFE_SUPPLY_CODES: frozenset[str] = frozenset()
 # Food GAME_NOTES names (Manual §16; Obs).
 FOOD_CODES = frozenset({"golden_cap", "apple", "berry"})
 
@@ -40,16 +40,16 @@ UNKNOWN_SCORE = 50
 
 def is_counter_supply(code: str | None) -> bool:
     """Gems and lives are consumed on pickup into counters (Manual §11)."""
-    return bool(code) and (code in UNKNOWN_LIFE_SUPPLY_CODES or code in UNKNOWN_GEM_SUPPLY_CODES)
+    return bool(code) and (code in LIFE_SUPPLY_CODES or code in GEM_SUPPLY_CODES)
 
 
 def loot_score(code: str | None, items: dict[str, dict[str, Any]]) -> int:
     """Higher is more worth carrying; lives first, then gems (PLAYABLE_AGENT_PLAN)."""
     if not code:
         return UNKNOWN_SCORE
-    if code in UNKNOWN_LIFE_SUPPLY_CODES:
+    if code in LIFE_SUPPLY_CODES:
         return LIFE_SCORE
-    if code in UNKNOWN_GEM_SUPPLY_CODES:
+    if code in GEM_SUPPLY_CODES:
         return GEM_SCORE
     price = (items.get(code) or {}).get("gem_price")
     if isinstance(price, int) and price > 0:

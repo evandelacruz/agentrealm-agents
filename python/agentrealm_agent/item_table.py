@@ -27,7 +27,7 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   only while both exist and the gap is positive. It estimates how far the item
   lowers that type's best hit, not the item's defense stat.
 
-Capabilities are not stored: see PLAN.md A18 (Server gaps).
+Capabilities are not stored: see PLAN.md A46 (Server gaps).
 """
 
 from __future__ import annotations

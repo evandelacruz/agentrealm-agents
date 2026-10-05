@@ -52,6 +52,7 @@ from .m6_acceptance import M6AcceptanceMetrics
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
+from .curiosity_budget import record_curiosity_queue
 from .interest_list import read_key, say_key
 from .investigation import mark_cell_read, mark_npc_spoken
 from .zone_discovery import apply_town, apply_zone, zone_failed
@@ -410,6 +411,7 @@ class Runner:
             self.server_tick = w.tick
         if intents:
             m.queue_sent_tick = w.tick
+            record_curiosity_queue(m, w.tick, intents, m.state)
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
         rejected = self.apply_intent_results(r.get("intent_results") or [])
@@ -760,15 +762,16 @@ class Runner:
             return
         target = intent.get("target") or {}
         applied = result.get("outcome") == "applied"
-        if target.get("kind") == "block" and None not in (target.get("map_id"), target.get("x"), target.get("y")):
-            map_id, pos = int(target["map_id"]), (int(target["x"]), int(target["y"]))
+        if target.get("kind") == "block" and None not in (self.world.map_id, target.get("x"), target.get("y")):
+            # A Read is sent alone and moves nobody: its map is the one we stand on.
+            map_id, pos = int(self.world.map_id), (int(target["x"]), int(target["y"]))
             key = read_key(map_id, pos)
             if applied:
                 mark_cell_read(self.knowledge, map_id, pos)
-        elif target.get("kind") == "npc" and target.get("npc_id") is not None:
-            key = say_key(int(target["npc_id"]))
+        elif intent["verb"] == "Say" and intent.get("npc_id") is not None:
+            key = say_key(int(intent["npc_id"]))
             if applied:
-                mark_npc_spoken(self.knowledge, int(target["npc_id"]))
+                mark_npc_spoken(self.knowledge, int(intent["npc_id"]))
         else:
             return
         if result.get("outcome") == "rejected":

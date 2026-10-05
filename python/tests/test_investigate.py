@@ -198,14 +198,15 @@ class InvestigateStateTest(unittest.TestCase):
         ctx = PlayContext(Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
         out = dispatch(w, ctx)
         self.assertEqual(out.state, "Investigate")
-        self.assertEqual(out.intents, [read_block(7, (1, 1))])
+        # Exactly {kind, x, y}: a map_id is a field Read does not take (API rules § Read).
+        self.assertEqual(out.intents, [{"verb": "Read", "target": {"kind": "block", "x": 1, "y": 1}}])
 
     def test_decide_says_to_npc(self):
         w = world(["...", "...", "..."], at=(0, 1))
         w.entities = [Entity("npc", 4, (2, 2), "helper")]
         d = decide(w, Memory(), Policy(kind="scripted", hostile=[]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
         self.assertEqual(d.intent["verb"], "Say")
-        self.assertEqual(d.intent["target"], {"kind": "npc", "npc_id": 4})
+        self.assertEqual(d.intent, {"verb": "Say", "npc_id": 4, "text": "hello"})
 
     def test_act_has_no_side_effects_for_read(self):
         w = world(["...", ".S.", "..."], at=(0, 1))
@@ -338,6 +339,22 @@ class ZoneProbeOrderTest(unittest.TestCase):
         self.assertEqual(choose_call(w, m, Policy()), "zone")
         self.assertEqual(m.zone_probe, (7, (10, 10)), "A7 safety probe first")
 
+    def test_directive_curiosity_sets_the_cap_through_the_state(self):
+        def outcome(curiosity: float):
+            w = world(["." * 8 for _ in range(8)], at=(0, 0), perception=8)
+            w.view.tiles[(5, 5)] = "framed_door"
+            w.tick = 600
+            kb = KnowledgeBase.empty("sandbox")
+            kb.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
+            # 60 charged ticks already in the window.
+            m = Memory(curiosity_spans=[(500, 60)])
+            ctx = PlayContext(m, Policy(kind="scripted"), random.Random(0), knowledge=kb)
+            ctx.params["curiosity"] = curiosity
+            return dispatch(w, ctx)
+
+        self.assertEqual(outcome(0.2).state, "Investigate", "cap 120 leaves room")
+        self.assertNotEqual(outcome(0.05).state, "Investigate", "cap 30 is spent")
+
 
 class RunnerInvestigationTest(unittest.TestCase):
     def setUp(self):
@@ -359,23 +376,37 @@ class RunnerInvestigationTest(unittest.TestCase):
 
     def test_applied_read_is_remembered(self):
         r = self.runner([])
-        intent = read_block(7, (1, 1))
+        intent = read_block((1, 1))
         r.mem.pending = intent
         self.assertFalse(r.on_result({"outcome": "applied", "tick": 5}, 0))
         self.assertTrue(cell_was_read(r.knowledge, 7, (1, 1)))
 
     def test_rejected_read_is_capped(self):
         r = self.runner([])
-        intent = read_block(7, (1, 1))
+        intent = read_block((1, 1))
         for _ in range(MAX_REJECTIONS):
-            self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem).kind, "read_block")
+            self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=r.directives.directives.params).kind, "read_block")
             r.mem.pending = intent
             self.assertTrue(r.on_result({"outcome": "rejected", "tick": 5,
                                          "rejection": {"category": "target", "code": "nothing_to_read"}}, 0))
         self.assertFalse(cell_was_read(r.knowledge, 7, (1, 1)))
-        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem),
+        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=r.directives.directives.params),
                           "a refused read stops holding Investigate above Explore")
 
+
+    def test_sent_look_walk_is_charged_and_then_refused(self):
+        r = self.runner([{"tick": 100}])
+        r.world = world(["." * 8 for _ in range(8)], at=(0, 0), perception=8)
+        r.world.view.tiles[(5, 5)] = "framed_door"
+        r.knowledge.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
+        params = r.directives.directives.params
+        params["curiosity"] = 1 / 600  # cap of one tick
+        r.tick()
+        self.assertEqual(r.mem.state, "Investigate")
+        self.assertTrue(r.mem.curiosity_spans)
+        self.assertEqual(r.mem.curiosity_spans[0][0], 100)
+        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=params),
+                          "the spent budget refuses the look")
 
 if __name__ == "__main__":
     unittest.main()

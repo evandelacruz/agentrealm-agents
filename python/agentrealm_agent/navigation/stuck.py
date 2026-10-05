@@ -12,9 +12,11 @@ progress window, so a level is left only when its own window fails:
   along the obstacle, toward the reachable frontier nearest the target. Ends
   when a plan shorter than any seen before turns up (then REVEALED), or the
   budget runs out or no frontier is reachable (give up).
-- REVEALED (4): walk the plan reveal found; failing again gives up.
+- BREAK (2): step 2, ``Break`` a nominated obstacle on the blocked route (A28).
+- REVEALED (4): walk the plan reveal found; failing again tries step 4.
+- ALT_ROUTE (5): step 4, replan through the door graph when enclosed (A28).
 - Step 5: give up, back off ``BACKOFF_BASE_TICKS * 2**n`` and queue a strategist
-  ``stuck`` signal. Steps 2 and 4 are M9 (A28, A26).
+  ``stuck`` signal.
 
 Progress is the remaining length of the planned path plus the straight-line
 rest to the target, read when the state plans; a move only bumps counters, so
@@ -51,7 +53,7 @@ REVEAL_SEARCH_NODES = 400  # FINE_NODE_BUDGET: seen ground searched for a fronti
 # Escalation step 5: exponential backoff before retrying the goal (§4.5).
 BACKOFF_BASE_TICKS = 300
 
-WALK, CAUTIOUS, REVEAL, REVEALED = 0, 1, 3, 4
+WALK, CAUTIOUS, BREAK, REVEAL, REVEALED, ALT_ROUTE = 0, 1, 2, 3, 4, 5
 
 # Goals that share one key per cell, so a frontier or door dropped under one
 # is skipped by the others (Explore's goals and Level's walks).
@@ -82,6 +84,9 @@ class NavAttempt:
     outline: set[Pos] = field(default_factory=set)
     blocking: set[str] = field(default_factory=set)
     backoff_key: str | None = None  # cross-map legs: ultimate destination's key
+    break_x: int | None = None  # stuck step 2: block under break, if any
+    break_y: int | None = None
+    break_cap: str | None = None
 
 
 class Leg(NamedTuple):
@@ -202,9 +207,40 @@ def planning_params(m: Memory, params: CostGridParams) -> CostGridParams:
             avoid=set(params.avoid),
             costly=set(params.costly),
             break_nominated=set(params.break_nominated),
+            break_costs=dict(params.break_costs),
             fog_cost=FOG_CAUTIOUS,
         )
     return params
+
+
+def clear_break_target(att: NavAttempt) -> None:
+    att.break_x, att.break_y, att.break_cap = None, None, None
+
+
+def on_break_opened(m: Memory, w: WorldModel, att: NavAttempt | None) -> None:
+    """A break cleared the way: reset escalation to walking the route again."""
+    if att is None:
+        return
+    att.level = WALK
+    clear_break_target(att)
+    _fresh_window(att, w.tick)
+    _drop_path(m, att)
+
+
+def awaiting_break(m: Memory, w: WorldModel, goal: str) -> bool:
+    """``goal``'s attempt is at step 2: ``guided_step`` sends nothing and **Break** acts.
+
+    A state walking with ``guided_step`` above Break in dispatch yields the
+    round instead of falling back, so dispatch reaches Break (A28).
+    """
+    att = active(m, w)
+    return att is not None and att.goal == goal and att.level == BREAK
+
+
+def break_target(att: NavAttempt) -> Pos | None:
+    if att.break_x is None or att.break_y is None:
+        return None
+    return att.break_x, att.break_y
 
 
 def measure(path: list[Pos] | None, target: Pos) -> int | None:
@@ -296,8 +332,16 @@ def escalate(m: Memory, w: WorldModel, att: NavAttempt, reason: str) -> bool:
     if att.level == WALK:
         att.level = CAUTIOUS
     elif att.level == CAUTIOUS:
+        att.level = BREAK
+    elif att.level == BREAK:
         att.level = REVEAL
         att.reveal_left = REVEAL_MOVE_BUDGET
+        clear_break_target(att)
+    elif att.level in (REVEAL, REVEALED):
+        att.level = ALT_ROUTE
+    elif att.level == ALT_ROUTE:
+        give_up(m, w, att)
+        return False
     else:
         give_up(m, w, att)
         return False
@@ -351,7 +395,14 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     m.goal_op = None
 
 
-LEVEL_NAMES = {WALK: "", CAUTIOUS: "cautious", REVEAL: "reveal", REVEALED: "revealed"}
+LEVEL_NAMES = {
+    WALK: "",
+    CAUTIOUS: "cautious",
+    BREAK: "break",
+    REVEAL: "reveal",
+    REVEALED: "revealed",
+    ALT_ROUTE: "alt_route",
+}
 
 
 def level_note(att: NavAttempt | None) -> str:

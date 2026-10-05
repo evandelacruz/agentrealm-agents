@@ -42,7 +42,8 @@ class CostGridParams:
 
     avoid: set[Pos] = field(default_factory=set)  # impassable (rejected tiles, etc.)
     costly: set[Pos] = field(default_factory=set)  # passable at COSTLY_STEP extra (escape off hazards)
-    break_nominated: set[Pos] = field(default_factory=set)  # inert until M9: impassable
+    break_nominated: set[Pos] = field(default_factory=set)  # breakable cells considered for opening
+    break_costs: dict[Pos, int] = field(default_factory=dict)  # passable at break time + 1 (+ tool price)
     hostile_kinds: frozenset[str] = frozenset({"npc"})
     allow_goal_door: bool = False
     fog_cost: int = FOG  # A15 step 1 raises this to prefer known ground
@@ -113,7 +114,21 @@ class _Grid:
     def cost(self, p: Pos) -> int | None:
         """Movement cost onto ``p``, or ``None`` when impassable."""
         params = self.params
-        if p in params.avoid or p in params.break_nominated:
+        if p in params.avoid:
+            return None
+        if p in params.break_costs:
+            base = params.break_costs[p]
+            block = self.w.view.tiles.get(p)
+            if block is not None and block in DOORS:
+                return None
+            if p in self.occupied:
+                base += OCCUPANT
+            for h in self.hostiles:
+                d = chebyshev(p, h.pos)
+                if d < HOSTILE_DANGER_RADIUS:
+                    base += max(0, HOSTILE_DANGER - d * 5)
+            return base
+        if p in params.break_nominated:
             return None
         block = self.w.view.tiles.get(p)
         if block is not None and block in DOORS:
@@ -156,7 +171,14 @@ class _MacroCosts:
         self.memo: dict[Pos, int | None] = {}
         cells: dict[Pos, set[Pos]] = defaultdict(set)
         params = grid.params
-        for src in (grid.w.view.tiles, params.avoid, params.costly, params.break_nominated, grid.occupied):
+        for src in (
+            grid.w.view.tiles,
+            params.avoid,
+            params.costly,
+            params.break_nominated,
+            params.break_costs,
+            grid.occupied,
+        ):
             for p in src:
                 cells[macro_cell(p)].add(p)
         r = HOSTILE_DANGER_RADIUS - 1

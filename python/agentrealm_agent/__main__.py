@@ -12,7 +12,6 @@ from pathlib import Path
 
 from . import config
 from .client import ApiError, Client
-from .item_table import reconcile_item_capabilities
 from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
 from .run_metrics import RunMetrics, compare_run_metrics, load_metrics_source, metrics_from_trace
 from .runner import Runner
@@ -149,10 +148,7 @@ def run(client: Client, cfgs: list[config.CharacterConfig]) -> int:
     try:
         for cfg, _ in ids:
             if cfg.world not in world_knowledge:
-                kb = load_knowledge(cfg.world)
-                with kb.lock:
-                    reconcile_item_capabilities(kb.items, kb.breaks)
-                world_knowledge[cfg.world] = kb
+                world_knowledge[cfg.world] = load_knowledge(cfg.world)
     except (KnowledgeBaseError, OSError) as e:
         print(f"knowledge base: {e}", file=sys.stderr)
         return 2

@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..door_look import LOOK_GOAL, apply_door_look, approach_pos, ready_to_look
 from ..interest_list import pick_interest_tick
 from ..navigation import cost_path
+from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, guided_step, nav_search
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
@@ -62,9 +63,12 @@ def _look_outcome(
             params = grid_params(ctx.policy, plan_avoid, plan_costly, allow_goal_door=False, m=ctx.memory)
             return cost_path(w, stand, params, nav=nav_search(ctx.memory, w, LOOK_GOAL, stand))
 
-        step = guided_step(ctx.memory, w, LOOK_GOAL, stand, plan_avoid, plan)
+        step = guided_step(ctx.memory, w, LOOK_GOAL, stand, plan_avoid, plan, kb)
     if step is not None:
         return StateOutcome([set_position(step)], reason, state=InvestigateState.name)
+    if nav_stuck.awaiting_break(ctx.memory, w, LOOK_GOAL):
+        # Not a refusal: Break (A28) opens the way this round.
+        return StateOutcome(None, f"{reason}; stuck: break", state=InvestigateState.name)
     # No route: count a refusal so an unreachable mark does not pin Investigate forever.
     _count_refusal(ctx, reject_key)
     return StateOutcome(None, f"{reason}; no path", state=InvestigateState.name)

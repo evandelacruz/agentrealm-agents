@@ -436,7 +436,7 @@ class Plan:
     floor_params: dict[str, float | int] = field(default_factory=lambda: dict(PARAM_DEFAULTS))
     wait_started_tick: int | None = None
     stalled_since_tick: int | None = None  # first tick the current op found no path
-    use_block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
+    block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
 
     def snapshot(self) -> tuple:
@@ -448,7 +448,7 @@ class Plan:
             dict(self.floor_params),
             self.wait_started_tick,
             self.stalled_since_tick,
-            self.use_block_before,
+            self.block_before,
         )
 
     def restore(self, saved: tuple) -> None:
@@ -460,7 +460,7 @@ class Plan:
             floor_params,
             self.wait_started_tick,
             self.stalled_since_tick,
-            self.use_block_before,
+            self.block_before,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
 
@@ -475,8 +475,8 @@ class Plan:
                 self.params = apply_set_param(self.floor_params, self.params, op)
                 self._pop_current()
                 continue
-            if op["op"] in BLOCK_CHANGE_OPS and self.use_block_before is None and world.map_id is not None:
-                self.use_block_before = world.view.tiles.get((op["x"], op["y"]))
+            if op["op"] in BLOCK_CHANGE_OPS and self.block_before is None and world.map_id is not None:
+                self.block_before = world.view.tiles.get((op["x"], op["y"]))
             if not goal_done(op, world, self):
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
@@ -509,7 +509,7 @@ class Plan:
         self.index += 1
         self.wait_started_tick = None
         self.stalled_since_tick = None
-        self.use_block_before = None
+        self.block_before = None
 
     @classmethod
     def from_directives(
@@ -623,7 +623,7 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         # events and terrain reads both update the tile, so a missed window
         # does not lose the change.
         tile = world.view.tiles.get((op["x"], op["y"]))
-        return plan.use_block_before is not None and tile is not None and tile != plan.use_block_before
+        return plan.block_before is not None and tile is not None and tile != plan.block_before
     if name == "buy":
         return any(supply_matches(op["code"], s.code) for s in world.held_supplies + world.chest_supplies)
     # `fight_boss` finishes in Boss, which sees the defeat (A38).

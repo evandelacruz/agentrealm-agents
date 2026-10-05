@@ -28,7 +28,7 @@ from agentrealm_agent.plan import (
 )
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states.explore import scripted_outcome
-from agentrealm_agent.world import WorldModel
+from agentrealm_agent.world import Entity, WorldModel
 from tests.test_cost_grid import grid
 from tests.test_runner import FakeClient
 
@@ -126,15 +126,27 @@ class GoalStackTest(unittest.TestCase):
         self.assertEqual(m.goal, "explore")
 
     def test_travel_to_an_unpathed_destination_is_dropped_at_once(self):
-        for to in ("shop", "hunting_ground"):
-            with self.subTest(to=to):
-                plan = Plan([{"op": "travel", "to": to, "x": 1, "y": 1}], dict(PARAM_DEFAULTS))
-                m = Memory()
-                with self.assertLogs("agentrealm_agent.plan", "WARNING"):
-                    replan(open_world(), m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
-                           set(), set(), plan=plan)
-                self.assertIsNone(plan.current())
-                self.assertEqual(m.goal, "explore")
+        plan = Plan([{"op": "travel", "to": "hunting_ground", "x": 1, "y": 1}], dict(PARAM_DEFAULTS))
+        m = Memory()
+        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+            replan(open_world(), m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
+                   set(), set(), plan=plan)
+        self.assertIsNone(plan.current())
+        self.assertEqual(m.goal, "explore")
+
+    def test_travel_shop_paths_to_a_known_cell(self):
+        from agentrealm_agent.knowledge_base import KnowledgeBase
+        from agentrealm_agent.travel.knowledge import record_shop_cell
+
+        kb = KnowledgeBase.empty("sandbox")
+        record_shop_cell(kb, 1, (3, 0))
+        plan = Plan([{"op": "travel", "to": "shop", "x": 0, "y": 0}], dict(PARAM_DEFAULTS))
+        m = Memory()
+        w = grid(["...."], at=(0, 0))
+        replan(w, m, Policy(kind="scripted", goals=["explore"]), random.Random(0), set(), set(), plan=plan, knowledge=kb)
+        self.assertEqual(plan.current()["op"], "travel")
+        self.assertEqual(m.goal, "plan_shop")
+        self.assertEqual(m.path[-1], (3, 0))
 
     def test_unpathable_op_is_dropped_after_the_stall_timeout(self):
         # Walled in: (9, 9) is never reachable, so the op must not hold the stack forever.
@@ -226,6 +238,14 @@ class GoalDoneTest(unittest.TestCase):
         plan = Plan([op], dict(PARAM_DEFAULTS))
         self.assertTrue(goal_done(op, grid(["D."], at=(0, 0)), plan))
         self.assertFalse(goal_done(op, grid(["D."], at=(1, 0)), plan))
+
+    def test_travel_shop_done_at_cell_or_priced_supply(self):
+        op = {"op": "travel", "to": "shop", "x": 4, "y": 0}
+        plan = Plan([op], dict(PARAM_DEFAULTS))
+        self.assertTrue(goal_done(op, WorldModel(character_id=1, map_id=1, pos=(4, 0)), plan))
+        w = WorldModel(character_id=1, map_id=1, pos=(2, 0))
+        w.entities = [Entity("supply", 1, (2, 0), "torch", gem_price=3)]
+        self.assertTrue(goal_done({"op": "travel", "to": "shop", "x": 0, "y": 0}, w, plan))
 
     def test_unbounded_explore_done_only_without_frontier(self):
         op = {"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE}

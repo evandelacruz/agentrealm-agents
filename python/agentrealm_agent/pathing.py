@@ -81,8 +81,13 @@ def plan_op_goal(op: GoalOp) -> str:
     """The ``Memory.goal`` label a path for ``op`` carries, or "" when no path serves it (A34)."""
     if op["op"] == "explore_area":
         return "explore_area"
-    if op["op"] == "travel" and op["to"] in ("point", "entrance", "town"):
-        return {"point": "plan_travel", "entrance": "plan_entrance", "town": "plan_town"}[op["to"]]
+    if op["op"] == "travel" and op["to"] in ("point", "entrance", "town", "shop"):
+        return {
+            "point": "plan_travel",
+            "entrance": "plan_entrance",
+            "town": "plan_town",
+            "shop": "plan_shop",
+        }[op["to"]]
     return ""
 
 
@@ -160,6 +165,20 @@ def path_for_plan_op(
                 path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav_search(m, w, label, pos))
                 if path:
                     return path, label, Leg(pos)
+    if op["to"] == "shop":
+        from .travel.ops import travel_op_from_plan_goal
+        from .travel.resolve import resolve_travel
+
+        dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
+        if dest is None:
+            return None
+        target, dest_map = dest.pos, dest.map_id
+        if nav_stuck.backed_off(m, label, dest_map, target, w.tick):
+            return None
+        nav = nav_search(m, w, label, target) if dest_map == w.map_id else None
+        path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
+        if path:
+            return path, label, nav_stuck.leg_toward(m, w, label, dest_map, target, path)
     return None
 
 

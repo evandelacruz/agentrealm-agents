@@ -72,6 +72,25 @@ def set_travel_index(memory, index: int) -> None:
         memory.path, memory.goal = [], ""
 
 
+def travel_op_from_plan_goal(op: dict[str, Any]) -> TravelOp:
+    """Build a ``TravelOp`` from a validated plan ``travel`` goal (A34).
+
+    For ``shop``, ``x=0`` and ``y=0`` mean any known shop cell (like
+    ``travel:shop`` in directives), not the map origin.
+    """
+    to = op["to"]
+    x, y = op["x"], op["y"]
+    map_id = op.get("map_id")
+    if to == "shop" and x == 0 and y == 0:
+        return TravelOp(to="shop", map_id=map_id if isinstance(map_id, int) else None)
+    return TravelOp(
+        to=to,
+        x=x,
+        y=y,
+        map_id=map_id if isinstance(map_id, int) else None,
+    )
+
+
 def _opt_int(v: Any) -> int | None:
     if v is None or isinstance(v, bool):
         return None

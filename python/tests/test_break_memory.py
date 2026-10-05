@@ -13,6 +13,7 @@ from agentrealm_agent.break_memory import (
     attempt_open,
     break_key,
     capabilities_for_code,
+    held_capabilities,
     nominate_on_path,
     record_attempt,
 )
@@ -84,6 +85,19 @@ class NominateOnPathTest(unittest.TestCase):
     def test_nothing_on_the_route_nominates_nothing(self):
         w = _sword_world(["b....", "....."], at=(1, 0))
         self.assertIsNone(nominate_on_path(w, None, (1, 0), (4, 0)))
+
+    def test_worn_only_tool_nominates_nothing(self):
+        # Break can only arm held supplies; a capable code that is only worn has nothing to arm.
+        w = _sword_world([".b..."], at=(0, 0))
+        w.held_supplies = []
+        w.worn_codes = {"body": "bronze_sword"}
+        self.assertEqual(held_capabilities(w), set())
+        self.assertIsNone(nominate_on_path(w, None, (0, 0), (4, 0)))
+        w.armed_code = "bronze_sword"
+        self.assertEqual(held_capabilities(w), {"cut", "chop"})
+        choice = nominate_on_path(w, None, (0, 0), (4, 0))
+        self.assertIsNotNone(choice, "an armed tool still counts")
+        self.assertEqual(choice.supply.code, "bronze_sword")
 
     def test_failed_pair_on_the_route_is_skipped(self):
         kb = KnowledgeBase.empty("sandbox")

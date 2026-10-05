@@ -109,14 +109,10 @@ def record_attempt(
 
 
 def held_supplies(w: WorldModel) -> list[InventorySupply]:
+    """Supplies Break can arm: held, plus the armed one. Worn gear is not armable."""
     out = list(w.held_supplies)
-    if w.armed_code:
-        armed = next((s for s in w.held_supplies if s.code == w.armed_code), None)
-        if armed is None and w.armed_code:
-            out.append(InventorySupply(-1, w.armed_code))
-    for code in w.worn_codes.values():
-        if code:
-            out.append(InventorySupply(-2, code))
+    if w.armed_code and not any(s.code == w.armed_code for s in w.held_supplies):
+        out.append(InventorySupply(-1, w.armed_code))
     return out
 
 

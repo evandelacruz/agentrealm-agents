@@ -9,6 +9,7 @@ from ..break_memory import (
     nominate_on_path,
     pick_supply_for_capability,
 )
+from ..odd_block import pick_odd_break
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
@@ -81,7 +82,20 @@ def break_outcome(
         return reflex
 
     op = break_op(plan)
-    choice = _plan_choice(w, ctx, op) if op is not None else _stuck_choice(w, ctx)
+    m = ctx.memory
+    if op is not None:
+        choice = _plan_choice(w, ctx, op)
+    elif (att := nav_stuck.active(m, w)) is not None and att.level == nav_stuck.BREAK:
+        choice = _stuck_choice(w, ctx)
+    else:
+        choice = pick_odd_break(
+            w,
+            ctx.knowledge,
+            ctx.policy,
+            m,
+            params=ctx.params,
+            stick_to=m.break_odd,
+        )
     if choice is None:
         att = nav_stuck.active(m, w)
         if att is not None and att.level == nav_stuck.BREAK:
@@ -136,9 +150,18 @@ class BreakState(State):
         att = nav_stuck.active(ctx.memory, world)
         if att is not None and att.level == nav_stuck.BREAK:
             return True
+        m = ctx.memory
+        if pick_odd_break(
+            world,
+            ctx.knowledge,
+            ctx.policy,
+            m,
+            params=ctx.params,
+            stick_to=m.break_odd,
+        ) is not None:
+            return True
         # A break opened its block and the attempt went back to walking: the
         # weapon armed before it is still to be restored.
-        m = ctx.memory
         return m.break_rearm is not None and m.break_pending is None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:

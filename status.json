@@ -69,7 +69,7 @@
 
   "A30": {"state": "partial", "remaining": "Scroll reads (needs observed scroll supply_subtype_code; GAME_NOTES open questions; live play blocked — docs/observations/A30_live_play.md)."},
 
-  "A31": {"state": "open"},
+  "A31": {"state": "done"},
 
   "A32": {"state": "open"},
 

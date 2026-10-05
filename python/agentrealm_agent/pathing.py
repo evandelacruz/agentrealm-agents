@@ -283,7 +283,11 @@ def replan(
     for the caller's stuck detection (A15).
     """
     m.path, m.goal, m.goal_op = [], "", None
-    if plan is not None and plan_step(plan, w, m, policy, blocked, costly, knowledge):
+    if (
+        plan is not None
+        and not goto_navigation_pending(w, m, policy)
+        and plan_step(plan, w, m, policy, blocked, costly, knowledge)
+    ):
         return None
     missed: tuple[str, Leg, bool] | None = None
     for goal in policy.goals:

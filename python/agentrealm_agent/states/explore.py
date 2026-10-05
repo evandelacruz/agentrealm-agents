@@ -19,7 +19,14 @@ from ..memory import Memory
 from ..plan import Plan
 from ..navigation.rejection import navigation_avoid_costly
 from ..navigation import stuck as nav_stuck
-from ..pathing import attempt_plan, escalation_step, next_step, path_owned_by_plan, replan
+from ..pathing import (
+    attempt_plan,
+    escalation_step,
+    goto_navigation_pending,
+    next_step,
+    path_owned_by_plan,
+    replan,
+)
 from ..world import Pos, WorldModel
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position
@@ -78,6 +85,8 @@ def scripted_outcome(
             return StateOutcome(None, "plan wait", state=state)
 
     owned = path_owned_by_plan(plan, m, policy.goals)
+    if goto_navigation_pending(w, m, policy) and m.goal != "goto":
+        owned = False
     target_plan = attempt_plan(m, w, policy, plan_avoid, plan_costly, knowledge)
     step = _escalated_step(w, m, plan_avoid, target_plan, knowledge) if owned else None
     if step is None and owned:

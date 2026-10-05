@@ -28,7 +28,7 @@ def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
 
 def ctx(w: WorldModel, m: Memory | None = None, **policy_kw) -> PlayContext:
     return PlayContext(
-        m or Memory(),
+        m or Memory(heal_regen_absent=True),
         Policy(kind="scripted", **policy_kw),
         random.Random(0),
         directives=default_directives(),

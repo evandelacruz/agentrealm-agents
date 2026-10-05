@@ -22,7 +22,7 @@ from ..healing import (
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import grid_params, hostiles_in_range, nav_search, next_step
+from ..pathing import goto_navigation_pending, grid_params, hostiles_in_range, nav_search, next_step
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import arm, set_position, take, use_self
@@ -60,8 +60,20 @@ class HealState(State):
 
 
 def _wants_heal(w: WorldModel, ctx: PlayContext) -> bool:
-    """Hurt, out of combat, and not backing off after a fruitless wait."""
-    return w.tick >= ctx.memory.heal_backoff_until and hurt(w) and not hostiles_in_range(w, ctx.policy)
+    """Hurt and out of combat, or at full health while safe-zone regen is still unknown (M7)."""
+    if w.tick < ctx.memory.heal_backoff_until or hostiles_in_range(w, ctx.policy):
+        return False
+    if hurt(w):
+        return True
+    if regen_known(ctx.knowledge, ctx.memory) is not None:
+        return False
+    if w.death_chest is not None:
+        return False
+    if standing_in_safe_zone(w):
+        return True
+    if goto_navigation_pending(w, ctx.memory, ctx.policy):
+        return False
+    return nearest_known_safe(w) is not None
 
 
 def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:

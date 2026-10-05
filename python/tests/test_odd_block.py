@@ -108,6 +108,49 @@ class PickOddBreakTest(unittest.TestCase):
         self.assertIsNotNone(choice)
         self.assertEqual(choice.capability, "burn")
 
+    def test_clue_naming_capability_allows_matches_without_block_type(self):
+        rows = ["........."] * 9
+        rows[4] = "....b...."
+        w = self._world(rows, at=(4, 4))
+        w.held_supplies = [InventorySupply(2, "matches")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.clues.append({"text": "take matches to the thicket", "map_id": 1, "x": 0, "y": 0})
+        m = Memory()
+        choice = pick_odd_break(w, kb, Policy(kind="scripted"), m, params={"curiosity": 0.2})
+        self.assertIsNotNone(choice)
+        self.assertEqual(choice.capability, "burn")
+
+    def test_capability_clue_far_from_the_block_spends_no_tool(self):
+        rows = ["........."] * 9
+        rows[4] = "....b...."
+        w = self._world(rows, at=(4, 4))
+        w.held_supplies = [InventorySupply(2, "matches")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.clues.append({"text": "take matches to the thicket", "map_id": 1, "x": 40, "y": 40})
+        self.assertIsNone(pick_odd_break(w, kb, Policy(kind="scripted"), Memory(), params={"curiosity": 0.2}))
+
+    def test_capability_clue_allows_only_the_named_tool(self):
+        rows = ["........."] * 9
+        rows[4] = "....b...."
+        w = self._world(rows, at=(4, 4))
+        w.held_supplies = [InventorySupply(2, "matches")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.clues.append({"text": "a bomb would do it", "map_id": 1, "x": 0, "y": 0})
+        self.assertIsNone(pick_odd_break(w, kb, Policy(kind="scripted"), Memory(), params={"curiosity": 0.2}))
+
+    def test_named_tool_still_waits_behind_a_free_weapon(self):
+        rows = ["........."] * 9
+        rows[4] = "....b...."
+        w = self._world(rows, at=(4, 4))
+        w.held_supplies = [InventorySupply(2, "matches"), InventorySupply(3, "pocket_knife")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.clues.append({"text": "take matches to the thicket", "map_id": 1, "x": 0, "y": 0})
+        choice = pick_odd_break(w, kb, Policy(kind="scripted"), Memory(), params={"curiosity": 0.2})
+        self.assertEqual((choice.capability, choice.supply.code), ("cut", "pocket_knife"))
+        record_attempt(kb, map_id=1, pos=(4, 4), capability="cut", result="applied_no_effect")
+        choice = pick_odd_break(w, kb, Policy(kind="scripted"), Memory(), params={"curiosity": 0.2})
+        self.assertEqual((choice.capability, choice.supply.code), ("burn", "matches"))
+
     def test_clue_on_another_map_does_not_allow_matches(self):
         rows = ["........."] * 9
         rows[4] = "....b...."

@@ -142,7 +142,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 
 ## NPCs, signs and scrolls
 
-- **Helpers** stay put. `Say` to a helper within 25 blocks gets its one authored line back that tick as a `SpokenTo` with `speaker_kind: npc`; it is the same line every time. Hostiles, bosses, and helpers with no line stay silent, but the `Say` still applies (M §6, §11).
+- **Helpers** stay put. `Say` to a helper within 25 blocks gets its one authored line back that tick as a `SpokenTo` with `speaker_kind: npc`; it is the same line every time. The 25-block reach is wider than perception, so the helper answering can be out of sight. Hostiles, bosses, and helpers with no line stay silent, but the `Say` still applies (M §6, §11).
 - **Shopkeepers had nothing to say** (Obs). Other helpers gave clues, some of them riddles (Obs).
 - **Signs.** A sign is a block with `readable: true`. `Read {kind: block}` returns its text on the intent result while it is in sight (M §6). Statues were readable signs too (Obs).
 - **Scrolls.** A scroll is a supply. `Read {kind: supply}` works on a carried scroll, or one on the ground in sight. `Read` on a non-scroll supply is `nothing_to_read` (Obs).

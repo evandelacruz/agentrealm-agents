@@ -144,27 +144,36 @@ def compare_metrics_cmd(baseline: str, candidate: str) -> int:
 
 
 def metrics(source: str, *, character_id: int | None) -> int:
-    """Print the last run's metrics from a trace, or from a profile's keyed trace."""
+    """Print the last run's metrics.
+
+    A ``.toml`` source is a profile: ``--character-id`` (or
+    ``AGENTREALM_CHARACTER_ID``) picks its keyed trace. Anything else is read
+    as a trace, metrics snapshot or ``metrics`` capture, as ``compare-metrics`` does.
+    """
     path = Path(source)
-    if path.suffix == ".jsonl":
+    if path.suffix.lower() != ".toml":
         if character_id is not None:
-            print("--character-id goes with a profile, not a trace path", file=sys.stderr)
+            print("--character-id goes with a profile (.toml), not a trace path", file=sys.stderr)
             return 2
-        label = path.name
-    else:
         try:
-            cfg = config.load(path)
-            cid = resolve_character_id(None, cfg, character_id=character_id)
-        except (config.ConfigError, OSError, CharacterSelectionError) as e:
+            summary = _metrics_from_path(path).to_dict()
+        except (OSError, ValueError) as e:
             print(e, file=sys.stderr)
             return 2
-        path = cfg.trace_path(cid)
-        label = cfg.profile
-    if not path.is_file():
-        print(f"{label}: no trace at {path}", file=sys.stderr)
+        print(f"{path.name}: {json.dumps(summary, sort_keys=True)}")
+        return 0
+    try:
+        cfg = config.load(path)
+        cid = resolve_character_id(None, cfg, character_id=character_id)
+    except (OSError, ValueError) as e:  # ConfigError, CharacterSelectionError and bad TOML are ValueErrors
+        print(e, file=sys.stderr)
+        return 2
+    trace = cfg.trace_path(cid)
+    if not trace.is_file():
+        print(f"{cfg.profile}: no trace at {trace}", file=sys.stderr)
         return 1
-    summary = metrics_from_trace(path).to_dict()
-    print(f"{label}: {json.dumps(summary, sort_keys=True)}")
+    summary = metrics_from_trace(trace).to_dict()
+    print(f"{cfg.profile}: {json.dumps(summary, sort_keys=True)}")
     return 0
 
 

@@ -23,7 +23,7 @@ Other commands:
 ```sh
 python3 -m agentrealm_agent run characters/wren.toml --character-name Wren
 python3 -m agentrealm_agent status characters/wren.toml --character-id ID
-python3 -m agentrealm_agent metrics characters/wren.toml --character-id ID   # or: metrics path/to/x.trace.jsonl
+python3 -m agentrealm_agent metrics characters/wren.toml --character-id ID   # or: metrics path/to/trace.jsonl (or a .json snapshot)
 python3 -m agentrealm_agent compare-metrics baseline.trace.jsonl candidate.trace.jsonl
 ```
 
@@ -64,9 +64,9 @@ make test
 
 `make conductor-test` covers [`tools/conductor`](tools/conductor/README.md) (Node 22+). CI runs both on every pull request.
 
-Live M6 smoke on olympuff: `make smoke-m6-olympuff` with `AGENTREALM_API_KEY` set runs the M6 done-when ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)) via [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py). Pass `--character-id` or `--character-name` to pick the character; the profile is `python/characters/olympuff_walker.toml`. Lives on live worlds are permanent. The accepted live run (A4) is in [`docs/acceptance/m6_olympuff_PASS.transcript`](docs/acceptance/m6_olympuff_PASS.transcript) (names and ids redacted).
+Live M6 smoke on olympuff: `make smoke-m6-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M6 done-when ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)) via [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py). The variables are passed to the script as `--character-id` / `--character-name`; the profile is `python/characters/olympuff_walker.toml`. Lives on live worlds are permanent. The accepted live run (A4) is in [`docs/acceptance/m6_olympuff_PASS.transcript`](docs/acceptance/m6_olympuff_PASS.transcript) (names and ids redacted).
 
-Live M7 smoke: `make smoke-m7-olympuff` with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m7_olympuff.py`](scripts/smoke_m7_olympuff.py), using profile `python/characters/olympuff_m7.toml` and a character you choose at run time. Start with that character on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out): the script sends the agent to one `goto` target 150 blocks east of where it stands (`--target X,Y` overrides), then explores.
+Live M7 smoke: `make smoke-m7-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m7_olympuff.py`](scripts/smoke_m7_olympuff.py), using profile `python/characters/olympuff_m7.toml` and a character you choose at run time. Start with that character on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out): the script sends the agent to one `goto` target 150 blocks east of where it stands (`--target X,Y` overrides), then explores.
 
 While the `goto` target is still owed, the walk comes first: Loot, Shop, Investigate and Travel do not walk anywhere else, Break opens only a block the goto's own stuck escalation picked, and the strategist plan's moves and `wait` hold are skipped. Heal is not deferred, so a hurt character still walks to safety. The deferral lifts while the agent stands on the target, or while stuck detection is backed off from it after a give-up; it comes back when the agent steps off the target or the backoff ends, because `goto` stays first in the goals. Stuck detection keeps running on the kept goto path, so it still escalates and gives up.
 

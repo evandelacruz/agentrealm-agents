@@ -159,6 +159,51 @@ class ProfileAndCliTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn('"gems": 2', out.getvalue())
 
+    def run_metrics(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+                rc = cli.main(["metrics", *argv])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_metrics_reads_uppercase_trace_suffix(self):
+        trace = self.dir / "RUN.JSONL"
+        trace.write_text(json.dumps({"call": "tick", "gems": 4}) + "\n", encoding="utf-8")
+        rc, out, _ = self.run_metrics(str(trace))
+        self.assertEqual(rc, 0)
+        self.assertIn('"gems": 4', out)
+
+    def test_metrics_reads_snapshot_json(self):
+        trace = self.dir / "run.jsonl"
+        trace.write_text(json.dumps({"call": "tick", "gems": 6}) + "\n", encoding="utf-8")
+        _, out, _ = self.run_metrics(str(trace))
+        snapshot = self.dir / "run.json"
+        snapshot.write_text(out.split(": ", 1)[1], encoding="utf-8")
+        rc, out, err = self.run_metrics(str(snapshot))
+        self.assertEqual(rc, 0, err)
+        self.assertIn('"gems": 6', out)
+
+    def test_metrics_missing_or_bad_file_is_one_line_error(self):
+        bad = self.dir / "bad.json"
+        bad.write_text("not json", encoding="utf-8")
+        for source in (self.dir / "missing.jsonl", bad):
+            rc, out, err = self.run_metrics(str(source))
+            self.assertEqual(rc, 2)
+            self.assertEqual(out, "")
+            self.assertEqual(len(err.strip().splitlines()), 1, err)
+
+    def test_metrics_uppercase_toml_is_a_profile(self):
+        upper = self.dir / "WREN.TOML"
+        upper.write_text('world = "sandbox"\n', encoding="utf-8")
+        rc, _, err = self.run_metrics(str(upper))
+        self.assertEqual(rc, 2)
+        self.assertIn("AGENTREALM_CHARACTER_ID", err)
+
+    def test_metrics_character_id_with_trace_path_is_an_error(self):
+        rc, _, err = self.run_metrics(str(self.dir / "x.jsonl"), "--character-id", "42")
+        self.assertEqual(rc, 2)
+        self.assertIn("goes with a profile", err)
+
     def test_metrics_rejects_character_name(self):
         with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
             cli.main(["metrics", str(self.toml), "--character-name", "Pat"])

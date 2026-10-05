@@ -336,11 +336,22 @@ def parse_directives_goals(lines: list[str]) -> list[GoalOp]:
     return out
 
 
-def parse_plan_payload(raw: object, *, floor_params: dict[str, float | int]) -> tuple[list[GoalOp], dict[str, float | int], str]:
-    """Parse strategist JSON: goals, params, notes. Drops invalid ops and params."""
+def parse_plan_payload(
+    raw: object,
+    *,
+    floor_params: dict[str, float | int],
+    current_params: dict[str, float | int] | None = None,
+) -> tuple[list[GoalOp], dict[str, float | int], str]:
+    """Parse strategist JSON: goals, params, notes. Drops invalid ops and params.
+
+    Incoming ``params`` merge onto ``current_params`` (the floor when not given),
+    so a reply naming one key leaves the others as they were. Each key is still
+    bounded by ``floor_params``.
+    """
+    current = dict(floor_params if current_params is None else current_params)
     if not isinstance(raw, dict):
         log.warning("plan: payload is not an object")
-        return [], dict(floor_params), ""
+        return [], current, ""
     extra = set(raw) - {"goals", "params", "notes"}
     if extra:
         log.warning("plan: dropped unknown top-level keys %s", sorted(extra))
@@ -357,7 +368,7 @@ def parse_plan_payload(raw: object, *, floor_params: dict[str, float | int]) -> 
     if not isinstance(notes, str):
         log.warning("plan: `notes` must be a string")
         notes = ""
-    params = dict(floor_params)
+    params = current
     incoming = raw.get("params")
     if incoming is not None:
         if not isinstance(incoming, dict):

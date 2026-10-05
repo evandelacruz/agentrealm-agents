@@ -15,7 +15,7 @@ One window, on the tick thread:
 1. Move new triggers (clue, stuck, death, goal done or failed, level, idle)
    from ``Memory`` into the strategist's inbox.
 2. If an answer came back, apply it. A failed call or a reply that is not
-   JSON puts its triggers back in the inbox. Its ``params`` apply at once; its
+   JSON puts its triggers back in the inbox. Its ``params`` merge in at once; its
    ``goals`` replace the stack only when at least one is valid and directives
    ``goals`` do not own the stack.
 3. If nothing is in flight, the inbox has triggers and the limits allow it,
@@ -69,7 +69,7 @@ OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 SYSTEM_PROMPT = """You are the strategist for an Agent Realm character. Reply with one JSON object only, no markdown, with exactly these keys:
 - "goals": array of plan operations (see schema below)
-- "params": optional survival params object
+- "params": the full survival params object, every key, starting from the current values under State; omit it to keep them
 - "notes": optional string for the trace
 
 Each goal is an object with "op" and the fields for that op. Valid ops include travel, explore_area, read, say, buy, break_block, use_block, compose, fetch_item, gather_gems, hunt, enter_level, fight_boss, avoid, wait, set_param. Unknown ops are dropped.
@@ -201,6 +201,8 @@ def build_prompt(
     state_lines = [
         f"tick={w.tick} pos={pos} alive={w.alive} health={w.health}/{w.max_health} gems={w.gems}",
         f"map_level={w.map_level} armed={w.armed_code} lives={w.lives}",
+        f"params={json.dumps(plan.params, sort_keys=True)}",
+        f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
     if plan.notes:
         state_lines.append(f"plan_notes={plan.notes!r}")
@@ -368,7 +370,7 @@ class Strategist:
     def _settle(self, runner: Any, answer: Answer) -> None:
         """Charge the real token count, then apply the answer or put its triggers back.
 
-        ``params`` apply at once, checked against the directives floor as it is now.
+        ``params`` merge onto the current ones at once, bounded by the directives floor as it is now.
         ``goals`` replace the stack only when there is at least one valid goal and
         directives ``goals`` do not own the stack.
         """
@@ -396,9 +398,10 @@ class Strategist:
             runner.log("strategist", f"failed: {answer.error}", {"strategist": {"event": "error", "error": answer.error, **record}})
             return
         d = runner.directives.directives
-        goals, params, notes = parse_plan_payload(reply, floor_params=dict(d.params))
-        if isinstance(reply, dict) and "params" in reply:
-            runner.plan.params = params
+        goals, params, notes = parse_plan_payload(
+            reply, floor_params=dict(d.params), current_params=runner.plan.params
+        )
+        runner.plan.params = params
         record.update(goals=goals, params=runner.plan.params, notes=notes)
         if not goals:
             runner.log("strategist", "answer had no valid goals; stack kept", {"strategist": {"event": "kept", **record}})

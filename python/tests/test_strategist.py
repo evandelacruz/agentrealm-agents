@@ -204,6 +204,23 @@ class ParamsTest(unittest.TestCase):
         self.assertEqual(r.plan.current()["op"], "wait")
         self.assertEqual(r.plan.params["retreat_hits"], 3)
 
+    def test_one_key_reply_keeps_the_other_keys(self):
+        s, r = make(FakeLLM({"goals": [], "params": {"curiosity": 0.5}})), fake_runner()
+        r.plan.params.update(retreat_hits=3, fight_margin=2.0, risk=0.2)
+        queue_signal(r.mem, {"trigger": "death"})
+        round_trip(s, r)
+        self.assertEqual(r.plan.params["curiosity"], 0.5)
+        self.assertEqual((r.plan.params["retreat_hits"], r.plan.params["fight_margin"], r.plan.params["risk"]), (3, 2.0, 0.2))
+
+    def test_prompt_shows_current_params(self):
+        llm = FakeLLM(WAIT_ANSWER)
+        s, r = make(llm), fake_runner()
+        r.plan.params["retreat_hits"] = 3
+        queue_signal(r.mem, {"trigger": "death"})
+        s.on_window(r)
+        s.serve_one(timeout=0)
+        self.assertIn('"retreat_hits": 3', llm.messages[0][1]["content"])
+
     def test_reply_without_params_keeps_earlier_ones(self):
         s, r = make(FakeLLM(WAIT_ANSWER)), fake_runner()
         r.plan.params["retreat_hits"] = 3

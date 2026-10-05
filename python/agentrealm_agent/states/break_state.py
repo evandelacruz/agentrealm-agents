@@ -82,7 +82,6 @@ def break_outcome(
         return reflex
 
     op = break_op(plan)
-    m = ctx.memory
     if op is not None:
         choice = _plan_choice(w, ctx, op)
     elif (att := nav_stuck.active(m, w)) is not None and att.level == nav_stuck.BREAK:

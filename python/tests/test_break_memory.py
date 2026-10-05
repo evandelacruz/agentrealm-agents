@@ -19,6 +19,7 @@ from agentrealm_agent.break_memory import (
     record_attempt,
 )
 from agentrealm_agent.config import CharacterConfig, Policy
+from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
@@ -26,6 +27,7 @@ from agentrealm_agent.door_look import approach_pos, look_key
 from agentrealm_agent.knowledge_maps import sync_tiles
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import grid_params
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.break_state import BreakState
@@ -346,6 +348,15 @@ class BreakRearmTest(unittest.TestCase):
         m.break_rearm, m.break_pending = "bronze_sword", (7, (2, 0), "smash")
         self.assertFalse(BreakState().guard(self.r.world, self.ctx))
 
+
+    def test_acting_on_the_plan_op_clears_its_stall(self):
+        # Break, not plan pathing, makes progress on `break_block` (A34 stall rule, A36).
+        self.att.level = nav_stuck.WALK
+        self.ctx.plan = Plan([{"op": "break_block", "x": 2, "y": 0, "capability": "smash"}], dict(PARAM_DEFAULTS))
+        self.ctx.plan.stalled_since_tick = 0
+        out = BreakState().act(self.r.world, self.ctx)
+        self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
+        self.assertIsNone(self.ctx.plan.stalled_since_tick)
 
 class InvestigateYieldsToBreakTest(unittest.TestCase):
     def test_stuck_door_look_reaches_break(self):

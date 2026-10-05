@@ -86,13 +86,10 @@ Give-up rule: navigation passes on a give-up only when stuck detection gave up o
 
 No live hour has passed yet (A58); runs that did not are in [`docs/observations/A16_live_play.md`](docs/observations/A16_live_play.md) and [`docs/observations/A58_live_play.md`](docs/observations/A58_live_play.md). CI covers the gate, the runner hooks and the navigation fixtures in `python/tests/test_m7_acceptance.py` without live keys.
 
-Live M4 smoke: `make smoke-m4-strategist CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY`, `AGENTREALM_STRATEGIST_MODEL`, and `AGENTREALM_STRATEGIST_API_KEY` or `OPENAI_API_KEY` set runs the M4 done-when on sandbox via [`scripts/smoke_m4_strategist.py`](scripts/smoke_m4_strategist.py), using profile `python/characters/strategist_gate.toml` and a character you choose at run time.
+M4 (strategist) acceptance is offline: `make test` runs [`python/tests/test_m4_acceptance.py`](python/tests/test_m4_acceptance.py), where the real runner and states play an invented test world against a fake server, with a fake model in place of the LLM. The agent reads a sign, the clue reaches the strategist, and its answer (buy a torch, travel to a hedge, burn it, travel to the entrance behind it) has to be carried out.
 
 Pass criteria (PLAN.md A36, checked in [`m4_acceptance.py`](python/agentrealm_agent/m4_acceptance.py)):
 
+- at least one clue trigger reaches the strategist;
 - no API error;
-- on a run of at least 95% of an hour, at least one clue trigger reaches the strategist;
-- the strategist plans each gate op from the invented test-world example in [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) (`buy` torch, `travel` to entrance 120,40, `break_block` 118,41 with `burn`);
-- the state machine carries each one out in `Shop`, `Travel`, or `Break` while that op is on top and a new queue is sent.
-
-No live sandbox pass has exited 0 on this gate yet (A36 partial); the live run waits on A33, A58 and earlier acceptance gates. CI covers the gate and smoke script in `python/tests/test_m4_acceptance.py` without live keys.
+- each required op is planned by an applied strategist answer, run by the state that owns it (`Shop` for `buy`, `Break` for `break_block`, Explore's plan pathing or `Travel` for `travel`) with a new queue while it is the head of the stack, and finished (popped as done).

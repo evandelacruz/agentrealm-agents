@@ -213,6 +213,8 @@ class BreakState(State):
             state=self.name,
             odd=self.odd,
         )
+        if out.intents and break_op(ctx.plan) is not None:
+            ctx.plan.stalled_since_tick = None  # progress on the plan's break_block (A34 stall rule)
         if out.intents or out.reason != "nothing to break":
             return out
         code, ctx.memory.break_rearm = ctx.memory.break_rearm, None

@@ -1,8 +1,9 @@
-"""What the live acceptance runs (M6 A4, M7 A16, M4 A36) share.
+"""What the acceptance runs (M6 A4, M7 A16, M4 A36) share.
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
-measures. ``CountingClient`` records failed requests (and optionally every
+measures. A new hook is declared here and called unconditionally, never looked
+up with ``hasattr``. ``CountingClient`` records failed requests (and optionally every
 call).
 """
 
@@ -43,6 +44,9 @@ class AcceptanceHooks:
         ``intents`` is None when a held queue keeps running and nothing new is sent.
         ``plan_op`` is the stack's current goal, when the runner knows it (A36).
         """
+
+    def on_strategist_trigger(self, trigger: dict) -> None:
+        """A trigger (``clue``, ``goal_done``, …) moved into the strategist's inbox (A36)."""
 
     def on_strategist_applied(self, goals: list[dict]) -> None:
         """The strategist replaced the goal stack with ``goals`` (A36)."""

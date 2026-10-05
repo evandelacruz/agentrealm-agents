@@ -180,6 +180,31 @@ class GoalStackTest(unittest.TestCase):
             replan(w, Memory(), pol, random.Random(0), set(), set(), plan=plan)
         self.assertEqual(plan.current()["op"], "wait")
 
+    def test_break_block_waits_for_break_then_stalls_out(self):
+        # Break owns `break_block`: plan pathing leaves it on the stack (A36)
+        # until it has stalled as long as any other op.
+        w = open_world()
+        brk = {"op": "break_block", "x": 3, "y": 3, "capability": "burn"}
+        plan = Plan([brk, {"op": "wait", "seconds": 5}], dict(PARAM_DEFAULTS), tick_hz=10)
+        pol = Policy(kind="scripted", goals=["hold"])
+        w.tick = 100
+        replan(w, Memory(), pol, random.Random(0), set(), set(), plan=plan)
+        self.assertEqual(plan.current(), brk, "not dropped for want of a state")
+        w.tick = 100 + PLAN_STALL_SECONDS * 10
+        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+            replan(w, Memory(), pol, random.Random(0), set(), set(), plan=plan)
+        self.assertEqual(plan.current()["op"], "wait")
+
+    def test_break_block_done_once_the_block_changes(self):
+        w = open_world()
+        w.view.tiles[(3, 3)] = "hedge"
+        plan = Plan([{"op": "break_block", "x": 3, "y": 3, "capability": "burn"}], dict(PARAM_DEFAULTS))
+        plan.advance(w)
+        self.assertIsNotNone(plan.current(), "the hedge still stands")
+        w.view.tiles[(3, 3)] = "grass"
+        plan.advance(w)
+        self.assertIsNone(plan.current())
+
     def test_a_found_path_resets_the_stall_clock(self):
         w = open_world()
         plan = Plan([{"op": "travel", "to": "point", "x": 3, "y": 3}], dict(PARAM_DEFAULTS))

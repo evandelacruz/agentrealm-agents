@@ -146,7 +146,7 @@ Things the example does on purpose, worth keeping in your own states:
 
 - **Its own memory.** The greeted set lives on the state, keyed by your character's id because one `STATES` tuple serves every character the process runs. It needs no knowledge base, and it marks a player when the `Say` is sent, so a refused hello is not retried: at most one per player per run. (Investigate instead records NPCs in the knowledge base after an applied `Say`, which persists across runs.)
 - **Pacing and budget.** It returns one `Say` per decision window. The runner sends it through the speech pacer and inside the window's `POST tick`, so it costs no extra call.
-- **Priority.** Placed above Explore, it waits for every survival state and for Investigate. A player standing next to a hostile NPC is greeted only after the fight.
+- **Priority.** Placed above Explore, it waits for every survival state and for Investigate.
 
 Its test, `python/tests/test_example_greet.py`, runs in `make test`. It checks that the shipped `STATES` leaves the example out, then patches `STATES` with the example inserted above Explore and drives the real dispatcher. Copy that pattern: duplicate the module, rename the class, change `guard` and `act`, add your line to `STATES`, and add a test beside it.
 

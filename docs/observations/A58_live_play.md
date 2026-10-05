@@ -52,6 +52,13 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Cause:** Explore replanned the goto path each tick and kept stepping back to the cell just left (393↔394, then 425↔426), tripping the oscillation guard repeatedly after each backoff ended.
 - **Fix:** while `goto_navigation_pending`, treat the cell just left as blocked for `next_step` / `replan` (`nav_blocked_for_walk`, `test_explore_goto_does_not_replan_straight_back`).
 
+## Run 6 — stopped (~12 min): Flee still pinned (live run budget exhausted)
+
+- **Character:** chosen at run time via `CHARACTER_NAME` (not committed).
+- **Gate:** not finished; 0 deaths; regen not measured; stopped by hand after ~12 minutes on the same two cells (`614,397` ↔ `615,396`) with **Flee** and goto **Break** queues alternating.
+- **Trace:** one `oscillation` with `goal: goto` early; survival pacing did not abort the smoke run. Flee anti-backstep (Run 4 fix) was too weak when only the reverse step scored best; Break escalation for the goto still walked while hostiles were in range.
+- **Follow-up in this PR (unverified live):** always pick a non-reverse flee step when one exists; defer goto stuck **Break** while `should_flee`.
+
 ## Done-when
 
 A58 stays open until a live hour exits 0 on the A16 gate and a redacted PASS transcript is committed under `docs/acceptance/m7_olympuff_PASS.transcript`.

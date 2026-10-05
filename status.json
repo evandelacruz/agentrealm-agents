@@ -41,7 +41,7 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 
-  "A58": {"state": "partial", "remaining": "Runs 4–5 failed (Flee ping-pong, then ABORT on goto replan ping-pong); fixes offline with tests. One live run left in the A58 budget. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "Three live runs used (Run 4 manual stop, Run 5 ABORT sustained oscillation, Run 6 manual stop on Flee/Break pin); agent fixes landed with offline tests but the A16 hour gate did not PASS. Needs another live pass. Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 

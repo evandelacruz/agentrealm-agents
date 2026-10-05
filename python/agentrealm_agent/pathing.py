@@ -133,16 +133,10 @@ def flee_step(
         return (nearest, total, p)
 
     ranked = sorted(move_options, key=safety, reverse=True)
-    best_score = safety(ranked[0])[:3] if safes else safety(ranked[0])[:2]
-
-    def scores_as_well(p: Pos) -> bool:
-        s = safety(p)
-        return s[:3] == best_score if safes else s[:2] == best_score
-
-    for p in ranked:
-        if avoid is not None and p == avoid and any(scores_as_well(q) and q != avoid for q in ranked):
-            continue
-        return p
+    if avoid is not None:
+        others = [p for p in ranked if p != avoid]
+        if others:
+            ranked = others
     return ranked[0]
 
 

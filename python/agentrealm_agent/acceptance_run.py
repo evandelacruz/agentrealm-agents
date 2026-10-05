@@ -15,6 +15,7 @@ class TimedRunHooks(AcceptanceHooks):
     """Deaths, API errors, and an optional wall-clock stop for long smoke runs."""
 
     stop: threading.Event | None = None
+    target_seconds: float | None = None  # wall-clock length of the run; None plays until stopped
     clock: Callable[[], float] = time.monotonic
     started_at: float | None = None
     deaths: int = 0
@@ -27,12 +28,11 @@ class TimedRunHooks(AcceptanceHooks):
         now = self.clock()
         if self.started_at is None:
             self.started_at = now
-        target = getattr(self, "target_seconds", None)
         if (
             self.stop is not None
-            and target is not None
+            and self.target_seconds is not None
             and alive
-            and now - self.started_at >= target
+            and now - self.started_at >= self.target_seconds
         ):
             self.stop.set()
 

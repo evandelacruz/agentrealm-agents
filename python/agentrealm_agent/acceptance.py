@@ -1,9 +1,9 @@
-"""What the live acceptance runs (M6 A4, M7 A16) share.
+"""What the live acceptance runs (M6 A4, M7 A16, M8 A25) share.
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
-measures. ``CountingClient`` records failed requests (and optionally every
-call).
+measures; M8 also reads tick events (``NPCDied``) through ``on_events``.
+``CountingClient`` records failed requests (and optionally every call).
 """
 
 from __future__ import annotations

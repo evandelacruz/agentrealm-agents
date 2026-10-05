@@ -10,12 +10,17 @@ module checks for each clause:
 - Heals from food it picks up and from carried potions: **Heal** sends a
   ``Take`` on ground food, and **Heal** sends ``Arm`` + ``Use`` self on a
   carried potion.
-- Kills lone weak hostiles without dying: at least one ``NPCDied`` while the
-  agent was fighting a lone measured hostile whose threat table hit is at most
-  the weak default (2). Deaths fail the run immediately.
-- Never starts a fight below its health floor: **Fight** must not send an
-  attack ``Use`` while hurt (health below ``max_health``; PLAYABLE_AGENT
-  Combat, "never start a fight hurt").
+- Kills lone weak hostiles without dying: at least one ``NPCDied`` for the
+  NPC **Fight** was attacking when it was the lone hostile in the combat group,
+  measured, with a threat table hit at most the weak default (2). The fight
+  lasts until the state leaves **Fight** or the target dies, so the kill counts
+  on a later tick that only polls the held attack queue. Deaths fail the run
+  immediately.
+- Never starts a fight below its health floor: the first attack ``Use`` after
+  entering **Fight** must not come while ``would_lose`` holds (the group's
+  expected damage against health plus ``fight_margin``; PLAYABLE_AGENT
+  Combat). Swings later in the same fight are not judged: taking hits is what
+  a fight does.
 
 On a run shorter than 95% of the target duration, only deaths, fight-floor
 violations and API errors fail the run; the milestone checks above are judged
@@ -24,19 +29,15 @@ only on a nearly full run.
 
 from __future__ import annotations
 
-import threading
-import time
 from dataclasses import dataclass, field
-from typing import Callable
 
 from .acceptance_run import TimedRunHooks
-from .break_memory import WEAPONS
 from .config import Policy
 from .equip import is_consumable, is_weapon, wear_slot
-from .healing import FOOD_CODES, POTION_CODES, hurt, potion_count
+from .healing import FOOD_CODES, POTION_CODES, potion_count
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .survival import combat_group
+from .survival import combat_group, would_lose
 from .threat import UNMEASURED_DEFAULT, type_key_for_entity
 from .world import WorldModel
 
@@ -49,8 +50,6 @@ class M8AcceptanceMetrics(TimedRunHooks):
     """Counts economy, healing, combat and API faults while the runner plays."""
 
     target_seconds: float = TARGET_SECONDS
-    stop: threading.Event | None = None
-    clock: Callable[[], float] = time.monotonic
     potion_reserve: int = 2
     start_gems: int | None = None
     max_gems: int | None = None
@@ -64,6 +63,8 @@ class M8AcceptanceMetrics(TimedRunHooks):
     fight_below_floor: int = 0
     _prev_gems: int | None = field(default=None, repr=False)
     _seen_worn: set[str] = field(default_factory=set, repr=False)
+    _fighting: bool = field(default=False, repr=False)  # an attack was sent since entering Fight
+    _fight_target: int | None = field(default=None, repr=False)  # NPC id this fight attacks
     _weak_lone_fight: bool = field(default=False, repr=False)
 
     def before_tick(
@@ -78,7 +79,8 @@ class M8AcceptanceMetrics(TimedRunHooks):
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
     ) -> None:
-        self._weak_lone_fight = False
+        if state != "Fight":
+            self._end_fight()
         self.potion_reserve = max(0, int(params.get("potion_reserve", self.potion_reserve)))
         self._note_gems(w)
         self._note_loadout(w)
@@ -86,12 +88,22 @@ class M8AcceptanceMetrics(TimedRunHooks):
             self.potion_reserve_met = True
         if intents is not None:
             self._note_heal(state, intents, w)
-            self._note_fight(state, intents, w, policy)
+            self._note_fight(state, intents, w, policy, params)
 
     def on_events(self, events: list[dict]) -> None:
         for ev in events:
-            if ev.get("kind") == "NPCDied" and self._weak_lone_fight:
+            if ev.get("kind") != "NPCDied" or self._fight_target is None:
+                continue
+            if ev.get("npc_id") != self._fight_target:
+                continue
+            if self._weak_lone_fight:
                 self.weak_hostile_kills += 1
+            self._end_fight()
+
+    def _end_fight(self) -> None:
+        self._fighting = False
+        self._fight_target = None
+        self._weak_lone_fight = False
 
     def _note_gems(self, w: WorldModel) -> None:
         if w.gems is None:
@@ -117,27 +129,37 @@ class M8AcceptanceMetrics(TimedRunHooks):
     def _note_heal(self, state: str, intents: list[dict], w: WorldModel) -> None:
         if state != "Heal":
             return
-        for intent in intents:
+        for i, intent in enumerate(intents):
             if intent.get("verb") == "Take":
                 sid = intent.get("supply_id")
                 for e in w.entities:
                     if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
                         self.heal_food_take = True
             if intent.get("verb") == "Use" and _is_self_use(intent, w):
-                code = w.armed_code
-                if code in POTION_CODES:
+                if _self_use_code(intents, i, w) in POTION_CODES:
                     self.heal_potion = True
 
-    def _note_fight(self, state: str, intents: list[dict], w: WorldModel, policy: Policy) -> None:
+    def _note_fight(
+        self,
+        state: str,
+        intents: list[dict],
+        w: WorldModel,
+        policy: Policy,
+        params: dict[str, float | int],
+    ) -> None:
         if state != "Fight" or not intents:
             return
         attacks = [i for i in intents if _is_attack_use(i, w)]
         if not attacks:
             return
-        if hurt(w):
+        target = (attacks[0].get("target") or {}).get("npc_id")
+        if not self._fighting and would_lose(w, policy, params):
             self.fight_below_floor += 1
-        group = combat_group(w, policy)
-        self._weak_lone_fight = _lone_weak_group(w, group)
+        self._fighting = True
+        if target != self._fight_target:
+            group = combat_group(w, policy)
+            self._fight_target = target
+            self._weak_lone_fight = target is not None and _lone_weak_group(w, group, target)
 
     def milestones_ok(self) -> bool:
         return (
@@ -154,7 +176,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
         out = list(self.base_failures())
         if self.fight_below_floor:
             out.append(
-                f"{self.fight_below_floor} Fight attack(s) while hurt (below health floor)"
+                f"{self.fight_below_floor} fight(s) started below the health floor (would_lose)"
             )
         if not full_run:
             return out
@@ -199,6 +221,22 @@ def _is_self_use(intent: dict, w: WorldModel) -> bool:
     return target.get("kind") == "character" and target.get("character_id") == w.character_id
 
 
+def _self_use_code(intents: list[dict], index: int, w: WorldModel) -> str | None:
+    """The code the self-``Use`` at ``index`` drinks or eats.
+
+    Heal sends ``[Arm item, Use self]`` in one queue while ``armed_code`` still
+    names the weapon, so an ``Arm`` just before the ``Use`` names the item
+    (same rule as ``Runner._used_on_self_code``).
+    """
+    before = intents[index - 1] if index > 0 else None
+    if before and before.get("verb") == "Arm":
+        for h in w.held_supplies:
+            if h.id == before.get("supply_id"):
+                return h.code
+        return None
+    return w.armed_code
+
+
 def _is_attack_use(intent: dict, w: WorldModel) -> bool:
     if intent.get("verb") != "Use":
         return False
@@ -209,8 +247,8 @@ def _is_attack_use(intent: dict, w: WorldModel) -> bool:
     return kind in ("npc", "block")
 
 
-def _lone_weak_group(w: WorldModel, group: list) -> bool:
-    if len(group) != 1:
+def _lone_weak_group(w: WorldModel, group: list, npc_id: int) -> bool:
+    if len(group) != 1 or group[0].kind != "npc" or group[0].id != npc_id:
         return False
     key = type_key_for_entity(group[0])
     if key is None or not w.threat.measured(key):

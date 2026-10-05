@@ -6,8 +6,8 @@ import threading
 import time
 from typing import Callable
 
-from .acceptance import AcceptanceHooks
-from .client import ApiError, Client
+from .acceptance_run import TimedRunHooks
+from .client import Client
 from .config import CharacterConfig
 from .executor.intents import wait
 from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
@@ -68,14 +68,13 @@ def run_smoke(
     client: Client,
     cfg: CharacterConfig,
     cid: int,
-    metrics: AcceptanceHooks,
+    metrics: TimedRunHooks,
     *,
     timeout_s: float,
     log: Callable[[str], None] | None = None,
-) -> tuple[AcceptanceHooks, float]:
+) -> tuple[TimedRunHooks, float]:
     stop = threading.Event()
-    if hasattr(metrics, "stop"):
-        metrics.stop = stop
+    metrics.stop = stop
     started = time.monotonic()
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
 

@@ -42,17 +42,31 @@ def world(**kw) -> WorldModel:
     return w
 
 
-def decide(m, w, *, state="Explore", intents=None, params=None):
+HELD = object()  # the runner polling a held queue: before_tick sees intents=None
+WAIT = [{"verb": "Wait"}]
+SWING = [{"verb": "Use", "target": {"kind": "npc", "npc_id": 5}}] * 3
+WINNABLE = {**PARAM_DEFAULTS, "fight_margin": 0.5}  # a 10-health start beats one snotling
+
+
+def decide(m, w, *, state="Explore", intents=WAIT, params=None):
     m.before_tick(
         w,
         Memory(),
         state=state,
         reason="test",
-        intents=intents if intents is not None else [{"verb": "Wait"}],
+        intents=None if intents is HELD else intents,
         policy=Policy(hostile=["npc"], on_hostile="fight"),
         params=params or dict(PARAM_DEFAULTS),
         knowledge=None,
     )
+
+
+def weak_fight_world(health=10) -> WorldModel:
+    """One measured snotling hitting 1, in reach."""
+    w = world(health=health, max_health=10)
+    w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
+    w.threat.record(("npc", "snotling"), 1)
+    return w
 
 
 class MilestoneGateTest(unittest.TestCase):
@@ -101,33 +115,88 @@ class MilestoneGateTest(unittest.TestCase):
         )
         self.assertTrue(m.heal_potion)
 
+    def test_heal_arm_and_use_potion_while_weapon_still_armed(self):
+        # Heal's first drink: [Arm potion, Use self] while armed_code is still the weapon.
+        m = metrics()
+        w = world()
+        w.armed_code = "bronze_sword"
+        w.held_supplies = [InventorySupply(4, "small_potion"), InventorySupply(6, "bronze_sword")]
+        use = {"verb": "Use", "target": {"kind": "character", "character_id": 1}}
+        decide(m, w, state="Heal", intents=[{"verb": "Arm", "supply_id": 6}, use])
+        self.assertFalse(m.heal_potion)
+        decide(m, w, state="Heal", intents=[{"verb": "Arm", "supply_id": 4}, use])
+        self.assertTrue(m.heal_potion)
+
     def test_weak_kill_on_npc_died_after_lone_weak_fight(self):
         m = metrics()
-        w = world(health=10, max_health=10)
-        w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
-        w.threat.record(("npc", "snotling"), 1)
-        decide(
-            m,
-            w,
-            state="Fight",
-            intents=[{"verb": "Use", "target": {"kind": "npc", "npc_id": 5}}],
-        )
+        w = weak_fight_world()
+        decide(m, w, state="Fight", intents=SWING)
         m.on_events([{"kind": "NPCDied", "npc_id": 5}])
         self.assertEqual(m.weak_hostile_kills, 1)
 
-    def test_fight_while_hurt_fails(self):
+    def test_weak_kill_on_a_later_held_queue_tick(self):
         m = metrics()
-        w = world(health=5, max_health=10)
-        w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
-        w.threat.record(("npc", "snotling"), 1)
-        decide(
-            m,
-            w,
-            state="Fight",
-            intents=[{"verb": "Use", "target": {"kind": "npc", "npc_id": 5}}],
-        )
+        w = weak_fight_world()
+        decide(m, w, state="Fight", intents=SWING)
+        m.on_events([])
+        decide(m, w, state="Fight", intents=HELD)
+        m.on_events([])
+        decide(m, w, state="Fight", intents=HELD)
+        m.on_events([{"kind": "NPCDied", "npc_id": 5}])
+        self.assertEqual(m.weak_hostile_kills, 1)
+
+    def test_npc_died_for_another_npc_is_not_our_kill(self):
+        m = metrics()
+        w = weak_fight_world()
+        decide(m, w, state="Fight", intents=SWING)
+        m.on_events([{"kind": "NPCDied", "npc_id": 6}])
+        self.assertEqual(m.weak_hostile_kills, 0)
+
+    def test_npc_died_after_leaving_fight_is_not_counted(self):
+        m = metrics()
+        w = weak_fight_world()
+        decide(m, w, state="Fight", intents=SWING)
+        decide(m, w, state="Retreat")
+        m.on_events([{"kind": "NPCDied", "npc_id": 5}])
+        self.assertEqual(m.weak_hostile_kills, 0)
+
+    def test_kill_of_a_target_in_a_group_is_not_a_lone_kill(self):
+        m = metrics()
+        w = weak_fight_world()
+        w.entities.append(Entity("npc", 6, (2, 0), code="snotling"))
+        decide(m, w, state="Fight", intents=SWING)
+        m.on_events([{"kind": "NPCDied", "npc_id": 5}])
+        self.assertEqual(m.weak_hostile_kills, 0)
+
+    def test_kill_of_a_target_outside_the_lone_group_is_not_counted(self):
+        # The lone weak hostile is NPC 6; NPC 5, the one attacked, is far off.
+        m = metrics()
+        w = weak_fight_world()
+        w.entities = [Entity("npc", 6, (1, 0), code="snotling"), Entity("npc", 5, (20, 0), code="snotling")]
+        decide(m, w, state="Fight", intents=SWING)
+        m.on_events([{"kind": "NPCDied", "npc_id": 5}])
+        self.assertEqual(m.weak_hostile_kills, 0)
+
+    def test_fight_started_when_it_would_lose_fails(self):
+        m = metrics()
+        w = weak_fight_world(health=1)
+        w.threat.record(("npc", "snotling"), 2)
+        decide(m, w, state="Fight", intents=SWING, params=WINNABLE)
         self.assertEqual(m.fight_below_floor, 1)
         self.assertTrue(any("health floor" in f for f in m.failures(full_run=False)))
+
+    def test_hurt_but_winnable_fight_start_passes(self):
+        m = metrics()
+        decide(m, weak_fight_world(health=8), state="Fight", intents=SWING, params=WINNABLE)
+        self.assertEqual(m.fight_below_floor, 0)
+
+    def test_swings_later_in_a_fight_are_not_judged(self):
+        m = metrics()
+        decide(m, weak_fight_world(), state="Fight", intents=SWING, params=WINNABLE)
+        w = weak_fight_world(health=1)
+        w.threat.record(("npc", "snotling"), 2)
+        decide(m, w, state="Fight", intents=SWING, params=WINNABLE)
+        self.assertEqual(m.fight_below_floor, 0)
 
     def test_short_run_skips_milestones(self):
         m = metrics()

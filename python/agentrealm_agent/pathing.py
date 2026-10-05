@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import random
-from typing import Callable
+from typing import Callable, Collection
 
 from .break_memory import break_costs_for_planning, nominate_on_path
 from .clues import nearest_explore_target
@@ -75,17 +75,82 @@ def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
     return True
 
 
-def flee_step(w: WorldModel, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:
+# How far a committed flee run reaches past its first step when no safe tile
+# is known (A9, A58). Long enough to leave two hostiles' reach, short enough
+# that the run is replanned before the map around it goes stale.
+FLEE_RUN_STEPS = 6
+
+
+def _nearest(p: Pos, hostiles: list[Entity]) -> int:
+    return min(chebyshev(p, h.pos) for h in hostiles)
+
+
+def outruns(route: list[Pos], hostiles: list[Entity]) -> bool:
+    """Every cell of ``route`` after its first is reached before any hostile could get there.
+
+    ``route`` starts one step from the agent, so its cell ``i`` is ``i + 1``
+    steps away; a hostile that is no further than that would get there no
+    later than the agent (A9).
+    """
+    return all(_nearest(p, hostiles) > i + 1 for i, p in enumerate(route) if i)
+
+
+def flee_step(
+    w: WorldModel, hostiles: list[Entity], blocked: set[Pos], safes: Collection[Pos] = frozenset()
+) -> Pos | None:
+    """The best single step away from ``hostiles``, or None when standing still is best.
+
+    Ranked by distance to the nearest hostile, then by distance to the
+    nearest known safe tile when ``safes`` holds any, else by the summed
+    distance to every hostile, then by the cell. Standing still is one of the
+    candidates, so a cornered agent waits instead of stepping closer.
+    """
     here = w.pos
     options = w.open_neighbours(here, blocked) + [here]
 
-    def safety(p: Pos) -> tuple[int, int]:
-        nearest = min(chebyshev(p, h.pos) for h in hostiles)
-        total = sum(chebyshev(p, h.pos) for h in hostiles)
-        return nearest, total
+    def safety(p: Pos) -> tuple[int, int, Pos]:
+        if safes:
+            return _nearest(p, hostiles), -min(chebyshev(p, s) for s in safes), p
+        return _nearest(p, hostiles), sum(chebyshev(p, h.pos) for h in hostiles), p
 
-    best = max(options, key=lambda p: (safety(p), p))
+    best = max(options, key=safety)
     return None if best == here else best
+
+
+def flee_run(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], first: Pos) -> list[Pos]:
+    """``first``, then a route of up to ``FLEE_RUN_STEPS`` more seen, open cells away from the hostiles.
+
+    A breadth-first search from ``first`` that never steps back onto the
+    agent's own cell and only enters cells the agent reaches before any
+    hostile could (the ``outruns`` rule: each cell further from every hostile
+    than the steps it takes to get there). The run ends on the cell it found
+    furthest from the nearest hostile, preferring the longer run on ties.
+    """
+    occupied = w.occupied() | blocked
+    came: dict[Pos, Pos | None] = {first: None}
+    depth = {first: 1}
+    frontier = [first]
+    while frontier:
+        nxt_frontier = []
+        for cur in frontier:
+            d = depth[cur] + 1
+            if d > FLEE_RUN_STEPS + 1:
+                continue
+            for n in w.neighbours(cur):
+                if n in came or n == w.pos or n in occupied or not w.view.walkable(n):
+                    continue
+                if _nearest(n, hostiles) <= d:
+                    continue
+                came[n], depth[n] = cur, d
+                nxt_frontier.append(n)
+        frontier = nxt_frontier
+
+    end = max(came, key=lambda p: (_nearest(p, hostiles), depth[p], p))
+    run = []
+    while end is not None:
+        run.append(end)
+        end = came[end]
+    return run[::-1]
 
 
 def step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:

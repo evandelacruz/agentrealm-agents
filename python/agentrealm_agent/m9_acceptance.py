@@ -9,7 +9,9 @@ module checks:
 - Records what each needs: ``looked`` with a ``block_type``; a locked mark
   also has ``needs: key`` (Manual §9.2, §11).
 - Returns to town: the character stands on the town cell from the knowledge
-  base when the run ends.
+  base when the run ends. ``on_entrances_done`` fires once when the catalog
+  is complete; the smoke script uses it to put ``travel:town`` in the
+  profile's directives, so Travel (A27) walks the agent home.
 
 Survival gates match M7 (``acceptance_survival.py``): death, retreat miss,
 unsafe Recover, loops and API errors fail immediately. Heal actions are
@@ -20,7 +22,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 from .acceptance_survival import SurvivalAcceptanceMetrics
@@ -70,7 +72,10 @@ def missing_entrance_marks(
     """Required marks that are not recorded yet."""
     if kb is None:
         return []
-    required = required_entrance_marks(kb, bracket)
+    return _unrecorded(kb, required_entrance_marks(kb, bracket))
+
+
+def _unrecorded(kb: KnowledgeBase, required: set[tuple[int, Pos]]) -> list[tuple[int, Pos]]:
     missing: list[tuple[int, Pos]] = []
     with kb.lock:
         for map_id, pos in sorted(required):
@@ -86,18 +91,21 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
 
     ``stop`` is set once every required entrance is recorded and the character
     stands on town, or when ``target_seconds`` have passed with the character
-    alive (whichever comes first).
+    alive (whichever comes first). ``at_town_end`` is the last decision's
+    position, so leaving town after a visit clears it.
     """
 
     target_seconds: float = TARGET_SECONDS
     stop: threading.Event | None = None
     clock: Callable[[], float] = time.monotonic
     started_at: float | None = None
+    on_entrances_done: Callable[[], None] | None = None
+    marks_known: int = 0
     catalog_size: int = 0
     entrances_recorded: int = 0
     strength_closed_skipped: int = 0
     at_town_end: bool = False
-    _catalog_ready: bool = False
+    _entrances_done_sent: bool = False
 
     def on_window(self, *, urgent: bool, alive: bool = True) -> None:
         now = self.clock()
@@ -134,38 +142,36 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
             knowledge=knowledge,
         )
         self._refresh_entrances(knowledge, m.strength)
+        if self.entrances_ok() and not self._entrances_done_sent:
+            self._entrances_done_sent = True
+            if self.on_entrances_done is not None:
+                self.on_entrances_done()
         town = town_from_kb(knowledge)
-        if town is not None and w.map_id == town[0] and w.pos == town[1]:
-            self.at_town_end = True
-            if self._catalog_ready and self.entrances_recorded >= self.catalog_size and self.catalog_size:
-                if self.stop is not None:
-                    self.stop.set()
+        self.at_town_end = town is not None and w.map_id == town[0] and w.pos == town[1]
+        if self.at_town_end and self.entrances_ok() and self.stop is not None:
+            self.stop.set()
 
     def _refresh_entrances(self, kb: KnowledgeBase | None, bracket: StrengthBracket) -> None:
         if kb is None:
             return
-        required = required_entrance_marks(kb, bracket)
-        if not required and not self._catalog_ready:
-            return
         all_marks = {(mid, pos) for mid, pos, _ in iter_entrances(kb) if not is_level_interior(kb, mid)}
+        if not all_marks:
+            return
+        required = required_entrance_marks(kb, bracket)
+        self.marks_known = len(all_marks)
         self.strength_closed_skipped = len(all_marks - required)
         self.catalog_size = len(required)
-        recorded = 0
-        with kb.lock:
-            for map_id, pos in required:
-                row = kb.entrances.get(f"{map_id}:{pos[0]},{pos[1]}", {})
-                if isinstance(row, dict) and entrance_row_recorded(row):
-                    recorded += 1
-        self.entrances_recorded = recorded
-        self._catalog_ready = True
+        self.entrances_recorded = len(required) - len(_unrecorded(kb, required))
 
     def entrances_ok(self) -> bool:
-        return self.catalog_size > 0 and self.entrances_recorded >= self.catalog_size
+        """Every required mark recorded. Vacuously true when the minimap listed
+        marks but the strength bracket closed all of them."""
+        return self.marks_known > 0 and self.entrances_recorded >= self.catalog_size
 
     def failures(self, *, full_run: bool = True) -> list[str]:
         out = list(self.survival_failures())
         if full_run:
-            if not self.catalog_size:
+            if not self.marks_known:
                 out.append("no entrance catalog from minimap")
             elif not self.entrances_ok():
                 missing = self.catalog_size - self.entrances_recorded
@@ -176,6 +182,7 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
 
     def summary_lines(self) -> list[str]:
         lines = [
+            f"entrance marks known: {self.marks_known}",
             f"entrance marks required: {self.catalog_size} (skipped as over-strength: {self.strength_closed_skipped})",
             f"entrance marks recorded: {self.entrances_recorded}",
             f"on town at end: {self.at_town_end}",

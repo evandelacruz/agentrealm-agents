@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import tempfile
+import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -12,7 +13,7 @@ from unittest import mock
 
 from agentrealm_agent import config
 from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_agent.directives import PARAM_DEFAULTS, load_directives
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.m9_acceptance import (
     M9AcceptanceMetrics,
@@ -104,6 +105,78 @@ class M9GateTest(unittest.TestCase):
         self.assertTrue(m.at_town_end)
         self.assertEqual(m.failures(), [])
 
+    def record(self, kb, *keys):
+        with kb.lock:
+            for key in keys or list(kb.entrances):
+                kb.entrances[key].update({"looked": True, "block_type": "grass"})
+
+    def test_failure_counts_the_marks_the_gate_still_misses(self):
+        kb = kb_with_entrances()
+        self.record(kb, "7:10,20")
+        with kb.lock:
+            kb.entrances["7:30,40"]["looked"] = True  # looked, but no block_type filed
+        m = M9AcceptanceMetrics()
+        decide(m, self.open_world(), kb)
+        self.assertEqual(m.entrances_recorded, 1)
+        self.assertIn("1 entrance mark(s) not looked and recorded", m.failures())
+
+    def test_leaving_town_after_a_visit_fails_town_at_end(self):
+        kb = kb_with_entrances()
+        self.record(kb)
+        m = M9AcceptanceMetrics()
+        decide(m, self.open_world((0, 0)), kb)
+        self.assertTrue(m.at_town_end)
+        decide(m, self.open_world((1, 0)), kb)
+        self.assertFalse(m.at_town_end)
+        self.assertIn("character not on town at end", m.failures())
+
+    def test_town_on_another_map_is_not_town(self):
+        kb = kb_with_entrances()
+        self.record(kb)
+        m = M9AcceptanceMetrics()
+        decide(m, self.open_world((0, 0), map_id=8), kb)
+        self.assertFalse(m.at_town_end)
+
+    def test_entrances_done_fires_once_and_stop_waits_for_town(self):
+        kb = kb_with_entrances()
+        calls = []
+        stop = threading.Event()
+        m = M9AcceptanceMetrics(stop=stop, on_entrances_done=lambda: calls.append(1))
+        decide(m, self.open_world((5, 5)), kb)
+        self.assertEqual(calls, [], "catalog not complete yet")
+        self.record(kb)
+        decide(m, self.open_world((5, 5)), kb)
+        decide(m, self.open_world((4, 4)), kb)
+        self.assertEqual(calls, [1], "the town hand-off is sent once")
+        self.assertFalse(stop.is_set(), "entrances done but not on town")
+        decide(m, self.open_world((0, 0)), kb)
+        self.assertTrue(stop.is_set())
+
+    def test_town_alone_does_not_stop_before_entrances(self):
+        kb = kb_with_entrances()
+        stop = threading.Event()
+        m = M9AcceptanceMetrics(stop=stop)
+        decide(m, self.open_world((0, 0)), kb)
+        self.assertFalse(stop.is_set())
+
+    def test_all_marks_over_strength_is_not_a_missing_catalog(self):
+        kb = kb_with_entrances()
+        mem = Memory()
+        mem.strength = StrengthBracket(closed={(7, (10, 20)), (7, (30, 40))})
+        m = M9AcceptanceMetrics()
+        decide(m, self.open_world((0, 0)), kb, mem)
+        self.assertEqual((m.marks_known, m.catalog_size, m.strength_closed_skipped), (2, 0, 2))
+        self.assertTrue(m.entrances_ok())
+        self.assertEqual(m.failures(), [])
+
+    def test_no_minimap_marks_fails_as_no_catalog(self):
+        kb = KnowledgeBase.from_dict("sandbox", {})
+        sync_town(kb, {"map_id": 7, "x": 0, "y": 0})
+        m = M9AcceptanceMetrics()
+        decide(m, self.open_world((0, 0)), kb)
+        self.assertFalse(m.entrances_ok())
+        self.assertIn("no entrance catalog from minimap", m.failures())
+
     def test_survival_failures_match_m7(self):
         m = M9AcceptanceMetrics()
         m.on_death()
@@ -158,10 +231,30 @@ class SmokeScriptTest(unittest.TestCase):
 
     def test_full_run_passes_when_gate_is_met(self):
         def played(m):
-            m.catalog_size, m.entrances_recorded, m.at_town_end = 3, 3, True
+            m.marks_known, m.catalog_size, m.entrances_recorded, m.at_town_end = 3, 3, 3, True
 
         code, out, _ = self.run_main(7200, played)
         self.assertEqual(code, 0, out)
+
+    def test_run_smoke_sends_town_on_catalog_done_and_restores_directives(self):
+        profile = self.tmp / "olympuff_m9.toml"
+        profile.write_text(self.smoke.DEFAULT_PROFILE.read_text())
+        cfg = config.load(profile)
+        cfg.directives_path.write_text('goals = ["gather_gems"]\n')
+        seen = []
+
+        class FakeRunner:
+            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance):
+                self.stop, self.metrics = stop, acceptance
+
+            def run(self):
+                self.metrics.on_entrances_done()
+                seen.append(load_directives(cfg.directives_path).goals)
+
+        with mock.patch.object(self.smoke, "Runner", FakeRunner), redirect_stdout(io.StringIO()):
+            self.smoke.run_smoke(mock.Mock(), cfg, 9, M9AcceptanceMetrics(), timeout_s=0)
+        self.assertEqual(seen, [["gather_gems", "travel:town"]])
+        self.assertEqual(cfg.directives_path.read_text(), 'goals = ["gather_gems"]\n')
 
     def test_main_wakes_before_run(self):
         with mock.patch.object(self.smoke, "Client") as Client, \
@@ -173,6 +266,45 @@ class SmokeScriptTest(unittest.TestCase):
             code, _, _ = self.main(["--api-key", "k", "--character-id", "9", "--seconds", "60"])
         self.assertEqual(code, 0)
         self.assertEqual(fake.ticks, [[{"verb": "Wait"}]])
+
+
+class TownHandoffTest(unittest.TestCase):
+    def setUp(self):
+        self.smoke = load_smoke()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / "olympuff_m9.directives.toml"
+
+    def test_send_to_town_keeps_params_and_replaces_travel_ops(self):
+        self.path.write_text(
+            'goals = ["travel:entrance:7:10:20", "gather_gems"]\nnever_attack = ["sheep"]\n'
+            'instructions = "be \\"careful\\""\n[params]\nrisk = 0.25\n'
+        )
+        self.smoke.send_to_town(self.path)
+        d = load_directives(self.path)
+        self.assertEqual(d.goals, ["gather_gems", "travel:town"])
+        self.assertEqual(d.never_attack, ["sheep"])
+        self.assertEqual(d.instructions, 'be "careful"')
+        self.assertEqual(d.params["risk"], 0.25)
+
+    def test_send_to_town_with_no_file_writes_defaults(self):
+        self.smoke.send_to_town(self.path)
+        d = load_directives(self.path)
+        self.assertEqual(d.goals, ["travel:town"])
+        self.assertEqual(d.params, PARAM_DEFAULTS)
+
+    def test_send_to_town_replaces_an_unparseable_file(self):
+        self.path.write_text("goals = [")
+        self.smoke.send_to_town(self.path)
+        self.assertEqual(load_directives(self.path).goals, ["travel:town"])
+
+    def test_restore_puts_back_or_removes_the_file(self):
+        self.smoke.send_to_town(self.path)
+        self.smoke.restore_file(self.path, None)
+        self.assertFalse(self.path.exists())
+        self.path.write_bytes(b"x")
+        self.smoke.restore_file(self.path, b"goals = []\n")
+        self.assertEqual(self.path.read_bytes(), b"goals = []\n")
 
 
 class MissingMarksTest(unittest.TestCase):

@@ -13,7 +13,8 @@ Sourced rules (docs/GAME_NOTES.md, Items, slots and gear):
   (Manual §11).
 
 Ground gems use ``supply_subtype_code`` ``gem`` (GAME_NOTES, Obs). Lives on
-the ground are still unknown, so hearts first stays off until A47 observes one.
+the ground are still unknown, so hearts first stays off until A47 observes one
+(``observe_life_supply_code`` on a Take that raises ``lives``).
 """
 
 from __future__ import annotations
@@ -22,14 +23,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from .item_table import InventorySupply
-from .world import Pos, WorldModel, chebyshev
+from .world import Entity, Pos, WorldModel, chebyshev
 
 # The Olympuff starting kit's pocket knife cannot change hands (Manual §5.3, §11).
 NON_TRANSFERABLE = frozenset({"pocket_knife"})
 # Observed on the wire (GAME_NOTES.md, docs/observations/A20_live_play.md).
 GEM_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
-# Open question: which code a heart/life pickup uses (GAME_NOTES.md).
+# Shipped empty; grows when live play confirms a life's ground code (A47).
 LIFE_SUPPLY_CODES: frozenset[str] = frozenset()
+# Authored carry caps (Manual §16 gear table); applied when Take of that upgrade applies (A47).
+AUTHORED_CHEST_CAPACITY: dict[str, int] = {"middle_chest": 30, "red_chest": 100}
+_observed_life_codes: set[str] = set()
 # Food GAME_NOTES names (Manual §16; Obs).
 FOOD_CODES = frozenset({"golden_cap", "apple", "berry"})
 
@@ -38,16 +42,26 @@ GEM_SCORE = 5_000
 UNKNOWN_SCORE = 50
 
 
+def _life_supply_codes() -> frozenset[str]:
+    return LIFE_SUPPLY_CODES | frozenset(_observed_life_codes)
+
+
+def observe_life_supply_code(code: str | None) -> None:
+    """Record a life's ground ``supply_subtype_code`` once Take raises ``lives`` (A47)."""
+    if code:
+        _observed_life_codes.add(code)
+
+
 def is_counter_supply(code: str | None) -> bool:
     """Gems and lives are consumed on pickup into counters (Manual §11)."""
-    return bool(code) and (code in LIFE_SUPPLY_CODES or code in GEM_SUPPLY_CODES)
+    return bool(code) and (code in _life_supply_codes() or code in GEM_SUPPLY_CODES)
 
 
 def loot_score(code: str | None, items: dict[str, dict[str, Any]]) -> int:
     """Higher is more worth carrying; lives first once A47 fills LIFE_SUPPLY_CODES, then gems."""
     if not code:
         return UNKNOWN_SCORE
-    if code in LIFE_SUPPLY_CODES:
+    if code in _life_supply_codes():
         return LIFE_SCORE
     if code in GEM_SUPPLY_CODES:
         return GEM_SCORE
@@ -69,12 +83,12 @@ def inventory_full(w: WorldModel) -> bool:
 
 
 def droppable_supplies(w: WorldModel) -> list[InventorySupply]:
-    """Held supplies ``Drop`` may shed.
-
-    Stowed supplies (``inventory.chest``) are left out: whether ``Drop`` takes
-    one is not documented (GAME_NOTES open questions).
-    """
-    return [s for s in w.held_supplies if s.code not in NON_TRANSFERABLE and s.id not in w.undroppable]
+    """Held supplies ``Drop`` may shed; stowed too once live play confirms it (A47)."""
+    held = [s for s in w.held_supplies if s.code not in NON_TRANSFERABLE and s.id not in w.undroppable]
+    if not w.stowed_drop_supported:
+        return held
+    stowed = [s for s in w.chest_supplies if s.code not in NON_TRANSFERABLE and s.id not in w.undroppable]
+    return held + stowed
 
 
 def worst_droppable(w: WorldModel, items: dict[str, dict[str, Any]]) -> InventorySupply | None:
@@ -137,6 +151,54 @@ def worthwhile_pickups(w: WorldModel, items: dict[str, dict[str, Any]]) -> list[
     keep = [p for p in pickups(w, items) if pickup_room(w, p, items) is not False]
     keep.sort(key=lambda p: (-p.score, chebyshev(p.pos, here), p.supply_id))
     return keep
+
+
+def supply_code_for_take(intent: dict | None, entities: list[Entity]) -> str | None:
+    """Subtype of the supply a ``Take`` names, from the pre-tick entity list."""
+    if not intent or intent.get("verb") != "Take":
+        return None
+    sid = intent.get("supply_id")
+    if not isinstance(sid, int):
+        return None
+    for e in entities:
+        if e.kind == "supply" and e.id == sid:
+            return e.code or None
+    return None
+
+
+def learn_loot_applied(
+    w: WorldModel,
+    intent: dict | None,
+    outcome: str | None,
+    *,
+    entities_before: list[Entity],
+) -> None:
+    """What an applied Take or Drop teaches before the snapshot updates (A47)."""
+    if outcome != "applied" or not intent:
+        return
+    verb = intent.get("verb")
+    if verb == "Take":
+        code = supply_code_for_take(intent, entities_before)
+        cap = AUTHORED_CHEST_CAPACITY.get(code or "")
+        if cap is not None:
+            w.carry_capacity = max(w.carry_capacity, cap)
+    elif verb == "Drop" and intent.get("supply_id") is not None:
+        sid = int(intent["supply_id"])
+        if any(s.id == sid for s in w.chest_supplies):
+            w.stowed_drop_supported = True
+
+
+def learn_loot_life_take(
+    w: WorldModel,
+    intent: dict | None,
+    *,
+    entities_before: list[Entity],
+    lives_before: int,
+) -> None:
+    """After the snapshot applies, record a life's ground code when lives rose on Take (A47)."""
+    if not intent or intent.get("verb") != "Take" or w.lives <= lives_before:
+        return
+    observe_life_supply_code(supply_code_for_take(intent, entities_before))
 
 
 def learn_loot_rejection(w: WorldModel, intent: dict | None, code: str | None) -> None:

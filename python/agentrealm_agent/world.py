@@ -127,6 +127,8 @@ class WorldModel:
     # which brings a new 10-slot chest (Manual §11; loot.learn_loot_rejection).
     carry_capacity: int = DEFAULT_CARRY_CAPACITY
     undroppable: set[int] = field(default_factory=set)  # supply ids Drop refused not_transferable
+    # A47: set when a live Take/Drop confirms stowed Drop or a chest upgrade (see loot.learn_loot_applied).
+    stowed_drop_supported: bool = False
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)

@@ -15,10 +15,15 @@ from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.loot import (
+    _observed_life_codes,
     carry_slots_used,
+    droppable_supplies,
     inventory_full,
     is_counter_supply,
+    learn_loot_applied,
+    learn_loot_life_take,
     learn_loot_rejection,
+    observe_life_supply_code,
     worst_droppable,
 )
 from agentrealm_agent.runner import Runner
@@ -354,6 +359,45 @@ class RejectionTest(unittest.TestCase):
         w.carry_capacity = 4
         w.apply_events([{"tick": 5, "events": [{"kind": "Respawned", "map_id": 1, "x": 2, "y": 3}]}])
         self.assertEqual(w.carry_capacity, DEFAULT_CARRY_CAPACITY)
+
+
+class A47CarryEdgeCasesTest(unittest.TestCase):
+    def setUp(self):
+        _observed_life_codes.clear()
+
+    def test_middle_chest_take_sets_authored_capacity(self):
+        w = WorldModel(character_id=1)
+        entities = [Entity("supply", 50, (1, 0), "middle_chest")]
+        learn_loot_applied(
+            w,
+            {"verb": "Take", "supply_id": 50},
+            "applied",
+            entities_before=entities,
+        )
+        self.assertEqual(w.carry_capacity, 30)
+
+    def test_stowed_drop_supported_includes_chest_in_droppables(self):
+        w = WorldModel(character_id=1)
+        w.held_supplies = [InventorySupply(1, "torch")]
+        w.chest_supplies = [InventorySupply(2, "apple")]
+        self.assertEqual([s.id for s in droppable_supplies(w)], [1])
+        learn_loot_applied(w, {"verb": "Drop", "supply_id": 2}, "applied", entities_before=[])
+        w.chest_supplies = [InventorySupply(2, "apple")]
+        self.assertEqual(sorted(s.id for s in droppable_supplies(w)), [1, 2])
+
+    def test_life_code_learned_when_take_raises_lives(self):
+        w = WorldModel(character_id=1)
+        w.lives = 11
+        entities = [Entity("supply", 9, (0, 0), "heart")]
+        learn_loot_life_take(
+            w,
+            {"verb": "Take", "supply_id": 9},
+            entities_before=entities,
+            lives_before=10,
+        )
+        self.assertTrue(is_counter_supply("heart"))
+        observe_life_supply_code("heart")  # idempotent
+        self.assertTrue(is_counter_supply("heart"))
 
 
 class RunnerRejectionTest(unittest.TestCase):

@@ -33,7 +33,7 @@ from .item_table import (
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
-from .loot import learn_loot_rejection
+from .loot import learn_loot_applied, learn_loot_life_take, learn_loot_rejection
 from .shop import note_shop_result
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.ops import refresh_travel_stack
@@ -417,11 +417,21 @@ class Runner:
             record_curiosity_queue(m, w.tick, intents, m.state)
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
-        rejected = self.apply_intent_results(r.get("intent_results") or [])
-        earlier = w.entities
+        lives_before = w.lives
+        entities_before = w.entities
+        sent_intents = (
+            list(m.pending_intents)
+            if m.pending_intents
+            else ([m.pending] if m.pending is not None else [])
+        )
+        rejected = self.apply_intent_results(r.get("intent_results") or [], entities_before)
+        earlier = entities_before
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        self._learn_loot_life_takes(
+            r.get("intent_results") or [], entities_before, lives_before, sent_intents
+        )
         w.note_level_clear(r.get("level_clear_ceremony"))
         self._sync_loadout()
         sync_refusals(m, w)
@@ -655,7 +665,7 @@ class Runner:
             m.pending = None
         return paced
 
-    def apply_intent_results(self, results: list[dict]) -> bool:
+    def apply_intent_results(self, results: list[dict], entities_before: list | None = None) -> bool:
         """Fold intent results since the last call. True if the last one rejected."""
         w, m = self.world, self.mem
         self._applied_uses = []
@@ -672,7 +682,7 @@ class Runner:
             if m.pending_intents is not None and idx < m.pending_next_index:
                 continue
             intent = self._intent_at(idx)
-            if self.on_result(res, idx):
+            if self.on_result(res, idx, entities_before or w.entities):
                 self._note_reach(res, intent)
                 rejected = True
                 break
@@ -698,14 +708,16 @@ class Runner:
             return m.pending
         return None
 
-    def on_result(self, result: dict, index: int) -> bool:
+    def on_result(self, result: dict, index: int, entities_before: list | None = None) -> bool:
         """Applies one intent result. True when it was rejected."""
         w, m = self.world, self.mem
+        entities = entities_before if entities_before is not None else w.entities
         intent = self._intent_at(index)
         note_shop_result(m, intent, result.get("outcome") != "rejected")
         if m.state == "Equip":
             note_equip_result(m, w, intent, result.get("outcome") == "rejected")
         if result.get("outcome") != "rejected":
+            learn_loot_applied(w, intent, result.get("outcome"), entities_before=entities)
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
@@ -747,7 +759,7 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
-        target = use_target_block(intent, w.entities) if intent and intent.get("verb") == "Use" else None
+        target = use_target_block(intent, entities) if intent and intent.get("verb") == "Use" else None
         self._note_break_use(intent, result, target, index)
         if self.acceptance is not None:
             code = (result.get("rejection") or {}).get("code", "?")
@@ -762,6 +774,25 @@ class Runner:
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
+
+    def _learn_loot_life_takes(
+        self,
+        results: list[dict],
+        entities_before: list,
+        lives_before: int,
+        sent_intents: list[dict],
+    ) -> None:
+        """Record a life's ground code when an applied Take raised lives (A47)."""
+        w = self.world
+        for res in sorted(results, key=lambda r: (r.get("tick", 0), r.get("index", 0))):
+            if res.get("outcome") != "applied":
+                continue
+            idx = int(res.get("index", 0))
+            if idx >= len(sent_intents):
+                continue
+            learn_loot_life_take(
+                w, sent_intents[idx], entities_before=entities_before, lives_before=lives_before
+            )
 
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
         """Remember an applied Read/Say in the knowledge base; count a refused one."""

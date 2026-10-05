@@ -51,7 +51,7 @@
 
   "A20": {"state": "done"},
 
-  "A47": {"state": "open", "note": "Observable in live play: life ground code, stowed Drop, middle_chest capacity (steps in PLAN.md A47; docs/observations/A20_live_play.md)."},
+  "A47": {"state": "partial", "remaining": "Live play on 2026-10-05 did not confirm life ground code, stowed Drop, or middle_chest fill (docs/observations/A47_live_play.md). Runtime learning hooks ship; defaults match A20 until those events occur."},
 
   "A21": {"state": "done"},
 

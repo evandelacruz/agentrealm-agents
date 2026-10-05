@@ -213,23 +213,42 @@ class LoopGateTest(unittest.TestCase):
         self.assertTrue(m.loop_detected)
 
 
+def gave_up(tick: int) -> dict:
+    """A guard event that gave up the goto."""
+    return {"tick": tick, "cells": [[1, 0], [2, 0]], "states": ["Break", "Explore"], "goal": "goto", "target": [150, 0]}
+
+
+def kept(tick: int) -> dict:
+    """A guard event where survival states did the moving and nothing was given up."""
+    return {"tick": tick, "cells": [[1, 0], [2, 0]], "states": ["Fight", "Retreat"]}
+
+
 class OscillationAbortTest(unittest.TestCase):
-    def test_sustained_pacing_stops_the_run_and_fails_it(self):
+    def test_sustained_give_ups_stop_the_run_and_fail_it(self):
         stop = threading.Event()
         m = metrics(stop=stop)
         for i in range(OSCILLATION_ABORT_COUNT):
-            m.on_oscillation({"tick": i * 100, "cells": [[1, 0], [2, 0]]})
+            m.on_oscillation(gave_up(i * 100))
         self.assertFalse(stop.is_set(), "a few give-ups are the guard doing its job")
-        m.on_oscillation({"tick": OSCILLATION_ABORT_COUNT * 100, "cells": [[1, 0], [2, 0]]})
+        m.on_oscillation(gave_up(OSCILLATION_ABORT_COUNT * 100))
         self.assertTrue(stop.is_set())
         self.assertTrue(any("sustained oscillation" in f for f in m.failures(full_hour=False)))
-        self.assertIn("nothing given up", m.oscillation_abort, "never blames a target the guard kept")
+        self.assertIn("goto", m.oscillation_abort)
+
+    def test_survival_only_pacing_never_aborts(self):
+        stop = threading.Event()
+        m = metrics(stop=stop)
+        for i in range(OSCILLATION_ABORT_COUNT * 10):
+            m.on_oscillation(kept(i * 10))
+        self.assertFalse(stop.is_set())
+        self.assertEqual(m.failures(full_hour=False), [])
+        self.assertEqual(len(m.oscillation_ticks), OSCILLATION_ABORT_COUNT * 10, "still counted and reported")
 
     def test_events_spread_past_the_window_do_not_abort(self):
         stop = threading.Event()
         m = metrics(stop=stop)
         for i in range(OSCILLATION_ABORT_COUNT * 3):
-            m.on_oscillation({"tick": i * OSCILLATION_ABORT_TICKS // 2, "cells": []})
+            m.on_oscillation(gave_up(i * OSCILLATION_ABORT_TICKS // 2))
         self.assertFalse(stop.is_set())
         self.assertEqual(m.failures(full_hour=False), [])
 
@@ -430,7 +449,7 @@ class SmokeScriptTest(unittest.TestCase):
     def test_sustained_oscillation_exits_1_with_a_clear_message(self):
         def played(m):
             for i in range(OSCILLATION_ABORT_COUNT + 1):
-                m.on_oscillation({"tick": i, "cells": [[1, 0], [2, 0]]})
+                m.on_oscillation(gave_up(i))
 
         code, _, err = self.run_main(3600, played)
         self.assertEqual(code, 1)

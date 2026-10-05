@@ -8,8 +8,9 @@ sends the agent to one ``goto`` target 150 blocks east of that start (or
 ``agentrealm_agent/m7_acceptance.py`` and the README. Requires AGENTREALM_API_KEY.
 
 Sustained pacing aborts the run early with exit 1: more than
-``OSCILLATION_ABORT_COUNT`` oscillation events within
-``OSCILLATION_ABORT_TICKS`` stop the runner (m7_acceptance.py).
+``OSCILLATION_ABORT_COUNT`` oscillation-guard give-ups within
+``OSCILLATION_ABORT_TICKS`` stop the runner (m7_acceptance.py). Guard events
+that gave nothing up (survival states pacing) do not count.
 """
 
 from __future__ import annotations

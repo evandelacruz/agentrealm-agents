@@ -22,8 +22,10 @@ module checks for each clause:
 
 - Does not pace: the oscillation guard (``navigation/oscillation.py``) gives
   up a target the agent paces toward. More than ``OSCILLATION_ABORT_COUNT``
-  of those within ``OSCILLATION_ABORT_TICKS`` ends the run at once, so a
-  live hour never burns its time walking back and forth.
+  of those give-ups within ``OSCILLATION_ABORT_TICKS`` ends the run at once,
+  so a live hour never burns its time walking back and forth. Guard events
+  that gave nothing up (survival states such as Fight and Retreat doing the
+  moving) are counted and reported, never an abort.
 
 Heal actions are reported but not gated: a character that is never hurt has
 nothing to heal.
@@ -49,8 +51,9 @@ from .zone_discovery import safe_tiles
 TARGET_SECONDS = 3600.0
 TARGET_DISTANCE = 150
 LOOP_STEP_LIMIT = 24  # Step-sending decisions in a row at one cell with one reason
-# Sustained pacing: the guard fired more than this many times in this many
-# ticks (10 minutes at 10 ticks/s). Its backoffs double (30 s, 60 s, 120 s),
+# Sustained pacing: the guard gave up a target more than this many times in
+# this many ticks (10 minutes at 10 ticks/s); events that gave nothing up do
+# not count. Its backoffs double (30 s, 60 s, 120 s),
 # so a target that keeps making the agent pace trips this within minutes.
 OSCILLATION_ABORT_COUNT = 3
 OSCILLATION_ABORT_TICKS = 6000
@@ -88,6 +91,7 @@ class M7AcceptanceMetrics(AcceptanceHooks):
     regen: str | None = None  # "yes" or "no" once measured
     loop_detected: bool = False
     oscillation_ticks: list[int] = field(default_factory=list)  # each guard event's tick
+    pacing_give_up_ticks: list[int] = field(default_factory=list)  # ticks of events that gave up a target
     oscillation_abort: str | None = None  # why the run was stopped for pacing
     api_errors: list[str] = field(default_factory=list)
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
@@ -111,16 +115,23 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             self.stop.set()
 
     def on_oscillation(self, event: dict) -> None:
-        """Count the guard's events; sustained pacing ends the run."""
+        """Count the guard's events; sustained give-ups for pacing end the run.
+
+        Only an event that gave up a target (it carries ``goal``) counts
+        toward the abort; survival states pacing on their own do not.
+        """
         tick = int(event.get("tick") or 0)
         self.oscillation_ticks.append(tick)
-        recent = [t for t in self.oscillation_ticks if tick - t < OSCILLATION_ABORT_TICKS]
+        if "goal" not in event:
+            return
+        self.pacing_give_up_ticks.append(tick)
+        recent = [t for t in self.pacing_give_up_ticks if tick - t < OSCILLATION_ABORT_TICKS]
         if len(recent) > OSCILLATION_ABORT_COUNT and self.oscillation_abort is None:
-            gave_up = f"gave up {event['goal']}" if "goal" in event else "nothing given up"
             self.oscillation_abort = (
-                f"sustained oscillation: {len(recent)} pacing events in {OSCILLATION_ABORT_TICKS} ticks "
-                f"(last at tick {tick}, cells {event.get('cells')}, moved by "
-                f"{', '.join(event.get('states') or []) or 'no state'}, {gave_up})"
+                f"sustained oscillation: gave up {len(recent)} targets for pacing in "
+                f"{OSCILLATION_ABORT_TICKS} ticks (last at tick {tick}: {event['goal']} → "
+                f"{tuple(event.get('target') or ())}, cells {event.get('cells')}, moved by "
+                f"{', '.join(event.get('states') or []) or 'no state'})"
             )
             if self.stop is not None:
                 self.stop.set()
@@ -228,7 +239,7 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             f"heal actions: {self.heal_actions}",
             f"safe-zone regen: {self.regen or 'not measured'}",
             f"loop detected: {self.loop_detected}",
-            f"oscillation events: {len(self.oscillation_ticks)}",
+            f"oscillation events: {len(self.oscillation_ticks)} (gave up a target: {len(self.pacing_give_up_ticks)})",
             f"API errors: {len(self.api_errors)}",
             f"lives last seen: {self.lives_seen}",
         ]

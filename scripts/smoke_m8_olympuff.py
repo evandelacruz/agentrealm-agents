@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""A16: Live M7 acceptance on Olympuff (docs/PLAYABLE_AGENT_PLAN.md M7 done-when).
+"""A25: Live M8 acceptance on Olympuff (docs/PLAYABLE_AGENT_PLAN.md M8 done-when).
 
-Plays one hour (default) from wherever the character stands on the overworld.
-Before the runner starts it reads the world and the character's position, and
-sends the agent to one ``goto`` target 150 blocks east of that start (or
-``--target X,Y``); the rest of the hour it explores. Pass criteria are in
-``agentrealm_agent/m7_acceptance.py`` and the README. Requires AGENTREALM_API_KEY.
+Plays from wherever the character stands on the overworld (default one hour).
+Pass criteria are in ``agentrealm_agent/m8_acceptance.py`` and the README.
+Requires AGENTREALM_API_KEY. The character is chosen at run time (A59); the
+script never creates one.
 """
 
 from __future__ import annotations
@@ -23,26 +22,20 @@ sys.path.insert(0, str(PYTHON))
 from agentrealm_agent import config  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
-from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
+from agentrealm_agent.m8_acceptance import TARGET_SECONDS, M8AcceptanceMetrics  # noqa: E402
 from agentrealm_agent.smoke_olympuff import navigation_start, run_smoke, wake  # noqa: E402
 
-DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m7.toml"
+DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m8.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
 
 
-def aim_at(cfg: config.CharacterConfig, overworld: int, target: tuple[int, int]) -> None:
-    """Send the agent to ``target`` first, then let it explore for the rest of the hour."""
-    cfg.policy.goto, cfg.policy.goto_map = target, overworld
-    cfg.policy.goals = ["goto"] + [g for g in cfg.policy.goals if g != "goto"]
-
-
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="M7 acceptance smoke test on Olympuff (A16).")
+    ap = argparse.ArgumentParser(description="M8 acceptance smoke test on Olympuff (A25).")
     ap.add_argument(
         "--profile",
         type=Path,
         default=DEFAULT_PROFILE,
-        help="behavior profile TOML (default: python/characters/olympuff_m7.toml)",
+        help="behavior profile TOML (default: python/characters/olympuff_m8.toml)",
     )
     ap.add_argument("--character-id", type=int, default=None)
     ap.add_argument("--character-name", default=None)
@@ -52,18 +45,13 @@ def main(argv: list[str] | None = None) -> int:
         "--seconds",
         type=float,
         default=TARGET_SECONDS,
-        help="wall-clock seconds to play before stopping (M7 done-when: 3600)",
+        help="wall-clock seconds to play before stopping (M8 default: 3600)",
     )
     ap.add_argument(
         "--timeout",
         type=float,
         default=TARGET_SECONDS + 600.0,
         help="hard timeout seconds (0 = no limit)",
-    )
-    ap.add_argument(
-        "--target",
-        default="",
-        help=f"overworld goto target X,Y (default: {TARGET_DISTANCE} blocks east of the start)",
     )
     args = ap.parse_args(argv)
 
@@ -97,33 +85,20 @@ def main(argv: list[str] | None = None) -> int:
     except (ApiError, ValueError) as e:
         print(f"start: {e}", file=sys.stderr)
         return 2
-    if args.target:
-        x, y = (int(v) for v in args.target.split(","))
-        target = (x, y)
-    else:
-        target = (origin[0] + TARGET_DISTANCE, origin[1])
-    aim_at(cfg, overworld, target)
     time.sleep(1.0)  # the runner's own world read follows: stay inside the burst of 3
 
     print(
-        f"M7 smoke (A16): profile {cfg.profile} character {cid} on {cfg.world} "
-        f"→ {args.seconds:.0f}s, goto {target} from {origin}, base {args.base_url}",
+        f"M8 smoke (A25): profile {cfg.profile} character {cid} on {cfg.world} "
+        f"→ {args.seconds:.0f}s on overworld map {overworld} from {origin}, base {args.base_url}",
         flush=True,
     )
-    metrics = M7AcceptanceMetrics(
-        overworld_map_id=overworld,
-        origin=origin,
-        target=target,
-        target_seconds=args.seconds,
-    )
+    metrics = M8AcceptanceMetrics(target_seconds=args.seconds)
     metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, log=print)
     print(f"finished in {elapsed:.1f}s", flush=True)
     for line in metrics.summary_lines():
         print(line, flush=True)
-    # A shorter practice run still fails on deaths, misses, loops and API
-    # errors; navigation and regen are judged only on (nearly) the full hour.
-    full_hour = args.seconds >= TARGET_SECONDS * 0.95
-    failures = list(metrics.failures(full_hour=full_hour))
+    full_run = args.seconds >= TARGET_SECONDS * 0.95
+    failures = list(metrics.failures(full_run=full_run))
     if elapsed + 1.0 < args.seconds:
         failures.append(f"ran {elapsed:.0f}s < target {args.seconds:.0f}s")
     try:
@@ -135,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     if failures:
         print("FAIL:", "; ".join(failures), file=sys.stderr)
         return 1
-    print("PASS: M7 acceptance criteria met", flush=True)
+    print("PASS: M8 acceptance criteria met", flush=True)
     return 0
 
 

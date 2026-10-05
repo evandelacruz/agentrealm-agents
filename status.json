@@ -67,7 +67,8 @@
 
   "A24": {"state": "done"},
 
-  "A25": {"state": "open"},
+  "A25": {"state": "partial", "remaining": "Live M8 pass on Olympuff (gate shipped; depends on A58 and M8 behavior PRs A19–A24)"},
+
 
   "A26": {"state": "done"},
 

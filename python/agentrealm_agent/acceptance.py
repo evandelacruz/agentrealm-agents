@@ -51,6 +51,9 @@ class AcceptanceHooks:
     def on_death(self) -> None:
         """A ``Died`` event arrived for our character."""
 
+    def on_events(self, events: list[dict]) -> None:
+        """Tick events after the response is applied (for example ``NPCDied``)."""
+
 
 class CountingClient:
     """Forwards to a client, appending each failed request to ``errors`` and,

@@ -1060,6 +1060,8 @@ class Runner:
 
     def on_events(self, events: list[dict]) -> None:
         w, m = self.world, self.mem
+        if self.acceptance is not None:
+            self.acceptance.on_events(events)
         for ev in events:
             kind = ev.get("kind")
             if kind == "SpokenTo":

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..config import Policy
 from ..item_table import InventorySupply
-from ..knowledge_base import KnowledgeBase
+from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..loot import carry_slots_used, loot_score, worst_droppable
 from ..memory import Memory
 from ..navigation import cost_path
@@ -15,7 +15,6 @@ from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome, scripted_outcome
 from .intents import drop, set_position, withdraw, withdraw_all
-from .pickup import knowledge_items
 
 
 def _map_view(w: WorldModel, map_id: int):

@@ -1,4 +1,9 @@
-"""Retreat: withdraw to a known safe tile before the next hits could kill (A9)."""
+"""Retreat: walk to a known safe tile before the next hits could kill (A9).
+
+Priority 1. Runs with a hostile in range, a known safe destination, and
+``should_retreat`` from health and the threat table; never on a safe tile or
+during a boss fight (A38).
+"""
 
 from __future__ import annotations
 
@@ -13,6 +18,8 @@ from .intents import set_position
 
 
 class RetreatState(State):
+    """Priority 1. Steps toward ``nearest_safe_goal`` while retreat conditions hold."""
+
     name = "Retreat"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:

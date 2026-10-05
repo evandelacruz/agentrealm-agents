@@ -13,7 +13,10 @@ from dataclasses import dataclass
 
 from .break_memory import (
     BREAKABLE,
+    CAPABILITIES,
     WEAPONS,
+    attempt_failed,
+    attempt_open,
     BreakChoice,
     break_step_cost,
     held_capabilities,
@@ -129,17 +132,25 @@ def _danger_near(w: WorldModel, policy, pos: Pos) -> int:
     )
 
 
+def already_opened(kb: KnowledgeBase | None, map_id: int, pos: Pos) -> bool:
+    """A break opened this cell before, with any capability: a regrown block is not odd again."""
+    return any(attempt_open(kb, map_id, pos, cap) for cap in CAPABILITIES)
+
+
+def _tried(kb: KnowledgeBase | None, map_id: int, pos: Pos) -> bool:
+    return any(attempt_failed(kb, map_id, pos, cap) for cap in CAPABILITIES)
+
+
 def list_odd_blocks(
     w: WorldModel,
     kb: KnowledgeBase | None,
     policy,
     m: Memory | None = None,
-    *,
-    at: Pos | None = None,
 ) -> list[OddNomination]:
+    """Odd blocks in sight, never opened, untried ones first, then by score over distance and danger."""
     if w.map_id is None or w.pos is None:
         return []
-    here = at or w.pos
+    here = w.pos
     tiles = _map_tiles(w, kb, w.map_id)
     sr = sight_range(w, w.map_id, here)
     out: list[OddNomination] = []
@@ -148,14 +159,20 @@ def list_odd_blocks(
             continue
         if chebyshev(here, p) > sr:
             continue
-        if _gave_up(m, w.map_id, p):
+        if _gave_up(m, w.map_id, p) or already_opened(kb, w.map_id, p):
             continue
         boost = _clue_boost(kb, block, w.map_id)
         score = odd_score(tiles, p, boost)
         if score <= 0:
             continue
         out.append(OddNomination(p, score, boost))
-    out.sort(key=lambda n: (-(n.score / (chebyshev(here, n.pos) + 1 + _danger_near(w, policy, n.pos))), n.pos))
+    out.sort(
+        key=lambda n: (
+            _tried(kb, w.map_id, n.pos),
+            -(n.score / (chebyshev(here, n.pos) + 1 + _danger_near(w, policy, n.pos))),
+            n.pos,
+        )
+    )
     return out
 
 
@@ -187,7 +204,7 @@ def _stick_choice(
 ) -> BreakChoice | None:
     """The sticky target, while it is on this map, in sight, still odd and not given up."""
     map_id, pos = stick_to
-    if map_id != w.map_id or w.pos is None or _gave_up(m, map_id, pos):
+    if map_id != w.map_id or w.pos is None or _gave_up(m, map_id, pos) or already_opened(kb, map_id, pos):
         return None
     if chebyshev(w.pos, pos) > sight_range(w, map_id, w.pos):
         return None

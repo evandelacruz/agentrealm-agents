@@ -286,7 +286,7 @@ This is what makes a second run better than the first, and it is what the strate
 ### Strategist (LLM, optional)
 
 - **Runs** in its own thread. The state machine keeps the old plan until a new one lands.
-- **Triggers:** a new clue, an NPC reply, entering a level, no progress for N minutes, a goal finished or failed, a death. Calls are rate-limited and capped by a cost budget.
+- **Triggers:** a new clue, an NPC reply, entering a level, no progress for N minutes, a goal finished or failed, a death. Calls are rate-limited and capped by a token budget (`AGENTREALM_STRATEGIST_MAX_TOKENS`, PLAN.md A35): tokens times the model's price is the cost, so the cap holds whatever the model costs.
 - **Input:** a compact state summary, relevant knowledge-base entries, all clue text, the current plan, and the operator's directives.
 - **Its main job** is interpretation: turn clue text (riddles and directions) into concrete goals, such as which entrance mark matches a clue, what tool an entrance needs, or which odd block to try.
 - **Output:** JSON checked against a schema. The example uses an invented world:

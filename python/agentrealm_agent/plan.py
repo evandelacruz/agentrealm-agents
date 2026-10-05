@@ -410,8 +410,8 @@ def apply_set_param(
 class Plan:
     """Validated goal stack plus effective params (A34).
 
-    ``params`` holds the effective survival params for the strategist; the
-    survival states read the directives' params (A9). ``current`` and ``goal_done`` only read;
+    ``params`` holds the effective survival params the states read (A9): the
+    directives' values, tightened by ``set_param`` or the strategist (A35). ``current`` and ``goal_done`` only read;
     ``advance``, ``drop_current`` and ``finish_current`` are the only calls that move the stack.
     """
 

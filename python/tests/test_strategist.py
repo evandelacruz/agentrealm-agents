@@ -23,7 +23,8 @@ from agentrealm_agent.strategist import (
     build_prompt,
     drain_triggers,
 )
-from agentrealm_agent.world import WorldModel
+from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_agent.zone_discovery import apply_zone
 
 WAIT_ANSWER = {"goals": [{"op": "wait", "seconds": 1}], "notes": "from model"}
 
@@ -209,6 +210,45 @@ class ParamsTest(unittest.TestCase):
         queue_signal(r.mem, {"trigger": "death"})
         round_trip(s, r)
         self.assertEqual(r.plan.params["retreat_hits"], 3)
+
+
+class RunnerParamsTest(unittest.TestCase):
+    """The states read the plan's params, so a strategist reply changes what the agent does."""
+
+    def runner(self) -> Runner:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        policy = Policy(kind="scripted", goals=["hold"], on_hostile="flee", hostile=["npc"], hostile_range=2)
+        cfg = CharacterConfig("T", "default", "test", "sandbox", policy, Path("t.toml"))
+        r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
+        self.addCleanup(r.trace.close)
+        # A gnawer hits for 5; at 12 health two hits cannot kill, four can.
+        w = WorldModel(character_id=1, map_id=7, pos=(2, 0), perception=3)
+        for y in range(3):
+            for x in range(5):
+                w.view.tiles[(x, y)] = "dirt"
+        w.terrain_center, w.terrain_map = (2, 0), 7
+        w.health, w.max_health, w.lives, w.alive = 12, 20, 6, True
+        w.entities = [Entity("npc", 1, (3, 0), code="gnawer")]
+        w.threat.record(("npc", "gnawer"), 5)
+        apply_zone(w, 7, 0, 2, {"safe": True, "brightness": 1})
+        r.world = w
+        r.mem = Memory(need_self=False, need_position=False)
+        return r
+
+    def test_strategist_retreat_hits_changes_the_decision(self):
+        r = self.runner()
+        before = r._decide(r.world, r.mem, plan=r.plan)
+        self.assertFalse(before.reason.startswith("retreat"), before.reason)
+        s = make(FakeLLM({"goals": [], "params": {"retreat_hits": 4}}))
+        queue_signal(r.mem, {"trigger": "death"})
+        round_trip(s, r)
+        self.assertEqual(r.plan.params["retreat_hits"], 4)
+        after = r._decide(r.world, r.mem, plan=r.plan)
+        self.assertTrue(after.reason.startswith("retreat"), after.reason)
 
 
 class FailureTest(unittest.TestCase):

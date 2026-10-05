@@ -186,7 +186,7 @@ class Runner:
             self.cfg.policy,
             self.rng,
             never_attack=self.directives.directives.never_attack,
-            params=self.directives.directives.params,
+            params=self.plan.params,  # directives params, tightened by the strategist or a set_param op (A34, A35)
             knowledge=self.knowledge,
             directives=self.directives.directives,
             plan=plan,

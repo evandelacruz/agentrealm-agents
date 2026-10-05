@@ -25,6 +25,8 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.break_state import BreakState
+from agentrealm_agent.states.equip import EquipState
+from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.states.investigate import InvestigateState
 from agentrealm_agent.states.shop import ShopState
 from agentrealm_agent.states.travel import TravelState
@@ -93,6 +95,12 @@ class GotoDefersStatesTest(unittest.TestCase):
         w.view.readable[(1, 1)] = True
         self.assertTrue(InvestigateState().guard(w, ctx(goto=False)))
         self.assertFalse(InvestigateState().guard(w, ctx(goto=True)))
+
+    def test_equip(self):
+        w = world()
+        w.held_supplies = [InventorySupply(1, "red_chest")]
+        self.assertTrue(EquipState().guard(w, ctx(goto=False)))
+        self.assertFalse(EquipState().guard(w, ctx(goto=True)))
 
     def test_travel(self):
         w = world()

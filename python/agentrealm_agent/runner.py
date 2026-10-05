@@ -56,9 +56,19 @@ from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
 from .curiosity_budget import record_curiosity_queue
-from .interest_list import read_key, say_key
-from .clues import note_read_clue, note_spoken_clue
+from .interest_list import read_key, read_supply_key, say_key
+from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
 from .investigation import mark_cell_read, mark_npc_spoken
+from .scroll_investigation import (
+    codes_from_entities_payload,
+    codes_from_inventory_supplies,
+    log_supply_codes_seen,
+    mark_code_probed,
+    mark_scroll_subtype,
+    mark_supply_read,
+    scroll_subtype_codes,
+    supply_code_on_world,
+)
 from .zone_discovery import apply_town, apply_zone, zone_failed
 from .memory import queue_signal
 from .strategist import Strategist
@@ -438,6 +448,7 @@ class Runner:
         absorb_heal_pending(m, w, self.knowledge, events)
         self._learn_life_code(lives_before)
         w.note_level_clear(r.get("level_clear_ceremony"))
+        self._log_inventory_supply_codes()
         self._sync_loadout()
         sync_refusals(m, w)
         w.learn_threat(events, earlier)
@@ -854,6 +865,23 @@ class Runner:
                     pos,
                     int(result.get("tick", self.world.tick)),
                 )
+        elif target.get("kind") == "supply" and target.get("supply_id") is not None:
+            sid = int(target["supply_id"])
+            key = read_supply_key(sid)
+            code = supply_code_on_world(self.world, sid)
+            rej = result.get("rejection") or {}
+            if applied:
+                mark_supply_read(self.knowledge, sid)
+                if code:
+                    mark_scroll_subtype(self.knowledge, code)
+                note_scroll_clue(self.knowledge, self.mem, self.world, result, sid)
+            elif rej.get("code") == "nothing_to_read":
+                if code and code not in scroll_subtype_codes(self.knowledge):
+                    # A probe answered: this code is not a scroll. Nothing was refused.
+                    mark_code_probed(self.knowledge, code)
+                    return
+                # A scroll with no text (or a code learned wrong): never read it again.
+                mark_supply_read(self.knowledge, sid)
         elif intent["verb"] == "Say" and intent.get("npc_id") is not None:
             key = say_key(int(intent["npc_id"]))
             if applied:
@@ -873,6 +901,14 @@ class Runner:
 
     def _learn_items_from_entities(self, payload: dict) -> None:
         self._with_item_table(lambda items: absorb_entities_payload(items, payload))
+        log_supply_codes_seen(self.knowledge, codes_from_entities_payload(payload))
+
+    def _log_inventory_supply_codes(self) -> None:
+        w = self.world
+        log_supply_codes_seen(
+            self.knowledge,
+            codes_from_inventory_supplies(w.held_supplies + w.chest_supplies),
+        )
 
     def _note_reach(self, result: dict, intent: dict | None) -> None:
         # Held until the same response's observation is applied: an Arm that
@@ -915,11 +951,15 @@ class Runner:
             # The baseline holds only until the next loadout change, death or map change.
             self._removed_code = None
 
+        seen_codes: list[str] = []
+
         def learn(items: dict) -> None:
             if obs and not obs.get("unchanged"):
                 body = obs.get("snapshot") if obs.get("complete") else obs.get("delta")
                 if isinstance(body, dict) and "entities" in body:
-                    absorb_entities_payload(items, body.get("entities"))
+                    entities = body.get("entities")
+                    absorb_entities_payload(items, entities)
+                    seen_codes.extend(codes_from_entities_payload(entities))
             absorb_attack_range(items, w.armed_code, reach)
             absorb_npc_damaged(
                 items,
@@ -933,6 +973,7 @@ class Runner:
                 absorb_damaged_worn(items, events, w.worn_codes, self._removed_code, w.entities, earlier_entities)
 
         self._with_item_table(learn)
+        log_supply_codes_seen(self.knowledge, seen_codes)
 
     def _note_break_use(self, intent: dict | None, result: dict, block, index: int) -> None:
         """Settle the Break ``Use`` in flight (A28).

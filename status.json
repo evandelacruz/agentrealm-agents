@@ -51,9 +51,9 @@
 
   "A20": {"state": "done"},
 
-  "A47": {"state": "partial", "remaining": "Code ships: life code filed to the item table on a single-Take lives rise, Manual §16 chest cap as an assumed default, held-only drops. What needs live play to observe (confirm the life code, stowed Drop, measured middle_chest cap) is split to A57 (docs/observations/A47_live_play.md)."},
+  "A47": {"state": "done"},
 
-  "A57": {"state": "open"},
+  "A57": {"state": "open", "note": "Live play still needed: confirm a life's ground code, probe stowed Drop on inventory.chest, measure middle_chest capacity at carry_capacity_full. Observers had no stowed supplies and under 50 gems; see docs/observations/A47_live_play.md (session 3)."},
 
   "A21": {"state": "done"},
 
@@ -75,7 +75,7 @@
 
   "A30": {"state": "done"},
 
-  "A56": {"state": "open"},
+  "A56": {"state": "done"},
 
   "A31": {"state": "done"},
 

@@ -191,6 +191,25 @@ class RunnerTest(unittest.TestCase):
         second = r.intents_for(Decision(say, "test"))
         self.assertEqual([i["verb"] for i in second], ["Wait"] * 5 + ["Say"])
 
+    def test_say_to_an_npc_is_remembered_by_its_top_level_npc_id(self):
+        # Say names an NPC by npc_id, not a target (API rules § Say); an
+        # applied one is spoken, a rejected one counts against the item.
+        from agentrealm_agent.interest_list import say_key
+        from agentrealm_agent.investigation import spoken_npc_ids
+        from agentrealm_agent.knowledge_base import KnowledgeBase
+        from agentrealm_agent.states.intents import say_to
+
+        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r.knowledge = KnowledgeBase.empty("sandbox")
+        say = say_to(Entity("npc", 4, (1, 1), "helper"))
+        self.assertEqual(say, {"verb": "Say", "npc_id": 4, "text": "hello"})
+        r.mem.pending = say
+        r.on_result({"tick": 20, "outcome": "rejected", "rejection": {"code": "target_out_of_range"}}, 0)
+        self.assertEqual(r.mem.investigate_rejections, {say_key(4): 1})
+        r.mem.pending = say
+        r.on_result({"tick": 21, "outcome": "applied"}, 0)
+        self.assertIn(4, spoken_npc_ids(r.knowledge))
+
     def test_applied_use_and_say_start_their_cooldowns(self):
         # A1: an applied result records its tick; a rejected one leaves the clock alone.
         r = self.runner(FakeClient([]), Policy(goals=["hold"]))

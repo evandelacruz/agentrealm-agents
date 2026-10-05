@@ -1,5 +1,23 @@
 # A4 live M6 acceptance on Olympuff (2026-10-04). Character id redacted; no credentials.
 # Regenerate: AGENTREALM_API_KEY=… make smoke-m6-olympuff
+#
+# NOT ACCEPTED. The PASS line below is what the script printed, but the run hid
+# two faults the metrics did not count then (they do now: API errors fail a run):
+#  - 20× `tick error HTTP 400 malformed_intent`, in two bursts (t=2605077–086,
+#    t=2605247–258). The agent stood within 25 blocks of an NPC and Investigate
+#    sent `Say` with `target: {kind: npc, npc_id}`; the API takes a top-level
+#    `npc_id` (API rules § Say), so ingest refused the whole queue. An ingest
+#    refusal is an ApiError, not an intent result, so it never counted against
+#    the Say item and the agent resent it every tick: one POST per tick, past
+#    the burst-of-3 budget. Client bug, fixed in `states/intents.say_to`; the
+#    same pass drops the `map_id` that `read_block` put in a Read's block
+#    target, a field Read does not take (API rules § Read).
+#  - 1× `zone error HTTP 429 rate_limited` (t=2604977): a spare-window zone
+#    read over the budget. Not explained by this run alone; the re-run must
+#    show none.
+# The run used a smoke-only shim that marked visible NPCs "spoken" to keep
+# Investigate quiet; it is removed. A4 stays partial until a re-run after the
+# fix prints PASS with zero API errors.
 
 M6 smoke (A4): OlympuffWalker (***) on olympuff → 200 steps, base https://api.agentrealm.gg
 [OlympuffWalker] t=0 @? world    olympuff open 10Hz

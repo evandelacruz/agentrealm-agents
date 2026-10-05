@@ -198,14 +198,15 @@ class InvestigateStateTest(unittest.TestCase):
         ctx = PlayContext(Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
         out = dispatch(w, ctx)
         self.assertEqual(out.state, "Investigate")
-        self.assertEqual(out.intents, [read_block(7, (1, 1))])
+        # Exactly {kind, x, y}: a map_id is a field Read does not take (API rules § Read).
+        self.assertEqual(out.intents, [{"verb": "Read", "target": {"kind": "block", "x": 1, "y": 1}}])
 
     def test_decide_says_to_npc(self):
         w = world(["...", "...", "..."], at=(0, 1))
         w.entities = [Entity("npc", 4, (2, 2), "helper")]
         d = decide(w, Memory(), Policy(kind="scripted", hostile=[]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
         self.assertEqual(d.intent["verb"], "Say")
-        self.assertEqual(d.intent["target"], {"kind": "npc", "npc_id": 4})
+        self.assertEqual(d.intent, {"verb": "Say", "npc_id": 4, "text": "hello"})
 
     def test_act_has_no_side_effects_for_read(self):
         w = world(["...", ".S.", "..."], at=(0, 1))
@@ -359,14 +360,14 @@ class RunnerInvestigationTest(unittest.TestCase):
 
     def test_applied_read_is_remembered(self):
         r = self.runner([])
-        intent = read_block(7, (1, 1))
+        intent = read_block((1, 1))
         r.mem.pending = intent
         self.assertFalse(r.on_result({"outcome": "applied", "tick": 5}, 0))
         self.assertTrue(cell_was_read(r.knowledge, 7, (1, 1)))
 
     def test_rejected_read_is_capped(self):
         r = self.runner([])
-        intent = read_block(7, (1, 1))
+        intent = read_block((1, 1))
         for _ in range(MAX_REJECTIONS):
             self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem).kind, "read_block")
             r.mem.pending = intent

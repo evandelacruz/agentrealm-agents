@@ -61,8 +61,9 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
     if m.need_self or m.windows_since_self >= SELF_REFRESH:
         return "self"
     if m.need_position or w.pos is None:
-        # Asleep or unplaced characters are off the map until a tick runs (M6).
-        if w.placed is False or w.asleep:
+        # Asleep is off the map: position cannot answer, and any intent wakes
+        # it (GAME_NOTES Sleep). Sync sends the Wait.
+        if w.asleep:
             return "tick"
         return "position"
     if policy.kind in ("idle",):

@@ -7,10 +7,12 @@ world = "olympuff"
 [policy]
 kind = "scripted"
 goals = ["explore"]
-# M6 done-when is calm paced walking; hostiles are ignored so Flee cannot hold the round.
+# M6's done-when is the executor on calm walking (PLAYABLE_AGENT_PLAN Milestones,
+# M6): 200 Steps, no movement_cooldown, tick POSTs under a quarter of calm
+# windows. Flee and Fight are not under test, so hostiles are ignored. Damage
+# still lands, and Heal may walk to food; those Steps count.
 on_hostile = "ignore"
 hostile = []
-hostile_range = 2
 pickup = false
 avoid_blocks = ["fire", "lava"]
 entity_refresh = 20

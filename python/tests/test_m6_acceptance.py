@@ -71,6 +71,25 @@ class M6AcceptanceMetricsTest(unittest.TestCase):
         m.on_rejection("movement_cooldown", verb="Step")
         self.assertTrue(any("movement_cooldown" in f for f in m.failures()))
 
+    def test_api_errors_are_counted_and_fail_the_run(self):
+        # An ingest refusal (400) or a 429 never reaches on_rejection, but it
+        # spent a request and is a client or budget fault the run must show.
+        from agentrealm_agent.client import ApiError
+
+        class Failing(Reads):
+            def tick(self, *a, **k):
+                raise ApiError(400, "malformed_intent")
+
+        m = M6AcceptanceMetrics(target_steps=0)
+        client = m.wrap(Failing())
+        with self.assertRaises(ApiError):
+            client.tick(1, [{"verb": "Say"}])
+        m.on_window(urgent=False)
+        self.assertEqual(m.calm_tick_calls, 1, "a failed request still spent the window")
+        self.assertEqual(m.api_errors, ["tick 400 malformed_intent"])
+        self.assertTrue(any("API error" in f for f in m.failures()))
+        self.assertIn("API errors: 1", m.summary_lines())
+
     def test_stop_is_set_at_the_step_goal(self):
         stop = threading.Event()
         m = M6AcceptanceMetrics(target_steps=2, stop=stop)
@@ -299,18 +318,41 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertEqual(self.smoke.ensure_character(client, cfg), 9)
         client.create_character.assert_called_once_with("olympuff", cfg.name, cfg.avatar, cfg.model_agent)
 
-    def test_ensure_character_reuses_listing_when_create_fails(self):
+    def test_ensure_character_reuses_listing_when_the_name_was_used(self):
         from agentrealm_agent.client import ApiError
 
         cfg = config.load(self.smoke.DEFAULT_CHARACTER)
         client = mock.Mock()
-        client.create_character.side_effect = ApiError(409, "character_cap_reached")
+        client.create_character.side_effect = ApiError(409, "identity_reuse")
         client.list_characters.return_value = [
             {"id": 4, "name": cfg.name, "world_code": "sandbox"},
             {"id": 7, "name": cfg.name, "world_code": cfg.world},
         ]
         self.assertEqual(self.smoke.ensure_character(client, cfg), 7)
         self.assertEqual(config.load_state(cfg)["character_id"], 7)
+
+    def test_ensure_character_raises_other_create_failures(self):
+        from agentrealm_agent.client import ApiError
+
+        cfg = config.load(self.smoke.DEFAULT_CHARACTER)
+        for err in (ApiError(401, "unauthorized"), ApiError(500, "internal"), ApiError(400, "name_invalid")):
+            with self.subTest(code=err.code):
+                client = mock.Mock()
+                client.create_character.side_effect = err
+                with self.assertRaises(ApiError):
+                    self.smoke.ensure_character(client, cfg)
+                client.list_characters.assert_not_called()
+                self.assertIsNone(config.load_state(cfg))
+
+    def test_ensure_character_raises_when_no_listed_character_matches(self):
+        from agentrealm_agent.client import ApiError
+
+        cfg = config.load(self.smoke.DEFAULT_CHARACTER)
+        client = mock.Mock()
+        client.create_character.side_effect = ApiError(409, "identity_reuse")
+        client.list_characters.return_value = [{"id": 4, "name": cfg.name, "world_code": "sandbox"}]
+        with self.assertRaises(ApiError):
+            self.smoke.ensure_character(client, cfg)
 
     def exit_code_for(self, metrics):
         with mock.patch.object(self.smoke, "Client"), \

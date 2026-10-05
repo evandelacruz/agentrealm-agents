@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 
+from .client import ApiError
+
 TARGET_STEPS = 200
 CALM_BUDGET_FRACTION = 0.25
 
@@ -27,11 +29,14 @@ class M6AcceptanceMetrics:
     calm_tick_calls: int = 0  # POST tick only; M6 done-when is poll cadence
     urgent_windows: int = 0
     rejection_codes: list[str] = field(default_factory=list)
+    # Failed requests ("tick 400 malformed_intent", "zone 429 rate_limited"):
+    # an ingest refusal never reaches on_rejection, and each one spent a call.
+    api_errors: list[str] = field(default_factory=list)
     window_calls: list[str] = field(default_factory=list)  # this window's calls so far
 
     def wrap(self, client):
         """``client`` with every method call recorded against the current window."""
-        return _CountingClient(client, self.window_calls)
+        return _CountingClient(client, self.window_calls, self.api_errors)
 
     def on_window(self, *, urgent: bool) -> None:
         """Close one window: file the calls it made as urgent or calm."""
@@ -82,6 +87,8 @@ class M6AcceptanceMetrics:
                 f"({self.calm_tick_calls}/{self.calm_windows} windows), "
                 f"need under {CALM_BUDGET_FRACTION:.0%}"
             )
+        if self.api_errors:
+            out.append(f"{len(self.api_errors)} API error(s): {', '.join(sorted(set(self.api_errors)))}")
         return out
 
     def summary_lines(self) -> list[str]:
@@ -93,6 +100,7 @@ class M6AcceptanceMetrics:
             f"calm API calls (reads included): {self.calm_calls} "
             f"({self.calm_call_fraction:.1%} of calm windows)",
             f"urgent windows: {self.urgent_windows}",
+            f"API errors: {len(self.api_errors)}",
         ]
         if self.rejection_codes:
             other = [c for c in self.rejection_codes if c != "movement_cooldown"]
@@ -102,11 +110,13 @@ class M6AcceptanceMetrics:
 
 
 class _CountingClient:
-    """Forwards to a client, appending each method name called to ``calls``."""
+    """Forwards to a client, appending each method name called to ``calls``
+    and each failed request to ``errors``."""
 
-    def __init__(self, inner, calls: list[str]):
+    def __init__(self, inner, calls: list[str], errors: list[str]):
         self._inner = inner
         self._calls = calls
+        self._errors = errors
 
     def __getattr__(self, name: str):
         attr = getattr(self._inner, name)
@@ -115,6 +125,10 @@ class _CountingClient:
 
         def call(*args, **kwargs):
             self._calls.append(name)  # a request is spent even if it fails
-            return attr(*args, **kwargs)
+            try:
+                return attr(*args, **kwargs)
+            except ApiError as e:
+                self._errors.append(f"{name} {e.status} {e.code}")
+                raise
 
         return call

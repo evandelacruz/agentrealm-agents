@@ -79,6 +79,15 @@ class MergeTest(unittest.TestCase):
         it.absorb_supply_entry(items, {"id": 1, "x": 0, "y": 0, "supply_subtype_code": "apple"})
         self.assertEqual(items, {})
 
+    def test_supply_read_does_not_store_capabilities_until_served(self):
+        # Entity reads serve gem_price today, not capability tags (PLAN.md Server gaps, A54).
+        items: dict = {}
+        it.absorb_supply_entry(
+            items,
+            {"id": 1, "supply_subtype_code": "bronze_sword", "gem_price": 5, "capabilities": ["cut", "chop"]},
+        )
+        self.assertEqual(items, {"bronze_sword": {"gem_price": 5}})
+
 
 class EntitiesTest(unittest.TestCase):
     def test_entity_read_list(self):

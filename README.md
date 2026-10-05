@@ -86,6 +86,20 @@ Give-up rule: navigation passes on a give-up only when stuck detection gave up o
 
 No live hour has passed yet (A58); runs that did not are in [`docs/observations/A16_live_play.md`](docs/observations/A16_live_play.md) and [`docs/observations/A58_live_play.md`](docs/observations/A58_live_play.md). CI covers the gate, the runner hooks and the navigation fixtures in `python/tests/test_m7_acceptance.py` without live keys.
 
+Live M10 smoke: `make smoke-m10-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set explores for one hour on olympuff via [`scripts/smoke_m10_olympuff.py`](scripts/smoke_m10_olympuff.py), using profile `python/characters/olympuff_m10.toml` and a character you choose at run time. A sleeping character is woken with one `Wait` first.
+
+Pass criteria (PLAN.md A33, checked in [`m10_acceptance.py`](python/agentrealm_agent/m10_acceptance.py)):
+
+- no death, and alive at the end of the run;
+- no Break attempt on a (block, capability) pair already failed in the knowledge base (re-breaking a regrown block a pair opened is fine);
+- no API error;
+- on a run of at least 95% of the default hour, every readable sign that came into sight along the route has been read, and every NPC that came within 25 blocks has been spoken to;
+- the odd-block clause is covered offline by the `ODD_BUSH` fixture in `python/tests/test_m10_acceptance.py`.
+
+Break memory sees a `Use` only through `Memory.break_pending`, which only Break and OddBreak set. Gather's `cut bush` and Solve's `use_block` never set it, so their uses are neither recorded in `kb.breaks` nor counted by the duplicate-break gate.
+
+No live M10 pass yet (A33 partial); CI covers the gate, the odd-bush fixture and the smoke script in `python/tests/test_m10_acceptance.py` without live keys.
+
 M4 (strategist) acceptance is offline: `make test` runs [`python/tests/test_m4_acceptance.py`](python/tests/test_m4_acceptance.py), where the real runner and states play an invented test world against a fake server, with a fake model in place of the LLM. The agent reads a sign, the clue reaches the strategist, and its answer (buy a torch, travel to a hedge, burn it, travel to the entrance behind it) has to be carried out.
 
 Pass criteria (PLAN.md A36, checked in [`m4_acceptance.py`](python/agentrealm_agent/m4_acceptance.py)):

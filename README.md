@@ -56,6 +56,8 @@ In a calm window it would otherwise skip, the agent calls `get_zone` on one reve
 
 With `policy.pickup` on, **Recover** walks back to a dropped death chest on this map only once a safe tile on or next to it is known; until then, or while no step toward it can be planned, it keeps exploring. At the chest it withdraws everything when it all fits, else the best supplies by id that fit; it drops held junk first when the pack is full and the chest beats what is carried; otherwise it skips a withdraw that would only repeat `carry_capacity_full`. Only that tile is checked, not the route to it. **Escape**, **Retreat**, **Fight** and **Flee** outrank it, and the pickup reflex still runs first. Urgent windows and the `idle` policy never read zones.
 
+**Equip** (A19) runs when something in hand beats the weapon or armor already worn: it `Arm`s a better weapon, or `Remove`s a worn piece and `Wear`s the upgrade. Armor is scored from learned damage saved against hostile types in the threat table; weapons from learned hit damage, with shop prices as a fallback. Food, potions, and compose fragments stay for **Heal** and **Solve**.
+
 ## Tests
 
 From the repo root:

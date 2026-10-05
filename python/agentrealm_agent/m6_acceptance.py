@@ -5,8 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 
-from .acceptance import AcceptanceHooks
-from .client import ApiError
+from .acceptance import AcceptanceHooks, CountingClient
 
 TARGET_STEPS = 200
 CALM_BUDGET_FRACTION = 0.25
@@ -37,7 +36,7 @@ class M6AcceptanceMetrics(AcceptanceHooks):
 
     def wrap(self, client):
         """``client`` with every method call recorded against the current window."""
-        return _CountingClient(client, self.window_calls, self.api_errors)
+        return CountingClient(client, self.api_errors, calls=self.window_calls)
 
     def on_window(self, *, urgent: bool, alive: bool = True) -> None:
         """Close one window: file the calls it made as urgent or calm."""
@@ -109,27 +108,3 @@ class M6AcceptanceMetrics(AcceptanceHooks):
                 lines.append(f"other rejections: {', '.join(other)}")
         return lines
 
-
-class _CountingClient:
-    """Forwards to a client, appending each method name called to ``calls``
-    and each failed request to ``errors``."""
-
-    def __init__(self, inner, calls: list[str], errors: list[str]):
-        self._inner = inner
-        self._calls = calls
-        self._errors = errors
-
-    def __getattr__(self, name: str):
-        attr = getattr(self._inner, name)
-        if not callable(attr):
-            return attr
-
-        def call(*args, **kwargs):
-            self._calls.append(name)  # a request is spent even if it fails
-            try:
-                return attr(*args, **kwargs)
-            except ApiError as e:
-                self._errors.append(f"{name} {e.status} {e.code}")
-                raise
-
-        return call

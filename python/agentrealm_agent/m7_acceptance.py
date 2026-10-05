@@ -6,7 +6,9 @@ module checks for each clause:
 - Survives an hour: no ``Died`` event, alive when the hour ends.
 - Retreats in time: no tick where ``should_retreat`` held on the world the
   decision saw while a non-survival state was running.
-- Recovers only when safe: no Recover withdraw while the chest spot is unsafe.
+- Recovers only when safe: every ``WithdrawFromChest`` Recover sends runs while
+  the agent stands on a known safe tile (a ``get_zone`` read said so). The cell
+  is where the queue puts the agent when that intent runs, not where it stands now.
 - Measures safe-zone regen: ``regen_known`` has an answer ("yes" or "no"). A
   "yes" an earlier run saved to the knowledge base counts.
 - Reaches a point 150 blocks away, or gives up with a reason: the smoke script
@@ -29,15 +31,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .acceptance import AcceptanceHooks
-from .client import ApiError
+from .acceptance import AcceptanceHooks, CountingClient
 from .config import Policy
+from .executor.movement import step_landing
 from .healing import regen_known
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .states.recover import recover_spot_safe
 from .survival import should_retreat
 from .world import Pos, WorldModel, chebyshev
+from .zone_discovery import safe_tiles
 
 TARGET_SECONDS = 3600.0
 TARGET_DISTANCE = 150
@@ -81,7 +83,7 @@ class M7AcceptanceMetrics(AcceptanceHooks):
     _loop_streak: int = 0
 
     def wrap(self, client):
-        return _ErrorCountingClient(client, self.api_errors)
+        return CountingClient(client, self.api_errors)
 
     def on_window(self, *, urgent: bool, alive: bool = True) -> None:
         now = self.clock()
@@ -91,7 +93,10 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             self.stop.set()
 
     def on_death(self) -> None:
+        """A death already fails the run, so end it rather than play on."""
         self.deaths += 1
+        if self.stop is not None:
+            self.stop.set()
 
     def before_tick(
         self,
@@ -114,10 +119,11 @@ class M7AcceptanceMetrics(AcceptanceHooks):
         if intents and state == "Heal":
             self.heal_actions += 1
         if intents and state == "Recover":
-            self.recover_withdraws += 1
-            chest = w.death_chest
-            if chest is not None and not recover_spot_safe(w, chest[0], chest[1]):
-                self.recover_unsafe += 1
+            safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
+            for cell in withdraw_cells(w.pos, intents):
+                self.recover_withdraws += 1
+                if cell not in safe:
+                    self.recover_unsafe += 1
         self.regen = regen_known(knowledge, m) or self.regen
         if intents is not None:
             self._note_loop(w, reason, intents)
@@ -165,7 +171,7 @@ class M7AcceptanceMetrics(AcceptanceHooks):
         if self.retreat_misses:
             out.append(f"{self.retreat_misses} tick(s) should_retreat held outside a survival state")
         if self.recover_unsafe:
-            out.append(f"{self.recover_unsafe} Recover withdraw(s) with an unsafe chest spot")
+            out.append(f"{self.recover_unsafe} Recover withdraw(s) from a cell not known safe")
         if self.loop_detected:
             out.append(f"loop: {LOOP_STEP_LIMIT} Steps in a row at one cell with one reason")
         if full_hour and not self.navigation_ok():
@@ -189,7 +195,7 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             f"give-ups on other goals: {self.other_give_ups}",
             f"deaths: {self.deaths}",
             f"retreat misses: {self.retreat_misses}",
-            f"recover withdraws: {self.recover_withdraws} (unsafe {self.recover_unsafe})",
+            f"recover withdraws: {self.recover_withdraws} (from a cell not known safe: {self.recover_unsafe})",
             f"heal actions: {self.heal_actions}",
             f"safe-zone regen: {self.regen or 'not measured'}",
             f"loop detected: {self.loop_detected}",
@@ -198,23 +204,19 @@ class M7AcceptanceMetrics(AcceptanceHooks):
         ]
 
 
-class _ErrorCountingClient:
-    """Forwards to a client, appending each failed request to ``errors``."""
+def withdraw_cells(pos: Pos | None, intents: list[dict]) -> list[Pos | None]:
+    """Where the agent stands when each ``WithdrawFromChest`` in the queue runs.
 
-    def __init__(self, inner, errors: list[str]):
-        self._inner = inner
-        self._errors = errors
-
-    def __getattr__(self, name: str):
-        attr = getattr(self._inner, name)
-        if not callable(attr):
-            return attr
-
-        def call(*args, **kwargs):
-            try:
-                return attr(*args, **kwargs)
-            except ApiError as e:
-                self._errors.append(f"{name} {e.status} {e.code}")
-                raise
-
-        return call
+    Walks the queue from ``pos``: a ``Step`` moves one block, a ``SetPosition``
+    moves to its cell. None when the start is unknown.
+    """
+    cells: list[Pos | None] = []
+    for intent in intents:
+        verb = intent.get("verb")
+        if pos is not None and verb == "Step":
+            pos = step_landing(pos, intent["direction"])
+        elif verb == "SetPosition":
+            pos = (int(intent["x"]), int(intent["y"]))
+        elif verb == "WithdrawFromChest":
+            cells.append(pos)
+    return cells

@@ -70,9 +70,9 @@ Live M7 smoke: `make smoke-m7-olympuff` with `AGENTREALM_API_KEY` set plays one 
 
 Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_agent/m7_acceptance.py)):
 
-- no death, and alive at the end of the hour;
+- no death (the first one ends the run), and alive at the end of the hour;
 - no tick where `should_retreat` held, on the world the decision saw, while a non-survival state ran;
-- no Recover withdraw from a chest spot that is not safe;
+- Recover withdraws only while standing on a known safe tile (the cell the queue puts it on when the `WithdrawFromChest` runs);
 - no loop: 24 Step-sending decisions in a row at one cell with one reason (waiting, such as Heal resting, is not a loop);
 - no API error;
 - on a run of at least 95% of an hour, safe-zone regen measured (yes or no), and the navigation target reached or given up on.

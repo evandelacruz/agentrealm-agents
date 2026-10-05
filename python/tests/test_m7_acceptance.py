@@ -53,7 +53,7 @@ def open_world(pos=(0, 0)) -> WorldModel:
     return w
 
 
-STEP = [{"verb": "Step", "x": 1, "y": 0}]
+STEP = [{"verb": "Step", "direction": "right"}]
 
 
 def decide(m, w, mem=None, *, state="Explore", reason="explore", intents=STEP, knowledge=None):
@@ -140,15 +140,33 @@ class SurvivalGateTest(unittest.TestCase):
             decide(m, self.threatened(), state=state)
         self.assertEqual(m.retreat_misses, 0)
 
-    def test_recover_withdraw_counts_an_unsafe_chest_spot(self):
-        m = metrics()
-        w = open_world()
-        w.death_chest = (OVERWORLD, (2, 0), 11)
-        decide(m, w, state="Recover", intents=[{"verb": "WithdrawFromChest"}])
+    def recover(self, m, w, intents):
+        w.death_chest = (OVERWORLD, (3, 0), 11)
+        decide(m, w, state="Recover", reason="recover chest", intents=intents)
+
+    def test_withdraw_from_a_cell_not_known_safe_fails(self):
+        m, w = metrics(), open_world((2, 0))
+        apply_zone(w, OVERWORLD, 3, 0, {"safe": True})  # the chest tile is safe, where we stand is not
+        self.recover(m, w, [{"verb": "WithdrawFromChest", "chest_id": 11}])
         self.assertEqual((m.recover_withdraws, m.recover_unsafe), (1, 1))
+        self.assertTrue(any("not known safe" in f for f in m.failures(full_hour=False)))
+
+    def test_withdraw_on_a_known_safe_tile_passes(self):
+        m, w = metrics(), open_world((2, 0))
         apply_zone(w, OVERWORLD, 2, 0, {"safe": True})
-        decide(m, w, state="Recover", intents=[{"verb": "WithdrawFromChest"}])
-        self.assertEqual((m.recover_withdraws, m.recover_unsafe), (2, 1))
+        self.recover(m, w, [{"verb": "WithdrawFromChest", "chest_id": 11}])
+        self.assertEqual((m.recover_withdraws, m.recover_unsafe), (1, 0))
+
+    def test_withdraw_is_judged_where_the_queue_puts_the_agent(self):
+        m, w = metrics(), open_world((1, 0))
+        apply_zone(w, OVERWORLD, 1, 0, {"safe": True})  # safe where we stand, not where we withdraw
+        self.recover(m, w, [{"verb": "Step", "direction": "right"}, {"verb": "WithdrawFromChest", "chest_id": 11}])
+        self.assertEqual((m.recover_withdraws, m.recover_unsafe), (1, 1))
+
+    def test_steps_toward_the_chest_are_not_withdraws(self):
+        m, w = metrics(), open_world((0, 0))
+        self.recover(m, w, [{"verb": "SetPosition", "x": 1, "y": 0}])
+        self.assertEqual((m.recover_withdraws, m.recover_unsafe), (0, 0))
 
     def test_regen_must_be_measured_on_a_full_hour(self):
         m = metrics(target=(0, 0))
@@ -249,8 +267,10 @@ class RunnerHookTest(RunnerCase):
         m = metrics()
         server = TownServer(10, stop)
         r = self.make_runner(server, stop, m)
+        m.stop = stop
         r.on_events([{"kind": "Died", "cause": "killed"}])
         self.assertEqual(m.deaths, 1)
+        self.assertTrue(stop.is_set(), "a death ends the run")
 
 
 class NavigationFixtureTest(unittest.TestCase):

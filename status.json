@@ -37,13 +37,13 @@
 
   "A14": {"state": "done"},
 
-  "A15": {"state": "partial", "remaining": "Stuck detection on cross-map legs: a goto or Travel leg toward a door to another map is not tracked, so it escalates only on the destination's map (PLAN.md Stuck detection)."},
+  "A15": {"state": "done"},
 
   "A16": {"state": "open"},
 
   "A17": {"state": "done"},
 
-  "A18": {"state": "partial", "remaining": "Damage saved per worn item (needs Damaged amounts from one attacker type with and without the item; docs/GAME_NOTES.md open questions), and capabilities once they can be sourced (not served on reads; PLAN.md Server gaps, A28 break results)."},
+  "A18": {"state": "partial", "remaining": "Capabilities once they can be sourced (not served on reads; PLAN.md Server gaps, A28 break results)."},
 
   "A19": {"state": "open"},
 
@@ -51,7 +51,7 @@
 
   "A21": {"state": "open"},
 
-  "A22": {"state": "partial", "remaining": "Gem piles: set the pile supply code in states/gather.py once observed (GAME_NOTES.md Open questions); pile targeting is off until then."},
+  "A22": {"state": "done"},
 
   "A23": {"state": "done"},
 
@@ -67,7 +67,7 @@
 
   "A29": {"state": "open"},
 
-  "A30": {"state": "partial", "remaining": "Door and entrance looks (walk to an unvisited door or entrance mark and record what it needs; fits A27) and scroll reads (needs a sourced way to tell a scroll supply, GAME_NOTES open questions)."},
+  "A30": {"state": "partial", "remaining": "Scroll reads (needs a sourced way to tell a scroll supply, GAME_NOTES open questions), the curiosity cap (A32), and door and entrance looks on other maps (with the cap)."},
 
   "A31": {"state": "open"},
 
@@ -83,9 +83,9 @@
 
   "A37": {"state": "done"},
 
-  "A38": {"state": "open"},
+  "A38": {"state": "done"},
 
-  "A39": {"state": "open"},
+  "A39": {"state": "done"},
 
   "A40": {"state": "open"},
 

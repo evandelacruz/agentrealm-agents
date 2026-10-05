@@ -13,19 +13,22 @@ from .flee import FleeState
 from .gather import GatherState
 from .heal import HealState
 from .idle import IdleState
+from .boss import BossState, sync_boss
 from .level import LevelState
 from .investigate import InvestigateState
 from .loot import LootState
 from .recover import RecoverState
 from .retreat import RetreatState
+from .solve import SolveState
 from .sync import SyncState
 from .travel import TravelState
 
 # Priority order (PLAYABLE_AGENT_PLAN.md State machine). Sync and Downed are
 # both priority 0 and never both act: each only waits. Escape, Retreat and
 # Heal (A10) are priority 1; Fight (A23) slots in before Flee at 2; Recover
-# (A11) and Loot (A20) are priority 3, in the plan's table order, above Gather
-# (A22), Travel (A27) and Level (A37) at 5. M8 economy states slot above Explore.
+# (A11) and Loot (A20) are priority 3, in the plan's table order; Investigate
+# (A30) and Solve (A39) are priority 4, above Gather (A22), Travel (A27), Boss
+# (A38) and Level (A37) at 5. M8 economy states slot above Explore.
 STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
@@ -37,8 +40,10 @@ STATES: tuple[State, ...] = (
     RecoverState(),
     LootState(),
     InvestigateState(),
+    SolveState(),
     GatherState(),
     TravelState(),
+    BossState(),
     LevelState(),
     ExploreState(),
     IdleState(),
@@ -52,10 +57,12 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     its own guard until its ``done`` holds. A state that runs (active or guard
     holds) but whose ``act`` sends no intent falls through to the next state (A44),
     unless it sets ``StateOutcome.wait``. Each call is one decision window:
-    it ages what Step rejections taught the map (A14).
+    it ages what Step rejections taught the map (A14), and starts, ends or
+    finishes the boss fight before any guard reads it (A38).
     """
     m = ctx.memory
     yielded: list[str] = []
+    sync_boss(world, m, ctx.plan)
     try:
         for state in STATES:
             active = state.name == m.state and not state.done(world, ctx)

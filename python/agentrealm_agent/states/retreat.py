@@ -7,6 +7,7 @@ from ..pathing import grid_params, nav_search, next_step
 from ..survival import nearest_safe_goal, on_safe_tile, should_retreat
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
+from .boss import boss_fight_on
 from .explore import plan_sets
 from .intents import set_position
 
@@ -17,6 +18,8 @@ class RetreatState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
+        if boss_fight_on(world, ctx.memory):
+            return False  # Boss retreats out or commits (A38)
         if on_safe_tile(world):
             return False
         if nearest_safe_goal(world) is None:
@@ -24,6 +27,8 @@ class RetreatState(State):
         return should_retreat(world, ctx.policy, ctx.params)
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
+        if boss_fight_on(world, ctx.memory):
+            return True
         return on_safe_tile(world) or not should_retreat(world, ctx.policy, ctx.params)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:

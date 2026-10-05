@@ -5,15 +5,20 @@ from .dispatch import STATES, dispatch
 from .explore import ExploreState, scripted_outcome
 from .gather import GatherState, gather_outcome
 from .heal import HealState
+from .boss import BossState
 from .level import LevelState
+from .solve import SolveState, solve_op
 from .travel import TravelState
 
 __all__ = [
     "ExploreState",
     "GatherState",
     "HealState",
+    "BossState",
     "LevelState",
+    "SolveState",
     "TravelState",
+    "solve_op",
     "PlayContext",
     "STATES",
     "State",

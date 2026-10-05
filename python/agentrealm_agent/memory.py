@@ -12,6 +12,15 @@ from .travel.strength import StrengthBracket
 from .world import Pos
 
 
+@dataclass(frozen=True)
+class BossFight:
+    """A boss seen while its ``fight_boss`` op is current (A38)."""
+
+    op: dict  # the plan op this fight belongs to; a pop, drop or reload ends it
+    boss_id: int  # the boss NPC's id
+    since_tick: int  # tick the boss was first seen
+
+
 @dataclass
 class Memory:
     """What the brain carries between windows besides the world model."""
@@ -62,3 +71,6 @@ class Memory:
     heal_wait: tuple[int, int] | None = None  # (tick, health) Heal began sending nothing, reset when health rises
     heal_backoff_until: int = -1  # Heal yields to Explore until this tick
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
+    # Boss (A38): the fight under way, or None. Set and cleared only by states/boss.sync_boss.
+    boss: BossFight | None = None
+    solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)

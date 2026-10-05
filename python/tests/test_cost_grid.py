@@ -76,10 +76,16 @@ class CostGridTest(unittest.TestCase):
         w.entities = [Entity("character", 1, (1, 0))]
         self.assertEqual(cost_path(w, (1, 0), CostGridParams()), [(1, 0)])
 
-    def test_break_nominated_stays_impassable(self):
+    def test_break_nominated_without_cost_stays_impassable(self):
         w = grid(["..."])
         params = CostGridParams(break_nominated={(1, 0)})
         self.assertIsNone(_Grid(w, {(1, 0)}, params).cost((1, 0)))
+
+    def test_break_cost_makes_a_nominated_cell_passable(self):
+        w = grid(["..."])
+        w.view.tiles[(1, 0)] = "bush"
+        params = CostGridParams(break_nominated={(1, 0)}, break_costs={(1, 0): 11})
+        self.assertEqual(_Grid(w, {(1, 0)}, params).cost((1, 0)), 11)
 
     def test_doors_are_entered_only_as_the_goal(self):
         # A door warps, so a path never crosses one on the way somewhere else.

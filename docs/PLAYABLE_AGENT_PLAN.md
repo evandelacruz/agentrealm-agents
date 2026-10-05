@@ -121,7 +121,7 @@ Paths are never straight lines. Bushes, trees, water, walls, fences, NPCs and ot
 |---|---|
 | Known walkable | 1 |
 | Fog (never seen) | 2. Assumed open, so the agent can aim at an entrance 300 blocks into the fog |
-| An obstacle nominated for breaking (named by the plan, or scored by the odd-block detector) with a capability we hold that break memory has not marked as failed on it | Break time plus 1, plus the gem price of a consumable tool if that is the capability, so a nominated bush in a hedge line is a door, not a wall. Inert until `Break` lands in M9: before that the cell is impassable |
+| An obstacle nominated for breaking (named by the plan, or scored by the odd-block detector) with a capability we hold that break memory has not marked as failed on it | Break time plus 1, plus the gem price of a consumable tool if that is the capability, so a nominated bush in a hedge line is a door, not a wall. Applied only at stuck step 2 or while `Break` walks to its target (A28): otherwise the cell is impassable |
 | `fire`, `lava` | 1 plus a cost per point of `occupy_damage`; entered only when there is no other way |
 | Near a hostile | A danger cost that falls off with distance, so routes keep away from hostiles |
 | NPC or character standing there | High but finite, and it expires: they move |
@@ -190,7 +190,7 @@ Progress in this game is hidden behind things a player has to poke at. Helpers d
 | Supply type never seen | Walk over or `Take`, if free and safe | Fills the item table |
 | Odd block out | Try each capability we hold, cheapest first | Detector below |
 | Cell with unusual art, or a statue `facing` differently from its neighbours | Investigate the cells around it | Unsourced guess: the manual says art is a picture only and behaviour comes from `block_type` (M §9.2). Lowest priority until GAME_NOTES open questions confirm it |
-| Unvisited door or entrance mark | Walk to it, look | A locked or hidden door gets recorded with what it shows; a locked one needs a key. Current map only for now; looks on other maps are deferred (PLAN.md A30) |
+| Unvisited door or entrance mark | Walk to it, look | A locked or hidden door gets recorded with what it shows; a locked one needs a key. Any map the knowledge base knows except level interiors (Level, A37), through known door warps when needed, under the curiosity cap (PLAN.md A30) |
 | Unknown zone | `get_zone` once | Finds safe zones and hunting grounds |
 
 **Odd-block detector.** This is the manual's motif: one rock in a garden, one bush in a wheat field, one tree in a maze (M §16). A block is odd when:
@@ -263,7 +263,7 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 ### Gear and items
 
-- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, the largest weapon hit per NPC type, and for armor worn alone `damage_taken`, `damage_without` (nothing worn, after that item came off) and `damage_saved` (their difference) per NPC type; capabilities wait on reads (PLAN.md A46).
+- **Item table.** Keyed by `supply_subtype_code`, filled by observation: reach and damage after `Arm`, damage taken after `Wear`, shop prices seen, and which capability the item has (cut, chop, smash, burn, blast, light, water). A18 stores reach, price, the largest weapon hit per NPC type, and for armor worn alone `damage_taken`, `damage_without` (nothing worn, after that item came off) and `damage_saved` (their difference) per NPC type; A46 stores the capabilities a subtype has opened a block with; served capability tags wait on reads (PLAN.md A46).
 - **Equip** scores each slot and swaps when a carried item beats the worn one. Consumables (potions, food) are kept for `Heal`.
 - **Budget.** Gems are kept through death and gear is not, so the plan spends gems on what most raises survival first (weapon, armor, potions), then on tools a clue asks for.
 - **Compose.** When any fragment is held, its `fragment` field names the whole and the missing slots. The plan tracks it as a goal, and `Solve` composes when the set is complete.

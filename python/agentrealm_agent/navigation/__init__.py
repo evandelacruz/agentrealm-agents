@@ -1,6 +1,6 @@
 """Cost-grid navigation (M7 / A12, A13, A14) and cross-map door routing (A26)."""
 
-from .door_graph import doors_goal_path, route_first_leg
+from .door_graph import alt_route_path, doors_goal_path, route_first_leg
 from .planner import (
     COARSE_NODE_BUDGET,
     FINE_NODE_BUDGET,
@@ -25,6 +25,7 @@ __all__ = [
     "NavSearchState",
     "cost_flood",
     "cost_path",
+    "alt_route_path",
     "doors_goal_path",
     "known_prefix",
     "learn_step_rejection",

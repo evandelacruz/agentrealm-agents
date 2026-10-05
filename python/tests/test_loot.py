@@ -85,6 +85,38 @@ class LootPriorityTest(unittest.TestCase):
         out = dispatch(w, ctx())
         self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 3}])
 
+    def test_gem_beats_all_other_adjacent_loot(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [
+            Entity("supply", 2, (1, 2), "bronze_sword"),
+            Entity("supply", 3, (0, 1), "apple"),
+            Entity("supply", 4, (0, 0), "mystery"),
+            Entity("supply", 9, (2, 2), "gem"),
+        ]
+        d = decide(w, Memory(), scripted(), random.Random(0), knowledge=priced(bronze_sword=500))
+        self.assertEqual(d.intent, {"verb": "Take", "supply_id": 9})
+
+    def test_walks_to_a_far_gem_past_other_loot(self):
+        w = world([".....", ".....", "....."], at=(1, 1))
+        # Sword is nearer (3 west of the gem); the step goes toward the gem.
+        w.entities = [Entity("supply", 2, (3, 0), "bronze_sword"), Entity("supply", 9, (4, 2), "gem")]
+        out = dispatch(w, ctx(kb=priced(bronze_sword=500)))
+        self.assertEqual(out.state, "Loot")
+        self.assertIn("loot gem", out.reason)
+
+    def test_priced_shop_gem_is_ignored(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [Entity("supply", 5, (1, 2), "gem", gem_price=3)]
+        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
+        self.assertIsNone(d.intent, d.reason)
+
+    def test_full_pack_takes_gem_before_dropping_for_gear(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        full_inventory(w)
+        w.entities = [Entity("supply", 99, (1, 2), "bronze_sword"), Entity("supply", 3, (2, 1), "gem")]
+        out = dispatch(w, ctx(kb=priced(bronze_sword=15)))
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 3}])
+
     def test_priced_supply_is_shop_not_loot(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 5, (1, 2), "potion", gem_price=2)]

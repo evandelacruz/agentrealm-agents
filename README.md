@@ -1,8 +1,8 @@
 # Agent Realm reference agents
 
-Example Python agents that play [Agent Realm](https://agentrealm.gg) through its public HTTP API—no server code, no install step beyond Python 3.11+. Clone this repo, point it at your account, and a character starts moving in the world.
+Example agents that play [Agent Realm](https://agentrealm.gg) through its public HTTP API. Clone this repo, point it at your account, and a character starts moving in the world. They are ordinary clients: they import nothing from the server and never touch its databases. The agent lives in [`python/`](python/): Python 3.11+, standard library only, nothing to install or host.
 
-More depth: [`PLAN.md`](PLAN.md) (design and backlog), [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) (game facts), [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) (playable-agent milestones), [`AGENTS.md`](AGENTS.md) (rules for agents that build this repo). The site’s [guides](https://agentrealm.gg/guides) and [docs](https://agentrealm.gg/docs) describe the API itself.
+More depth: [`PLAN.md`](PLAN.md) (design and backlog), [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) (character files, every state, directives, metrics), [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) (game facts), [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) (playable-agent milestones), [`AGENTS.md`](AGENTS.md) (rules for agents that build this repo). The site’s [guides](https://agentrealm.gg/guides) and [docs](https://agentrealm.gg/docs) describe the API itself.
 
 ## Quick start
 
@@ -18,30 +18,33 @@ python3 -m agentrealm_agent create characters/wren.toml
 python3 -m agentrealm_agent run characters/wren.toml
 ```
 
-The default API is `https://api.agentrealm.gg`. Sample characters use `world = "sandbox"` (free practice); set another world code to play live—lives there are permanent. `create` stores the character id under `python/.state/`; `run` plays until Ctrl-C and writes a trace there. See [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) for metrics, shared world knowledge, and running multiple characters.
+Other commands:
+
+```sh
+python3 -m agentrealm_agent run characters/wren.toml characters/kit.toml   # several characters at once
+python3 -m agentrealm_agent status characters/wren.toml                     # where the character is now
+python3 -m agentrealm_agent metrics characters/wren.toml                    # summary of the last run
+python3 -m agentrealm_agent compare-metrics baseline.metrics candidate.metrics   # candidate-minus-baseline deltas
+```
+
+The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample characters use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` stores the character id under `python/.state/`; `run` plays until Ctrl-C and writes a trace there. Run one `run` process per world at a time. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
 
 Copy and edit a file in `python/characters/` to try different behavior (`policy.kind` can be `idle`, `wander`, or `scripted`).
 
 ## How the agent thinks
 
-Each tick the runner spends one API call: read position, terrain, or entities when stale, otherwise `POST tick` with an intent (or nothing). That keeps inside the game’s one-request-per-tick budget.
+- **Budget.** One API call per character per tick (burst of 3, reads included), and at most one intent per tick. With no decision to make, it sends nothing.
+- **World model.** Reads of position, terrain and entities, made only when stale, keep a model of what the character has seen.
+- **Reflexes** run first every tick and need no model: step off lava, take a supply underfoot, flee a close hostile, walk the next step of the path.
+- **States** are named behaviors, each with a `guard` (should I run?) and an `act` (what do I send?).
+- **Dispatcher** walks the states in a fixed priority order: survival first, then loot and recovery, then puzzles, travel and bosses, then explore and idle. A state with nothing to send falls through to the next, so the agent never stalls.
+- **Plan** is the path being walked: goals from the character file or live directives, A* over known tiles, around fog and hazards.
 
-**Reflexes** are cheap rules that run every tick before anything else—step off lava, take a supply underfoot, flee a nearby hostile, or walk the next step of the current path. They need no model.
-
-**States** are named behaviors with a `guard` (should I run?) and `act` (what intent do I send?). A **dispatcher** walks a fixed priority list each tick—survival first (sync, downed, escape, retreat, heal, fight, flee), then loot and recovery, investigate and puzzle ops, gather and travel, boss and level maps, then explore and idle. If a higher state has nothing to send this window, dispatch **falls through** so the agent never stalls.
-
-**Plan** is the path the agent is walking: goals from the character file (or live directives) plus A* over known map tiles, with fog, hazards, and remembered doors. Explore follows that path until something more urgent wins the round.
-
-Together: reads refresh a **world model**, the plan picks a direction, reflexes and states turn that into at most one intent queue per call. Full policy keys, every state, and directives are in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md); scheduler and reflex tables are in [`PLAN.md`](PLAN.md).
+Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md). Scheduler, reflex and plan tables: [`PLAN.md`](PLAN.md).
 
 ## Make it yours
 
-This repo is meant for you to fork and extend—not only to run Wren and Kit as shipped.
-
-- **[`docs/MAKE_IT_YOURS.md`](docs/MAKE_IT_YOURS.md)** (backlog A51): step-by-step guide to adding your own state, wiring it into the dispatcher, testing it, and tuning behavior with directives.
-- **Starter agent** (backlog A52): a single small file you can copy and grow (sync, walk, flee, explore)—coming after the guide lands.
-
-Until A52 ships, start from `python/characters/` and the modules under `python/agentrealm_agent/states/`.
+This repo is meant for you to fork and extend, not only to run Wren and Kit as shipped. [`PLAN.md`](PLAN.md) **M13: Make it yours** tracks a step-by-step guide to adding your own state (A51) and a small starter agent to copy and grow (A52). Until they land, start from `python/characters/` and the modules under `python/agentrealm_agent/states/`.
 
 ## Tests
 
@@ -53,4 +56,4 @@ make test
 
 `make conductor-test` covers [`tools/conductor`](tools/conductor/README.md) (Node 22+). CI runs both on every pull request.
 
-Live M6 smoke against Olympuff: `make smoke-m6-olympuff` with `AGENTREALM_API_KEY` set (see [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py) and [`docs/acceptance/m6_olympuff_PASS.transcript`](docs/acceptance/m6_olympuff_PASS.transcript)).
+Live M6 smoke against Olympuff: `make smoke-m6-olympuff` with `AGENTREALM_API_KEY` set runs the M6 done-when ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)) against the public API via [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py) and fails on any API error. It uses a dedicated character, `python/characters/olympuff_walker.toml`; lives on live worlds are permanent. If its `.state` entry is lost, a create refused `identity_reuse` reuses the same-named character. The first live run, [`docs/acceptance/m6_olympuff_PASS.transcript`](docs/acceptance/m6_olympuff_PASS.transcript), is **not accepted** (see its header); A4 waits on a re-run.

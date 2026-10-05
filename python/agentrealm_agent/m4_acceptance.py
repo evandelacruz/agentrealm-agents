@@ -28,8 +28,9 @@ from .memory import Memory
 from .world import WorldModel
 
 # The states that carry out each gated op. A stack `travel` op is walked by
-# Explore's plan pathing (`pathing.plan_step`); `Travel` runs the directives
-# `travel:*` queue (A27).
+# plan pathing (`pathing.plan_step`): in Explore, or in Travel when Travel has
+# reached or cannot step toward its own directives `travel:*` op and falls
+# back to it (A27).
 OP_DRIVERS: dict[str, frozenset[str]] = {
     "buy": frozenset({"Shop"}),
     "travel": frozenset({"Explore", "Travel"}),

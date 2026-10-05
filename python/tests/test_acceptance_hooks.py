@@ -31,7 +31,7 @@ def metrics_classes() -> list[type]:
     while todo:
         cls = todo.pop()
         todo.extend(cls.__subclasses__())
-        if cls.__module__.endswith("_acceptance"):
+        if cls.__module__.startswith("agentrealm_agent.") and cls.__module__.endswith("_acceptance"):
             out.append(cls)
     return out
 

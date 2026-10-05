@@ -51,7 +51,7 @@
 
   "A20": {"state": "done"},
 
-  "A47": {"state": "open"},
+  "A47": {"state": "open", "note": "Observable in live play: life ground code, stowed Drop, middle_chest capacity (steps in PLAN.md A47; docs/observations/A20_live_play.md)."},
 
   "A21": {"state": "done"},
 

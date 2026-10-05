@@ -44,7 +44,7 @@ def is_counter_supply(code: str | None) -> bool:
 
 
 def loot_score(code: str | None, items: dict[str, dict[str, Any]]) -> int:
-    """Higher is more worth carrying; lives first, then gems (PLAYABLE_AGENT_PLAN)."""
+    """Higher is more worth carrying; lives first once A47 fills LIFE_SUPPLY_CODES, then gems."""
     if not code:
         return UNKNOWN_SCORE
     if code in LIFE_SUPPLY_CODES:

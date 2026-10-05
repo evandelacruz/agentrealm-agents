@@ -45,13 +45,15 @@
 
   "A18": {"state": "done"},
 
-  "A19": {"state": "partial", "remaining": "Wearing a subtype never yet worn: no read serves its slot (PLAN.md Server gaps)."},
+  "A19": {"state": "done"},
+
+  "A55": {"state": "open", "note": "Waiting on a served wear slot for never-worn subtypes (PLAN.md Server gaps)."},
 
   "A20": {"state": "done"},
 
-  "A47": {"state": "open", "remaining": "Hearts-first until life's ground supply_subtype_code is observed; stowed Drop and middle_chest capacity (GAME_NOTES open questions; docs/observations/A20_live_play.md)."},
+  "A47": {"state": "open"},
 
-  "A21": {"state": "partial", "remaining": "travel:shop has no path yet, so Shop buys only priced supplies already in sight."},
+  "A21": {"state": "done"},
 
   "A22": {"state": "done"},
 
@@ -101,7 +103,9 @@
 
   "A45": {"state": "done"},
 
-  "A46": {"state": "partial", "remaining": "Merge capability tags from supply reads onto items rows once a read serves them (PLAN.md Server gaps)."},
+  "A46": {"state": "done"},
+
+  "A54": {"state": "open"},
 
   "A50": {"state": "done"},
 

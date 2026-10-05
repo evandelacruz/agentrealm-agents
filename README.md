@@ -66,6 +66,8 @@ make test
 
 Live M6 smoke on olympuff: `make smoke-m6-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M6 done-when ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)) via [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py). The variables are passed to the script as `--character-id` / `--character-name`; the profile is `python/characters/olympuff_walker.toml`. Lives on live worlds are permanent. The accepted live run (A4) is in [`docs/acceptance/m6_olympuff_PASS.transcript`](docs/acceptance/m6_olympuff_PASS.transcript) (names and ids redacted).
 
+Shared acceptance modules: [`acceptance.py`](python/agentrealm_agent/acceptance.py) (runner hooks, request-error counter), [`acceptance_smoke.py`](python/agentrealm_agent/acceptance_smoke.py) (wake, overworld start, the smoke run loop; M7, M10, M11) and [`acceptance_common.py`](python/agentrealm_agent/acceptance_common.py) (loop, retreat-miss, Recover-withdraw and oscillation-abort checks; M7, M11).
+
 Live M7 smoke: `make smoke-m7-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m7_olympuff.py`](scripts/smoke_m7_olympuff.py), using profile `python/characters/olympuff_m7.toml` and a character you choose at run time. Start with that character on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out): the script sends the agent to one `goto` target 150 blocks east of where it stands (`--target X,Y` overrides), then explores.
 
 While the `goto` target is still owed, the walk comes first: Loot, Shop, Investigate and Travel do not walk anywhere else, Break opens only a block the goto's own stuck escalation picked, and the strategist plan's moves and `wait` hold are skipped. Heal is not deferred, so a hurt character still walks to safety. The deferral lifts while the agent stands on the target, or while stuck detection is backed off from it after a give-up; it comes back when the agent steps off the target or the backoff ends, because `goto` stays first in the goals. Stuck detection keeps running on the kept goto path, so it still escalates and gives up.
@@ -110,5 +112,7 @@ Pass criteria (PLAN.md A40, checked in [`m11_acceptance.py`](python/agentrealm_a
 - no loop or sustained oscillation (same thresholds as M7);
 - no API error;
 - on a run of at least 95% of the default limit: at least one `level_clear_ceremony`, then a follow-on attempt: back on the overworld map, then into a level interior again, or `enter_level` / `fight_boss` on top of the plan while on the overworld map. Only the overworld map counts as having left the level.
+
+A shorter run (`--seconds` under 95% of 7200) judges survival only and prints `PASS (survival only; milestone not judged)`.
 
 No live Olympuff pass yet (A40 partial); CI covers the gate and smoke wiring in `python/tests/test_m11_acceptance.py` without live keys.

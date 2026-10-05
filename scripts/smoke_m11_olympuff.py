@@ -22,14 +22,13 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance_smoke import navigation_start, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, navigation_start, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics  # noqa: E402
 from agentrealm_agent.strategist import StrategistConfig  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m11.toml"
-DEFAULT_BASE = "https://api.agentrealm.gg"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -115,8 +114,6 @@ def main(argv: list[str] | None = None) -> int:
         print(line, flush=True)
     full_run = args.seconds >= TARGET_SECONDS * 0.95
     failures = list(metrics.failures(full_run=full_run))
-    if full_run and elapsed + 1.0 < args.seconds and not metrics.milestone_ok():
-        failures.append(f"ran {elapsed:.0f}s < limit {args.seconds:.0f}s without passing the gate")
     try:
         alive = client.self_(cid).get("alive", True)
         if not alive:
@@ -126,7 +123,10 @@ def main(argv: list[str] | None = None) -> int:
     if failures:
         print("FAIL:", "; ".join(failures), file=sys.stderr)
         return 1
-    print("PASS: M11 acceptance criteria met", flush=True)
+    if full_run:
+        print("PASS: M11 acceptance criteria met", flush=True)
+    else:
+        print("PASS (survival only; milestone not judged): run shorter than 95% of the default limit", flush=True)
     return 0
 
 

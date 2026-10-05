@@ -20,13 +20,12 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance_smoke import run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.m10_acceptance import FULL_RUN_FRACTION, TARGET_SECONDS, M10AcceptanceMetrics  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m10.toml"
-DEFAULT_BASE = "https://api.agentrealm.gg"
 
 
 def main(argv: list[str] | None = None) -> int:

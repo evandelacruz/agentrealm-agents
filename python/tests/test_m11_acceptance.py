@@ -227,7 +227,8 @@ class SmokeScriptTest(unittest.TestCase):
     def test_short_run_passes_without_levels(self):
         code, out, _ = self.run_main(10, lambda m: None)
         self.assertEqual(code, 0)
-        self.assertIn("PASS", out)
+        self.assertIn("PASS (survival only; milestone not judged)", out)
+        self.assertNotIn("M11 acceptance criteria met", out)
 
     def test_full_run_fails_without_milestone(self):
         code, _, err = self.run_main(TARGET_SECONDS, lambda m: None)
@@ -241,6 +242,7 @@ class SmokeScriptTest(unittest.TestCase):
 
         code, out, _ = self.run_main(TARGET_SECONDS, played)
         self.assertEqual(code, 0, out)
+        self.assertIn("PASS: M11 acceptance criteria met", out)
 
 
 class RunnerHookTest(unittest.TestCase):

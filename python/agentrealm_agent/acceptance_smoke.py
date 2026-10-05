@@ -13,6 +13,8 @@ from .executor.intents import wait
 from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
 from .runner import Runner
 
+DEFAULT_BASE = "https://api.agentrealm.gg"
+
 # Self reads before giving up on a character that stays asleep or downed, one
 # a second: well inside the call budget, and longer than the 5 s respawn delay.
 WAKE_READS = 30

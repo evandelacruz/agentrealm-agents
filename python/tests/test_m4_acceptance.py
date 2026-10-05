@@ -292,8 +292,8 @@ class RunnerActedOpTest(TestWorldCase):
         seen: list = []
 
         class Hooks(M4AcceptanceMetrics):
-            def before_tick(self, w, m, *, plan_op=None, **kw):
-                seen.append(plan_op)
+            def before_tick(self, w, m, *, acted_op=None, **kw):
+                seen.append(acted_op)
 
         stop = threading.Event()
         server = TestWorldServer(stop, 10)
@@ -322,7 +322,7 @@ class MetricsTest(unittest.TestCase):
     def tick(self, m, state, op, intents=({"verb": "Wait"},)):
         m.before_tick(WorldModel(character_id=1), Memory(), state=state, reason="test",
                       intents=list(intents) if intents is not None else None, policy=Policy(),
-                      params=dict(PARAM_DEFAULTS), knowledge=None, plan_op=op)
+                      params=dict(PARAM_DEFAULTS), knowledge=None, acted_op=op)
 
     def test_all_conditions_met_passes(self):
         self.assertEqual(self.done().failures(), [])
@@ -341,6 +341,7 @@ class MetricsTest(unittest.TestCase):
         m = M4AcceptanceMetrics(required=(BUY,))
         self.tick(m, "Explore", BUY)  # not Shop
         self.tick(m, "Shop", BUY, intents=None)  # a held queue sends nothing new
+        self.tick(m, "Shop", None)  # Shop sent a queue, but not for the plan's buy (a restock, a reflex)
         self.assertNotIn(op_key(BUY), m.run)
         self.assertIn(f"Shop never ran {op_key(BUY)}", m.failures())
         self.tick(m, "Shop", BUY)

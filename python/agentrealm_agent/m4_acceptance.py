@@ -97,12 +97,12 @@ class M4AcceptanceMetrics(AcceptanceHooks):
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
-        plan_op: dict | None = None,
+        acted_op: dict | None = None,
     ) -> None:
-        if not intents or plan_op is None:
+        if not intents or acted_op is None:
             return
-        if state in OP_DRIVERS.get(plan_op.get("op", ""), ()):
-            self.run.update(self._keys(plan_op))
+        if state in OP_DRIVERS.get(acted_op.get("op", ""), ()):
+            self.run.update(self._keys(acted_op))
 
     def failures(self) -> list[str]:
         out: list[str] = []

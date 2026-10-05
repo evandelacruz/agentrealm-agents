@@ -123,7 +123,7 @@ class M7AcceptanceMetrics(TimedRunHooks):
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
-        plan_op: dict | None = None,
+        acted_op: dict | None = None,
     ) -> None:
         if w.lives is not None:
             self.lives_seen = w.lives

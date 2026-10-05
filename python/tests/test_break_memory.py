@@ -27,7 +27,8 @@ from agentrealm_agent.door_look import approach_pos, look_key
 from agentrealm_agent.knowledge_maps import sync_tiles
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import grid_params
-from agentrealm_agent.plan import Plan
+from agentrealm_agent.pathing import replan as path_replan
+from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.break_state import BreakState
@@ -362,6 +363,7 @@ class BreakRearmTest(unittest.TestCase):
         out = BreakState().act(self.r.world, self.ctx)
         self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
         self.assertIsNone(plan.stalled_since_tick)
+        self.assertEqual(plan.acted, plan.current())
 
     def test_a_reflex_in_break_keeps_the_stall(self):
         w = self.r.world
@@ -372,6 +374,12 @@ class BreakRearmTest(unittest.TestCase):
         self.assertTrue(out.intents)
         self.assertNotEqual(out.reason, "break smash @ (2, 0)", "the pickup reflex took the round")
         self.assertEqual(plan.stalled_since_tick, 0)
+        self.assertIsNone(plan.acted)
+        # So the stall still runs out on time and plan pathing drops the op.
+        w.tick = PLAN_STALL_SECONDS * plan.tick_hz
+        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+            path_replan(w, self.r.mem, self.ctx.policy, random.Random(0), set(), set(), plan=plan)
+        self.assertIsNone(plan.current())
 
     def test_the_goto_stuck_break_keeps_the_plan_ops_stall(self):
         # While the goto is owed, Break opens the goto's own stuck target, not the plan op (A58).
@@ -380,6 +388,8 @@ class BreakRearmTest(unittest.TestCase):
         out = BreakState().act(self.r.world, self.ctx)
         self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
         self.assertEqual(plan.stalled_since_tick, 0)
+        self.assertIsNone(plan.acted)
+
 
 class InvestigateYieldsToBreakTest(unittest.TestCase):
     def test_stuck_door_look_reaches_break(self):

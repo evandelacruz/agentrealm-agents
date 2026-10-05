@@ -45,14 +45,16 @@ class AcceptanceHooks:
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
-        plan_op: dict | None = None,
+        acted_op: dict | None = None,
     ) -> None:
         """A tick is about to be sent. ``w`` is the world the decision saw.
 
         ``intents`` is None when a held queue keeps running and nothing new is sent.
-        ``plan_op`` is the goal-stack op this decision acted on (``Plan.acted``):
+        ``acted_op`` is the goal-stack op this decision acted on (``Plan.acted``):
         set only when the state that owns the head op stepped toward it or sent
         its Take or Use, None otherwise (a reflex, another goal, a held queue) (A36).
+        It is not the stack's head op, which a gate that needs it reads as its
+        own kwarg (``plan_op``, ``Plan.current()``).
         """
 
     def on_strategist_trigger(self, trigger: dict) -> None:

@@ -185,7 +185,7 @@ Progress in this game is hidden behind things a player has to poke at. Helpers d
 | Thing | Action | Notes |
 |---|---|---|
 | Unread `readable` cell (sign, statue, plinth) | `Read` | While it is in sight (perception × zone brightness, plus light, capped at perception), so no walk is needed once seen. Free: no speech cost, one per tick |
-| Unread scroll, carried or in sight | `Read` | |
+| Unread scroll, carried or in sight | `Read` | Not shipped until scroll subtype codes are learned (PLAN.md A56) |
 | NPC id never spoken to | `Say` once | Works from 25 blocks. A helper replies with its line; a hostile stays silent, which also tells us it is not a helper. Spaced 1 s apart |
 | Supply type never seen | Walk over or `Take`, if free and safe | Fills the item table |
 | Odd block out | Try each capability we hold, cheapest first | Detector below |

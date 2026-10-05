@@ -54,6 +54,8 @@ class Directives:
     never_attack: list[str] = field(default_factory=list)
     goals: list[str] = field(default_factory=list)
     instructions: str = ""
+    # Optional toggles for teaching states (A51); ignored when absent.
+    flags: dict[str, bool] = field(default_factory=dict)
 
 
 def default_directives() -> Directives:
@@ -105,6 +107,20 @@ def load_directives(path: Path) -> Directives:
             log.warning("%s: `instructions` must be a string; ignoring", path.name)
         else:
             d.instructions = instructions
+    flags = raw.get("flags")
+    if flags is not None:
+        if not isinstance(flags, dict):
+            log.warning("%s: `flags` must be a table; ignoring", path.name)
+        else:
+            parsed: dict[str, bool] = {}
+            for key, value in flags.items():
+                if not isinstance(key, str):
+                    continue
+                if isinstance(value, bool):
+                    parsed[key] = value
+                else:
+                    log.warning("%s: flag `%s` must be true or false; ignoring", path.name, key)
+            d.flags = parsed
     return d
 
 

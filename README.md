@@ -5,6 +5,7 @@ Reference agents that play Agent Realm through its public API. They are ordinary
 - [`PLAN.md`](PLAN.md): design, what the API allows today, and the backlog (PR-sized items grouped under milestones).
 - [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md): the plan to make the agent able to play: state machine, LLM strategist, and the scope of milestones M0, M4 and M6–M12.
 - [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md): the game facts that plan relies on, each with its source.
+- [`docs/MAKE_IT_YOURS.md`](docs/MAKE_IT_YOURS.md): add your own state — guard/act, dispatcher, testing, and a tiny greet example (A51).
 - [`python/`](python/): the Python reference agent. Python 3.11+, standard library only.
 - [`AGENTS.md`](AGENTS.md): rules for coding agents, and the supervisor, conductor, and worker roles that build this repo.
 

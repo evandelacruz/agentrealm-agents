@@ -15,7 +15,7 @@
 
   "A3": {"state": "done"},
 
-  "A4": {"state": "partial", "remaining": "Re-run scripts/smoke_m6_olympuff.py against Olympuff after the Say/Read intent-shape fix and replace docs/acceptance/m6_olympuff_PASS.transcript with a run that prints PASS with 0 API errors."},
+  "A4": {"state": "done"},
 
   "A5": {"state": "done"},
 
@@ -47,9 +47,9 @@
 
   "A19": {"state": "partial", "remaining": "Wearing a subtype never yet worn: no read serves its slot (PLAN.md Server gaps)."},
 
-  "A20": {"state": "partial", "remaining": "Hearts first until a life's ground supply_subtype_code is known; stowed Drop and middle_chest carry capacity (GAME_NOTES open questions). Gems-first uses code gem."},
+  "A20": {"state": "partial", "remaining": "Hearts first until a life's ground supply_subtype_code is observed (Olympuff live play: 1500+ grass cuts at map 76 town, codes gem/berry only — docs/observations/A20_live_play.md). Stowed Drop and middle_chest carry capacity (GAME_NOTES open questions). Gems-first uses code gem."},
 
-  "A21": {"state": "open"},
+  "A21": {"state": "partial", "remaining": "travel:shop has no path yet, so Shop buys only priced supplies already in sight."},
 
   "A22": {"state": "done"},
 

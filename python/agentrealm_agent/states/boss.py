@@ -5,7 +5,7 @@ from __future__ import annotations
 from ..config import Policy
 from ..directives import attack_forbidden
 from ..executor import build_attack_queue, queue_horizon_intents
-from ..healing import POTION_CODES
+from ..healing import POTION_CODES, potion_count
 from ..memory import BossFight, Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, guided_step, nav_search, next_step
@@ -90,13 +90,6 @@ def sync_boss(w: WorldModel, m: Memory, plan: Plan | None) -> None:
         return
     if boss_entity(w, m.boss) is None and not w.in_boss_fight():
         m.boss = None
-
-
-def potion_count(w: WorldModel) -> int:
-    codes = POTION_CODES
-    n = sum(1 for h in w.held_supplies if h.code in codes)
-    n += sum(1 for s in w.chest_supplies if s.code in codes)
-    return n
 
 
 def fight_boss_preconditions_met(w: WorldModel, op: GoalOp) -> tuple[bool, str]:

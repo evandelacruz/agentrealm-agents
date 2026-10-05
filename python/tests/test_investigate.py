@@ -11,8 +11,18 @@ from agentrealm_agent import config, runner as runner_mod
 from agentrealm_agent.brain import choose_call, decide
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.door_look import apply_door_look, infer_needs, look_key, ready_to_look
-from agentrealm_agent.interest_list import MAX_REJECTIONS, list_interest, pick_interest_tick, sight_range
+from agentrealm_agent.interest_list import MAX_REJECTIONS, list_interest, pick_interest_tick, read_supply_key, sight_range
 from agentrealm_agent.investigation import cell_was_read, mark_cell_read, mark_npc_spoken, spoken_npc_ids
+from agentrealm_agent.item_table import InventorySupply
+from agentrealm_agent.scroll_investigation import (
+    code_was_probed,
+    log_supply_codes_seen,
+    mark_code_probed,
+    mark_scroll_subtype,
+    mark_supply_read,
+    scroll_subtype_codes,
+    supply_was_read,
+)
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import (
     is_level_interior,
@@ -26,7 +36,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.states.intents import read_block
+from agentrealm_agent.states.intents import read_block, read_supply
 from agentrealm_agent.travel.knowledge import entrance_from_kb, sync_entrances
 from agentrealm_agent.world import Entity, WorldModel, ZoneFact, chebyshev
 
@@ -48,6 +58,48 @@ class InterestListTest(unittest.TestCase):
         w = world(["...", ".S.", "..."], at=(1, 1))
         items = list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), Memory())
         self.assertEqual([(it.kind, it.pos) for it in items], [("read_block", (1, 1))])
+
+    def test_unprobed_supply_code_is_nominated_for_probe(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [Entity("supply", 5, (1, 2), "mystery_scroll")]
+        kb = KnowledgeBase.empty("sandbox")
+        log_supply_codes_seen(kb, ["mystery_scroll"])
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([(it.kind, it.supply_id) for it in items], [("read_supply", 5)])
+
+    def test_unlogged_supply_code_is_not_probed_yet(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [Entity("supply", 5, (1, 2), "potion")]
+        self.assertEqual(list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), Memory()), [])
+
+    def test_known_scroll_subtype_is_nominated(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.held_supplies = [InventorySupply(9, "clue_scroll")]
+        kb = KnowledgeBase.empty("sandbox")
+        mark_scroll_subtype(kb, "clue_scroll")
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([(it.kind, it.supply_id) for it in items], [("read_supply", 9)])
+
+    def test_probed_non_scroll_code_is_not_reprobed(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [Entity("supply", 5, (1, 2), "apple")]
+        kb = KnowledgeBase.empty("sandbox")
+        log_supply_codes_seen(kb, ["apple"])
+        mark_code_probed(kb, "apple")
+        self.assertTrue(code_was_probed(kb, "apple"))
+        self.assertNotIn("apple", scroll_subtype_codes(kb))
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
+
+    def test_read_supply_sorts_before_say(self):
+        w = world(["...", ".S.", "..."], at=(1, 1))
+        w.entities = [
+            Entity("supply", 5, (1, 2), "clue_scroll"),
+            Entity("npc", 9, (1, 4), "guard"),
+        ]
+        kb = KnowledgeBase.empty("sandbox")
+        mark_scroll_subtype(kb, "clue_scroll")
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([it.kind for it in items], ["read_block", "read_supply", "say"])
 
     def test_readable_out_of_sight_waits(self):
         w = world(["S....."], at=(5, 0), perception=3)
@@ -485,6 +537,25 @@ class RunnerInvestigationTest(unittest.TestCase):
         self.assertFalse(cell_was_read(r.knowledge, 7, (1, 1)))
         self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=r.directives.directives.params),
                           "a refused read stops holding Investigate above Explore")
+
+    def test_supply_probe_nothing_to_read_marks_code_probed(self):
+        r = self.runner([])
+        r.world.held_supplies = [InventorySupply(12, "apple")]
+        intent = read_supply(12)
+        r.mem.pending = intent
+        r.on_result({"outcome": "rejected", "tick": 5,
+                     "rejection": {"category": "target", "code": "nothing_to_read"}}, 0)
+        self.assertTrue(code_was_probed(r.knowledge, "apple"))
+        self.assertFalse(supply_was_read(r.knowledge, 12))
+
+    def test_applied_supply_read_remembers_scroll_code(self):
+        r = self.runner([])
+        r.world.held_supplies = [InventorySupply(12, "clue_scroll")]
+        intent = read_supply(12)
+        r.mem.pending = intent
+        r.on_result({"outcome": "applied", "tick": 5}, 0)
+        self.assertTrue(supply_was_read(r.knowledge, 12))
+        self.assertIn("clue_scroll", scroll_subtype_codes(r.knowledge))
 
 
     def test_sent_look_walk_is_charged_and_then_refused(self):

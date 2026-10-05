@@ -42,6 +42,10 @@ def read_block(pos: Pos) -> dict:
     return {"verb": "Read", "target": {"kind": "block", "x": pos[0], "y": pos[1]}}
 
 
+def read_supply(supply_id: int) -> dict:
+    return {"verb": "Read", "target": {"kind": "supply", "supply_id": supply_id}}
+
+
 def say_to(npc: Entity, text: str = "hello") -> dict:
     # Say names its recipient by a top-level npc_id (or character_id), not a
     # target; anything else is malformed_intent at ingest (API rules § Say).

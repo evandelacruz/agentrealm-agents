@@ -13,6 +13,7 @@ from .directives import PARAM_DEFAULTS, _valid_param
 from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
+from .travel.ops import travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
 
 log = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ BOSS_PLAN_OPS = frozenset({"fight_boss"})
 SHOP_PLAN_OPS = frozenset({"buy"})
 SOLVE_OPS = frozenset({"compose", "use_block"})
 # `travel` destinations with a path today; `hunting_ground` waits on knowledge.
-TRAVEL_PATHED = frozenset({"entrance", "town", "point"})
+TRAVEL_PATHED = frozenset({"entrance", "town", "point", "shop"})
 
 # Built-in `explore` explores the whole map: no center, no radius bound.
 EXPLORE_ANYWHERE = 1 << 30
@@ -571,6 +572,23 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
             return world.view.tiles.get(world.pos) in DOORS
         if op["to"] == "town":
             return (world.map_id, world.pos) in world.respawn_anchors
+        if op["to"] == "shop":
+            here = world.pos
+            if here is None:
+                return False
+            t = travel_op_from_plan_goal(op)
+            if t.x is not None and t.y is not None:
+                dest_map = t.map_id if t.map_id is not None else world.map_id
+                return dest_map == world.map_id and here == (t.x, t.y)
+            # Any shop: a priced supply underfoot is one. A bought-out known
+            # cell is arrival too; `plan_step` pops that one, it needs the KB.
+            return any(
+                e.kind == "supply"
+                and isinstance(e.gem_price, int)
+                and e.gem_price > 0
+                and e.pos == here
+                for e in world.entities
+            )
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
     if name == "use_block":

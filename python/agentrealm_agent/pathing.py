@@ -35,6 +35,8 @@ from .plan import (
     SOLVE_OPS,
     explore_targets,
 )
+from .travel.ops import travel_op_from_plan_goal
+from .travel.resolve import at_destination, resolve_travel
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -81,8 +83,13 @@ def plan_op_goal(op: GoalOp) -> str:
     """The ``Memory.goal`` label a path for ``op`` carries, or "" when no path serves it (A34)."""
     if op["op"] == "explore_area":
         return "explore_area"
-    if op["op"] == "travel" and op["to"] in ("point", "entrance", "town"):
-        return {"point": "plan_travel", "entrance": "plan_entrance", "town": "plan_town"}[op["to"]]
+    if op["op"] == "travel" and op["to"] in ("point", "entrance", "town", "shop"):
+        return {
+            "point": "plan_travel",
+            "entrance": "plan_entrance",
+            "town": "plan_town",
+            "shop": "plan_shop",
+        }[op["to"]]
     return ""
 
 
@@ -160,6 +167,17 @@ def path_for_plan_op(
                 path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav_search(m, w, label, pos))
                 if path:
                     return path, label, Leg(pos)
+    if op["to"] == "shop":
+        dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
+        if dest is None:
+            return None
+        target, dest_map = dest.pos, dest.map_id
+        if nav_stuck.backed_off(m, label, dest_map, target, w.tick):
+            return None
+        nav = nav_search(m, w, label, target) if dest_map == w.map_id else None
+        path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
+        if path:
+            return path, label, nav_stuck.leg_toward(m, w, label, dest_map, target, path)
     return None
 
 
@@ -206,6 +224,13 @@ def plan_step(
         if op["op"] == "travel" and op["to"] not in TRAVEL_PATHED:
             plan.drop_current(f"no path to a {op['to']} yet")
             continue
+        if op["op"] == "travel" and op["to"] == "shop":
+            # A known shop cell stays listed when bought out (A27), so standing
+            # on the resolved cell is arrival even with nothing priced in sight.
+            dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
+            if dest is not None and at_destination(w, dest):
+                plan.finish_current("at shop cell")
+                continue
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
         if found and next_step(w, blocked, found[0]):
             plan.stalled_since_tick = None

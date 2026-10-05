@@ -13,9 +13,6 @@ from ..world import WorldModel, chebyshev
 from .base import StateOutcome
 from .intents import drop, take, withdraw
 
-__all__ = ["knowledge_items", "pickup_outcome"]
-
-
 def pickup_outcome(w: WorldModel, knowledge: KnowledgeBase | None, *, state: str) -> StateOutcome | None:
     """``Drop`` junk, ``Take``, or ``WithdrawFromChest`` one supply; None when nothing in reach is worth it."""
     here = w.pos

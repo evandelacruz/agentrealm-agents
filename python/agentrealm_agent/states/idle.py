@@ -1,7 +1,9 @@
-"""Idle and wander: non-scripted policies (lowest priority).
+"""Idle and wander: the ``idle`` and ``wander`` policy kinds (M1, A5).
 
-Runs when ``policy.kind`` is ``idle`` (wait forever) or ``wander`` (random step).
-Scripted characters reach here only if every other state fell through.
+Guards only when ``policy.kind`` is ``idle`` or ``wander``, so a scripted
+character never runs it. Every decision, ``idle`` holds the round with no
+intent and ``wander`` steps to a random open neighbour, holding instead when
+boxed in.
 """
 
 from __future__ import annotations
@@ -13,7 +15,9 @@ from .intents import set_position
 
 
 class IdleState(State):
-    """Last in ``STATES``. ``idle`` waits; ``wander`` picks a random open neighbour."""
+    """Last in ``STATES``; runs only for ``idle`` and ``wander`` policies, once
+    Sync and Downed have nothing to wait on. ``idle`` waits; ``wander`` steps to
+    a random open neighbour that Step rejections have not ruled out (A14)."""
 
     name = "Idle"
 

@@ -1,8 +1,12 @@
-"""Explore: default scripted behavior — reflexes and policy goals (priority last).
+"""Explore: the scripted fallback, reflex 4 then the plan's goals (M3, A12).
 
-Runs for every alive scripted character with a known position when no higher
-state sends an intent. Handles rejection lessons, pickup reflex, hostile
-steps, and walking the current plan path (M3, A12).
+Guards for every alive ``scripted`` character with a known position, and is
+the last state in ``STATES`` that does. It runs when no higher state sent an
+intent or held the round. Each decision it takes a worthwhile pickup within
+one block (reflex 4, A20, when ``policy.pickup``), holds for a plan ``wait``
+op, or steps along the path to the plan head or a ``policy.goals`` target,
+replanning and escalating a stuck attempt (A15). Cells Step rejections ruled
+out and ``avoid_blocks`` hazards stay out of the path (A14).
 """
 
 from __future__ import annotations
@@ -23,8 +27,9 @@ from .pickup import pickup_outcome
 
 
 class ExploreState(State):
-    """Lowest scripted priority (above **Idle**). Fallback when survival, economy,
-    travel, and curiosity states fall through or never guard."""
+    """Last scripted state: runs when every higher state's guard fails or its
+    ``act`` sends nothing. **Idle** follows it but never guards for ``scripted``.
+    No reachable goal sends nothing, so the decision ends with no state."""
 
     name = "Explore"
 

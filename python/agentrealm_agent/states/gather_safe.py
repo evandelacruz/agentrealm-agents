@@ -1,6 +1,8 @@
-"""Safe-ish ground checks for **Gather** (A22).
+"""Which ground counts as safe-ish for **Gather** (A22). Not a ``STATES`` entry.
 
-``GatherState`` only ``Use``s grass or bushes on cells that pass ``is_safe_ish``.
+``GatherState`` targets a gem pile, grass or bush only where ``is_safe_ish``
+holds: it guards on one being in view, plans paths only to those, ``Take``s
+such a pile and ``Use``s such grass or bush.
 """
 
 from __future__ import annotations

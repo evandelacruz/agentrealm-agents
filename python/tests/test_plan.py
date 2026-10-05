@@ -148,6 +148,21 @@ class GoalStackTest(unittest.TestCase):
         self.assertEqual(m.goal, "plan_shop")
         self.assertEqual(m.path[-1], (3, 0))
 
+    def test_travel_shop_pops_at_a_bought_out_known_cell(self):
+        from agentrealm_agent.knowledge_base import KnowledgeBase
+        from agentrealm_agent.travel.knowledge import record_shop_cell
+
+        kb = KnowledgeBase.empty("sandbox")
+        record_shop_cell(kb, 1, (3, 0))
+        for x, y in ((0, 0), (3, 0)):
+            with self.subTest(target=(x, y)):
+                plan = Plan([{"op": "travel", "to": "shop", "x": x, "y": y}], dict(PARAM_DEFAULTS))
+                w = grid(["...."], at=(3, 0))
+                replan(w, Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0),
+                       set(), set(), plan=plan, knowledge=kb)
+                self.assertIsNone(plan.current())
+                self.assertIsNone(plan.stalled_since_tick)
+
     def test_unpathable_op_is_dropped_after_the_stall_timeout(self):
         # Walled in: (9, 9) is never reachable, so the op must not hold the stack forever.
         w = grid(["###", "#.#", "###"], at=(1, 1))
@@ -246,6 +261,8 @@ class GoalDoneTest(unittest.TestCase):
         w = WorldModel(character_id=1, map_id=1, pos=(2, 0))
         w.entities = [Entity("supply", 1, (2, 0), "torch", gem_price=3)]
         self.assertTrue(goal_done({"op": "travel", "to": "shop", "x": 0, "y": 0}, w, plan))
+        # An explicit cell is not done at a priced supply elsewhere.
+        self.assertFalse(goal_done(op, w, plan))
 
     def test_unbounded_explore_done_only_without_frontier(self):
         op = {"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE}

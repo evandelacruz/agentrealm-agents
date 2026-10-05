@@ -576,18 +576,19 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
             here = world.pos
             if here is None:
                 return False
-            if any(
+            t = travel_op_from_plan_goal(op)
+            if t.x is not None and t.y is not None:
+                dest_map = t.map_id if t.map_id is not None else world.map_id
+                return dest_map == world.map_id and here == (t.x, t.y)
+            # Any shop: a priced supply underfoot is one. A bought-out known
+            # cell is arrival too; `plan_step` pops that one, it needs the KB.
+            return any(
                 e.kind == "supply"
                 and isinstance(e.gem_price, int)
                 and e.gem_price > 0
                 and e.pos == here
                 for e in world.entities
-            ):
-                return True
-            t = travel_op_from_plan_goal(op)
-            if t.x is not None and t.y is not None:
-                dest_map = t.map_id if t.map_id is not None else world.map_id
-                return dest_map == world.map_id and here == (t.x, t.y)
+            )
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
     if name == "use_block":

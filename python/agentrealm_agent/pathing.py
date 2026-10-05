@@ -35,6 +35,8 @@ from .plan import (
     SOLVE_OPS,
     explore_targets,
 )
+from .travel.ops import travel_op_from_plan_goal
+from .travel.resolve import at_destination, resolve_travel
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -166,9 +168,6 @@ def path_for_plan_op(
                 if path:
                     return path, label, Leg(pos)
     if op["to"] == "shop":
-        from .travel.ops import travel_op_from_plan_goal
-        from .travel.resolve import resolve_travel
-
         dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
         if dest is None:
             return None
@@ -225,6 +224,13 @@ def plan_step(
         if op["op"] == "travel" and op["to"] not in TRAVEL_PATHED:
             plan.drop_current(f"no path to a {op['to']} yet")
             continue
+        if op["op"] == "travel" and op["to"] == "shop":
+            # A known shop cell stays listed when bought out (A27), so standing
+            # on the resolved cell is arrival even with nothing priced in sight.
+            dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
+            if dest is not None and at_destination(w, dest):
+                plan.finish_current("at shop cell")
+                continue
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
         if found and next_step(w, blocked, found[0]):
             plan.stalled_since_tick = None

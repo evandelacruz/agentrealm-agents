@@ -20,12 +20,8 @@ Step loop; no sustained oscillation pacing abort; no API error.
 
 from __future__ import annotations
 
-import threading
-import time
 from dataclasses import dataclass, field
-from typing import Callable
 
-from .acceptance import AcceptanceHooks, CountingClient
 from .acceptance_common import (
     LOOP_STEP_LIMIT,
     OscillationAbortTracker,
@@ -33,6 +29,7 @@ from .acceptance_common import (
     recover_withdraws,
     retreat_missed,
 )
+from .acceptance_run import TimedRunHooks
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -46,23 +43,18 @@ TARGET_SECONDS = 7200.0  # default max wall-clock before the smoke script stops
 SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee", "Boss")
 
 
-@dataclass
-class M11AcceptanceMetrics(AcceptanceHooks):
+@dataclass(kw_only=True)
+class M11AcceptanceMetrics(TimedRunHooks):
     """Counts level clears, the follow-on attempt, and shared survival faults."""
 
     overworld_map_id: int  # "left the level" means back on this map
     target_seconds: float = TARGET_SECONDS
-    stop: threading.Event | None = None
-    clock: Callable[[], float] = time.monotonic
-    started_at: float | None = None
     cleared_levels: set[int] = field(default_factory=set)
     next_level_attempted: bool = False
-    deaths: int = 0
     lives_seen: int | None = None
     retreat_misses: int = 0
     recover_withdraws: int = 0
     recover_unsafe: int = 0
-    api_errors: list[str] = field(default_factory=list)
     _loop: StepLoopTracker = field(default_factory=StepLoopTracker)
     _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
     _outside_after_first_clear: bool = False
@@ -85,23 +77,10 @@ class M11AcceptanceMetrics(AcceptanceHooks):
     def oscillation_abort(self) -> str | None:
         return self._oscillation.oscillation_abort
 
-    def wrap(self, client):
-        return CountingClient(client, self.api_errors)
-
     def on_window(self, *, urgent: bool, alive: bool = True) -> None:
-        now = self.clock()
-        if self.started_at is None:
-            self.started_at = now
-        if self.stop is None or not alive:
-            return
-        if self.milestone_ok():
-            self.stop.set()
-        elif now - self.started_at >= self.target_seconds:
-            self.stop.set()
-
-    def on_death(self) -> None:
-        self.deaths += 1
-        if self.stop is not None:
+        """Stops at the wall-clock limit (``TimedRunHooks``) or once the milestone passes."""
+        super().on_window(urgent=urgent, alive=alive)
+        if self.stop is not None and alive and self.milestone_ok():
             self.stop.set()
 
     def on_level_clear(self, ceremony: dict) -> None:
@@ -167,9 +146,7 @@ class M11AcceptanceMetrics(AcceptanceHooks):
         return bool(self.cleared_levels) and self.next_level_attempted
 
     def failures(self, *, full_run: bool = True) -> list[str]:
-        out: list[str] = []
-        if self.deaths:
-            out.append(f"{self.deaths} death(s) during run")
+        out = list(self.base_failures())
         if self.retreat_misses:
             out.append(f"{self.retreat_misses} tick(s) should_retreat held outside a survival state")
         if self.recover_unsafe:
@@ -185,8 +162,6 @@ class M11AcceptanceMetrics(AcceptanceHooks):
                 f"cleared level(s) {sorted(self.cleared_levels)} but never attempted the next "
                 "(back on the overworld, re-enter a level or stack enter_level/fight_boss)"
             )
-        if self.api_errors:
-            out.append(f"{len(self.api_errors)} API error(s): {', '.join(sorted(set(self.api_errors)))}")
         return out
 
     def summary_lines(self) -> list[str]:

@@ -66,7 +66,7 @@ make test
 
 Live M6 smoke on olympuff: `make smoke-m6-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M6 done-when ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)) via [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py). The variables are passed to the script as `--character-id` / `--character-name`; the profile is `python/characters/olympuff_walker.toml`. Lives on live worlds are permanent. The accepted live run (A4) is in [`docs/acceptance/m6_olympuff_PASS.transcript`](docs/acceptance/m6_olympuff_PASS.transcript) (names and ids redacted).
 
-Shared acceptance modules: [`acceptance.py`](python/agentrealm_agent/acceptance.py) (runner hooks, request-error counter), [`acceptance_smoke.py`](python/agentrealm_agent/acceptance_smoke.py) (wake, overworld start, the smoke run loop; M7, M10, M11) and [`acceptance_common.py`](python/agentrealm_agent/acceptance_common.py) (loop, retreat-miss, Recover-withdraw and oscillation-abort checks; M7, M11).
+Shared acceptance modules: [`acceptance.py`](python/agentrealm_agent/acceptance.py) (runner hooks, request-error counter), [`acceptance_smoke.py`](python/agentrealm_agent/acceptance_smoke.py) (wake, overworld start, the smoke run loop; M7, M8, M10, M11), [`acceptance_run.py`](python/agentrealm_agent/acceptance_run.py) (`TimedRunHooks`: deaths, API errors, the wall-clock stop; `FULL_RUN_FRACTION`; M7, M8, M10, M11) and [`acceptance_common.py`](python/agentrealm_agent/acceptance_common.py) (loop, retreat-miss, Recover-withdraw and oscillation-abort checks; M7, M11).
 
 Live M7 smoke: `make smoke-m7-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m7_olympuff.py`](scripts/smoke_m7_olympuff.py), using profile `python/characters/olympuff_m7.toml` and a character you choose at run time. Start with that character on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out): the script sends the agent to one `goto` target 150 blocks east of where it stands (`--target X,Y` overrides), then explores.
 
@@ -87,6 +87,17 @@ Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_ag
 Give-up rule: navigation passes on a give-up only when stuck detection gave up on that target itself, with a reason (for example, a route that needs a block broken). Give-ups on other goals, such as frontier cells while exploring, are counted in the summary but never pass. Heal actions are reported, not gated.
 
 No live hour has passed yet (A58); runs that did not are in [`docs/observations/A16_live_play.md`](docs/observations/A16_live_play.md) and [`docs/observations/A58_live_play.md`](docs/observations/A58_live_play.md). CI covers the gate, the runner hooks and the navigation fixtures in `python/tests/test_m7_acceptance.py` without live keys.
+
+Live M8 smoke: `make smoke-m8-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m8_olympuff.py`](scripts/smoke_m8_olympuff.py), using profile `python/characters/olympuff_m8.toml` and a character you choose at run time. Start on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out).
+
+Pass criteria (PLAN.md A25, checked in [`m8_acceptance.py`](python/agentrealm_agent/m8_acceptance.py)):
+
+- no death (the first one ends the run), and alive at the end of the run;
+- no fight started below the health floor (`would_lose` at the first attack after entering **Fight**);
+- no API error;
+- on a run of at least 95% of an hour: gems earned at least once; armor worn; a shop weapon armed; potion reserve reached; **Heal** took ground food and drank a carried potion; at least one lone weak hostile kill (`NPCDied` for the NPC **Fight** attacked while it was the lone hostile, of a measured type hitting at most 2).
+
+No live M8 pass has run yet; the gate and `python/tests/test_m8_acceptance.py` cover the metrics and smoke script without live keys.
 
 Live M10 smoke: `make smoke-m10-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set explores for one hour on olympuff via [`scripts/smoke_m10_olympuff.py`](scripts/smoke_m10_olympuff.py), using profile `python/characters/olympuff_m10.toml` and a character you choose at run time. A sleeping character is woken with one `Wait` first.
 

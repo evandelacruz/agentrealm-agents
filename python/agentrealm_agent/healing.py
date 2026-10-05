@@ -186,6 +186,22 @@ def nearest_known_safe(w: WorldModel) -> tuple[int, Pos] | None:
     return map_id, candidates[0][2]
 
 
+def self_use_code(w: WorldModel, before: dict | None) -> str | None:
+    """The code a self-``Use`` drinks or eats, given the intent queued just before it.
+
+    Heal sends ``[Arm item, Use self]`` in one queue, and both results are
+    applied before the observation updates ``armed_code``. So an ``Arm``
+    just before the ``Use`` names the item; with no ``Arm`` there, the item
+    was already armed.
+    """
+    if before and before.get("verb") == "Arm":
+        for h in w.held_supplies:
+            if h.id == before.get("supply_id"):
+                return h.code
+        return None
+    return w.armed_code
+
+
 def note_heal_pending(m: Memory, w: WorldModel, code: str, kind: str) -> None:
     """Remember health before a food ``Take`` or self-``Use`` (``kind`` is
     "take" or "use"), so the next observation can show what it healed (A24).

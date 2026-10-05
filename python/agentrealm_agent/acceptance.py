@@ -1,9 +1,10 @@
-"""What the live acceptance runs (M6 A4, M7 A16, M10 A33, M11 A40) share.
+"""What the live acceptance runs (M6 A4, M7 A16, M8 A25, M10 A33, M11 A40) share.
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
-measures (M11 adds ``on_level_clear``). ``CountingClient`` records failed requests (and optionally every
-call).
+measures; M8 also reads tick events (``NPCDied``) through ``on_events``, and
+M11 level clears through ``on_level_clear``.
+``CountingClient`` records failed requests (and optionally every call).
 """
 
 from __future__ import annotations
@@ -60,6 +61,9 @@ class AcceptanceHooks:
 
     def on_death(self) -> None:
         """A ``Died`` event arrived for our character."""
+
+    def on_events(self, events: list[dict]) -> None:
+        """Tick events after the response is applied (for example ``NPCDied``)."""
 
     def on_level_clear(self, ceremony: dict) -> None:
         """A round trip carried a one-shot ``level_clear_ceremony`` (A38, A40)."""

@@ -23,6 +23,7 @@ from ..pathing import (
     attempt_plan,
     escalation_step,
     goto_navigation_pending,
+    nav_blocked_for_walk,
     next_step,
     path_owned_by_plan,
     replan,
@@ -83,6 +84,7 @@ def scripted_outcome(
     # kept like a plan-owned one, so stuck detection (A15) still escalates
     # and gives up on it.
     walking_goto = goto_navigation_pending(w, m, policy)
+    nav_avoid = nav_blocked_for_walk(w, m, policy, plan_avoid) if walking_goto else plan_avoid
     if plan is not None:
         plan.advance(w, m)
         op = plan.current()
@@ -94,17 +96,17 @@ def scripted_outcome(
     else:
         owned = path_owned_by_plan(plan, m, policy.goals)
     target_plan = attempt_plan(m, w, policy, plan_avoid, plan_costly, knowledge)
-    step = _escalated_step(w, m, plan_avoid, target_plan, knowledge) if owned else None
+    step = _escalated_step(w, m, nav_avoid, target_plan, knowledge) if owned else None
     if step is None and owned:
-        step = next_step(w, plan_avoid, m.path)
+        step = next_step(w, nav_avoid, m.path)
         att = nav_stuck.active(m, w)
         if step is not None and att is not None and m.goal == att.goal:
             nav_stuck.observe(att, w, m.path)
     if step is None:
-        missed = replan(w, m, policy, rng, plan_avoid, plan_costly, knowledge, plan=plan)
-        step = next_step(w, plan_avoid, m.path)
+        missed = replan(w, m, policy, rng, nav_avoid, plan_costly, knowledge, plan=plan)
+        step = next_step(w, nav_avoid, m.path)
         if step is None and missed is not None:
-            step = _missed_step(w, m, plan_avoid, target_plan, knowledge, *missed)
+            step = _missed_step(w, m, nav_avoid, target_plan, knowledge, *missed)
     if step is not None:
         att = nav_stuck.active(m, w)
         label = m.path[-1] if m.path else att.target if att else step

@@ -44,6 +44,14 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Cause:** with two hostiles in range, greedy `flee_step` maximised distance to the nearest NPC each tick, so the best step from each cell was back to the other.
 - **Fix:** `flee_step` skips stepping back to the cell just left when another step scores as well (`states/flee.py`, `pathing.py`); offline test `test_two_hostiles_does_not_immediately_step_back`.
 
+## Run 5 — ABORT: sustained oscillation on goto (~5.5 min)
+
+- **Character:** chosen at run time via `CHARACTER_NAME` (not committed).
+- **Gate:** exit 1 `ABORT: sustained oscillation` — 4 goto pacing give-ups in 6000 ticks (last at 425↔426 on y=375); regen not measured; 0 deaths; ~333 s wall clock.
+- **Trace:** 24 oscillation events (4 with `goal: goto`); one Loot-only pacing event (`385,371`↔`385,373`, nothing given up). No Flee ping-pong after the Run 4 fix.
+- **Cause:** Explore replanned the goto path each tick and kept stepping back to the cell just left (393↔394, then 425↔426), tripping the oscillation guard repeatedly after each backoff ended.
+- **Fix:** while `goto_navigation_pending`, treat the cell just left as blocked for `next_step` / `replan` (`nav_blocked_for_walk`, `test_explore_goto_does_not_replan_straight_back`).
+
 ## Done-when
 
 A58 stays open until a live hour exits 0 on the A16 gate and a redacted PASS transcript is committed under `docs/acceptance/m7_olympuff_PASS.transcript`.

@@ -49,6 +49,36 @@ def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
     return [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
 
 
+def goto_back_avoid(m: Memory, w: WorldModel) -> Pos | None:
+    """Cell the agent just left; skip stepping straight back on the goto walk (A58).
+
+    Only when Explore's own ``goto`` step brought the agent here. Another
+    state's move (Break, Loot, Flee, …) may legitimately need a step back.
+    """
+    stuck = m.nav_stuck
+    cells = stuck.recent_cells
+    if w.pos is None or len(cells) < 2 or cells[-1] != w.pos:
+        return None
+    # Legitimate goto routes backtrack around fog and dead ends; only block
+    # when the last few cells already look like a two-cell loop.
+    if len(cells) >= 4 and len(set(cells[-4:])) > 2:
+        return None
+    moves = stuck.recent_moves
+    if moves and len(moves) >= len(cells) - 1:
+        goal, state = moves[-1]
+        if state not in ("", "Explore") or goal not in ("", "goto"):
+            return None
+    return cells[-2]
+
+
+def nav_blocked_for_walk(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos]) -> set[Pos]:
+    """``blocked`` plus the back-avoid cell while a policy ``goto`` is owed."""
+    avoid = goto_back_avoid(m, w)
+    if avoid is not None and goto_navigation_pending(w, m, policy):
+        return blocked | {avoid}
+    return blocked
+
+
 def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
     """True while the agent still owes the ``goto`` in ``policy.goals`` (M7 smoke, A58).
 

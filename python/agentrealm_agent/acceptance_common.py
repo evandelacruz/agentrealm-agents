@@ -2,26 +2,29 @@
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, field
 
 from .config import Policy
 from .executor.movement import step_landing
-from .knowledge_base import KnowledgeBase
-from .memory import Memory
 from .survival import should_retreat
 from .world import Pos, WorldModel
 from .zone_discovery import safe_tiles
 
 LOOP_STEP_LIMIT = 24  # Step-sending decisions in a row at one cell with one reason
+# Sustained pacing: the guard gave up a target more than this many times in
+# this many ticks (10 minutes at 10 ticks/s); events that gave nothing up do
+# not count. Its backoffs double (30 s, 60 s, 120 s),
+# so a target that keeps making the agent pace trips this within minutes.
 OSCILLATION_ABORT_COUNT = 3
 OSCILLATION_ABORT_TICKS = 6000
 
-SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee", "Boss")
-
 
 def withdraw_cells(pos: Pos | None, intents: list[dict]) -> list[Pos | None]:
-    """Where the agent stands when each ``WithdrawFromChest`` in the queue runs."""
+    """Where the agent stands when each ``WithdrawFromChest`` in the queue runs.
+
+    Walks the queue from ``pos``: a ``Step`` moves one block, a ``SetPosition``
+    moves to its cell. None when the start is unknown.
+    """
     cells: list[Pos | None] = []
     for intent in intents:
         verb = intent.get("verb")
@@ -32,6 +35,25 @@ def withdraw_cells(pos: Pos | None, intents: list[dict]) -> list[Pos | None]:
         elif verb == "WithdrawFromChest":
             cells.append(pos)
     return cells
+
+
+def retreat_missed(
+    w: WorldModel,
+    policy: Policy,
+    params: dict[str, float | int],
+    *,
+    state: str,
+    survival_states: tuple[str, ...],
+) -> bool:
+    """``should_retreat`` held on the decision's world while a non-survival state ran."""
+    return state not in survival_states and should_retreat(w, policy, params)
+
+
+def recover_withdraws(w: WorldModel, intents: list[dict]) -> tuple[int, int]:
+    """``(withdraws, unsafe)``: Recover's ``WithdrawFromChest`` intents, and those off a known safe tile."""
+    safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
+    cells = withdraw_cells(w.pos, intents)
+    return len(cells), sum(1 for cell in cells if cell not in safe)
 
 
 @dataclass
@@ -56,50 +78,30 @@ class StepLoopTracker:
 
 @dataclass
 class OscillationAbortTracker:
-    """Ends the run when pacing give-ups repeat within a tick window (A15)."""
+    """Counts the guard's events and decides when sustained pacing aborts the run (A15)."""
 
-    stop: threading.Event | None = None
-    oscillation_ticks: list[int] = field(default_factory=list)
-    pacing_give_up_ticks: list[int] = field(default_factory=list)
-    oscillation_abort: str | None = None
+    oscillation_ticks: list[int] = field(default_factory=list)  # each guard event's tick
+    pacing_give_up_ticks: list[int] = field(default_factory=list)  # ticks of events that gave up a target
+    oscillation_abort: str | None = None  # why the run was stopped for pacing
 
-    def on_oscillation(self, event: dict) -> None:
+    def on_oscillation(self, event: dict) -> bool:
+        """True when this event is the one that trips the abort; the caller stops the run.
+
+        Only an event that gave up a target (it carries ``goal``) counts
+        toward the abort; survival states pacing on their own do not.
+        """
         tick = int(event.get("tick") or 0)
         self.oscillation_ticks.append(tick)
         if "goal" not in event:
-            return
+            return False
         self.pacing_give_up_ticks.append(tick)
         recent = [t for t in self.pacing_give_up_ticks if tick - t < OSCILLATION_ABORT_TICKS]
-        if len(recent) > OSCILLATION_ABORT_COUNT and self.oscillation_abort is None:
-            self.oscillation_abort = (
-                f"sustained oscillation: gave up {len(recent)} targets for pacing in "
-                f"{OSCILLATION_ABORT_TICKS} ticks (last at tick {tick}: {event['goal']} → "
-                f"{tuple(event.get('target') or ())}, cells {event.get('cells')}, moved by "
-                f"{', '.join(event.get('states') or []) or 'no state'})"
-            )
-            if self.stop is not None:
-                self.stop.set()
-
-
-def note_retreat_miss(
-    metrics: object,
-    w: WorldModel,
-    policy: Policy,
-    params: dict[str, float | int],
-    *,
-    state: str,
-) -> None:
-    if should_retreat(w, policy, params) and state not in SURVIVAL_STATES:
-        metrics.retreat_misses += 1  # type: ignore[attr-defined]
-
-
-def note_recover_withdraws(
-    metrics: object,
-    w: WorldModel,
-    intents: list[dict],
-) -> None:
-    safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
-    for cell in withdraw_cells(w.pos, intents):
-        metrics.recover_withdraws += 1  # type: ignore[attr-defined]
-        if cell not in safe:
-            metrics.recover_unsafe += 1  # type: ignore[attr-defined]
+        if len(recent) <= OSCILLATION_ABORT_COUNT or self.oscillation_abort is not None:
+            return False
+        self.oscillation_abort = (
+            f"sustained oscillation: gave up {len(recent)} targets for pacing in "
+            f"{OSCILLATION_ABORT_TICKS} ticks (last at tick {tick}: {event['goal']} → "
+            f"{tuple(event.get('target') or ())}, cells {event.get('cells')}, moved by "
+            f"{', '.join(event.get('states') or []) or 'no state'})"
+        )
+        return True

@@ -1,8 +1,8 @@
-"""What the live acceptance runs (M6 A4, M7 A16) share.
+"""What the live acceptance runs (M6 A4, M7 A16, M11 A40) share.
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
-measures. ``CountingClient`` records failed requests (and optionally every
+measures (M11 adds ``on_level_clear``). ``CountingClient`` records failed requests (and optionally every
 call).
 """
 

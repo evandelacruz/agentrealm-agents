@@ -95,6 +95,6 @@ Pass criteria (PLAN.md A40, checked in [`m11_acceptance.py`](python/agentrealm_a
 - Recover withdraws only on a known safe tile;
 - no loop or sustained oscillation (same thresholds as M7);
 - no API error;
-- on a run of at least 95% of the default limit: at least one `level_clear_ceremony`, then a follow-on attempt (re-enter a level interior after leaving one, or stack `enter_level` / `fight_boss` after the clear).
+- on a run of at least 95% of the default limit: at least one `level_clear_ceremony`, then a follow-on attempt (re-enter a level interior after leaving one, or stack `enter_level` / `fight_boss` after the clear while not inside a level already cleared).
 
 No live Olympuff pass yet (A40 partial); CI covers the gate and smoke wiring in `python/tests/test_m11_acceptance.py` without live keys.

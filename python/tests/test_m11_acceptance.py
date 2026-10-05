@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import sys
 import tempfile
 import threading
 import unittest
@@ -12,13 +13,11 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import config
-from agentrealm_agent.client import ApiError
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics
+from agentrealm_agent.m7_acceptance import OSCILLATION_ABORT_COUNT
 from agentrealm_agent.memory import Memory
-from agentrealm_agent.world import WorldModel
-from tests.test_m7_acceptance import OVERWORLD, decide, open_world
+from agentrealm_agent.world import Entity, WorldModel
+from tests.test_m7_acceptance import OVERWORLD, decide, gave_up, metrics as m7_metrics, open_world
 
 REPO = Path(__file__).resolve().parents[2]
 SMOKE_PATH = REPO / "scripts" / "smoke_m11_olympuff.py"
@@ -70,6 +69,22 @@ class LevelGateTest(unittest.TestCase):
         decide(m, open_world(), mem)
         self.assertTrue(m.milestone_ok())
 
+    def test_plan_op_inside_the_cleared_level_does_not_count(self):
+        m, mem = metrics(), Memory()
+        m.on_level_clear({"level_number": 1, "max_health_gain": 5})
+        mem.goal_op = {"op": "fight_boss", "x": 3, "y": 4}
+        decide(m, level_world(1), mem)
+        self.assertFalse(m.milestone_ok())
+        decide(m, open_world(), mem)
+        self.assertTrue(m.milestone_ok(), "the same op counts once outside the level")
+
+    def test_plan_op_inside_an_uncleared_level_counts(self):
+        m, mem = metrics(), Memory()
+        m.on_level_clear({"level_number": 1, "max_health_gain": 5})
+        mem.goal_op = {"op": "fight_boss", "x": 3, "y": 4}
+        decide(m, level_world(2), mem)
+        self.assertTrue(m.milestone_ok())
+
     def test_short_run_skips_level_criteria(self):
         m = metrics()
         self.assertEqual(m.failures(full_run=False), [])
@@ -83,6 +98,75 @@ class SharedSurvivalGateTest(unittest.TestCase):
         for _ in range(24):
             decide(m, open_world(), reason="explore → (1,0)")
         self.assertTrue(m.loop_detected)
+
+
+def threatened(level: int | None = None) -> WorldModel:
+    w = open_world()
+    w.map_level = level
+    w.health, w.lives = 3, 6
+    w.entities = [Entity("npc", 1, (1, 0), code="gnawer")]
+    w.threat.record(("npc", "gnawer"), 5)
+    return w
+
+
+class SurvivalStatesTest(unittest.TestCase):
+    """A40 adds Boss to the survival states; A16 does not (PLAN.md)."""
+
+    def test_boss_is_a_survival_state_for_m11(self):
+        m = metrics()
+        decide(m, threatened(level=1), state="Boss")
+        self.assertEqual(m.retreat_misses, 0)
+        decide(m, threatened(), state="Explore")
+        self.assertEqual(m.retreat_misses, 1)
+
+    def test_boss_is_a_retreat_miss_for_m7(self):
+        m = m7_metrics()
+        decide(m, threatened(), state="Boss")
+        self.assertEqual(m.retreat_misses, 1)
+
+
+class OscillationStopTest(unittest.TestCase):
+    """The smoke scripts assign ``stop`` after the metrics are built."""
+
+    def assert_abort_stops(self, m):
+        stop = threading.Event()
+        m.stop = stop
+        for i in range(OSCILLATION_ABORT_COUNT + 1):
+            m.on_oscillation(gave_up(i * 100))
+        self.assertTrue(stop.is_set())
+        self.assertIn("sustained oscillation", m.oscillation_abort)
+
+    def test_m7_abort_stops_a_late_assigned_stop(self):
+        self.assert_abort_stops(m7_metrics())
+
+    def test_m11_abort_stops_a_late_assigned_stop(self):
+        self.assert_abort_stops(metrics())
+
+
+class SharedRunSmokeTest(unittest.TestCase):
+    def test_oscillation_abort_ends_the_runner_through_run_smoke(self):
+        common = sys.modules[load_smoke().run_smoke.__module__]
+        seen = {}
+
+        class FakeRunner:
+            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance):
+                seen["stop"] = stop
+                self.acceptance = acceptance
+
+            def run(self):
+                for i in range(OSCILLATION_ABORT_COUNT + 1):
+                    self.acceptance.on_oscillation(gave_up(i * 100))
+                seen["stopped_during_run"] = seen["stop"].is_set()
+
+        cfg = config.load(REPO / "python" / "characters" / "olympuff_m11.toml")
+        with mock.patch.object(common, "Runner", FakeRunner), \
+                mock.patch.object(common, "load_knowledge"), \
+                mock.patch.object(common, "save_knowledge"), \
+                redirect_stdout(io.StringIO()):
+            m, _ = common.run_smoke(mock.Mock(), cfg, 9, metrics(), timeout_s=0)
+        self.assertIs(m.stop, seen["stop"])
+        self.assertTrue(seen["stopped_during_run"], "the abort must stop the runner, not wait for it to end")
+        self.assertIsNotNone(m.oscillation_abort)
 
 
 class SmokeScriptTest(unittest.TestCase):
@@ -143,7 +227,6 @@ class SmokeScriptTest(unittest.TestCase):
 class RunnerHookTest(unittest.TestCase):
     def test_runner_forwards_level_clear_ceremony(self):
         from agentrealm_agent.runner import Runner
-        from agentrealm_agent import config
 
         cfg = config.load(REPO / "python" / "characters" / "olympuff_m11.toml")
         m = M11AcceptanceMetrics(overworld_map_id=OVERWORLD)

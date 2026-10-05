@@ -8,7 +8,8 @@ module checks:
 - Uses what it learned to attempt the next: after the first clear, the character
   leaves level interior maps and enters a level interior again (a positive
   ``level`` on the position read), or the plan's top op is ``enter_level`` or
-  ``fight_boss`` while not already inside that level.
+  ``fight_boss`` while not inside a level already cleared (the op names a
+  door, not a level, so a level whose clear was seen is "that level").
 
 Shared survival gates (same as M7 A16 where they apply during a long unattended
 run): no death; no retreat miss; Recover withdraws only on known safe tiles; no
@@ -27,8 +28,8 @@ from .acceptance_common import (
     LOOP_STEP_LIMIT,
     OscillationAbortTracker,
     StepLoopTracker,
-    note_recover_withdraws,
-    note_retreat_miss,
+    recover_withdraws,
+    retreat_missed,
 )
 from .config import Policy
 from .knowledge_base import KnowledgeBase
@@ -37,6 +38,10 @@ from .states.level import inside_level
 from .world import WorldModel
 
 TARGET_SECONDS = 7200.0  # default max wall-clock before the smoke script stops
+
+# M7's survival states plus Boss: during a boss fight Retreat stands down and
+# Boss walks back toward the door itself (A38).
+SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee", "Boss")
 
 
 @dataclass
@@ -55,18 +60,27 @@ class M11AcceptanceMetrics(AcceptanceHooks):
     retreat_misses: int = 0
     recover_withdraws: int = 0
     recover_unsafe: int = 0
-    loop_detected: bool = False
-    oscillation_ticks: list[int] = field(default_factory=list)
-    pacing_give_up_ticks: list[int] = field(default_factory=list)
-    oscillation_abort: str | None = None
     api_errors: list[str] = field(default_factory=list)
     _loop: StepLoopTracker = field(default_factory=StepLoopTracker)
     _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
     _outside_after_first_clear: bool = False
     _plan_attempt_after_clear: bool = False
 
-    def __post_init__(self) -> None:
-        self._oscillation.stop = self.stop
+    @property
+    def loop_detected(self) -> bool:
+        return self._loop.loop_detected
+
+    @property
+    def oscillation_ticks(self) -> list[int]:
+        return self._oscillation.oscillation_ticks
+
+    @property
+    def pacing_give_up_ticks(self) -> list[int]:
+        return self._oscillation.pacing_give_up_ticks
+
+    @property
+    def oscillation_abort(self) -> str | None:
+        return self._oscillation.oscillation_abort
 
     def wrap(self, client):
         return CountingClient(client, self.api_errors)
@@ -94,10 +108,8 @@ class M11AcceptanceMetrics(AcceptanceHooks):
         self.cleared_levels.add(int(level))
 
     def on_oscillation(self, event: dict) -> None:
-        self._oscillation.on_oscillation(event)
-        self.oscillation_ticks = self._oscillation.oscillation_ticks
-        self.pacing_give_up_ticks = self._oscillation.pacing_give_up_ticks
-        self.oscillation_abort = self._oscillation.oscillation_abort
+        if self._oscillation.on_oscillation(event) and self.stop is not None:
+            self.stop.set()
 
     def before_tick(
         self,
@@ -113,18 +125,21 @@ class M11AcceptanceMetrics(AcceptanceHooks):
     ) -> None:
         if w.lives is not None:
             self.lives_seen = w.lives
-        note_retreat_miss(self, w, policy, params, state=state)
+        if retreat_missed(w, policy, params, state=state, survival_states=SURVIVAL_STATES):
+            self.retreat_misses += 1
         if intents and state == "Recover":
-            note_recover_withdraws(self, w, intents)
+            withdraws, unsafe = recover_withdraws(w, intents)
+            self.recover_withdraws += withdraws
+            self.recover_unsafe += unsafe
         if intents is not None:
             self._loop.note(w, reason, intents)
-            self.loop_detected = self._loop.loop_detected
         self._note_level_attempt(w, m)
 
     def _note_level_attempt(self, w: WorldModel, m: Memory) -> None:
         if not self.cleared_levels:
             return
-        if m.goal_op is not None and m.goal_op.get("op") in ("enter_level", "fight_boss"):
+        in_cleared = inside_level(w) and w.map_level in self.cleared_levels
+        if m.goal_op is not None and m.goal_op.get("op") in ("enter_level", "fight_boss") and not in_cleared:
             self._plan_attempt_after_clear = True
         if self._plan_attempt_after_clear:
             self.next_level_attempted = True

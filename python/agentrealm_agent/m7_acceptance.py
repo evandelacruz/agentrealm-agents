@@ -45,8 +45,8 @@ from .acceptance_common import (
     OSCILLATION_ABORT_TICKS,
     OscillationAbortTracker,
     StepLoopTracker,
-    note_recover_withdraws,
-    note_retreat_miss,
+    recover_withdraws,
+    retreat_missed,
     withdraw_cells,
 )
 from .config import Policy
@@ -57,6 +57,9 @@ from .world import Pos, WorldModel, chebyshev
 
 TARGET_SECONDS = 3600.0
 TARGET_DISTANCE = 150
+
+# States that are already the right answer when should_retreat holds.
+SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee")
 
 
 @dataclass
@@ -86,17 +89,26 @@ class M7AcceptanceMetrics(AcceptanceHooks):
     recover_unsafe: int = 0
     heal_actions: int = 0
     regen: str | None = None  # "yes" or "no" once measured
-    loop_detected: bool = False
-    oscillation_ticks: list[int] = field(default_factory=list)
-    pacing_give_up_ticks: list[int] = field(default_factory=list)
-    oscillation_abort: str | None = None
     api_errors: list[str] = field(default_factory=list)
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
     _loop: StepLoopTracker = field(default_factory=StepLoopTracker)
     _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
 
-    def __post_init__(self) -> None:
-        self._oscillation.stop = self.stop
+    @property
+    def loop_detected(self) -> bool:
+        return self._loop.loop_detected
+
+    @property
+    def oscillation_ticks(self) -> list[int]:
+        return self._oscillation.oscillation_ticks
+
+    @property
+    def pacing_give_up_ticks(self) -> list[int]:
+        return self._oscillation.pacing_give_up_ticks
+
+    @property
+    def oscillation_abort(self) -> str | None:
+        return self._oscillation.oscillation_abort
 
     def wrap(self, client):
         return CountingClient(client, self.api_errors)
@@ -115,10 +127,9 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             self.stop.set()
 
     def on_oscillation(self, event: dict) -> None:
-        self._oscillation.on_oscillation(event)
-        self.oscillation_ticks = self._oscillation.oscillation_ticks
-        self.pacing_give_up_ticks = self._oscillation.pacing_give_up_ticks
-        self.oscillation_abort = self._oscillation.oscillation_abort
+        """Count the guard's events; sustained give-ups for pacing end the run."""
+        if self._oscillation.on_oscillation(event) and self.stop is not None:
+            self.stop.set()
 
     def before_tick(
         self,
@@ -136,15 +147,17 @@ class M7AcceptanceMetrics(AcceptanceHooks):
             self.lives_seen = w.lives
         self._note_navigation(w)
         self._note_give_ups(m)
-        note_retreat_miss(self, w, policy, params, state=state)
+        if retreat_missed(w, policy, params, state=state, survival_states=SURVIVAL_STATES):
+            self.retreat_misses += 1
         if intents and state == "Heal":
             self.heal_actions += 1
         if intents and state == "Recover":
-            note_recover_withdraws(self, w, intents)
+            withdraws, unsafe = recover_withdraws(w, intents)
+            self.recover_withdraws += withdraws
+            self.recover_unsafe += unsafe
         self.regen = regen_known(knowledge, m) or self.regen
         if intents is not None:
             self._loop.note(w, reason, intents)
-            self.loop_detected = self._loop.loop_detected
 
     def _note_navigation(self, w: WorldModel) -> None:
         if w.pos is None or w.map_id != self.overworld_map_id:
@@ -219,6 +232,7 @@ __all__ = [
     "M7AcceptanceMetrics",
     "OSCILLATION_ABORT_COUNT",
     "OSCILLATION_ABORT_TICKS",
+    "SURVIVAL_STATES",
     "TARGET_DISTANCE",
     "TARGET_SECONDS",
     "withdraw_cells",

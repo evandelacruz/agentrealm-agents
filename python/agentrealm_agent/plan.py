@@ -10,6 +10,7 @@ from typing import Any
 
 from .config import Policy
 from .directives import PARAM_DEFAULTS, _valid_param
+from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .world import DOORS, Pos, WorldModel, chebyshev
 
@@ -44,6 +45,8 @@ OP_STATE: dict[str, str | None] = {
 # Ops the shipped Explore pathing can drive today. Every other op is dropped
 # with a log line when it reaches the top of the stack (A34 slice).
 EXPLORE_PATH_OPS = frozenset({"explore_area", "travel", "wait"})
+BOSS_PLAN_OPS = frozenset({"fight_boss"})
+SOLVE_OPS = frozenset({"compose", "use_block"})
 # `travel` destinations with a path today; `hunting_ground` and `shop` wait on A20/Shop.
 TRAVEL_PATHED = frozenset({"entrance", "town", "point"})
 
@@ -195,7 +198,23 @@ def _validate_enter_level(op: dict[str, Any]) -> bool:
 
 
 def _validate_fight_boss(op: dict[str, Any]) -> bool:
-    return _validate_enter_level(op)
+    if not _require_fields(op, ("x", "y")) or not all(_is_int(op[k]) for k in ("x", "y")):
+        return False
+    if "min_health" in op and (not _is_int(op["min_health"]) or op["min_health"] < 0):
+        _drop("bad min_health", op)
+        return False
+    if "min_potions" in op and (not _is_int(op["min_potions"]) or op["min_potions"] < 0):
+        _drop("bad min_potions", op)
+        return False
+    if "armed" in op and not _is_str(op["armed"]):
+        _drop("bad armed", op)
+        return False
+    if "worn" in op:
+        worn = op["worn"]
+        if not isinstance(worn, list) or not worn or not all(_is_str(c) for c in worn):
+            _drop("bad worn", op)
+            return False
+    return True
 
 
 def _validate_avoid(op: dict[str, Any]) -> bool:
@@ -389,7 +408,7 @@ class Plan:
 
     ``params`` holds the effective survival params for the strategist; the
     survival states read the directives' params (A9). ``current`` and ``goal_done`` only read;
-    ``advance`` and ``drop_current`` are the only calls that move the stack.
+    ``advance``, ``drop_current`` and ``finish_current`` are the only calls that move the stack.
     """
 
     goals: list[GoalOp]
@@ -399,6 +418,7 @@ class Plan:
     floor_params: dict[str, float | int] = field(default_factory=lambda: dict(PARAM_DEFAULTS))
     wait_started_tick: int | None = None
     stalled_since_tick: int | None = None  # first tick the current op found no path
+    use_block_before: str | None = None  # block_type at a `use_block` target when first seen as the head op
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
 
     def snapshot(self) -> tuple:
@@ -410,6 +430,7 @@ class Plan:
             dict(self.floor_params),
             self.wait_started_tick,
             self.stalled_since_tick,
+            self.use_block_before,
         )
 
     def restore(self, saved: tuple) -> None:
@@ -421,6 +442,7 @@ class Plan:
             floor_params,
             self.wait_started_tick,
             self.stalled_since_tick,
+            self.use_block_before,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
 
@@ -435,6 +457,8 @@ class Plan:
                 self.params = apply_set_param(self.floor_params, self.params, op)
                 self._pop_current()
                 continue
+            if op["op"] == "use_block" and self.use_block_before is None and world.map_id is not None:
+                self.use_block_before = world.view.tiles.get((op["x"], op["y"]))
             if not goal_done(op, world, self):
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
@@ -447,6 +471,13 @@ class Plan:
             log.warning("plan: dropped op %r: %s", op, reason)
         self._pop_current()
 
+    def finish_current(self, reason: str) -> None:
+        """Pop an op whose state saw it finish (``fight_boss``, A38)."""
+        op = self.current()
+        if op is not None:
+            log.info("plan: finished op %r: %s", op, reason)
+        self._pop_current()
+
     def note_stalled(self, tick: int) -> bool:
         """Record that the current op found no path; True once it has stalled too long."""
         if self.stalled_since_tick is None:
@@ -457,6 +488,7 @@ class Plan:
         self.index += 1
         self.wait_started_tick = None
         self.stalled_since_tick = None
+        self.use_block_before = None
 
     @classmethod
     def from_directives(
@@ -537,7 +569,18 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
             return world.view.tiles.get(world.pos) in DOORS
         if op["to"] == "town":
             return (world.map_id, world.pos) in world.respawn_anchors
-    # Ops whose states are not shipped never finish here; replan drops them.
+    if name == "compose":
+        return holds_whole(world.held_supplies, op["composes_into"])
+    if name == "use_block":
+        # Done once the target's block_type differs from what it was when the
+        # op reached the top: a successful Use destroys the block, which then
+        # shows its destroyed type (GAME_NOTES Breaking blocks). BlockChanged
+        # events and terrain reads both update the tile, so a missed window
+        # does not lose the change.
+        tile = world.view.tiles.get((op["x"], op["y"]))
+        return plan.use_block_before is not None and tile is not None and tile != plan.use_block_before
+    # `fight_boss` finishes in Boss, which sees the defeat (A38). Ops whose
+    # states are not shipped never finish here; replan drops them.
     return False
 
 

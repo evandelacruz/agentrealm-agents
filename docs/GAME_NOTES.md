@@ -101,7 +101,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Hostiles stay near their spawn.** The pair stood just outside town for over 30 minutes, moving at most one block, and never followed into the safe zone (Obs).
 - **Lesson.** Several hostiles close together are one fight, not several. Never step next to a group with 10 health. Count every hostile within two blocks of the target before engaging (Obs).
 - **Combat events.** `NPCDamaged` shows damage dealt; a miss emits nothing. `NPCDied` marks a kill (M §8).
-- **Bosses** are the only NPCs with `health`/`max_health` on entity reads (M §9.3).
+- **Bosses** are the only NPCs with `health`/`max_health` on entity reads: "A boss NPC also includes its current `health` and `max_health` … no character, hostile, or helper carries health" (M §9.3; API Reads). The agent identifies a boss by that field (A38).
 - **Healing.** Potions and food heal (M §16). A new character starts at 10 health. Regeneration out of combat has not been observed.
 - **Never wake or idle next to a hostile.** An unattended character keeps taking hits (Guide).
 
@@ -131,6 +131,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Gear tiers:** bronze in town, iron at waystations, adamant at the Last Camp and from bosses (M §16).
 - **Gems come from** cutting grass and bushes (10% in ring 1, 15% farther), felling trees, gem piles that return on an interval, and gem caches. Field work earns about 3 gems a minute (M §16). Gems are kept on death.
 - **Food and gems on the ground.** Apples, berries and gem piles lie around town, free to pick up (Obs).
+- **Authored gem piles on the wire.** In Olympuff town, a pile ready to pick up is three adjacent ground supplies on one row, each with `supply_subtype_code` `gem` and no `gem_price` (Obs: GemPileObserver0c52, map 76, supplies 266–268 at 377–379,377 and 2226–2228 at 359–361,360, ticks ~2578415). No separate `gem_pile` code appeared on entity reads. Grass and bush drops use the same code when a gem lands on the ground.
 
 ## Compose
 
@@ -193,7 +194,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   - health refills, and max health rises on the first clear;
   - you are moved outside the level that tick;
   - `levels_cleared` updates in the snapshot
-  (M §7.2; API Round Trip).
+  (M §7.2; API Round Trip). The agent takes the ceremony as the boss's defeat (A38).
 - **Inside a level** you can't `Sleep` (M §11).
 - **Clearing all `level_count` levels** transcends the character, which ends it (M §11).
 
@@ -203,22 +204,22 @@ Each has a test the agent or a hand session can run.
 
 | Question | How to find out |
 |---|---|
+| Is the boss fight clock served, and under what field? The docs say only that the time limit sets health to 0 (M §11). The agent reads `boss_fight_end_tick` if a round trip carries it (A38) | Enter a boss room and log the round trip and `get_self` each tick until the fight ends |
 | Hostile health per type (no NPC's health is served but a boss's) | Sum `NPCDamaged` on one NPC until its `NPCDied` |
 | Hostile stats (defense, range, speed) per type | Log `NPCDamaged` and our swings for the hit rate (gives defense); log `Damaged` and spacing for damage and cooldown; log first `Attacked` distance for range |
 | Does health regenerate out of combat? | Take a hit, retreat to town, read `health` every 10 s for 2 minutes |
 | Weapon cooldown per subtype | Swing at a lone weak hostile from full health, with a retreat queued in the same request, and log the ticks between our `NPCDamaged`. A18 records, per NPC type, the largest hit seen (`weapon_damage`), a lower bound on the damage cap against that type, not the weapon's damage stat: an `NPCDamaged` is copied to every character that sees the block (API Events) and a miss emits nothing, so it counts the hit only when it is the one `NPCDamaged` on the block and tick our `Use` resolved and no other character was in sight when the `Use` applied or at the response's observation. Open: whether a character out of our sight can still strike a block we see |
-| How much damage each worn item saves | Take hits from one hostile type with and without the item worn and compare `Damaged` amounts; one hit can't be split between worn slots. Not recorded by A18: a `Damaged` amount depends on the attacker, and no baseline for the same attacker without the item is kept, so no per-item number exists to store |
-| What each level's entrance needs | Walk to each minimap mark; read terrain (`locked`, block type), signs and helpers nearby. Stored in `.state/`, never committed |
+| How much damage each worn item saves | Take hits from one hostile type with and without the item worn and compare `Damaged` amounts; one hit can't be split between worn slots. A18 records, per NPC type, `damage_taken` while exactly one worn slot is filled for a whole response, `damage_without` under the lone item our `Remove` took off, while no slot is filled and until the next loadout change, death or map change, and `damage_saved` as the difference of those two maxes. Hits in a response whose worn loadout changed are not recorded |
+| What each level's entrance needs | **Investigate (A30)** walks next to each minimap mark (A27) on the current map and records `block_type` and `locked` on its `kb.entrances` row, keyed `"<map_id>:<x>,<y>"` (M §9.2). The only `needs` value set is `key`, on a locked door (M §9.2, §11); `break` and `cross_water` are not inferred, since a block never says whether it breaks (M §11) and an entrance across water shows its door, not the water. Open: what a non-door block on a mark means, and which key a lock takes. Signs and helpers nearby are still separate `Read`/`Say` items. Stored in `.state/`, never committed |
 | Hunting ground locations and ceilings | `get_zone` on cells around town |
 | Boss fight time limits | Read on entry, or learn from the first attempt |
 | How ground food other than the golden cap heals (apples, berries): on pickup, or carried and `Use`d on self | `Take` one while hurt and read `health`; if unchanged, `Arm` + `Use` self |
 | Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
 | How to tell a scroll supply from others before reading it. Nothing sourced names scroll subtype codes, so `Investigate` reads no scrolls yet (PLAN.md A30) | Log `supply_subtype_code` of every supply seen; `Read` one of each once and keep the codes that do not answer `nothing_to_read` |
-| Which `supply_subtype_code` a life (heart) and a gem have on the ground. Until known, A20's hearts first is off | `Take` a heart or gem dropped by cut grass and log its code with the `lives` or `gems` change |
+| Which `supply_subtype_code` a life (heart) has on the ground. Until known, A20's hearts first is off | `Take` a heart dropped by cut grass and log its code with the `lives` change |
 | Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? A20 drops held only | `Drop` a stowed supply and read the result |
 | Is the armed supply also listed in `held`? A20 counts held, worn, armed and stowed separately | Compare `inventory` before and after an `Arm` |
 | Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full` | Carry one and fill until `carry_capacity_full` |
-| What supply code does a gem pile carry? The manual describes authored piles (M §16) but names no code; only gem caches (`gem_cache_5/7/10`) are named | Read entities beside a pile in town and record its `code`; Gather (A22) targets piles once it is known |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 
 ### Assumed until measured

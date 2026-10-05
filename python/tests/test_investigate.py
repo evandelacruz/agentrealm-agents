@@ -10,19 +10,22 @@ from unittest import mock
 from agentrealm_agent import config, runner as runner_mod
 from agentrealm_agent.brain import choose_call, decide
 from agentrealm_agent.config import CharacterConfig, Policy
+from agentrealm_agent.door_look import apply_door_look, infer_needs, look_key, ready_to_look
 from agentrealm_agent.interest_list import MAX_REJECTIONS, list_interest, pick_interest_tick, sight_range
 from agentrealm_agent.investigation import cell_was_read, mark_cell_read, mark_npc_spoken, spoken_npc_ids
 from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.knowledge_maps import iter_doors, sync_tiles
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.intents import read_block
+from agentrealm_agent.travel.knowledge import entrance_from_kb, sync_entrances
 from agentrealm_agent.world import Entity, WorldModel, ZoneFact
 
 
 def world(rows: list[str], at=(1, 1), perception=3) -> WorldModel:
-    glyph = {".": "dirt", "#": "wall", "S": "wall"}
+    glyph = {".": "dirt", "#": "wall", "S": "wall", "D": "framed_door"}
     w = WorldModel(character_id=1, map_id=7, pos=at, perception=perception)
     for y, row in enumerate(rows):
         for x, g in enumerate(row):
@@ -74,6 +77,119 @@ class InterestListTest(unittest.TestCase):
         m = Memory(path=[(2, 1), (2, 2)])
         self.assertEqual(list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), m), [])
 
+    def test_unlooked_entrance_is_nominated(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([it.kind for it in items], ["look_door"])
+        self.assertEqual(items[0].pos, (2, 1))
+
+    def test_looked_entrance_is_skipped(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1, "looked": True}
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
+
+    def test_other_map_entrance_is_not_nominated(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["9:1,1"] = {"map_id": 9, "x": 1, "y": 1}
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
+
+    def test_unlooked_door_is_nominated_and_visited_door_is_not(self):
+        w = world(["....", "....", "...."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        sync_tiles(kb, 7, {(3, 0): "framed_door", (3, 2): "framed_door"})
+        for d in iter_doors(kb, 7):
+            if (d["x"], d["y"]) == (3, 2):
+                d.update({"to_map_id": 8, "to_x": 1, "to_y": 1})
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([(it.kind, it.pos) for it in items], [("look_door", (3, 0))])
+
+    def test_entrance_mark_with_door_tile_is_nominated(self):
+        w = world(["...", ".D.", "..."], at=(0, 1))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:1,1"] = {"map_id": 7, "x": 1, "y": 1}
+        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
+        self.assertEqual([it.kind for it in items], ["look_door"])
+
+    def test_look_given_up_after_max_rejections(self):
+        w = world(["...", "...", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
+        m = Memory(investigate_rejections={look_key(7, (2, 1)): MAX_REJECTIONS})
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), m), [])
+
+
+class EntranceKeyTest(unittest.TestCase):
+    def test_same_cell_on_two_maps_stays_apart(self):
+        kb = KnowledgeBase.empty("sandbox")
+        sync_entrances(kb, {"maps": [
+            {"map_id": 7, "entrances": [{"x": 2, "y": 1}]},
+            {"map_id": 9, "entrances": [{"x": 2, "y": 1}]},
+        ]})
+        self.assertEqual(set(kb.entrances), {"7:2,1", "9:2,1"})
+        w = WorldModel(1, map_id=9, pos=(1, 1), perception=5)
+        w.view.tiles[(2, 1)] = "framed_door"
+        w.view.locked[(2, 1)] = True
+        self.assertTrue(apply_door_look(kb, w, 9, (2, 1)))
+        self.assertEqual(kb.entrances["9:2,1"]["needs"], "key")
+        self.assertNotIn("looked", kb.entrances["7:2,1"])
+
+    def test_cell_only_rows_migrate_at_load(self):
+        kb = KnowledgeBase.from_dict("sandbox", {"entrances": {
+            "2,1": {"map_id": 7, "x": 2, "y": 1, "needs": "key"},
+            "4,4": {"x": 4, "y": 4},  # no map: kept as is, readers skip it
+        }})
+        self.assertEqual(kb.entrances, {
+            "7:2,1": {"map_id": 7, "x": 2, "y": 1, "needs": "key"},
+            "4,4": {"x": 4, "y": 4},
+        })
+
+    def test_entrance_from_kb_without_map(self):
+        kb = KnowledgeBase.empty("sandbox")
+        sync_entrances(kb, {"maps": [{"map_id": 7, "entrances": [{"x": 2, "y": 1}, {"x": 5, "y": 5}]},
+                                     {"map_id": 9, "entrances": [{"x": 2, "y": 1}]}]})
+        self.assertEqual(entrance_from_kb(kb, None, 5, 5), (7, (5, 5)))
+        self.assertIsNone(entrance_from_kb(kb, None, 2, 1))
+        self.assertEqual(entrance_from_kb(kb, 9, 2, 1), (9, (2, 1)))
+
+
+class DoorLookTest(unittest.TestCase):
+    def test_locked_door_records_key_need(self):
+        w = WorldModel(1, map_id=7, pos=(1, 1), perception=5)
+        w.view.tiles[(2, 1)] = "framed_door"
+        w.view.locked[(2, 1)] = True
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
+        self.assertTrue(ready_to_look(w, 7, (2, 1)))
+        self.assertTrue(apply_door_look(kb, w, 7, (2, 1)))
+        self.assertEqual(kb.entrances["7:2,1"]["needs"], "key")
+        self.assertTrue(kb.entrances["7:2,1"]["locked"])
+        door = [d for d in iter_doors(kb, 7) if (d["x"], d["y"]) == (2, 1)][0]
+        self.assertTrue(door["locked"] and door["looked"])
+
+    def test_infer_needs_is_key_only(self):
+        self.assertEqual(infer_needs("framed_door", locked=True), "key")
+        self.assertIsNone(infer_needs("framed_door", locked=False))
+        # Unsourced: a block never says whether it breaks (break), water is the
+        # route not the cell (cross_water), and a catch-all would guess (blocked).
+        for block in ("bush", "tree", "rock", "wall", "water", "dirt"):
+            self.assertIsNone(infer_needs(block, locked=False), block)
+        self.assertIsNone(infer_needs(None, locked=True))
+
+    def test_non_door_entrance_records_block_without_needs(self):
+        w = WorldModel(1, map_id=7, pos=(1, 1), perception=5)
+        w.view.tiles[(2, 1)] = "water"
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
+        self.assertTrue(ready_to_look(w, 7, (2, 1)))
+        self.assertTrue(apply_door_look(kb, w, 7, (2, 1)))
+        row = kb.entrances["7:2,1"]
+        self.assertEqual((row["looked"], row["block_type"]), (True, "water"))
+        self.assertNotIn("needs", row)
+        self.assertEqual(iter_doors(kb, 7), [], "a non-door cell is not added to the door list")
 
 
 class InvestigateStateTest(unittest.TestCase):
@@ -91,7 +207,7 @@ class InvestigateStateTest(unittest.TestCase):
         self.assertEqual(d.intent["verb"], "Say")
         self.assertEqual(d.intent["target"], {"kind": "npc", "npc_id": 4})
 
-    def test_act_has_no_side_effects(self):
+    def test_act_has_no_side_effects_for_read(self):
         w = world(["...", ".S.", "..."], at=(0, 1))
         kb = KnowledgeBase.empty("sandbox")
         ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
@@ -100,6 +216,61 @@ class InvestigateStateTest(unittest.TestCase):
         dispatch(w, ctx)
         after = kb.to_dict()
         self.assertEqual(before, after, "only an applied result marks the knowledge base")
+
+    def test_investigate_walks_to_entrance_mark(self):
+        rows = ["." * 8 for _ in range(8)]
+        w = world(rows, at=(0, 0), perception=8)
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
+        w.view.tiles[(5, 5)] = "framed_door"
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        out = dispatch(w, ctx)
+        self.assertEqual(out.state, "Investigate")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+
+    def test_investigate_walks_beside_a_water_entrance(self):
+        rows = ["." * 8 for _ in range(8)]
+        w = world(rows, at=(0, 0), perception=8)
+        w.view.tiles[(5, 5)] = "water"
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        out = dispatch(w, ctx)
+        self.assertEqual(out.state, "Investigate")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertEqual(ctx.memory.investigate_rejections, {})
+
+    def test_investigate_records_entrance_when_already_adjacent(self):
+        w = world(["...", ".D.", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:1,1"] = {"map_id": 7, "x": 1, "y": 1}
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        out = dispatch(w, ctx)
+        self.assertTrue(kb.entrances["7:1,1"]["looked"])
+        self.assertIn("Investigate: looked", out.yielded[0])
+
+    def test_unreachable_mark_counts_a_rejection(self):
+        # Every cell beside the mark is known wall: there is nowhere to look from.
+        w = world([".....", ".###.", ".#D#.", ".###.", "....."], at=(0, 0), perception=8)
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:2,2"] = {"map_id": 7, "x": 2, "y": 2}
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        for n in range(1, MAX_REJECTIONS + 1):
+            dispatch(w, ctx)
+            self.assertEqual(ctx.memory.investigate_rejections.get(look_key(7, (2, 2))), n)
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), ctx.memory), [])
+
+    def test_unrevealed_look_counts_a_rejection(self):
+        # Adjacent, but the look cannot finish: capped like an unreachable mark.
+        w = world(["...", ".D.", "..."], at=(0, 0))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:1,1"] = {"map_id": 7, "x": 1, "y": 1}
+        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
+        with mock.patch("agentrealm_agent.states.investigate.apply_door_look", return_value=False):
+            for n in range(1, MAX_REJECTIONS + 1):
+                dispatch(w, ctx)
+                self.assertEqual(ctx.memory.investigate_rejections.get(look_key(7, (1, 1))), n)
+        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), ctx.memory), [])
 
 
 class SightRangeTest(unittest.TestCase):
@@ -126,6 +297,31 @@ class ReadableParsingTest(unittest.TestCase):
         self.assertEqual(w.view.readable, {(1, 0): True})
         w.apply_observation({"version": "3", "delta": {"terrain": {"removed": [{"map_id": 7, "x": 1, "y": 0}]}}})
         self.assertEqual(w.view.readable, {})
+
+
+class LockedParsingTest(unittest.TestCase):
+    def test_terrain_delta_and_snapshot(self):
+        w = WorldModel(character_id=1, pos=(1, 1), map_id=7)
+        w.apply_observation({"version": "1", "complete": True, "snapshot": {"terrain": {"cells": [
+            {"map_id": 7, "x": 2, "y": 1, "block_type": "framed_door", "locked": True},
+            {"map_id": 7, "x": 0, "y": 1, "block_type": "framed_door"},
+        ]}}})
+        self.assertEqual(w.view.locked, {(2, 1): True})
+        w.apply_observation({"version": "2", "delta": {"terrain": {
+            "changed": [{"map_id": 7, "x": 0, "y": 1, "block_type": "framed_door", "locked": True}]}}})
+        self.assertEqual(w.view.locked, {(2, 1): True, (0, 1): True})
+        w.apply_observation({"version": "3", "delta": {"terrain": {
+            "changed": [{"map_id": 7, "x": 2, "y": 1, "block_type": "framed_door", "locked": False}]}}})
+        self.assertEqual(w.view.locked, {(0, 1): True}, "an explicit false unlocks")
+        w.apply_observation({"version": "4", "delta": {"terrain": {"removed": [{"map_id": 7, "x": 0, "y": 1}]}}})
+        self.assertEqual(w.view.locked, {})
+        # The parsed flag reaches the look: a locked door records a key need.
+        w.apply_observation({"version": "5", "delta": {"terrain": {
+            "changed": [{"map_id": 7, "x": 2, "y": 1, "block_type": "framed_door", "locked": True}]}}})
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
+        self.assertTrue(apply_door_look(kb, w, 7, (2, 1)))
+        self.assertEqual(kb.entrances["7:2,1"]["needs"], "key")
 
 
 class ZoneProbeOrderTest(unittest.TestCase):

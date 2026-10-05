@@ -49,6 +49,11 @@ class ValidateOpTest(unittest.TestCase):
     def test_drops_bad_break_capability(self):
         self.assertIsNone(validate_goal_op({"op": "break_block", "x": 0, "y": 0, "capability": "magic"}))
 
+    def test_fight_boss_preconditions(self):
+        op = validate_goal_op({"op": "fight_boss", "x": 1, "y": 2, "min_potions": 1})
+        self.assertEqual(op, {"op": "fight_boss", "x": 1, "y": 2, "min_potions": 1})
+        self.assertIsNone(validate_goal_op({"op": "fight_boss", "x": 1, "y": 2, "min_health": -1}))
+
     def test_say_needs_one_npc_field(self):
         self.assertIsNone(validate_goal_op({"op": "say", "text": "hi"}))
         self.assertIsNotNone(validate_goal_op({"op": "say", "npc_type": "guard", "text": "hi"}))
@@ -336,6 +341,14 @@ class PathForPlanOpTest(unittest.TestCase):
     def test_other_ops_have_no_path(self):
         self.assertIsNone(path_for_plan_op({"op": "wait", "seconds": 1}, open_world(), Memory(),
                                            Policy(kind="scripted"), set(), set(), None))
+
+    def test_compose_goal_done_when_whole_held(self):
+        from agentrealm_agent.item_table import InventorySupply
+
+        op = {"op": "compose", "composes_into": "master_key"}
+        w = WorldModel(character_id=1, map_id=1, pos=(0, 0))
+        w.held_supplies = [InventorySupply(1, "master_key")]
+        self.assertTrue(goal_done(op, w, Plan([op], dict(PARAM_DEFAULTS))))
 
 
 class RunnerPlanTest(unittest.TestCase):

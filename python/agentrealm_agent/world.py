@@ -61,6 +61,13 @@ class Entity:
     pos: Pos
     code: str = ""  # outfit, npc type, or supply subtype; empty for a chest
     gem_price: int | None = None  # shop supplies on entity reads (Manual §9.3)
+    health: int | None = None  # bosses only on entity reads (Manual §9.3, A38)
+    max_health: int | None = None
+
+    @property
+    def is_boss(self) -> bool:
+        """Only a boss NPC carries ``health`` on entity reads (API Reads; GAME_NOTES.md Combat)."""
+        return self.kind == "npc" and self.health is not None
 
 
 @dataclass
@@ -72,6 +79,8 @@ class MapView:
     damage: dict[Pos, int] = field(default_factory=dict)
     # Signs and statues (Manual §9.2): readable wall cells from terrain reads.
     readable: dict[Pos, bool] = field(default_factory=dict)
+    # Doors may carry ``locked: true`` on terrain reads (Manual §9.2).
+    locked: dict[Pos, bool] = field(default_factory=dict)
 
     def walkable(self, p: Pos) -> bool:
         return self.tiles.get(p) in WALKABLE
@@ -140,6 +149,11 @@ class WorldModel:
     zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
     # Town and Respawned locations used to seed safe-tile probes.
     respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
+    # Boss fight clock, read only when a round trip carries it; the published
+    # docs name no such field (GAME_NOTES.md Levels and bosses, A38).
+    boss_fight_end_tick: int | None = None
+    # Tick of the last `level_clear_ceremony` (a boss clear; API Round Trip).
+    level_clear_tick: int | None = None
 
     def record_respawn_anchor(self, map_id: int, pos: Pos) -> None:
         """Seeds safe-tile probes around a town or Respawned location (A7)."""
@@ -213,6 +227,7 @@ class WorldModel:
             _set_damage(view, p, cell)
             # A full read: a cell whose legend entry lacks the flag is not readable.
             _set_readable(view, p, cell, full=True)
+            _set_locked(view, p, cell, full=True)
         self.terrain_center = self.pos
         self.terrain_map = self.map_id
 
@@ -228,7 +243,16 @@ class WorldModel:
             if int(c["id"]) != self.character_id:
                 out.append(Entity("character", int(c["id"]), (int(c["x"]), int(c["y"])), c.get("outfit_code", "")))
         for n in e.get("npcs") or []:
-            out.append(Entity("npc", int(n["id"]), (int(n["x"]), int(n["y"])), n.get("npc_type_code", "")))
+            out.append(
+                Entity(
+                    "npc",
+                    int(n["id"]),
+                    (int(n["x"]), int(n["y"])),
+                    n.get("npc_type_code", ""),
+                    health=_opt_int(n.get("health")),
+                    max_health=_opt_int(n.get("max_health")),
+                )
+            )
         for s in e.get("supplies") or []:
             price = _opt_int(s.get("gem_price"))
             out.append(
@@ -255,7 +279,14 @@ class WorldModel:
                 return None
             return Entity("character", eid, pos, entry.get("outfit_code", ""))
         if kind == "npc":
-            return Entity("npc", eid, pos, entry.get("npc_type_code", ""))
+            return Entity(
+                "npc",
+                eid,
+                pos,
+                entry.get("npc_type_code", ""),
+                health=_opt_int(entry.get("health")),
+                max_health=_opt_int(entry.get("max_health")),
+            )
         if kind == "supply":
             return Entity(
                 "supply",
@@ -309,6 +340,7 @@ class WorldModel:
             v.tiles[p] = cell.get("block_type", "")
             _set_damage(v, p, cell)
             _set_readable(v, p, cell)
+            _set_locked(v, p, cell)
         for cell in patch.get("removed") or []:
             map_id = int(cell["map_id"])
             p = (int(cell["x"]), int(cell["y"]))
@@ -316,6 +348,7 @@ class WorldModel:
             v.tiles.pop(p, None)
             v.damage.pop(p, None)
             v.readable.pop(p, None)
+            v.locked.pop(p, None)
 
     def _apply_snapshot_terrain(self, terrain: dict) -> None:
         for cell in terrain.get("cells") or []:
@@ -325,6 +358,7 @@ class WorldModel:
             v.tiles[p] = cell.get("block_type", "")
             _set_damage(v, p, cell)
             _set_readable(v, p, cell)
+            _set_locked(v, p, cell)
 
     def _chest_contents_from_entities(self, entities: dict) -> dict[int, list[InventorySupply]]:
         return {
@@ -366,6 +400,26 @@ class WorldModel:
             else:
                 self.apply_position(pos)
 
+    def note_level_clear(self, ceremony: dict | None) -> None:
+        """Records a round trip's one-shot ``level_clear_ceremony`` (A38)."""
+        if ceremony:
+            self.level_clear_tick = self.tick
+
+    def _apply_boss_fight_clock(self, body: dict, *, complete: bool) -> None:
+        if complete or "boss_fight_end_tick" in body:
+            self.boss_fight_end_tick = _opt_int(body.get("boss_fight_end_tick"))
+
+    def in_boss_fight(self) -> bool:
+        """True while the served fight clock has not expired (A38)."""
+        end = self.boss_fight_end_tick
+        return end is not None and end > self.tick
+
+    def boss_fight_ticks_left(self) -> int | None:
+        end = self.boss_fight_end_tick
+        if end is None:
+            return None
+        return max(0, end - self.tick)
+
     def _apply_inventory(self, inv: dict | None) -> None:
         if inv is None:
             return
@@ -378,6 +432,7 @@ class WorldModel:
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
         self._apply_vitals(snap, complete=True)
+        self._apply_boss_fight_clock(snap, complete=True)
         if "inventory" in snap:
             self._apply_inventory(snap.get("inventory"))
         if "entities" in snap:
@@ -393,6 +448,7 @@ class WorldModel:
     def _apply_delta_body(self, delta: dict) -> None:
         self._apply_body_scalars(delta)
         self._apply_vitals(delta, complete=False)
+        self._apply_boss_fight_clock(delta, complete=False)
         if "inventory" in delta:
             self._apply_inventory(delta.get("inventory"))
         if "entities" in delta:
@@ -511,6 +567,13 @@ def _set_readable(view: MapView, p: Pos, cell: dict, *, full: bool = False) -> N
         view.readable[p] = True
     elif full or "readable" in cell:
         view.readable.pop(p, None)
+
+
+def _set_locked(view: MapView, p: Pos, cell: dict, *, full: bool = False) -> None:
+    if cell.get("locked"):
+        view.locked[p] = True
+    elif full or "locked" in cell:
+        view.locked.pop(p, None)
 
 
 def _opt_int(v) -> int | None:

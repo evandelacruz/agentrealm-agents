@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..equip import ARMED, EquipUpgrade, best_equip_upgrade, learn_worn_slots, sync_refusals
+from ..equip import ARMED, EquipUpgrade, best_equip_upgrade
 from ..navigation import stuck as nav_stuck
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
@@ -37,10 +37,7 @@ class EquipState(State):
 
 
 def _upgrade(world: WorldModel, ctx: PlayContext) -> EquipUpgrade | None:
-    m = ctx.memory
-    learn_worn_slots(m, world)
-    sync_refusals(m, world)
-    return best_equip_upgrade(world, knowledge_items(ctx.knowledge), world.threat, m, _armed_owned(world, ctx))
+    return best_equip_upgrade(world, knowledge_items(ctx.knowledge), world.threat, ctx.memory, _armed_owned(world, ctx))
 
 
 def _armed_owned(world: WorldModel, ctx: PlayContext) -> bool:

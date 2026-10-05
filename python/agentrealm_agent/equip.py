@@ -4,8 +4,8 @@ Only sourced facts decide what goes where:
 
 - **Weapons** are the exact codes GAME_NOTES names as weapons
   (``break_memory.WEAPONS``). Nothing else is armed by Equip.
-- **Worn slots** come from the snapshot's ``worn`` by slot: a subtype seen
-  worn in a slot is filed there for the run. A held subtype never seen worn has
+- **Worn slots** come from the snapshot's ``worn`` by slot: the world model
+  files a subtype seen worn in a slot there for the run (``WorldModel.worn_slots``). A held subtype never seen worn has
   no known slot and is not worn (supply reads serve no slot; PLAN.md Server gaps).
 
 Each slot compares like with like, never across units: learned per-NPC-type
@@ -50,17 +50,11 @@ def is_weapon(code: str | None) -> bool:
     return bool(code) and code in WEAPONS
 
 
-def learn_worn_slots(m: Memory, w: WorldModel) -> None:
-    """File each worn subtype under the slot the snapshot serves it in."""
-    for slot, code in w.worn_codes.items():
-        if slot in WEAR_SLOTS and code:
-            m.equip_slots[code] = slot
-
-
-def wear_slot(code: str | None, m: Memory) -> str | None:
+def wear_slot(code: str | None, w: WorldModel) -> str | None:
     if not code or is_consumable(code) or is_weapon(code):
         return None
-    return m.equip_slots.get(code)
+    slot = w.worn_slots.get(code) if code else None
+    return slot if slot in WEAR_SLOTS else None
 
 
 def _price(code: str, items: dict[str, dict[str, Any]]) -> int | None:
@@ -182,7 +176,7 @@ def best_equip_upgrade(
         worn = w.worn_codes.get(slot)
         if worn is not None and (None, slot) in refused:
             continue  # Remove refused on this slot
-        fits = [s for s in held if wear_slot(s.code, m) == slot and (s.code, slot) not in refused]
+        fits = [s for s in held if wear_slot(s.code, w) == slot and (s.code, slot) not in refused]
         s = _best_for_slot(slot, worn, fits, items, threat, "damage_saved")
         if s is None:
             continue
@@ -208,15 +202,21 @@ def sync_refusals(m: Memory, w: WorldModel) -> None:
         m.equip_refused_sig = sig
 
 
-def learn_equip_rejection(m: Memory, w: WorldModel, intent: dict | None) -> None:
+def note_equip_result(m: Memory, w: WorldModel, intent: dict | None, rejected: bool) -> None:
     """Mark the (subtype, slot) an Equip ``Arm``, ``Wear`` or ``Remove`` was refused for.
 
-    Called before the response's observation is applied, so held supplies are
-    still the ones the intent named. The signature is taken on the next guard.
+    Only a rejection is marked. An applied ``Remove`` clears an earlier refused
+    Remove on that slot. Called before the response's observation is applied, so
+    held supplies are still the ones the intent named; the runner's
+    ``sync_refusals`` after that observation takes the signature.
     """
     if not intent:
         return
     verb = intent.get("verb")
+    if not rejected:
+        if verb == "Remove":
+            m.equip_refused.discard((None, intent.get("slot")))
+        return
     if verb == "Remove":
         slot = intent.get("slot")
         if isinstance(slot, str):
@@ -226,7 +226,7 @@ def learn_equip_rejection(m: Memory, w: WorldModel, intent: dict | None) -> None
         code = next((s.code for s in w.held_supplies if s.id == sid), None)
         if code is None:
             return
-        slot = ARMED if verb == "Arm" else wear_slot(code, m)
+        slot = ARMED if verb == "Arm" else wear_slot(code, w)
         if slot is not None:
             m.equip_refused.add((code, slot))
     else:

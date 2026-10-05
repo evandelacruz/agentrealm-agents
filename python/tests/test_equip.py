@@ -1,21 +1,26 @@
 """A19: Equip scoring and state."""
 
 import random
+import tempfile
+import threading
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from agentrealm_agent.config import Policy
+from agentrealm_agent import config
+from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import default_directives
 from agentrealm_agent.equip import (
     best_equip_upgrade,
     compare,
-    learn_equip_rejection,
-    learn_worn_slots,
+    note_equip_result,
     sync_refusals,
     wear_slot,
 )
 from agentrealm_agent.item_table import FragmentMeta, InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.threat import ThreatTable
 from agentrealm_agent.world import WorldModel
@@ -35,6 +40,10 @@ def world() -> WorldModel:
     return WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)
 
 
+def snapshot(inventory: dict) -> dict:
+    return {"complete": True, "snapshot": {"inventory": inventory}}
+
+
 def rats(amount: int = 5) -> ThreatTable:
     t = ThreatTable()
     t.record(("npc", "rat"), amount)
@@ -43,16 +52,17 @@ def rats(amount: int = 5) -> ThreatTable:
 
 class SlotTest(unittest.TestCase):
     def test_slot_only_from_served_worn(self):
-        m = Memory()
+        w = world()
         # Substring look-alikes and unseen codes have no slot.
         for code in ("bronze_mail", "waxed_cloth", "elbow_pad", "legend_map", "bronze_helm"):
-            self.assertIsNone(wear_slot(code, m))
-        w = world()
-        w.worn_codes = {"body": "bronze_mail"}
-        learn_worn_slots(m, w)
-        self.assertEqual(wear_slot("bronze_mail", m), "body")
-        self.assertIsNone(wear_slot("small_potion", m))
-        self.assertIsNone(wear_slot("bronze_sword", m))
+            self.assertIsNone(wear_slot(code, w))
+        w.apply_observation(snapshot({"worn": {"body": {"id": 3, "supply_subtype_code": "bronze_mail"}}}))
+        self.assertEqual(wear_slot("bronze_mail", w), "body")
+        self.assertIsNone(wear_slot("small_potion", w))
+        self.assertIsNone(wear_slot("bronze_sword", w))
+        # Kept for the run once taken off.
+        w.apply_observation(snapshot({"worn": {}, "held": [{"id": 3, "supply_subtype_code": "bronze_mail"}]}))
+        self.assertEqual(wear_slot("bronze_mail", w), "body")
 
     def test_unknown_slot_is_not_worn(self):
         w = world()
@@ -111,8 +121,8 @@ class UpgradeTest(unittest.TestCase):
 
     def test_swaps_body_armor_on_clear_gain(self):
         m = Memory()
-        m.equip_slots = {"bronze_mail": "body", "iron_mail": "body"}
         w = world()
+        w.worn_slots = {"bronze_mail": "body", "iron_mail": "body"}
         w.worn_codes = {"body": "bronze_mail"}
         w.held_supplies = [InventorySupply(8, "iron_mail")]
         items = {"bronze_mail": {"gem_price": 20}, "iron_mail": {"gem_price": 60}}
@@ -122,8 +132,8 @@ class UpgradeTest(unittest.TestCase):
 
     def test_no_swap_on_tie_or_noise(self):
         m = Memory()
-        m.equip_slots = {"bronze_mail": "body", "iron_mail": "body"}
         w = world()
+        w.worn_slots = {"bronze_mail": "body", "iron_mail": "body"}
         w.worn_codes = {"body": "bronze_mail"}
         w.held_supplies = [InventorySupply(8, "iron_mail")]
         t = rats(5)
@@ -175,27 +185,28 @@ class RefusalTest(unittest.TestCase):
         c = ctx(self.kb)
         out = dispatch(self.w, c)
         self.assertEqual(out.state, "Equip")
-        learn_equip_rejection(c.memory, self.w, out.intents[0])
+        note_equip_result(c.memory, self.w, out.intents[0], rejected=True)
+        sync_refusals(c.memory, self.w)
         for _ in range(3):
             self.assertNotEqual(dispatch(self.w, c).state, "Equip")
         self.w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(9, "apple")]
+        sync_refusals(c.memory, self.w)
         out = dispatch(self.w, c)
         self.assertEqual(out.state, "Equip")
         self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 5}])
 
     def test_refused_wear_and_remove(self):
         m = Memory()
-        m.equip_slots = {"bronze_mail": "body", "iron_mail": "body"}
         w = world()
+        w.worn_slots = {"bronze_mail": "body", "iron_mail": "body"}
         w.worn_codes = {"body": "bronze_mail"}
         w.held_supplies = [InventorySupply(8, "iron_mail")]
         items = {"bronze_mail": {"gem_price": 20}, "iron_mail": {"gem_price": 60}}
-        learn_equip_rejection(m, w, {"verb": "Wear", "supply_id": 8})
+        note_equip_result(m, w, {"verb": "Wear", "supply_id": 8}, rejected=True)
         sync_refusals(m, w)
         self.assertIsNone(best_equip_upgrade(w, items, w.threat, m))
         m2 = Memory()
-        m2.equip_slots = dict(m.equip_slots)
-        learn_equip_rejection(m2, w, {"verb": "Remove", "slot": "body"})
+        note_equip_result(m2, w, {"verb": "Remove", "slot": "body"}, rejected=True)
         sync_refusals(m2, w)
         self.assertIsNone(best_equip_upgrade(w, items, w.threat, m2))
         w.worn_codes = {}
@@ -205,8 +216,49 @@ class RefusalTest(unittest.TestCase):
 
     def test_other_verbs_ignored(self):
         m = Memory()
-        learn_equip_rejection(m, self.w, {"verb": "Drop", "supply_id": 5})
+        note_equip_result(m, self.w, {"verb": "Drop", "supply_id": 5}, rejected=True)
         self.assertEqual(m.equip_refused, set())
+
+
+class RunnerEquipResultTest(unittest.TestCase):
+    """Only a rejected Equip intent is recorded as refused (runner ``on_result``)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        cfg = CharacterConfig("T", "default", "test", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
+        r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
+        self.addCleanup(r.trace.close)
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.worn_codes = {"body": "bronze_mail"}
+        w.worn_slots = {"bronze_mail": "body", "iron_mail": "body"}
+        w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(8, "iron_mail")]
+        r.world, r.mem = w, Memory(need_self=False, need_position=False)
+        r.mem.state = "Equip"
+        r.mem.pending_intents = [{"verb": "Arm", "supply_id": 5}, {"verb": "Remove", "slot": "body"}, {"verb": "Wear", "supply_id": 8}]
+        self.r = r
+
+    def test_applied_results_are_not_refusals(self):
+        for i in range(3):
+            self.assertFalse(self.r.on_result({"tick": 3, "outcome": "applied"}, i))
+        self.assertEqual(self.r.mem.equip_refused, set())
+
+    def test_rejected_results_are_refusals(self):
+        res = {"tick": 3, "outcome": "rejected", "rejection": {"category": "state", "code": "invalid_target"}}
+        intents = list(self.r.mem.pending_intents)
+        self.assertTrue(self.r.on_result(res, 0))
+        self.r.mem.pending_intents = intents  # a rejection drops the queue; replay the Wear
+        self.assertTrue(self.r.on_result(dict(res), 2))
+        self.assertEqual(self.r.mem.equip_refused, {("bronze_sword", "armed"), ("iron_mail", "body")})
+
+    def test_applied_remove_clears_refused_remove(self):
+        self.r.mem.equip_refused = {(None, "body")}
+        self.assertFalse(self.r.on_result({"tick": 3, "outcome": "applied"}, 1))
+        self.assertEqual(self.r.mem.equip_refused, set())
 
 
 class DispatchTest(unittest.TestCase):
@@ -223,13 +275,23 @@ class DispatchTest(unittest.TestCase):
     def test_wear_learned_from_served_worn(self):
         c = ctx()
         w = world()
-        w.worn_codes = {"body": "bronze_mail"}
-        dispatch(w, c)  # files bronze_mail under body
-        w.worn_codes = {}
-        w.held_supplies = [InventorySupply(8, "bronze_mail")]
+        # The observation files bronze_mail under body; no dispatch needed.
+        w.apply_observation(snapshot({"worn": {"body": {"id": 8, "supply_subtype_code": "bronze_mail"}}}))
+        w.apply_observation({"delta": {"inventory": {"worn": {}, "held": [{"id": 8, "supply_subtype_code": "bronze_mail"}]}}})
         out = dispatch(w, c)
         self.assertEqual(out.state, "Equip")
         self.assertEqual(out.intents, [{"verb": "Wear", "supply_id": 8}])
+
+    def test_guard_is_pure(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["bronze_sword"] = {"gem_price": 15}
+        c = ctx(kb)
+        before = (dict(w.worn_slots), set(c.memory.equip_refused), c.memory.equip_refused_sig)
+        self.assertEqual(dispatch(w, c).state, "Equip")
+        self.assertEqual((dict(w.worn_slots), set(c.memory.equip_refused), c.memory.equip_refused_sig), before)
 
     def test_not_scripted_or_dead(self):
         w = world()

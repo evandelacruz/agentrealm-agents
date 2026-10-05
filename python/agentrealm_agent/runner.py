@@ -32,7 +32,7 @@ from .item_table import (
 )
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
-from .equip import learn_equip_rejection
+from .equip import note_equip_result, sync_refusals
 from .loot import learn_loot_rejection
 from .shop import note_shop_result
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
@@ -424,6 +424,7 @@ class Runner:
         w.apply_observation(r.get("observation"))
         w.note_level_clear(r.get("level_clear_ceremony"))
         self._sync_loadout()
+        sync_refusals(m, w)
         w.learn_threat(events, earlier)
         self._learn_items_from_tick(r.get("observation"), events, earlier, worn_before)
         self.on_events(events)
@@ -702,6 +703,8 @@ class Runner:
         w, m = self.world, self.mem
         intent = self._intent_at(index)
         note_shop_result(m, intent, result.get("outcome") != "rejected")
+        if m.state == "Equip":
+            note_equip_result(m, w, intent, result.get("outcome") == "rejected")
         if result.get("outcome") != "rejected":
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
@@ -744,8 +747,6 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
-        if m.state == "Equip":
-            learn_equip_rejection(m, w, intent)
         target = use_target_block(intent, w.entities) if intent and intent.get("verb") == "Use" else None
         self._note_break_use(intent, result, target, index)
         if self.acceptance is not None:

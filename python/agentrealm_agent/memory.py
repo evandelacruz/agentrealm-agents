@@ -55,7 +55,7 @@ class Memory:
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
     investigate_rejections: dict[str, int] = field(default_factory=dict)  # interest item key -> refused Read/Say count (A30)
-    curiosity_spans: list[tuple[int, int]] = field(default_factory=list)  # (start tick, length) charged Investigate/Break queues (A32)
+    curiosity_spans: list[tuple[int, int]] = field(default_factory=list)  # (start tick, length) charged Investigate/Break queues (A30)
     gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass", cell) Gather is walking toward (A22)
     gather_backoff_until: int = -1  # Gather yields to Explore until this tick (A22)
     travel_ops: list[TravelOp] = field(default_factory=list)  # parsed travel:* directives goals (A27)

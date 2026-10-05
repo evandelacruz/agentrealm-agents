@@ -1,4 +1,4 @@
-"""Curiosity budget cap for Investigate detours (A30, A32)."""
+"""Curiosity budget cap for Investigate detours (A30)."""
 
 import unittest
 

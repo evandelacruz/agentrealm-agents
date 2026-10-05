@@ -15,7 +15,6 @@ from typing import Literal
 
 from .config import Policy
 from .curiosity_budget import curiosity_room
-from .directives import PARAM_DEFAULTS
 from .door_look import iter_unlooked, look_key
 from .investigation import cell_was_read, spoken_npc_ids
 from .knowledge_base import KnowledgeBase
@@ -150,11 +149,10 @@ def pick_interest_tick(
     policy: Policy,
     m: Memory,
     *,
-    params: dict[str, float | int] | None = None,
+    params: dict[str, float | int],
     tick: int | None = None,
 ) -> InterestItem | None:
-    """Top interest item the curiosity budget still allows (A32)."""
-    params = dict(PARAM_DEFAULTS if params is None else params)
+    """Top interest item the curiosity budget still allows (A30)."""
     now = w.tick if tick is None else tick
     for item in list_interest(w, kb, policy, m):
         if not item.charges_budget or curiosity_room(params, m, now):

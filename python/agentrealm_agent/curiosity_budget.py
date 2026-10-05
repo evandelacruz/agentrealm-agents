@@ -1,4 +1,4 @@
-"""Rolling curiosity budget for Investigate and Break (A32, PLAYABLE_AGENT_PLAN Curiosity).
+"""Rolling curiosity budget for Investigate and Break (A30, PLAYABLE_AGENT_PLAN Curiosity).
 
 Over the last 600 ticks, queues that Investigate or Break send may cover at most
 ``curiosity`` × 600 ticks. Reads and speech from where the agent stands are free

@@ -20,7 +20,7 @@ from .heal import HealState
 from .idle import IdleState
 from .boss import BossState, sync_boss
 from .level import LevelState
-from .break_state import BreakState
+from .break_state import BreakState, OddBreakState
 from .investigate import InvestigateState
 from .loot import LootState
 from .equip import EquipState
@@ -37,7 +37,9 @@ from .travel import TravelState
 # Heal (A10) are priority 1; Fight (A23) slots in before Flee at 2; Recover
 # (A11), Equip (A19), Loot (A20) and Shop (A21) are priority 3, in the plan's table order; Investigate
 # (A30) and Solve (A39) are priority 4, above Gather (A22), Travel (A27), Boss
-# (A38) and Level (A37) at 5. M8 economy states slot above Explore.
+# (A38) and Level (A37) at 5. M8 economy states slot above Explore. Break for
+# a plan op or stuck step 2 (A28) sits with Investigate; OddBreak, Break on an odd block
+# (A31) sits below Level so curiosity never preempts Solve, Travel, Boss or Level.
 STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
@@ -57,6 +59,7 @@ STATES: tuple[State, ...] = (
     TravelState(),
     BossState(),
     LevelState(),
+    OddBreakState(),
     ExploreState(),
     IdleState(),
 )

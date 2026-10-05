@@ -34,6 +34,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 
 - **Clock and budget.** 10 ticks/s. One request per character per tick, burst 3, counted across every `/characters/{id}/…` route, reads included (M §7.4).
 - **Queue.** Each POST carries up to `queue_horizon_seconds × tick_rate` intents, 40 at 10 Hz (M §7.6). Over that is `queue_too_long`.
+- **Draining a long walk by hand.** Send at most 40 intents (each `Step` followed by its pacing `Wait`s), then `POST tick` with no `intents` field until the queue runs out. Replacing the queue on every poll before it drains left the character stuck; clearing with `[]` and re-queuing worked (Obs [`A47_live_play.md`](observations/A47_live_play.md)).
 - **Step.** `{"verb": "Step", "direction": d}` with `d` one of `up`, `down`, `left`, `right`, `up_left`, `up_right`, `down_left`, `down_right`; `up` is toward row 0. It moves one block from wherever the character stands when it runs, so the rest of a queue stays valid across an idle tick. `{"verb": "Wait"}` takes no fields (Tick).
 - **Movement pacing.** At movement speed 2500 (2.5 blocks/s), a move is allowed every 4 ticks: `Step, Wait, Wait, Wait`. Three rates use the same accumulator mechanism (API Movement):
   - movement: one move per 1000 / speed seconds;
@@ -216,11 +217,11 @@ Each has a test the agent or a hand session can run.
 | Boss fight time limits | Read on entry, or learn from the first attempt |
 | How ground food other than the golden cap heals (apples, berries): on pickup, or carried and `Use`d on self | `Take` one while hurt and read `health`; if unchanged, `Arm` + `Use` self |
 | Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
-| How to tell a scroll supply from others before reading it. Nothing sourced names scroll subtype codes, so `Investigate` reads no scrolls yet (PLAN.md A30) | Log `supply_subtype_code` of every supply seen; `Read` one of each once and keep the codes that do not answer `nothing_to_read` |
-| Which `supply_subtype_code` a life (heart) has on the ground. Until known, A47's hearts first is off (A20 ships gems-first only); the agent records the code when a Take raises `lives` | On Olympuff, keep cutting grass and bushes and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16; Obs [`A20_live_play.md`](observations/A20_live_play.md), [`A47_live_play.md`](observations/A47_live_play.md)) |
-| Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? A47 extends A20's held-only drops once an applied stowed Drop is seen | `Drop` a stowed supply and read the result (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
+| How to tell a scroll supply from others before reading it. Nothing sourced names scroll subtype codes, so `Investigate` reads no scrolls yet (PLAN.md A56) | Log `supply_subtype_code` of every supply seen; `Read` one of each once and keep the codes that do not answer `nothing_to_read` |
+| Which `supply_subtype_code` a life (heart) has on the ground. Until confirmed, `LIFE_SUPPLY_CODES` ships empty; the agent files a code as `life_on_pickup` in the item table when `lives` rises in a response whose only applied `Take` was that supply (A47), and confirming it is A57 | On Olympuff, keep cutting grass and bushes and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16; Obs [`A20_live_play.md`](observations/A20_live_play.md), [`A47_live_play.md`](observations/A47_live_play.md)) |
+| Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? Loot drops held supplies only until this is known (A57) | `Drop` a stowed supply and read the result (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Is the armed supply also listed in `held`? Loot counts held, worn, armed and stowed separately (A20) | Compare `inventory` before and after an `Arm` |
-| Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 sets the Manual §16 cap when Take of that upgrade applies, and can still learn from rejections | Buy `middle_chest` and fill until `carry_capacity_full` (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
+| Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 assumes the Manual §16 cap once a `Take` of the upgrade applies (below), and measuring it is A57 | Buy `middle_chest` and fill until `carry_capacity_full` (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 
 ### Assumed until measured
@@ -234,3 +235,9 @@ The win estimate (A9, gated on by **Fight** in A23) uses these until the questio
 | Our damage per hit | 1 | A bronze sword's landed swings did 1 and 2 (Combat); a new character's knife is unmeasured |
 | Health of a hostile type with no kill on record | 10 | A new character's health (PLAYABLE_AGENT_PLAN Combat) |
 | Our health when no observation has served it | 10 | A new character's health (Combat) |
+
+Loot (A47) also assumes one value until measured (A57):
+
+| Assumption | Value | Basis |
+|---|---|---|
+| Carry capacity after an applied `Take` of `middle_chest` / `red_chest` | 30 / 100 | Manual §16 gear table. A `carry_capacity_full` rejection still lowers it to what is carried, and a respawn resets it to 10 |

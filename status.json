@@ -47,11 +47,13 @@
 
   "A19": {"state": "done"},
 
-  "A55": {"state": "open", "note": "Waiting on a served wear slot for never-worn subtypes (PLAN.md Server gaps)."},
+  "A55": {"state": "done"},
 
   "A20": {"state": "done"},
 
-  "A47": {"state": "partial", "remaining": "Live play on 2026-10-05 did not confirm life ground code, stowed Drop, or middle_chest fill (docs/observations/A47_live_play.md). Runtime learning hooks ship; defaults match A20 until those events occur."},
+  "A47": {"state": "partial", "remaining": "Code ships: life code filed to the item table on a single-Take lives rise, Manual §16 chest cap as an assumed default, held-only drops. What needs live play to observe (confirm the life code, stowed Drop, measured middle_chest cap) is split to A57 (docs/observations/A47_live_play.md)."},
+
+  "A57": {"state": "open"},
 
   "A21": {"state": "done"},
 
@@ -59,7 +61,7 @@
 
   "A23": {"state": "done"},
 
-  "A24": {"state": "open"},
+  "A24": {"state": "done"},
 
   "A25": {"state": "open"},
 
@@ -71,9 +73,11 @@
 
   "A29": {"state": "open"},
 
-  "A30": {"state": "partial", "remaining": "Scroll reads (needs observed scroll supply_subtype_code; GAME_NOTES open questions; live play blocked — docs/observations/A30_live_play.md)."},
+  "A30": {"state": "done"},
 
-  "A31": {"state": "open"},
+  "A56": {"state": "open"},
+
+  "A31": {"state": "done"},
 
   "A32": {"state": "open"},
 
@@ -105,7 +109,7 @@
 
   "A46": {"state": "done"},
 
-  "A54": {"state": "open"},
+  "A54": {"state": "open", "note": "Waiting on the Manual Supplies reference (saims B132)."},
 
   "A50": {"state": "done"},
 

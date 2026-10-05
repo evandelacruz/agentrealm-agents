@@ -80,10 +80,17 @@ class Memory:
     heal_wait: tuple[int, int] | None = None  # (tick, health) Heal began sending nothing, reset when health rises
     heal_backoff_until: int = -1  # Heal yields to Explore until this tick
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
+    heal_rearm: str | None = None  # weapon code armed before a drink; restored once (A24)
+    heal_pending: tuple[int, str, str] | None = None  # (health before, supply code, "take"|"use") awaiting observation
     # Boss (A38): the fight under way, or None. Set and cleared only by states/boss.sync_boss.
     boss: BossFight | None = None
     solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)
     break_rearm: str | None = None  # code armed before Break, restored when break finishes (A28)
     break_pending: tuple[int, Pos, str] | None = None  # map, block and capability a Use in flight targets (A28)
+    break_odd: tuple[int, Pos] | None = None  # map and odd block Break is walking toward (A31)
+    break_odd_refusals: dict[tuple[int, Pos], int] = field(default_factory=dict)  # (map, odd block) -> times Break found no route to it (A31)
+    break_odd_pick: tuple | None = None  # (inputs, choice): the odd pick cached for one decision window (A31)
     equip_refused: set[tuple[str | None, str]] = field(default_factory=set)  # (subtype, slot) Equip was refused; (None, slot) for Remove (A19)
     equip_refused_sig: tuple | None = None  # loadout and inventory the refusals hold for; None until the next observation syncs it (A19)
+    equip_not_wearable: set[str] = field(default_factory=set)  # subtypes Wear rejected with not_wearable for the run (A55)
+    equip_try_refused: set[str] = field(default_factory=set)  # subtypes whose slot-learn Wear was refused transiently (A55)

@@ -1,4 +1,4 @@
-"""Equip: arm and wear better gear from held supplies (A19)."""
+"""Equip: arm and wear better gear from held supplies (A19, A55)."""
 
 from __future__ import annotations
 
@@ -29,6 +29,8 @@ class EquipState(State):
         up = _upgrade(world, ctx)
         if up is None:
             return StateOutcome(None, "nothing to equip", state=self.name)
+        if up.learn_slot:
+            return StateOutcome([wear(up.supply_id)], f"learn wear {up.code}", state=self.name)
         if up.slot == ARMED:
             return StateOutcome([arm(up.supply_id)], f"arm {up.code}", state=self.name)
         intents = [remove_slot(up.slot)] if up.remove_first else []
@@ -41,9 +43,9 @@ def _upgrade(world: WorldModel, ctx: PlayContext) -> EquipUpgrade | None:
 
 
 def _armed_owned(world: WorldModel, ctx: PlayContext) -> bool:
-    """Solve or Break holds the armed slot: it armed a tool, or is about to."""
+    """Heal, Solve or Break holds the armed slot: it armed a drink or tool, or is about to."""
     m = ctx.memory
-    if m.solve_rearm is not None or m.break_rearm is not None:
+    if m.solve_rearm is not None or m.break_rearm is not None or m.heal_rearm is not None:
         return True
     if solve_op(ctx.plan) is not None or break_op(ctx.plan) is not None:
         return True

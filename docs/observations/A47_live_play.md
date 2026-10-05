@@ -6,7 +6,7 @@ API.
 
 ## Technique
 
-- Movement queues must stay within the horizon (~40 intents): chunk `Step` plus four `Wait`s, then
+- Movement queues must stay within the horizon (40 intents at 10 Hz): chunk `Step` plus four `Wait`s, then
   drain with `POST tick` omitting `intents` so the server runs the queue.
 - Replacing the queue every poll before it drains leaves the character stuck; clearing with `[]`
   then re-queuing works.

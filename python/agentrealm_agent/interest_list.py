@@ -5,7 +5,7 @@ cells in sight (``Read``) and NPCs within 25 blocks never spoken to (``Say``).
 It also walks next to unlooked doors and A27 minimap entrance marks on any
 map the knowledge base knows, through known door warps when needed
 (``door_look``). Unknown zones are read by A7's spare-window
-probes (respawn ring first, then the path). Scroll reads stay deferred (PLAN.md A30).
+probes (respawn ring first, then the path). Scroll reads are PLAN.md A56.
 """
 
 from __future__ import annotations

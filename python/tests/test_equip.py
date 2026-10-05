@@ -64,18 +64,22 @@ class SlotTest(unittest.TestCase):
         w.apply_observation(snapshot({"worn": {}, "held": [{"id": 3, "supply_subtype_code": "bronze_mail"}]}))
         self.assertEqual(wear_slot("bronze_mail", w), "body")
 
-    def test_unknown_slot_is_not_worn(self):
+    def test_unknown_slot_triggers_learn_wear(self):
         w = world()
         w.held_supplies = [InventorySupply(8, "iron_mail")]
         items = {"iron_mail": {"gem_price": 60}}
-        self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory()))
+        up = best_equip_upgrade(w, items, w.threat, Memory())
+        assert up is not None
+        self.assertEqual((up.learn_slot, up.supply_id, up.code), (True, 8, "iron_mail"))
 
     def test_only_sourced_weapons_are_armed(self):
         w = world()
         w.armed_code = "pocket_knife"
         w.held_supplies = [InventorySupply(5, "waxed_axe"), InventorySupply(6, "torch")]
         items = {"waxed_axe": {"gem_price": 40}, "torch": {"gem_price": 10}}
-        self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory()))
+        up = best_equip_upgrade(w, items, w.threat, Memory())
+        assert up is not None
+        self.assertEqual((up.learn_slot, up.code), (True, "waxed_axe"))
 
     def test_fragments_and_consumables_skipped(self):
         w = world()
@@ -171,6 +175,12 @@ class UpgradeTest(unittest.TestCase):
             c = ctx(kb)
             setattr(c.memory, attr, "bronze_mallet")
             self.assertNotEqual(dispatch(w, c).state, "Equip", attr)
+        # Heal (priority 1) puts its weapon back before Equip looks (A24).
+        w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(6, "bronze_mallet")]
+        c = ctx(kb)
+        c.memory.heal_rearm = "bronze_mallet"
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.intents), ("Heal", [{"verb": "Arm", "supply_id": 6}]))
 
 
 class RefusalTest(unittest.TestCase):
@@ -259,6 +269,96 @@ class RunnerEquipResultTest(unittest.TestCase):
         self.r.mem.equip_refused = {(None, "body")}
         self.assertFalse(self.r.on_result({"tick": 3, "outcome": "applied"}, 1))
         self.assertEqual(self.r.mem.equip_refused, set())
+
+
+    def test_learn_wear_rejection_code_reaches_memory(self):
+        w = self.r.world
+        w.held_supplies = [InventorySupply(3, "legend_map"), InventorySupply(4, "odd_hat")]
+        self.r.mem.pending_intents = [{"verb": "Wear", "supply_id": 3}]
+        res = {"tick": 3, "outcome": "rejected", "rejection": {"category": "state", "code": "not_wearable"}}
+        self.assertTrue(self.r.on_result(res, 0))
+        self.r.mem.pending_intents = [{"verb": "Wear", "supply_id": 4}]
+        res = {"tick": 4, "outcome": "rejected", "rejection": {"category": "state", "code": "worn_slot_occupied"}}
+        self.assertTrue(self.r.on_result(res, 0))
+        self.assertEqual(self.r.mem.equip_not_wearable, {"legend_map"})
+        self.assertEqual(self.r.mem.equip_try_refused, {"odd_hat"})
+
+
+class LearnWearTest(unittest.TestCase):
+    """A55: discover worn slot by trying Wear from Equip."""
+
+    def test_dispatch_learn_wear_without_remove(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(8, "iron_mail")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["iron_mail"] = {"gem_price": 60}
+        out = dispatch(w, ctx(kb))
+        self.assertEqual(out.state, "Equip")
+        self.assertEqual(out.intents, [{"verb": "Wear", "supply_id": 8}])
+
+    def test_unpriced_loot_is_tried(self):
+        w = world()
+        w.held_supplies = [InventorySupply(8, "looted_helm")]
+        up = best_equip_upgrade(w, {}, w.threat, Memory())
+        assert up is not None
+        self.assertEqual((up.learn_slot, up.code), (True, "looted_helm"))
+
+    def test_not_wearable_never_retried(self):
+        m = Memory()
+        m.equip_not_wearable.add("legend_map")
+        w = world()
+        w.held_supplies = [InventorySupply(3, "legend_map")]
+        self.assertIsNone(best_equip_upgrade(w, {}, w.threat, m))
+
+    def test_transient_try_refusal_cleared_on_inventory_change(self):
+        m = Memory()
+        w = world()
+        w.held_supplies = [InventorySupply(8, "iron_mail")]
+        items = {"iron_mail": {"gem_price": 60}}
+        note_equip_result(m, w, {"verb": "Wear", "supply_id": 8}, rejected=True, rejection_code="worn_slot_occupied")
+        sync_refusals(m, w)
+        self.assertIn("iron_mail", m.equip_try_refused)
+        self.assertIsNone(best_equip_upgrade(w, items, w.threat, m))
+        w.held_supplies = [InventorySupply(8, "iron_mail"), InventorySupply(9, "apple")]
+        sync_refusals(m, w)
+        up = best_equip_upgrade(w, items, w.threat, m)
+        assert up is not None
+        self.assertTrue(up.learn_slot)
+
+    def test_not_wearable_from_rejection(self):
+        m = Memory()
+        w = world()
+        w.held_supplies = [InventorySupply(3, "legend_map")]
+        note_equip_result(m, w, {"verb": "Wear", "supply_id": 3}, rejected=True, rejection_code="not_wearable")
+        self.assertIn("legend_map", m.equip_not_wearable)
+        self.assertNotIn("legend_map", m.equip_try_refused)
+
+    def test_learned_slot_then_scores_like_a19(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(8, "iron_mail")]
+        items = {"bronze_mail": {"gem_price": 20}, "iron_mail": {"gem_price": 60}}
+        self.assertTrue(best_equip_upgrade(w, items, w.threat, Memory()).learn_slot)
+        w.apply_observation(snapshot({"worn": {"body": {"id": 8, "supply_subtype_code": "iron_mail"}}}))
+        w.apply_observation(
+            snapshot({"worn": {}, "held": [{"id": 8, "supply_subtype_code": "iron_mail"}]})
+        )
+        self.assertEqual(wear_slot("iron_mail", w), "body")
+        w.worn_codes = {"body": "bronze_mail"}
+        w.worn_slots["bronze_mail"] = "body"
+        up = best_equip_upgrade(w, items, w.threat, Memory())
+        assert up is not None
+        self.assertEqual((up.slot, up.code, up.remove_first), ("body", "iron_mail", True))
+
+    def test_weapon_upgrade_before_learn_wear(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(8, "iron_mail")]
+        items = {"bronze_sword": {"gem_price": 15}, "iron_mail": {"gem_price": 60}}
+        up = best_equip_upgrade(w, items, w.threat, Memory())
+        assert up is not None
+        self.assertEqual(up.slot, "armed")
 
 
 class DispatchTest(unittest.TestCase):

@@ -7,11 +7,13 @@ from ..healing import (
     back_off,
     carried_heal,
     food_in_sight,
+    food_worth_pickup,
     hurt,
     nearest_known_safe,
     note_regen_sample,
     note_try,
     raise_buy_potion,
+    rearm_after_drink,
     regen_known,
     save_regen_yes,
     standing_in_safe_zone,
@@ -130,6 +132,8 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
     here = w.pos
     assert here is not None
     for food in food_in_sight(w, m)[:FOOD_CANDIDATES]:
+        if not food_worth_pickup(w, ctx.knowledge, food.code):
+            continue
         if chebyshev(food.pos, here) <= 1:
             note_try(m, "take", food.id)
             return _out([take(food.id)], f"take food {food.code}")
@@ -140,15 +144,20 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
 
 
 def _act_carried(w: WorldModel, m: Memory) -> StateOutcome | None:
-    """``Arm`` + ``Use`` self on carried food or a potion (API Use).
-
-    The weapon stays unarmed afterwards: re-arming it is A24. A rejected
-    ``Use`` is retried at most ``HEAL_MAX_TRIES`` times per supply.
-    """
+    """``Arm`` + ``Use`` self on carried food or a potion, then re-``Arm`` the weapon (A24)."""
+    if m.heal_rearm and w.armed_code != m.heal_rearm:
+        code = m.heal_rearm
+        if intents := rearm_after_drink(w, m):
+            return _out(intents, f"re-arm {code}")
     item = carried_heal(w, m)
     if item is None:
         return None
     note_try(m, "use", item.id)
-    if w.armed_code == item.code:
-        return _out([use_self(w.character_id)], f"use {item.code}")
-    return _out([arm(item.id), use_self(w.character_id)], f"arm and use {item.code}")
+    intents: list[dict] = []
+    if w.armed_code != item.code:
+        if m.heal_rearm is None and w.armed_code is not None:
+            m.heal_rearm = w.armed_code
+        intents.append(arm(item.id))
+    intents.append(use_self(w.character_id))
+    label = "use" if len(intents) == 1 else "arm and use"
+    return _out(intents, f"{label} {item.code}")

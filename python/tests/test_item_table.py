@@ -42,6 +42,16 @@ class MergeTest(unittest.TestCase):
         it.merge_item(items, "bronze_sword", attack_range=2)
         self.assertEqual(items, {"potion": {"gem_price": 7}, "bronze_sword": {"attack_range": 2}})
 
+    def test_heal_keeps_max_and_pickup_flag(self):
+        items: dict = {}
+        it.merge_heal(items, "apple", 3, on_pickup=True)
+        it.merge_heal(items, "apple", 5, on_pickup=True)
+        it.merge_heal(items, "berry", 0, on_pickup=False)
+        self.assertEqual(
+            items,
+            {"apple": {"heal_amount": 5, "heal_on_pickup": True}, "berry": {"heal_on_pickup": False}},
+        )
+
     def test_invalid_values_are_ignored_and_make_no_row(self):
         items: dict = {}
         for bad in (0, -1, True, "x", None, 2.5e400):

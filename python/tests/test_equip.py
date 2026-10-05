@@ -167,7 +167,7 @@ class UpgradeTest(unittest.TestCase):
         self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory(), armed_owned=True))
         kb = KnowledgeBase.empty("sandbox")
         kb.items.update(items)
-        for attr in ("solve_rearm", "break_rearm"):
+        for attr in ("solve_rearm", "break_rearm", "heal_rearm"):
             c = ctx(kb)
             setattr(c.memory, attr, "bronze_mallet")
             self.assertNotEqual(dispatch(w, c).state, "Equip", attr)

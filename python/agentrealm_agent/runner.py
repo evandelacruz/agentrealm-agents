@@ -34,6 +34,7 @@ from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
 from .loot import learn_loot_rejection
+from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending
 from .shop import note_shop_result
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.ops import refresh_travel_stack
@@ -422,6 +423,7 @@ class Runner:
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        absorb_heal_pending(m, w, self.knowledge, events)
         w.note_level_clear(r.get("level_clear_ceremony"))
         self._sync_loadout()
         sync_refusals(m, w)
@@ -731,6 +733,7 @@ class Runner:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
+            self._note_heal_intent(intent)
             self._note_investigation(intent, result)
             if m.pending is not None and index == 0:
                 m.pending = None
@@ -762,6 +765,29 @@ class Runner:
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
+
+    def _note_heal_intent(self, intent: dict | None) -> None:
+        """Remember health before a food ``Take`` or self-``Use`` for item-table learning (A24)."""
+        if not intent:
+            return
+        w, m = self.world, self.mem
+        verb = intent.get("verb")
+        if verb == "Take":
+            sid = intent.get("supply_id")
+            if sid is None:
+                return
+            for e in w.entities:
+                if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
+                    note_heal_pending(m, w, e.code, "take")
+                    return
+        if verb != "Use":
+            return
+        target = intent.get("target") or {}
+        if target.get("kind") != "character" or int(target.get("character_id", -1)) != w.character_id:
+            return
+        code = w.armed_code
+        if code in FOOD_CODES | POTION_CODES:
+            note_heal_pending(m, w, code, "use")
 
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
         """Remember an applied Read/Say in the knowledge base; count a refused one."""

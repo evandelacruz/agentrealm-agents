@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .item_table import InventorySupply
+from .item_table import InventorySupply, merge_heal
+from .knowledge_base import knowledge_items
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import safe_tiles
 
@@ -174,6 +175,72 @@ def nearest_known_safe(w: WorldModel) -> tuple[int, Pos] | None:
         return None
     candidates.sort()
     return map_id, candidates[0][2]
+
+
+def missing_health(w: WorldModel) -> int | None:
+    if w.health is None or w.max_health is None:
+        return None
+    return max(0, w.max_health - w.health)
+
+
+def heal_amount_known(knowledge: KnowledgeBase | None, code: str) -> int | None:
+    row = knowledge_items(knowledge).get(code) or {}
+    n = row.get("heal_amount")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else None
+
+
+def food_worth_pickup(w: WorldModel, knowledge: KnowledgeBase | None, code: str) -> bool:
+    """True when hurt enough to use this food's measured heal (A24).
+
+    Unknown heal amounts are still tried (A10).
+    """
+    missing = missing_health(w)
+    if missing is None or missing <= 0:
+        return False
+    amount = heal_amount_known(knowledge, code)
+    if amount is None:
+        return True
+    return missing >= amount
+
+
+def note_heal_pending(m: Memory, w: WorldModel, code: str, kind: str) -> None:
+    if w.health is None or code not in FOOD_CODES | POTION_CODES:
+        return
+    m.heal_pending = (w.health, code, kind)
+
+
+def absorb_heal_pending(
+    m: Memory,
+    w: WorldModel,
+    knowledge: KnowledgeBase | None,
+    events: list[dict],
+) -> None:
+    """Learn heal from the health change after a food ``Take`` or self-``Use``."""
+    pending = m.heal_pending
+    if pending is None or w.health is None or knowledge is None:
+        m.heal_pending = None
+        return
+    start_health, code, kind = pending
+    m.heal_pending = None
+    if any(e.get("kind") == "Damaged" for e in events):
+        return
+    delta = w.health - start_health
+    with knowledge.lock:
+        if delta > 0:
+            merge_heal(knowledge.items, code, delta, on_pickup=(kind == "take"))
+        elif kind == "take":
+            merge_heal(knowledge.items, code, 0, on_pickup=False)
+
+
+def rearm_after_drink(w: WorldModel, m: Memory) -> list[dict] | None:
+    """One ``Arm`` for the weapon that was swapped out for a drink (A24)."""
+    code, m.heal_rearm = m.heal_rearm, None
+    if code is None or w.armed_code == code:
+        return None
+    for h in w.held_supplies:
+        if h.code == code:
+            return [{"verb": "Arm", "supply_id": h.id}]
+    return None
 
 
 def raise_buy_potion(m: Memory, *, why: str, code: str = DEFAULT_BUY_POTION) -> None:

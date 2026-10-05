@@ -11,6 +11,8 @@ from agentrealm_agent.healing import (
     REGEN_KEY,
     REGEN_MEASURE_TICKS,
     SURVIVAL_KEY,
+    absorb_heal_pending,
+    food_worth_pickup,
     hurt,
     regen_known,
     save_regen_yes,
@@ -105,6 +107,39 @@ class HealStateTest(unittest.TestCase):
             self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
             w.tick += 7
         self.assertNotIn("Use", verbs(dispatch(w, ctx(m))))
+
+    def test_rearms_weapon_after_drinking_potion(self):
+        w = grid()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(1, "pocket_knife"), InventorySupply(4, "small_potion")]
+        m = Memory()
+        out = dispatch(w, ctx(m))
+        self.assertEqual(verbs(out), ["Arm", "Use"])
+        self.assertEqual(m.heal_rearm, "pocket_knife")
+        w.armed_code = None
+        w.held_supplies = [InventorySupply(1, "pocket_knife")]
+        out = dispatch(w, ctx(m))
+        self.assertEqual(verbs(out), ["Arm"])
+        self.assertIsNone(m.heal_rearm)
+
+    def test_skips_food_when_missing_health_below_learned_heal(self):
+        w = grid(at=(1, 1))
+        w.health = 9
+        w.entities = [Entity("supply", 8, (2, 1), "apple")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["apple"] = {"heal_amount": 5}
+        self.assertFalse(food_worth_pickup(w, kb, "apple"))
+        out = dispatch(w, ctx(kb=kb))
+        self.assertNotIn("Take", verbs(out))
+
+    def test_learns_heal_from_applied_take(self):
+        kb = KnowledgeBase.empty("sandbox")
+        m = Memory(heal_pending=(5, "apple", "take"))
+        w = grid()
+        w.health = 8
+        absorb_heal_pending(m, w, kb, [])
+        self.assertEqual(kb.items["apple"]["heal_amount"], 3)
+        self.assertTrue(kb.items["apple"]["heal_on_pickup"])
 
     def test_walks_to_known_safe_tile(self):
         w = grid(at=(2, 2))

@@ -96,4 +96,6 @@ Pass criteria (PLAN.md A33, checked in [`m10_acceptance.py`](python/agentrealm_a
 - on a run of at least 95% of the default hour, every readable sign that came into sight along the route has been read, and every NPC that came within 25 blocks has been spoken to;
 - the odd-block clause is covered offline by the `ODD_BUSH` fixture in `python/tests/test_m10_acceptance.py`.
 
+Break memory sees a `Use` only through `Memory.break_pending`, which only Break and OddBreak set. Gather's `cut bush` and Solve's `use_block` never set it, so their uses are neither recorded in `kb.breaks` nor counted by the duplicate-break gate.
+
 No live M10 pass yet (A33 partial); CI covers the gate, the odd-bush fixture and the smoke script in `python/tests/test_m10_acceptance.py` without live keys.

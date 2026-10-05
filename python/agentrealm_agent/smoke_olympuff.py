@@ -72,7 +72,8 @@ def run_smoke(
     *,
     timeout_s: float,
     log: Callable[[str], None] | None = None,
-) -> tuple[TimedRunHooks, float]:
+) -> float:
+    """Play until ``metrics`` stops the run or ``timeout_s`` passes; the seconds it took."""
     stop = threading.Event()
     metrics.stop = stop
     started = time.monotonic()
@@ -111,4 +112,4 @@ def run_smoke(
         save_knowledge(knowledge)
     except OSError as e:
         out(f"knowledge base {knowledge.world_code}: not saved: {e}")
-    return metrics, elapsed
+    return elapsed

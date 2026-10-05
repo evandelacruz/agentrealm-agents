@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
     metrics = M8AcceptanceMetrics(target_seconds=args.seconds)
-    metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, log=print)
+    elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, log=print)
     print(f"finished in {elapsed:.1f}s", flush=True)
     for line in metrics.summary_lines():
         print(line, flush=True)

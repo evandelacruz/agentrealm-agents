@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from .acceptance_run import TimedRunHooks
 from .config import Policy
 from .equip import is_consumable, is_weapon, wear_slot
-from .healing import FOOD_CODES, POTION_CODES, potion_count
+from .healing import FOOD_CODES, POTION_CODES, potion_count, self_use_code
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .survival import combat_group, would_lose
@@ -136,7 +136,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
                     if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
                         self.heal_food_take = True
             if intent.get("verb") == "Use" and _is_self_use(intent, w):
-                if _self_use_code(intents, i, w) in POTION_CODES:
+                if self_use_code(w, intents[i - 1] if i > 0 else None) in POTION_CODES:
                     self.heal_potion = True
 
     def _note_fight(
@@ -219,22 +219,6 @@ def _is_armor(code: str, w: WorldModel) -> bool:
 def _is_self_use(intent: dict, w: WorldModel) -> bool:
     target = intent.get("target") or {}
     return target.get("kind") == "character" and target.get("character_id") == w.character_id
-
-
-def _self_use_code(intents: list[dict], index: int, w: WorldModel) -> str | None:
-    """The code the self-``Use`` at ``index`` drinks or eats.
-
-    Heal sends ``[Arm item, Use self]`` in one queue while ``armed_code`` still
-    names the weapon, so an ``Arm`` just before the ``Use`` names the item
-    (same rule as ``Runner._used_on_self_code``).
-    """
-    before = intents[index - 1] if index > 0 else None
-    if before and before.get("verb") == "Arm":
-        for h in w.held_supplies:
-            if h.id == before.get("supply_id"):
-                return h.code
-        return None
-    return w.armed_code
 
 
 def _is_attack_use(intent: dict, w: WorldModel) -> bool:

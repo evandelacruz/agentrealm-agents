@@ -34,7 +34,7 @@ from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
 from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
-from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending
+from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, self_use_code
 from .shop import note_shop_result
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.ops import refresh_travel_stack
@@ -851,26 +851,9 @@ class Runner:
         target = intent.get("target") or {}
         if target.get("kind") != "character" or int(target.get("character_id", -1)) != w.character_id:
             return
-        code = self._used_on_self_code(index)
+        code = self_use_code(self.world, self._intent_at(index - 1) if index > 0 else None)
         if code in FOOD_CODES | POTION_CODES:
             note_heal_pending(m, w, code, "use")
-
-    def _used_on_self_code(self, index: int) -> str | None:
-        """The code a self-``Use`` at ``index`` drinks or eats.
-
-        Heal sends ``[Arm item, Use self]`` in one queue, and both results are
-        applied before the observation updates ``armed_code``. So the ``Arm``
-        just before the ``Use`` names the item; with no ``Arm`` there, the item
-        was already armed.
-        """
-        w = self.world
-        before = self._intent_at(index - 1) if index > 0 else None
-        if before and before.get("verb") == "Arm":
-            for h in w.held_supplies:
-                if h.id == before.get("supply_id"):
-                    return h.code
-            return None
-        return w.armed_code
 
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
         """Remember an applied Read/Say in the knowledge base; count a refused one."""

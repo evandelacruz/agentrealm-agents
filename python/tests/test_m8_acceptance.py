@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -16,6 +17,8 @@ from agentrealm_agent.m8_acceptance import M8AcceptanceMetrics, TARGET_SECONDS
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
+from tests.test_m6_acceptance import RunnerCase
+from tests.test_m7_acceptance import TownServer
 
 REPO = Path(__file__).resolve().parents[2]
 SMOKE_PATH = REPO / "scripts" / "smoke_m8_olympuff.py"
@@ -204,6 +207,16 @@ class MilestoneGateTest(unittest.TestCase):
         self.assertEqual(m.failures(full_run=False), [])
 
 
+class RunnerHookTest(RunnerCase):
+    def test_npc_died_reaches_the_gate_through_the_runner(self):
+        stop = threading.Event()
+        m = metrics()
+        r = self.make_runner(TownServer(10, stop), stop, m)
+        decide(m, weak_fight_world(), state="Fight", intents=SWING)
+        r.on_events([{"kind": "NPCDied", "npc_id": 5}])
+        self.assertEqual(m.weak_hostile_kills, 1)
+
+
 class SmokeScriptTest(unittest.TestCase):
     def setUp(self):
         self.smoke = load_smoke()
@@ -229,7 +242,7 @@ class SmokeScriptTest(unittest.TestCase):
                 mock.patch.object(self.smoke.time, "sleep"), \
                 mock.patch.object(self.smoke, "wake"), \
                 mock.patch.object(self.smoke, "navigation_start", return_value=(OVERWORLD, (0, 0))), \
-                mock.patch.object(self.smoke, "run_smoke", side_effect=lambda *a, **k: (a[3], 10.0)):
+                mock.patch.object(self.smoke, "run_smoke", return_value=10.0):
             code, out, _ = self.main(["--api-key", "k", "--character-id", "9", "--seconds", "10"])
         self.assertEqual(code, 0, out)
 
@@ -239,7 +252,7 @@ class SmokeScriptTest(unittest.TestCase):
                 mock.patch.object(self.smoke.time, "sleep"), \
                 mock.patch.object(self.smoke, "wake"), \
                 mock.patch.object(self.smoke, "navigation_start", return_value=(OVERWORLD, (0, 0))), \
-                mock.patch.object(self.smoke, "run_smoke", side_effect=lambda *a, **k: (a[3], float(TARGET_SECONDS))):
+                mock.patch.object(self.smoke, "run_smoke", return_value=float(TARGET_SECONDS)):
             code, _, err = self.main(["--api-key", "k", "--character-id", "9", "--seconds", str(TARGET_SECONDS)])
         self.assertEqual(code, 1)
         self.assertIn("gems never increased", err)

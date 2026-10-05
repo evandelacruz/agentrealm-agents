@@ -410,7 +410,7 @@ class SmokeScriptTest(unittest.TestCase):
 
         def run_smoke(client, cfg, cid, metrics, *, timeout_s, log=None):
             played(metrics)
-            return metrics, seconds
+            return seconds
 
         with mock.patch.object(self.smoke, "Client") as Client, \
                 mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
@@ -489,7 +489,7 @@ class SmokeScriptTest(unittest.TestCase):
         with mock.patch.object(self.smoke, "Client") as Client, \
                 mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
                 mock.patch.object(self.smoke.time, "sleep"), \
-                mock.patch.object(self.smoke, "run_smoke", side_effect=lambda c, cfg, cid, m, **kw: (m, 10)):
+                mock.patch.object(self.smoke, "run_smoke", return_value=10):
             fake = FakeSleeper()
             Client.return_value = fake
             fake.on_position = lambda: seen.append(list(fake.ticks))

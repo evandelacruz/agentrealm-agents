@@ -53,7 +53,9 @@
 
   "A47": {"state": "done"},
 
-  "A57": {"state": "open", "note": "Live play still needed: confirm a life's ground code, probe stowed Drop on inventory.chest, measure middle_chest capacity at carry_capacity_full. Observers had no stowed supplies and under 50 gems; see docs/observations/A47_live_play.md (session 3)."},
+  "A57": {"state": "done", "note": "Live play pass documented in docs/observations/A57_live_play.md; code wiring for life code, stowed Drop, and measured middle_chest cap split to A58."},
+
+  "A58": {"state": "open"},
 
   "A21": {"state": "done"},
 

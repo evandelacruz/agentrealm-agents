@@ -218,10 +218,10 @@ Each has a test the agent or a hand session can run.
 | How ground food other than the golden cap heals (apples, berries): on pickup, or carried and `Use`d on self | `Take` one while hurt and read `health`; if unchanged, `Arm` + `Use` self |
 | Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
 | How to tell a scroll supply from others before reading it. Nothing sourced names scroll subtype codes, so `Investigate` learns them by probing (PLAN.md A56); none is confirmed on the wire yet | Log `supply_subtype_code` of every supply seen; `Read` one of each once and keep the codes that do not answer `nothing_to_read` (A56 does this; note confirmed codes in [`A30_live_play.md`](observations/A30_live_play.md)) |
-| Which `supply_subtype_code` a life (heart) has on the ground. Until confirmed, `LIFE_SUPPLY_CODES` ships empty; the agent files a code as `life_on_pickup` in the item table when `lives` rises in a response whose only applied `Take` was that supply (A47), and confirming it is A57 | On Olympuff, keep cutting grass and bushes and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16; Obs [`A20_live_play.md`](observations/A20_live_play.md), [`A47_live_play.md`](observations/A47_live_play.md)) |
-| Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? Loot drops held supplies only until this is known (A57) | `Drop` a stowed supply and read the result (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
+| Which `supply_subtype_code` a life (heart) has on the ground. Until confirmed, `LIFE_SUPPLY_CODES` ships empty; the agent files a code as `life_on_pickup` in the item table when `lives` rises in a response whose only applied `Take` was that supply (A47), and confirming it is A58 (A57 pass: Obs [`A57_live_play.md`](observations/A57_live_play.md)) | On Olympuff, keep cutting grass and bushes and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16; Obs [`A20_live_play.md`](observations/A20_live_play.md), [`A47_live_play.md`](observations/A47_live_play.md)) |
+| Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? Loot drops held supplies only until this is known (A58; A57 pass: Obs [`A57_live_play.md`](observations/A57_live_play.md)) | `Drop` a stowed supply and read the result (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Is the armed supply also listed in `held`? Loot counts held, worn, armed and stowed separately (A20) | Compare `inventory` before and after an `Arm` |
-| Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 assumes the Manual §16 cap once a `Take` of the upgrade applies (below), and measuring it is A57 | Buy `middle_chest` and fill until `carry_capacity_full` (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
+| Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 assumes the Manual §16 cap once a `Take` of the upgrade applies (below), and measuring it is A58 (A57 pass: Obs [`A57_live_play.md`](observations/A57_live_play.md)) | Buy `middle_chest` and fill until `carry_capacity_full` (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 
 ### Assumed until measured
@@ -236,7 +236,7 @@ The win estimate (A9, gated on by **Fight** in A23) uses these until the questio
 | Health of a hostile type with no kill on record | 10 | A new character's health (PLAYABLE_AGENT_PLAN Combat) |
 | Our health when no observation has served it | 10 | A new character's health (Combat) |
 
-Loot (A47) also assumes one value until measured (A57):
+Loot (A47) also assumes one value until measured (A58; A57 live pass in Obs [`A57_live_play.md`](observations/A57_live_play.md)):
 
 | Assumption | Value | Basis |
 |---|---|---|

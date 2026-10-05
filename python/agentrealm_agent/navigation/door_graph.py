@@ -134,6 +134,22 @@ def route_first_leg(
     return _route(w, kb, dest_map, dest, params)
 
 
+def alt_route_path(
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    dest_map: int,
+    dest: Pos,
+    params: CostGridParams,
+) -> list[Pos] | None:
+    """Escalation step 4: door-graph routes only, not another same-map A* replan (A28)."""
+    if w.map_id is None or w.pos is None:
+        return None
+    cross = _route(w, kb, dest_map, dest, params)
+    if cross is not None:
+        return cross
+    return doors_goal_path(w, kb, params)
+
+
 def unvisited_doors_on_map(kb: KnowledgeBase | None, w: WorldModel) -> set[Pos]:
     """Doors on the current map whose warp destination is not recorded yet."""
     doors = {p for p, b in w.view.tiles.items() if b in DOORS}

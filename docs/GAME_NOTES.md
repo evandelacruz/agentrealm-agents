@@ -117,7 +117,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Drop** puts a carried supply on the ground under you. `Drop` and `DepositToChest` refuse a gem, a life, or a non-transferable supply (the starting kit) with `not_transferable`, permanent (M §6, §10.2, §11).
 - **`attack_range`** on `get_self` is the armed weapon's reach; 1 when the weapon authors none (M §5.3).
 - **Olympuff starting kit:** a non-transferable pocket knife (damage 2, range 1, cuts grass and bushes). It survives death and is re-armed on respawn (M §5.3, §11; Obs: Died dropped everything but the knife).
-- **Buying.** Walk onto, or `Take`, a supply with a `gem_price`. Without enough gems it is `not_enough_gems` (M §11).
+- **Buying.** Walk onto, or `Take`, a supply with a `gem_price`. Without enough gems it is `not_enough_gems` (M §11). The agent never steps onto one (`WorldModel.for_sale()` is impassable except as a search goal): Shop buys only by `Take` from a neighbouring cell, corners included (A21).
 - **Olympuff town shop prices seen** (Obs):
 
   | Item | Gems |

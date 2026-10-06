@@ -240,6 +240,14 @@ class ShopTilesAreNotWalkedTest(unittest.TestCase):
         self.assertNotIn((2, 2), stepped)
         self.assertEqual(w.pos, (4, 2))
 
+    def test_travel_to_a_point_on_an_item_for_sale_ends_beside_it(self):
+        w = world(at=(0, 2))
+        w.entities = [Entity("supply", 7, (4, 2), "bronze_sword", gem_price=15)]
+        c = ctx(w, plan=Plan(parse_directives_goals(["travel:point:4:2"]), dict(PARAM_DEFAULTS)))
+        stepped, _ = walk(w, c, "Travel")
+        self.assertNotIn((4, 2), stepped)
+        self.assertIsNone(c.plan.current(), "arrived beside it: the op is done")
+
     def test_walk_queue_stops_before_an_item_for_sale(self):
         w = world(at=(0, 2))
         w.entities = [Entity("supply", 7, (2, 2), "bronze_sword", gem_price=15)]

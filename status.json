@@ -27,7 +27,7 @@
 
   "A9": {"state": "partial", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing.", "remaining": "A23 run 2: with hostile = [\"npc\"], Retreat and Flee fire on townsfolk (rumor_teller, apothecary, salvager): combat_group takes every NPC in hostile_range, and would_lose counts each as an unmeasured threat."},
 
-  "A10": {"state": "done", "note": "Live Walk run fix: Heal rests in the safe zone instead of walking out mid-sample; once regen is no it stops sampling and raises heal_supplies for the planner."},
+  "A10": {"state": "partial", "note": "Live Walk run fix: Heal rests in the safe zone instead of walking out mid-sample; once regen is no it stops sampling and raises heal_supplies for the planner.", "remaining": "A63 run 4 death: _walk_to_safe (states/heal.py:169) picks nearest_known_safe with no hostile check on the target, unlike heal_explore (hostiles_near), and walked a 10-Step heal_measure queue into a known-hostile pack beside the safe tile."},
 
   "A11": {"state": "done"},
 
@@ -129,7 +129,7 @@
 
   "A53": {"state": "done"},
 
-  "A63": {"state": "done", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield, gather_status and gather_run; Gather skips barren regions unless the op names one. Run 1 made no cut (Gather bar was safe zones only); run 2 cut one town cell 168 times with no effect. Both fixed (field cells first, no-effect cells held out, 3 no-effect cuts mark a region or safe zone uncuttable). Run 3 (11 gems, then a flee step into lava): stale-position Step guard, lone intents held as queues, narrower hostile bar with fight-or-move-off for a shadowing hostile, walking/blocked/stall gather_status, best regions at any distance, smoke runs play on after a death. Run 4 (600 s): 20 gems by 257 s, one death (Heal walked into a hostile pack), and lone Takes still doubled by the Pickup reflex."},
+  "A63": {"state": "partial", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield, gather_status and gather_run; Gather skips barren regions unless the op names one. Run 1 made no cut (Gather bar was safe zones only); run 2 cut one town cell 168 times with no effect. Both fixed (field cells first, no-effect cells held out, 3 no-effect cuts mark a region or safe zone uncuttable). Run 3 (11 gems, then a flee step into lava): stale-position Step guard, lone intents held as queues, narrower hostile bar with fight-or-move-off for a shadowing hostile, walking/blocked/stall gather_status, best regions at any distance, smoke runs play on after a death. Run 4 (600 s): 20 gems by 257 s, one death (A10 Heal walk).", "remaining": "Run 4 defects (docs/observations/A63_gem_gathering_runs.md): (2) the Pickup reflex re-sends a held lone Take, so 10 of 13 supplies took a duplicate Take: held_step_matches (runner.py:785) keeps a held queue only for a SetPosition reflex, so pickup.py:33 replaces the held Take with the same Take; (3) Gather and Retreat paced for 34 s: gather_bar (states/gather_safe.py:31) lets Gather target grass 2 cells from a hostile, where should_retreat (survival.py:270) turns it back to the safe tile."},
 
   "A64": {"state": "open", "note": "A23 run 2: decisions blocked the loop 5-17 s (nearest_target A* per target, danger() per hostile, full _decide in reflex_while_held)."},
 

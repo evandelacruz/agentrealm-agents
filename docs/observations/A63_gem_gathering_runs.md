@@ -261,6 +261,7 @@ Intents: 130 `Step`, 211 `Wait`, 28 `Use`, 22 `Take`. Call mix: 221 `tick`, 58 `
 
 ## Run 4: 20 gems by 257 s, one death on a Heal walk into a hostile pack, and lone Takes still doubled
 
+- **IDs:** A63 (Gather; defects 2 and 3 are in its `remaining`) and A10 (Heal; defect 1).
 - **Code:** `main` at `5ff4f0f`, after #132 (navigation under 100 ms a decision), #131 (townsfolk not threats, outward hunt search), #129 (planner sees NPCs, Greet), #134 (stale Step, lone Take, shadowing hostile, play on after a death) and #133 (park before exit).
 - **Setup:** as Run 3, but `--seconds 600`: `gather_gems:20` directive, planner on, play goes on after a death (the new default), park phase on (default 60 s). Empty local knowledge base.
 - **Verdict:** exit 0, `PASS` after **601.7 s**. The character started at 10/10 health, 8 lives and 11 gems, at (400, 609) beside the southern safe zone.
@@ -273,7 +274,7 @@ Intents: 130 `Step`, 211 `Wait`, 28 `Use`, 22 `Take`. Call mix: 221 `tick`, 58 `
 | Gems | **11 → 21**. **20 at 257 s**, when `gather_gems:20` was done (it counts gems held, not gems gained). One more at 428 s, from a ground gem on the walk to town |
 | Gems per minute | **2.1** while gathering (9 in 257 s); **1.0** over the whole run |
 | Cuts (`Use` on grass) | **54 filed, 54 took effect, 0 `applied_no_effect`** (`gather_run`); no bush cuts. One more `Use` was a break |
-| `Take` | **24 sent for 13 supplies**: 10 gems (9 that our cuts dropped, 1 ground gem), 3 apples, 1 berry. **11 Takes were wasted**: 10 gems and the berry each took a second identical Take (defect 2) |
+| `Take` | **24 sent for 13 supplies**: 10 gems (9 that our cuts dropped, 1 ground gem), 2 apples, 1 berry. **12 were wasted.** 10 were back-to-back duplicates: 9 gems and the berry each took a second identical `Take` 3 ticks after the first (defect 2). Apple 62590 took 2 Takes 180 s apart, and neither got a `SupplyTaken`. That is 9 × 2 + 1 = 19 gem Takes and 2 + 2 + 1 = 5 food Takes |
 | `gem_yield` records | 54 cuts and 8 gems filed, in six regions (table below). Barren marks **none**; uncuttable marks **none** |
 
 | Region (x0, y0) | Cuts | Gems | Yield | Mark |
@@ -329,7 +330,7 @@ Intents: 791 `Step`, 1,851 `Wait`, 58 `Use`, 24 `Take`, 17 `Say`, 3 `Read`. Call
 ### #129–#134 checks
 
 - **#134 stale Step:** no Step from a stale position landed on a hazard. One flee was stopped by the new guard (`flee npc 240: stop, the step may land on a blocked cell`).
-- **#134 lone Take:** **not fixed in practice.** The Take is now held as a queue (each first Take's record carries `held_queue`), but a second identical Take still goes out 3 ticks later (defect 2).
+- **#134 lone Take:** **not fixed in practice.** The Take is now held as a queue (each first Take's record carries `held_queue`), but a second identical `Take` still goes out 3 ticks later, for 10 of 13 supplies (defect 2).
 - **#134 shadowing hostile:** no 45 s stall under a follower. The longest gap with no cut while gathering was the 34 s pacing in defect 3.
 - **#134 play on after a death:** works. The run went on for 470 s after the death.
 - **#131:** townsfolk were not fled from or fought; all flee and retreat targets were gristlewicks and wartlurches.
@@ -351,7 +352,7 @@ Intents: 791 `Step`, 1,851 `Wait`, 58 `Use`, 24 `Take`, 17 `Say`, 3 `Read`. Call
 
    Suspects: `states/heal.py:169` (`_walk_to_safe` takes `nearest_known_safe` with no hostile check on the target, unlike `_explore_zone`'s `hostiles_near` filter at `:133`) and `runner.py:743` (a held Heal queue keeps walking until a reflex fires, which here was the first hit). The respawn tile is beside the same pack, so Heal, Retreat and respawn all pull the character back to it.
 
-2. **The Pickup reflex re-sends a held lone `Take`.** #134 now holds a lone `Take` as a queue. But on the next poll `reflex_while_held` runs Pickup, which sees the same supply (it leaves `w.entities` only on `SupplyTaken`, one response later) and fires a fresh `Take`. `held_step_matches` lets a held queue keep running only when the reflex is a `SetPosition`, so the identical `Take` replaces the queue. This happened 11 times out of 13 supplies.
+2. **The Pickup reflex re-sends a held lone `Take`.** #134 now holds a lone `Take` as a queue. But on the next poll `reflex_while_held` runs Pickup, which sees the same supply (it leaves `w.entities` only on `SupplyTaken`, one response later) and fires a fresh `Take`. `held_step_matches` lets a held queue keep running only when the reflex is a `SetPosition`, so the identical `Take` replaces the queue. This happened for 10 of the 13 supplies (9 gems and the berry).
 
    ```
    t=4037152 @76:405,624 tick  Take(62600) (take gem)                  held_queue 2721d352…

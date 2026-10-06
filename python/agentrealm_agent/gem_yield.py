@@ -29,8 +29,8 @@ roll, so it is never filed (a false miss would push its region toward
 barren). The tracker holds that cell out for ``REGROW_TICKS`` so Gather
 moves on, and counts it for the planner (:meth:`GemYieldTracker.run_counts`).
 After ``NO_EFFECT_ZONE_CUTS`` such cuts in one region, or in one known safe
-zone, the whole region or zone is uncuttable for the run
-(:meth:`GemYieldTracker.uncuttable`). That is not barren: barren means cuts
+zone (repeats on one cell count), the whole region or zone is uncuttable
+until those cuts are ``NO_EFFECT_TTL`` old (:meth:`GemYieldTracker.uncuttable`). That is not barren: barren means cuts
 work and drop no gem.
 """
 
@@ -112,10 +112,11 @@ class GemYieldTracker:
     claimed: set[int] = field(default_factory=set)  # ground gems already credited to a cut
     on_ground: set[int] = field(default_factory=set)  # claimed gems not yet gone from view
     last_gems: int | None = None  # the gem counter at the last update
-    # Cells a Use left unchanged (``applied_no_effect``): (map_id, cell) -> tick,
-    # oldest first, at most MAX_NO_EFFECT, forgotten after NO_EFFECT_TTL. Each
-    # holds its cell out of Gather for REGROW_TICKS; several mark ground uncuttable.
-    no_effect: dict[tuple[int, Pos], int] = field(default_factory=dict)
+    # Uses that left grass or a bush unchanged (``applied_no_effect``), one
+    # (map_id, cell, tick) per cut, oldest first, at most MAX_NO_EFFECT and
+    # forgotten after NO_EFFECT_TTL. Each holds its cell out of Gather for
+    # REGROW_TICKS; NO_EFFECT_ZONE_CUTS of them mark ground uncuttable.
+    no_effect: list[tuple[int, Pos, int]] = field(default_factory=list)
     cuts: int = 0  # Uses on grass or a bush that took effect, this run
     no_effect_cuts: int = 0  # Uses on grass or a bush that did nothing, this run
     # The latest no-effect cut (map_id, cell, tick), cleared by a cut that takes effect.
@@ -140,11 +141,9 @@ class GemYieldTracker:
         ``block``. Grass or a bush: held out of Gather, never filed as a cut."""
         if w.map_id is None or block not in GATHER_BLOCKS:
             return
-        self.no_effect.pop((w.map_id, pos), None)  # re-inserted as the newest
-        self.no_effect[(w.map_id, pos)] = tick
+        self.no_effect.append((w.map_id, pos, tick))
         self._prune(tick)
-        while len(self.no_effect) > MAX_NO_EFFECT:
-            del self.no_effect[next(iter(self.no_effect))]
+        del self.no_effect[:-MAX_NO_EFFECT]
         self.no_effect_cuts += 1
         self.last_no_effect = (w.map_id, pos, tick)
 
@@ -153,7 +152,7 @@ class GemYieldTracker:
         cuts still waiting out their gem window, and cells a ``Use`` left
         unchanged within ``REGROW_TICKS`` of ``tick`` (:func:`exhausted_cells`)."""
         out = {c.pos for c in self.pending if c.map_id == map_id}
-        return out | {p for (mid, p), t in self.no_effect.items() if mid == map_id and tick - t < REGROW_TICKS}
+        return out | {p for mid, p, t in self.no_effect if mid == map_id and tick - t < REGROW_TICKS}
 
     def uncuttable(self, w: WorldModel) -> tuple[set[tuple[int, int]], set[Pos]]:
         """Regions, and known safe-zone cells, of ``w``'s map where
@@ -162,7 +161,7 @@ class GemYieldTracker:
         if w.map_id is None:
             return set(), set()
         self._prune(w.tick)
-        here = [p for mid, p in self.no_effect if mid == w.map_id]
+        here = [p for mid, p, _ in self.no_effect if mid == w.map_id]  # one per cut
         safe = safe_tiles(w, w.map_id)
         per_region: dict[tuple[int, int], int] = {}
         for p in here:
@@ -182,11 +181,8 @@ class GemYieldTracker:
 
     def _prune(self, tick: int) -> None:
         """Forget no-effect cuts older than ``NO_EFFECT_TTL`` (oldest first)."""
-        while self.no_effect:
-            key = next(iter(self.no_effect))
-            if tick - self.no_effect[key] < NO_EFFECT_TTL:
-                break
-            del self.no_effect[key]
+        while self.no_effect and tick - self.no_effect[0][2] >= NO_EFFECT_TTL:
+            del self.no_effect[0]
 
     def no_effect_near(self, map_id: int | None, pos: Pos, tick: int) -> bool:
         """The latest cut had no effect, in ``pos``'s region, and no cut took

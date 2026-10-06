@@ -211,7 +211,7 @@ class NoEffectCutTest(unittest.TestCase):
     def test_only_grass_and_bushes_are_held(self):
         w, t = world(), GemYieldTracker()
         t.note_no_effect(w, (1, 1), "rock", 100)  # break memory owns other blocks (A28)
-        self.assertEqual((t.no_effect, t.no_effect_cuts), ({}, 0))
+        self.assertEqual((t.no_effect, t.no_effect_cuts), ([], 0))
 
     def test_gather_moves_on_and_says_cuts_have_no_effect(self):
         w, t, m = field_world(), GemYieldTracker(), Memory()
@@ -238,14 +238,23 @@ class NoEffectCutTest(unittest.TestCase):
         self.assertEqual(m.gather_status, gather_mod.CUTTING)
         w.tick += gem_yield.NO_EFFECT_TTL
         self.assertEqual(t.uncuttable(w), (set(), set()))
-        self.assertEqual(t.no_effect, {}, "forgotten after NO_EFFECT_TTL")
+        self.assertEqual(t.no_effect, [], "forgotten after NO_EFFECT_TTL")
 
     def test_the_store_is_capped_oldest_first(self):
         w, t = world(), GemYieldTracker()
         for i in range(gem_yield.MAX_NO_EFFECT + 5):
             t.note_no_effect(w, (i, 0), "grass", w.tick)
         self.assertEqual(len(t.no_effect), gem_yield.MAX_NO_EFFECT)
-        self.assertNotIn((MAP, (0, 0)), t.no_effect)
+        self.assertNotIn((MAP, (0, 0), w.tick), t.no_effect)
+
+    def test_repeat_cuts_on_one_safe_cell_mark_its_zone(self):
+        """Review on #126: three no-effect cuts count, even on one cell (run 2 cut one cell 168 times)."""
+        w, t = world(), GemYieldTracker()
+        w.view.safe |= {(1, 1), (2, 1)}
+        for i in range(gem_yield.NO_EFFECT_ZONE_CUTS):
+            t.note_no_effect(w, (1, 1), "grass", w.tick + i * gem_yield.REGROW_TICKS)
+        w.tick += (gem_yield.NO_EFFECT_ZONE_CUTS - 1) * gem_yield.REGROW_TICKS
+        self.assertEqual(t.uncuttable(w), (set(), {(1, 1), (2, 1)}))
 
     def test_no_effect_cuts_in_one_field_region_mark_it_uncuttable(self):
         w, t = world(), GemYieldTracker()

@@ -689,15 +689,34 @@ class AcceptanceCountTest(unittest.TestCase):
         r.acceptance.on_planner(enabled=True)
         return r
 
-    def test_every_failed_call_counts_and_fails_the_run(self):
-        s, r = make(FakeLLM(*[RuntimeError("anthropic http 401")] * 3), calls_per_min=1000), self.runner_with_metrics()
+    def test_failures_in_a_row_fail_the_run(self):
+        llm = FakeLLM(*[RuntimeError("openai http 500")] * 3)
+        s, r = make(llm, calls_per_min=1000), self.runner_with_metrics()
         for _ in range(3):
             round_trip(s, r)
             s.clock.now = s.retry_at
         self.assertEqual((r.acceptance.planner_errors, r.acceptance.plans_accepted), (3, 0))
-        self.assertIn("3 planner error(s)", r.acceptance.base_failures())
+        self.assertIn("3 planner errors in a row (3 in all)", r.acceptance.base_failures())
         self.assertIn("planner on but no plan accepted", r.acceptance.base_failures())
         self.assertEqual(r.acceptance.planner_summary_line(), "planner: 0 plan(s) accepted, 3 error(s)")
+
+    def test_a_transient_error_the_backoff_recovers_from_passes(self):
+        llm = FakeLLM(RuntimeError("anthropic http 529: overloaded"), WAIT_ANSWER, RuntimeError("timeout"), WAIT_ANSWER)
+        s, r = make(llm, calls_per_min=1000, replan_s=15), self.runner_with_metrics()
+        for _ in range(4):
+            round_trip(s, r)
+            s.clock.now = max(s.retry_at, s.clock.now + 15)
+        self.assertEqual((r.acceptance.planner_errors, r.acceptance.plans_accepted), (2, 2))
+        self.assertEqual(r.acceptance.base_failures(), [])
+        self.assertEqual(r.acceptance.planner_summary_line(), "planner: 2 plan(s) accepted, 2 error(s)")
+
+    def test_a_refused_key_mid_run_fails_at_once(self):
+        llm = FakeLLM(WAIT_ANSWER, ProviderHTTPError("openai http 401: invalid key", 401))
+        s, r = make(llm, calls_per_min=1000, replan_s=15), self.runner_with_metrics()
+        round_trip(s, r)
+        s.clock.now += 15
+        round_trip(s, r)
+        self.assertEqual(r.acceptance.base_failures(), ["1 planner auth error(s) (401/403)"])
 
     def test_accepted_plans_count_and_pass(self):
         s, r = make(FakeLLM(WAIT_ANSWER, {"notes": "keep going"}), replan_s=15), self.runner_with_metrics()

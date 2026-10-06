@@ -531,6 +531,56 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertEqual(r.plan.current(), target, "the planner cannot drop the target")
         self.assertEqual([g["op"] for g in r.plan.goals], ["travel", "wait"])
 
+    def test_a_reached_pinned_target_never_comes_back_on_reload(self):
+        # Review: a directives reload after the agent stood on the target put
+        # `travel:point` back on top. Pinned goals are pinned once.
+        from agentrealm_agent.plan import Plan as PlanCls
+        from tests.test_strategist import FakeLLM, make
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        directives = Path(tmp.name) / "t.directives.toml"
+        with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
+            cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
+            acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=make(FakeLLM()))
+        self.addCleanup(r.trace.close)
+        r.world = WorldModel(character_id=1, map_id=OVERWORLD, pos=(5, 6), tick=10)
+        r.plan.advance(r.world, r.mem)  # stood on the target: the op pops done
+        self.assertIsNone(r.plan.current())
+        r.unpin_done_goals()
+        self.assertEqual(r.directives.pinned_goals, [])
+        # The user edits the directives file: the stack is rebuilt without the target.
+        directives.write_text('goals = ["buy:torch"]\n')
+        old = r.directives.directives.goals
+        self.assertTrue(r.directives.maybe_reload())
+        r.reload_directives(old)
+        self.assertEqual(r.plan.goals, [{"op": "buy", "code": "torch"}])
+        directives.unlink()
+        old = r.directives.directives.goals
+        self.assertTrue(r.directives.maybe_reload())
+        r.reload_directives(old)
+        self.assertIsNone(r.plan.current(), "deleting the file does not bring the target back")
+        self.assertIsInstance(r.plan, PlanCls)
+
+    def test_a_pinned_target_not_yet_reached_survives_a_reload(self):
+        from tests.test_strategist import FakeLLM, make
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        directives = Path(tmp.name) / "t.directives.toml"
+        with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
+            cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
+            acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=make(FakeLLM()))
+        self.addCleanup(r.trace.close)
+        r.unpin_done_goals()
+        directives.write_text('goals = ["buy:torch"]\n')
+        old = r.directives.directives.goals
+        r.directives.maybe_reload()
+        r.reload_directives(old)
+        self.assertEqual([g["op"] for g in r.plan.goals], ["travel", "buy"])
+
     def test_main_with_the_planner_pins_the_target(self):
         seen = []
         env = {"AGENTREALM_PLANNER_PROVIDER": "openai", "AGENTREALM_PLANNER_MODEL": "m", "OPENAI_API_KEY": "k"}

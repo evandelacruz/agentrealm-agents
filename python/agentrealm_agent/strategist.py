@@ -513,6 +513,7 @@ class Answer:
     raw: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
     error: str = ""  # set when the call failed
+    status: int | None = None  # the provider's HTTP status on a failed call, when it gave one
 
 
 @dataclass
@@ -617,6 +618,7 @@ class Strategist:
             answer.raw, answer.usage = self.client.complete(messages)
         except Exception as e:  # network, HTTP status, refusal
             answer.error = str(e) or type(e).__name__
+            answer.status = error_status(e)
         return answer
 
     # --- tick thread: everything else ---
@@ -748,7 +750,7 @@ class Strategist:
                 {"strategist": {"event": "error", "error": answer.error, "backoff_s": delay, **record}},
             )
             if runner.acceptance is not None:
-                runner.acceptance.on_strategist_error(answer.error)
+                runner.acceptance.on_strategist_error(answer.error, auth=answer.status in AUTH_STATUSES)
             return
         self.failures_in_a_row, self.retry_at = 0, 0.0
         try:

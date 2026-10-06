@@ -70,10 +70,7 @@ class HealState(State):
 
 def _wants_heal(w: WorldModel, ctx: PlayContext) -> bool:
     """Hurt and out of combat."""
-    if not hurt(w):
-        ctx.memory.heal_supplies_asked = False  # healed: a later hurt asks again
-        return False
-    return not hostiles_in_range(w, ctx.policy)
+    return hurt(w) and not hostiles_in_range(w, ctx.policy)
 
 
 def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
@@ -110,21 +107,17 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
             _ask_for_supplies(w, m)
             return _out(None, "no safe-zone regen this run")
     out = safe_default(w, ctx)
-    if any(not _in_safe_zone(w, (i["x"], i["y"])) for i in out.intents or () if i.get("verb") == "SetPosition"):
+    if any(not standing_in_safe_zone(w, (i["x"], i["y"])) for i in out.intents or () if i.get("verb") == "SetPosition"):
         # Leaving would cut the regen sample short and walk straight back (live flip-flop).
         return _out([wait()], "heal: rest in the safe zone")
     out.state, out.reason = HealState.name, f"heal in safe ground: {out.reason}"
     return out
 
 
-def _in_safe_zone(w: WorldModel, p: Pos) -> bool:
-    fact = w.zones.get(w.map_id, {}).get(p) if w.map_id is not None else None
-    return fact is not None and fact.safe is True
-
-
 def _ask_for_supplies(w: WorldModel, m: Memory) -> None:
     """Hurt, nothing to eat or drink, and no regen: ask the planner for food
-    and potions (a ``fetch_item`` or ``buy``), once until health is full again."""
+    and potions (a ``fetch_item`` or ``buy``), once until health is full again
+    (``note_heal_window`` re-arms it)."""
     if m.heal_supplies_asked:
         return
     m.heal_supplies_asked = True

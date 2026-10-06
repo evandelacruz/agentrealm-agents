@@ -332,6 +332,29 @@ class HealStateTest(unittest.TestCase):
         dispatch(w, ctx(m))
         self.assertEqual(len([s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]), 2)
 
+    def test_heal_supplies_rearmed_by_a_full_heal_another_state_saw(self):
+        # Review: a full heal seen while Fight or Flee held the round re-arms the ask.
+        from agentrealm_agent.healing import note_heal_window
+
+        m = Memory(heal_supplies_asked=True)
+        w = grid()
+        w.health = 10
+        note_heal_window(m, w)
+        self.assertFalse(m.heal_supplies_asked)
+        m.heal_supplies_asked = True
+        w.health = 4
+        note_heal_window(m, w)
+        self.assertTrue(m.heal_supplies_asked)
+
+    def test_dispatch_rearms_the_ask_even_when_a_reflex_above_heal_runs(self):
+        m = Memory(heal_supplies_asked=True)
+        w = grid()
+        w.health = 10
+        w.entities = [Entity("npc", 3, (2, 2), "slime")]  # Retreat or Flee holds the round
+        out = dispatch(w, ctx(m))
+        self.assertNotEqual(out.state, "Heal")
+        self.assertFalse(m.heal_supplies_asked)
+
     def test_regen_absent_does_not_pull_to_safe_ground(self):
         # Once this run has measured no regen, Heal sends nothing anywhere:
         # the plan's executor (or the safe default) moves instead.

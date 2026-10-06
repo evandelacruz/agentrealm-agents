@@ -1,5 +1,5 @@
-# The AI planner's provider SDKs (A35). Only the planner imports them, and only
+# The AI planner's provider SDK (A35). Only the planner imports it, and only
 # when it runs: `make test` and `--no-planner` stay standard library only.
+# The OpenAI provider needs nothing (stdlib urllib).
 # Install with `make setup` (pip install -r python/requirements.txt).
-anthropic
-openai
+anthropic>=0.39  # models.retrieve (the startup check) and status_code on API errors

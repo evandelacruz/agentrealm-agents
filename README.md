@@ -1,6 +1,6 @@
 # Agent Realm reference agents
 
-Example agents that play [Agent Realm](https://agentrealm.gg) through its public HTTP API. Clone this repo, point it at your account, and a character starts moving in the world. They are ordinary clients: they import nothing from the server and never touch its databases. The agent lives in [`python/`](python/): Python 3.11+, standard library only, nothing to install or host.
+Example agents that play [Agent Realm](https://agentrealm.gg) through its public HTTP API. Clone this repo, point it at your account, and a character starts moving in the world. They are ordinary clients: they import nothing from the server and never touch its databases. The agent lives in [`python/`](python/): Python 3.11+, standard library only, nothing to host; the one install is the AI planner's `anthropic` SDK (`make setup`), which `make test` and `--no-planner` do not need.
 
 More depth: [`PLAN.md`](PLAN.md) (design and backlog), [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) (character files, every state, directives, metrics), [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md) (game facts), [`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md) (playable-agent milestones), [`AGENTS.md`](AGENTS.md) (rules for agents that build this repo). The site’s [guides](https://agentrealm.gg/guides) and [docs](https://agentrealm.gg/docs) describe the API itself.
 
@@ -34,7 +34,7 @@ The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides 
 `run` plays with the AI planner (A35), which owns the goal stack. Give it a key before you run:
 
 ```bash
-make setup                            # pip install -r python/requirements.txt (anthropic, openai); the rest is standard library
+make setup                            # pip install -r python/requirements.txt (anthropic); the rest is standard library
 export AGENTREALM_PLANNER_ANTHROPIC_KEY=...   # or ANTHROPIC_API_KEY; default provider, model claude-sonnet-5-5
 python3 -m agentrealm_agent run characters/wren.toml --character-id ID
 
@@ -93,7 +93,7 @@ Shared acceptance modules: [`acceptance.py`](python/agentrealm_agent/acceptance.
 
 Live M7 smoke: `make smoke-m7-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m7_olympuff.py`](scripts/smoke_m7_olympuff.py), using profile `python/characters/olympuff_m7.toml` and a character you choose at run time. Start with that character on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out): the script sends the agent to one target 150 blocks east of where it stands (`--target X,Y` overrides), then the planner plays.
 
-With the planner on, the target is a directives goal (`travel:point:<map>:<x>:<y>`, set in memory by `acceptance_smoke.pin_goto`, never written to your directives file): it sits on top of the stack, the planner cannot drop it and keeps planning below it, and once the agent stands there the planner owns the stack. With `--no-planner` it is the built-in planner's `goto`, in front of the profile's goals. Either way it is a `travel` op, so only **Travel** moves the character until it arrives; reflexes such as Heal and Flee still act. Stuck detection escalates the walk and gives it up like any other.
+With the planner on, the target is a directives goal (`travel:point:<map>:<x>:<y>`, set in memory by `acceptance_smoke.pin_goto`, never written to your directives file): it sits on top of the stack, the planner cannot drop it and keeps planning below it, and once the agent stands there it is unpinned for good and the planner owns the stack. With `--no-planner` it is the built-in planner's `goto`, in front of the profile's goals. Either way it is a `travel` op, so only **Travel** moves the character until it arrives; reflexes such as Heal and Flee still act. Stuck detection escalates the walk and gives it up like any other.
 
 Every walk commits to the path it chose and keeps it until it arrives, a step is rejected, its target changes, or newly seen terrain blocks it or makes another path more than 20% cheaper; it never turns round for a route that only looks a step cheaper, so two equal routes never alternate (`navigation/walk.py`, A15). The oscillation guard is a safety net that should no longer fire (A61). If the character paces between two cells (6 cell changes over at most 2 cells), the oscillation guard in dispatch gives up the target it was walking to, backs it off like any stuck give-up (reason `pacing`), and writes an `oscillation` event to the trace; Retreat, Fight and Flee pacing with steps of their own back nothing off, while a Heal or Loot walk that paces has its food, pickup or safe tile given up; dispatch then picks something else (`navigation/oscillation.py`). Heal and Loot walks are also given up on no route or no progress in 20 moves or 30 s, so Heal cannot pace beside food it cannot reach. The smoke script aborts with exit 1 and an `ABORT: sustained oscillation` message when the guard gives up a target more than 3 times in 6000 ticks, so a live run never spends its hour pacing. Guard events that gave nothing up (survival states doing the moving) are reported, never an abort.
 
@@ -105,7 +105,7 @@ Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_ag
 - no loop: 24 Step-sending decisions in a row at one cell with one reason (waiting, such as Heal resting, is not a loop);
 - no sustained oscillation: more than 3 `oscillation` events that gave up a target within 6000 ticks stops the run at once (events where survival states did the moving and nothing was given up do not count; a Heal or Loot walk given up by the guard counts);
 - no API error;
-- with the planner on, no planner error (a failed call or a reply that is not a plan) and at least one plan accepted; the summary prints both counts (every smoke script does);
+- with the planner on, no 3 planner errors in a row (a failed call or a reply that is not a plan; a lone error the backoff recovers from is reported, not fatal), no refused key (401/403), and at least one plan accepted; the summary prints both totals (every smoke script does);
 - on a run of at least 95% of an hour, safe-zone regen measured (yes or no), and the navigation target reached or given up on.
 
 Give-up rule: navigation passes on a give-up only when stuck detection gave up on that target itself, with a reason (for example, a route that needs a block broken). Give-ups on other goals, such as frontier cells while exploring, are counted in the summary but never pass. Heal actions are reported, not gated.

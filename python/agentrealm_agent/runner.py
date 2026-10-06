@@ -20,7 +20,7 @@ from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .pathing import goto_satisfied
-from .plan import Plan
+from .plan import Plan, parse_directives_goal
 from .item_table import (
     AppliedUse,
     absorb_attack_range,
@@ -69,7 +69,7 @@ from .scroll_investigation import (
 )
 from .zone_discovery import apply_town, apply_zone, zone_failed
 from .memory import queue_signal
-from .strategist import Strategist
+from .strategist import Strategist, same_ops
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
@@ -159,6 +159,16 @@ class Runner:
         plan.tick_hz = self.tick_hz
         return plan
 
+    def unpin_done_goals(self) -> None:
+        """Pin once: a pinned directives goal whose op popped done (its
+        ``goal_done`` signal, still queued until the strategist drains it this
+        window) is unpinned, so a later reload never puts it back (A16)."""
+        done = [s["op"] for s in self.mem.strategist_signals if s.get("trigger") == "goal_done" and s.get("reason") == "goal_done"]
+        for goal in list(self.directives.pinned_goals):
+            op = parse_directives_goal(goal)
+            if op is not None and any(same_ops([op], [d]) for d in done):
+                self.directives.unpin(goal)
+
     def reload_directives(self, old_goals: list[str]) -> None:
         """Apply reloaded directives to the plan (A34).
 
@@ -240,6 +250,7 @@ class Runner:
                 # calm gap and entity_refresh would never come due. Responses
                 # carry the server's tick and correct it.
                 self.world.tick += 1
+                self.unpin_done_goals()
                 old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():
                     self.reload_directives(old_goals)

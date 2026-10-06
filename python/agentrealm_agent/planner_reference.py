@@ -35,6 +35,7 @@ CORE_SECTIONS = (
     "/docs/manual / 1. contract",
     "/docs/manual / 3. how the world works",
     "/docs/manual / 6. intent reference",
+    "/docs/manual / 7. the round trip",
     "/docs/manual / 8. events",
     "/docs/manual / 9. perception",
     "/docs/manual / 11. game rules",

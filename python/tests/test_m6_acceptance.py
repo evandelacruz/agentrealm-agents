@@ -251,10 +251,11 @@ class WalkPacingTest(RunnerCase):
     """The next walk owes Waits counted to the server's tick, not local windows."""
 
     def walked(self, after_second_poll) -> list[str]:
-        applied = [{"tick": 101 + i, "queue_id": "q1", "index": i, "outcome": "applied"} for i in range(5)]
+        # The Waits ran too, but only the Steps report (B133).
+        applied = [{"tick": 101 + i, "queue_id": "q1", "index": i, "outcome": "applied"} for i in (0, 4)]
         server = ScriptedServer([
             {"tick": 100},
-            {"tick": 105, "intent_results": applied},
+            {"tick": 105, "intent_results": applied, "finished_queue": {"queue_id": "q1", "length": 5}},
             {"tick": 110},
         ])
         r = self.make_runner(server, threading.Event())

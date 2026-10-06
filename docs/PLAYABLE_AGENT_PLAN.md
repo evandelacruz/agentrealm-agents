@@ -84,6 +84,8 @@ Shipped so far: the runner sends movement as paced `Step`/`Wait` queues (`execut
 
 ### State machine
 
+**Superseded in part by A61 (2026-10-06): AI plans, state machine executes** (PLAN.md *Architecture*). The table below keeps the states and their order, but "Enters when" now holds only for the reflexes (Sync, Downed, Escape, Retreat, Heal, Fight, Flee, Recover, and a supply in reach). Every other state is an executor that runs only for the plan's top op; with no op, Explore runs the safe default. Curiosity no longer starts anything on its own: `read`, `say` and `break_block` come from the planner.
+
 States are checked in priority order once per round trip: after each `POST tick` response is folded into the world model, before the next request. The first whose guard holds runs `act`, which returns the queue for the ticks until the next poll. Between round trips the server runs that queue one intent per tick, and nothing runs client-side; a state that must react within a tick (a hostile closing, health dropping) does so by switching the executor to its every-tick cadence. Each state has entry and exit conditions with hysteresis so it does not flip back and forth.
 
 | Priority | State | Enters when | Does |
@@ -177,6 +179,8 @@ An opening we cut or burned is open only until it grows back (about 60 s for a b
 Each asserts the goal is reached, or abandoned with the right reason, within a move budget.
 
 ### Curiosity
+
+**Since A61 the agent no longer acts on this section by itself**: the interest list, the curiosity budget and the odd-block detector are removed. What follows describes what a planner should look for and turn into `read`, `say` and `break_block` ops.
 
 Progress in this game is hidden behind things a player has to poke at. Helpers drop hints only when spoken to. Signs and statues carry text. Breakable "odd blocks" hide gems, doors and secrets. Nothing announces itself (M §16). So the agent needs a drive to investigate, not just a reflex for whatever it passes.
 

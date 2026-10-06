@@ -9,7 +9,7 @@ from unittest import mock
 
 from agentrealm_agent import config
 from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import default_directives
+from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.equip import (
     best_equip_upgrade,
     compare,
@@ -20,19 +20,26 @@ from agentrealm_agent.equip import (
 from agentrealm_agent.item_table import FragmentMeta, InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.threat import ThreatTable
 from agentrealm_agent.world import WorldModel
 
 
-def ctx(kb: KnowledgeBase | None = None, m: Memory | None = None) -> PlayContext:
+def equip_plan(**op) -> Plan:
+    """A plan whose top op is ``equip`` (Equip runs only for it)."""
+    return Plan([{"op": "equip", **op}], dict(PARAM_DEFAULTS))
+
+
+def ctx(kb: KnowledgeBase | None = None, m: Memory | None = None, plan: Plan | None = None) -> PlayContext:
     return PlayContext(
         m or Memory(),
         Policy(kind="scripted", goals=["hold"]),
         random.Random(0),
         directives=default_directives(),
         knowledge=kb or KnowledgeBase.empty("sandbox"),
+        plan=plan if plan is not None else equip_plan(),
     )
 
 
@@ -201,6 +208,7 @@ class RefusalTest(unittest.TestCase):
             self.assertNotEqual(dispatch(self.w, c).state, "Equip")
         self.w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(9, "apple")]
         sync_refusals(c.memory, self.w)
+        c.plan = equip_plan()  # the refusal left nothing to equip, so that op finished
         out = dispatch(self.w, c)
         self.assertEqual(out.state, "Equip")
         self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 5}])
@@ -392,6 +400,43 @@ class DispatchTest(unittest.TestCase):
         before = (dict(w.worn_slots), set(c.memory.equip_refused), c.memory.equip_refused_sig)
         self.assertEqual(dispatch(w, c).state, "Equip")
         self.assertEqual((dict(w.worn_slots), set(c.memory.equip_refused), c.memory.equip_refused_sig), before)
+
+    def test_runs_only_for_an_equip_op(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["bronze_sword"] = {"gem_price": 15}
+        empty = Plan([], dict(PARAM_DEFAULTS))
+        self.assertEqual(dispatch(w, ctx(kb, plan=empty)).state, "Explore")
+        travel = Plan([{"op": "travel", "to": "point", "x": 2, "y": 0}], dict(PARAM_DEFAULTS))
+        self.assertNotEqual(dispatch(w, ctx(kb, plan=travel)).state, "Equip")
+
+    def test_op_finishes_when_nothing_is_left_to_equip(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["bronze_sword"] = {"gem_price": 15}
+        c = ctx(kb)
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Arm", "supply_id": 5}])
+        w.armed_code, w.held_supplies = "bronze_sword", []
+        out = dispatch(w, c)
+        self.assertNotEqual(out.state, "Equip")
+        self.assertEqual(out.yielded, ["Equip: nothing to equip"])
+        self.assertIsNone(c.plan.current())
+
+    def test_op_with_a_code_finishes_when_that_code_is_not_the_upgrade(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["bronze_sword"] = {"gem_price": 15}
+        c = ctx(kb, plan=equip_plan(code="fake_helm"))
+        self.assertNotEqual(dispatch(w, c).state, "Equip")
+        self.assertIsNone(c.plan.current())
+        c = ctx(kb, plan=equip_plan(code="bronze_sword"))
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Arm", "supply_id": 5}])
 
     def test_not_scripted_or_dead(self):
         w = world()

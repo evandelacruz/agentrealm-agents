@@ -5,25 +5,41 @@ from __future__ import annotations
 import json
 import random
 import unittest
+from unittest import mock
 
 from agentrealm_agent.brain import Memory, decide
+from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
 from agentrealm_agent.navigation import CostGridParams
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation.planner import FOG
 from agentrealm_agent.pathing import escalation_step, guided_step, path_for_plan_op, replan
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.travel.ops import TravelOp
 from agentrealm_agent.world import Entity, WorldModel
 from tests.fixtures.navigation import grids, sim
 from tests.test_cost_grid import grid
 from tests.test_recover import apply_zone, ctx, died_at, world
 
 
+# A policy ``goto`` is a plan ``travel`` point op, walked by Travel under this label.
+WALK = "travel:point"
+
+
 def open_world(width: int = 12, at=(0, 0)) -> WorldModel:
     """Seen ground ``width`` wide and 3 deep, fog beyond."""
     return grid(["." * width] * 3, at=at)
+
+
+def builtin_plan(policy) -> Plan:
+    return Plan.from_policy(policy, dict(PARAM_DEFAULTS))
+
+
+def run_plan(sc, policy, plan: Plan, **kw) -> sim.Run:
+    """``sim.run`` with ``plan`` in place of the built-in plan for ``policy``."""
+    with mock.patch.object(sim.Plan, "from_policy", lambda *a, **k: plan):
+        return sim.run(sc, policy, **kw)
 
 
 class StuckWindowTest(unittest.TestCase):
@@ -107,10 +123,13 @@ class StuckWindowTest(unittest.TestCase):
     def test_standing_on_the_goto_target_is_not_stuck(self):
         w, m = open_world(at=(3, 1)), Memory()
         policy = sim.scripted(goals=["goto"], goto=(3, 1))
+        plan = builtin_plan(policy)
         for _ in range(3):
-            d = decide(w, m, policy, random.Random(1))
-            self.assertIsNone(d.intent)
+            d = decide(w, m, policy, random.Random(1), plan=plan)
+            self.assertIsNone(plan.current(), "the travel op is done on arrival")
+            self.assertFalse(d.reason.startswith(WALK), d.reason)
             w.tick += nav_stuck.PROGRESS_TICK_LIMIT
+        self.assertNotIn(WALK, {a.goal for a in m.nav_stuck.attempts.values()})
         self.assertEqual(m.nav_stuck.stuck_signals, [])
 
 
@@ -174,7 +193,7 @@ class BackoffTest(unittest.TestCase):
         self.assertGreaterEqual(len(sigs), 2, "the stuck trigger re-arms once the backoff runs out")
         first, second = sigs[0]["tick"], sigs[1]["tick"]
         self.assertGreaterEqual(second - first, nav_stuck.BACKOFF_BASE_TICKS)
-        key = nav_stuck.goal_key("goto", 1, sc.goal)
+        key = nav_stuck.goal_key(WALK, 1, sc.goal)
         n = len(sigs)
         self.assertEqual(r.memory.nav_stuck.backoff_power[key], n)
         self.assertEqual(
@@ -195,12 +214,12 @@ class FrontierDropTest(unittest.TestCase):
         w = grid(["?......?"] * 3, at=(2, 1))
         policy = sim.scripted(goals=["explore"])
         m = Memory()
-        replan(w, m, policy, random.Random(1), set(), set())
+        replan(w, m, policy, set(), set())  # the safe default's walk
         first = m.path[-1]
         att = nav_stuck.active(m, w)
         self.assertEqual((att.goal, att.target), ("explore", first))
         att.level, att.moves = nav_stuck.REVEALED, nav_stuck.PROGRESS_MOVE_LIMIT
-        out = dispatch(w, sim_ctx(m, policy))
+        out = dispatch(w, sim_ctx(m, policy))  # no plan: the safe default
         self.assertIn(nav_stuck.goal_key("explore", 1, first), m.nav_stuck.backoff_until)
         self.assertEqual(m.nav_stuck.stuck_signals[0]["goal"], "explore")
         self.assertNotEqual(m.path[-1], first, "the dropped frontier is not picked again")
@@ -216,7 +235,8 @@ def sim_ctx(m: Memory, policy) -> PlayContext:
 class NavigationFixtureTest(unittest.TestCase):
     """PLAYABLE_AGENT_PLAN Navigation **Tests**: each fixture is reached, or
     abandoned with the right reason, within a move budget, through the real
-    dispatcher (Explore's ``goto`` and Travel's ``travel:point``).
+    dispatcher (a policy ``goto`` is the built-in plan's ``travel`` point op,
+    walked by Travel as ``travel:point``).
 
     The hedge "with the tool" case needs Break (M9, A28); until then a hedge is
     a wall and only "without the tool" applies.
@@ -242,24 +262,15 @@ class NavigationFixtureTest(unittest.TestCase):
             self.assertEqual(r.signal["reason"], reason, sc.name)
             self.assertEqual(r.signal["target"], list(sc.goal), sc.name)
 
-    def test_explore_goto(self):
+    def test_goto_travel_point(self):
         for sc, outcome, reason, budget in self.CASES:
             with self.subTest(sc.name):
                 r = sim.run(sc, sim.scripted(goals=["goto"], goto=sc.goal), max_decisions=800)
                 self.check(sc, r, outcome, reason, budget)
                 if outcome == "abandoned":
-                    key = nav_stuck.goal_key("goto", 1, sc.goal)
+                    self.assertEqual(r.signal["goal"], WALK)
+                    key = nav_stuck.goal_key(WALK, 1, sc.goal)
                     self.assertTrue(nav_stuck.is_backed_off(r.memory.nav_stuck, key, r.world.tick))
-
-    def test_travel_point(self):
-        for sc, outcome, reason, budget in self.CASES:
-            with self.subTest(sc.name):
-                m = Memory()
-                m.travel_ops = [TravelOp("point", *sc.goal)]
-                r = sim.run(sc, sim.scripted(goals=["hold"]), memory=m, max_decisions=800)
-                self.check(sc, r, outcome, reason, budget)
-                if outcome == "abandoned":
-                    self.assertEqual(r.signal["goal"], "travel:point")
 
     def test_hedge_line_reached_with_a_sword(self):
         sc = grids.HEDGE_LINE
@@ -286,17 +297,17 @@ class NavigationFixtureTest(unittest.TestCase):
 class TravelBackoffTest(unittest.TestCase):
     def test_travel_yields_while_backed_off_and_retries_after(self):
         sc = grids.HEDGE_LINE
-        m = Memory()
-        m.travel_ops = [TravelOp("point", *sc.goal)]
-        policy = sim.scripted(goals=["hold"])
-        r = sim.run(sc, policy, memory=m)
+        policy = sim.scripted(goals=["goto"], goto=sc.goal)
+        r = sim.run(sc, policy)
         self.assertEqual(r.outcome, "abandoned")
-        w = r.world
-        d = decide(w, m, policy, random.Random(1))
-        self.assertIsNone(d.intent, "backed off: Travel yields to Explore, which holds")
-        self.assertIn("blocked", d.reason)
-        w.tick = m.nav_stuck.backoff_until[nav_stuck.goal_key("travel:point", 1, sc.goal)]
-        d = decide(w, m, policy, random.Random(1))
+        w, m = r.world, r.memory
+        c = PlayContext(m, policy, random.Random(1), never_attack=[], plan=builtin_plan(policy))
+        out = dispatch(w, c)
+        self.assertEqual(out.yielded, [f"Travel: {WALK} blocked"], "backed off: Travel yields")
+        self.assertEqual(out.state, "Explore", "the safe default moves instead")
+        self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
+        w.tick = m.nav_stuck.backoff_until[nav_stuck.goal_key(WALK, 1, sc.goal)]
+        dispatch(w, c)
         self.assertEqual(len(m.nav_stuck.stuck_signals), 2, "retried after the backoff, and stuck again")
 
 
@@ -306,7 +317,9 @@ class RecoverStuckTest(unittest.TestCase):
         died_at(w, 1, 1)
         apply_zone(w, 7, 1, 1, {"safe": True, "brightness": 1})
         c = ctx(sim.scripted(goals=["hold"], pickup=True))
-        self.assertIsNone(dispatch(w, c).intents, "Recover yields; hold sends nothing")
+        out = dispatch(w, c)
+        self.assertEqual(out.yielded, ["Recover: chest not reachable"], "Recover yields")
+        self.assertEqual(out.state, "Explore", "the safe default moves instead")
         sig = c.memory.nav_stuck.stuck_signals[0]
         self.assertEqual((sig["goal"], sig["reason"]), ("chest", "no_path"))
         dispatch(w, c)
@@ -317,7 +330,8 @@ class LevelStuckTest(unittest.TestCase):
     def test_walled_door_escalates_then_backs_off(self):
         sc = grids.LEVEL_WALLED_DOOR
         policy = sim.scripted(goals=["hold"])
-        r = sim.run(sc, policy)
+        plan = Plan([{"op": "enter_level", "x": sc.goal[0], "y": sc.goal[1]}], dict(PARAM_DEFAULTS))
+        r = run_plan(sc, policy, plan)
         self.assertEqual(r.outcome, "abandoned")
         self.assertTrue(all(row["reason"].startswith("level →") for row in r.trace[:-1]), r.trace)
         sig = r.signal
@@ -327,7 +341,8 @@ class LevelStuckTest(unittest.TestCase):
         w, m = r.world, r.memory
         key = nav_stuck.goal_key("level:door", 1, sc.goal)
         self.assertEqual(key, nav_stuck.goal_key("doors", 1, sc.goal), "the doors goal skips it too")
-        d = decide(w, m, policy, random.Random(1))
+        self.assertIsNone(plan.current(), "no level step left: the op is done")
+        d = decide(w, m, policy, random.Random(1), plan=Plan([dict(plan.goals[0])], dict(PARAM_DEFAULTS)))
         self.assertNotIn(f"level → {sc.goal}", d.reason, "backed off: Level does not walk to it")
         self.assertTrue(nav_stuck.is_backed_off(m.nav_stuck, key, w.tick))
         self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
@@ -356,9 +371,9 @@ class CrossMapStuckTest(unittest.TestCase):
         r = sim.run(sc, policy, cross=cross)
         self.assertEqual(r.outcome, "abandoned")
         self.assertEqual(r.signal["reason"], "no_path")
-        key = nav_stuck.goal_key("goto", 2, (0, 0))
+        key = nav_stuck.goal_key(WALK, 2, (0, 0))
         self.assertTrue(nav_stuck.is_backed_off(r.memory.nav_stuck, key, r.world.tick))
-        self.assertEqual(r.signal["goal"], "goto")
+        self.assertEqual(r.signal["goal"], WALK)
 
     def test_goto_map_reaches_goal_through_door(self):
         sc = grids.CROSS_MAP_OPEN
@@ -369,7 +384,7 @@ class CrossMapStuckTest(unittest.TestCase):
         self.assertEqual(r.world.map_id, 2)
         walked = [row for row in r.trace if row["map_id"] == 2 and row.get("applied")]
         self.assertEqual(len(walked), 5, "walks from the landing to the goal on map 2")
-        self.assertTrue(all(row["reason"].startswith("goto → ") for row in walked))
+        self.assertTrue(all(row["reason"].startswith(f"{WALK} → ") for row in walked))
         self.assertEqual(r.memory.nav_stuck.stuck_signals, [])
 
     def test_goto_leg_tracks_the_door_and_backs_off_the_destination(self):
@@ -378,26 +393,24 @@ class CrossMapStuckTest(unittest.TestCase):
         w = sim.world_for(sc, cross=cross)
         m = Memory()
         policy = sim.scripted(goals=["goto"], goto=(0, 0), goto_map=2)
-        self.assertIsNone(replan(w, m, policy, random.Random(0), set(), set(), cross.kb))
+        d = decide(w, m, policy, random.Random(0), knowledge=cross.kb, plan=builtin_plan(policy))
+        self.assertEqual(d.reason, f"{WALK} → (4, 0)")
         att = nav_stuck.active(m, w)
-        self.assertEqual((att.goal, att.target), ("goto", (4, 0)), "the door on this map")
-        self.assertEqual(att.backoff_key, nav_stuck.goal_key("goto", 2, (0, 0)))
+        self.assertEqual((att.goal, att.target), (WALK, (4, 0)), "the door on this map")
+        self.assertEqual(att.backoff_key, nav_stuck.goal_key(WALK, 2, (0, 0)))
 
-    def test_plan_travel_point_across_maps_tracks_the_door(self):
+    def test_plan_travel_town_across_maps_tracks_the_door(self):
         sc = grids.CROSS_MAP_OPEN
         cross = _cross_map_run(sc, (4, 0), landing=(5, 0))
         w = sim.world_for(sc, cross=cross)
-        pol = sim.scripted()
-        point = {"op": "travel", "to": "point", "x": 0, "y": 0, "map_id": 2}
-        path, label, leg = path_for_plan_op(point, w, Memory(), pol, set(), set(), cross.kb)
-        self.assertEqual(path[-1], (4, 0))
-        self.assertEqual(leg, nav_stuck.Leg((4, 0), nav_stuck.goal_key(label, 2, (0, 0))))
-        town = {"op": "travel", "to": "town", "x": 0, "y": 0}
         w.respawn_anchors.append((2, (0, 0)))
-        self.assertIsNone(path_for_plan_op(town, w, Memory(), pol, set(), set(), cross.kb), "town is this map's only")
-        w.respawn_anchors.append((1, (6, 2)))
-        _, _, leg = path_for_plan_op(town, w, Memory(), pol, set(), set(), cross.kb)
-        self.assertEqual(leg, nav_stuck.Leg((6, 2)), "no ultimate key on this map")
+        m = Memory()
+        plan = Plan([{"op": "travel", "to": "town", "x": 0, "y": 0}], dict(PARAM_DEFAULTS))
+        out = dispatch(w, PlayContext(m, sim.scripted(), random.Random(0), knowledge=cross.kb, plan=plan))
+        self.assertEqual(out.reason, "travel:town → (4, 0)")
+        att = nav_stuck.active(m, w)
+        self.assertEqual(att.target, (4, 0), "the door on this map")
+        self.assertEqual(att.backoff_key, nav_stuck.goal_key("travel:town", 2, (0, 0)))
 
     def test_leg_toward_keeps_a_lost_route_only_for_its_own_destination(self):
         sc = grids.CROSS_MAP_OPEN
@@ -408,33 +421,24 @@ class CrossMapStuckTest(unittest.TestCase):
         nav_stuck.track(m, w, "goto", nav_stuck.Leg((4, 0), ultimate))
         self.assertEqual(nav_stuck.leg_toward(m, w, "goto", 2, (0, 0), None), nav_stuck.Leg((4, 0), ultimate))
         self.assertIsNone(nav_stuck.leg_toward(m, w, "goto", 2, (1, 0), None), "another destination")
-        self.assertIsNone(nav_stuck.leg_toward(m, w, "travel:point", 2, (0, 0), None), "another goal")
+        self.assertIsNone(nav_stuck.leg_toward(m, w, "travel:town", 2, (0, 0), None), "another goal")
         self.assertEqual(nav_stuck.leg_toward(m, w, "goto", 1, (3, 2), None), nav_stuck.Leg((3, 2)))
-
-    def test_travel_point_cross_map_abandons_when_door_unreachable(self):
-        sc = grids.CROSS_MAP_HEDGE
-        cross = _cross_map_run(sc, (6, 3))
-        m = Memory()
-        m.travel_ops = [TravelOp("point", 0, 0, map_id=2)]
-        r = sim.run(sc, sim.scripted(goals=["hold"]), memory=m, cross=cross)
-        self.assertEqual(r.outcome, "abandoned")
-        self.assertEqual(r.signal["goal"], "travel:point")
-        key = nav_stuck.goal_key("travel:point", 2, (0, 0))
-        self.assertTrue(nav_stuck.is_backed_off(r.memory.nav_stuck, key, r.world.tick))
-
 
     def test_travel_with_no_known_route_yields_without_backoff(self):
         sc = grids.CROSS_MAP_OPEN
         cross = _cross_map_run(sc, (4, 0), landing=(5, 0))
-        m = Memory()
-        m.travel_ops = [TravelOp("point", 2, 1, map_id=3)]
-        r = sim.run(sc, sim.scripted(goals=["hold"]), memory=m, cross=cross, max_decisions=100)
+        policy = sim.scripted(goals=["goto"], goto=(2, 1), goto_map=3)
+        plan = builtin_plan(policy)
+        w = sim.world_for(sc, cross=cross)
+        out = dispatch(w, PlayContext(Memory(), policy, random.Random(0), knowledge=cross.kb, plan=plan))
+        self.assertEqual(out.yielded, [f"Travel: {WALK} blocked"])
+        r = run_plan(sc, policy, plan, cross=cross, max_decisions=100)
         self.assertEqual(r.outcome, "budget")
-        self.assertEqual(r.moves, 0)
+        self.assertFalse(any(row["reason"].startswith(WALK) for row in r.trace), "Travel never stepped")
         self.assertEqual(r.memory.nav_stuck.stuck_signals, [])
         self.assertEqual(r.memory.nav_stuck.backoff_until, {})
-        self.assertEqual(r.memory.nav_stuck.attempts, {})
-        self.assertIn("travel:point blocked", r.trace[-1]["reason"])
+        self.assertNotIn(WALK, {a.goal for a in r.memory.nav_stuck.attempts.values()})
+        self.assertIsNone(plan.current(), "the stalled op is dropped (A34)")
 
 
 class CrossMapTraceReplayTest(unittest.TestCase):
@@ -448,14 +452,14 @@ class CrossMapTraceReplayTest(unittest.TestCase):
 
         w = sim.world_for(sc, cross=cross)
         m = Memory()
-        sim.quiet_investigate(w, m, cross.kb)
         rng = random.Random(7)
         map2 = sim.map2_view()
+        plan = builtin_plan(policy)
         for row in trace:
             w.tick = row["tick"]
             w.map_id = row.get("map_id", 1)
             self.assertEqual(list(w.pos), row["pos"], row)
-            d = decide(w, m, policy, rng, knowledge=cross.kb)
+            d = decide(w, m, policy, rng, knowledge=cross.kb, plan=plan)
             self.assertEqual((d.intent, d.reason), (row["intent"], row["reason"]), row)
             if d.intent is not None and d.intent.get("verb") == "SetPosition":
                 self.assertEqual(
@@ -486,10 +490,11 @@ class TraceReplayTest(unittest.TestCase):
         w = sim.world_for(sc)
         m = Memory()
         rng = random.Random(7)
+        plan = builtin_plan(policy)
         for row in trace:
             w.tick = row["tick"]
             self.assertEqual(list(w.pos), row["pos"], row)
-            d = decide(w, m, policy, rng)
+            d = decide(w, m, policy, rng, plan=plan)
             self.assertEqual((d.intent, d.reason), (row["intent"], row["reason"]), row)
             if d.intent is not None:
                 self.assertEqual(sim.apply(w, m, sc, (d.intent["x"], d.intent["y"]), {}), row["applied"], row)

@@ -1,4 +1,5 @@
-"""A20: Loot state: Take, WithdrawFromChest, Drop junk when full; gems first (hearts first is A47)."""
+"""A20: Pickup reflex (Take, WithdrawFromChest, Drop junk when full; gems first, hearts first is A47)
+and the Loot executor for ``fetch_item`` ops."""
 
 import random
 import tempfile
@@ -8,11 +9,14 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import config, knowledge_base
-
-from agentrealm_agent.brain import Memory, decide
-from agentrealm_agent.brain import Decision
+from agentrealm_agent.brain import Decision, Memory, decide
 from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory
+from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_agent.item_table import (
+    DEFAULT_CARRY_CAPACITY,
+    InventorySupply,
+    carried_from_inventory,
+)
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.loot import (
     LIFE_SCORE,
@@ -25,10 +29,10 @@ from agentrealm_agent.loot import (
     loot_score,
     worst_droppable,
 )
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.states.loot import loot_outcome
 from agentrealm_agent.world import Entity, WorldModel
 
 
@@ -46,9 +50,15 @@ def scripted(**kw) -> Policy:
     return Policy(kind="scripted", **kw)
 
 
-def ctx(policy=None, kb=None) -> PlayContext:
-    # Equip has already tried the junk torch on and got not_wearable (A55), so it leaves Loot the round.
-    return PlayContext(Memory(equip_not_wearable={"torch"}), policy or scripted(), random.Random(0), knowledge=kb)
+def ctx(policy=None, kb=None, plan=None) -> PlayContext:
+    # Equip has already tried the junk torch on and got not_wearable (A55), so it leaves Pickup the round.
+    return PlayContext(
+        Memory(equip_not_wearable={"torch"}), policy or scripted(), random.Random(0), knowledge=kb, plan=plan
+    )
+
+
+def fetch(code: str, **xy) -> Plan:
+    return Plan([{"op": "fetch_item", "code": code, **xy}], dict(PARAM_DEFAULTS))
 
 
 def priced(**prices) -> KnowledgeBase:
@@ -56,6 +66,14 @@ def priced(**prices) -> KnowledgeBase:
     for code, gems in prices.items():
         kb.items[code] = {"gem_price": gems}
     return kb
+
+
+LOOT_VERBS = ("Take", "Drop", "WithdrawFromChest")
+
+
+def no_loot_intent(intents) -> bool:
+    """No state took, dropped or withdrew anything (the safe default may still step)."""
+    return not any(i.get("verb") in LOOT_VERBS for i in intents or [])
 
 
 def full_inventory(w: WorldModel, *, junk: str = "torch") -> None:
@@ -102,19 +120,18 @@ class LootPriorityTest(unittest.TestCase):
         d = decide(w, Memory(), scripted(), random.Random(0), knowledge=priced(bronze_sword=500))
         self.assertEqual(d.intent, {"verb": "Take", "supply_id": 9})
 
-    def test_walks_to_a_far_gem_past_other_loot(self):
+    def test_far_gem_is_not_walked_to_without_a_fetch_op(self):
+        # Pickup is a reflex for what is in reach; walking to loot is a plan `fetch_item` op.
         w = world([".....", ".....", "....."], at=(1, 1))
-        # Sword is nearer (3 west of the gem); the step goes toward the gem.
-        w.entities = [Entity("supply", 2, (3, 0), "bronze_sword"), Entity("supply", 9, (4, 2), "gem")]
+        w.entities = [Entity("supply", 9, (4, 2), "gem")]
         out = dispatch(w, ctx(kb=priced(bronze_sword=500)))
-        self.assertEqual(out.state, "Loot")
-        self.assertIn("loot gem", out.reason)
+        self.assertNotIn(out.state, ("Loot", "Pickup"))
 
     def test_priced_shop_gem_is_ignored(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 5, (1, 2), "gem", gem_price=3)]
         d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
-        self.assertIsNone(d.intent, d.reason)
+        self.assertTrue(no_loot_intent([d.intent] if d.intent else None), d.reason)
 
     def test_full_pack_takes_gem_before_dropping_for_gear(self):
         w = world(["...", "...", "..."], at=(1, 1))
@@ -127,21 +144,14 @@ class LootPriorityTest(unittest.TestCase):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 5, (1, 2), "potion", gem_price=2)]
         d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
-        self.assertIsNone(d.intent, d.reason)
-
-    def test_loot_walks_to_a_supply_in_sight(self):
-        w = world(["....", "...."], at=(0, 0))
-        w.entities = [Entity("supply", 8, (3, 0), "apple")]
-        out = dispatch(w, ctx(scripted(goals=["explore"])))
-        self.assertEqual(out.state, "Loot")
-        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
+        self.assertTrue(no_loot_intent([d.intent] if d.intent else None), d.reason)
 
     def test_pickup_off_leaves_supplies(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 8, (1, 2), "apple")]
         out = dispatch(w, ctx(scripted(pickup=False, goals=["hold"])))
-        self.assertNotEqual(out.state, "Loot")
-        self.assertIsNone(out.intents)
+        self.assertNotEqual(out.state, "Pickup")
+        self.assertNotIn({"verb": "Take", "supply_id": 8}, out.intents or [])
 
 
 class FullPackTest(unittest.TestCase):
@@ -150,7 +160,7 @@ class FullPackTest(unittest.TestCase):
         full_inventory(w)
         w.entities = [Entity("supply", 99, (1, 2), "bronze_sword")]
         out = dispatch(w, ctx(kb=priced(bronze_sword=15)))
-        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.state, "Pickup")
         self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": 1}])
 
     def test_full_pack_skips_junk_and_explore_runs(self):
@@ -161,7 +171,7 @@ class FullPackTest(unittest.TestCase):
         c = ctx(scripted(goals=["explore"]))
         for _ in range(3):
             out = dispatch(w, c)
-            self.assertNotEqual(out.state, "Loot")
+            self.assertNotEqual(out.state, "Pickup")
             self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
 
     def test_full_pack_of_knives_drops_nothing(self):
@@ -170,8 +180,8 @@ class FullPackTest(unittest.TestCase):
         self.assertIsNone(worst_droppable(w, {}))
         w.entities = [Entity("supply", 99, (1, 2), "bronze_sword")]
         out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
-        self.assertNotEqual(out.state, "Loot")
-        self.assertIsNone(out.intents)
+        self.assertNotEqual(out.state, "Pickup")
+        self.assertTrue(no_loot_intent(out.intents), out.intents)
 
     def test_stowed_supplies_count_but_are_not_dropped(self):
         w = world(["..."], at=(1, 0))
@@ -183,26 +193,28 @@ class FullPackTest(unittest.TestCase):
 
 
 class StallTest(unittest.TestCase):
-    def test_unreachable_supply_falls_through_to_explore(self):
+    def test_unreachable_fetch_target_yields(self):
         w = world([".#..", "##..", "...."], at=(0, 0))
         w.entities = [Entity("supply", 8, (3, 0), "apple")]
-        out = dispatch(w, ctx(scripted(goals=["hold"])))
+        out = dispatch(w, ctx(plan=fetch("apple")))
         self.assertNotEqual(out.state, "Loot")
 
-    def test_unreachable_supply_lets_explore_send(self):
+    def test_unreachable_fetch_target_lets_the_safe_default_move(self):
         # Boxed in with room to move; the apple is outside the box.
         w = world(["######", "#..#.#", "######"], at=(1, 1))
         w.entities = [Entity("supply", 8, (4, 1), "apple")]
-        out = dispatch(w, ctx(scripted(goals=["wander"])))
+        plan = fetch("apple")
+        out = dispatch(w, ctx(plan=plan))
         self.assertEqual(out.state, "Explore")
         self.assertIsNotNone(out.intents, out.reason)
+        self.assertIsNotNone(plan.stalled_since_tick)  # the fetch op's stall clock runs
 
     def test_chest_with_unread_contents_is_not_a_target(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("chest", 50, (2, 1))]
         out = dispatch(w, ctx(scripted(goals=["hold"])))
-        self.assertNotEqual(out.state, "Loot")
-        self.assertIsNone(out.intents)
+        self.assertNotEqual(out.state, "Pickup")
+        self.assertTrue(no_loot_intent(out.intents), out.intents)
 
     def test_loot_never_claims_a_round_without_an_intent(self):
         cases = []
@@ -219,7 +231,7 @@ class StallTest(unittest.TestCase):
             c = ctx(scripted(goals=["explore"]))
             for _ in range(3):
                 out = dispatch(w, c)
-                if out.state == "Loot":
+                if out.state == "Pickup":
                     self.assertIsNotNone(out.intents, out.reason)
 
 
@@ -229,7 +241,7 @@ class ChestTest(unittest.TestCase):
         w.entities = [Entity("chest", 50, (2, 1))]
         w.chest_contents[50] = [InventorySupply(70, "torch"), InventorySupply(71, "bronze_sword")]
         out = dispatch(w, ctx(kb=priced(bronze_sword=15)))
-        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.state, "Pickup")
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 50, "supply_ids": [71]}])
 
     def test_full_pack_drops_junk_before_withdraw(self):
@@ -246,23 +258,15 @@ class ChestTest(unittest.TestCase):
         w.entities = [Entity("chest", 50, (2, 1))]
         w.chest_contents[50] = [InventorySupply(71, "torch")]
         out = dispatch(w, ctx(scripted(goals=["hold"])))
-        self.assertNotEqual(out.state, "Loot")
-        self.assertIsNone(out.intents)
-
-    def test_walks_to_a_chest_in_sight(self):
-        w = world(["....", "...."], at=(0, 0))
-        w.entities = [Entity("chest", 50, (3, 0))]
-        w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
-        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
-        self.assertEqual(out.state, "Loot")
-        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
+        self.assertNotEqual(out.state, "Pickup")
+        self.assertTrue(no_loot_intent(out.intents), out.intents)
 
     def test_empty_chest_is_not_a_target(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("chest", 50, (2, 1))]
         w.chest_contents[50] = []
         out = dispatch(w, ctx(scripted(goals=["hold"])))
-        self.assertNotEqual(out.state, "Loot")
+        self.assertNotEqual(out.state, "Pickup")
 
     def test_death_chest_is_left_to_recover(self):
         # No safe tile known (A7), so Recover waits and Loot must not go around it.
@@ -271,8 +275,8 @@ class ChestTest(unittest.TestCase):
         w.entities = [Entity("chest", 50, (2, 1))]
         w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
         out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
-        self.assertNotIn(out.state, ("Loot", "Recover"))
-        self.assertIsNone(out.intents)
+        self.assertNotIn(out.state, ("Pickup", "Recover"))
+        self.assertTrue(no_loot_intent(out.intents), out.intents)
 
     def test_ground_chest_beside_the_death_chest_is_still_looted(self):
         w = world(["...", "...", "..."], at=(1, 1))
@@ -281,7 +285,7 @@ class ChestTest(unittest.TestCase):
         w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
         w.chest_contents[51] = [InventorySupply(72, "apple")]
         out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
-        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.state, "Pickup")
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 51, "supply_ids": [72]}])
 
 
@@ -546,27 +550,59 @@ class RunnerLootLearningTest(unittest.TestCase):
         self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
 
 
-class GotoDefersFarLootTest(unittest.TestCase):
-    def test_far_gem_walk_yields_while_goto_target_is_still_owed(self):
-        w = world(["....", "....", "....", "...."], at=(0, 0))
-        w.entities = [Entity("supply", 3, (3, 0), code="gem")]
-        policy = scripted(
-            pickup=True,
-            goals=["goto", "explore"],
-            goto=(10, 0),
-            goto_map=7,
-        )
-        c = ctx(policy)
-        self.assertIsNone(loot_outcome(w, c, "Loot"))
+class FetchItemTest(unittest.TestCase):
+    """Loot is the executor for the plan's ``fetch_item`` op (A20)."""
 
-    def test_far_gem_walk_runs_when_only_explore_is_left(self):
-        w = world(["....", "....", "....", "...."], at=(0, 0))
-        w.entities = [Entity("supply", 3, (3, 0), code="gem")]
-        policy = scripted(pickup=True, goals=["explore"])
-        c = ctx(policy)
-        out = loot_outcome(w, c, "Loot")
-        self.assertIsNotNone(out)
-        self.assertIn("loot", out.reason)
+    def test_guard_needs_a_fetch_op(self):
+        from agentrealm_agent.states.loot import LootState
+
+        w = world(["....", "...."], at=(0, 0))
+        w.entities = [Entity("supply", 8, (3, 0), "apple")]
+        self.assertFalse(LootState().guard(w, ctx()))
+        self.assertTrue(LootState().guard(w, ctx(plan=fetch("apple"))))
+
+    def test_walks_to_the_ops_code_in_sight(self):
+        w = world(["....", "...."], at=(0, 0))
+        w.entities = [Entity("supply", 8, (3, 0), "apple")]
+        plan = fetch("apple")
+        out = dispatch(w, ctx(plan=plan))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
+        self.assertEqual(plan.acted, plan.current())
+
+    def test_walks_to_the_ops_code_past_other_loot(self):
+        w = world([".....", ".....", "....."], at=(1, 1))
+        w.entities = [Entity("supply", 2, (3, 0), "bronze_sword"), Entity("supply", 9, (4, 2), "gem")]
+        out = dispatch(w, ctx(kb=priced(bronze_sword=500), plan=fetch("gem")))
+        self.assertEqual(out.state, "Loot")
+        self.assertIn("fetch gem", out.reason)
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertEqual(out.intents[0]["x"], 2)
+
+    def test_takes_the_ops_code_in_reach(self):
+        # A fetch target in reach: Pickup (a reflex) or Loot takes it, either way a Take.
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.entities = [Entity("supply", 8, (2, 1), "apple")]
+        out = dispatch(w, ctx(scripted(pickup=False), plan=fetch("apple")))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 8}])
+
+    def test_priced_supply_is_not_fetched(self):
+        w = world(["....", "...."], at=(0, 0))
+        w.entities = [Entity("supply", 8, (3, 0), "apple", gem_price=2)]
+        out = dispatch(w, ctx(plan=fetch("apple")))
+        self.assertNotEqual(out.state, "Loot")
+
+    def test_walks_to_the_ops_cell_when_none_in_sight(self):
+        w = world(["....", "...."], at=(0, 0))
+        out = dispatch(w, ctx(plan=fetch("apple", x=3, y=0)))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
+
+    def test_no_code_in_sight_and_no_cell_yields(self):
+        w = world(["....", "...."], at=(0, 0))
+        out = dispatch(w, ctx(plan=fetch("apple")))
+        self.assertNotEqual(out.state, "Loot")
 
 
 if __name__ == "__main__":

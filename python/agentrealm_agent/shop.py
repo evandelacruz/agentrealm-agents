@@ -1,11 +1,10 @@
-"""Shop wants, priced supplies in sight, and buy-signal consumption (A21)."""
+"""Shop: the plan's ``buy`` op, priced supplies in sight, and Takes in flight (A21)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .directives import PARAM_DEFAULTS
-from .healing import DEFAULT_BUY_POTION, potion_count, supply_matches
+from .healing import supply_matches
 from .memory import Memory
 from .plan import goal_done
 from .travel.strength import loadout_key
@@ -31,11 +30,6 @@ def can_afford(w: WorldModel, price: int) -> bool:
     return w.gems is not None and w.gems >= price
 
 
-def carries_code(w: WorldModel, code: str) -> bool:
-    """Held only: Heal drinks carried supplies, not stowed ones (A10, GAME_NOTES)."""
-    return any(supply_matches(code, h.code) for h in w.held_supplies)
-
-
 def plan_buy_op(ctx: PlayContext, w: WorldModel) -> dict | None:
     plan = ctx.plan
     if plan is None:
@@ -49,29 +43,9 @@ def plan_buy_op(ctx: PlayContext, w: WorldModel) -> dict | None:
 
 
 def wanted_codes(w: WorldModel, ctx: PlayContext) -> list[str]:
-    """Codes Shop should try to buy this window, best effort first."""
-    out: list[str] = []
-    seen: set[str] = set()
-
-    def add(code: str) -> None:
-        if code and code not in seen:
-            seen.add(code)
-            out.append(code)
-
+    """The code the plan's ``buy`` op wants, while it is on top and not bought yet."""
     op = plan_buy_op(ctx, w)
-    if op is not None:
-        add(op["code"])
-
-    for sig in ctx.memory.buy_signals:
-        code = sig.get("code")
-        if isinstance(code, str) and not carries_code(w, code):
-            add(code)
-
-    reserve = int(ctx.params.get("potion_reserve", PARAM_DEFAULTS["potion_reserve"]))
-    if potion_count(w) < reserve:
-        add(DEFAULT_BUY_POTION)
-
-    return out
+    return [op["code"]] if op is not None else []
 
 
 def pick_supply(
@@ -99,19 +73,10 @@ def pick_supply(
     return candidates[0][1]
 
 
-def consume_buy_signal(m: Memory, code: str) -> None:
-    """Drop Heal's first matching ``buy`` op once a purchase lands (A10, A21)."""
-    for i, sig in enumerate(m.buy_signals):
-        c = sig.get("code")
-        if isinstance(c, str) and supply_matches(c, code):
-            del m.buy_signals[i]
-            return
-
-
 def note_shop_result(m: Memory, intent: dict | None, applied: bool) -> None:
-    """Settle the Take in flight from its result: applied consumes the signal,
-    a rejection (of it or a ``Drop`` queued before it) keeps it and counts
-    against that supply (``SHOP_MAX_REFUSALS``)."""
+    """Settle the Take in flight from its result: applied settles it, a
+    rejection (of it or a ``Drop`` queued before it) counts against that
+    supply (``SHOP_MAX_REFUSALS``)."""
     pending = m.shop_pending
     if pending is None:
         return
@@ -120,7 +85,6 @@ def note_shop_result(m: Memory, intent: dict | None, applied: bool) -> None:
         m.shop_pending = None
         return
     if intent and intent.get("verb") == "Take" and intent.get("supply_id") == pending[0]:
-        consume_buy_signal(m, pending[1])
         m.shop_pending = None
 
 
@@ -136,7 +100,7 @@ def sync_shop(w: WorldModel, m: Memory) -> None:
     """A gem drop since the Take was sent is the purchase landing (A21).
 
     A stale Take is forgotten first, so a later unrelated gem drop does not
-    consume a buy signal. A loadout, gem or map change clears the refusal counts.
+    count as a purchase. A loadout, gem or map change clears the refusal counts.
     """
     key = (loadout_key(w), w.gems, w.map_id)
     if key != m.shop_refusal_key:
@@ -151,5 +115,4 @@ def sync_shop(w: WorldModel, m: Memory) -> None:
     if pending[2] is None or w.gems is None:
         return
     if w.gems < pending[2]:
-        consume_buy_signal(m, pending[1])
         m.shop_pending = None

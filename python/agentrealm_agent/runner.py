@@ -38,7 +38,6 @@ from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, su
 from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, self_use_code
 from .shop import note_shop_result
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
-from .travel.ops import refresh_travel_stack
 from .travel.strength import loadout_key
 from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
@@ -56,10 +55,8 @@ from .acceptance import AcceptanceHooks
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
-from .curiosity_budget import record_curiosity_queue
-from .interest_list import read_key, read_supply_key, say_key
 from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
-from .investigation import mark_cell_read, mark_npc_spoken
+from .investigation import mark_cell_read, mark_npc_spoken, read_key, read_supply_key, say_key
 from .scroll_investigation import (
     codes_from_entities_payload,
     codes_from_inventory_supplies,
@@ -158,11 +155,9 @@ class Runner:
 
         Changed ``goals`` rebuild the stack from the top and drop the current
         path, so the new head replans at once. Otherwise the stack keeps its
-        progress and only the params reset to the file's values. **Travel**
-        (A27) keeps its own ``travel:*`` queue, refreshed from the same goals.
+        progress and only the params reset to the file's values.
         """
         d = self.directives.directives
-        refresh_travel_stack(self.mem, d.goals)
         if d.goals != old_goals:
             self.plan = self._build_plan()
             self.mem.path, self.mem.goal, self.mem.goal_op = [], "", None
@@ -219,7 +214,6 @@ class Runner:
         if self.knowledge is not None:
             sync_town(self.knowledge, world.get("town"))
             self._sync_minimap()
-        refresh_travel_stack(self.mem, self.directives.directives.goals)
         self.strategist = Strategist.from_env(tick_hz=hz)
         self.strategist.start()
         self.mem.strategist_progress_tick = self.world.tick
@@ -456,7 +450,6 @@ class Runner:
             self.server_tick = w.tick
         if intents:
             m.queue_sent_tick = w.tick
-            record_curiosity_queue(m, w.tick, intents, m.state)
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
         lives_before = w.lives
@@ -1059,8 +1052,6 @@ class Runner:
                     code=w.armed_code,
                 )
                 m.break_pending = None
-                if m.break_odd == (map_id, pos):
-                    m.break_odd = None
                 on_break_opened(m, w, nav_active(m, w))
                 return
 

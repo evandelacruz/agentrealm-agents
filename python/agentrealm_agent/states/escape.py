@@ -47,7 +47,7 @@ class EscapeState(State):
         # Surrounded: cross as little hazard as the cost grid allows (plan_sets prices hazards instead of blocking them).
         step = next_step(w, plan_avoid, m.path)
         if step is None:
-            replan(w, m, policy, ctx.rng, plan_avoid, plan_costly, ctx.knowledge)
+            replan(w, m, policy, plan_avoid, plan_costly, ctx.knowledge)
             step = next_step(w, plan_avoid, m.path)
         if step is not None:
             return StateOutcome(

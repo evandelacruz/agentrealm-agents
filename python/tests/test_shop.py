@@ -1,4 +1,4 @@
-"""A21: Shop state — priced supplies, plan buy, buy_signals, potion_reserve."""
+"""A21: Shop state — the executor for the plan's ``buy`` op on priced supplies."""
 
 import random
 import tempfile
@@ -11,17 +11,19 @@ from agentrealm_agent import config
 from agentrealm_agent.brain import Decision
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.healing import raise_buy_potion
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan, goal_done
-from agentrealm_agent.pathing import replan as path_replan
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.shop import SHOP_MAX_REFUSALS, SHOP_PENDING_TICKS, note_shop_result, sync_shop
+from agentrealm_agent.shop import (
+    SHOP_MAX_REFUSALS,
+    SHOP_PENDING_TICKS,
+    note_shop_result,
+    sync_shop,
+)
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.states.shop import ShopState
 from agentrealm_agent.world import Entity, WorldModel
 
 
@@ -82,67 +84,33 @@ class ShopBuyTest(unittest.TestCase):
         op = {"op": "buy", "code": "torch"}
         self.assertTrue(goal_done(op, w, Plan([op], dict(PARAM_DEFAULTS))))
 
-    def test_plan_keeps_buy_op_with_shop(self):
-        plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
-        m = Memory()
-        path_replan(world(), m, Policy(kind="scripted", goals=["explore"]), random.Random(0), set(), set(), plan=plan)
-        self.assertEqual(plan.current(), {"op": "buy", "code": "torch"})
-
-    def test_signal_only_non_potion_buy_sends_take(self):
-        # No plan op and the potion reserve met: only the signal wants the torch.
+    def _sent_take(self):
         w = world()
-        w.health, w.max_health = 10, 10
-        w.held_supplies = [InventorySupply(1, "small_potion"), InventorySupply(2, "small_potion")]
-        w.entities = [Entity("supply", 5, (1, 2), "torch", gem_price=3)]
-        m = Memory()
-        raise_buy_potion(m, why="test", code="torch")
-        c = ctx(w, m=m)
-        self.assertTrue(ShopState().guard(w, c))
-        self.assertEqual(m.buy_signals[0]["code"], "torch")  # guard left memory alone
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Shop")
-        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
-        self.assertEqual(len(m.buy_signals), 1)  # not consumed until the Take lands
-
-    def _sent_heal_take(self):
-        w = world()
-        w.health, w.max_health = 10, 10
         w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
         m = Memory()
-        raise_buy_potion(m, why="test")
-        out = dispatch(w, ctx(w, m=m))
+        plan = Plan([{"op": "buy", "code": "small_potion"}], dict(PARAM_DEFAULTS))
+        out = dispatch(w, ctx(w, m=m, plan=plan))
         self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
+        self.assertIsNotNone(m.shop_pending)
         return w, m, out.intents[0]
 
-    def test_applied_take_consumes_heal_buy_signal(self):
-        _, m, intent = self._sent_heal_take()
+    def test_applied_take_settles_pending(self):
+        _, m, intent = self._sent_take()
         note_shop_result(m, intent, applied=True)
-        self.assertEqual(m.buy_signals, [])
         self.assertIsNone(m.shop_pending)
+        self.assertEqual(m.shop_refusals, {})
 
-    def test_rejected_take_keeps_buy_signal(self):
-        _, m, intent = self._sent_heal_take()
+    def test_rejected_take_counts_refusal(self):
+        _, m, intent = self._sent_take()
         note_shop_result(m, intent, applied=False)
-        self.assertEqual(len(m.buy_signals), 1)
         self.assertIsNone(m.shop_pending)
+        self.assertEqual(m.shop_refusals, {5: 1})
 
-    def test_gem_drop_consumes_buy_signal(self):
-        w, m, _ = self._sent_heal_take()
+    def test_gem_drop_settles_pending(self):
+        w, m, _ = self._sent_take()
         w.gems = 7
         sync_shop(w, m)
-        self.assertEqual(m.buy_signals, [])
-
-    def test_stowed_potions_do_not_block_heal_signal(self):
-        # Reserve met by stowed potions; Heal drinks only carried ones.
-        w = world()
-        w.health, w.max_health = 10, 10
-        w.chest_supplies = [InventorySupply(1, "small_potion"), InventorySupply(2, "small_potion")]
-        w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
-        m = Memory()
-        raise_buy_potion(m, why="test")
-        out = dispatch(w, ctx(w, m=m))
-        self.assertEqual(out.state, "Shop")
-        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
+        self.assertIsNone(m.shop_pending)
 
     def test_full_pack_drops_then_takes(self):
         w = world()
@@ -172,33 +140,29 @@ class ShopBuyTest(unittest.TestCase):
         self.assertIsNone(m.shop_pending)
 
     def test_pending_take_expires_on_leaving_shop_cell(self):
-        w, m, _ = self._sent_heal_take()
+        w, m, _ = self._sent_take()
         w.pos = (4, 4)
         sync_shop(w, m)
         self.assertIsNone(m.shop_pending)
-        w.pos, w.gems = (1, 1), 7  # an unrelated gem drop later
-        sync_shop(w, m)
-        self.assertEqual(len(m.buy_signals), 1)
 
     def test_pending_take_expires_after_timeout(self):
-        w, m, _ = self._sent_heal_take()
+        w, m, _ = self._sent_take()
         w.tick += SHOP_PENDING_TICKS + 1
-        w.gems = 7
         sync_shop(w, m)
         self.assertIsNone(m.shop_pending)
-        self.assertEqual(len(m.buy_signals), 1)
 
     def test_buy_op_with_nothing_in_sight_is_dropped_after_stall(self):
-        plan = Plan([{"op": "buy", "code": "torch"}, {"op": "explore_area", "x": 2, "y": 2, "radius": 2}],
-                    dict(PARAM_DEFAULTS))
-        m, pol = Memory(), Policy(kind="scripted", goals=["explore"])
+        explore = {"op": "explore_area", "x": 2, "y": 2, "radius": 2}
+        plan = Plan([{"op": "buy", "code": "torch"}, explore], dict(PARAM_DEFAULTS))
+        m = Memory()
         w = world()
-        path_replan(w, m, pol, random.Random(0), set(), set(), plan=plan)
+        out = dispatch(w, ctx(w, m=m, plan=plan))
+        self.assertNotEqual(out.state, "Shop")  # nothing in sight: Shop sends nothing
         self.assertEqual(plan.current()["op"], "buy")
         w.tick += PLAN_STALL_SECONDS * plan.tick_hz
         with self.assertLogs("agentrealm_agent.plan", "WARNING"):
-            path_replan(w, m, pol, random.Random(0), set(), set(), plan=plan)
-        self.assertNotEqual((plan.current() or {}).get("op"), "buy")
+            dispatch(w, ctx(w, m=m, plan=plan))
+        self.assertEqual(plan.current(), explore)
 
     def test_hostile_in_range_outranks_shop(self):
         w = world()
@@ -207,38 +171,30 @@ class ShopBuyTest(unittest.TestCase):
         out = dispatch(w, ctx(w, plan=plan))
         self.assertNotEqual(out.state, "Shop")
 
-    def test_restock_potion_reserve(self):
+    def test_no_buy_op_no_shop(self):
+        # Shop buys only the plan's `buy` op: no potion-reserve restock (A21).
         w = world()
         w.health, w.max_health = 10, 10
         w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
-        params = dict(PARAM_DEFAULTS)
-        params["potion_reserve"] = 2
+        params = dict(PARAM_DEFAULTS, potion_reserve=2)
         out = dispatch(w, ctx(w, params=params))
-        self.assertEqual(out.state, "Shop")
-        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
+        self.assertNotEqual(out.state, "Shop")
+        self.assertNotIn({"verb": "Take", "supply_id": 5}, out.intents or [])
 
-    def test_only_the_plans_own_buy_counts_as_acting_on_it(self):
-        # A36: a potion restock while `buy torch` heads the stack is not the buy.
+    def test_buys_only_the_ops_code(self):
+        # A36: with `buy torch` on top, a potion in sight is not bought.
         w = world()
         w.health, w.max_health = 10, 10
         w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
         plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
         params = dict(PARAM_DEFAULTS, potion_reserve=2)
         out = dispatch(w, ctx(w, plan=plan, params=params))
-        self.assertEqual((out.state, out.intents), ("Shop", [{"verb": "Take", "supply_id": 5}]))
+        self.assertNotEqual(out.state, "Shop")
         self.assertIsNone(plan.acted)
-        w.entities.append(Entity("supply", 6, (2, 1), "torch", gem_price=2))  # cheaper: Shop picks it
+        w.entities.append(Entity("supply", 6, (2, 1), "torch", gem_price=2))
         out = dispatch(w, ctx(w, plan=plan, params=params))
         self.assertEqual((out.state, out.intents), ("Shop", [{"verb": "Take", "supply_id": 6}]))
         self.assertEqual(plan.acted, {"op": "buy", "code": "torch"})
-
-    def test_no_shop_when_reserve_met(self):
-        w = world()
-        w.health, w.max_health = 10, 10
-        w.held_supplies = [InventorySupply(1, "small_potion"), InventorySupply(2, "small_potion")]
-        w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
-        out = dispatch(w, ctx(w))
-        self.assertNotEqual(out.state, "Shop")
 
 
 class ShopRefusalCapTest(unittest.TestCase):
@@ -247,18 +203,17 @@ class ShopRefusalCapTest(unittest.TestCase):
 
     def refuse_until_skipped(self, w, m):
         for _ in range(SHOP_MAX_REFUSALS):
-            out = dispatch(w, ctx(w, m=m))
+            out = dispatch(w, ctx(w, m=m, plan=self.plan))
             self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
             note_shop_result(m, out.intents[0], applied=False)
-        out = dispatch(w, ctx(w, m=m))
+        out = dispatch(w, ctx(w, m=m, plan=self.plan))
         self.assertNotEqual(out.state, "Shop")
-        self.assertEqual(len(m.buy_signals), 1)
 
     def setUp(self):
         self.w = world()
         self.w.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
         self.m = Memory()
-        raise_buy_potion(self.m, why="test")
+        self.plan = Plan([{"op": "buy", "code": "small_potion"}], dict(PARAM_DEFAULTS))
 
     def test_skips_supply_after_max_refusals(self):
         self.refuse_until_skipped(self.w, self.m)
@@ -266,19 +221,19 @@ class ShopRefusalCapTest(unittest.TestCase):
     def test_other_supply_still_bought(self):
         self.refuse_until_skipped(self.w, self.m)
         self.w.entities.append(Entity("supply", 6, (2, 2), "small_potion", gem_price=3))
-        out = dispatch(self.w, ctx(self.w, m=self.m))
+        out = dispatch(self.w, ctx(self.w, m=self.m, plan=self.plan))
         self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 6}])
 
     def test_gem_change_clears_refusals(self):
         self.refuse_until_skipped(self.w, self.m)
         self.w.gems += 5
-        out = dispatch(self.w, ctx(self.w, m=self.m))
+        out = dispatch(self.w, ctx(self.w, m=self.m, plan=self.plan))
         self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
 
     def test_loadout_change_clears_refusals(self):
         self.refuse_until_skipped(self.w, self.m)
         self.w.armed_code = "wooden_sword"
-        out = dispatch(self.w, ctx(self.w, m=self.m))
+        out = dispatch(self.w, ctx(self.w, m=self.m, plan=self.plan))
         self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
 
     def test_map_change_clears_refusals(self):
@@ -303,18 +258,18 @@ class RunnerShopResultTest(unittest.TestCase):
         self.r.world.health, self.r.world.max_health = 10, 10
         self.r.world.entities = [Entity("supply", 5, (1, 2), "small_potion", gem_price=3)]
         self.r.mem = Memory(need_self=False, need_position=False)
-        raise_buy_potion(self.r.mem, why="test")
-        out = dispatch(self.r.world, ctx(self.r.world, m=self.r.mem))
+        plan = Plan([{"op": "buy", "code": "small_potion"}], dict(PARAM_DEFAULTS))
+        out = dispatch(self.r.world, ctx(self.r.world, m=self.r.mem, plan=plan))
         self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
         self.r.intents_for(Decision(out.intents[0], "test"))
 
-    def test_applied_take_consumes_buy_signal(self):
+    def test_applied_take_settles_pending(self):
         self.assertFalse(self.r.on_result({"tick": 30, "outcome": "applied"}, 0))
-        self.assertEqual(self.r.mem.buy_signals, [])
         self.assertIsNone(self.r.mem.shop_pending)
+        self.assertEqual(self.r.mem.shop_refusals, {})
 
-    def test_rejected_take_keeps_buy_signal(self):
+    def test_rejected_take_counts_refusal(self):
         rejection = {"category": "state", "code": "insufficient_gems", "retryability": "permanent"}
         self.assertTrue(self.r.on_result({"tick": 30, "outcome": "rejected", "rejection": rejection}, 0))
-        self.assertEqual(len(self.r.mem.buy_signals), 1)
         self.assertIsNone(self.r.mem.shop_pending)
+        self.assertEqual(self.r.mem.shop_refusals, {5: 1})

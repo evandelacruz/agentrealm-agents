@@ -45,6 +45,8 @@
 
   "A59": {"state": "done"},
 
+  "A61": {"state": "done", "note": "Step 1 of the AI-plans redirect: dispatch and states. Walker internals (step 1b) and strategist wiring (step 2) are separate sessions; until step 2, M9's look clause and M10's read and say clause need a planner that emits those ops."},
+
   "A60": {"state": "done", "note": "Probe, profile and offline tests shipped; not run live. A58 runs it before the hour when the knowledge base has no regen answer."},
 
   "A17": {"state": "done"},

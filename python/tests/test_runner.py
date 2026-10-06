@@ -128,6 +128,12 @@ class RunnerTest(unittest.TestCase):
         # queue; an empty list would clear it.
         fake = FakeClient([{"tick": 12, "window_remaining_ms": 0}])
         r = self.runner(fake, Policy(goals=["hold"]))
+        # Walled in: even the safe default, which never idles on open ground,
+        # has nothing to send.
+        for x in range(-1, 6):
+            for y in range(-1, 3):
+                if (x, y) != (0, 0):
+                    r.world.view.tiles[(x, y)] = "wall"
         r.tick()
         self.assertEqual(fake.sent, [(None, None)])
 
@@ -194,8 +200,7 @@ class RunnerTest(unittest.TestCase):
     def test_say_to_an_npc_is_remembered_by_its_top_level_npc_id(self):
         # Say names an NPC by npc_id, not a target (API rules § Say); an
         # applied one is spoken, a rejected one counts against the item.
-        from agentrealm_agent.interest_list import say_key
-        from agentrealm_agent.investigation import spoken_npc_ids
+        from agentrealm_agent.investigation import say_key, spoken_npc_ids
         from agentrealm_agent.knowledge_base import KnowledgeBase
         from agentrealm_agent.states.intents import say_to
 
@@ -533,10 +538,11 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(cells[-1], (4, 0))
         self.assertEqual(r.world.pos, (2, 0), "the old queue's late results are ignored")
 
-    def test_unavoidable_blocker_stops_the_queue_once_and_does_not_resend_again(self):
+    def test_unavoidable_blocker_replaces_the_queue_once_and_does_not_resend_again(self):
         # A one-wide corridor: a wall read on it leaves no route (an NPC
-        # would not: the cost grid prices occupants, A12). The old queue is
-        # stopped with one empty submit; later polls do not resend.
+        # would not: the cost grid prices occupants, A12). Travel yields and
+        # the safe default's step replaces the old queue once; later polls
+        # do not resend.
         fake = FakeClient([
             {"tick": 10, "window_remaining_ms": 0},
             {"tick": 11, "window_remaining_ms": 0},
@@ -552,7 +558,10 @@ class RunnerTest(unittest.TestCase):
             "rows": ["#"], "legend": {"#": {"block_type": "wall"}},
         }
         r.step("terrain")
-        self.assertEqual(self._resend(r, fake), [], "no route: the old queue is stopped")
+        resent = self._resend(r, fake)
+        self.assertEqual(r.mem.state, "Explore", "no route: the safe default moves")
+        self.assertNotEqual(resent, fake.sent[0][0])
+        self.assertNotIn((2, 0), self._walk_cells((0, 0), resent))
         for _ in range(2):
             r.step("terrain")
             r.tick()

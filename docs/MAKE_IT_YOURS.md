@@ -11,7 +11,7 @@ Each wall-clock window the runner makes **one HTTP call**: read self, position, 
 1. **`brain.choose_call`** — which kind of call fits the call budget this window ([PLAN.md](../PLAN.md) *Scheduler*).
 2. **`states.dispatch`** — when the call is `POST tick`, which **state** returns the intent list.
 
-States are checked in **priority order** (see `STATES` in `python/agentrealm_agent/states/dispatch.py`). Survival and reflexes rank above exploration. Only one state wins each decision; it returns a `StateOutcome` with zero or more intents.
+States are checked in **priority order** (see `STATES` in `python/agentrealm_agent/states/dispatch.py`): `REFLEXES`, then `EXECUTORS`, then Idle. AI plans, state machine executes ([PLAN.md](../PLAN.md) *Architecture*): a **reflex** acts on what is happening now, whatever the plan says; an **executor** runs only to carry out the plan's top op, and its guard asks `my_op(ctx, self.name)`. Explore, last, is also the safe default when there is no op. Only one state wins each decision; it returns a `StateOutcome` with zero or more intents.
 
 ## Anatomy of a state
 
@@ -41,17 +41,17 @@ StateOutcome(intents, reason, state="MyState", wait=False, reflex=False, paced=F
 
 If your state's `guard` holds (or you are the active state) and `act` returns **no intents** and **`wait` is false**, the dispatcher tries the **next** state in priority order. Reasons from skipped states are collected in `outcome.yielded` as `"StateName: reason"`.
 
-Use **`wait=True`** when you mean “do nothing this window on purpose” (Sync waiting for a read, Idle, Flee with nowhere to go, Recover waiting to open a chest). Do **not** use `wait` when you simply have nothing to do yet and want Explore to run — return `StateOutcome(None, "...")` without `wait` and let fall-through happen.
+Use **`wait=True`** only for a forced wait, “do nothing this window on purpose” (Sync waiting for a read, Idle, Flee with nowhere to go, Recover waiting to open a chest). Do **not** use `wait` when you simply have nothing to do yet and want Explore to run — return `StateOutcome(None, "...")` without `wait` and let fall-through happen.
 
 Tests for fall-through live in `python/tests/test_states.py` (`DispatcherFallThroughTest`).
 
 ## Where your state goes
 
 1. Add a module under `python/agentrealm_agent/states/` with a class whose `name` is unique.
-2. Import it in `states/dispatch.py` and insert an instance into **`STATES`** at the right priority — higher in the tuple means it runs earlier. Match the table in [docs/PLAYABLE_AGENT_PLAN.md](PLAYABLE_AGENT_PLAN.md) (*State machine*) unless you deliberately want to interrupt something else.
+2. Decide what it is. A state that reacts to what is in front of the character (and never walks off toward a goal of its own) is a reflex: insert an instance into **`REFLEXES`** in `states/dispatch.py`; higher in the tuple runs earlier. A state that does something the planner asks for is an executor: name its op in `plan.OP_STATE` (with a validator in `plan.py`), guard on `my_op(ctx, self.name)`, and insert it into **`EXECUTORS`** before Explore. Never let a state pick a movement target of its own: two states that each walk somewhere take turns moving the character.
 3. Export nothing special from `states/__init__.py` unless other code needs your helpers.
 
-That one line in `STATES` is the switch: a state that is not in the tuple never runs. Keep your additions in your own copy (a fork or branch) so the shipped agent stays as it is.
+That one line in `REFLEXES` or `EXECUTORS` is the switch: a state that is not in either never runs. Keep your additions in your own copy (a fork or branch) so the shipped agent stays as it is.
 
 ## Reading the world
 
@@ -124,15 +124,14 @@ Invalid params are ignored with a log line; a broken file keeps the last good di
 
 The repo ships **`ExampleGreetState`** in `python/agentrealm_agent/states/example_greet.py` (about 40 lines). It says hello once to each other player in sight. No shipped state talks to players (Investigate says hello to **NPCs**), so it adds behavior instead of shadowing a state that already runs.
 
-It is **not** in the shipped `STATES`, so the reference agent never runs it. To try it in your copy, add one line to `STATES` in `states/dispatch.py`, above Explore:
+It is **not** in the shipped `STATES`, so the reference agent never runs it. It reacts to who is in sight and never moves the character, so it is a reflex. To try it in your copy, add one line to the end of `REFLEXES` in `states/dispatch.py`:
 
 ```python
 from .example_greet import ExampleGreetState
 ...
-    LevelState(),
+    PickupState(),
+    RecoverState(),
     ExampleGreetState(),  # mine: say hello to players in sight
-    ExploreState(),
-    IdleState(),
 )
 ```
 
@@ -140,13 +139,13 @@ Behavior:
 
 1. `guard` — scripted, alive, and some other character is in readable sight and not greeted yet.
 2. `act` — `Say` hello to the nearest one, addressed by `character_id`, and remember its id.
-3. The next window greets the next player, or falls through to Explore.
+3. The next window greets the next player, or falls through to the plan's executor.
 
 Things the example does on purpose, worth keeping in your own states:
 
 - **Its own memory.** The greeted set lives on the state, keyed by your character's id because one `STATES` tuple serves every character the process runs. It needs no knowledge base, and it marks a player when the `Say` is sent, so a refused hello is not retried: at most one per player per run. (Investigate instead records NPCs in the knowledge base after an applied `Say`, which persists across runs.)
 - **Pacing and budget.** It returns one `Say` per decision window. The runner sends it through the speech pacer and inside the window's `POST tick`, so it costs no extra call.
-- **Priority.** Placed above Explore, it waits for every survival state and for Investigate.
+- **Priority.** Last among the reflexes, it waits for every survival state, and outranks the plan's executor for one window per player.
 
 Its test, `python/tests/test_example_greet.py`, runs in `make test`. It checks that the shipped `STATES` leaves the example out, then patches `STATES` with the example inserted above Explore and drives the real dispatcher. Copy that pattern: duplicate the module, rename the class, change `guard` and `act`, add your line to `STATES`, and add a test beside it.
 

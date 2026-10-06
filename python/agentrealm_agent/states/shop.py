@@ -1,55 +1,41 @@
-"""Shop: buy in-sight priced supplies the plan wants; restock potion_reserve (A21)."""
+"""Shop: carry out the plan's ``buy`` op on priced supplies in sight (A21)."""
 
 from __future__ import annotations
 
-from ..healing import supply_matches
 from ..knowledge_base import knowledge_items
 from ..loot import Pickup, loot_score, pickup_room
 from ..memory import Memory
 from ..navigation import cost_path
-from ..pathing import goto_navigation_pending, grid_params, nav_search, next_step
+from ..pathing import grid_params, nav_search, next_step
 from ..shop import (
     GOAL,
     can_afford,
     pick_supply,
-    plan_buy_op,
     price_of,
     wanted_codes,
 )
 from ..world import Entity, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome
-from .explore import plan_sets, reflex_outcome
+from .base import PlayContext, State, StateOutcome, my_op
+from .explore import plan_sets
 from .intents import drop, set_position, take
 
 
 class ShopState(State):
-    """Priority 3, after Loot. Takes priced supplies in sight for plan ``buy``
-    ops, Heal ``buy_signals``, and ``potion_reserve`` restock."""
+    """Executor for ``buy``: takes a priced supply in sight that the op wants.
+    With none in sight it sends nothing; getting to a shop is a ``travel`` op."""
 
     name = "Shop"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        if goto_navigation_pending(world, ctx.memory, ctx.policy):
-            return False
-        return _target(world, ctx) is not None
+        return my_op(ctx, self.name) is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        reflex = reflex_outcome(
-            world, ctx.policy, never_attack=ctx.never_attack, state=self.name, knowledge=ctx.knowledge
-        )
-        if reflex is not None:
-            return reflex
-        op = plan_buy_op(ctx, world)
-        supply = _target(world, ctx) if op is not None else None
-        out = shop_outcome(world, ctx, self.name)
-        if out.intents and ctx.plan is not None and supply is not None and supply_matches(op["code"], supply.code):
-            ctx.plan.note_progress()  # a step or Take for the plan's own buy, not a potion restock
-        return out
+        return shop_outcome(world, ctx, self.name)
 
 
 def _target(w: WorldModel, ctx: PlayContext) -> Entity | None:

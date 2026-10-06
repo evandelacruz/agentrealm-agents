@@ -21,7 +21,7 @@ from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import cost_path, planner
 from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import goto_navigation_pending
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.world import Entity, WorldModel, ZoneFact
@@ -30,13 +30,22 @@ SMALL_BUDGET = 30
 
 
 def ctx(policy: Policy) -> PlayContext:
+    """The built-in plan for ``policy``: a goto is a ``travel`` point op."""
     return PlayContext(
         Memory(),
         policy,
         random.Random(0),
         params=dict(PARAM_DEFAULTS),
         knowledge=KnowledgeBase.empty("sandbox"),
+        plan=Plan.from_policy(policy, dict(PARAM_DEFAULTS)),
     )
+
+
+WALK = "travel:point"  # the goal label of a goto's travel op walk
+
+
+def goto_backed_off(w: WorldModel, c: PlayContext) -> bool:
+    return nav_stuck.backed_off(c.memory, WALK, w.map_id, GOTO, w.tick)
 
 
 def land(w: WorldModel, c: PlayContext, out) -> None:
@@ -85,28 +94,13 @@ class GotoAtCorridorWaypointTest(unittest.TestCase):
                 reasons.append(out.reason)
                 land(w, c, out)
                 read_terrain(w)
-        waypoints = {r for r in reasons if r.startswith("goto → (") and "[" not in r}
+        waypoints = {r for r in reasons if r.startswith(f"{WALK} → (") and "[" not in r}
         self.assertGreater(len(waypoints), 2, "walked waypoint to waypoint, as in the live trace")
-        self.assertTrue(all(r.startswith("goto") for r in reasons[:-1]), "explore never took the move")
+        self.assertTrue(all(r.startswith(WALK) for r in reasons[:-1]), "the travel op kept the move")
         signals = c.memory.nav_stuck.stuck_signals
-        self.assertEqual([(s["goal"], s["target"]) for s in signals], [("goto", list(GOTO))])
+        self.assertEqual([(s["goal"], s["target"]) for s in signals], [(WALK, list(GOTO))])
         self.assertTrue(signals[0]["reason"], "given up with a reason, as the A16 give-up rule needs")
-        self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), "backed off")
-
-    def test_explore_moves_only_while_the_goto_is_backed_off(self):
-        w = strip_world()
-        c = ctx(Policy(kind="scripted", goals=["goto", "explore"], goto=GOTO))
-        explored = 0
-        with mock.patch.object(planner, "FINE_NODE_BUDGET", SMALL_BUDGET):
-            for _ in range(300):
-                out = dispatch(w, c)
-                if out.reason.startswith("explore"):
-                    explored += 1
-                    self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), out.reason)
-                land(w, c, out)
-                read_terrain(w)
-        self.assertGreater(explored, 0)
-        self.assertEqual({s["goal"] for s in c.memory.nav_stuck.stuck_signals}, {"goto"})
+        self.assertTrue(goto_backed_off(w, c), "backed off")
 
 
 # --- 2. Heal (and Loot) walking to food it cannot reach -------------------
@@ -148,20 +142,31 @@ def play(w: WorldModel, c: PlayContext, decisions: int) -> list:
     return outs
 
 
+def fetch_ctx() -> PlayContext:
+    """Loot walks to a supply only for the plan's ``fetch_item`` op."""
+    c = ctx(Policy(kind="scripted", goals=["explore"]))
+    c.plan = Plan([{"op": "fetch_item", "code": "apple"}], dict(PARAM_DEFAULTS))
+    return c
+
+
 class UnreachableFoodTest(unittest.TestCase):
     def test_heal_gives_the_food_up_instead_of_pacing(self):
         w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"], pickup=False))
+        w.pos = (403, 608)  # within Heal's FOOD_REACH of the food
         outs = play(w, c, 80)
         signals = c.memory.nav_stuck.stuck_signals
         # Given up at the dead end, retried once when the 300-tick backoff ends,
-        # given up again (now backed off 600).
+        # given up again (now backed off 600). In between the safe default
+        # looks around, so the retry walks to the dead end again.
         self.assertEqual([(s["goal"], s["target"], s["reason"]) for s in signals], [("heal_food", list(FOOD), "no_path")] * 2)
         self.assertEqual(c.memory.nav_stuck.oscillations, [], "no pacing at all")
-        self.assertEqual(sum(o.reason.startswith("heal_food") for o in outs), 3, "walked until the dead end")
+        heal_walk = [o.reason.startswith("heal_food") for o in outs]
+        self.assertEqual(sum(heal_walk), 6, "walked until the dead end, twice")
+        self.assertEqual(heal_walk[:4], [True, True, True, False], "given up at the dead end")
 
     def test_loot_gives_the_pickup_up_instead_of_pacing(self):
         w = pond_world(health=10)
-        c = ctx(Policy(kind="scripted", goals=["explore"], pickup=True))
+        c = fetch_ctx()
         play(w, c, 80)
         signals = c.memory.nav_stuck.stuck_signals
         self.assertIn(("loot", list(FOOD)), [(s["goal"], s["target"]) for s in signals])
@@ -189,8 +194,8 @@ class HealWalkBoundedTest(unittest.TestCase):
     def test_heal_only_pacing_is_given_up_by_the_guard(self):
         # A path that steps to the other cell every decision, as run 7's did.
         w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"], pickup=False))
-        w.pos = (404, 607)
-        flip = {(404, 607): (404, 608), (404, 608): (404, 607)}
+        w.pos = (403, 608)  # both cells within Heal's FOOD_REACH of the food
+        flip = {(403, 608): (402, 608), (402, 608): (403, 608)}
         with mock.patch("agentrealm_agent.states.heal.cost_path", lambda w, *a, **k: [flip[w.pos]]):
             outs = play(w, c, 20)
         events = c.memory.nav_stuck.oscillations
@@ -249,14 +254,13 @@ class HealWalkBoundedTest(unittest.TestCase):
         self.assertIs(nav_stuck.active(m, w), walking)
         self.assertEqual(nav_stuck.stuck_reason(walking, w.tick), "time")
 
-    def test_food_and_an_owed_goto_both_behind_fog_are_not_held_forever(self):
+    def test_food_and_an_owed_goto_both_behind_fog_do_not_hold_the_goto_window(self):
         """Review on #101: the food's first step and the goto's are both unseen.
 
-        Heal tries the food, has no step and yields (backing off); Explore
-        holds the goto. The food must not restart the goto's window, so the
-        goto escalates once ``PROGRESS_TICK_LIMIT`` has passed. Heal only
-        comes back to the food once per backoff, so the food is never pursued
-        on consecutive decisions and nothing holds on it.
+        Heal tries the food each decision and has no step; the plan's travel
+        op (the goto) has none either. The food must not restart the goto's
+        window, so the goto escalates once ``PROGRESS_TICK_LIMIT`` has
+        passed, and the food walk is bounded on its own (given up on time).
         """
         # A dead-end pocket whose only way out, east, is an unseen cell.
         w = WorldModel(character_id=1, map_id=1, pos=(0, 0), perception=5, health=5, max_health=10)
@@ -268,13 +272,14 @@ class HealWalkBoundedTest(unittest.TestCase):
         w.terrain_center, w.terrain_map = w.pos, 1
         w.entities = [Entity("supply", 7, (3, 0), "apple")]
         c = ctx(Policy(kind="scripted", goals=["goto", "explore"], goto=(5, 0), pickup=False))
-        for _ in range(2 * nav_stuck.PROGRESS_TICK_LIMIT // 10 + 1):
+        for _ in range(nav_stuck.PROGRESS_TICK_LIMIT // 10 + 1):
             dispatch(w, c)
             w.tick += 10
-        self.assertEqual(c.memory.nav_stuck.stuck_signals, [])
+        signals = c.memory.nav_stuck.stuck_signals
+        self.assertEqual([(s["goal"], s["reason"]) for s in signals], [("heal_food", "time")])
         goto = nav_stuck.active(c.memory, w)
-        self.assertEqual(goto.goal, "goto")
-        self.assertGreater(goto.level, nav_stuck.CAUTIOUS, "the goto's windows ran out twice")
+        self.assertEqual(goto.goal, WALK)
+        self.assertGreaterEqual(goto.level, nav_stuck.CAUTIOUS, "the goto's window ran out")
 
     def test_a_blocked_step_after_an_old_walk_is_not_judged_on_the_old_window(self):
         # Review on #101: walk a step, come back much later, find the way taken.
@@ -336,11 +341,11 @@ class HealWalkBoundedTest(unittest.TestCase):
 
     def test_a_pickup_in_reach_ends_its_loot_walk(self):
         w = pond_world(health=10)
-        c = ctx(Policy(kind="scripted", goals=["explore"]))
+        c = fetch_ctx()
         drain(w)
         w.pos = (403, 608)
         loot_key = nav_stuck.goal_key("loot", 1, FOOD)
-        self.assertTrue(dispatch(w, c).reason.startswith("loot"))
+        self.assertEqual(dispatch(w, c).reason, f"fetch apple → {FOOD}")
         self.assertIn(loot_key, c.memory.nav_stuck.attempts)
         w.pos = (401, 610)
         self.assertEqual(dispatch(w, c).intents, [{"verb": "Take", "supply_id": 7}])

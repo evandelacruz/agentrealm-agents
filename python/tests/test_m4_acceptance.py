@@ -25,6 +25,7 @@ from agentrealm_agent.executor import step_landing
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.m4_acceptance import M4AcceptanceMetrics, op_key
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.strategist import Strategist, StrategistConfig
 from agentrealm_agent.world import WorldModel
 
@@ -47,6 +48,9 @@ BREAK = {"op": "break_block", "x": HEDGE[0], "y": HEDGE[1], "capability": "burn"
 ENTER = {"op": "travel", "to": "entrance", "x": ENTRANCE[0], "y": ENTRANCE[1]}
 REQUIRED = (BUY, TO_HEDGE, BREAK, ENTER)
 PLAN = {"goals": [dict(BUY, why="clue: hedges burn"), TO_HEDGE, BREAK, ENTER], "notes": "burn through the hedge"}
+# The opening stack: read the sign. Nothing reads on its own any more (the
+# planner decides what to investigate), so the clue comes from this op.
+READ_SIGN = {"op": "read", "x": SIGN[0], "y": SIGN[1], "why": "a sign in sight"}
 
 
 def block_at(p: tuple[int, int], burnt: set) -> str:
@@ -150,7 +154,8 @@ class TestWorldServer:
         return {"tick_rate_hz": 10, "code": "testworld", "status": "live"}
 
     def minimap(self, cid):
-        return {"maps": []}
+        # The entrance is a minimap mark, so Travel resolves `travel:entrance:122,40` (A27).
+        return {"maps": [{"map_id": MAP, "entrances": [{"x": ENTRANCE[0], "y": ENTRANCE[1]}]}]}
 
     def terrain(self, cid, map_id, x0, y0, width, height):
         legend = {
@@ -256,6 +261,7 @@ class TestWorldCase(unittest.TestCase):
         self.addCleanup(r.trace.close)
         r.world = WorldModel(character_id=1)
         r.mem = Memory()
+        r.plan = Plan([dict(READ_SIGN)], dict(PARAM_DEFAULTS))
 
         def on_wait():
             strategist.serve_one(timeout=0)
@@ -280,7 +286,7 @@ class M4DoneWhenTest(TestWorldCase):
         self.assertGreater(server.windows, 0, "finished before the windows ran out")
 
     def test_plan_without_the_ops_fails(self):
-        metrics, server, _ = self.play({"goals": [{"op": "wait", "seconds": 1}], "notes": "no idea"}, windows=600)
+        metrics, server, _ = self.play({"goals": [{"op": "wait", "seconds": 1, "why": "no idea"}], "notes": "no idea"}, windows=600)
         failures = metrics.failures()
         for op in REQUIRED:
             self.assertIn(f"strategist never planned {op_key(op)}", failures)
@@ -303,7 +309,7 @@ class RunnerActedOpTest(TestWorldCase):
         r.world = WorldModel(character_id=1, map_id=MAP, pos=START, perception=25, tick=100)
         r.mem = Memory(need_self=False, need_position=False)
         r.plan.acted = dict(TO_HEDGE)  # left over from an earlier round
-        r.tick()  # `hold` waits: nothing acts on a stack op
+        r.tick()  # no plan op: the safe default acts on none
         self.assertEqual(seen, [None])
 
 
@@ -314,7 +320,7 @@ class MetricsTest(unittest.TestCase):
         m = M4AcceptanceMetrics(required=REQUIRED)
         m.on_strategist_trigger({"trigger": "clue", "text": CLUE})
         m.on_strategist_applied(list(PLAN["goals"]))
-        for op, state in ((BUY, "Shop"), (TO_HEDGE, "Explore"), (BREAK, "Break"), (ENTER, "Explore")):
+        for op, state in ((BUY, "Shop"), (TO_HEDGE, "Travel"), (BREAK, "Break"), (ENTER, "Travel")):
             self.tick(m, state, op)
             m.on_strategist_trigger({"trigger": "goal_done", "op": dict(op), "reason": "goal_done"})
         return m

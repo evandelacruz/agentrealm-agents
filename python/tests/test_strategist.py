@@ -26,7 +26,7 @@ from agentrealm_agent.strategist import (
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
 
-WAIT_ANSWER = {"goals": [{"op": "wait", "seconds": 1}], "notes": "from model"}
+WAIT_ANSWER = {"goals": [{"op": "wait", "seconds": 1, "why": "test"}], "notes": "from model"}
 
 
 class FakeLLM:
@@ -120,7 +120,7 @@ class TriggerTest(unittest.TestCase):
 
     def test_plan_pops_queue_goal_done_and_failed(self):
         m = Memory()
-        plan = Plan([{"op": "wait", "seconds": 0}, {"op": "explore_area", "x": 0, "y": 0, "radius": 1}], dict(PARAM_DEFAULTS))
+        plan = Plan([{"op": "wait", "seconds": 0, "why": "test"}, {"op": "explore_area", "x": 0, "y": 0, "radius": 1}], dict(PARAM_DEFAULTS))
         plan.finish_current("done", memory=m)
         plan.drop_current("no path", memory=m)
         self.assertEqual([(t["trigger"], t["op"]["op"]) for t in m.strategist_signals], [("goal_done", "wait"), ("goal_failed", "explore_area")])
@@ -152,7 +152,7 @@ class AnswerTest(unittest.TestCase):
 
     def test_prompt_has_whole_plan_and_every_clue(self):
         kb = SimpleNamespace(lock=threading.Lock(), clues=[{"kind": "sign", "text": f"clue {i}"} for i in range(20)])
-        plan = Plan([{"op": "wait", "seconds": 0}, {"op": "explore_area", "x": 3, "y": 4, "radius": 5}], dict(PARAM_DEFAULTS))
+        plan = Plan([{"op": "wait", "seconds": 0, "why": "test"}, {"op": "explore_area", "x": 3, "y": 4, "radius": 5}], dict(PARAM_DEFAULTS))
         messages = build_prompt(
             triggers=[{"trigger": "clue", "text": "torch"}],
             w=WorldModel(character_id=1, map_id=1, pos=(2, 3), tick=5),
@@ -190,7 +190,7 @@ class ParamsTest(unittest.TestCase):
         self.assertEqual(logged_events(r), ["ask", "kept"])
 
     def test_params_apply_while_directives_own_stack(self):
-        reply = {"goals": [{"op": "wait", "seconds": 1}], "params": {"retreat_hits": 3}}
+        reply = {"goals": [{"op": "wait", "seconds": 1, "why": "test"}], "params": {"retreat_hits": 3}}
         s, r = make(FakeLLM(reply)), fake_runner(goals=["gather_gems:5"])
         queue_signal(r.mem, {"trigger": "death"})
         round_trip(s, r)
@@ -198,7 +198,7 @@ class ParamsTest(unittest.TestCase):
         self.assertEqual(r.plan.params["retreat_hits"], 3)
 
     def test_params_carry_into_a_replaced_stack(self):
-        reply = {"goals": [{"op": "wait", "seconds": 1}], "params": {"retreat_hits": 3}}
+        reply = {"goals": [{"op": "wait", "seconds": 1, "why": "test"}], "params": {"retreat_hits": 3}}
         s, r = make(FakeLLM(reply)), fake_runner()
         queue_signal(r.mem, {"trigger": "death"})
         round_trip(s, r)

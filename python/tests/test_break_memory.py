@@ -23,11 +23,8 @@ from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
-from agentrealm_agent.door_look import approach_pos, look_key
-from agentrealm_agent.knowledge_maps import sync_tiles
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import grid_params
-from agentrealm_agent.pathing import replan as path_replan
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
@@ -356,56 +353,46 @@ class BreakRearmTest(unittest.TestCase):
         self.ctx.plan = plan
         return plan
 
-    def test_acting_on_the_plan_op_clears_its_stall(self):
-        # Break, not plan pathing, makes progress on `break_block` (A34 stall rule, A36).
+    def test_a_use_try_on_the_plan_op_keeps_its_stall(self):
+        # A Use that has not opened the block yet is a try, not progress (A34):
+        # a refused or ineffective one cannot pin the stack.
         self.att.level = nav_stuck.WALK
         plan = self.stalled_plan()
-        out = BreakState().act(self.r.world, self.ctx)
+        out = dispatch(self.r.world, self.ctx)
+        self.assertEqual(out.state, "Break")
         self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
+        self.assertFalse(out.progress)
+        self.assertEqual(plan.stalled_since_tick, 0)
+        self.assertEqual(plan.acted, plan.current())  # acted on (A36), just not progress
+
+    def test_walking_to_the_plan_op_clears_its_stall(self):
+        self.att.level = nav_stuck.WALK
+        w = self.r.world
+        w.pos = (0, 0)
+        w.view.tiles[(2, 0)] = "dirt"
+        w.view.tiles[(4, 0)] = "bush"
+        plan = Plan([{"op": "break_block", "x": 4, "y": 0, "capability": "smash"}], dict(PARAM_DEFAULTS))
+        plan.stalled_since_tick = 0
+        self.ctx.plan = plan
+        out = dispatch(w, self.ctx)
+        self.assertEqual(out.state, "Break")
+        self.assertEqual(out.intents[-1], {"verb": "SetPosition", "x": 1, "y": 0})
         self.assertIsNone(plan.stalled_since_tick)
         self.assertEqual(plan.acted, plan.current())
 
-    def test_a_reflex_in_break_keeps_the_stall(self):
+    def test_a_reflex_keeps_the_stall(self):
+        self.att.level = nav_stuck.WALK
         w = self.r.world
         w.entities = [Entity("supply", 77, (0, 0), "bronze_sword")]
         self.ctx.policy = Policy(kind="scripted", goals=["hold"], pickup=True)
         plan = self.stalled_plan()
-        out = BreakState().act(w, self.ctx)
-        self.assertTrue(out.intents)
-        self.assertNotEqual(out.reason, "break smash @ (2, 0)", "the pickup reflex took the round")
+        out = dispatch(w, self.ctx)
+        self.assertEqual(out.state, "Pickup", "the pickup reflex took the round")
         self.assertEqual(plan.stalled_since_tick, 0)
         self.assertIsNone(plan.acted)
-        # So the stall still runs out on time and plan pathing drops the op.
+        # The Use tries that follow are no progress either, so the stall runs out on time.
+        w.entities = []
         w.tick = PLAN_STALL_SECONDS * plan.tick_hz
         with self.assertLogs("agentrealm_agent.plan", "WARNING"):
-            path_replan(w, self.r.mem, self.ctx.policy, random.Random(0), set(), set(), plan=plan)
+            dispatch(w, self.ctx)
         self.assertIsNone(plan.current())
-
-    def test_the_goto_stuck_break_keeps_the_plan_ops_stall(self):
-        # While the goto is owed, Break opens the goto's own stuck target, not the plan op (A58).
-        self.ctx.policy = Policy(kind="scripted", goals=["goto"], goto=(4, 0), pickup=False)
-        plan = self.stalled_plan()
-        out = BreakState().act(self.r.world, self.ctx)
-        self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
-        self.assertEqual(plan.stalled_since_tick, 0)
-        self.assertIsNone(plan.acted)
-
-
-class InvestigateYieldsToBreakTest(unittest.TestCase):
-    def test_stuck_door_look_reaches_break(self):
-        # Investigate's walk to look at a door hits step 2: it yields, Break swings.
-        w = _sword_world(["....b.", "......"], at=(5, 0))
-        kb = KnowledgeBase.empty("sandbox")
-        sync_tiles(kb, 7, {(0, 0): "framed_door"})
-        w.view.tiles[(0, 0)] = "framed_door"
-        stand = approach_pos(w, (0, 0))
-        m = Memory()
-        att = nav_stuck.track(m, w, look_key(7, (0, 0)), stand)
-        att.level = nav_stuck.BREAK
-        att.break_x, att.break_y, att.break_cap = 4, 0, "cut"
-        c = PlayContext(m, Policy(kind="scripted", goals=["hold"], pickup=False), random.Random(0), knowledge=kb)
-        out = dispatch(w, c)
-        self.assertTrue(any(y.startswith("Investigate:") and y.endswith("stuck: break") for y in out.yielded), out)
-        self.assertEqual(out.state, "Break", out.reason)
-        self.assertEqual(out.intents, [arm(5), use_block((4, 0))])
-        self.assertEqual(m.investigate_rejections, {}, "a step-2 yield is not a refusal")

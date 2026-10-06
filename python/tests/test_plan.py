@@ -13,9 +13,10 @@ from agentrealm_agent import config
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
-from agentrealm_agent.pathing import note_goto_reached, path_for_plan_op, replan
+from agentrealm_agent.pathing import note_goto_reached, path_for_plan_op, path_owned_by, replan
 from agentrealm_agent.plan import (
     EXPLORE_ANYWHERE,
+    MAX_WAIT_SECONDS,
     PLAN_STALL_SECONDS,
     Plan,
     apply_strategist_params,
@@ -27,7 +28,7 @@ from agentrealm_agent.plan import (
     validate_goal_op,
 )
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.states.explore import scripted_outcome
+from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.world import Entity, WorldModel
 from tests.test_cost_grid import grid
 from tests.test_runner import FakeClient
@@ -36,6 +37,12 @@ from tests.test_runner import FakeClient
 def open_world() -> WorldModel:
     """A 4x4 dirt patch at (0, 0) with fog around it."""
     return grid(["....", "....", "....", "...."], at=(0, 0))
+
+
+def run(w: WorldModel, m: Memory, plan: Plan | None, policy: Policy | None = None, knowledge=None):
+    """One decision through the state machine with ``plan``."""
+    pol = policy if policy is not None else Policy(kind="scripted")
+    return dispatch(w, PlayContext(m, pol, random.Random(0), knowledge=knowledge, plan=plan))
 
 
 class ValidateOpTest(unittest.TestCase):
@@ -61,6 +68,19 @@ class ValidateOpTest(unittest.TestCase):
     def test_set_param_rejects_never_attack(self):
         self.assertIsNone(validate_goal_op({"op": "set_param", "name": "never_attack", "value": 1}))
 
+    def test_wait_needs_a_reason_and_a_short_time(self):
+        ok = {"op": "wait", "seconds": MAX_WAIT_SECONDS, "why": "let the guard pass"}
+        self.assertEqual(validate_goal_op(ok), ok)
+        self.assertIsNone(validate_goal_op({"op": "wait", "seconds": 5}))
+        self.assertIsNone(validate_goal_op({"op": "wait", "seconds": 5, "why": ""}))
+        self.assertIsNone(validate_goal_op({"op": "wait", "seconds": MAX_WAIT_SECONDS + 1, "why": "x"}))
+        self.assertIsNone(validate_goal_op({"op": "wait", "seconds": -1, "why": "x"}))
+
+    def test_equip_code_is_optional(self):
+        self.assertEqual(validate_goal_op({"op": "equip"}), {"op": "equip"})
+        self.assertIsNotNone(validate_goal_op({"op": "equip", "code": "bronze_sword"}))
+        self.assertIsNone(validate_goal_op({"op": "equip", "code": ""}))
+
 
 class DirectivesGoalsTest(unittest.TestCase):
     def test_shorthand(self):
@@ -72,12 +92,15 @@ class DirectivesGoalsTest(unittest.TestCase):
     def test_bad_shorthand_ignored(self):
         self.assertEqual(parse_directives_goals(["not-an-op"]), [])
 
-    def test_travel_goals_are_left_to_travel(self):
-        with self.assertNoLogs("agentrealm_agent.plan", level="WARNING"):
-            self.assertEqual(parse_directives_goals(["travel:town", "travel:point:3:4"]), [])
-            self.assertIsNone(Plan.from_directives(directive_goals=["travel:shop"], directive_params=dict(PARAM_DEFAULTS)))
-        plan = Plan.from_directives(directive_goals=["travel:town", "buy:torch"], directive_params=dict(PARAM_DEFAULTS))
-        self.assertEqual(plan.goals, [{"op": "buy", "code": "torch"}])
+    def test_travel_goals_become_travel_ops(self):
+        self.assertEqual(
+            parse_directives_goals(["travel:town", "travel:point:3:4"]),
+            [{"op": "travel", "to": "town", "x": 0, "y": 0}, {"op": "travel", "to": "point", "x": 3, "y": 4}],
+        )
+        plan = Plan.from_directives(directive_goals=["travel:shop", "buy:torch"], directive_params=dict(PARAM_DEFAULTS))
+        self.assertEqual(
+            plan.goals, [{"op": "travel", "to": "shop", "x": 0, "y": 0}, {"op": "buy", "code": "torch"}]
+        )
 
 
 class ParamLimitsTest(unittest.TestCase):
@@ -108,7 +131,7 @@ class GoalStackTest(unittest.TestCase):
     def test_set_param_runs_when_reached(self):
         floor = dict(PARAM_DEFAULTS)
         plan = Plan(
-            [{"op": "set_param", "name": "curiosity", "value": 0.0}, {"op": "wait", "seconds": 0}],
+            [{"op": "set_param", "name": "curiosity", "value": 0.0}, {"op": "wait", "seconds": 0, "why": "t"}],
             dict(floor),
             floor_params=floor,
         )
@@ -118,21 +141,25 @@ class GoalStackTest(unittest.TestCase):
         self.assertIsNone(plan.current())
 
     def test_buy_stays_on_stack_for_shop(self):
+        # No shop known: Shop sends nothing, the safe default moves, and the
+        # op stays on top while its stall clock runs.
         plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
         m = Memory()
-        replan(open_world(), m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
-               set(), set(), plan=plan)
+        out = run(open_world(), m, plan)
         self.assertEqual(plan.current(), {"op": "buy", "code": "torch"})
-        self.assertEqual(m.goal, "explore")
+        self.assertEqual((out.state, m.goal), ("Explore", "explore"))
+        self.assertIsNotNone(plan.stalled_since_tick)
 
-    def test_travel_to_an_unpathed_destination_is_dropped_at_once(self):
-        plan = Plan([{"op": "travel", "to": "hunting_ground", "x": 1, "y": 1}], dict(PARAM_DEFAULTS))
-        m = Memory()
+    def test_ops_without_an_executor_are_dropped(self):
+        plan = Plan(
+            [{"op": "hunt", "npc_type": "rat"}, {"op": "avoid", "npc_type": "rat"},
+             {"op": "travel", "to": "point", "x": 3, "y": 0}],
+            dict(PARAM_DEFAULTS),
+        )
         with self.assertLogs("agentrealm_agent.plan", "WARNING"):
-            replan(open_world(), m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
-                   set(), set(), plan=plan)
-        self.assertIsNone(plan.current())
-        self.assertEqual(m.goal, "explore")
+            out = run(open_world(), Memory(), plan)
+        self.assertEqual(plan.current()["op"], "travel")
+        self.assertEqual(out.state, "Travel")
 
     def test_travel_shop_paths_to_a_known_cell(self):
         from agentrealm_agent.knowledge_base import KnowledgeBase
@@ -142,10 +169,10 @@ class GoalStackTest(unittest.TestCase):
         record_shop_cell(kb, 1, (3, 0))
         plan = Plan([{"op": "travel", "to": "shop", "x": 0, "y": 0}], dict(PARAM_DEFAULTS))
         m = Memory()
-        w = grid(["...."], at=(0, 0))
-        replan(w, m, Policy(kind="scripted", goals=["explore"]), random.Random(0), set(), set(), plan=plan, knowledge=kb)
+        out = run(grid(["...."], at=(0, 0)), m, plan, knowledge=kb)
+        self.assertEqual(out.state, "Travel")
         self.assertEqual(plan.current()["op"], "travel")
-        self.assertEqual(m.goal, "plan_shop")
+        self.assertEqual(m.goal, "travel:shop")
         self.assertEqual(m.path[-1], (3, 0))
 
     def test_travel_shop_pops_at_a_bought_out_known_cell(self):
@@ -157,55 +184,53 @@ class GoalStackTest(unittest.TestCase):
         for x, y in ((0, 0), (3, 0)):
             with self.subTest(target=(x, y)):
                 plan = Plan([{"op": "travel", "to": "shop", "x": x, "y": y}], dict(PARAM_DEFAULTS))
-                w = grid(["...."], at=(3, 0))
-                replan(w, Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0),
-                       set(), set(), plan=plan, knowledge=kb)
+                run(grid(["...."], at=(3, 0)), Memory(), plan, knowledge=kb)
                 self.assertIsNone(plan.current())
                 self.assertIsNone(plan.stalled_since_tick)
 
     def test_unpathable_op_is_dropped_after_the_stall_timeout(self):
         # Walled in: (9, 9) is never reachable, so the op must not hold the stack forever.
         w = grid(["###", "#.#", "###"], at=(1, 1))
-        plan = Plan([{"op": "travel", "to": "point", "x": 9, "y": 9}, {"op": "wait", "seconds": 5}],
+        plan = Plan([{"op": "travel", "to": "point", "x": 9, "y": 9}, {"op": "wait", "seconds": 5, "why": "t"}],
                     dict(PARAM_DEFAULTS), tick_hz=10)
-        pol = Policy(kind="scripted", goals=["hold"])
+        m = Memory()
         w.tick = 100
-        replan(w, Memory(), pol, random.Random(0), set(), set(), plan=plan)
+        run(w, m, plan)
         self.assertEqual(plan.current()["op"], "travel", "not dropped on the first miss")
         w.tick = 100 + PLAN_STALL_SECONDS * 10 - 1
-        replan(w, Memory(), pol, random.Random(0), set(), set(), plan=plan)
+        run(w, m, plan)
         self.assertEqual(plan.current()["op"], "travel")
         w.tick += 1
         with self.assertLogs("agentrealm_agent.plan", "WARNING"):
-            replan(w, Memory(), pol, random.Random(0), set(), set(), plan=plan)
+            run(w, m, plan)
         self.assertEqual(plan.current()["op"], "wait")
 
-    def test_moving_for_policy_goals_is_not_acting_on_a_stalled_op(self):
-        # A36: Explore walks for `policy.goals` while the head op has no path,
-        # so the round did not act on the op.
+    def test_safe_default_moving_is_not_acting_on_a_stalled_op(self):
+        # A36: the safe default moves while the head op has no path, so the
+        # round did not act on the op.
         w = grid(["###", "#.#", "###"], at=(1, 1))
         plan = Plan([{"op": "travel", "to": "point", "x": 9, "y": 9}], dict(PARAM_DEFAULTS))
-        replan(w, Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0), set(), set(), plan=plan)
+        run(w, Memory(), plan)
         self.assertIsNotNone(plan.stalled_since_tick)
         self.assertIsNone(plan.acted)
-        w2 = open_world()
         plan2 = Plan([{"op": "travel", "to": "point", "x": 3, "y": 3}], dict(PARAM_DEFAULTS))
-        replan(w2, Memory(), Policy(kind="scripted", goals=[]), random.Random(0), set(), set(), plan=plan2)
-        self.assertEqual(plan2.acted, plan2.current(), "a path for the op is acting on it")
+        run(open_world(), Memory(), plan2)
+        self.assertEqual(plan2.acted, plan2.current(), "a step toward the op is acting on it")
 
-    def test_break_block_waits_for_break_then_stalls_out(self):
-        # Break owns `break_block`: plan pathing leaves it on the stack (A36)
+    def test_break_block_is_left_to_break_then_stalls_out(self):
+        # Break owns `break_block`: dispatch leaves it on the stack (A36)
         # until it has stalled as long as any other op.
         w = open_world()
         brk = {"op": "break_block", "x": 3, "y": 3, "capability": "burn"}
-        plan = Plan([brk, {"op": "wait", "seconds": 5}], dict(PARAM_DEFAULTS), tick_hz=10)
-        pol = Policy(kind="scripted", goals=["hold"])
+        plan = Plan([brk, {"op": "wait", "seconds": 5, "why": "t"}], dict(PARAM_DEFAULTS), tick_hz=10)
+        m = Memory()
         w.tick = 100
-        replan(w, Memory(), pol, random.Random(0), set(), set(), plan=plan)
+        out = run(w, m, plan)
         self.assertEqual(plan.current(), brk, "not dropped for want of a state")
+        self.assertNotEqual(out.state, "Break", "nothing to burn with: Break sends nothing")
         w.tick = 100 + PLAN_STALL_SECONDS * 10
         with self.assertLogs("agentrealm_agent.plan", "WARNING"):
-            replan(w, Memory(), pol, random.Random(0), set(), set(), plan=plan)
+            run(w, m, plan)
         self.assertEqual(plan.current()["op"], "wait")
 
     def test_break_block_done_once_the_block_changes(self):
@@ -218,14 +243,14 @@ class GoalStackTest(unittest.TestCase):
         plan.advance(w)
         self.assertIsNone(plan.current())
 
-    def test_a_found_path_resets_the_stall_clock(self):
+    def test_a_step_toward_the_op_resets_the_stall_clock(self):
         w = open_world()
         plan = Plan([{"op": "travel", "to": "point", "x": 3, "y": 3}], dict(PARAM_DEFAULTS))
         plan.stalled_since_tick = 0
         w.tick = 5
         m = Memory()
-        replan(w, m, Policy(kind="scripted", goals=[]), random.Random(0), set(), set(), plan=plan)
-        self.assertEqual(m.goal, "plan_travel")
+        run(w, m, plan)
+        self.assertEqual(m.goal, "travel:point")
         self.assertIsNone(plan.stalled_since_tick)
 
 
@@ -249,9 +274,26 @@ class BuiltinPlanTest(unittest.TestCase):
         plan = Plan.from_policy(pol, dict(PARAM_DEFAULTS))
         w = open_world()
         m = Memory()
-        replan(w, m, pol, random.Random(0), set(), set(), plan=plan)
+        out = run(w, m, plan, pol)
+        self.assertEqual(out.state, "Explore")
         self.assertEqual(plan.current()["op"], "explore_area", "not popped while frontier remains")
         self.assertEqual(m.goal, "explore_area")
+        self.assertEqual(m.goal_op, plan.current())
+        self.assertIn(m.path[-1], w.view.frontier())
+
+    def test_builtin_goto_is_walked_by_travel(self):
+        pol = Policy(kind="scripted", goals=["goto"], goto=(3, 0))
+        plan = Plan.from_policy(pol, dict(PARAM_DEFAULTS))
+        m = Memory()
+        out = run(open_world(), m, plan, pol)
+        self.assertEqual(out.state, "Travel")
+        self.assertEqual((m.goal, m.path[-1]), ("travel:point", (3, 0)))
+
+    def test_replan_without_op_is_the_safe_default(self):
+        w = open_world()
+        m = Memory()
+        self.assertIsNone(replan(w, m, Policy(kind="scripted"), set(), set()))
+        self.assertEqual((m.goal, m.goal_op), ("explore", None))
         self.assertIn(m.path[-1], w.view.frontier())
 
     def test_all_invalid_directive_goals_fall_back_with_a_log(self):
@@ -273,10 +315,16 @@ class JsonPlanTest(unittest.TestCase):
         self.assertEqual(params["fight_margin"], 2.0)
 
     def test_load_plan_json(self):
-        text = json.dumps({"goals": [{"op": "wait", "seconds": 0}], "notes": "n"})
+        text = json.dumps({"goals": [{"op": "wait", "seconds": 0, "why": "t"}], "notes": "n"})
         plan = load_plan_json(text, floor_params=dict(PARAM_DEFAULTS))
         self.assertEqual(plan.notes, "n")
         self.assertEqual(plan.current()["op"], "wait")
+
+    def test_load_plan_json_drops_a_wait_without_a_reason(self):
+        text = json.dumps({"goals": [{"op": "wait", "seconds": 5}]})
+        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+            plan = load_plan_json(text, floor_params=dict(PARAM_DEFAULTS))
+        self.assertIsNone(plan.current())
 
 
 class GoalDoneTest(unittest.TestCase):
@@ -318,7 +366,7 @@ class GoalDoneTest(unittest.TestCase):
         self.assertFalse(goal_done(near, open_world(), plan))
 
     def test_wait_counts_seconds_at_the_world_tick_rate(self):
-        op = {"op": "wait", "seconds": 2}
+        op = {"op": "wait", "seconds": 2, "why": "t"}
         plan = Plan([op], dict(PARAM_DEFAULTS), tick_hz=4)
         w = WorldModel(character_id=1, map_id=1, pos=(0, 0))
         w.tick = 10
@@ -334,63 +382,69 @@ class GoalDoneTest(unittest.TestCase):
         self.assertIsNone(plan.current())
 
 
-class ScriptedOutcomeTest(unittest.TestCase):
+class ExecutorTest(unittest.TestCase):
     def test_plan_wait_holds_without_moving(self):
         w = open_world()
         w.tick = 7
-        plan = Plan([{"op": "wait", "seconds": 1}], dict(PARAM_DEFAULTS), tick_hz=10)
+        plan = Plan([{"op": "wait", "seconds": 1, "why": "let the gate open"}], dict(PARAM_DEFAULTS), tick_hz=10)
         m = Memory()
-        out = scripted_outcome(w, m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
-                               never_attack=[], plan=plan)
+        out = run(w, m, plan)
+        self.assertEqual(out.state, "Wait")
         self.assertIsNone(out.intents)
-        self.assertEqual(out.reason, "plan wait")
+        self.assertTrue(out.wait)
+        self.assertEqual(out.reason, "plan wait: let the gate open")
         self.assertEqual((plan.wait_started_tick, m.path), (7, []))
+        self.assertIsNone(plan.stalled_since_tick, "holding for its own op is not a stall")
         w.tick = 17
-        out = scripted_outcome(w, m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
-                               never_attack=[], plan=plan)
+        out = run(w, m, plan)
         self.assertIsNone(plan.current(), "wait done after its seconds")
-        self.assertIsNotNone(out.intents, "falls back to policy goals")
+        self.assertEqual(out.state, "Explore")
+        self.assertIsNotNone(out.intents, "the safe default moves")
 
     def test_stale_path_does_not_override_the_plan_head(self):
         w = open_world()
         plan = Plan([{"op": "travel", "to": "point", "x": 0, "y": 3}], dict(PARAM_DEFAULTS))
         m = Memory()
         m.path, m.goal = [(1, 0)], "explore"
-        out = scripted_outcome(w, m, Policy(kind="scripted", goals=["explore"]), random.Random(0),
-                               never_attack=[], plan=plan)
-        self.assertEqual(m.goal, "plan_travel")
+        out = run(w, m, plan)
+        self.assertEqual(m.goal, "travel:point")
         self.assertEqual(m.path[-1], (0, 3))
         self.assertNotEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 0), "stale explore step not taken")
 
     def test_same_kind_head_swap_replans(self):
+        # A new stack (strategist, directives reload) clears the walk, as the runner does.
         w = open_world()
-        pol = Policy(kind="scripted")
-        old = Plan([{"op": "travel", "to": "point", "x": 3, "y": 0}], dict(PARAM_DEFAULTS))
         m = Memory()
-        scripted_outcome(w, m, pol, random.Random(0), never_attack=[], plan=old)
-        self.assertEqual((m.goal, m.path[-1]), ("plan_travel", (3, 0)))
+        old = Plan([{"op": "travel", "to": "point", "x": 3, "y": 0}], dict(PARAM_DEFAULTS))
+        run(w, m, old)
+        self.assertEqual((m.goal, m.path[-1]), ("travel:point", (3, 0)))
+        m.path, m.goal, m.goal_op = [], "", None
         new = Plan([{"op": "travel", "to": "point", "x": 0, "y": 3}], dict(PARAM_DEFAULTS))
-        out = scripted_outcome(w, m, pol, random.Random(0), never_attack=[], plan=new)
-        self.assertEqual(m.path[-1], (0, 3), "path toward the old head's target is dropped")
+        out = run(w, m, new)
+        self.assertEqual(m.path[-1], (0, 3))
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), m.path[0])
 
-
-    def test_stalled_head_keeps_the_wander_step(self):
+    def test_dropped_travel_op_path_does_not_drive_the_next_one(self):
         w = open_world()
-        pol = Policy(kind="scripted", goals=["wander"])
-        plan = Plan([{"op": "travel", "to": "town", "x": 0, "y": 0}], dict(PARAM_DEFAULTS))
         m = Memory()
-        rng = random.Random(0)
-        first = scripted_outcome(w, m, pol, rng, never_attack=[], plan=plan)
-        self.assertIsNotNone(plan.stalled_since_tick, "no town known: the head stalls")
-        self.assertEqual(m.goal, "wander")
-        steps = {(first.intents[0]["x"], first.intents[0]["y"])}
-        for tick in range(1, 6):
-            w.tick = tick
-            out = scripted_outcome(w, m, pol, rng, never_attack=[], plan=plan)
-            steps.add((out.intents[0]["x"], out.intents[0]["y"]))
-        self.assertEqual(len(steps), 1, "wander is not re-rolled while the head stalls")
-        self.assertEqual(plan.current()["to"], "town", "still within the stall window")
+        plan = Plan([{"op": "travel", "to": "point", "x": 3, "y": 0},
+                     {"op": "travel", "to": "point", "x": 0, "y": 3}], dict(PARAM_DEFAULTS))
+        run(w, m, plan)
+        plan.drop_current("test")
+        out = run(w, m, plan)
+        self.assertEqual(m.path[-1], (0, 3), "path toward the dropped op's target is not walked")
+        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), m.path[0])
+
+    def test_explore_area_head_swap_replans(self):
+        w = grid(["........", "........", "........", "........"], at=(3, 0))
+        m = Memory()
+        old = Plan([{"op": "explore_area", "x": 7, "y": 0, "radius": 1}], dict(PARAM_DEFAULTS))
+        run(w, m, old)
+        self.assertEqual(m.goal_op, old.current())
+        new_op = {"op": "explore_area", "x": 0, "y": 3, "radius": 1}
+        run(w, m, Plan([new_op], dict(PARAM_DEFAULTS)))
+        self.assertEqual(m.goal_op, new_op, "a path for the old op does not keep driving movement")
+        self.assertLessEqual(max(abs(m.path[-1][0]), abs(m.path[-1][1] - 3)), 1)
 
 
 class PathForPlanOpTest(unittest.TestCase):
@@ -400,20 +454,24 @@ class PathForPlanOpTest(unittest.TestCase):
         self.assertEqual(label, "explore_area")
         self.assertLessEqual(max(abs(path[-1][0] - 3), abs(path[-1][1])), 1)
 
-    def test_travel_point_and_town(self):
-        w = open_world()
-        pol = Policy(kind="scripted")
-        path, label, _ = path_for_plan_op({"op": "travel", "to": "point", "x": 3, "y": 2}, w, Memory(), pol,
-                                       set(), set(), None)
-        self.assertEqual((path[-1], label), ((3, 2), "plan_travel"))
-        town = {"op": "travel", "to": "town", "x": 0, "y": 0}
-        self.assertIsNone(path_for_plan_op(town, w, Memory(), pol, set(), set(), None), "no anchor known")
-        w.respawn_anchors.append((1, (2, 2)))
-        path, label, _ = path_for_plan_op(town, w, Memory(), pol, set(), set(), None)
-        self.assertEqual((path[-1], label), ((2, 2), "plan_town"))
+    def test_travel_ops_have_no_plan_path(self):
+        # Travel walks `travel` ops itself (A27).
+        op = {"op": "travel", "to": "point", "x": 3, "y": 2}
+        self.assertIsNone(path_for_plan_op(op, open_world(), Memory(), Policy(kind="scripted"), set(), set(), None))
+
+    def test_path_owned_by(self):
+        op = {"op": "explore_area", "x": 3, "y": 0, "radius": 1}
+        m = Memory()
+        m.goal, m.goal_op = "explore_area", dict(op)
+        self.assertTrue(path_owned_by(op, m))
+        self.assertFalse(path_owned_by({**op, "x": 0}, m), "same kind, other target")
+        self.assertFalse(path_owned_by(None, m))
+        m.goal, m.goal_op = "explore", None
+        self.assertTrue(path_owned_by(None, m), "the safe default's walk")
+        self.assertFalse(path_owned_by(op, m))
 
     def test_other_ops_have_no_path(self):
-        self.assertIsNone(path_for_plan_op({"op": "wait", "seconds": 1}, open_world(), Memory(),
+        self.assertIsNone(path_for_plan_op({"op": "wait", "seconds": 1, "why": "t"}, open_world(), Memory(),
                                            Policy(kind="scripted"), set(), set(), None))
 
     def test_compose_goal_done_when_whole_held(self):
@@ -464,7 +522,7 @@ class RunnerPlanTest(unittest.TestCase):
     def test_goals_reload_drops_the_current_path(self):
         r = self.runner('goals = ["buy:torch"]\n', ["explore"])
         op = {"op": "travel", "to": "point", "x": 3, "y": 0}
-        r.mem.path, r.mem.goal, r.mem.goal_op = [(1, 0), (2, 0), (3, 0)], "plan_travel", op
+        r.mem.path, r.mem.goal, r.mem.goal_op = [(1, 0), (2, 0), (3, 0)], "travel:point", op
         self.reload(r, 'goals = ["buy:torch"]\nparams = { risk = 0.3 }\n')
         self.assertEqual(r.mem.goal_op, op, "same goals: path kept")
         self.reload(r, 'goals = ["buy:lamp"]\n')
@@ -482,7 +540,7 @@ class RunnerPlanTest(unittest.TestCase):
         self.assertNotIn("travel", [o["op"] for o in r.plan.goals])
         self.assertEqual([o["op"] for o in r.plan.goals], ["explore_area"])
         r._decide(r.world, r.mem, plan=r.plan)
-        self.assertNotIn(r.mem.goal, ("goto", "plan_travel"), "no walk back")
+        self.assertNotEqual(r.mem.goal, "travel:point", "no walk back")
 
     def test_a_rebuilt_builtin_plan_keeps_an_unreached_goto(self):
         r = self.runner('goals = ["buy:torch"]\n', ["goto", "explore"])
@@ -492,7 +550,7 @@ class RunnerPlanTest(unittest.TestCase):
 
     def test_reflex_probe_leaves_the_plan_alone(self):
         r = self.runner("", ["explore"])
-        r.plan = Plan([{"op": "buy", "code": "torch"}, {"op": "wait", "seconds": 0}], dict(PARAM_DEFAULTS))
+        r.plan = Plan([{"op": "buy", "code": "torch"}, {"op": "wait", "seconds": 0, "why": "t"}], dict(PARAM_DEFAULTS))
         self.assertIsNone(r.reflex_while_held())
         self.assertEqual(r.plan.index, 0)
         self.assertIsNone(r.plan.stalled_since_tick)
@@ -501,7 +559,7 @@ class RunnerPlanTest(unittest.TestCase):
         r = self.runner("", ["explore"])
         r.world.tick = 40
         floor = dict(PARAM_DEFAULTS)
-        r.plan = Plan([{"op": "set_param", "name": "curiosity", "value": 0.0}, {"op": "wait", "seconds": 5}],
+        r.plan = Plan([{"op": "set_param", "name": "curiosity", "value": 0.0}, {"op": "wait", "seconds": 5, "why": "t"}],
                       dict(floor), floor_params=floor)
         self.assertIsNone(r.reflex_while_held())
         self.assertEqual((r.plan.index, r.plan.params), (0, floor))

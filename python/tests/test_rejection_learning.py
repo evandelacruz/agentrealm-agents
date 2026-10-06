@@ -11,6 +11,7 @@ from agentrealm_agent import config
 from agentrealm_agent import knowledge_base as kb_mod
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import CharacterConfig, Policy
+from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.navigation import CostGridParams, cost_path
 from agentrealm_agent.navigation.rejection import (
     OCCUPANT_LEARN_TICKS,
@@ -19,6 +20,7 @@ from agentrealm_agent.navigation.rejection import (
     navigation_avoid_costly,
     on_block_changed,
 )
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.world import Entity, WorldModel, ZoneFact
 from tests.test_cost_grid import grid
@@ -28,6 +30,10 @@ from tests.test_runner import FakeClient, rejected
 def scripted(**kw) -> Policy:
     kw.setdefault("pickup", False)
     return Policy(kind="scripted", **kw)
+
+
+def builtin_plan(policy: Policy) -> Plan:
+    return Plan.from_policy(policy, dict(PARAM_DEFAULTS))
 
 
 def target(d) -> tuple[int, int]:
@@ -70,7 +76,8 @@ class RejectionLearningTest(unittest.TestCase):
         w = grid(["...", "..."])
         w.maps[2] = w.maps.pop(1)
         w.map_id = w.terrain_map = 2
-        d = decide(w, m, scripted(goals=["goto"], goto=(2, 0)), random.Random(0), knowledge=self.kb)
+        policy = scripted(goals=["goto"], goto=(2, 0))
+        d = decide(w, m, policy, random.Random(0), knowledge=self.kb, plan=builtin_plan(policy))
         self.assertEqual(target(d), (1, 0), "a map-1 block does not stop a step on map 2")
 
     def test_block_occupied_waits_one_decision_then_costs_until_expiry(self):
@@ -80,7 +87,8 @@ class RejectionLearningTest(unittest.TestCase):
         learn_step_rejection(m, w, None, (1, 0), "block_occupied", 10)
         avoid, costly = navigation_avoid_costly(m.nav, None, 1, 10)
         self.assertEqual((avoid, costly), ({(1, 0)}, {(1, 0)}))
-        d = decide(w, m, scripted(goals=["goto"], goto=(2, 0)), random.Random(0))
+        policy = scripted(goals=["goto"], goto=(2, 0))
+        d = decide(w, m, policy, random.Random(0), plan=builtin_plan(policy))
         self.assertEqual(target(d), (1, 1), "routes round the occupied cell")
         avoid, costly = navigation_avoid_costly(m.nav, None, 1, 11)
         self.assertEqual((avoid, costly), (set(), {(1, 0)}))
@@ -106,7 +114,8 @@ class RejectionLearningTest(unittest.TestCase):
                 learn_step_rejection(m, w, None, (1, 0), code, 10)
                 self.assertEqual(m.nav.impassable, set())
                 self.assertEqual(m.nav.occupant_until, {})
-                d = decide(w, m, scripted(goals=["goto"], goto=(2, 0)), random.Random(0))
+                policy = scripted(goals=["goto"], goto=(2, 0))
+                d = decide(w, m, policy, random.Random(0), plan=builtin_plan(policy))
                 self.assertNotEqual(target(d), (1, 0))
                 self.assertEqual(navigation_avoid_costly(m.nav, None, 1, 10), (set(), set()))
 

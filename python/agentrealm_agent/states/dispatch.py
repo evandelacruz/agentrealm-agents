@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from ..navigation import oscillation
 from ..navigation.rejection import end_decision
+from ..pathing import note_goto_reached
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
 from .downed import DownedState
@@ -75,7 +76,8 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     unless it sets ``StateOutcome.wait``. Each call is one decision window:
     it ages what Step rejections taught the map (A14), and starts, ends or
     finishes the boss fight before any guard reads it (A38), and settles
-    a Shop purchase whose gems were spent (A21).
+    a Shop purchase whose gems were spent (A21). It also notes a policy
+    ``goto`` the agent stands on, which is then satisfied (A16).
 
     Before any state runs, the oscillation guard checks whether the character
     is pacing between two cells, whichever states are doing it, and if so
@@ -87,6 +89,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     yielded: list[str] = []
     if oscillation.check(m, world) is not None:
         yielded.append("oscillation: paced between two cells")
+    note_goto_reached(world, m, ctx.policy)
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
     try:

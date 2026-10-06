@@ -72,14 +72,14 @@ Intents: 430 `Step`, 1,097 `Wait`, 2 `Use`. Call mix: 337 `zone`, 185 `tick`, 44
 
    Suspects: `states/retreat.py:62–70` (one `set_position` step per decision, and the cost path weighs the chaser so it detours instead of taking the shortest way in); `states/flee.py:97–104` chose to fight at 8/10 with `cornered` or `wins` true against a hostile the knife never damaged. A retreat that is losing ground (gap to safety not shrinking, hits landing) has no fallback. Same gristlewick, same patch (around (401–413, 351–366)) as Walk run 4's death.
 
-2. **`travel:hunting_ground` never resolves on Olympuff, so the directive sends the character nowhere.** Zone reads carry no `strength_ceiling` (fields: tick, map_id, x, y, brightness, safe), and the knowledge base had no hunting cells, so `_resolve_hunting` has no candidates. Travel sent no move, the safe default explored, and plan stall dropped the pinned op at 37 s. The fight came from the planner's `explore_area` radius 40 running out of town, not from the directive.
+2. **`travel:hunting_ground` had nowhere to go: no hunting cell was known or read, and nothing goes looking for one.** `get_zone` returns `strength_ceiling` only for a hunting-ground cell (GAME_NOTES **Zone fields**, PLAN.md API table). This run read zones only in and around town (318 of 337 safe), and the knowledge base held no hunting cells, so `_resolve_hunting` had no candidates. Travel sent no move, the safe default explored, and plan stall dropped the pinned op at 37 s. The fight came from the planner's `explore_area` radius 40 running out of town, not from the directive. This run does not show whether Olympuff has hunting grounds or whether `get_zone` reports them; it is not a server gap.
 
    ```
    t=3956139 @76:383,377 tick  queue 10×Step 27×Wait (explore → (406, 375))
    plan: dropped op {'op': 'travel', 'to': 'hunting_ground', 'x': 0, 'y': 0}: Travel: no progress for 30s
    ```
 
-   Suspects: `travel/resolve.py:75–95` (only knowledge-base hunting cells and zone facts with a `strength_ceiling` count); nothing learns a hunting ground from where hostiles were seen. The repo has no working way to say "go where the hostiles are".
+   Suspects: `travel/resolve.py:75–95` resolves only from cells already known (knowledge-base hunting cells, zone facts with a `strength_ceiling`), and no state or zone probe searches for an unknown hunting ground, so a `hunting_ground` op with none known just stalls for 30 s and drops.
 
 3. **The planner's hurt reply was half rejected and half wrong.** At 3/10 the planner sent `travel to: town` without `x`/`y`; `plan.py:110–111` requires `x` and `y` for every travel op, although `town` takes none (`travel/ops.py:36`, and directives shorthand fills in 0, 0), so the op was dropped. That left `wait 30` on top, with the reason "hostiles cannot hurt in town" while the character stood 14 cells outside it with 217 adjacent. It also asked for `retreat_hits: 1` "to retreat sooner" again, rejected by `plan.py:456` (third run with that misreading).
 

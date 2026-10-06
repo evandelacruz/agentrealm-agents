@@ -57,18 +57,21 @@ def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
 
 
 def recently_attacked(w: WorldModel) -> bool:
-    """An Attacked or Damaged landed on us within ``THREAT_MEMORY_TICKS``."""
+    """A hostile hit us within ``THREAT_MEMORY_TICKS``: an ``Attacked``, or a
+    ``Damaged`` from an NPC or character. Traps and hazard ground do not count."""
     return w.attacked_tick is not None and w.tick - w.attacked_tick <= THREAT_MEMORY_TICKS
 
 
 def flee_from(w: WorldModel, policy: Policy) -> list[Entity]:
-    """The hostiles Flee runs from: those in range, or every one in view while recently attacked.
+    """The hostiles Flee runs from: those in range, or, with ``on_hostile = "flee"``,
+    every one in view while a hostile hit us recently.
 
     A pursuer that steps just past ``hostile_range`` between its hits is
-    still chasing us (A58 run 9).
+    still chasing us (A58 run 9). ``fight`` keeps its own rule: it flees only
+    a target in range it cannot beat or reach.
     """
     in_range = hostiles_in_range(w, policy)
-    if in_range or not recently_attacked(w):
+    if in_range or policy.on_hostile != "flee" or not recently_attacked(w):
         return in_range
     return [e for e in w.entities if e.kind in policy.hostile]
 

@@ -18,9 +18,10 @@ from .fight import can_engage, engage, fight_target
 from .intents import set_position
 from .retreat import retreat_step
 
-# Flee decisions the gap to the nearest hostile gets to grow before Flee
-# calls the escape failed (A9).
-FLEE_PROBE_STEPS = 3
+# Ticks the gap to the nearest hostile gets to grow before Flee calls the
+# escape failed (A9). Ticks, not decisions: under urgent polling Flee decides
+# every tick or two, and a step takes several ticks.
+FLEE_PROBE_TICKS = 30
 
 
 def _committed_step(w: WorldModel, m: Memory, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:
@@ -68,16 +69,16 @@ def flee_escape(
 
 
 def hit_while_fleeing(w: WorldModel, m: Memory) -> bool:
-    """Attacked or Damaged since Flee began."""
+    """A hostile hit us (``WorldModel.attacked_tick``) since Flee began."""
     return w.attacked_tick is not None and w.attacked_tick > m.flee_since
 
 
 def not_outrunning(w: WorldModel, m: Memory) -> bool:
-    """Fleeing is a death march: hit since Flee began, or the gap to the
-    nearest hostile has not grown over the last ``FLEE_PROBE_STEPS`` decisions (A9)."""
-    gaps = m.flee_gaps
-    stuck_gap = len(gaps) > FLEE_PROBE_STEPS and gaps[-1] <= gaps[-1 - FLEE_PROBE_STEPS]
-    return stuck_gap or hit_while_fleeing(w, m)
+    """Fleeing is a death march: a hostile hit us since Flee began, or the gap
+    to the nearest hostile has not grown over the last ``FLEE_PROBE_TICKS`` (A9)."""
+    tick, gap = m.flee_gaps[-1]
+    earlier = [g for t, g in m.flee_gaps if t <= tick - FLEE_PROBE_TICKS]
+    return bool(earlier and gap <= earlier[-1]) or hit_while_fleeing(w, m)
 
 
 def instead_of_fleeing(
@@ -145,7 +146,7 @@ class FleeState(State):
     stands still.
 
     Running must work: once a hostile hits us after Flee began, or the gap
-    to it has not grown over ``FLEE_PROBE_STEPS`` decisions, Flee fights back
+    to it has not grown over ``FLEE_PROBE_TICKS`` ticks, Flee fights back
     or retreats instead (``instead_of_fleeing``) until it stops (A9)."""
 
     name = "Flee"
@@ -165,7 +166,7 @@ class FleeState(State):
         blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
         if m.state != self.name:
             m.flee_gaps, m.flee_since, m.flee_failed = [], w.tick, False
-        m.flee_gaps.append(chebyshev(target.pos, w.pos))
+        m.flee_gaps.append((w.tick, chebyshev(target.pos, w.pos)))
         if m.flee_failed or not_outrunning(w, m):
             m.flee_failed = True
             instead = instead_of_fleeing(w, ctx, target, hostiles, blocked)

@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .threat import ThreatTable, absorb_damaged, damage_amount
+from .threat import ThreatTable, absorb_damaged, damage_amount, hostile_hit
 
 log = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class WorldModel:
     terrain_map: int | None = None
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
-    attacked_tick: int | None = None  # tick of the last Attacked or Damaged on us (A9)
+    attacked_tick: int | None = None  # tick of the last hostile hit on us: Attacked, or Damaged from an NPC or character (A9)
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
@@ -482,7 +482,7 @@ class WorldModel:
             for ev in group.get("events") or []:
                 flat.append(ev)
                 kind = ev.get("kind")
-                if kind in ("Attacked", "Damaged"):
+                if hostile_hit(ev):
                     self.attacked_tick = int(ev.get("tick", group["tick"]))
                 if kind == "Damaged":
                     amount = damage_amount(ev)

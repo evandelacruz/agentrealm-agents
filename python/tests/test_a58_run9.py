@@ -16,37 +16,42 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import config
-from agentrealm_agent.brain import choose_call
+from agentrealm_agent.brain import UNPLACED_SELF_REFRESH, choose_call
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.states.flee import FLEE_PROBE_STEPS
+from agentrealm_agent.states.flee import FLEE_PROBE_TICKS
 from agentrealm_agent.world import Entity, WorldModel, chebyshev
 from agentrealm_agent.zone_discovery import apply_zone
 
 SURVIVAL = {"Escape", "Retreat", "Heal", "Fight", "Flee"}
+STEP_TICKS = 4  # default movement_speed 2500: one step about every 4 ticks
+SWING_TICKS = 15  # survival.HOSTILE_ATTACK_INTERVAL_TICKS
 
 
 def world(at=(10, 10)) -> WorldModel:
     w = WorldModel(character_id=1, map_id=1, pos=at, perception=8, health=10, max_health=10, lives=9)
-    for x in range(-20, 41):
-        for y in range(-20, 41):
+    for x in range(-40, 61):
+        for y in range(-40, 61):
             w.view.tiles[(x, y)] = "dirt"
     w.terrain_center, w.terrain_map = at, 1
     return w
 
 
-def ctx() -> PlayContext:
-    policy = Policy(kind="scripted", goals=["explore"], on_hostile="flee", hostile=["npc"], pickup=True)
+def ctx(on_hostile: str = "flee") -> PlayContext:
+    policy = Policy(kind="scripted", goals=["explore"], on_hostile=on_hostile, hostile=["npc"], pickup=True)
     return PlayContext(Memory(), policy, random.Random(0), params=dict(PARAM_DEFAULTS))
 
 
-def hit(w: WorldModel, amount: int = 2) -> None:
+def hit(w: WorldModel, npc_id: int = 7, amount: int = 2) -> None:
     """The pursuer's swing lands this tick."""
-    w.apply_events([{"tick": w.tick, "events": [{"kind": "Attacked"}, {"kind": "Damaged", "amount": amount}]}])
+    w.apply_events([{"tick": w.tick, "events": [
+        {"kind": "Attacked"},
+        {"kind": "Damaged", "amount": amount, "source_kind": "npc", "source_id": npc_id},
+    ]}])
     w.health -= amount
 
 
@@ -59,36 +64,40 @@ def chase(w: WorldModel, npc: Entity) -> None:
         npc.pos = (nx, ny)
 
 
-def land(w: WorldModel, out) -> None:
-    w.tick += 10
-    if out.intents and out.intents[0]["verb"] == "SetPosition":
-        w.pos = (out.intents[0]["x"], out.intents[0]["y"])
-        w.terrain_center = w.pos
+def pursue(w: WorldModel, c: PlayContext, *, npc_every: int, ticks: int = 80, start_gap: int = 1, swings: bool = True):
+    """Live cadence under threat: one decision per tick (urgent polling), our
+    step lands every ``STEP_TICKS``, the NPC steps toward us every
+    ``npc_every`` ticks and swings every ``SWING_TICKS`` while adjacent.
+    Returns (tick, outcome) per decision; the NPC opens with a hit."""
+    npc = Entity("npc", 7, (w.pos[0] + start_gap, w.pos[1]), code="pursuer")
+    w.entities = [npc]
+    hit(w)
+    last_move = last_swing = w.tick
+    outs = []
+    for _ in range(ticks):
+        w.tick += 1
+        out = dispatch(w, c)
+        outs.append((w.tick, out))
+        if out.intents and out.intents[0]["verb"] == "SetPosition" and w.tick - last_move >= STEP_TICKS:
+            w.pos = w.terrain_center = (out.intents[0]["x"], out.intents[0]["y"])
+            last_move = w.tick
+        if w.tick % npc_every == 0:
+            chase(w, npc)
+        if swings and chebyshev(npc.pos, w.pos) <= 1 and w.tick - last_swing >= SWING_TICKS:
+            hit(w)
+            last_swing = w.tick
+    return outs
 
 
 class PursuerNotOutrunTest(unittest.TestCase):
     """Flee is not a death march: a pursuer that keeps pace makes it fight or retreat."""
-
-    def _pursue(self, w: WorldModel, c: PlayContext, decisions: int = 8) -> list:
-        npc = Entity("npc", 7, (w.pos[0] + 1, w.pos[1]), code="pursuer")
-        w.entities = [npc]
-        hit(w)
-        outs = []
-        for _ in range(decisions):
-            out = dispatch(w, c)
-            outs.append(out)
-            land(w, out)
-            chase(w, npc)
-            if chebyshev(npc.pos, w.pos) <= 1:
-                hit(w)
-        return outs
 
     def test_no_safe_tile_known_fights_back(self):
         """Even a fight the estimate says we lose: running and retreating both failed."""
         w, c = world(), ctx()
         w.health = w.max_health = 100
         c.params["risk"] = 0.0
-        outs = self._pursue(w, c)
+        outs = [o for _, o in pursue(w, c, npc_every=STEP_TICKS)]
         verbs = [o.intents[0]["verb"] for o in outs if o.intents]
         self.assertIn("Use", verbs, [o.reason for o in outs])
         self.assertTrue(all(o.state in SURVIVAL for o in outs), [o.state for o in outs])
@@ -97,47 +106,53 @@ class PursuerNotOutrunTest(unittest.TestCase):
         w, c = world(), ctx()
         w.health = w.max_health = 100  # healthy: Retreat's own health rule stays quiet
         c.params["risk"] = 0.0  # cautious: an unmeasured pursuer is one we would lose to
-        apply_zone(w, 1, 4, 4, {"safe": True})
-        outs = self._pursue(w, c)
-        reasons = [o.reason for o in outs]
-        self.assertTrue(any("retreat → safe (4, 4)" in r for r in reasons), reasons)
+        apply_zone(w, 1, -20, -20, {"safe": True})
+        reasons = [o.reason for _, o in pursue(w, c, npc_every=STEP_TICKS)]
+        self.assertTrue(any("retreat → safe (-20, -20)" in r for r in reasons), reasons)
 
     def test_a_pursuer_we_beat_is_fought_even_with_a_safe_tile_known(self):
         w, c = world(), ctx()
         w.health = w.max_health = 100
         c.params["risk"] = 1.0  # bold: the win estimate decides
-        apply_zone(w, 1, 4, 4, {"safe": True})
-        reasons = [o.reason for o in self._pursue(w, c)]
-        self.assertEqual(reasons[1], "not outrunning npc 7: fight npc 7", "the first hit after Flee began ends the run")
+        apply_zone(w, 1, -20, -20, {"safe": True})
+        reasons = [o.reason for _, o in pursue(w, c, npc_every=STEP_TICKS)]
+        given_up = [r for r in reasons if r.startswith("not outrunning")]
+        self.assertTrue(given_up, reasons)
+        self.assertEqual(given_up[0], "not outrunning npc 7: fight npc 7")
         self.assertFalse(any("retreat" in r for r in reasons), reasons)
 
     def test_a_pursuer_keeping_pace_without_hitting_is_fought_once_the_gap_stalls(self):
         w, c = world(), ctx()
         w.health = w.max_health = 100
         c.params["risk"] = 1.0
-        npc = Entity("npc", 7, (11, 10), code="pacer")
-        w.entities = [npc]
-        hit(w)
-        reasons = []
-        for _ in range(6):
-            out = dispatch(w, c)
-            reasons.append(out.reason)
-            land(w, out)
-            chase(w, npc)
-        self.assertEqual(reasons[:FLEE_PROBE_STEPS], ["flee npc 7"] * FLEE_PROBE_STEPS, reasons)
-        self.assertTrue(reasons[FLEE_PROBE_STEPS].startswith("not outrunning npc 7:"), reasons)
+        start = w.tick
+        outs = pursue(w, c, npc_every=STEP_TICKS, start_gap=2, swings=False)
+        early = [o.reason for t, o in outs if t - start <= FLEE_PROBE_TICKS]
+        self.assertEqual(set(early), {"flee npc 7"}, early)
+        self.assertTrue(any(o.reason.startswith("not outrunning npc 7:") for _, o in outs), [o.reason for _, o in outs])
 
-    def test_a_pursuer_left_behind_is_not_fought(self):
-        """Fleeing that works stays fleeing: no hit after Flee began, gap growing."""
+    def test_a_slower_pursuer_at_urgent_cadence_is_outrun_not_fought(self):
+        """Decisions come every tick but steps every 4: a few decisions with the gap
+        unchanged are not a failed escape (review on #107)."""
         w, c = world(), ctx()
-        w.entities = [Entity("npc", 7, (11, 10), code="slow")]
-        hit(w)
-        for _ in range(6):
-            out = dispatch(w, c)
-            if out.state != "Flee":
-                break
-            self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
-            land(w, out)
+        w.health = w.max_health = 100
+        c.params["risk"] = 1.0  # a fight we would win: a latched give-up would show as one
+        outs = pursue(w, c, npc_every=3 * STEP_TICKS, ticks=40)
+        flee = [o.reason for _, o in outs if o.state == "Flee"]
+        self.assertTrue(flee)
+        self.assertFalse([r for r in flee if r.startswith("not outrunning")], flee)
+
+    def test_trap_and_hazard_damage_is_not_a_pursuer(self):
+        w, c = world(), ctx()
+        w.entities = [Entity("npc", 7, (16, 10))]  # in view, out of range
+        w.apply_events([{"tick": w.tick, "events": [
+            {"kind": "Damaged", "amount": 2, "source_kind": "trap", "source_id": 3},
+            {"kind": "Damaged", "amount": 1, "source_kind": "occupy"},
+        ]}])
+        self.assertIsNone(w.attacked_tick)
+        self.assertNotEqual(dispatch(w, c).state, "Flee")
+        w.apply_events([{"tick": w.tick, "events": [{"kind": "Attacked"}]}])
+        self.assertEqual(w.attacked_tick, w.tick, "an Attacked alone is a hostile's swing")
 
 
 class FleeKeepsThePursuerTest(unittest.TestCase):
@@ -157,13 +172,13 @@ class FleeKeepsThePursuerTest(unittest.TestCase):
         npc = Entity("npc", 7, (11, 10))
         w.entities = [npc]
         hit(w)
-        for i in range(8):
+        for i in range(16):
+            w.tick += 1
             npc.pos = (w.pos[0] + (2 if i % 2 else 3), w.pos[1])
-            if i % 2:
+            if i % 8 == 7:
                 hit(w)  # it keeps landing hits between its steps out of range
             out = dispatch(w, c)
             self.assertEqual(out.state, "Flee", out.reason)
-            land(w, out)
 
     def test_flee_ends_once_the_pursuer_is_shaken(self):
         w, c = world(), ctx()
@@ -171,6 +186,15 @@ class FleeKeepsThePursuerTest(unittest.TestCase):
         w.tick = 100
         hit(w)
         w.tick += 100  # long past the last hit, out of range
+        self.assertNotEqual(dispatch(w, c).state, "Flee")
+
+    def test_fight_policy_does_not_flee_a_beatable_attacker_past_range(self):
+        """``on_hostile = "fight"`` keeps its rule: a beatable NPC 3 away that just hit us is no reason to run."""
+        w, c = world(), ctx("fight")
+        w.health = w.max_health = 100
+        c.params["risk"] = 1.0
+        w.entities = [Entity("npc", 7, (13, 10), code="pursuer")]
+        hit(w)
         self.assertNotEqual(dispatch(w, c).state, "Flee")
 
 
@@ -189,6 +213,20 @@ class NoPositionReadWhileDownedTest(unittest.TestCase):
         w.apply_self({"lives": 8, "alive": False, "placed": False})
         for _ in range(4):
             self.assertEqual(choose_call(w, m, pol), "tick")
+
+    def test_alive_but_not_placed_ticks_and_rereads_self_with_a_backoff(self):
+        """Not placed yet: poll ticks for the events, re-read self only every few windows (review on #107)."""
+        w, m, pol = world(), Memory(need_position=True, need_self=False), ctx().policy
+        w.pos = None
+        w.apply_self({"lives": 9, "alive": True, "placed": False})
+        calls = []
+        for _ in range(2 * UNPLACED_SELF_REFRESH):
+            call = choose_call(w, m, pol)
+            calls.append(call)
+            m.windows_since_self = 0 if call == "self" else m.windows_since_self + 1
+        self.assertNotIn("position", calls)
+        self.assertEqual(calls.count("self"), 1, calls)
+        self.assertEqual(calls.index("self"), UNPLACED_SELF_REFRESH)
 
     def test_respawned_reads_position_again(self):
         w, m, pol = world(), Memory(need_position=True, need_self=False), ctx().policy

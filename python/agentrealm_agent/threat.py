@@ -79,6 +79,14 @@ def type_key_from_damaged(ev: dict, *views: list[Any]) -> TypeKey | None:
     return None
 
 
+def hostile_hit(ev: dict) -> bool:
+    """An ``Attacked``, or a ``Damaged`` whose source is a hostile (not a trap or ``occupy`` ground)."""
+    kind = ev.get("kind")
+    if kind == "Attacked":
+        return True
+    return kind == "Damaged" and ev.get("source_kind") in HOSTILE_KINDS
+
+
 def type_key_for_entity(e: Any) -> TypeKey | None:
     """Type key for a perceived hostile entity; None when it has no type code."""
     if e.kind in HOSTILE_KINDS.values() and e.code:

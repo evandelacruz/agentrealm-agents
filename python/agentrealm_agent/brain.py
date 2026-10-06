@@ -40,6 +40,7 @@ __all__ = [
 ]
 
 SELF_REFRESH = 60  # windows between self reads when nothing forces one
+UNPLACED_SELF_REFRESH = 10  # windows between self reads while alive but not on the map (A5)
 
 
 # Scheduler.
@@ -66,10 +67,13 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
         if w.asleep:
             return "tick"
         # Off the map (dead, or not placed yet): position answers 409
-        # not_on_map. Read self first; once it says dead, Downed waits on
-        # ticks until Respawned puts us back (A5, A58 run 9).
+        # not_on_map. Poll ticks for Respawned, which re-reads self and
+        # position; while self still says alive, re-read it now and then in
+        # case placement brings no event (A5, A58 run 9).
         if not w.placed:
-            return "tick" if not w.alive else "self"
+            if w.alive and m.windows_since_self >= UNPLACED_SELF_REFRESH:
+                return "self"
+            return "tick"
         return "position"
     if policy.kind in ("idle",):
         return gate_tick_call(w, m, policy)

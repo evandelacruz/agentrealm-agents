@@ -358,20 +358,23 @@ def replan(
 
     A path whose first step lies in fog is skipped like an unreachable goal,
     so a later goal (explore, say) gets the move while terrain reads catch up.
+    An owed ``goto`` is the exception (below).
     When a plan is active, its current op is tried before ``policy.goals``.
     When no goal gets a step, returns the first goal with a target on this map,
     its leg, and whether a route was found (its first step was not open),
     for the caller's stuck detection (A15).
+
+    While the ``goto`` is owed (A16 goto first), it is the only goal tried:
+    a goto with no open step is returned as missed, so stuck detection
+    escalates it and gives it up, rather than a later goal taking the move
+    and leaving the goto neither reached nor given up (A58 run 7).
     """
     m.path, m.goal, m.goal_op = [], "", None
-    if (
-        plan is not None
-        and not goto_navigation_pending(w, m, policy)
-        and plan_step(plan, w, m, policy, blocked, costly, knowledge)
-    ):
+    walking_goto = goto_navigation_pending(w, m, policy)
+    if plan is not None and not walking_goto and plan_step(plan, w, m, policy, blocked, costly, knowledge):
         return None
     missed: tuple[str, Leg, bool] | None = None
-    for goal in policy.goals:
+    for goal in ["goto"] if walking_goto else policy.goals:
         found, leg = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
         if next_step(w, blocked, found):
             _store_path(m, w, goal, found, leg)
@@ -565,6 +568,60 @@ def guided_step(
             return _wait(m, att, found)
         reason = "no_path"
     return escalation_step(m, w, att, avoid, plan, reason, knowledge)
+
+
+def bounded_step(
+    m: Memory,
+    w: WorldModel,
+    goal: str,
+    at: Pos,
+    avoid: set[Pos],
+    plan: Callable[[], "list[Pos] | None"],
+) -> Pos | None:
+    """One move toward ``at`` on a walk that gives up instead of escalating (A15).
+
+    For the short walks to something in sight: Heal to food or a safe tile
+    (A10), Loot to a pickup (A20). Each is a stuck attempt like any walk, so
+    the oscillation guard can give it up too, but it skips the escalation
+    ladder: nothing in sight is worth a block broken or a reveal walk. No
+    path, or a window with no progress (moves, time or pacing), gives ``at``
+    up through step 5 with its backoff, and a target still backed off is
+    skipped. A route whose first step is taken or unseen waits, as in A15,
+    and is given up once it has waited ``PROGRESS_TICK_LIMIT`` with no step
+    in between; a window left over from walking earlier is never judged
+    there. The path for ``goal`` is kept while it still ends on ``at`` with
+    an open first step, else planned again with ``plan``.
+
+    None when there is no move now: the caller tries something else. Only a
+    walk that moves makes its attempt active, so one with no move never
+    restarts the window of the walk that does (``nav_stuck.track``). The
+    window and the wait hold only while the walk is pursued on consecutive
+    decisions (``nav_stuck.resume``).
+    """
+    if nav_stuck.backed_off(m, goal, w.map_id, at, w.tick):
+        return None
+    att = nav_stuck.attempt(m, w, goal, at)
+    if att is None:
+        return None
+    nav_stuck.resume(m, att, w.tick)
+    if not (m.goal == goal and m.path and m.path[-1] == at and next_step(w, avoid, m.path)):
+        found = plan()
+        if not found or not next_step(w, avoid, found):
+            if att.waiting_since is None:
+                att.waiting_since = w.tick
+            if not found:
+                nav_stuck.give_up(m, w, att, "no_path")
+            elif w.tick - att.waiting_since >= nav_stuck.PROGRESS_TICK_LIMIT:
+                nav_stuck.give_up(m, w, att, "time")
+            return None
+        m.path, m.goal = found, goal
+    nav_stuck.track(m, w, goal, at)
+    att.waiting_since = None
+    nav_stuck.observe(att, w, m.path)
+    if reason := nav_stuck.stuck_reason(att, w.tick):
+        nav_stuck.give_up(m, w, att, reason)
+        return None
+    return next_step(w, avoid, m.path)
 
 
 def attempt_plan(

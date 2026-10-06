@@ -6,7 +6,8 @@ from ..knowledge_base import knowledge_items
 from ..loot import worthwhile_pickups
 from ..memory import Memory
 from ..navigation import cost_path
-from ..pathing import goto_navigation_pending, grid_params, nav_search, next_step
+from ..navigation import stuck as nav_stuck
+from ..pathing import bounded_step, goto_navigation_pending, grid_params, nav_search
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets, reflex_outcome
@@ -50,6 +51,7 @@ def loot_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | 
         return None
     near = pickup_outcome(w, ctx.knowledge, state=state)
     if near is not None:
+        nav_stuck.finish_in_reach(ctx.memory, w, "loot")
         return near
     if goto_navigation_pending(w, ctx.memory, ctx.policy):
         return None
@@ -63,13 +65,12 @@ def loot_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | 
 
 
 def _step_toward(w: WorldModel, m: Memory, policy, plan_avoid: set[Pos], plan_costly: set[Pos], goal: Pos) -> Pos | None:
-    """Next step of the kept loot path to ``goal``, replanned when it is stale."""
-    if m.goal == "loot" and m.path and m.path[-1] == goal:
-        step = next_step(w, plan_avoid, m.path)
-        if step is not None:
-            return step
-    found = cost_path(w, goal, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, "loot", goal))
-    step = next_step(w, plan_avoid, found)
-    if step is not None:
-        m.path, m.goal = found, "loot"
-    return step
+    """Next step of the kept loot path to ``goal``, replanned when it is stale.
+
+    Bounded like any walk (``bounded_step``, A15): a pickup with no path, or
+    no progress in its window, is given up with a backoff."""
+
+    def plan() -> list[Pos] | None:
+        return cost_path(w, goal, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, "loot", goal))
+
+    return bounded_step(m, w, "loot", goal, plan_avoid, plan)

@@ -87,6 +87,10 @@ class NavAttempt:
     break_x: int | None = None  # stuck step 2: block under break, if any
     break_y: int | None = None
     break_cap: str | None = None
+    # A short walk (``pathing.bounded_step``): the decision it was last
+    # pursued on, and the tick it began waiting with no step.
+    seen_decision: int | None = None
+    waiting_since: int | None = None
 
 
 class Leg(NamedTuple):
@@ -114,6 +118,7 @@ class NavStuckMemory:
     cells_map: int | None = None
     oscillations: list[dict] = field(default_factory=list)
     escape_from: set[Pos] = field(default_factory=set)
+    decision: int = 0  # counts decisions (dispatch), so a short walk knows it was pursued on the last one
 
 
 def goal_key(goal: str, map_id: int | None, target: Pos) -> str:
@@ -142,7 +147,22 @@ def track(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt 
 
     An attempt keeps its level when a replan flips to another target and back,
     so alternating between two targets cannot reset either one's escalation.
+    Switching to an attempt restarts its time window: only time spent
+    pursuing it counts. So a walk with no move this decision uses
+    ``attempt`` instead, which leaves the active one and both windows alone.
     """
+    att = attempt(m, w, goal, target)
+    if att is None:
+        return None
+    if m.nav_stuck.active != att.key:
+        att.goal = goal
+        att.window_tick = w.tick  # only time spent pursuing it counts
+    m.nav_stuck.active = att.key
+    return att
+
+
+def attempt(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt | None:
+    """The attempt for ``goal`` at ``target`` on this map, made if new, not made active."""
     if w.map_id is None or w.pos is None:
         return None
     target, backoff_key = target if isinstance(target, Leg) else Leg(target)
@@ -153,11 +173,7 @@ def track(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt 
         att = stuck.attempts[key] = NavAttempt(key=key, goal=goal, target=target, map_id=w.map_id, window_tick=w.tick)
         while len(stuck.attempts) > ATTEMPTS_KEPT:
             stuck.attempts.pop(next(iter(stuck.attempts)))
-    elif stuck.active != key:
-        att.goal = goal
-        att.window_tick = w.tick  # only time spent pursuing it counts
     att.backoff_key = backoff_key
-    stuck.active = key
     return att
 
 
@@ -198,6 +214,16 @@ def finish(m: Memory, att: NavAttempt) -> None:
     stuck.backoff_power.pop(att.key, None)
     if stuck.active == att.key:
         stuck.active = None
+
+
+def finish_in_reach(m: Memory, w: WorldModel, goal: str) -> None:
+    """Forget ``goal``'s attempts on this map whose target is in reach: the walk
+    is over (a Heal or Loot ``Take``), so a later walk there starts fresh."""
+    if w.pos is None:
+        return
+    for att in list(m.nav_stuck.attempts.values()):
+        if att.goal == goal and att.map_id == w.map_id and chebyshev(att.target, w.pos) <= 1:
+            finish(m, att)
 
 
 def done(att: NavAttempt, w: WorldModel) -> bool:
@@ -326,6 +352,21 @@ def _blocking_types(w: WorldModel, att: NavAttempt) -> set[str]:
     return out
 
 
+def resume(m: Memory, att: NavAttempt, tick: int) -> None:
+    """A short walk's window and wait hold only while it is pursued on
+    consecutive decisions; otherwise both start again now (``pathing.bounded_step``).
+
+    Pursued means tried at all, step or not, so a walk that waits behind an
+    occupant keeps its wait, and one Heal left (health back, food eaten
+    on the way, a higher state's turn) starts fresh when it comes back.
+    """
+    now = m.nav_stuck.decision
+    if att.seen_decision not in (now, now - 1):
+        _fresh_window(att, tick)
+        att.waiting_since = None
+    att.seen_decision = now
+
+
 def _fresh_window(att: NavAttempt, tick: int) -> None:
     att.best, att.moves, att.reject_streak, att.window_tick = None, 0, 0, tick
     att.recent.clear()
@@ -401,8 +442,11 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     stuck.attempts.pop(att.key, None)
     if stuck.active == att.key:
         stuck.active = None
-    _drop_path(m, att)
-    m.goal_op = None
+    if m.goal == att.goal:  # another walk's path, such as a waiting goto's, is not this attempt's to drop
+        _drop_path(m, att)
+        m.goal_op = None
+    else:
+        m.corridors.pop(att.goal, None)
 
 
 LEVEL_NAMES = {

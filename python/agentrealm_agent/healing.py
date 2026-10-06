@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from .item_table import InventorySupply, merge_heal
 from .world import Entity, Pos, WorldModel, chebyshev
@@ -168,14 +168,18 @@ def back_off(m: Memory, w: WorldModel) -> None:
         m.path, m.goal = [], ""
 
 
-def nearest_known_safe(w: WorldModel) -> tuple[int, Pos] | None:
-    """Nearest known safe cell on the current map, preferring cells near town."""
+def nearest_known_safe(w: WorldModel, skip: Callable[[Pos], bool] | None = None) -> tuple[int, Pos] | None:
+    """Nearest known safe cell on the current map, preferring cells near town.
+
+    ``skip`` leaves cells out, such as those a walk gave up on (A15)."""
     here = w.pos
     map_id = w.map_id
     if here is None or map_id is None:
         return None
     candidates: list[tuple[int, int, Pos]] = []
     for pos in safe_tiles(w, map_id):
+        if skip is not None and skip(pos):
+            continue
         near_town = any(
             am == map_id and chebyshev(pos, anchor) <= 8 for am, anchor in w.respawn_anchors
         )

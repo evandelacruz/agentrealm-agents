@@ -16,8 +16,10 @@ target out of the way. It works the same whichever states caused it.
 
 After each decision dispatch also calls ``note_move``, so the guard knows
 which walk made each move. A target is given up only when its own walk was
-one of the moves: survival states (Retreat, Fight, Flee, Heal) that pace on
-their own back nothing off.
+one of the moves: states that pace with steps of their own (Retreat, Fight,
+Flee) back nothing off. Heal's and Loot's walks are stuck attempts of their
+own (``pathing.bounded_step``), so pacing on one of them gives up its own
+food, pickup or safe tile.
 
 Survival-only pacing is corrected here too, in the same one place. When
 only Flee and Retreat made the moves, the guard hands the paced cells to
@@ -69,7 +71,7 @@ def check(m: Memory, w: WorldModel) -> dict | None:
 
     Only the active stuck attempt is given up, and only when its own walk
     made some of the moves (``note_move``). When other states did all the
-    moving (Retreat, Fight, Flee or Heal pacing on their own), a goto or
+    moving (Retreat, Fight or Flee pacing on their own), a goto or
     explore attempt left over from earlier did not cause it, so nothing is
     backed off; the event still goes to the trace.
 

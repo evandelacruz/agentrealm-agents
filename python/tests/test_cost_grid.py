@@ -289,12 +289,24 @@ class TwoLevelBrainTest(unittest.TestCase):
 
 class KnownPrefixBrainTest(unittest.TestCase):
     def test_goal_starting_in_fog_falls_through_to_the_next_goal(self):
-        # goto's cheapest path starts on an unseen tile; explore takes the move.
+        # doors' path starts on an unseen tile; explore takes the move.
         w = grid([".."])
-        policy = Policy(kind="scripted", goals=["goto", "explore"], goto=[0, 5])
-        self.assertNotIn(cost_path(w, (0, 5))[0], w.view.tiles)
+        w.view.tiles[(0, 5)] = "framed_door"
+        policy = Policy(kind="scripted", goals=["doors", "explore"])
+        self.assertNotIn(cost_path(w, (0, 5), CostGridParams(allow_goal_door=True))[0], w.view.tiles)
         d = decide(w, Memory(), policy, random.Random(0))
         self.assertEqual((d.intent["x"], d.intent["y"]), (1, 0))
+
+    def test_an_owed_goto_starting_in_fog_keeps_the_move(self):
+        # A16 goto first: explore never takes the move from an owed goto; the
+        # goto waits out its stuck window instead (A15).
+        w = grid([".."])
+        m = Memory()
+        policy = Policy(kind="scripted", goals=["goto", "explore"], goto=[0, 5])
+        self.assertNotIn(cost_path(w, (0, 5))[0], w.view.tiles)
+        d = decide(w, m, policy, random.Random(0))
+        self.assertIsNone(d.intent)
+        self.assertEqual(m.goal, "goto")
 
     def test_no_goal_with_a_seen_first_step_sends_nothing(self):
         w = grid(["."])

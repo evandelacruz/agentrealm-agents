@@ -21,7 +21,7 @@ Stored in the world knowledge base under ``kb.extra["gem_yield"]``::
 
 ``cuts`` keeps the latest ``MAX_RECORDS`` per map; ``regions`` keeps every
 total. The planner's State shows :func:`summary`; Gather skips barren
-regions (:func:`is_barren`).
+regions (:func:`barren_regions`, read once per decision).
 """
 
 from __future__ import annotations
@@ -35,7 +35,10 @@ from .world import Pos, WorldModel, chebyshev
 
 KEY = "gem_yield"
 REGION_SIZE = 16  # blocks per region side
-BARREN_MIN_CUTS = 15  # a fair sample: this many cuts with no gem marks a region barren
+# A fair sample: this many cuts with no gem marks a region barren. At the
+# manual's lowest rate (10% a cut, GAME_NOTES.md Gems) a normal region shows
+# no gem in 30 cuts about 4% of the time (0.9**30); at 15 it would be 21%.
+BARREN_MIN_CUTS = 30
 GEM_WINDOW_TICKS = 5  # a gem that shows up later than this is not the cut's
 MAX_RECORDS = 500  # cut records kept per map; region totals are kept in full
 CUT_BLOCKS = BREAKABLE | {"grass"}  # blocks a cut or break is recorded on
@@ -193,10 +196,6 @@ def barren_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[in
         raw = row.get("regions") if isinstance(row, dict) else None
         keys = [k for k, v in raw.items() if isinstance(v, dict) and barren(v)] if isinstance(raw, dict) else []
     return {r for r in map(_parse, keys) if r is not None}
-
-
-def is_barren(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> bool:
-    return region_of(pos) in barren_regions(kb, map_id)
 
 
 def _parse(key: str) -> tuple[int, int] | None:

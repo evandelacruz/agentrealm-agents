@@ -160,11 +160,11 @@ class RegionSummaryTest(unittest.TestCase):
         k = kb()
         for i in range(BARREN_MIN_CUTS - 1):
             record_cut(k, MAP, (1, 1), "grass", i, False)
-        self.assertFalse(gem_yield.is_barren(k, MAP, (1, 1)))
+        self.assertFalse((0, 0) in gem_yield.barren_regions(k, MAP))
         record_cut(k, MAP, (2, 2), "grass", 99, False)
-        self.assertTrue(gem_yield.is_barren(k, MAP, (15, 15)))
+        self.assertTrue((0, 0) in gem_yield.barren_regions(k, MAP))
         record_cut(k, MAP, (2, 2), "grass", 100, True)
-        self.assertFalse(gem_yield.is_barren(k, MAP, (1, 1)))
+        self.assertFalse((0, 0) in gem_yield.barren_regions(k, MAP))
 
     def test_summary_lists_best_and_barren_nearby(self):
         k = kb()

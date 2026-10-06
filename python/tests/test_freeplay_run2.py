@@ -186,6 +186,17 @@ class ReachableSafeGoalTest(unittest.TestCase):
         self.assertEqual(reachable_safe_goal(m, w, [WALLED, OPEN], params, None), OPEN)
         self.assertIn((MAP, WALLED), m.safe_unreachable)
 
+    def test_a_boxed_in_start_marks_no_safe_cell_unreachable(self):
+        # Review on #140: a search that runs out from our side proves only
+        # that we stand shut in (here behind a bush Break could open).
+        w, m = world(), Memory()
+        wall_in(w, (10, 10))
+        params = grid_params(Policy(kind="scripted"), set(), set())
+        reachable_safe_goal(m, w, [OPEN, (14, 10)], params, (-20, 10))
+        self.assertEqual(m.safe_unreachable, {})
+        w.pos = (20, 10)
+        self.assertEqual(reachable_safe_goal(m, w, [OPEN, (14, 10)], params, (-20, 10)), OPEN)
+
     def test_falls_back_to_town(self):
         w, m = world(), Memory()
         wall_in(w, WALLED)

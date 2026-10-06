@@ -331,20 +331,16 @@ def _search(w: WorldModel, goal: Pos, params: CostGridParams, max_nodes: int = 1
 
 
 def no_way(w: WorldModel, goal: Pos, params: CostGridParams | None = None) -> bool:
-    """True only when no path from ``w.pos`` can reach ``goal``: a search
-    within ``FINE_NODE_BUDGET`` cells ran out of cells, from our side, or
-    from the goal's, where a cell walled in runs out fast whatever lies
-    around us. Passing a cell is a property of the cell, so either side proves it."""
+    """True only when ``goal`` is walled in: the passable cells joined to it
+    run out within ``FINE_NODE_BUDGET`` without reaching ``w.pos``, or the
+    goal itself is impassable. Only the goal's side proves it: a search from
+    our side that runs out says where we stand is shut, which a move ends,
+    not where the goal is."""
     assert w.pos is not None
     if w.pos == goal:
         return False
     grid = _Grid(w, {goal}, params or CostGridParams())
-    if grid.cost(goal) is None:
-        return True
-    found = _astar(grid, FINE_NODE_BUDGET)
-    if found.path is not None:
-        return False
-    return not found.budget_hit or _walled_in(grid, goal, w.pos, FINE_NODE_BUDGET)
+    return grid.cost(goal) is None or _walled_in(grid, goal, w.pos, FINE_NODE_BUDGET)
 
 
 def _walled_in(grid: _Grid, goal: Pos, start: Pos, max_cells: int) -> bool:

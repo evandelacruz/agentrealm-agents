@@ -22,6 +22,7 @@ for _mod in pkgutil.iter_modules(agentrealm_agent.__path__):
 # Constructor arguments for metrics classes that have required ones.
 ARGS: dict[str, dict] = {
     "M7AcceptanceMetrics": {"overworld_map_id": 7, "origin": (0, 0), "target": (80, 0)},
+    "M11AcceptanceMetrics": {"overworld_map_id": 7},
 }
 
 

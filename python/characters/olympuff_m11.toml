@@ -1,0 +1,12 @@
+# A40 live M11 acceptance: clear a level unattended, then attempt the next
+# (scripts/smoke_m11_olympuff.py). Seeks entrance doors, then explores the overworld.
+world = "olympuff"
+
+[policy]
+kind = "scripted"
+goals = ["doors", "explore"]
+on_hostile = "flee"
+hostile = ["npc"]
+pickup = true
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 20

@@ -1,12 +1,15 @@
-"""Survival gates shared by live acceptance runs (M7 A16, M9 A29).
+"""Survival gates shared by live acceptance runs (M7 A16, M9 A29, M11 A40).
 
 Death, retreat timing, Recover safe tiles, Step loops and API errors are
-judged the same way on long exploration runs as on the M7 hour.
+judged the same way on long exploration runs as on the M7 hour. Each gate
+names its own survival states (M11 adds Boss). ``OscillationAbortTracker``
+is the sustained-pacing abort M7 and M11 share.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import ClassVar
 
 from .acceptance_run import TimedRunHooks
 from .config import Policy
@@ -20,6 +23,13 @@ from .zone_discovery import safe_tiles
 
 LOOP_STEP_LIMIT = 24  # Step-sending decisions in a row at one cell with one reason
 
+# Sustained pacing: the guard gave up a target more than this many times in
+# this many ticks (10 minutes at 10 ticks/s); events that gave nothing up do
+# not count. Its backoffs double (30 s, 60 s, 120 s),
+# so a target that keeps making the agent pace trips this within minutes.
+OSCILLATION_ABORT_COUNT = 3
+OSCILLATION_ABORT_TICKS = 6000
+
 # States that are already the right answer when should_retreat holds.
 SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee")
 
@@ -29,6 +39,7 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
     """Retreat misses, unsafe Recover and loops, on top of ``TimedRunHooks``'
     deaths, API errors and wall-clock stop."""
 
+    survival_states: ClassVar[tuple[str, ...]] = SURVIVAL_STATES  # a gate may add its own (M11: Boss)
     retreat_misses: int = 0
     recover_withdraws: int = 0
     recover_unsafe: int = 0
@@ -51,7 +62,7 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
         track_regen: bool = False,
     ) -> str | None:
         """Shared ``before_tick`` survival checks. Returns regen verdict when tracked."""
-        if should_retreat(w, policy, params) and state not in SURVIVAL_STATES:
+        if should_retreat(w, policy, params) and state not in self.survival_states:
             self.retreat_misses += 1
         if intents and state == "Heal":
             self.heal_actions += 1
@@ -115,3 +126,34 @@ def withdraw_cells(pos: Pos | None, intents: list[dict]) -> list[Pos | None]:
         elif verb == "WithdrawFromChest":
             cells.append(pos)
     return cells
+
+
+@dataclass
+class OscillationAbortTracker:
+    """Counts the guard's events and decides when sustained pacing aborts the run (A15)."""
+
+    oscillation_ticks: list[int] = field(default_factory=list)  # each guard event's tick
+    pacing_give_up_ticks: list[int] = field(default_factory=list)  # ticks of events that gave up a target
+    oscillation_abort: str | None = None  # why the run was stopped for pacing
+
+    def on_oscillation(self, event: dict) -> bool:
+        """True when this event is the one that trips the abort; the caller stops the run.
+
+        Only an event that gave up a target (it carries ``goal``) counts
+        toward the abort; survival states pacing on their own do not.
+        """
+        tick = int(event.get("tick") or 0)
+        self.oscillation_ticks.append(tick)
+        if "goal" not in event:
+            return False
+        self.pacing_give_up_ticks.append(tick)
+        recent = [t for t in self.pacing_give_up_ticks if tick - t < OSCILLATION_ABORT_TICKS]
+        if len(recent) <= OSCILLATION_ABORT_COUNT or self.oscillation_abort is not None:
+            return False
+        self.oscillation_abort = (
+            f"sustained oscillation: gave up {len(recent)} targets for pacing in "
+            f"{OSCILLATION_ABORT_TICKS} ticks (last at tick {tick}: {event['goal']} → "
+            f"{tuple(event.get('target') or ())}, cells {event.get('cells')}, moved by "
+            f"{', '.join(event.get('states') or []) or 'no state'})"
+        )
+        return True

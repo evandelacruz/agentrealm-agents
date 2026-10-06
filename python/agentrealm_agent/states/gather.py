@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Callable
 
 from ..config import Policy
-from ..gem_yield import is_barren, region_of
+from ..gem_yield import barren_regions, region_of
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
@@ -77,8 +77,10 @@ def gather_outcome(
         return StateOutcome(None, "position unknown", state=state)
     view = w.view
 
+    skip = _barren_to_skip(w, knowledge, op)
+
     def cuttable(p: Pos) -> bool:
-        return is_safe_ish(w, p, policy) and not _barren_skip(w, knowledge, op, p)
+        return is_safe_ish(w, p, policy) and region_of(p) not in skip
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
     piles = [e for e in w.entities if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and is_safe_ish(w, e.pos, policy)]
@@ -109,12 +111,12 @@ def gather_outcome(
     return StateOutcome(None, "no gather target", state=state)
 
 
-def _barren_skip(w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None, p: Pos) -> bool:
-    """True when ``p`` lies in a barren region the op does not name (A63)."""
-    if not is_barren(knowledge, w.map_id, p):
-        return False
-    named = op is not None and "x" in op and "y" in op and region_of((op["x"], op["y"])) == region_of(p)
-    return not named
+def _barren_to_skip(w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None) -> set[tuple[int, int]]:
+    """Barren regions of this map (A63), less the one the op names with ``x, y``."""
+    skip = barren_regions(knowledge, w.map_id)
+    if skip and op is not None and "x" in op and "y" in op:
+        skip.discard(region_of((op["x"], op["y"])))
+    return skip
 
 
 def _still_wanted(w: WorldModel, target: tuple[str, Pos] | None, policy: Policy, cuttable: Callable[[Pos], bool]) -> bool:

@@ -176,9 +176,20 @@ def barren(region: dict[str, Any]) -> bool:
     return int(region.get("cuts", 0)) >= BARREN_MIN_CUTS and int(region.get("gems", 0)) == 0
 
 
+def barren_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[int, int]]:
+    """The barren regions of one map, as ``(rx, ry)``: read once per decision."""
+    if kb is None or map_id is None:
+        return set()
+    with kb.lock:
+        root = kb.extra.get(KEY)
+        row = root.get(str(map_id)) if isinstance(root, dict) else None
+        raw = row.get("regions") if isinstance(row, dict) else None
+        keys = [k for k, v in raw.items() if isinstance(v, dict) and barren(v)] if isinstance(raw, dict) else []
+    return {r for r in map(_parse, keys) if r is not None}
+
+
 def is_barren(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> bool:
-    region = regions(kb, map_id).get(region_key(pos))
-    return region is not None and barren(region)
+    return region_of(pos) in barren_regions(kb, map_id)
 
 
 def _parse(key: str) -> tuple[int, int] | None:

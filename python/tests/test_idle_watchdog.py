@@ -77,9 +77,9 @@ def run_until(w: WorldModel, c: PlayContext, tick: int, *, move: bool = False):
 class IdleWatchdogTest(unittest.TestCase):
     def test_heal_waiting_with_no_health_back_is_redirected(self):
         # Standing in the pen with nothing to do for 30 s, then Heal rests
-        # with no health coming back. Heal's own bound counts from when it
-        # began waiting (another 60 s); the watchdog counts from the last
-        # productive tick, so the stretch never passes 60 s.
+        # with no health coming back. The watchdog counts from the last
+        # productive tick, not from when Heal began, so the stretch never
+        # passes 60 s.
         w, kb = pen(), KnowledgeBase.empty("sandbox")
         save_regen_yes(kb)
         m = Memory(heal_backoff_until=LIMIT // 2)
@@ -180,6 +180,25 @@ class IdleWatchdogTest(unittest.TestCase):
         idle_watchdog.observe(m, w)
         w.tick, m.state = LIMIT, "Heal"
         self.assertEqual(idle_watchdog.check(m, w)["held_off"], "Heal")
+
+    def test_state_backoff_is_capped_and_starts_over_once_productive(self):
+        w, m = pen(), Memory()
+        idle_watchdog.observe(m, w)
+        lengths = []
+        for _ in range(idle_watchdog.BACKOFF_POWER_MAX + 3):  # separate idle episodes
+            w.tick += LIMIT
+            m.state = "Heal"
+            idle_watchdog.check(m, w)
+            lengths.append(m.nav_stuck.backoff_until[idle_watchdog.state_key("Heal")] - w.tick)
+        base = nav_stuck.BACKOFF_BASE_TICKS
+        cap = base * 2**idle_watchdog.BACKOFF_POWER_MAX
+        self.assertEqual(lengths, [base, 2 * base, 4 * base, cap, cap, cap])
+        m.state = "Heal"
+        w.health += 1  # health came back while Heal rested
+        idle_watchdog.observe(m, w)
+        w.tick += LIMIT
+        idle_watchdog.check(m, w)
+        self.assertEqual(m.nav_stuck.backoff_until[idle_watchdog.state_key("Heal")] - w.tick, base)
 
     def test_server_wait_then_tick_jump_is_not_idle(self):
         # A network outage: the server keeps ticking, and the next response's

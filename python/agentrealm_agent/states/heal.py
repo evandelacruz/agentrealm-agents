@@ -17,7 +17,6 @@ from ..healing import (
     regen_known,
     save_regen_yes,
     standing_in_safe_zone,
-    wait_exhausted,
 )
 from ..memory import Memory
 from ..navigation import cost_path
@@ -34,8 +33,9 @@ FOOD_CANDIDATES = 3
 
 class HealState(State):
     """Above Explore. Every branch that sends nothing is bounded: no reachable
-    safe tile yields at once, and a wait with no health back yields after
-    ``HEAL_WAIT_TICKS``; Heal then stays out for ``HEAL_BACKOFF_TICKS``.
+    safe tile yields at once (Heal then stays out for ``HEAL_BACKOFF_TICKS``),
+    and a rest with no health back is redirected by the idle watchdog after
+    60 s (``idle_watchdog.py``, A61).
     Every walk, to food or a safe tile, is bounded by stuck detection
     (``bounded_step``): one that goes nowhere gives its target up.
 
@@ -56,10 +56,7 @@ class HealState(State):
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         if not _wants_heal(world, ctx):
             return _rearm_weapon(world, ctx.memory)
-        out = _choose(world, ctx)
-        if out.intents:
-            ctx.memory.heal_wait = None
-        return out
+        return _choose(world, ctx)
 
 
 def _wants_heal(w: WorldModel, ctx: PlayContext) -> bool:
@@ -91,8 +88,6 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
         back_off(m, w)
         return _out(None, "no reachable safe tile, yield to Explore")
 
-    if wait_exhausted(m, w):
-        return _out(None, "no health back, yield to Explore")
     if known is None:
         verdict = note_regen_sample(m, w)
         if verdict == "yes":

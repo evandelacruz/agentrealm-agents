@@ -2,14 +2,11 @@
 
 import random
 import unittest
-from unittest import mock
 
-from agentrealm_agent import idle_watchdog
 from agentrealm_agent.config import Policy
 from agentrealm_agent.healing import (
     HEAL_BACKOFF_TICKS,
     HEAL_MAX_TRIES,
-    HEAL_WAIT_TICKS,
     REGEN_KEY,
     REGEN_MEASURE_TICKS,
     SURVIVAL_KEY,
@@ -287,21 +284,6 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(m.buy_signals, [{"op": "buy", "code": "small_potion", "why": "hurt in town, no food or potion"}])
         dispatch(w, ctx(m))
         self.assertEqual(len(m.buy_signals), 1)
-
-    @mock.patch.object(idle_watchdog, "IDLE_REDIRECT_SECONDS", 3600)  # Heal's own bound, not the watchdog's (A61)
-    def test_wait_without_health_back_is_bounded(self):
-        w = grid(at=(0, 0))
-        m = Memory(heal_regen_absent=True)
-        dispatch(w, ctx(m))
-        w.tick = HEAL_WAIT_TICKS
-        out = dispatch(w, ctx(m))
-        # Heal gives up and the same window goes to Explore (A44).
-        self.assertEqual(out.state, "Explore")
-        self.assertIsNotNone(out.intents)
-        self.assertEqual(out.yielded, ["Heal: no health back, yield to Explore"])
-        self.assertEqual(m.heal_backoff_until, w.tick + HEAL_BACKOFF_TICKS)
-        w.tick += 7
-        self.assertEqual(dispatch(w, ctx(m)).state, "Explore")
 
 
 if __name__ == "__main__":

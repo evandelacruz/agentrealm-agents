@@ -87,8 +87,8 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
 
     The idle watchdog runs there too: after ``IDLE_REDIRECT_SECONDS`` with
     nothing productive it gives up the target and any plan ``wait``, and
-    backs off the state that was idling, which is then skipped until its
-    backoff ends (``idle_watchdog.py``, A61).
+    backs off the state that was idling (never Explore, Idle or a survival
+    state, ``NEVER_BACKED_OFF``), which is then skipped until its backoff ends (``idle_watchdog.py``, A61).
     """
     m = ctx.memory
     m.nav_stuck.decision += 1

@@ -42,7 +42,6 @@ REGEN_MEASURE_TICKS = 200
 REGEN_SAMPLE_GAP_TICKS = 50
 # Ticks Heal may send nothing with no health back before it yields to
 # Explore, and how long it then stays out (~60 s and ~30 s).
-HEAL_WAIT_TICKS = 600
 HEAL_BACKOFF_TICKS = 300
 # Times one Take or Use of the same supply is sent before Heal gives up on it.
 HEAL_MAX_TRIES = 3
@@ -145,24 +144,8 @@ def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
     return None
 
 
-def wait_exhausted(m: Memory, w: WorldModel) -> bool:
-    """Count a window Heal sends nothing. True, and back off, once it has
-    waited ``HEAL_WAIT_TICKS`` with no health back."""
-    health = w.health if w.health is not None else 0
-    if m.heal_wait is None or health > m.heal_wait[1]:
-        m.heal_wait = (w.tick, health)
-        return False
-    start, low = m.heal_wait
-    m.heal_wait = (start, min(low, health))
-    if w.tick - start < HEAL_WAIT_TICKS:
-        return False
-    back_off(m, w)
-    return True
-
-
 def back_off(m: Memory, w: WorldModel) -> None:
     m.heal_backoff_until = w.tick + HEAL_BACKOFF_TICKS
-    m.heal_wait = None
     m.heal_regen_sample = None
     if m.goal.startswith("heal_"):
         m.path, m.goal = [], ""

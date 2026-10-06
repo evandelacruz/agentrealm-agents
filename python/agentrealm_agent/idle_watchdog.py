@@ -88,6 +88,12 @@ WORLD_VERBS = frozenset(
 # Explore; giving up their target is enough. Heal is not among them.
 NEVER_BACKED_OFF = frozenset({"Explore", "Idle", "Escape", "Retreat", "Flee", "Fight", "Boss"})
 
+# Cap on how many times a state's idle backoff doubles: 300 ticks at most
+# 2**3 = 2400 ticks (4 minutes at 10 ticks/s), so a hurt character is never
+# kept from Heal for hours. The doubling also starts over once the state does
+# something productive (``_productive``).
+BACKOFF_POWER_MAX = 3
+
 GIVE_UP_REASON = "idle"
 EVENTS_KEPT = 16  # newest kept until the runner writes them to the trace
 
@@ -127,7 +133,9 @@ def observe(m: Memory, w: WorldModel, tick_hz: int | None = None, *, response: b
         idle.tick_hz = tick_hz
     cell = (w.map_id, w.pos)
     healed = w.health is not None and idle.health is not None and w.health > idle.health
-    if idle.productive_tick is None or idle.server_wait or exempt(w) or cell != idle.cell or healed:
+    if cell != idle.cell or healed:
+        _productive(m, w.tick)
+    elif idle.productive_tick is None or idle.server_wait or exempt(w):
         idle.productive_tick = w.tick
     if response:
         idle.server_wait = False
@@ -137,7 +145,15 @@ def observe(m: Memory, w: WorldModel, tick_hz: int | None = None, *, response: b
 def note_applied(m: Memory, verb: str | None, tick: int) -> None:
     """An intent applied; a world-changing one is productive."""
     if verb in WORLD_VERBS:
-        m.idle.productive_tick = tick
+        _productive(m, tick)
+
+
+def _productive(m: Memory, tick: int) -> None:
+    """Something productive happened: restart the clock, and the doubling of
+    the active state's idle backoff."""
+    m.idle.productive_tick = tick
+    if m.state:
+        m.nav_stuck.backoff_power.pop(state_key(m.state), None)
 
 
 def note_server_wait(m: Memory) -> None:
@@ -201,7 +217,7 @@ def check(m: Memory, w: WorldModel, plan: Plan | None = None) -> dict | None:
         plan.drop_current(GIVE_UP_REASON, m)
     if state and state not in NEVER_BACKED_OFF:
         event["held_off"] = state
-        nav_stuck.back_off(m.nav_stuck, state_key(state), w.tick)
+        nav_stuck.back_off(m.nav_stuck, state_key(state), w.tick, max_power=BACKOFF_POWER_MAX)
     m.state = ""  # the active state no longer holds the round
     idle.events.append(event)
     del idle.events[:-EVENTS_KEPT]

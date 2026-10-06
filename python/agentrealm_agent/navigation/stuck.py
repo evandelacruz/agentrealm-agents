@@ -411,9 +411,12 @@ def reveal_found_way(att: NavAttempt, w: WorldModel, path: list[Pos] | None) -> 
     return True
 
 
-def back_off(stuck: NavStuckMemory, key: str, tick: int) -> None:
-    """Hold ``key`` off for ``BACKOFF_BASE_TICKS``, doubled on each back-off of the same key."""
+def back_off(stuck: NavStuckMemory, key: str, tick: int, max_power: int | None = None) -> None:
+    """Hold ``key`` off for ``BACKOFF_BASE_TICKS``, doubled on each back-off of the
+    same key, at most ``max_power`` times when given."""
     power = stuck.backoff_power.get(key, 0)
+    if max_power is not None:
+        power = min(power, max_power)
     stuck.backoff_until[key] = tick + BACKOFF_BASE_TICKS * (2**power)
     stuck.backoff_power[key] = power + 1
 

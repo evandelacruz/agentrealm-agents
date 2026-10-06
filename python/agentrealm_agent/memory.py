@@ -91,7 +91,6 @@ class Memory:
     # "yes" is saved to the knowledge base; a "no" holds for this run only.
     heal_regen_sample: tuple[int, int, int] | None = None
     heal_regen_absent: bool = False
-    heal_wait: tuple[int, int] | None = None  # (tick, health) Heal began sending nothing, reset when health rises
     heal_backoff_until: int = -1  # Heal yields to Explore until this tick
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
     heal_rearm: str | None = None  # weapon code armed before a drink; restored once (A24)

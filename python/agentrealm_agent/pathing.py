@@ -6,7 +6,7 @@ import dataclasses
 from typing import Callable, Collection
 
 from .break_memory import break_costs_for_planning, nominate_on_path
-from .clues import nearest_explore_target
+from .clues import direction_hint, nearest_explore_target, on_hint_side
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -16,8 +16,10 @@ from .navigation import (
     alt_route_path,
     cost_path,
     known_prefix,
+    nearest_target,
 )
 from .navigation import stuck as nav_stuck
+from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
 from .healing import hurt
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
@@ -205,16 +207,25 @@ def path_for_plan_op(
     if op["op"] != "explore_area":
         return None
     label = plan_op_goal(op)
+    targets = explore_area_targets(op, w, m)
+    center = (op["x"], op["y"])
+    if targets == {center} and nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
+        return None
+    params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+    found = nearest_explore_target(w, targets, params, knowledge)
+    leg = Leg(found[0]) if found and found[1] else None
+    path, leg = commit_explore(m, w, label, targets, leg, found[1] if leg else None, params, knowledge)
+    return (path, label, leg) if path else None
+
+
+def explore_area_targets(op: GoalOp, w: WorldModel, m: Memory) -> set[Pos]:
+    """The cells an ``explore_area`` op may walk to: its frontier not backed off,
+    else its centre while we stand outside the area."""
     targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, explore_targets(op, w), w.tick)
     center = (op["x"], op["y"])
     if not targets and op["radius"] < EXPLORE_ANYWHERE and chebyshev(w.pos, center) > op["radius"]:
-        targets = {center}
-        if nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
-            return None
-    found = nearest_explore_target(
-        w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge), knowledge
-    )
-    return (found[1], label, Leg(found[0])) if found and found[1] else None
+        return {center}
+    return targets
 
 
 def replan(
@@ -229,7 +240,9 @@ def replan(
     """Set ``m.path`` for the ``explore_area`` ``op``, or with no op for the
     safe default: the nearest safe frontier (``safe_explore_path``).
 
-    A path whose first step lies in fog does not count. When there is no
+    Either walk keeps the frontier it is heading for (``commit_explore``),
+    so a reveal never turns it round. A path whose first step lies in fog
+    does not count. When there is no
     step, returns the goal, its leg on this map, and whether a route was
     found (its first step was not open), for the caller's stuck detection (A15).
     """
@@ -247,6 +260,112 @@ def replan(
     if leg is not None and leg.target != w.pos:
         return goal, leg, bool(path)
     return None
+
+
+def commit_walk(
+    m: Memory,
+    w: WorldModel,
+    goal: str,
+    target: Pos,
+    found: list[Pos] | None,
+    params: CostGridParams,
+    *,
+    any_target: bool = False,
+) -> list[Pos] | None:
+    """The path to walk toward ``target``: the one ``goal`` is already on, or ``found``.
+
+    The walker commits to its path (``navigation.walk``, A15): it is kept
+    until it is walked, a cell on it turns out blocked or a step on it is
+    rejected, the target changes, or ``found`` is cheaper by more than
+    ``walk.SWITCH_GAIN``; and never dropped for a path that steps straight
+    back to the cell just left while it is still open.
+
+    ``params`` must be the grid the planner searched ``found`` on: the kept
+    path and ``found`` are both priced on it, so the comparison sees the
+    same hazards, hostiles and fog price the search did.
+    """
+    path, walk = nav_walk.commit(m.walks.get(goal), w, goal, target, found, params, any_target=any_target)
+    if walk is None:
+        nav_walk.drop(m, goal)
+    else:
+        m.walks[goal] = walk
+    return path
+
+
+def clue_redirects(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    blocked: set[Pos],
+    costly: set[Pos],
+    knowledge: KnowledgeBase | None,
+    op: GoalOp | None = None,
+) -> bool:
+    """A direction clue (A32) names a side the explore walk could go to, and the walk heads elsewhere.
+
+    The walk is the ``explore_area`` ``op``'s, or with no op the safe
+    default's. Its targets are the planner's own (``explore_area_targets``,
+    ``safe_explore_targets``): only when one on the clue's side is reachable
+    is the walk dropped, with its path when it is the current one, so the
+    next plan takes that side (``nearest_explore_target``). A clue is a
+    target change. A side the planner could not pick never drops the walk,
+    so it is not remade every decision while the clue lasts. Explore calls
+    this each decision before it keeps a path. True when it dropped the walk.
+    """
+    goal = plan_op_goal(op) if op is not None else SAFE_EXPLORE_GOAL
+    hint = direction_hint(w, knowledge)
+    walk = m.walks.get(goal)
+    if hint is None or walk is None or on_hint_side(hint, walk.target):
+        return False
+    targets = explore_area_targets(op, w, m) if op is not None else safe_explore_targets(w, m, policy)
+    side = {t for t in targets if on_hint_side(hint, t)}
+    params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+    if not side or nearest_target(w, side, params) is None:
+        return False
+    nav_walk.drop(m, goal)
+    if m.goal == goal:
+        m.path, m.goal = [], ""
+    return True
+
+
+def commit_explore(
+    m: Memory,
+    w: WorldModel,
+    goal: str,
+    targets: set[Pos],
+    leg: Leg | None,
+    found: list[Pos] | None,
+    params: CostGridParams,
+    knowledge: KnowledgeBase | None = None,
+) -> tuple[list[Pos] | None, Leg | None]:
+    """``commit_walk`` for an explore walk (``explore``, ``explore_area``), and the leg it walks.
+
+    ``targets`` are the frontier cells the planner chose ``leg`` from. The
+    walk keeps heading for the frontier it was exploring
+    (``walk.follow_frontier``), so a reveal that makes another frontier the
+    nearest never turns it round; only a route there cheaper by more than
+    ``walk.SWITCH_GAIN`` does, or the kept one being blocked. ``leg`` and
+    ``found`` are the planner's choice, None when it found no frontier.
+
+    A direction clue (A32) is a target change: Explore calls
+    ``clue_redirects`` first each decision, which drops a walk heading off
+    the clue's side; a re-aim prefers that side too (``nearest_explore_target``).
+    """
+    def ahead(back: Pos | None) -> tuple[Pos, list[Pos]] | None:
+        found = nearest_explore_target(
+            w, targets, dataclasses.replace(params, avoid=params.avoid | {back} - {None}), knowledge
+        )
+        # Only a way on that starts on a seen, open step; one through fog is no way on yet.
+        return found if found and next_step(w, params.avoid, found[1]) else None
+
+    walk = nav_walk.follow_frontier(m.walks.get(goal), w, goal, targets, ahead)
+    if walk is None:
+        nav_walk.drop(m, goal)
+    else:
+        m.walks[goal] = walk
+    path = commit_walk(m, w, goal, leg.target if leg else w.pos, found, params, any_target=True)
+    kept = m.walks.get(goal)
+    return path, (Leg(kept.target) if kept is not None else leg)
 
 
 def nav_search(m: Memory, w: WorldModel, plan: str, goal: Pos) -> NavSearchState:
@@ -303,12 +422,23 @@ def _store_path(m: Memory, w: WorldModel, goal: str, path: list[Pos], leg: Leg |
         nav_stuck.observe(att, w, path)
 
 
+def _walk_grid(params: Callable[[], CostGridParams] | None, avoid: set[Pos]) -> CostGridParams:
+    """The grid a walk's plan searched on: ``params()``, else the default grid with ``avoid``."""
+    return params() if params is not None else CostGridParams(avoid=set(avoid), allow_goal_door=True)
+
+
 # A plan for one attempt's target, under the attempt's escalation level.
 AttemptPlan = Callable[[NavAttempt], "list[Pos] | None"]
 
 
 def _walk(m: Memory, w: WorldModel, att: NavAttempt, avoid: set[Pos], path: list[Pos]) -> Pos | None:
+    """Walk an escalation level's plan: a new walk, since the old path is the one that got stuck."""
     m.path, m.goal = path, att.goal
+    walk = nav_walk.start(w, att.goal, att.target, path)
+    if walk is None:
+        nav_walk.drop(m, att.goal)
+    else:
+        m.walks[att.goal] = walk
     nav_stuck.observe(att, w, path)
     return next_step(w, avoid, path)
 
@@ -400,6 +530,8 @@ def guided_step(
     avoid: set[Pos],
     plan: AttemptPlan,
     knowledge: KnowledgeBase | None = None,
+    *,
+    params: Callable[[], CostGridParams] | None = None,
 ) -> Pos | None:
     """One move toward ``target`` on this map, with stuck detection and escalation (A15).
 
@@ -408,12 +540,17 @@ def guided_step(
     or was just given up on, so the caller yields the round.
 
     A cross-map ``Leg`` is backed off, and given up, by its ultimate destination.
+
+    ``params`` builds the grid ``plan`` searches on, so the walk prices its
+    kept path on the same one (``commit_walk``); None for a plan on the
+    default grid with ``avoid`` (tests).
     """
     leg = target if isinstance(target, Leg) else Leg(target)
     backoff = leg.backoff_key or nav_stuck.goal_key(goal, w.map_id, leg.target)
     if nav_stuck.is_backed_off(m.nav_stuck, backoff, w.tick):
         if m.goal == goal:
             m.path, m.goal = [], ""
+        nav_walk.drop(m, goal, leg.target)
         return None
     att = nav_stuck.track(m, w, goal, leg)
     if att is None:
@@ -426,9 +563,11 @@ def guided_step(
         if m.goal == goal and next_step(w, avoid, m.path):
             nav_stuck.observe(att, w, m.path)
             return next_step(w, avoid, m.path)
-        found = plan(att)
+        found = commit_walk(m, w, goal, leg.target, plan(att), _walk_grid(params, avoid))
         if next_step(w, avoid, found):
-            return _walk(m, w, att, avoid, found)
+            m.path, m.goal = found, goal
+            nav_stuck.observe(att, w, found)
+            return next_step(w, avoid, found)
         if found:
             return _wait(m, att, found)
         reason = "no_path"
@@ -442,6 +581,8 @@ def bounded_step(
     at: Pos,
     avoid: set[Pos],
     plan: Callable[[], "list[Pos] | None"],
+    *,
+    params: Callable[[], CostGridParams] | None = None,
 ) -> Pos | None:
     """One move toward ``at`` on a walk that gives up instead of escalating (A15).
 
@@ -461,7 +602,8 @@ def bounded_step(
     walk that moves makes its attempt active, so one with no move never
     restarts the window of the walk that does (``nav_stuck.track``). The
     window and the wait hold only while the walk is pursued on consecutive
-    decisions (``nav_stuck.resume``).
+    decisions (``nav_stuck.resume``). ``params`` is the grid ``plan``
+    searches on, as in ``guided_step``.
     """
     if nav_stuck.backed_off(m, goal, w.map_id, at, w.tick):
         return None
@@ -470,7 +612,7 @@ def bounded_step(
         return None
     nav_stuck.resume(m, att, w.tick)
     if not (m.goal == goal and m.path and m.path[-1] == at and next_step(w, avoid, m.path)):
-        found = plan()
+        found = commit_walk(m, w, goal, at, plan(), _walk_grid(params, avoid))
         if not found or not next_step(w, avoid, found):
             if att.waiting_since is None:
                 att.waiting_since = w.tick
@@ -520,6 +662,21 @@ def attempt_plan(
     return plan
 
 
+def safe_explore_targets(w: WorldModel, m: Memory, policy: Policy, *, push: bool = False) -> set[Pos]:
+    """The frontier cells the safe default may walk to (``safe_explore_path``).
+
+    ``push`` drops the hurt rule (safe-zone ground only): the frontier just
+    outside safe ground, still off hazards and away from hostiles.
+    """
+    from .states.gather_safe import hostiles_near, is_safe_ish
+
+    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
+    targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
+    if hurt(w) and not push:
+        return {p for p in targets if is_safe_ish(w, p, policy)}
+    return {p for p in targets if not hostiles_near(w, p, policy)}
+
+
 def safe_explore_path(
     w: WorldModel,
     m: Memory,
@@ -540,15 +697,13 @@ def safe_explore_path(
     always. So the safe default never loops "look around" while unexplored
     ground is reachable. Frontiers backed off after a give-up are skipped (A15).
     """
-    from .states.gather_safe import hostiles_near, is_safe_ish
-
-    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
-    targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
-    targets = {p for p in targets if not hostiles_near(w, p, policy)}
+    targets = safe_explore_targets(w, m, policy)
     params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
-    found = None
-    if hurt(w):
-        found = nearest_explore_target(w, {p for p in targets if is_safe_ish(w, p, policy)}, params, knowledge)
-    if not (found and found[1]):
+    found = nearest_explore_target(w, targets, params, knowledge)
+    if not (found and found[1]) and hurt(w):
+        # Hurt-safe ground all explored or out of reach: push the boundary.
+        targets = safe_explore_targets(w, m, policy, push=True)
         found = nearest_explore_target(w, targets, params, knowledge)
-    return (found[1], Leg(found[0])) if found and found[1] else (None, None)
+    leg = Leg(found[0]) if found and found[1] else None
+    path, leg = commit_explore(m, w, SAFE_EXPLORE_GOAL, targets, leg, found[1] if leg else None, params, knowledge)
+    return (path, leg) if path else (None, None)

@@ -52,11 +52,13 @@ def level_outcome(
     if choice is not None:
         goal, target = choice
 
-        def plan(att):
-            params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
-            return cost_path(w, target, params, nav=nav_search(m, w, goal, target))
+        def params():
+            return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
 
-        step = guided_step(m, w, goal, target, plan_avoid, plan)
+        def plan(att):
+            return cost_path(w, target, params(), nav=nav_search(m, w, goal, target))
+
+        step = guided_step(m, w, goal, target, plan_avoid, plan, params=params)
         if step is not None:
             note = nav_stuck.level_note(nav_stuck.active(m, w))
             return StateOutcome([set_position(step)], f"level → {target}{note}", state=state)
@@ -124,11 +126,13 @@ def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcom
     m, policy = ctx.memory, ctx.policy
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
 
-    def plan(att):
-        params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
-        return cost_path(w, door, params, nav=nav_search(m, w, ENTRANCE_GOAL, door))
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
 
-    step = guided_step(m, w, ENTRANCE_GOAL, door, plan_avoid, plan)
+    def plan(att):
+        return cost_path(w, door, params(), nav=nav_search(m, w, ENTRANCE_GOAL, door))
+
+    step = guided_step(m, w, ENTRANCE_GOAL, door, plan_avoid, plan, params=params)
     if step is None:
         return StateOutcome(None, f"no path to level entrance {door}", state=LevelState.name)
     return StateOutcome([set_position(step)], f"level entrance → {door}", state=LevelState.name)

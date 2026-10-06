@@ -21,6 +21,7 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent import __main__ as cli
 from agentrealm_agent.pathing import path_owned_by, plan_op_goal
+from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.strategist import (
     BACKOFF_BASE_S,
@@ -35,6 +36,10 @@ from agentrealm_agent.strategist import (
     StrategistConfig,
     build_prompt,
     drain_triggers,
+    default_tokens_per_min,
+    estimate_tokens,
+    system_prompt,
+    trace_messages,
     parse_reply,
     tokens_used,
 )
@@ -248,7 +253,8 @@ class AnswerTest(unittest.TestCase):
         self.assertEqual(r.mem.path, [])
         self.assertEqual(logged_events(r), ["ask", "applied"])
         ask = r.log.call_args_list[0].args[2]["strategist"]
-        self.assertEqual(ask["messages"], llm.messages[0])
+        self.assertEqual(ask["messages"], trace_messages(llm.messages[0]))
+        self.assertIn("<cached prefix: ", ask["messages"][0]["content"])  # the trace skips the reference text
         self.assertIn({"trigger": "death", "tick": 3}, ask["triggers"])
 
     def test_prompt_has_whole_plan_every_clue_and_the_op_table(self):
@@ -309,6 +315,14 @@ class AnswerTest(unittest.TestCase):
 
 class ProgressTest(unittest.TestCase):
     """A timer reply that re-sends the stack must not restart the op on top."""
+
+    def test_a_new_head_drops_every_walk(self):
+        """The new head walks a path of its own: no walk the old stack committed to is kept (A15)."""
+        llm = FakeLLM({"goals": [{"op": "travel", "to": "town", "x": 0, "y": 0}]})
+        s, r = make(llm), fake_runner()
+        r.mem.walks["explore"] = Walk("explore", 1, (5, 0), [(0, 0), (1, 0)])
+        round_trip(s, r)
+        self.assertEqual(r.mem.walks, {})
 
     def test_identical_reply_keeps_the_plan_and_its_progress(self):
         stack = [{"op": "wait", "seconds": 20, "why": "boss spawns"}, {"op": "buy", "code": "torch"}]
@@ -762,9 +776,10 @@ class BudgetTest(unittest.TestCase):
 class FakeAnthropicSDK:
     """Stands in for the ``anthropic`` package: records each request, answers ``reply``."""
 
-    def __init__(self, reply: str = '{"goals": []}', stop_reason: str = "end_turn") -> None:
+    def __init__(self, reply: str = '{"goals": []}', stop_reason: str = "end_turn", **usage: int) -> None:
         self.requests: list[dict] = []
         self.reply, self.stop_reason = reply, stop_reason
+        self.usage = {"input_tokens": 30, "output_tokens": 12, **usage}
         sdk = self
 
         class Anthropic:
@@ -779,7 +794,7 @@ class FakeAnthropicSDK:
         return SimpleNamespace(
             stop_reason=self.stop_reason,
             content=[SimpleNamespace(type="thinking", thinking=""), SimpleNamespace(type="text", text=self.reply)],
-            usage=SimpleNamespace(input_tokens=30, output_tokens=12),
+            usage=SimpleNamespace(**self.usage),
         )
 
 
@@ -841,9 +856,81 @@ class ProviderTest(unittest.TestCase):
         self.assertEqual(tokens_used(usage), 42)
         req = sdk.requests[0]
         self.assertEqual(sdk.api_key, "a-key")
-        self.assertEqual((req["model"], req["system"], req["messages"]), ("claude-sonnet-5-5", "sys", [{"role": "user", "content": "state"}]))
+        self.assertEqual(
+            (req["model"], req["system"], req["messages"]),
+            ("claude-sonnet-5-5", [{"type": "text", "text": "sys"}], [{"role": "user", "content": "state"}]),
+        )
         self.assertNotIn("temperature", req)
         self.assertEqual(req["extra_body"]["fallbacks"], "default")
+
+    def test_anthropic_caches_the_marked_system_block(self):
+        sdk = FakeAnthropicSDK(reply=json.dumps(WAIT_ANSWER))
+        s = self.from_env(sdk, ANTHROPIC_API_KEY="a")
+        s.client.complete([{"role": "system", "content": "ref", "cache": True}, {"role": "user", "content": "state"}])
+        req = sdk.requests[0]
+        self.assertEqual(req["system"], [{"type": "text", "text": "ref", "cache_control": {"type": "ephemeral"}}])
+        self.assertEqual(req["messages"], [{"role": "user", "content": "state"}])
+
+    def test_anthropic_cache_miss_counts_the_write_and_a_hit_skips_the_read(self):
+        miss = FakeAnthropicSDK(reply=json.dumps(WAIT_ANSWER), cache_creation_input_tokens=60_000)
+        _, usage = self.from_env(miss, ANTHROPIC_API_KEY="a").client.complete([{"role": "user", "content": "s"}])
+        self.assertEqual(tokens_used(usage), 60_042)
+        hit = FakeAnthropicSDK(reply=json.dumps(WAIT_ANSWER), cache_read_input_tokens=60_000)
+        _, usage = self.from_env(hit, ANTHROPIC_API_KEY="a").client.complete([{"role": "user", "content": "s"}])
+        self.assertEqual(tokens_used(usage), 42)
+
+    def openai_usage(self, usage: dict) -> dict:
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(req, timeout):
+            body = {"choices": [{"message": {"content": json.dumps(WAIT_ANSWER)}}], "usage": usage}
+            return Resp(json.dumps(body).encode())
+
+        with mock.patch("urllib.request.urlopen", urlopen):
+            return OpenAIChatClient("k", "m").complete([{"role": "user", "content": "s"}])[1]
+
+    def test_openai_cache_miss_counts_the_whole_prompt(self):
+        miss = {"prompt_tokens": 60_000, "completion_tokens": 10, "prompt_tokens_details": {"cached_tokens": 0}}
+        self.assertEqual(tokens_used(self.openai_usage(miss)), 60_010)
+        self.assertEqual(tokens_used(self.openai_usage({"prompt_tokens": 60_000, "completion_tokens": 10})), 60_010)
+
+    def test_default_budget_fits_one_prefix_write(self):
+        prefix = estimate_tokens([{"role": "system", "content": system_prompt()}])
+        self.assertGreaterEqual(default_tokens_per_min(), 1.5 * prefix)
+        s = Strategist(config=StrategistConfig(provider="openai", model="m", api_key="k"), clock=Clock())
+        self.assertEqual(s.token_budget(), default_tokens_per_min())
+        s.spent.append([s.clock(), prefix + 2_000])  # a cache miss: the whole prefix written, plus the rest
+        self.assertEqual(s.limit_reached(), "")
+        self.assertEqual(make(tokens_per_min=5000).token_budget(), 5000)  # an explicit budget wins
+
+    def test_openai_sends_a_cache_key_and_counts_only_uncached_tokens(self):
+        sent = {}
+
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(req, timeout):
+            sent.update(json.loads(req.data))
+            usage = {"prompt_tokens": 1000, "completion_tokens": 10, "prompt_tokens_details": {"cached_tokens": 900}}
+            body = {"choices": [{"message": {"content": json.dumps(WAIT_ANSWER)}}], "usage": usage}
+            return Resp(json.dumps(body).encode())
+
+        with mock.patch("urllib.request.urlopen", urlopen):
+            _, usage = OpenAIChatClient("k", "m").complete(
+                [{"role": "system", "content": "ref", "cache": True}, {"role": "user", "content": "state"}]
+            )
+        self.assertEqual(sent["prompt_cache_key"], "agentrealm-planner")
+        self.assertEqual(sent["messages"][0], {"role": "system", "content": "ref"})  # no extra keys on the wire
+        self.assertEqual(tokens_used(usage), 110)
 
     def test_anthropic_refusal_is_a_failed_call(self):
         s = self.from_env(FakeAnthropicSDK(stop_reason="refusal"), ANTHROPIC_API_KEY="a")

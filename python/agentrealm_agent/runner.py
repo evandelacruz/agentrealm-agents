@@ -170,6 +170,7 @@ class Runner:
         if d.goals != old_goals:
             self.plan = self._build_plan()
             self.mem.path, self.mem.goal, self.mem.goal_op = [], "", None
+            self.mem.walks.clear()  # the new head walks a path of its own (A15)
             queue_signal(self.mem, {"trigger": "directives", "goals": list(d.goals), "tick": self.world.tick})
         else:
             self.plan.floor_params, self.plan.params = dict(d.params), dict(d.params)
@@ -217,6 +218,8 @@ class Runner:
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
         self.pacer = Pacer(1.0 / hz)
         apply_town(self.world, world.get("town"))
+        if isinstance(world.get("level_count"), int):
+            self.world.level_count = world["level_count"]
         town = world.get("town") or {}
         if town.get("map_id") is not None:
             # The town is on the overworld, so leaving its map enters a level (A41).

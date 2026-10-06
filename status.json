@@ -37,7 +37,7 @@
 
   "A14": {"state": "done"},
 
-  "A15": {"state": "done"},
+  "A15": {"state": "done", "note": "The walker commits to its path (A58 run 5 flip, step 1b of the pacing redirect); the oscillation guard stays as a safety net."},
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58. Under the planner the target is a pinned directives goal; planner errors or no accepted plan fail every smoke gate."},
 
@@ -45,7 +45,7 @@
 
   "A59": {"state": "done"},
 
-  "A61": {"state": "partial", "remaining": "Step 1b: walker and pathing internals (pathing.py, navigation/*). Step 2: strategist and planner wiring (#108): prompt op table matching the validators (no hunt, wait with why and <= 30 s, equip), and emitting equip, potion buy, read, say and entrance travel ops, which M8, M9's look clause and M10's read-and-say clause need. potion_reserve is planner-only."},
+  "A61": {"state": "done", "note": "Steps 1 (#110), 1b walker commits (#109) and 2 planner wiring (#108) shipped; not yet run live: the next A58 live scenario checks no pacing with the planner on."},
 
   "A60": {"state": "done", "note": "Probe, profile and offline tests shipped; not run live. A58 runs it before the hour when the knowledge base has no regen answer."},
 
@@ -93,7 +93,9 @@
 
   "A34": {"state": "done"},
 
-  "A35": {"state": "done", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack runs the A61 safe default, fail fast with no key. Planner prompt op table matches the executors (equip in, hunt out). Clearing Memory.walks on a stack change waits on #109. Refused key (401/403) is fatal at startup; mid-run failures back off (2 s doubling, cap 120 s); directives ops stay above the planner's goals; SDKs in python/requirements.txt."},
+  "A35": {"state": "done", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack runs the A61 safe default, fail fast with no key. Planner prompt op table matches the executors (equip in, hunt out). A stack change also drops every committed walk (Memory.walks, A15). Refused key (401/403) is fatal at startup; mid-run failures back off (2 s doubling, cap 120 s); directives ops stay above the planner's goals; SDKs in python/requirements.txt."},
+
+  "A62": {"state": "done", "note": "Planner prompt: game reference (site docs and guides, refreshed by scripts/refresh_planner_reference.py), GAME_NOTES.md, progression section (survive and learn, gear up, beat levels, beat the world; readiness bars on State fields worn, held, armed, levels_cleared, level_count), op contract; cached prefix (Anthropic cache_control, OpenAI prompt_cache_key). Token budget counts cache writes, not reads; default fits one prefix write. Not yet run live."},
 
   "A36": {"state": "done"},
 

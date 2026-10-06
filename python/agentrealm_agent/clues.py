@@ -207,6 +207,12 @@ def direction_hint(w: WorldModel, kb: KnowledgeBase | None) -> tuple[Pos, tuple[
     return None if best is None else (best[1], best[2])
 
 
+def on_hint_side(hint: tuple[Pos, tuple[int, int]], p: Pos) -> bool:
+    """``p`` lies on the side of the clue cell its direction names."""
+    (cx, cy), (dx, dy) = hint
+    return (p[0] - cx) * dx + (p[1] - cy) * dy > 0
+
+
 def nearest_explore_target(
     w: WorldModel, targets: set[Pos], params: CostGridParams | None, kb: KnowledgeBase | None
 ) -> tuple[Pos, list[Pos]] | None:
@@ -218,8 +224,7 @@ def nearest_explore_target(
     hint = direction_hint(w, kb)
     if hint is None:
         return nearest_target(w, targets, params)
-    (cx, cy), (dx, dy) = hint
-    ahead = {p for p in targets if (p[0] - cx) * dx + (p[1] - cy) * dy > 0}
+    ahead = {p for p in targets if on_hint_side(hint, p)}
     if ahead:
         found = nearest_target(w, ahead, params)
         if found is not None:

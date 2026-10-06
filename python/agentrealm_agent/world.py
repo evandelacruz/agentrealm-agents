@@ -118,6 +118,8 @@ class WorldModel:
     woke: bool = False
     asleep: bool = False  # GetSelf and a sleeping round trip carry it (GAME_NOTES Sleep)
     lives: int = 0
+    levels_cleared: list[int] = field(default_factory=list)  # level numbers cleared, from snapshots (A62)
+    level_count: int | None = None  # levels the world authored, from GetWorld (A62)
     gems: int | None = None  # inventory counter from snapshots (A22)
     health: int | None = None
     max_health: int | None = None
@@ -413,6 +415,8 @@ class WorldModel:
             self.lives = int(body["lives"])
         if "alive" in body:
             self.alive = bool(body["alive"])
+        if isinstance(body.get("levels_cleared"), list):
+            self.levels_cleared = sorted({n for n in map(_opt_int, body["levels_cleared"]) if n is not None})
         if "asleep" in body:
             self._set_asleep(bool(body["asleep"]))
         if "position" in body:

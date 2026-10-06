@@ -119,12 +119,14 @@ def recover_outcome(
         if contents is None:
             return StateOutcome(None, f"open chest {chest_id}", state=state, wait=True)
 
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly, m=m)
+
     def plan(att):
-        params = grid_params(policy, plan_avoid, plan_costly, m=m)
-        return cost_path(w, target, params, nav=nav_search(m, w, "chest", target))
+        return cost_path(w, target, params(), nav=nav_search(m, w, "chest", target))
 
     # Stuck detection and escalation drive the walk; a chest given up on is backed off (A15).
-    step = guided_step(m, w, "chest", target, plan_avoid, plan, knowledge)
+    step = guided_step(m, w, "chest", target, plan_avoid, plan, knowledge, params=params)
     if step is not None:
         note = nav_stuck.level_note(nav_stuck.active(m, w))
         return StateOutcome([set_position(step)], f"chest → {target}{note}", state=state)

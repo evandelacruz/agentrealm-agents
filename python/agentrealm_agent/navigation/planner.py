@@ -412,6 +412,24 @@ def _fine_path(
     return None if best == start else _unwind(came, start, best)
 
 
+def path_cost(w: WorldModel, path: list[Pos], goal: Pos, params: CostGridParams | None = None) -> int | None:
+    """What walking ``path`` costs on today's cost grid, plus the straight-line
+    rest from its end to ``goal``; None when a cell on it is impassable now.
+
+    Prices a kept path and a new plan alike, so a walk can tell whether the
+    new one is really cheaper (``navigation.walk``, A15).
+    """
+    grid = _Grid(w, {goal}, params or CostGridParams())
+    total = 0
+    for p in path:
+        c = grid.cost(p)
+        if c is None:
+            return None
+        total += c
+    end = path[-1] if path else w.pos
+    return total + chebyshev(end, goal) * KNOWN_WALKABLE
+
+
 def cost_flood(
     w: WorldModel, targets: set[Pos], params: CostGridParams | None = None
 ) -> dict[Pos, tuple[list[Pos], int]]:
@@ -516,7 +534,9 @@ def nearest_target(
     params = params or CostGridParams()
     best: tuple[Pos, list[Pos]] | None = None
     best_cost = 0
-    for t in sorted(targets, key=lambda p: chebyshev(w.pos, p)):
+    # Ties go to the smaller cell, whatever order the set holds them in, so
+    # one map always gives the same target (A15).
+    for t in sorted(targets, key=lambda p: (chebyshev(w.pos, p), p)):
         if best is not None and chebyshev(w.pos, t) * KNOWN_WALKABLE >= best_cost:
             break
         found = _search(w, t, params)

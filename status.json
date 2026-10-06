@@ -41,7 +41,7 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 
-  "A58": {"state": "partial", "remaining": "Run 8 (full hour on main after #101): exit 1, ABORT sustained oscillation at ~28 min after navigation reached the goto; the reached goto was owed again on each step-off and ping-ponged against Explore. Fixed offline (a reached goto is satisfied, A16); rerun the live hour. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "Regen unmeasured on every run (1 and 3-8); in run 8 the character was never hurt, so run 9 can fail the regen gate. Run 8's post-reach goto/explore ping-pong is fixed offline (A16: a reached goto is satisfied); rerun the live hour. Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 

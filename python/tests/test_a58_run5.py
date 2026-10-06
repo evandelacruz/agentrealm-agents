@@ -25,7 +25,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import CostGridParams, learn_step_rejection
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation import walk as nav_walk
-from agentrealm_agent.navigation.planner import path_cost
+from agentrealm_agent.navigation.planner import hostile_cost, path_cost
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.pathing import bounded_step, clue_redirects, commit_walk, guided_step
@@ -305,6 +305,19 @@ class CommitRulesTest(unittest.TestCase):
         self.assertEqual(self.commit(back)[0], self.kept[1:], "no hostile: the walk keeps its path")
         self.w.entities = [Entity("npc", 9, (5, 1))]
         self.assertEqual(self.commit(back)[0], back, "the kept path runs past the hostile: back it is")
+
+    def test_a_step_back_under_a_fifth_safer_is_not_taken(self):
+        """Review on #119: cheaper overall, but its hostile cost is within ``SWITCH_GAIN`` of the kept path's."""
+        self.w.pos = (1, 0)
+        self.w.entities = [Entity("npc", 9, (2, 3)), Entity("npc", 8, (11, -5))]
+        back = [(0, 0), (0, -1), (1, -2)] + [(x, -3) for x in range(2, 9)] + [(9, -2), (10, -1), self.target]
+        kept_hostile, back_hostile = hostile_cost(self.w, self.kept[1:]), hostile_cost(self.w, back)
+        self.assertLess(back_hostile, kept_hostile)
+        self.assertGreaterEqual(back_hostile, (1 - nav_walk.SWITCH_GAIN) * kept_hostile)
+        self.assertLess(
+            path_cost(self.w, back, self.target, self.params), path_cost(self.w, self.kept[1:], self.target, self.params)
+        )
+        self.assertEqual(self.commit(back)[0], self.kept[1:])
 
     def test_a_costlier_step_back_is_not_taken_for_hostile_cost_alone(self):
         """Review on #119: a hostile at the edge of its reach must not turn the walk onto a dearer detour."""

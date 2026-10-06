@@ -215,7 +215,8 @@ class DispatcherFallThroughTest(unittest.TestCase):
 
     def test_flee_with_nowhere_to_go_waits(self):
         w = world(["###", "#.#", "###"], at=(1, 1))
-        w.entities = [Entity("npc", 5, (2, 1))]
+        w.entities = [Entity("npc", 5, (2, 1), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         out = dispatch(w, ctx(w, on_hostile="flee", hostile=["npc"], hostile_range=2))
         self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Flee", None, "nowhere to flee", True))
 

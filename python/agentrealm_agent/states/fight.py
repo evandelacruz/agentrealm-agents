@@ -11,7 +11,7 @@ from ..executor.movement import direction_between
 from ..knowledge_base import KnowledgeBase
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
-from ..survival import RETREAT_NAV, on_safe_tile, pursuer_peaks, retreat_goal, would_lose
+from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks, retreat_goal, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
@@ -23,14 +23,14 @@ ATTACK_USES = 3
 
 
 def fight_target(w: WorldModel, policy, never_attack: list[str]) -> Entity | None:
-    """Nearest hostile in range that ``on_hostile = fight`` may swing at."""
+    """Nearest hostile in range (``survival.is_hostile``) that ``on_hostile = fight`` may swing at."""
     here = w.pos
     if here is None or policy.on_hostile != "fight":
         return None
     hostiles = [
         e
         for e in w.entities
-        if e.kind in policy.hostile
+        if is_hostile(w, policy, e)
         and not e.is_boss  # Boss fights bosses (A38)
         and chebyshev(e.pos, here) <= policy.hostile_range
     ]

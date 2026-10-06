@@ -167,6 +167,7 @@ class ShopBuyTest(unittest.TestCase):
     def test_hostile_in_range_outranks_shop(self):
         w = world()
         w.entities = [Entity("supply", 5, (1, 2), "torch", gem_price=3), Entity("npc", 3, (2, 2), "slime")]
+        w.hostile_types.add(("npc", "slime"))  # a type seen attacking (survival.is_hostile)
         plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
         out = dispatch(w, ctx(w, plan=plan))
         self.assertNotEqual(out.state, "Shop")

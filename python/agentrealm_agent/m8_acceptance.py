@@ -79,6 +79,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
         acted_op: dict | None = None,
+        plan_op: dict | None = None,
     ) -> None:
         if state != "Fight":
             self._end_fight()

@@ -146,6 +146,7 @@ class M9AcceptanceMetrics(SurvivalAcceptanceMetrics):
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
         acted_op: dict | None = None,
+        plan_op: dict | None = None,
     ) -> None:
         self.note_survival_tick(
             w,

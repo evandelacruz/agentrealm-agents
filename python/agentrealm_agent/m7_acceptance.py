@@ -35,7 +35,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .acceptance_survival import LOOP_STEP_LIMIT, SurvivalAcceptanceMetrics, withdraw_cells
+from .acceptance_survival import (
+    LOOP_STEP_LIMIT,
+    OSCILLATION_ABORT_COUNT,
+    OSCILLATION_ABORT_TICKS,
+    OscillationAbortTracker,
+    SurvivalAcceptanceMetrics,
+    withdraw_cells,
+)
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -43,12 +50,6 @@ from .world import Pos, WorldModel, chebyshev
 
 TARGET_SECONDS = 3600.0
 TARGET_DISTANCE = 150
-# Sustained pacing: the guard gave up a target more than this many times in
-# this many ticks (10 minutes at 10 ticks/s); events that gave nothing up do
-# not count. Its backoffs double (30 s, 60 s, 120 s),
-# so a target that keeps making the agent pace trips this within minutes.
-OSCILLATION_ABORT_COUNT = 3
-OSCILLATION_ABORT_TICKS = 6000
 
 __all__ = [
     "LOOP_STEP_LIMIT",
@@ -80,32 +81,25 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
     other_give_ups: int = 0  # give-ups on any other goal: reported, never a pass
     lives_seen: int | None = None
     regen: str | None = None  # "yes" or "no" once measured
-    oscillation_ticks: list[int] = field(default_factory=list)  # each guard event's tick
-    pacing_give_up_ticks: list[int] = field(default_factory=list)  # ticks of events that gave up a target
-    oscillation_abort: str | None = None  # why the run was stopped for pacing
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
+    _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
+
+    @property
+    def oscillation_ticks(self) -> list[int]:
+        return self._oscillation.oscillation_ticks
+
+    @property
+    def pacing_give_up_ticks(self) -> list[int]:
+        return self._oscillation.pacing_give_up_ticks
+
+    @property
+    def oscillation_abort(self) -> str | None:
+        return self._oscillation.oscillation_abort
 
     def on_oscillation(self, event: dict) -> None:
-        """Count the guard's events; sustained give-ups for pacing end the run.
-
-        Only an event that gave up a target (it carries ``goal``) counts
-        toward the abort; survival states pacing on their own do not.
-        """
-        tick = int(event.get("tick") or 0)
-        self.oscillation_ticks.append(tick)
-        if "goal" not in event:
-            return
-        self.pacing_give_up_ticks.append(tick)
-        recent = [t for t in self.pacing_give_up_ticks if tick - t < OSCILLATION_ABORT_TICKS]
-        if len(recent) > OSCILLATION_ABORT_COUNT and self.oscillation_abort is None:
-            self.oscillation_abort = (
-                f"sustained oscillation: gave up {len(recent)} targets for pacing in "
-                f"{OSCILLATION_ABORT_TICKS} ticks (last at tick {tick}: {event['goal']} → "
-                f"{tuple(event.get('target') or ())}, cells {event.get('cells')}, moved by "
-                f"{', '.join(event.get('states') or []) or 'no state'})"
-            )
-            if self.stop is not None:
-                self.stop.set()
+        """Count the guard's events; sustained give-ups for pacing end the run."""
+        if self._oscillation.on_oscillation(event) and self.stop is not None:
+            self.stop.set()
 
     def before_tick(
         self,
@@ -119,6 +113,7 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
         acted_op: dict | None = None,
+        plan_op: dict | None = None,
     ) -> None:
         if w.lives is not None:
             self.lives_seen = w.lives

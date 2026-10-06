@@ -99,6 +99,7 @@ class M4AcceptanceMetrics(AcceptanceHooks):
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
         acted_op: dict | None = None,
+        plan_op: dict | None = None,
     ) -> None:
         if not intents or acted_op is None:
             return

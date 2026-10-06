@@ -16,13 +16,8 @@ from agentrealm_agent.acceptance import AcceptanceHooks
 from agentrealm_agent.client import ApiError
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.m7_acceptance import (
-    LOOP_STEP_LIMIT,
-    OSCILLATION_ABORT_COUNT,
-    OSCILLATION_ABORT_TICKS,
-    TARGET_DISTANCE,
-    M7AcceptanceMetrics,
-)
+from agentrealm_agent.acceptance_survival import LOOP_STEP_LIMIT, OSCILLATION_ABORT_COUNT, OSCILLATION_ABORT_TICKS
+from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, M7AcceptanceMetrics
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
@@ -62,7 +57,7 @@ def open_world(pos=(0, 0)) -> WorldModel:
 STEP = [{"verb": "Step", "direction": "right"}]
 
 
-def decide(m, w, mem=None, *, state="Explore", reason="explore", intents=STEP, knowledge=None):
+def decide(m, w, mem=None, *, state="Explore", reason="explore", intents=STEP, knowledge=None, plan_op=None):
     """One ``before_tick`` call; ``intents=None`` is a held queue, nothing new sent."""
     m.before_tick(
         w,
@@ -73,6 +68,7 @@ def decide(m, w, mem=None, *, state="Explore", reason="explore", intents=STEP, k
         policy=Policy(hostile=["npc"]),
         params=dict(PARAM_DEFAULTS),
         knowledge=knowledge,
+        plan_op=plan_op,
     )
 
 

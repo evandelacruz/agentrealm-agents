@@ -30,12 +30,13 @@ sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
 from agentrealm_agent.acceptance_run import FULL_RUN_FRACTION  # noqa: E402
-from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, STOP_ON_DEATH_HELP, navigation_start, planner_for, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, STOP_ON_DEATH_HELP, add_park_argument, alive_at_end_failures, navigation_start, planner_for, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.directives import Directives, default_directives, load_directives  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase  # noqa: E402
 from agentrealm_agent.m9_acceptance import TARGET_SECONDS, M9AcceptanceMetrics, clear_entrance_looks  # noqa: E402
+from agentrealm_agent.park import DEFAULT_PARK_SECONDS  # noqa: E402
 from agentrealm_agent.strategist import PlannerConfigError, Strategist  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m9.toml"
@@ -118,6 +119,7 @@ def run_smoke(
     *,
     timeout_s: float,
     planner: Strategist | None = None,
+    park_seconds: float = DEFAULT_PARK_SECONDS,
 ) -> tuple[M9AcceptanceMetrics, float]:
     directives_path = cfg.directives_path
     original = directives_path.read_bytes() if directives_path.is_file() else None
@@ -137,7 +139,7 @@ def run_smoke(
 
     metrics.on_entrances_done = entrances_done
     try:
-        elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=timeout_s, out=out, prepare=prepare, planner=planner)
+        elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=timeout_s, out=out, prepare=prepare, planner=planner, park_seconds=park_seconds)
     finally:
         restore_file(directives_path, original)
     return metrics, elapsed
@@ -157,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     ap.add_argument("--no-planner", action="store_true", help=NO_PLANNER_HELP)
     ap.add_argument("--stop-on-death", action="store_true", help=STOP_ON_DEATH_HELP)
+    add_park_argument(ap)
     ap.add_argument(
         "--seconds",
         type=float,
@@ -215,8 +218,9 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
     metrics = M9AcceptanceMetrics(stop_on_death=args.stop_on_death, target_seconds=args.seconds)
-    metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, planner=planner)
+    metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, planner=planner, park_seconds=args.park_seconds)
     print(f"finished in {elapsed:.1f}s", flush=True)
+    print(metrics.park_summary_line(), flush=True)
     for line in metrics.summary_lines():
         print(line, flush=True)
 
@@ -224,14 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     failures = list(metrics.failures(full_run=full_run))
     if full_run and elapsed + 1.0 < args.seconds and not metrics.entrances_ok():
         failures.append(f"ran {elapsed:.0f}s < target {args.seconds:.0f}s without finishing entrances")
-    try:
-        alive = client.self_(cid).get("alive", True)
-        if not alive and args.stop_on_death:
-            failures.append("character not alive at end")
-        elif not alive:
-            print("character not alive at end (respawning)", flush=True)
-    except ApiError as e:
-        failures.append(f"self read failed: {e.code}")
+    failures.extend(alive_at_end_failures(client, cid, metrics, stop_on_death=args.stop_on_death))
     if failures:
         print("FAIL:", "; ".join(failures), file=sys.stderr)
         return 1

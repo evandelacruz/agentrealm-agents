@@ -98,6 +98,9 @@ class Memory:
     retreat_walk: Pos | None = None
     retreat_to: Pos | None = None
     retreat_gaps: list[tuple[int, int]] = field(default_factory=list)
+    # The runner's park phase (A66): the run is over and only the survival
+    # reflexes and Park run, walking to safe ground before the exit.
+    parking: bool = False
     strength: StrengthBracket = field(default_factory=StrengthBracket)
     loadout_key: tuple = ()  # reset strength bracket when armed/worn changes (A27)
     # Clues (A32): {"trigger": "clue", **kb.clues row} per new clue; the strategist (A35) drains them.

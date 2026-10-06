@@ -44,6 +44,7 @@ from .idle import IdleState
 from .investigate import InvestigateState
 from .level import LevelState
 from .loot import LootState
+from .park import ParkState
 from .pickup import PickupState
 from .recover import RecoverState
 from .retreat import RetreatState
@@ -93,6 +94,11 @@ EXECUTORS: tuple[State, ...] = (
 
 # The ``idle`` and ``wander`` policy kinds (M1); never guards for ``scripted``.
 STATES: tuple[State, ...] = REFLEXES + EXECUTORS + (IdleState(),)
+
+# The runner's park phase, after the run ends (A66): the survival reflexes,
+# then Park walking to safe ground. No plan op runs, and nothing else.
+SURVIVAL = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee")
+PARK_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name in SURVIVAL) + (ParkState(),)
 
 
 def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
@@ -197,9 +203,10 @@ def _breaking_for(owner: str | None, m: Memory, world: WorldModel) -> bool:
 
 
 def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> StateOutcome:
-    """The first state, in ``STATES`` order, that runs and sends an intent or waits."""
+    """The first state, in ``STATES`` order, that runs and sends an intent or
+    waits; in the park phase, in ``PARK_STATES`` order (A66)."""
     m = ctx.memory
-    for state in STATES:
+    for state in PARK_STATES if m.parking else STATES:
         active = state.name == m.state and not state.done(world, ctx)
         if not (active or state.guard(world, ctx)):
             continue

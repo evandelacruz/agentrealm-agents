@@ -133,5 +133,7 @@
 
   "A64": {"state": "open", "note": "A23 run 2: decisions blocked the loop 5-17 s (nearest_target A* per target, danger() per hostile, full _decide in reflex_while_held)."},
 
-  "A65": {"state": "done", "note": "Planner State nearby_npcs and npcs_spoken_to; Greet reflex says hello once to a likely helper in sight (stays put, not known hostile; none off safe ground while NPCs are hostile). No live run yet."}
+  "A65": {"state": "done", "note": "Planner State nearby_npcs and npcs_spoken_to; Greet reflex says hello once to a likely helper in sight (stays put, not known hostile; none off safe ground while NPCs are hostile). No live run yet."},
+
+  "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Not yet seen in a live run."}
 }

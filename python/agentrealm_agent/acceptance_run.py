@@ -7,15 +7,17 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .acceptance import CountingClient, PlannerHealth
+from .acceptance import CountingClient, ParkSplit, PlannerHealth
 
 # A run at least this share of its target duration is judged on the full gate.
 FULL_RUN_FRACTION = 0.95
 
 
 @dataclass(kw_only=True)
-class TimedRunHooks(PlannerHealth):
-    """Deaths, API errors, planner health (``PlannerHealth``), and an optional wall-clock stop for long smoke runs."""
+class TimedRunHooks(PlannerHealth, ParkSplit):
+    """Deaths, API errors, planner health (``PlannerHealth``), and an optional wall-clock stop for long smoke runs.
+
+    The park phase after the stop (A66) counts toward none of them (``ParkSplit``)."""
 
     stop: threading.Event | None = None
     target_seconds: float | None = None  # wall-clock length of the run; None plays until stopped

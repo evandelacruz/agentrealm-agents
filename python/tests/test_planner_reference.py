@@ -110,9 +110,13 @@ class SectionTest(unittest.TestCase):
 
     def test_setup_sections_match_by_key_not_substring(self):
         picked = {s.key for s in select_sections(self.sections, "", budget=10**9)}
-        self.assertIn("/docs/api / accounts and access", picked)  # play rules, not the manual's setup section
-        self.assertNotIn("/docs/manual / 4. accounts and keys", picked)
+        self.assertIn("/docs/guides/create-a-character-agent / identity", picked)
+        for setup in ("/docs/manual / 4. accounts and keys", "/docs/api / accounts and access"):
+            self.assertNotIn(setup, picked)
         self.assertFalse(any(k.startswith("/docs/changelog") for k in picked))
+
+    def test_default_reference_has_the_round_trip(self):
+        self.assertIn("### 7. The round trip", reference_text(""))
 
     def test_core_only_and_a_named_section(self):
         core = select_sections(self.sections, "core")

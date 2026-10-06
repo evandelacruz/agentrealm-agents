@@ -52,6 +52,7 @@ LAST_SECTIONS = (
     "/docs/manual / 2. quick start",
     "/docs/manual / 4. accounts and keys",
     "/docs/manual / 13. running the stack locally",
+    "/docs/api / accounts and access",
 )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from ..knowledge_base import KnowledgeBase
@@ -23,7 +24,12 @@ def resolve_travel(
     w: WorldModel,
     kb: KnowledgeBase | None,
     bracket: StrengthBracket,
+    given_up: Collection[tuple[int, Pos]] = (),
 ) -> ResolvedDestination | None:
+    """Where ``op`` goes now, or None when nothing is known yet. A ``shop``
+    with no cell and a ``hunting_ground`` pick the best known cell that is not
+    in ``given_up`` (stuck detection's Travel give-ups, A16), so a given-up
+    best falls through to the next best; None when none is left."""
     if op.to == "town":
         town = town_from_kb(kb)
         if town is None and w.respawn_anchors:
@@ -52,7 +58,7 @@ def resolve_travel(
             if dest_map is None:
                 return None
             return ResolvedDestination(dest_map, (op.x, op.y), "shop")
-        shops = iter_shop_cells(kb)
+        shops = [s for s in iter_shop_cells(kb) if s not in given_up]
         if not shops:
             return None
         here = w.pos
@@ -62,7 +68,7 @@ def resolve_travel(
         best = min(shops, key=lambda s: (0 if s[0] == w.map_id else 1, chebyshev(here, s[1]), s))
         return ResolvedDestination(best[0], best[1], "shop")
     if op.to == "hunting_ground":
-        return _resolve_hunting(w, kb, bracket)
+        return _resolve_hunting(w, kb, bracket, given_up)
     return None
 
 
@@ -70,19 +76,20 @@ def _resolve_hunting(
     w: WorldModel,
     kb: KnowledgeBase | None,
     bracket: StrengthBracket,
+    given_up: Collection[tuple[int, Pos]],
 ) -> ResolvedDestination | None:
     candidates: list[tuple[int, Pos, int | None]] = []
     for map_id, pos, fact in iter_hunting_cells(kb):
         ceiling = fact.get("strength_ceiling")
         c = int(ceiling) if isinstance(ceiling, int) and not isinstance(ceiling, bool) else None
-        if not bracket.can_enter_ceiling(c):
+        if not bracket.can_enter_ceiling(c) or (map_id, pos) in given_up:
             continue
         candidates.append((map_id, pos, c))
     if w.map_id is not None and w.pos is not None:
         for pos, fact in w.zones.get(w.map_id, {}).items():
             if fact.strength_ceiling is None:
                 continue
-            if not bracket.can_enter_ceiling(fact.strength_ceiling):
+            if not bracket.can_enter_ceiling(fact.strength_ceiling) or (w.map_id, pos) in given_up:
                 continue
             candidates.append((w.map_id, pos, fact.strength_ceiling))
     if not candidates:
@@ -98,17 +105,41 @@ def _resolve_hunting(
 
 
 def travel_dest(
-    op: dict, w: WorldModel, kb: KnowledgeBase | None, bracket: StrengthBracket
+    op: dict,
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    bracket: StrengthBracket,
+    given_up: Collection[tuple[int, Pos]] = (),
 ) -> tuple[int, Pos] | None:
     """The map and cell a plan ``travel`` op walks to now, whatever its
     ``to``, or None for any other op and for one that does not resolve
     (an ``entrance`` at ``0, 0`` walks to the nearest unexplored door, which
     changes as doors are explored). Stuck detection's Travel give-ups are
-    matched against this (A16)."""
+    matched against this (A16): pass them as ``given_up`` so a symbolic
+    ``to`` resolves past them, and only an op with nothing left matches."""
     if op.get("op") != "travel":
         return None
-    dest = resolve_travel(travel_op_from_plan_goal(op), w, kb, bracket)
+    dest = resolve_travel(travel_op_from_plan_goal(op), w, kb, bracket, given_up)
     return (dest.map_id, dest.pos) if dest is not None else None
+
+
+def travel_given_up(
+    op: dict,
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    bracket: StrengthBracket,
+    given_up: Collection[tuple[int, Pos]],
+) -> bool:
+    """True when stuck detection gave up on where a ``travel`` op goes (A16):
+    its cell is in ``given_up``, or, for a ``shop`` or ``hunting_ground``,
+    every candidate it could pick is. A symbolic op with another candidate
+    left is not given up: it walks there instead."""
+    if not given_up:
+        return False
+    dest = travel_dest(op, w, kb, bracket, given_up)
+    if dest is not None:
+        return dest in given_up
+    return travel_dest(op, w, kb, bracket) in given_up
 
 
 def at_destination(w: WorldModel, dest: ResolvedDestination) -> bool:

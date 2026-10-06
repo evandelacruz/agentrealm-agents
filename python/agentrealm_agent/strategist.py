@@ -92,7 +92,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Collection, Protocol
 
 from .directives import Directives
-from .travel.resolve import travel_dest
+from .travel.resolve import travel_given_up
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .planner_reference import game_notes_text, reference_text
@@ -813,10 +813,10 @@ class Strategist:
             # A travel to a cell stuck detection gave up on never reaches the
             # stack (A16): filtered here, so a re-send raises no goal_failed
             # and cannot set off another call.
-            def dest(g):
-                return travel_dest(g, runner.world, runner.knowledge, runner.mem.strength)
+            def gave_up(g):
+                return travel_given_up(g, runner.world, runner.knowledge, runner.mem.strength, given_up)
 
-            kept = [g for g in goals if dest(g) not in given_up]
+            kept = [g for g in goals if not gave_up(g)]
             if len(kept) < len(goals):
                 record["given_up_filtered"] = [g for g in goals if g not in kept]
                 goals = kept

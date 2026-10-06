@@ -25,6 +25,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import CostGridParams, learn_step_rejection
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation import walk as nav_walk
+from agentrealm_agent.navigation.planner import path_cost
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.pathing import bounded_step, clue_redirects, commit_walk, guided_step
@@ -300,10 +301,28 @@ class CommitRulesTest(unittest.TestCase):
     def test_a_step_back_is_taken_when_the_kept_path_runs_nearer_hostiles(self):
         """A16 Walk run 3: the kept route led a hurt walker into a known hostile."""
         self.w.pos = (1, 0)
-        back = [(0, 0), (0, -1)] + [(x, -2) for x in range(1, 10)] + [self.target]
+        back = [(0, 0), (0, -1), (1, -2)] + [(x, -3) for x in range(2, 9)] + [(9, -2), (10, -1), self.target]
         self.assertEqual(self.commit(back)[0], self.kept[1:], "no hostile: the walk keeps its path")
         self.w.entities = [Entity("npc", 9, (5, 1))]
         self.assertEqual(self.commit(back)[0], back, "the kept path runs past the hostile: back it is")
+
+    def test_a_costlier_step_back_is_not_taken_for_hostile_cost_alone(self):
+        """Review on #119: a hostile at the edge of its reach must not turn the walk onto a dearer detour."""
+        self.w.pos = (1, 0)
+        self.w.entities = [Entity("npc", 9, (10, 5))]
+        # A long snake back and round: far from the hostile, but dearer overall.
+        back = (
+            [(0, 0)]
+            + [(x, -1) for x in range(-1, -6, -1)]
+            + [(x, -2) for x in range(-4, 9)]
+            + [(x, -3) for x in range(7, -5, -1)]
+            + [(x, -4) for x in range(-3, 10)]
+            + [(10, -3), (10, -2), (10, -1), self.target]
+        )
+        self.assertGreater(
+            path_cost(self.w, back, self.target, self.params), path_cost(self.w, self.kept[1:], self.target, self.params)
+        )
+        self.assertEqual(self.commit(back)[0], self.kept[1:])
 
     def test_a_walked_path_lets_the_next_plan_in(self):
         """A window path that ends short of its target (A13) is walked; the next one is taken as it comes."""

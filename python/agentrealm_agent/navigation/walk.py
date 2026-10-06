@@ -17,8 +17,9 @@ the walker turns round. So a walk keeps the path it chose until one of:
 - a new plan is cheaper by more than ``SWITCH_GAIN`` of the rest of it.
 
 A new path whose first step goes back to the cell the walk just came from
-is taken only when the old one is blocked, or runs nearer the hostiles
-than the new one (A16 Walk run 3), however much cheaper it looks. Equal
+is taken only when the old one is blocked, or when the new one is cheaper
+overall and the old one's hostile cost is higher by more than
+``SWITCH_GAIN`` (A16 Walk run 3); never for a route that only looks cheaper. Equal
 paths therefore never alternate: the one already walked wins.
 
 Each goal keeps its own walk (``Memory.walks``), so a goal whose kept path
@@ -134,8 +135,11 @@ def commit(
             if found_cost is None:
                 return kept, walk
             if found[0] == came_from:
-                # Turning back loses, unless the kept path runs nearer the hostiles.
-                if hostile_cost(w, kept, params) <= hostile_cost(w, found, params):
+                # Turning back loses, unless it is cheaper overall and the kept
+                # path runs nearer the hostiles by more than SWITCH_GAIN.
+                if found_cost >= kept_cost or hostile_cost(w, found, params) >= (1 - SWITCH_GAIN) * hostile_cost(
+                    w, kept, params
+                ):
                     return kept, walk
             elif found_cost >= (1 - SWITCH_GAIN) * kept_cost:
                 return kept, walk

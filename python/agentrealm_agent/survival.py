@@ -138,6 +138,29 @@ def retreat_goal(w: WorldModel, knowledge: KnowledgeBase | None) -> Pos | None:
     return min(goals, key=lambda p: (chebyshev(p, here), p))
 
 
+# The corridor search each retreat danger profile keeps (``pathing.nav_search``):
+# a corridor priced on one profile is never reused on another, since a finished
+# corridor is replanned only when a tile on it gets dearer (A13).
+RETREAT_NAV = "safe:retreat"
+LOSING_NAV = "safe:losing"
+
+
+def pursuer_peaks(w: WorldModel, policy: Policy, everyone: bool = False) -> dict[tuple[str, int], int]:
+    """Danger peak 0 for the hostiles a retreat runs from: the fight's group and
+    whoever hit us last, or every hostile in view when ``everyone`` (A9).
+
+    So a retreat path takes the shortest way to safety instead of detouring
+    round a chaser that follows anyway (A23 survive-a-fight run 1), and still
+    keeps clear of hostiles it has not met. Their cells stay occupied, so it
+    never runs through one.
+    """
+    if everyone:
+        chasing = [e for e in w.entities if e.kind in policy.hostile]
+    else:
+        chasing = combat_group(w, policy) + [e for e in w.entities if is_attacker(w, e)]
+    return {(e.kind, e.id): 0 for e in chasing}
+
+
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:
     if health <= 0 or not group:
         return float("inf")

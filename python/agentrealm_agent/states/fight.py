@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 from ..directives import attack_forbidden
 from ..executor import build_attack_queue, queue_horizon_intents
 from ..executor.intents import step
@@ -9,7 +11,7 @@ from ..executor.movement import direction_between
 from ..knowledge_base import KnowledgeBase
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
-from ..survival import on_safe_tile, retreat_goal, would_lose
+from ..survival import RETREAT_NAV, on_safe_tile, pursuer_peaks, retreat_goal, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
@@ -97,9 +99,10 @@ def retreat_tail(
     if goal is None or w.pos is None or w.pos == goal:
         return []
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
-    params = grid_params(policy, plan_avoid, plan_costly)
+    # Priced as Retreat prices its walk, so the two share one path and corridor.
+    params = dataclasses.replace(grid_params(policy, plan_avoid, plan_costly), danger_peaks=pursuer_peaks(w, policy))
     if m.goal != "safe" or not m.path or m.path[-1] != goal:
-        m.path = cost_path(w, goal, params, nav=nav_search(m, w, "safe", goal)) or []
+        m.path = cost_path(w, goal, params, nav=nav_search(m, w, RETREAT_NAV, goal)) or []
         m.goal = "safe"
     out: list[dict] = []
     pos = w.pos

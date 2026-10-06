@@ -21,7 +21,8 @@ from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import cost_path
-from agentrealm_agent.pathing import grid_params
+from agentrealm_agent.pathing import grid_params, nav_search
+from agentrealm_agent.survival import LOSING_NAV, RETREAT_NAV
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
@@ -165,6 +166,48 @@ class RetreatGoalTest(unittest.TestCase):
         self.w.entities.append(Entity("npc", 8, (0, 10), code="bystander"))  # on the route, out of range
         dispatch(self.w, self.c)
         self.assertTrue(all(chebyshev(p, (0, 10)) >= 2 for p in self.c.memory.path), self.c.memory.path)
+
+
+class RetreatCorridorTest(unittest.TestCase):
+    """Past the cell search's budget the corridor decides the route: a corridor
+    priced for another danger profile, or before the way opened, is not Retreat's (review on #125)."""
+
+    def setUp(self):
+        self.w = WorldModel(character_id=1, map_id=MAP, pos=(0, 0), perception=8, health=4, max_health=10, lives=9)
+        for x in range(-100, 21):
+            for y in range(-20, 61):
+                self.w.view.tiles[(x, y)] = "wall" if x == -8 and y not in (0, 50) else "dirt"
+        self.w.terrain_center, self.w.terrain_map = (0, 0), MAP
+        apply_zone(self.w, MAP, -90, 0, {"safe": True})
+        self.w.entities = [Entity("npc", 7, (1, 1), code="chaser")]
+        hit(self.w)
+        self.c = ctx(on_hostile="fight")
+
+    def stale_corridor_via_the_far_gap(self, key: str) -> None:
+        """Another plan (Fight's tail before this fix) searched while the near gap was shut."""
+        self.w.view.tiles[(-8, 0)] = "wall"
+        cost_path(self.w, (-90, 0), grid_params(self.c.policy, set(), set()),
+                  nav=nav_search(self.c.memory, self.w, key, (-90, 0)), fine_budget=50)
+        self.w.view.tiles[(-8, 0)] = "dirt"
+
+    def test_a_long_retreat_does_not_take_a_corridor_another_plan_kept(self):
+        self.stale_corridor_via_the_far_gap("safe")
+        with mock.patch("agentrealm_agent.navigation.planner.FINE_NODE_BUDGET", 50):
+            self.assertEqual(dispatch(self.w, self.c).state, "Retreat")
+        path = self.c.memory.path
+        self.assertTrue(path and all(p[1] <= 3 for p in path), path)
+
+    def test_losing_ground_plans_its_own_corridor(self):
+        self.stale_corridor_via_the_far_gap(RETREAT_NAV)
+        m = self.c.memory
+        with mock.patch("agentrealm_agent.navigation.planner.FINE_NODE_BUDGET", 50):
+            dispatch(self.w, self.c)
+            self.w.tick += RETREAT_PROBE_TICKS
+            hit(self.w)
+            out = dispatch(self.w, self.c)
+        self.assertIn("losing ground", out.reason)
+        self.assertIsNot(m.corridors[LOSING_NAV], m.corridors[RETREAT_NAV])
+        self.assertTrue(all(p[1] <= 3 for p in m.path), m.path)
 
 
 class RetreatQueueTest(unittest.TestCase):

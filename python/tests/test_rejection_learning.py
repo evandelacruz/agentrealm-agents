@@ -200,7 +200,8 @@ class RunnerRejectionTest(unittest.TestCase):
 
     def test_reflex_probe_while_held_does_not_age_the_learnings(self):
         r = self.runner(FakeClient([]))
-        r.world.entities = [Entity("npc", 9, (2, 0))]
+        r.world.entities = [Entity("npc", 9, (2, 0), "gnawer")]
+        r.world.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         r.cfg.policy.hostile, r.cfg.policy.hostile_range = ["npc"], 2
         r.mem.nav.wait_tile = (7, (1, 1))
         r.mem.nav.occupant_until[(7, (0, 1))] = 5

@@ -35,6 +35,7 @@ class FightTargetTest(unittest.TestCase):
     def test_npc_in_range(self):
         w = world(["..."], at=(0, 0))
         w.entities = [Entity("npc", 5, (1, 0), code="gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         pol = Policy(hostile=["npc"], on_hostile="fight", hostile_range=2)
         t = fight_target(w, pol, [])
         self.assertIsNotNone(t)
@@ -86,6 +87,7 @@ class FightStateTest(unittest.TestCase):
     def test_unmeasured_npc_at_default_params_flees(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("npc", 5, (2, 1), code="gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
         out = dispatch(w, ctx(on_hostile="fight", hostile=["npc"]))
         self.assertEqual(out.state, "Flee")

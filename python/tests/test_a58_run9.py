@@ -39,6 +39,8 @@ def world(at=(10, 10)) -> WorldModel:
         for y in range(-40, 61):
             w.view.tiles[(x, y)] = "dirt"
     w.terrain_center, w.terrain_map = at, 1
+    # Monster types these tests use, shown hostile (``survival.is_hostile``).
+    w.hostile_types |= {("npc", "pursuer"), ("npc", "bystander")}
     return w
 
 

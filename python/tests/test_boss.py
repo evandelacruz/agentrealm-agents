@@ -263,6 +263,7 @@ class FightDeferralTest(unittest.TestCase):
         w.entities = [boss(pos=(2, 0))]
         self.assertIsNone(fight_target(w, policy, []))
         w.entities.append(Entity("npc", 7, (0, 0), "snotling"))
+        w.hostile_types.add(("npc", "snotling"))  # a type seen attacking (survival.is_hostile)
         self.assertEqual(fight_target(w, policy, []).id, 7)
 
 

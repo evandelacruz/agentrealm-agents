@@ -185,7 +185,8 @@ class RecoverDispatchTest(unittest.TestCase):
         w = world(["....."], at=(2, 0))
         died_at(w, 0, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
-        w.entities = [Entity(id=9, kind="npc", pos=(1, 0))]
+        w.entities = [Entity(id=9, kind="npc", pos=(1, 0), code="gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         out = dispatch(w, ctx(scripted(goals=[], hostile=["npc"], hostile_range=2, on_hostile="flee")))
         self.assertEqual(out.state, "Flee")
         self.assertTrue(out.reflex)

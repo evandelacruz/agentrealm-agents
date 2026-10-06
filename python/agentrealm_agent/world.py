@@ -155,7 +155,7 @@ class WorldModel:
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
     # NPC id -> (cell, tick it was first seen there): how long each NPC in
-    # view has stood still. Helpers stay put (GAME_NOTES NPCs); Greet (A64).
+    # view has stood still. Helpers stay put (GAME_NOTES NPCs); Greet (A65).
     npc_still: dict[int, tuple[Pos, int]] = field(default_factory=dict)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest

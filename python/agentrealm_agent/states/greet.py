@@ -1,4 +1,4 @@
-"""Greet: say hello once to a nearby helper not yet spoken to (reflex, A64).
+"""Greet: say hello once to a nearby helper not yet spoken to (reflex, A65).
 
 The cheap, deterministic half of talking to NPCs, in the spirit of Pickup:
 it acts on what is in sight now and never walks. The API does not say which

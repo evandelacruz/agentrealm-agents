@@ -618,7 +618,7 @@ class Runner:
         which only a real decision may escalate (A15). The goal stack always stays as it
         was too: reflexes never consume its ops, so the probe must not advance,
         pop, or drop them (A34). Greet (4c) is not a reflex here: its hello waits
-        for the next decision window, and the probe leaves its tries as they were (A64).
+        for the next decision window, and the probe leaves its tries as they were (A65).
         """
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op, m.boss, dict(m.greetings))
@@ -629,7 +629,7 @@ class Runner:
         finally:
             self.plan.restore(saved_plan)
             m.boss = saved[5]  # boss memory belongs to the stack (A38)
-            m.greetings = saved[6]  # Greet's hello waits for a decision window: a probe sends none (A64)
+            m.greetings = saved[6]  # Greet's hello waits for a decision window: a probe sends none (A65)
         m.nav = saved[2]
         m.nav_stuck = saved_stuck
         if d.reflex:
@@ -992,7 +992,7 @@ class Runner:
         elif intent["verb"] == "Say" and intent.get("npc_id") is not None:
             npc_id = int(intent["npc_id"])
             if intent.get("text") == GREET_TEXT and npc_id in self.mem.greetings:
-                # Greet's hello (A64): its own record, and no say op's refusal budget.
+                # Greet's hello (A65): its own record, and no say op's refusal budget.
                 if applied:
                     mark_npc_greeted(self.knowledge, npc_id)
                 return

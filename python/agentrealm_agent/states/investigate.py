@@ -79,7 +79,7 @@ def _say(w: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
     npc = _npc(w, op)
     if npc is None:
         return _out(None, "no such NPC in sight")
-    # Greet's hello does not settle a say op (A64), unless the op says the very
+    # Greet's hello does not settle a say op (A65), unless the op says the very
     # same words: the runner files that Say as the hello, and it was said.
     said = npc.id in spoken_npc_ids(ctx.knowledge) or (
         op["text"] == GREET_TEXT and npc.id in greeted_npc_ids(ctx.knowledge)

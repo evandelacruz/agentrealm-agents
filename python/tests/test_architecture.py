@@ -88,7 +88,7 @@ class NoPlanTest(unittest.TestCase):
         self.assertTrue(acting, "something must act")
         self.assertLessEqual(acting, REFLEXES | {SAFE_DEFAULT}, acting)
         # Nothing was read on the agent's own initiative, and the only Say is
-        # Greet's one-tick hello to an NPC in sight (A64): no walk to talk.
+        # Greet's one-tick hello to an NPC in sight (A65): no walk to talk.
         verbs = {i["verb"] for o in outs for i in o.intents or []}
         self.assertNotIn("Read", verbs)
         self.assertTrue(all(o.state == "Greet" for o in outs for i in o.intents or [] if i["verb"] == "Say"))

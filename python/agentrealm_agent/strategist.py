@@ -565,12 +565,12 @@ def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     ]
 
 
-# The nearest NPCs in sight that State lists (A64).
+# The nearest NPCs in sight that State lists (A65).
 NEARBY_NPCS_SHOWN = 5
 
 
 def npc_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
-    """The nearest NPCs in sight, and how many were spoken to and greeted so far (A64).
+    """The nearest NPCs in sight, and how many were spoken to and greeted so far (A65).
 
     Each NPC: ``id``, ``type``, ``cells`` (Chebyshev) and ``dir`` from here,
     ``spoken`` (a ``say`` op's text was said to it, ``spoken_npcs``),

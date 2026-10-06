@@ -40,6 +40,7 @@ Decided. Do not cross without flagging prominently.
 - Read the cited PLAN.md sections and this file before writing code.
 - Write for the newcomer who will copy this agent: plain names, a short docstring on each state, one obvious place to add a behavior. Reviews flag anything that makes the agent harder to read or extend, the same as a bug.
 - The agent is character-agnostic: it plays whatever character it is handed at run time (A59). No live character name or id anywhere (code, configs, scripts, README, docs, status.json notes, tests; fixtures use obviously fake names), and characters are created only by an explicit `create` command.
+- A live run needs exclusive use of its character. Another client's `tick` replaces the queue, so two clients on one character corrupt both runs' traces (A23 run 2). Do not start a run on a character that another session or agent is playing.
 - Keep PLAN.md and README.md matching the code. A behavior change that leaves them describing the old one is not done.
 - Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`. The `test` GitHub Actions workflow runs both on every PR.
 - Open PRs **ready for review, not draft**. If tooling defaults to draft, run `gh pr ready`.
@@ -47,7 +48,7 @@ Decided. Do not cross without flagging prominently.
 - Do not add dependencies, or change moderation or the call budget or pacing, without flagging prominently.
 - If blocked by an open architecture, legal, or moderation question, an open design question, or a server gap, **halt and say why**. Do not invent. Check PLAN.md and the published docs first.
 - Backlog items are PR-sized. If one still needs a second PR, ship a reviewable slice, mark the ID `partial` with a `remaining` note in `status.json`, and let the next pass continue it.
-- In `status.json`, edit only the entries of the IDs your PR covers, and keep the blank line between entries. Two PRs on different IDs then never touch adjacent lines, so they do not conflict.
+- In `status.json`, edit only the entries of the IDs your PR covers, and keep the blank line between entries. Two PRs on different IDs then never touch adjacent lines, so they do not conflict. The exception is a new ID appended after the last entry: it adds a comma to that entry's line, so it can conflict with a PR that edits that entry. Merge `main` and keep both.
 
 ## Writer lock
 

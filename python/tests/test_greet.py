@@ -1,4 +1,4 @@
-"""Talking to NPCs (A64): the planner sees them in State, and Greet says
+"""Talking to NPCs (A65): the planner sees them in State, and Greet says
 hello once to a nearby likely helper not yet spoken to."""
 
 import json

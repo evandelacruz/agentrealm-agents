@@ -6,7 +6,7 @@ top-level knowledge-base keys of its own (PLAYABLE_AGENT_PLAN Knowledge base):
 - ``read_cells``: ``{"<map_id>": ["x,y", ...]}``, readable cells whose
   ``Read`` applied;
 - ``spoken_npcs``: NPC ids a planner ``say`` op's ``Say`` applied to;
-- ``greeted_npcs``: NPC ids Greet's hello applied to (A64). Kept apart, so a
+- ``greeted_npcs``: NPC ids Greet's hello applied to (A65). Kept apart, so a
   hello never settles a later ``say`` op with the planner's own text.
 
 Each grows only with what the world holds, one entry per sign or NPC. Clue
@@ -23,14 +23,14 @@ from .world import Pos, WorldModel, chebyshev
 READ_CELLS_KEY = "read_cells"
 SPOKEN_NPCS_KEY = "spoken_npcs"
 GREETED_NPCS_KEY = "greeted_npcs"
-# What Greet says (A64).
+# What Greet says (A65).
 GREET_TEXT = "hello"
 # Say reaches an NPC this many blocks away.
 SPEECH_RANGE = 25
 # A Read or Say refused this many times ends its op (Investigate, A30).
 MAX_REJECTIONS = 3
 # The API does not mark helpers (PLAN.md Server gaps). Helpers stay put, so an
-# NPC that has stood on one cell this long in view (5 s) may be one (A64).
+# NPC that has stood on one cell this long in view (5 s) may be one (A65).
 HELPER_STILL_TICKS = 50
 
 

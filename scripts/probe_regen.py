@@ -7,6 +7,9 @@ the cap passes (default 30 minutes), or the character dies (a failure). A
 "yes" is saved to the world knowledge base, where the M7 gate (A16) reads it.
 Prints the verdict and exits 0 only when regen answered. Never creates a
 character. Requires AGENTREALM_API_KEY.
+
+Plays with the AI planner (A35): set a planner key (README, The AI planner),
+or pass --no-planner for the test mode.
 """
 
 from __future__ import annotations

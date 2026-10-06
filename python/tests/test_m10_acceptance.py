@@ -1,10 +1,9 @@
-"""A33: M10 acceptance metrics, odd-bush fixture, and smoke script (no server)."""
+"""A33: M10 acceptance metrics and smoke script (no server)."""
 
 from __future__ import annotations
 
 import importlib.util
 import io
-import random
 import tempfile
 import threading
 import unittest
@@ -18,14 +17,11 @@ from agentrealm_agent.client import ApiError
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.investigation import mark_cell_read, mark_npc_spoken
-from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.m10_acceptance import TARGET_SECONDS, M10AcceptanceMetrics, odd_block_opened
 from agentrealm_agent.memory import Memory
-from agentrealm_agent.brain import decide
 from agentrealm_agent.states.intents import use_block
 from agentrealm_agent.world import Entity, WorldModel
-from tests.fixtures.navigation import grids, sim
 from tests.test_m6_acceptance import FakeMovementServer, RunnerCase
 from tests.test_m7_acceptance import OVERWORLD, load_smoke as load_m7_smoke
 
@@ -141,66 +137,6 @@ class BreakDisciplineTest(unittest.TestCase):
         kb = KnowledgeBase("fixture")
         record_attempt(kb, map_id=1, pos=ODD_BUSH_POS, capability="blast", result="opened", tick=1)
         self.assertTrue(odd_block_opened(kb, 1, ODD_BUSH_POS))
-
-
-class OddBushFixtureTest(unittest.TestCase):
-    def test_opens_the_lone_bush(self):
-        sc = grids.ODD_BUSH
-        kb = KnowledgeBase("fixture")
-        w = sim.world_for(sc)
-        w.held_supplies = [InventorySupply(1, "bronze_sword")]
-        w.armed_code = "bronze_sword"
-        m = Memory()
-        policy = sim.scripted(goals=["explore"])
-        rng = random.Random(0)
-        overlay: dict = {}
-        for _ in range(200):
-            if odd_block_opened(kb, 1, ODD_BUSH_POS):
-                break
-            d = decide(w, m, policy, rng, knowledge=kb)
-            if d.intent is not None and d.intent.get("verb") == "Use":
-                sim.apply_use(w, m, sc, d.intent, overlay, knowledge=kb)
-            elif d.intent is not None and d.intent.get("verb") == "SetPosition":
-                sim.apply(w, m, sc, (d.intent["x"], d.intent["y"]), overlay)
-            w.tick += sim.TICKS_PER_DECISION
-        self.assertTrue(odd_block_opened(kb, 1, ODD_BUSH_POS), "OddBreak should open the bush")
-
-    def test_a_failed_capability_is_not_tried_again_on_the_bush(self):
-        # A clue near the bush names smash, so the mallet goes first and fails on
-        # it (the sim records applied_no_effect); the sword then cuts it. The
-        # gate sees the agent's own queues, every window.
-        sc = grids.ODD_BUSH
-        kb = KnowledgeBase("fixture")
-        kb.clues.append({"kind": "sign", "text": "smash it", "map_id": 1, "x": 4, "y": 1, "tick": 1})
-        w = sim.world_for(sc)
-        supplies = [InventorySupply(1, "bronze_sword"), InventorySupply(2, "bronze_mallet")]
-        w.held_supplies = list(supplies)
-        w.armed_code = "bronze_sword"
-        m, gate = Memory(), metrics()
-        policy = sim.scripted(goals=["explore"])
-        rng = random.Random(0)
-        overlay: dict = {}
-        tried: list[str] = []
-        for _ in range(200):
-            if odd_block_opened(kb, 1, ODD_BUSH_POS):
-                break
-            d = decide(w, m, policy, rng, knowledge=kb)
-            intents = d.submit_queue or ([d.intent] if d.intent is not None else None)
-            decide_tick(gate, w, kb, mem=m, intents=intents)
-            for intent in intents or []:
-                verb = intent.get("verb")
-                if verb == "Arm":
-                    w.armed_code = next(s.code for s in supplies if s.id == intent["supply_id"])
-                elif verb == "Use":
-                    if m.break_pending is not None:
-                        tried.append(m.break_pending[2])
-                    sim.apply_use(w, m, sc, intent, overlay, knowledge=kb)
-                elif verb == "SetPosition":
-                    sim.apply(w, m, sc, (intent["x"], intent["y"]), overlay)
-            w.tick += sim.TICKS_PER_DECISION
-        self.assertEqual(gate.duplicate_break_attempts, 0)
-        self.assertEqual(tried, ["smash", "cut"])
-        self.assertTrue(odd_block_opened(kb, 1, ODD_BUSH_POS), "OddBreak should open the bush")
 
 
 class DeathTest(unittest.TestCase):

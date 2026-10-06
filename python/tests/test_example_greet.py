@@ -6,9 +6,10 @@ import unittest
 from unittest import mock
 
 from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import default_directives
+from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.example_greet import ExampleGreetState
 from agentrealm_agent.world import Entity
@@ -17,13 +18,14 @@ from tests.test_states import world
 dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")
 
 
-def ctx(knowledge=None) -> PlayContext:
+def ctx(knowledge=None, plan=None) -> PlayContext:
     return PlayContext(
         Memory(),
         Policy(kind="scripted", goals=["explore"], on_hostile="ignore"),
         random.Random(0),
         knowledge=knowledge,
         directives=default_directives(),
+        plan=plan,
     )
 
 
@@ -67,11 +69,11 @@ class ExampleGreetDispatchTest(unittest.TestCase):
         self.assertEqual(ids[:2], [6, 5])
         self.assertIsNone(ids[2])  # Explore's step, not a third hello
 
-    def test_investigate_still_greets_npcs_first(self):
-        # The NPC sits outside hostile_range (2), so curiosity is not paused.
+    def test_investigate_still_carries_out_a_say_op_first(self):
         w = world([".....", ".....", "....."], at=(0, 1))
         w.entities = [Entity("npc", 4, (3, 1)), Entity("character", 9, (1, 1))]
-        c = ctx(KnowledgeBase.empty("sandbox"))
+        plan = Plan([{"op": "say", "npc_id": 4, "text": "hello"}], dict(PARAM_DEFAULTS))
+        c = ctx(KnowledgeBase.empty("sandbox"), plan=plan)
         with mock.patch.object(dispatch_module, "STATES", with_example(ExampleGreetState())):
             out = dispatch(w, c)
         self.assertEqual(out.state, "Investigate")

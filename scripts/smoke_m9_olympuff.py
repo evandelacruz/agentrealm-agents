@@ -9,6 +9,9 @@ walks to the marks. Once the catalog is complete the script adds
 agent home; the file's original contents are restored when the run ends.
 Pass criteria are in ``agentrealm_agent/m9_acceptance.py`` and the README.
 Requires AGENTREALM_API_KEY.
+
+Plays with the AI planner (A35): set a planner key (README, The AI planner),
+or pass --no-planner for the test mode.
 """
 
 from __future__ import annotations

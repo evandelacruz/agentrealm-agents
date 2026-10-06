@@ -174,13 +174,15 @@ class RunnerZoneTest(unittest.TestCase):
     def run_windows(self, windows: int, refuse=()):
         stop = threading.Event()
         server = FakeServer(windows, stop, refuse)
-        pol = Policy(goals=["hold"], entity_refresh=1000)
+        pol = Policy(goals=[], entity_refresh=1000)
         cfg = CharacterConfig("T", "sandbox", pol, Path("t.toml"))
         r = runner.Runner(cfg, server, 1, stop, out=lambda _: None)
         w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=25, tick=100)
+        # Walls round town: the safe default, which never idles on open
+        # ground, has nowhere to step, so every window is calm and spare.
         for y in range(-1, 2):
             for x in range(-1, 2):
-                w.view.tiles[(x, y)] = "dirt"
+                w.view.tiles[(x, y)] = "dirt" if (x, y) == (0, 0) else "wall"
         w.terrain_center, w.terrain_map, w.entities_tick = (0, 0), 7, 100
         r.world, r.mem = w, Memory(need_self=False, need_position=False)
         with mock.patch.object(runner.Pacer, "wait_next_window", lambda _self, nb=0.0: server.wait(nb)):

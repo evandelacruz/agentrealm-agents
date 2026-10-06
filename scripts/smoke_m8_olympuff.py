@@ -5,6 +5,9 @@ Plays from wherever the character stands on the overworld (default one hour).
 Pass criteria are in ``agentrealm_agent/m8_acceptance.py`` and the README.
 Requires AGENTREALM_API_KEY. The character is chosen at run time (A59); the
 script never creates one.
+
+Plays with the AI planner (A35): set a planner key (README, The AI planner),
+or pass --no-planner for the test mode.
 """
 
 from __future__ import annotations

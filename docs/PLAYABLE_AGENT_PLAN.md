@@ -84,6 +84,8 @@ Shipped so far: the runner sends movement as paced `Step`/`Wait` queues (`execut
 
 ### State machine
 
+**Superseded in part by A61 (2026-10-06): AI plans, state machine executes** (PLAN.md *Architecture*). The table below keeps the states and their order, but "Enters when" now holds only for the reflexes (Sync, Downed, Escape, Retreat, Heal, Fight, Flee, Recover, and a supply in reach). Every other state is an executor that runs only for the plan's top op; with no op, Explore runs the safe default. Curiosity no longer starts anything on its own: `read`, `say` and `break_block` come from the planner.
+
 States are checked in priority order once per round trip: after each `POST tick` response is folded into the world model, before the next request. The first whose guard holds runs `act`, which returns the queue for the ticks until the next poll. Between round trips the server runs that queue one intent per tick, and nothing runs client-side; a state that must react within a tick (a hostile closing, health dropping) does so by switching the executor to its every-tick cadence. Each state has entry and exit conditions with hysteresis so it does not flip back and forth.
 
 | Priority | State | Enters when | Does |
@@ -178,6 +180,8 @@ Each asserts the goal is reached, or abandoned with the right reason, within a m
 
 ### Curiosity
 
+**Since A61 the agent no longer acts on this section by itself**: the interest list, the curiosity budget and the odd-block detector are removed. What follows describes what a planner should look for and turn into `read`, `say` and `break_block` ops.
+
 Progress in this game is hidden behind things a player has to poke at. Helpers drop hints only when spoken to. Signs and statues carry text. Breakable "odd blocks" hide gems, doors and secrets. Nothing announces itself (M §16). So the agent needs a drive to investigate, not just a reflex for whatever it passes.
 
 **Interest list.** Every terrain and entity read adds to it, and the knowledge base remembers what has been done, so nothing is investigated twice.
@@ -241,8 +245,8 @@ Below a floor, 3 lives by default, it stops fighting anything but measured weak 
 
 **Healing:**
 - **Food first, it's free.** Food lying in sight is picked up (walk onto it or `Take`) when the amount missing is at least what it heals, and is remembered as a source. Some food is eaten on pickup, like Olympuff's golden cap (M §16); carried food is eaten with `Arm` + `Use` self, the same call as a potion (API Use). Which kind each type is, and how much it heals, is learned from the `health` change.
-- **Potions are a reserve.** The agent keeps N potions (the `potion_reserve` directive, default 2). Below that, `Shop` buys more before any trip away from town. A potion is drunk out of combat only when no food is near and the next goal needs the health.
-- **Safe zones.** Health returning in a safe zone has not been observed yet. `Heal` (A10) measures it: a "yes" is saved to the knowledge base, a "no" (200 ticks in a safe zone with no health back) holds for that run. If it returns, resting in town is the free fallback; if not, the fallback is potions and food, and an agent with neither waits in town and raises a `buy` (see `Heal`).
+- **Potions are a reserve.** The agent keeps N potions (the `potion_reserve` directive, default 2). Below that, the planner adds a `buy` op before any trip away from town, and `Shop` carries it out (A61). A potion is drunk out of combat only when no food is near and the next goal needs the health.
+- **Safe zones.** Health returning in a safe zone has not been observed yet. `Heal` (A10) measures it: a "yes" is saved to the knowledge base, a "no" (200 ticks in a safe zone with no health back) holds for that run. If it returns, healing while exploring safe ground is the free fallback; if not, the fallback is potions and food, and buying more is the planner's `buy` op (A61): Heal raises nothing on its own.
 
 **Raising health and protection over time:**
 - **Armor first.** Defense counts twice: it lowers the chance to be hit and the damage of each hit. `Equip` scores armor by the damage it would have saved against the threats in the item and threat tables, and the gem budget puts armor and potions ahead of curiosity spending.
@@ -351,7 +355,7 @@ Hard constraints are never free text. `never_attack` lists what may not be attac
 | `curiosity` | 0.2 | 0 to 1 | set | Share of ticks `Investigate` and `Break` may use (see Curiosity) |
 | `lives_floor` | 3 | ≥ 1, integer | raise | At or below this many lives, fight only measured weak hostiles and stay inside explored ground |
 | `risk` | 0.5 | 0 to 1 | lower | 0 cautious to 1 bold; scales the fight margin, retreat threshold, untested types and level entry (see Health and lives) |
-| `potion_reserve` | 2 | ≥ 0, integer | raise | Potions to keep; `Shop` restocks below it before leaving town |
+| `potion_reserve` | 2 | ≥ 0, integer | raise | Potions to keep. Planner-only since A61: the planner adds a `buy` below it; no state restocks on its own |
 
 A directives value out of range is ignored and logged, and the default stays.
 

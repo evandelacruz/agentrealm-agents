@@ -154,9 +154,15 @@ class EscapeTest(unittest.TestCase):
         self.assertEqual(dispatch(w, ctx()).state, "Escape")
 
     def test_surrounded_crosses_hazard_toward_ground(self):
-        # No open neighbour: the plan prices hazards instead of blocking them.
+        # No open neighbour: the safe default's path prices hazards instead of
+        # blocking them. The only frontier is the dirt column: the rest of
+        # the edge is known void.
         w = world(["~~~.", "~~~.", "~~~."], at=(1, 1))
-        out = dispatch(w, ctx(goals=["goto"], goto=(3, 1)))
+        for x in range(-1, 4):
+            for y in range(-1, 4):
+                w.view.tiles.setdefault((x, y), "")
+        self.assertEqual(w.view.frontier(), {(3, 0), (3, 1), (3, 2)})
+        out = dispatch(w, ctx())
         self.assertEqual(out.state, "Escape")
         self.assertEqual(step(out)[0], 2)
 
@@ -364,10 +370,15 @@ class FleeTest(unittest.TestCase):
         self.assertIsNone(out.intents)
 
     def test_out_of_range_is_not_fled(self):
+        from agentrealm_agent.plan import Plan
+
         w = world([".....", ".....", "....."], at=(0, 1))
         w.entities = [Entity("npc", 5, (4, 1))]
-        # An NPC in speech range but out of hostile range is greeted (A30).
-        self.assertEqual(dispatch(w, ctx(hostile_range=2)).state, "Investigate")
+        self.assertEqual(dispatch(w, ctx(hostile_range=2)).state, "Explore")
+        # An NPC out of hostile range can be spoken to for a ``say`` op (A30).
+        c = ctx(hostile_range=2)
+        c.plan = Plan([{"op": "say", "npc_id": 5, "text": "hello"}], dict(PARAM_DEFAULTS))
+        self.assertEqual(dispatch(w, c).state, "Investigate")
 
 
 class FleeRunTest(unittest.TestCase):

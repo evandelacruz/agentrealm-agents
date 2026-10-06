@@ -9,23 +9,14 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
-from ..plan import PLAN_STALL_SECONDS, SOLVE_OPS, GoalOp, Plan
+from ..plan import GoalOp
 from ..world import Pos, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome
-from .explore import plan_sets, reflex_outcome
+from .base import PlayContext, State, StateOutcome, my_op
+from .explore import plan_sets
 from .intents import arm, compose, set_position, use_block
 
 GOAL = "solve"
 DEFAULT_USE_REACH = 1
-
-
-def solve_op(plan: Plan | None) -> GoalOp | None:
-    if plan is None:
-        return None
-    op = plan.current()
-    if op is not None and op["op"] in SOLVE_OPS:
-        return op
-    return None
 
 
 def use_reach(knowledge: KnowledgeBase | None, code: str) -> int:
@@ -51,51 +42,26 @@ def solve_outcome(
     w: WorldModel,
     m: Memory,
     policy: Policy,
-    plan: Plan,
+    op: GoalOp | None,
     *,
-    never_attack: list[str],
     knowledge: KnowledgeBase | None = None,
     state: str = "Solve",
 ) -> StateOutcome:
-    plan.advance(w, m)
-    op = plan.current()
-    if op is None or op["op"] not in SOLVE_OPS:
+    """One Solve round for the top ``compose`` or ``use_block`` op, else the re-arm.
+
+    A ``Compose``, ``Arm`` or ``Use`` is a try that has not finished the op
+    (``progress=False``), so a rejected or ineffective one cannot pin the
+    stack: only a step toward the target resets its stall clock (A34).
+    """
+    if op is None:
         return _rearm_outcome(w, m, state)
-
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    reflex = reflex_outcome(w, policy, never_attack=never_attack, state=state, knowledge=knowledge)
-    if reflex is not None:
-        if m.goal == GOAL:
-            m.path, m.goal = [], ""
-        return reflex
-
     if op["op"] == "compose":
         out = _compose_outcome(w, op, state)
     else:
         out = _use_block_outcome(w, m, policy, op, plan_avoid, plan_costly, knowledge, state)
-    return _track_progress(plan, w, m, op, out, state)
-
-
-def _track_progress(
-    plan: Plan, w: WorldModel, m: Memory, op: GoalOp, out: StateOutcome, state: str
-) -> StateOutcome:
-    """Drop the op once it has made no progress for ``PLAN_STALL_SECONDS`` (A34).
-
-    A step toward the target is progress. Sending nothing (pieces or supply
-    missing, target unreachable) is not, and neither is a `Compose`, `Arm` or
-    `Use` that has not finished the op, so a rejected or ineffective try
-    cannot pin the stack either. While the op sends nothing, dispatch falls
-    through to the states below (A44).
-    """
-    if out.intents and any(i.get("verb") == "SetPosition" for i in out.intents):
-        plan.note_progress()
-        return out
-    if not plan.note_stalled(w.tick):
-        return out
-    plan.drop_current(f"{out.reason}; no progress for {PLAN_STALL_SECONDS}s", memory=m)
-    if m.goal == GOAL:
-        m.path, m.goal = [], ""
-    return StateOutcome(None, f"dropped {op['op']}: {out.reason}", state=state)
+    out.progress = bool(out.intents) and any(i.get("verb") == "SetPosition" for i in out.intents)
+    return out
 
 
 def _rearm_outcome(w: WorldModel, m: Memory, state: str) -> StateOutcome:
@@ -205,8 +171,8 @@ def _use_stands(w: WorldModel, target: Pos, reach: int, blocked: set[Pos]) -> se
 
 
 class SolveState(State):
-    """Priority 4: compose fragments and use keys or tools at blocks from the plan,
-    then re-arm what a ``use_block`` swapped out."""
+    """Executor for ``compose`` and ``use_block``; then re-arms what a
+    ``use_block`` swapped out."""
 
     name = "Solve"
 
@@ -215,22 +181,13 @@ class SolveState(State):
             ctx.policy.kind == "scripted"
             and world.alive
             and world.pos is not None
-            and (solve_op(ctx.plan) is not None or ctx.memory.solve_rearm is not None)
+            and (my_op(ctx, self.name) is not None or ctx.memory.solve_rearm is not None)
         )
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        plan = ctx.plan
-        if plan is None:
-            return StateOutcome(None, "no plan", state=self.name)
         return solve_outcome(
-            world,
-            ctx.memory,
-            ctx.policy,
-            plan,
-            never_attack=ctx.never_attack,
-            knowledge=ctx.knowledge,
-            state=self.name,
+            world, ctx.memory, ctx.policy, my_op(ctx, self.name), knowledge=ctx.knowledge, state=self.name
         )

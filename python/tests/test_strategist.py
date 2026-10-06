@@ -20,8 +20,8 @@ from agentrealm_agent.memory import Memory, queue_signal
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent import __main__ as cli
-from agentrealm_agent.pathing import path_owned_by_plan, plan_op_goal
-from agentrealm_agent.plan import validate_goal_op
+from agentrealm_agent.pathing import path_owned_by, plan_op_goal
+from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.strategist import (
     DEFAULT_ANTHROPIC_MODEL,
     AnthropicClient,
@@ -166,14 +166,14 @@ class TriggerTest(unittest.TestCase):
 
     def test_plan_pops_queue_goal_done_and_failed(self):
         m = Memory()
-        plan = Plan([{"op": "wait", "seconds": 0}, {"op": "explore_area", "x": 0, "y": 0, "radius": 1}], dict(PARAM_DEFAULTS))
+        plan = Plan([{"op": "wait", "seconds": 0, "why": "test"}, {"op": "explore_area", "x": 0, "y": 0, "radius": 1}], dict(PARAM_DEFAULTS))
         plan.finish_current("done", memory=m)
         plan.drop_current("no path", memory=m)
         self.assertEqual([(t["trigger"], t["op"]["op"]) for t in m.strategist_signals], [("goal_done", "wait"), ("goal_failed", "explore_area")])
 
     def test_died_event_queues_death(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "STATE_DIR", Path(tmp)):
-            cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=["hold"]), Path("t.toml"))
+            cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[]), Path("t.toml"))
             runner = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
             self.addCleanup(runner.trace.close)
             runner.on_events([{"kind": "Died", "cause": "lava", "chest_id": 4}])
@@ -248,7 +248,7 @@ class AnswerTest(unittest.TestCase):
 
     def test_prompt_has_whole_plan_every_clue_and_the_op_table(self):
         kb = SimpleNamespace(lock=threading.Lock(), clues=[{"kind": "sign", "text": f"clue {i}"} for i in range(20)])
-        plan = Plan([{"op": "wait", "seconds": 0}, {"op": "explore_area", "x": 3, "y": 4, "radius": 5}], dict(PARAM_DEFAULTS))
+        plan = Plan([{"op": "wait", "seconds": 0, "why": "test"}, {"op": "explore_area", "x": 3, "y": 4, "radius": 5}], dict(PARAM_DEFAULTS))
         messages = build_prompt(
             triggers=[{"trigger": "clue", "text": "torch"}],
             w=WorldModel(character_id=1, map_id=1, pos=(2, 3), tick=5),
@@ -259,7 +259,7 @@ class AnswerTest(unittest.TestCase):
         user = messages[1]["content"]
         for text in ("torch", "be bold", "clue 0", "clue 19", "explore_area"):
             self.assertIn(text, user)
-        for op in ("explore_area", "travel", "gather_gems", "buy", "fight_boss", "compose", "use_block", "wait"):
+        for op in ("explore_area", "travel", "gather_gems", "buy", "fight_boss", "compose", "use_block", "equip", "wait"):
             self.assertIn(f"- {op}: ", messages[0]["content"])
 
     def test_reply_in_a_code_fence_is_read(self):
@@ -347,11 +347,11 @@ class ProgressTest(unittest.TestCase):
         s, r = make(FakeLLM(reply)), fake_runner()
         r.plan = Plan([head], dict(PARAM_DEFAULTS))
         r.mem.path, r.mem.goal, r.mem.goal_op = [(1, 0), (2, 0)], plan_op_goal(head), head
-        self.assertTrue(path_owned_by_plan(r.plan, r.mem))
+        self.assertTrue(path_owned_by(r.plan.current(), r.mem))
         round_trip(s, r)
         self.assertIs(r.plan.current(), head)
         self.assertEqual(r.plan.goals[1]["code"], "rope")
-        self.assertTrue(path_owned_by_plan(r.plan, r.mem))
+        self.assertTrue(path_owned_by(r.plan.current(), r.mem))
         self.assertEqual(r.mem.path, [(1, 0), (2, 0)])
 
     def test_a_longer_wait_is_a_new_wait(self):
@@ -370,6 +370,24 @@ class ProgressTest(unittest.TestCase):
             round_trip(s, r)
             s.clock.now += 15
         self.assertTrue(r.plan.note_stalled(300))  # 30 s at 10 Hz since the first stall
+
+
+class OpTableTest(unittest.TestCase):
+    def test_prompt_ops_are_exactly_the_executable_ops(self):
+        """The model is offered an op only if a state carries it out (or, for
+        set_param, Plan.advance applies it), so it can never plan a dead op."""
+        executable = {op for op, state in OP_STATE.items() if state is not None} | {"set_param"}
+        self.assertEqual(set(OP_FIELDS), executable)
+        self.assertNotIn("hunt", OP_FIELDS)
+        self.assertIn("equip", OP_FIELDS)
+
+    def test_prompt_lists_every_op(self):
+        messages = build_prompt(
+            triggers=[], w=WorldModel(character_id=1), plan=Plan([], dict(PARAM_DEFAULTS)),
+            directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=None,
+        )
+        for op in OP_FIELDS:
+            self.assertIn(f"- {op}: ", messages[0]["content"])
 
 
 class SafeDefaultTest(unittest.TestCase):
@@ -466,7 +484,7 @@ class RunnerParamsTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        policy = Policy(kind="scripted", goals=["hold"], on_hostile="flee", hostile=["npc"], hostile_range=2)
+        policy = Policy(kind="scripted", goals=[], on_hostile="flee", hostile=["npc"], hostile_range=2)
         cfg = CharacterConfig("T", "sandbox", policy, Path("t.toml"))
         r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
         self.addCleanup(r.trace.close)
@@ -507,7 +525,7 @@ class RunnerPlanTest(unittest.TestCase):
         path = Path(tmp.name) / "t.toml"
         if goals is not None:
             (Path(tmp.name) / "t.directives.toml").write_text(f"goals = {json.dumps(goals)}\n")
-        cfg = CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore", "hold"]), path)
+        cfg = CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore", "doors"]), path)
         r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=strategist)
         self.addCleanup(r.trace.close)
         return r
@@ -518,7 +536,7 @@ class RunnerPlanTest(unittest.TestCase):
 
     def test_no_planner_keeps_the_built_in_plan(self):
         r = self.runner()
-        self.assertEqual([op["op"] for op in r.plan.goals], ["explore_area", "wait"])
+        self.assertEqual([op["op"] for op in r.plan.goals], ["explore_area", "travel"])
 
     def test_directives_goals_own_the_stack_with_the_planner_on(self):
         r = self.runner(make(FakeLLM()), goals=["buy:torch"])

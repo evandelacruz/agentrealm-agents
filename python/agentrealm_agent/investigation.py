@@ -1,6 +1,6 @@
 """Investigation memory in the per-world knowledge base (A30).
 
-Remembers reads and speech so the interest list does not repeat them. Kept in
+Remembers reads and speech so a ``read`` or ``say`` op is not repeated. Kept in
 top-level knowledge-base keys of its own (PLAYABLE_AGENT_PLAN Knowledge base):
 
 - ``read_cells``: ``{"<map_id>": ["x,y", ...]}``, readable cells whose
@@ -13,11 +13,43 @@ text with place and time lives in ``kb.clues`` (``clues.py``, A32).
 
 from __future__ import annotations
 
+import math
+
 from .knowledge_base import KnowledgeBase
-from .world import Pos
+from .world import Pos, WorldModel, chebyshev
 
 READ_CELLS_KEY = "read_cells"
 SPOKEN_NPCS_KEY = "spoken_npcs"
+# Say reaches an NPC this many blocks away.
+SPEECH_RANGE = 25
+# A Read or Say refused this many times ends its op (Investigate, A30).
+MAX_REJECTIONS = 3
+
+
+def read_key(map_id: int, pos: Pos) -> str:
+    return f"read:{map_id}:{pos[0]},{pos[1]}"
+
+
+def say_key(npc_id: int) -> str:
+    return f"say:{npc_id}"
+
+
+def read_supply_key(supply_id: int) -> str:
+    return f"read_supply:{supply_id}"
+
+
+def sight_range(w: WorldModel, map_id: int, at: Pos) -> int:
+    """Readable sight: perception × zone brightness at the stand, capped at perception.
+
+    GAME_NOTES Light (Guide, The world model). Carried light is not counted yet.
+    """
+    fact = w.zones.get(map_id, {}).get(at)
+    bright = fact.brightness if fact is not None else 1.0
+    return max(1, min(w.perception, math.ceil(w.perception * bright)))
+
+
+def in_sight(w: WorldModel, map_id: int, at: Pos, target: Pos) -> bool:
+    return chebyshev(at, target) <= sight_range(w, map_id, at)
 
 
 def _cell(pos: Pos) -> str:

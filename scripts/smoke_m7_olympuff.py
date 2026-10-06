@@ -11,6 +11,9 @@ Sustained pacing aborts the run early with exit 1: more than
 ``OSCILLATION_ABORT_COUNT`` oscillation-guard give-ups within
 ``OSCILLATION_ABORT_TICKS`` stop the runner (m7_acceptance.py). Guard events
 that gave nothing up (survival states pacing) do not count.
+
+Plays with the AI planner (A35): set a planner key (README, The AI planner),
+or pass --no-planner for the test mode.
 """
 
 from __future__ import annotations

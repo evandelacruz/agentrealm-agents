@@ -5,6 +5,9 @@ Walks until 200 Steps apply with no movement_cooldown rejections and
 POST tick goes out in under a quarter of calm windows. Requires network access,
 AGENTREALM_API_KEY, and AGENTREALM_BASE_URL (default https://api.agentrealm.gg).
 Pass --character-id or --character-name to pick the character to play (A59).
+
+Plays with the AI planner (A35): set a planner key (README, The AI planner),
+or pass --no-planner for the test mode.
 """
 
 from __future__ import annotations

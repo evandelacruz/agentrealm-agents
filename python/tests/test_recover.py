@@ -5,9 +5,11 @@ import unittest
 
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
+from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.recover import recover_approach_target, recover_spot_safe
 from agentrealm_agent.world import Entity, WorldModel
@@ -53,7 +55,9 @@ def died_at(w: WorldModel, x: int, y: int, *, map_id=7, chest_id=80) -> None:
 
 
 def ctx(policy: Policy, m: Memory | None = None, kb: KnowledgeBase | None = None) -> PlayContext:
-    return PlayContext(m or Memory(), policy, random.Random(0), knowledge=kb)
+    """The built-in plan ``Plan.from_policy`` makes of ``policy.goals`` (none for ``hold``)."""
+    plan = Plan.from_policy(policy, dict(PARAM_DEFAULTS))
+    return PlayContext(m or Memory(), policy, random.Random(0), knowledge=kb, plan=plan)
 
 
 class RecoverSafetyTest(unittest.TestCase):
@@ -74,8 +78,10 @@ class RecoverSafetyTest(unittest.TestCase):
             [{"tick": 5, "events": [{"kind": "Died", "cause": "killed", "chest_id": 80, "map_id": 7, "x": 0, "y": 0}]}]
         )
         w.map_id, w.pos = 7, (4, 0)
-        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
-        self.assertIsNone(d.intent)
+        out = dispatch(w, ctx(scripted(goals=[])))
+        # No walk to the chest: the safe default moves instead.
+        self.assertEqual(out.state, "Explore")
+        self.assertNotIn("chest", out.reason)
 
     def test_recovers_when_adjacent_tile_safe(self):
         w = world(["....."], at=(4, 0))
@@ -84,7 +90,7 @@ class RecoverSafetyTest(unittest.TestCase):
         )
         w.map_id, w.pos = 7, (4, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
-        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
+        d = decide(w, Memory(), scripted(goals=[]), random.Random(0))
         self.assertEqual((d.intent["verb"], d.intent["x"]), ("SetPosition", 3))
 
 
@@ -96,32 +102,32 @@ class RecoverDispatchTest(unittest.TestCase):
         )
         w.map_id, w.pos = 7, (4, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
-        out = dispatch(w, PlayContext(Memory(), scripted(goals=["hold"]), random.Random(0)))
+        out = dispatch(w, PlayContext(Memory(), scripted(goals=[]), random.Random(0)))
         self.assertEqual(out.state, "Recover")
 
     def test_pickup_off_does_not_enter_recover(self):
         w = world(["....."], at=(4, 0))
         died_at(w, 0, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
-        out = dispatch(w, ctx(scripted(goals=["hold"], pickup=False)))
-        self.assertEqual(out.state, "")
-        self.assertIsNone(out.intents)
+        out = dispatch(w, ctx(scripted(goals=[], pickup=False)))
+        self.assertEqual((out.state, out.yielded), ("Explore", []))
+        self.assertNotIn("chest", out.reason)
 
     def test_chest_on_another_map_does_not_enter_recover(self):
         w = world(["....."], at=(4, 0))
         died_at(w, 0, 0, map_id=9)
         apply_zone(w, 9, 1, 0, {"safe": True, "brightness": 1})
-        out = dispatch(w, ctx(scripted(goals=["hold"])))
-        self.assertEqual(out.state, "")
+        out = dispatch(w, ctx(scripted(goals=[])))
+        self.assertEqual((out.state, out.yielded), ("Explore", []))
 
-    def test_unreachable_chest_yields_to_explore_goals(self):
-        # A wall cuts the chest off: Recover holds, but the round still moves.
+    def test_unreachable_chest_yields_to_the_plan(self):
+        # A wall cuts the chest off: Recover yields, and the plan's executor moves.
         w = world(["######", "#.#..#", "######"], at=(3, 1))
         died_at(w, 1, 1)
         apply_zone(w, 7, 1, 1, {"safe": True, "brightness": 1})
         out = dispatch(w, ctx(scripted(goals=["goto"], goto=(4, 1))))
-        self.assertEqual(out.state, "Recover")
-        self.assertIn("chest not reachable", out.reason)
+        self.assertEqual(out.yielded, ["Recover: chest not reachable"])
+        self.assertEqual(out.state, "Travel")
         self.assertEqual((out.intents[0]["verb"], out.intents[0]["x"]), ("SetPosition", 4))
 
     def test_adjacent_withdraws_when_contents_known(self):
@@ -129,7 +135,7 @@ class RecoverDispatchTest(unittest.TestCase):
         died_at(w, 0, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
         w.chest_contents[80] = [5, 6]
-        out = dispatch(w, ctx(scripted(goals=["hold"])))
+        out = dispatch(w, ctx(scripted(goals=[])))
         self.assertEqual(out.state, "Recover")
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 80}])
 
@@ -139,7 +145,7 @@ class RecoverDispatchTest(unittest.TestCase):
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
         full_inventory(w)
         w.chest_contents[80] = [InventorySupply(71, "bronze_sword")]
-        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
+        out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
         self.assertEqual(out.state, "Recover")
         self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": 1}])
 
@@ -149,12 +155,11 @@ class RecoverDispatchTest(unittest.TestCase):
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
         full_inventory(w)
         w.chest_contents[80] = [InventorySupply(71, "torch")]
-        out = dispatch(w, ctx(scripted(goals=["hold"]), m=Memory(equip_not_wearable={"torch"})))
-        # Recover yields and Explore (goal "hold") has nothing to send either.
-        self.assertEqual(out.state, "")
-        self.assertIsNone(out.intents)
-        self.assertTrue(out.yielded[0].startswith("Recover:"))
-        self.assertIn("chest 80 not worth a slot", out.reason)
+        out = dispatch(w, ctx(scripted(goals=[]), m=Memory(equip_not_wearable={"torch"})))
+        # Recover yields; with no plan op the safe default moves.
+        self.assertEqual(out.yielded, ["Recover: chest 80 not worth a slot"])
+        self.assertEqual(out.state, "Explore")
+        self.assertIsNotNone(out.intents)
 
     def test_after_drop_withdraws_best_not_lowest_id(self):
         w = world(["....."], at=(1, 0))
@@ -163,7 +168,7 @@ class RecoverDispatchTest(unittest.TestCase):
         full_inventory(w)
         w.held_supplies.pop(0)  # the Drop freed one slot
         w.chest_contents[80] = [InventorySupply(71, "torch"), InventorySupply(72, "bronze_sword")]
-        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
+        out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
         self.assertEqual(out.state, "Recover")
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 80, "supply_ids": [72]}])
 
@@ -171,7 +176,7 @@ class RecoverDispatchTest(unittest.TestCase):
         w = world(["....."], at=(1, 0))
         died_at(w, 0, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
-        out = dispatch(w, ctx(scripted(goals=["hold"])))
+        out = dispatch(w, ctx(scripted(goals=[])))
         self.assertEqual(out.state, "Recover")
         self.assertIsNone(out.intents)
         self.assertEqual(out.reason, "open chest 80")
@@ -181,7 +186,7 @@ class RecoverDispatchTest(unittest.TestCase):
         died_at(w, 0, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
         w.entities = [Entity(id=9, kind="npc", pos=(1, 0))]
-        out = dispatch(w, ctx(scripted(goals=["hold"], hostile=["npc"], hostile_range=2, on_hostile="flee")))
+        out = dispatch(w, ctx(scripted(goals=[], hostile=["npc"], hostile_range=2, on_hostile="flee")))
         self.assertEqual(out.state, "Flee")
         self.assertTrue(out.reflex)
         self.assertEqual(out.intents[0]["x"], 3)
@@ -192,12 +197,12 @@ class RecoverDispatchTest(unittest.TestCase):
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
         m = Memory()
         w.chest_contents[80] = [5]
-        self.assertEqual(dispatch(w, ctx(scripted(goals=["hold"]), m)).state, "Recover")
+        self.assertEqual(dispatch(w, ctx(scripted(goals=[]), m)).state, "Recover")
         w.chest_contents[80] = []
         w._refresh_death_chest()
         self.assertIsNone(w.death_chest)
-        out = dispatch(w, ctx(scripted(goals=["hold"]), m))
-        self.assertEqual((out.state, m.state), ("", ""))
+        out = dispatch(w, ctx(scripted(goals=[]), m))
+        self.assertEqual((out.state, m.state), ("Explore", "Explore"))
 
 
 if __name__ == "__main__":

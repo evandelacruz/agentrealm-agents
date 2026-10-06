@@ -17,7 +17,7 @@
 
   "A4": {"state": "done"},
 
-  "A5": {"state": "partial", "remaining": "Open bugs (A58 run 9): choose_call requests position while placed=false after Died, causing gate-counted 409 not_on_map API errors before respawn; and Explore/Investigate queues were dispatched between Flee steps while a hostile was in range (A44). See PLAN.md A5."},
+  "A5": {"state": "done", "note": "A58 run 9: no position read while off the map; polls tick until Respawned. Keeping other queues out while hit by an unseen source moved to the redirect step 1 (AI plans, state machine executes)."},
 
   "A6": {"state": "done"},
 
@@ -25,7 +25,7 @@
 
   "A8": {"state": "done"},
 
-  "A9": {"state": "partial", "remaining": "Open bug (A58 run 9): flee could not outrun npc 261 after post-goto explore; character died, failing M7 gate. See PLAN.md A9 and docs/observations/A58_live_play.md Run 9."},
+  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing."},
 
   "A10": {"state": "done"},
 
@@ -44,6 +44,8 @@
   "A58": {"state": "partial", "remaining": "Waiting on A9 (run 9 death during flee after goto reached) and A5 (mid-flee interleaving; respawn-window position 409s). #103 (A16) merged and cleared run 8 navigation; run 9 (main 8b30a0b) failed at ~211 s. Regen still unmeasured (hurt but died in Flee); run the A60 regen probe (make probe-regen). Live tests are 5-minute runs (--seconds 300) until the basics pass. Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
+
+  "A61": {"state": "partial", "remaining": "Step 1b: walker and pathing internals (pathing.py, navigation/*). Step 2: strategist and planner wiring (#108): prompt op table matching the validators (no hunt, wait with why and <= 30 s, equip), and emitting equip, potion buy, read, say and entrance travel ops, which M8, M9's look clause and M10's read-and-say clause need. potion_reserve is planner-only."},
 
   "A60": {"state": "done", "note": "Probe, profile and offline tests shipped; not run live. A58 runs it before the hour when the knowledge base has no regen answer."},
 
@@ -91,7 +93,7 @@
 
   "A34": {"state": "done"},
 
-  "A35": {"state": "partial", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack with no valid plan, fail fast with no key.", "remaining": "Docs and the planner prompt say an empty stack runs the dispatcher's safe default (exploring in safe ground); until the step 1 dispatch rework removes the policy.goals fallback in pathing.replan, an empty stack still walks policy.goals. Recheck PLAN A35, README, CHARACTER_AND_STATES and the prompt when step 1 lands."},
+  "A35": {"state": "done", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack runs the A61 safe default, fail fast with no key. Planner prompt op table matches the executors (equip in, hunt out). Clearing Memory.walks on a stack change waits on #109."},
 
   "A36": {"state": "done"},
 

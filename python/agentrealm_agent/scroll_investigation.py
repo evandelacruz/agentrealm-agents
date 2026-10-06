@@ -2,8 +2,8 @@
 
 Learns which ``supply_subtype_code`` values are scrolls by logging every code
 seen, ``Read``ing one supply of each unseen code once, and keeping codes that
-do not answer ``nothing_to_read`` (GAME_NOTES open questions). Unread scrolls
-carried or in sight are nominated for free ``Read`` like readable cells (A30).
+do not answer ``nothing_to_read`` (GAME_NOTES open questions). A plan ``read``
+op with a ``supply_id`` reads one (A30).
 
 Knowledge-base keys in ``kb.extra`` (PLAYABLE_AGENT_PLAN Knowledge base):
 
@@ -16,12 +16,11 @@ Knowledge-base keys in ``kb.extra`` (PLAYABLE_AGENT_PLAN Knowledge base):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Iterable
+from typing import Iterable
 
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
-from .world import Pos, WorldModel
+from .world import WorldModel
 
 SEEN_SUPPLY_CODES_KEY = "seen_supply_codes"
 PROBED_SUPPLY_CODES_KEY = "probed_supply_codes"
@@ -93,12 +92,6 @@ def scroll_subtype_codes(kb: KnowledgeBase | None) -> set[str]:
         return set(_str_list(kb, SCROLL_SUBTYPE_CODES_KEY))
 
 
-def code_was_probed(kb: KnowledgeBase | None, code: str) -> bool:
-    if not code:
-        return False
-    return code in probed_supply_codes(kb)
-
-
 def mark_code_probed(kb: KnowledgeBase | None, code: str) -> None:
     if kb is None or not code:
         return
@@ -163,32 +156,3 @@ def supply_code_on_world(w: WorldModel, supply_id: int) -> str:
         if e.kind == "supply" and e.id == supply_id and e.code:
             return e.code
     return ""
-
-
-@dataclass(frozen=True)
-class SupplyReadTarget:
-    supply_id: int
-    code: str
-    pos: Pos | None  # None when carried
-
-
-def iter_supply_targets(
-    w: WorldModel,
-    in_sight_fn: Callable[..., bool],
-) -> list[SupplyReadTarget]:
-    """Carried supplies and ground supplies in sight, with subtype codes.
-
-    Chest contents are left out: ``Read {kind: supply}`` takes a carried scroll
-    or one on the ground in sight (GAME_NOTES NPCs, signs and scrolls).
-    """
-    out: list[SupplyReadTarget] = []
-    here = w.pos
-    map_id = w.map_id
-    for s in w.held_supplies:
-        if s.code:
-            out.append(SupplyReadTarget(s.id, s.code, None))
-    if here is not None and map_id is not None:
-        for e in w.entities:
-            if e.kind == "supply" and e.code and in_sight_fn(w, map_id, here, e.pos):
-                out.append(SupplyReadTarget(e.id, e.code, e.pos))
-    return out

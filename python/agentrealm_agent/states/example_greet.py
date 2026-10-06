@@ -6,7 +6,7 @@ Opt-in: not in the shipped ``STATES``. Add one line there to try it
 
 from __future__ import annotations
 
-from ..interest_list import in_sight
+from ..investigation import in_sight
 from ..world import Entity, WorldModel
 from .base import PlayContext, State, StateOutcome
 

@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from .acceptance_run import FULL_RUN_FRACTION, TimedRunHooks  # FULL_RUN_FRACTION: re-exported for the smoke script
 from .break_memory import attempt_failed, attempt_open
 from .config import Policy
-from .interest_list import SPEECH_RANGE, cell_was_read, in_sight, spoken_npc_ids
+from .investigation import SPEECH_RANGE, cell_was_read, in_sight, spoken_npc_ids
 from .item_table import use_target_block
 from .knowledge_base import KnowledgeBase
 from .memory import Memory

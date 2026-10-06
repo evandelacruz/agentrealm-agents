@@ -5,6 +5,9 @@ Explores from wherever the character stands for the target duration (default
 one hour). Pass criteria are in ``agentrealm_agent/m10_acceptance.py`` and the
 README. The odd-block clause is checked offline on the ``ODD_BUSH`` fixture.
 Requires AGENTREALM_API_KEY.
+
+Plays with the AI planner (A35): set a planner key (README, The AI planner),
+or pass --no-planner for the test mode.
 """
 
 from __future__ import annotations

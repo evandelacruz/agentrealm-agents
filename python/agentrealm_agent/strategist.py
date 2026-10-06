@@ -66,7 +66,7 @@ from typing import Any, Callable, Protocol
 from .directives import Directives
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .plan import OP_FIELDS, WAIT_MAX_SECONDS, Plan, directive_stack_ops, parse_plan_payload
+from .plan import OP_FIELDS, MAX_WAIT_SECONDS, Plan, directive_stack_ops, parse_plan_payload
 from .world import WorldModel
 
 log = logging.getLogger(__name__)
@@ -108,10 +108,11 @@ Reply with one JSON object only, no markdown, with these keys:
 Each goal is an object with "op" and that op's fields; every op may also carry "why". These are the only ops (anything else is dropped):
 {_op_table()}
 
-"wait" needs a "why" and at most {WAIT_MAX_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game.
+"wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game.
 
-Example:
+Examples:
 {{"goals":[{{"op":"buy","code":"torch","why":"clue mentions darkness"}}],"params":{{"curiosity":0.3}},"notes":"try the cave entrance"}}
+{{"goals":[{{"op":"buy","code":"small_potion","why":"potions before the boss"}},{{"op":"equip","why":"wear the new armor"}}]}}
 """
 
 

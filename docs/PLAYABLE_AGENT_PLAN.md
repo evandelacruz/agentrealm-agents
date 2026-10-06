@@ -285,7 +285,7 @@ This is what makes a second run better than the first, and it is what the strate
 
 ### Strategist (the AI planner)
 
-- **Runs** in its own thread, on in every live run (`--no-planner` is a test mode). It owns the goal stack. The state machine keeps the old plan until a new one lands; with no valid plan the stack is empty and the dispatcher's default runs (today `policy.goals`; the dispatch rework narrows it to exploring safe ground).
+- **Runs** in its own thread, on in every live run (`--no-planner` is a test mode). It owns the goal stack. The state machine keeps the old plan until a new one lands; with no valid plan the stack is empty and the dispatcher's safe default runs (exploring in safe ground).
 - **Triggers:** a new clue, an NPC reply, a new map or level, getting hurt, no progress for N minutes, a goal finished or dropped, a death, and a 15 s timer. Calls are budgeted per minute of play, in calls and tokens (PLAN.md A35): tokens times the model's price is the cost per minute, whatever the model costs, and a long session never runs dry.
 - **Input:** a compact state summary, relevant knowledge-base entries, all clue text, the current plan, and the operator's directives.
 - **Its main job** is interpretation: turn clue text (riddles and directions) into concrete goals, such as which entrance mark matches a clue, what tool an entrance needs, or which odd block to try.

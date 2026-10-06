@@ -98,7 +98,7 @@ def _op_table() -> str:
     return "\n".join(f"- {name}: {fields}" for name, fields in OP_FIELDS.items())
 
 
-SYSTEM_PROMPT = f"""You are the planner for an Agent Realm character. You own its goal stack: the states work on the op on top. With an empty stack you are not steering, and the character falls back to its own default behavior from its profile (exploring).
+SYSTEM_PROMPT = f"""You are the planner for an Agent Realm character. You own its goal stack: the states work on the op on top. With an empty stack you are not steering: the dispatcher's safe default runs (exploring in safe ground).
 
 Reply with one JSON object only, no markdown, with these keys:
 - "goals": the whole new goal stack, top first. Omit the key to keep the current stack. An empty or invalid list clears it.
@@ -532,8 +532,8 @@ class Strategist:
         and ``goals``, when the reply has the key, become the stack. A stack
         equal to the one left keeps its progress, and the same op on top
         keeps its own (stall clock, wait start, block snapshot, path). No
-        valid goal (or a reply that is not a JSON object) clears it, so the
-        dispatcher's default runs. Directives ``goals`` own the stack
+        valid goal (or a reply that is not a JSON object) clears it: the
+        planner layer emits nothing and the dispatcher's safe default runs. Directives ``goals`` own the stack
         and override all of this.
         """
         triggers, self.in_flight = self.in_flight or [], None
@@ -589,7 +589,7 @@ class Strategist:
         else:
             runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
         if not goals:
-            runner.log("strategist", "no valid goals; stack cleared (dispatcher default)", {"strategist": {"event": "cleared", **record}})
+            runner.log("strategist", "no valid goals; stack cleared (dispatcher safe default)", {"strategist": {"event": "cleared", **record}})
             return
         runner.log("strategist", f"plan replaced ({len(goals)} goals)", {"strategist": {"event": "applied", **record}})
         if runner.acceptance is not None:

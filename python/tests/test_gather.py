@@ -1,4 +1,4 @@
-"""A22: Gather state — grass, bushes, gem piles in safe-ish ground."""
+"""A22: Gather state — grass, bushes, gem piles on known ground with no hostile near."""
 
 import random
 import unittest
@@ -10,7 +10,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, parse_directives_goal
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
 from agentrealm_agent.states import gather as gather_mod
-from agentrealm_agent.states.gather_safe import is_safe_ish
+from agentrealm_agent.states.gather_safe import GATHER_HOSTILE_RADIUS, gather_ground, is_safe_ish
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
 
@@ -73,7 +73,28 @@ class WorldGemsTest(unittest.TestCase):
         self.assertEqual(w.gems, 3)
 
 
-class GatherSafeIshTest(unittest.TestCase):
+class GatherGroundTest(unittest.TestCase):
+    def test_field_grass_with_no_hostile_near_qualifies(self):
+        """A63 run 1: every zone read was unsafe and Gather never cut."""
+        w = grid(["ggg"], at=(1, 0))
+        self.assertTrue(gather_ground(w, (1, 0), Policy()))
+
+    def test_hostile_within_the_radius_disqualifies(self):
+        w = grid(["g" * 12], at=(0, 0))
+        w.entities = [Entity("npc", 1, (GATHER_HOSTILE_RADIUS, 0))]
+        self.assertFalse(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
+        w.entities = [Entity("npc", 1, (GATHER_HOSTILE_RADIUS + 1, 0))]
+        self.assertTrue(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
+
+    def test_hazard_and_unknown_cells_disqualify(self):
+        w = grid(["gl"], at=(0, 0))
+        self.assertFalse(gather_ground(w, (1, 0), Policy(avoid_blocks=["lava"])))
+        self.assertFalse(gather_ground(w, (5, 5), Policy()))
+
+
+class SafeIshTest(unittest.TestCase):
+    """The stricter safe-zone ground a hurt character walks first."""
+
     def test_known_safe_tile_qualifies(self):
         w = grid(["ggg"], at=(1, 0))
         safe(w, (1, 0))
@@ -135,9 +156,14 @@ class GatherActTest(unittest.TestCase):
         out = outcome(w, pickup=False)
         self.assertEqual(out.intents[0]["verb"], "Take")
 
-    def test_skips_grass_outside_safe_ish_ground(self):
+    def test_cuts_field_grass_outside_safe_zones(self):
         w = grid(["ggg"], at=(1, 0))
-        self.assertIsNone(outcome(w).intents)
+        self.assertEqual(outcome(w).reason, "cut grass")
+
+    def test_skips_grass_with_a_hostile_near(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.entities = [Entity("npc", 4, (2, 0))]
+        self.assertIsNone(outcome(w, hostile=["npc"]).intents)
 
 
 class GatherPathingTest(unittest.TestCase):
@@ -231,6 +257,57 @@ class GatherReflexTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual(out.state, "Fight")
         self.assertEqual(out.intents[0]["target"], {"kind": "character", "character_id": 5})
+
+
+class GatherFallbackTest(unittest.TestCase):
+    """Nothing to cut in reach: walk to known cuttable ground before exploring (A63 run 1)."""
+
+    def test_walks_to_known_grass_far_away_rather_than_exploring(self):
+        w = grid(["." * 30 + "g"], at=(0, 0))
+        c = ctx(w, ["gather_gems:3"])
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual(c.memory.gather_target, ("grass", (30, 0)))
+        self.assertEqual(c.memory.gather_status, gather_mod.CUTTING)
+
+    def test_explores_when_no_known_cell_is_cuttable(self):
+        w = grid([".....", "....."], at=(0, 0))
+        c = ctx(w, ["gather_gems:3"])
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Gather")
+        self.assertTrue(out.reason.startswith("look for gems: "))
+        self.assertEqual(c.memory.gather_status, gather_mod.NONE_CUTTABLE)
+
+    def test_standing_in_a_barren_region_says_so(self):
+        w = grid(["ggg"], at=(1, 0))
+        c = ctx(w, ["gather_gems:3"])
+        with mock.patch.object(gather_mod, "barren_regions", return_value={(0, 0)}):
+            dispatch(w, c)
+        self.assertEqual(c.memory.gather_status, gather_mod.REGION_BARREN)
+
+
+class GatherStatusStaleTest(unittest.TestCase):
+    """``gather_status`` speaks only for a decision Gather made."""
+
+    def test_cleared_when_a_reflex_preempts_gather(self):
+        from agentrealm_agent.brain import decide
+
+        w = grid(["ggggg"], at=(2, 0))
+        m = Memory(gather_status=gather_mod.CUTTING)
+        w.entities = [Entity("npc", 4, (3, 0))]
+        c = ctx(w, ["gather_gems:3"], m, on_hostile="flee", hostile=["npc"], hostile_range=2)
+        d = decide(w, m, c.policy, c.rng, directives=c.directives, plan=c.plan)
+        self.assertIn("flee", d.reason.lower())
+        self.assertEqual(m.gather_status, "")
+
+    def test_kept_when_gather_decides(self):
+        from agentrealm_agent.brain import decide
+
+        w = grid(["ggg"], at=(1, 0))
+        m = Memory()
+        c = ctx(w, ["gather_gems:3"], m)
+        decide(w, m, c.policy, c.rng, directives=c.directives, plan=c.plan)
+        self.assertEqual(m.gather_status, gather_mod.CUTTING)
 
 
 class GatherDispatchTest(unittest.TestCase):

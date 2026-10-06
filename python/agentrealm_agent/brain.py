@@ -14,6 +14,7 @@ from .config import Policy
 from .directives import Directives, default_directives
 from .plan import Plan
 from .executor.movement import step_landing
+from .gem_yield import GemYieldTracker
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import known_prefix
@@ -114,6 +115,7 @@ def decide(
     knowledge: KnowledgeBase | None = None,
     directives: Directives | None = None,
     plan: Plan | None = None,
+    gem_cuts: GemYieldTracker | None = None,
 ) -> Decision:
     """Run the priority dispatcher (A5) and keep its first intent as a Decision."""
     ctx = PlayContext(
@@ -124,10 +126,13 @@ def decide(
         knowledge=knowledge,
         directives=directives or default_directives(),
         plan=plan,
+        gem_cuts=gem_cuts,
     )
     if params is not None:
         ctx.params = params
     outcome = dispatch(w, ctx)
+    if outcome.state != "Gather":
+        m.gather_status = ""  # Gather did not decide: its last word is stale
     intents = outcome.intents
     intent = intents[0] if intents else None
     submit_queue = intents if intents and outcome.paced else None

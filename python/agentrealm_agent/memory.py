@@ -65,6 +65,11 @@ class Memory:
     # The planned flee_path already excludes them; this only keeps them shut for
     # _committed_step's open check and its best-step comparison while that escape runs.
     flee_avoid: set[Pos] = field(default_factory=set)
+    # Whether fleeing works (A9, A58 run 9): the gap to the nearest hostile at
+    # each Flee decision, the tick Flee began, and whether it gave up running.
+    flee_gaps: list[int] = field(default_factory=list)
+    flee_since: int = 0
+    flee_failed: bool = False
     travel_ops: list[TravelOp] = field(default_factory=list)  # parsed travel:* directives goals (A27)
     travel_index: int = 0
     strength: StrengthBracket = field(default_factory=StrengthBracket)

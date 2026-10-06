@@ -20,6 +20,10 @@ OUR_DAMAGE_PER_HIT = 1
 UNKILLED_HOSTILE_HEALTH = 10
 NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)
+# How long an Attacked or Damaged keeps us threatened with no hostile in range:
+# two of a hostile's swings, so a pursuer stepping just out of range between
+# hits does not hand the decision back to Explore (A9, A58 run 9).
+THREAT_MEMORY_TICKS = 2 * HOSTILE_ATTACK_INTERVAL_TICKS
 
 
 def effective_risk(risk: float, lives: int, lives_floor: int) -> float:
@@ -50,6 +54,35 @@ def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
         for e in w.entities
         if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range
     ]
+
+
+def recently_attacked(w: WorldModel) -> bool:
+    """An Attacked or Damaged landed on us within ``THREAT_MEMORY_TICKS``."""
+    return w.attacked_tick is not None and w.tick - w.attacked_tick <= THREAT_MEMORY_TICKS
+
+
+def threatened(w: WorldModel, policy: Policy) -> bool:
+    """A hostile is in range, or one hit us recently (A9).
+
+    While this holds only the survival states may take the decision.
+    ``on_hostile = "ignore"`` is never threatened, and neither is a known
+    safe tile, where nothing can hurt us.
+    """
+    if policy.on_hostile == "ignore" or not w.alive or w.pos is None or on_safe_tile(w):
+        return False
+    return bool(hostiles_in_range(w, policy)) or recently_attacked(w)
+
+
+def flee_from(w: WorldModel, policy: Policy) -> list[Entity]:
+    """The hostiles Flee runs from: those in range, or every one in view while recently attacked.
+
+    A pursuer that steps just past ``hostile_range`` between its hits is
+    still chasing us (A58 run 9).
+    """
+    in_range = hostiles_in_range(w, policy)
+    if in_range or not recently_attacked(w):
+        return in_range
+    return [e for e in w.entities if e.kind in policy.hostile]
 
 
 def combat_group(w: WorldModel, policy: Policy) -> list[Entity]:

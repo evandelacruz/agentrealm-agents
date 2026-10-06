@@ -4,17 +4,23 @@ from __future__ import annotations
 
 import dataclasses
 
+from ..directives import attack_forbidden
 from ..memory import Memory
 from ..navigation import cost_path, oscillation
 from ..pathing import flee_run, flee_step, grid_params, outruns, step_open
-from ..survival import hostiles_in_range, on_safe_tile, would_lose
+from ..survival import flee_from, hostiles_in_range, on_safe_tile, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .explore import plan_sets
-from .fight import can_engage, fight_target
+from .fight import can_engage, engage, fight_target
 from .intents import set_position
+from .retreat import retreat_step
+
+# Flee decisions the gap to the nearest hostile gets to grow before Flee
+# calls the escape failed (A9).
+FLEE_PROBE_STEPS = 3
 
 
 def _committed_step(w: WorldModel, m: Memory, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:
@@ -61,10 +67,51 @@ def flee_escape(
     return flee_run(w, hostiles, blocked, first)
 
 
+def hit_while_fleeing(w: WorldModel, m: Memory) -> bool:
+    """Attacked or Damaged since Flee began."""
+    return w.attacked_tick is not None and w.attacked_tick > m.flee_since
+
+
+def not_outrunning(w: WorldModel, m: Memory) -> bool:
+    """Fleeing is a death march: hit since Flee began, or the gap to the
+    nearest hostile has not grown over the last ``FLEE_PROBE_STEPS`` decisions (A9)."""
+    gaps = m.flee_gaps
+    stuck_gap = len(gaps) > FLEE_PROBE_STEPS and gaps[-1] <= gaps[-1 - FLEE_PROBE_STEPS]
+    return stuck_gap or hit_while_fleeing(w, m)
+
+
+def instead_of_fleeing(
+    w: WorldModel, ctx: PlayContext, target: Entity, hostiles: list[Entity], blocked: set[Pos]
+) -> StateOutcome | None:
+    """Fight back or retreat once running away has failed (A9), or None to keep running.
+
+    In order: fight back when the win estimate says we win or there is no
+    step away (cornered); walk to the nearest known safe tile, Retreat's
+    way; fight back anyway when it keeps hitting us, since running and
+    retreating both failed. A target ``never_attack`` forbids is never fought.
+    """
+    may_hit = not attack_forbidden(target, ctx.never_attack)
+    cornered = flee_step(w, hostiles, blocked) is None
+    wins = bool(hostiles_in_range(w, ctx.policy)) and not would_lose(w, ctx.policy, ctx.params)
+    options = []
+    if may_hit and (cornered or wins):
+        options.append(lambda: engage(w, ctx, target, FleeState.name))
+    options.append(lambda: retreat_step(w, ctx, FleeState.name))
+    if may_hit and hit_while_fleeing(w, ctx.memory):
+        options.append(lambda: engage(w, ctx, target, FleeState.name))
+    for option in options:
+        out = option()
+        if out.intents:
+            out.reason = f"not outrunning {target.kind} {target.id}: {out.reason}"
+            return out
+    return None
+
+
 def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
     """``policy.on_hostile`` as the README documents it.
 
-    ``flee`` flees every hostile in range; ``fight`` flees when there is no
+    ``flee`` flees every hostile in range, and a pursuer that hit us
+    recently even out of range (``flee_from``); ``fight`` flees when there is no
     swingable target (``never_attack``), the win estimate says we lose, or
     the target is out of weapon reach with no open step closer; ``ignore``
     never flees. On a known safe tile, nothing can hurt us, so it stays.
@@ -74,7 +121,7 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
         return False
     if boss_fight_on(world, ctx.memory):
         return False  # Boss retreats out or commits (A38)
-    if policy.on_hostile == "ignore" or not hostiles_in_range(world, policy):
+    if policy.on_hostile == "ignore" or not flee_from(world, policy):
         return False
     if on_safe_tile(world):
         return False
@@ -95,7 +142,11 @@ class FleeState(State):
     it arrives, is blocked, or Flee stops running, rather than re-picking the
     greedy best step every decision: against two moving hostiles that
     re-pick sends it back and forth between two cells (A58). Cornered, it
-    stands still."""
+    stands still.
+
+    Running must work: once a hostile hits us after Flee began, or the gap
+    to it has not grown over ``FLEE_PROBE_STEPS`` decisions, Flee fights back
+    or retreats instead (``instead_of_fleeing``) until it stops (A9)."""
 
     name = "Flee"
 
@@ -107,11 +158,19 @@ class FleeState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         w, m, policy = world, ctx.memory, ctx.policy
-        hostiles = hostiles_in_range(w, policy)
+        hostiles = flee_from(w, policy)
         if not hostiles or w.pos is None:
             return StateOutcome(None, "no hostiles", state=self.name, wait=True)
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, w.pos), e.id))
         blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
+        if m.state != self.name:
+            m.flee_gaps, m.flee_since, m.flee_failed = [], w.tick, False
+        m.flee_gaps.append(chebyshev(target.pos, w.pos))
+        if m.flee_failed or not_outrunning(w, m):
+            m.flee_failed = True
+            instead = instead_of_fleeing(w, ctx, target, hostiles, blocked)
+            if instead is not None:
+                return instead
         safes = safe_tiles(w, w.map_id) if w.map_id is not None else set()
         # Start over when Flee did not run last decision (the threat was
         # gone in between) or the oscillation guard caught Flee/Retreat

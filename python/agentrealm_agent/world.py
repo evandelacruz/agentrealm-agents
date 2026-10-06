@@ -112,6 +112,7 @@ class WorldModel:
     movement: int = 1
     movement_speed: int = 2500  # thousandths of a block per second (GetSelf)
     alive: bool = True
+    placed: bool = True  # on a map: GetSelf's ``placed``; false once Died until Respawned (A5)
     asleep: bool = False  # GetSelf and a sleeping round trip carry it (GAME_NOTES Sleep)
     lives: int = 0
     gems: int | None = None  # inventory counter from snapshots (A22)
@@ -135,6 +136,7 @@ class WorldModel:
     terrain_map: int | None = None
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
+    attacked_tick: int | None = None  # tick of the last Attacked or Damaged on us (A9)
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
@@ -176,6 +178,7 @@ class WorldModel:
         if "movement_speed" in s:
             self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
+        self.placed = bool(s.get("placed", True))
         self.lives = int(s.get("lives", 0))
         if "asleep" in s:
             self.asleep = bool(s["asleep"])
@@ -198,6 +201,7 @@ class WorldModel:
         self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
         self.asleep = False  # a sleeping character is off the map (GAME_NOTES Sleep)
+        self.placed = True
         if has_level:
             self.map_level = level
 
@@ -478,6 +482,8 @@ class WorldModel:
             for ev in group.get("events") or []:
                 flat.append(ev)
                 kind = ev.get("kind")
+                if kind in ("Attacked", "Damaged"):
+                    self.attacked_tick = int(ev.get("tick", group["tick"]))
                 if kind == "Damaged":
                     amount = damage_amount(ev)
                     if amount is not None:
@@ -492,9 +498,11 @@ class WorldModel:
                     self.entities = [x for x in self.entities if not (x.kind == "supply" and x.id == ev.get("supply_id"))]
                 elif kind == "Died":
                     self.forget_position()
+                    self.placed = False  # off the map until Respawned: no position read can answer (A5)
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
                 elif kind == "Respawned":
+                    self.placed, self.attacked_tick = True, None
                     self.carry_capacity = DEFAULT_CARRY_CAPACITY  # a new, empty blue chest (10), Manual §11
                     try:
                         self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))

@@ -65,6 +65,11 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
         # it (GAME_NOTES Sleep). Sync sends the Wait.
         if w.asleep:
             return "tick"
+        # Off the map (dead, or not placed yet): position answers 409
+        # not_on_map. Read self first; once it says dead, Downed waits on
+        # ticks until Respawned puts us back (A5, A58 run 9).
+        if not w.placed:
+            return "tick" if not w.alive else "self"
         return "position"
     if policy.kind in ("idle",):
         return gate_tick_call(w, m, policy)

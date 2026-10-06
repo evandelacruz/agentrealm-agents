@@ -355,6 +355,43 @@ class HealStateTest(unittest.TestCase):
         self.assertNotEqual(out.state, "Heal")
         self.assertFalse(m.heal_supplies_asked)
 
+    def test_a_long_rest_leaves_stuck_detection_untouched(self):
+        # Review repro: one-cell zone, regen "yes", health held at 3 for 1300
+        # ticks. The safe default used to commit a walk outside the zone each
+        # window and escalate it to REVEAL without one move.
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w = grid(at=(0, 0))
+        w.health = 3
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        m = Memory()
+        for t in range(0, 1301, 10):
+            w.tick = t
+            out = dispatch(w, ctx(m, kb))
+            self.assertEqual((out.state, verbs(out)), ("Heal", ["Wait"]), out.reason)
+        self.assertEqual(m.nav_stuck.attempts, {})
+        self.assertEqual(m.nav_stuck.stuck_signals, [])
+        w.health, w.tick = 10, 1310
+        out = dispatch(w, ctx(m, kb))
+        self.assertEqual(out.state, "Explore")
+        att = nav_stuck.active(m, w)
+        self.assertTrue(att is None or att.level < nav_stuck.REVEAL, out.reason)
+        self.assertNotIn("reveal", out.reason)
+
+    def test_resting_walks_only_inside_the_zone(self):
+        # A zone with an unexplored edge: Heal walks there through zone cells only.
+        w = grid(at=(0, 2))
+        for y in range(5):
+            w.zones[7][(0, y)] = ZoneFact(safe=True)
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        out = dispatch(w, ctx(Memory(), kb))
+        self.assertEqual(out.state, "Heal")
+        self.assertEqual(verbs(out), ["SetPosition"])
+        step = (out.intents[0]["x"], out.intents[0]["y"])
+        self.assertEqual(step[0], 0, "never off the zone column")
+
     def test_regen_absent_does_not_pull_to_safe_ground(self):
         # Once this run has measured no regen, Heal sends nothing anywhere:
         # the plan's executor (or the safe default) moves instead.

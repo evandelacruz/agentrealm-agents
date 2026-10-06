@@ -160,13 +160,22 @@ class Runner:
         return plan
 
     def unpin_done_goals(self) -> None:
-        """Pin once: a pinned directives goal whose op popped done (its
-        ``goal_done`` signal, still queued until the strategist drains it this
-        window) is unpinned, so a later reload never puts it back (A16)."""
-        done = [s["op"] for s in self.mem.strategist_signals if s.get("trigger") == "goal_done" and s.get("reason") == "goal_done"]
+        """Pin once: a pinned directives goal whose op popped done or was
+        dropped (its ``goal_done`` or ``goal_failed`` signal), or whose target
+        stuck detection gave up on (a ``stuck`` signal), is unpinned, so a
+        later reload never puts it back (A16). Read before the strategist
+        drains the signals this window."""
+        ended = [s["op"] for s in self.mem.strategist_signals if s.get("trigger") in ("goal_done", "goal_failed")]
+        given_up = {
+            (s.get("map_id"), tuple(s.get("target") or ()))
+            for s in self.mem.nav_stuck.stuck_signals
+        }
         for goal in list(self.directives.pinned_goals):
             op = parse_directives_goal(goal)
-            if op is not None and any(same_ops([op], [d]) for d in done):
+            if op is None:
+                continue
+            target = (op.get("map_id", self.world.map_id), (op["x"], op["y"])) if op["op"] == "travel" else None
+            if any(same_ops([op], [e]) for e in ended) or (target is not None and target in given_up):
                 self.directives.unpin(goal)
 
     def reload_directives(self, old_goals: list[str]) -> None:

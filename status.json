@@ -39,9 +39,9 @@
 
   "A15": {"state": "done"},
 
-  "A16": {"state": "partial", "remaining": "goto-first: a reached goto is satisfied, not re-owed on step-off; implement with regression test (spec decided after A58 run 8, see PLAN.md A16). Gate and smoke script shipped; the live PASS is A58."},
+  "A16": {"state": "partial", "remaining": "goto-first (proposed: a reached policy goto is satisfied and not re-owed on step-off; awaiting Evan); once decided, implement with regression test. Found in A58 run 8, see PLAN.md A16. Gate and smoke script shipped; the live PASS is A58."},
 
-  "A58": {"state": "partial", "remaining": "Waiting on A16 fix for post-reach goto/explore ping-pong (run 8: exit 1 ABORT at ~1709 s after navigation reached (568,490); regen not measured). Run 7 fixes (#101) landed; notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "Two open blockers. (1) Waiting on A16 for post-reach goto/explore ping-pong (run 8: exit 1 ABORT at ~1709 s after navigation reached (568,490)). (2) Regen unmeasured on every run (1 and 3-8); in run 8 the character was never hurt, so run 9 can fail the regen gate even with the A16 fix. Run 7 fixes (#101) landed; notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 

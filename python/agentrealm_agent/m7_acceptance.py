@@ -16,6 +16,10 @@ module checks for each clause:
   agent stands on that target, or stuck detection gave up on that very target
   (the reason is recorded). Give-ups on other goals, such as frontier cells
   while exploring, are counted but never pass navigation.
+- Never comes back to a given-up target: once stuck detection gives up on a
+  ``travel`` destination, an op that resolves to that cell (any ``to``) acted on again later in the run (the
+  backoff ran out, a reload or a planner reply put it back) is a macro loop.
+  Each return is counted and any return fails the run.
 - Never loops: no run of ``LOOP_STEP_LIMIT`` Step-sending decisions in a row at
   the same cell with the same reason. A wait (Heal resting in a safe zone) is
   not movement, so it never counts as a loop.
@@ -47,6 +51,7 @@ from .acceptance_survival import (
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
+from .travel.resolve import travel_dest
 from .world import Pos, WorldModel, chebyshev
 
 TARGET_SECONDS = 3600.0
@@ -80,6 +85,8 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
     target_reached: bool = False
     target_give_up: str | None = None  # stuck detection's reason for giving up on the target
     other_give_ups: int = 0  # give-ups on any other goal: reported, never a pass
+    given_up_returns: int = 0  # times an op to a given-up point was acted on again: fails the run
+    _on_given_up: bool = False  # the last decision acted on an op to a given-up point
     lives_seen: int | None = None
     regen: str | None = None  # "yes" or "no" once measured
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
@@ -120,6 +127,7 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
             self.lives_seen = w.lives
         self._note_navigation(w)
         self._note_give_ups(m)
+        self._note_given_up_returns(w, m, acted_op, knowledge)
         regen = self.note_survival_tick(
             w,
             m,
@@ -153,6 +161,19 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
             elif not on_target:
                 self.other_give_ups += 1
 
+    def _note_given_up_returns(
+        self, w: WorldModel, m: Memory, acted_op: dict | None, knowledge: KnowledgeBase | None
+    ) -> None:
+        """Count each return to a travel destination stuck detection gave up on
+        at an earlier tick, whatever the op's ``to``: a run of decisions acting
+        on its op counts once."""
+        dest = travel_dest(acted_op, w, knowledge, m.strength) if acted_op else None
+        gave_up_at = m.nav_stuck.given_up_travel.get(dest) if dest is not None else None
+        on_it = gave_up_at is not None and gave_up_at < w.tick
+        if on_it and not self._on_given_up:
+            self.given_up_returns += 1
+        self._on_given_up = on_it
+
     def navigation_ok(self) -> bool:
         """Stood on the target, or stuck detection gave up on that target with a reason."""
         return self.target_reached or self.target_give_up is not None
@@ -162,6 +183,8 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
         out = list(self.survival_failures())
         if self.oscillation_abort:
             out.append(self.oscillation_abort)
+        if self.given_up_returns:
+            out.append(f"returned {self.given_up_returns} time(s) to a target stuck detection gave up on")
         if full_hour and not self.navigation_ok():
             out.append(f"target {self.target} neither reached nor given up on (max distance {self.max_distance})")
         if full_hour and self.regen is None:
@@ -179,6 +202,7 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
             f"navigation target {self.target} from {self.origin}: {nav}",
             f"max chebyshev distance from origin: {self.max_distance}",
             f"give-ups on other goals: {self.other_give_ups}",
+            f"returns to a given-up target: {self.given_up_returns}",
             *self.survival_summary_lines(),
             f"safe-zone regen: {self.regen or 'not measured'}",
             f"oscillation events: {len(self.oscillation_ticks)} (gave up a target: {len(self.pacing_give_up_ticks)})",

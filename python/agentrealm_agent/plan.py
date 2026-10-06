@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from .config import Policy
 from .directives import PARAM_DEFAULTS, _valid_param
@@ -543,6 +543,27 @@ class Plan:
             log.warning("plan: dropped op %r: %s", op, reason)
             note_goal_failed(memory, op, reason)
         self._pop_current()
+
+    def drop_ops(self, match: Callable[[GoalOp], bool], reason: str, memory: Memory | None = None) -> None:
+        """Remove every op left on the stack that ``match`` picks, wherever it
+        sits, directives ops included (A16): each raises ``goal_failed``."""
+        left = self.goals[self.index :]
+        if not any(match(op) for op in left):
+            return
+        head_dropped = match(left[0])
+        kept_directives = 0
+        kept: list[GoalOp] = []
+        for i, op in enumerate(left, self.index):
+            if match(op):
+                log.warning("plan: dropped op %r: %s", op, reason)
+                note_goal_failed(memory, op, reason)
+                continue
+            kept.append(op)
+            kept_directives += i < self.directive_end
+        self.goals = self.goals[: self.index] + kept
+        self.directive_end = self.index + kept_directives
+        if head_dropped:
+            self.wait_started_tick = self.stalled_since_tick = self.block_before = None
 
     def finish_current(self, reason: str, memory: Memory | None = None) -> None:
         """Pop an op whose state saw it finish (``fight_boss``, A38)."""

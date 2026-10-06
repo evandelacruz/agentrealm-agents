@@ -215,6 +215,30 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(m.path[-1], (0, 0))
         self.assertTrue(hostile_reach(w, c.policy).isdisjoint(m.path), m.path)
 
+    def test_a_reach_the_walk_cannot_go_round_is_not_replanned_every_decision(self):
+        """Review on #137: with the reach unavoidable, the replanned path always
+        crosses it, so comparing against the reach now replanned forever."""
+        from unittest import mock
+        from agentrealm_agent.states import heal
+
+        w, m = grid(at=(8, 0), size=9), Memory()
+        for x in range(-1, 10):
+            for y in range(-1, 10):
+                if y != 0 or x in (-1, 9):
+                    w.view.tiles[(x, y)] = "wall"  # one corridor along y = 0
+        w.hostile_types.add(("npc", "wartlurch"))
+        w.entities = [Entity("npc", 20, (3, 2), "wartlurch")]  # reaches x 1..5 of the corridor
+        c = ctx(m)
+        with mock.patch.object(heal, "cost_path", wraps=heal.cost_path) as planned:
+            self.assertEqual(dispatch(w, c).state, "Heal")
+            self.assertEqual(planned.call_count, 1)
+            w.entities = [Entity("npc", 20, (4, 2), "wartlurch")]  # it moves, still in reach
+            self.assertEqual(dispatch(w, c).state, "Heal")
+            self.assertEqual(planned.call_count, 1, "no new hostile, no new plan")
+            w.entities.append(Entity("npc", 21, (2, 2), "wartlurch"))
+            dispatch(w, c)
+            self.assertEqual(planned.call_count, 2, "a hostile not in reach when planned is")
+
     def test_no_safe_tile_yields_to_the_safe_default(self):
         w = grid(at=(2, 2))
         w.zones[7] = {}

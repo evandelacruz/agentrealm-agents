@@ -706,6 +706,26 @@ class RunnerTest(unittest.TestCase):
         r.note_held_path_stale()
         self.assertTrue(r.mem.resend_held_queue, "a second hostile in reach is")
 
+    def test_a_hostile_the_walk_was_planned_without_never_makes_it_stale(self):
+        # A losing Retreat plans weighing no hostile at all (review on #137):
+        # one of those stepping into reach of its queue is no reason to resend.
+        fake = FakeClient([{"tick": 10 + i, "window_remaining_ms": 0} for i in range(2)])
+        r = self.runner(fake, Policy(goals=[], pickup=False, on_hostile="ignore"))
+        r.world.hostile_types.add(("npc", "wartlurch"))
+        r.world.entities = [Entity("npc", 9, (4, 5), "wartlurch")]  # out of reach of the row
+        r.mem.path = [(1, 0), (2, 0), (3, 0), (4, 0)]
+
+        def losing_retreat(w, m, *a, **k):
+            m.walk_skip = {("npc", 9)}
+            return Decision(set_position((1, 0)), "retreat (losing ground)", reflex=True)
+
+        with mock.patch("agentrealm_agent.runner.decide", side_effect=losing_retreat):
+            r.tick()
+        self.assertEqual((r.mem.path_skip, r.mem.walk_skip), ({("npc", 9)}, set()))
+        r.world.entities = [Entity("npc", 9, (4, 2), "wartlurch")]  # now in reach of the walk
+        r.note_held_path_stale()
+        self.assertFalse(r.mem.resend_held_queue)
+
     def test_a_submitted_queue_records_what_it_already_crosses(self):
         # A Fight or Boss queue's Steps are judged against what they crossed
         # when sent, not against the walk sent before them.

@@ -23,7 +23,7 @@ from .pathing import step_open
 from .poll_cadence import gate_tick_call, is_urgent
 from .states import PlayContext, dispatch
 from .states.intents import set_position, take, use_on, withdraw_all
-from .survival import hostile_reach, pursuer_peaks
+from .survival import hostiles_reaching, pursuer_peaks
 from .world import DOORS, Pos, WorldModel
 from .zone_discovery import next_zone_probe
 
@@ -217,23 +217,18 @@ def path_blockers(w: WorldModel, m: Memory, policy: Policy, knowledge: Knowledge
 
 
 def path_threats(w: WorldModel, m: Memory, policy: Policy) -> set[tuple[str, int]]:
-    """The known hostiles (kind, id) with a cell the rest of the held walk
-    queue steps onto within their reach (``survival.hostile_reach``), leaving
-    out the fight's group and the last hitter (``pursuer_peaks``).
+    """The known hostiles with a cell the rest of the held walk queue steps onto
+    in their reach (``survival.hostiles_reaching``), leaving out the fight's
+    group and the last hitter (``pursuer_peaks``) and whoever the walk was
+    planned without (``Memory.path_skip``: every hostile, for a losing Retreat).
 
-    Retreat's path weighs no danger from those, and they follow it anyway, so
-    they never make its queue stale. Hostiles, not cells: one that moves while
-    in reach of the walk shifts its reach but is no new threat.
+    Those follow the walk anyway, or it went through their reach on purpose,
+    so they never make its queue stale.
     """
-    cells = set(remaining_walk_cells(w, m))
+    cells = remaining_walk_cells(w, m)
     if not cells or not w.alive or policy.kind == "idle":
         return set()
-    skip = pursuer_peaks(w, policy)
-    return {
-        (e.kind, e.id)
-        for e in w.entities
-        if (e.kind, e.id) not in skip and not cells.isdisjoint(hostile_reach(w, policy, skip=skip, only=e))
-    }
+    return hostiles_reaching(w, policy, cells, skip=set(pursuer_peaks(w, policy)) | m.path_skip)
 
 
 def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> bool:

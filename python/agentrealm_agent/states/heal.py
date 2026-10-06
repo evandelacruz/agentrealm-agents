@@ -22,7 +22,7 @@ from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, hostiles_in_range, nav_search
-from ..survival import hostile_reach
+from ..survival import hostile_reach, hostiles_reaching
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .break_state import break_toward
@@ -184,13 +184,14 @@ def _walk_toward(
     The walk is bounded like any other (``bounded_step``, A15): no path, or
     no progress in its window, gives ``at`` up with a backoff, so Heal tries
     the next food, a carried supply or a safe tile instead of pacing. A kept
-    path that now crosses a known hostile's reach is planned again.
+    path that now crosses the reach of a known hostile it did not cross
+    when planned is planned again.
     """
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)
     plan_avoid = plan_avoid | avoid
-    if m.goal == goal and not hostile_reach(w, policy).isdisjoint(m.path):
-        # A hostile seen since the path was planned stands in reach of it: plan
-        # again on the grid that prices its reach (A63 run 4).
+    if m.goal == goal and hostiles_reaching(w, policy, m.path) - m.planned_threats:
+        # A hostile that was not in reach of the path when it was planned is
+        # now: plan again on the grid that prices its reach (A63 run 4).
         m.path = []
 
     def params():
@@ -200,6 +201,8 @@ def _walk_toward(
         return cost_path(w, at, params(), nav=nav_search(m, w, goal, at))
 
     step = bounded_step(m, w, goal, at, plan_avoid, plan, params=params)
+    # What the path crosses now it could not go round: only a hostile beyond it replans.
+    m.planned_threats = hostiles_reaching(w, policy, m.path)
     return _out([set_position(step)], f"{goal} → {at}") if step is not None else None
 
 

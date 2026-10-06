@@ -236,6 +236,21 @@ def hostile_reach(
     return out
 
 
+def hostiles_reaching(
+    w: WorldModel, policy: Policy, cells: Collection[Pos], skip: Collection[tuple[str, int]] = ()
+) -> set[tuple[str, int]]:
+    """The known hostiles (kind, id), not in ``skip``, with one of ``cells`` in their ``hostile_reach``.
+
+    Hostiles, not cells: one that moves while in reach of a path shifts its
+    reach but is no new threat to it, so a walk that could not go round it is
+    not planned or sent again for every step it takes (A63 run 4).
+    """
+    cells = set(cells)
+    if not cells:
+        return set()
+    return {(e.kind, e.id) for e in w.entities if not cells.isdisjoint(hostile_reach(w, policy, skip, only=e))}
+
+
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:
     if health <= 0 or not group:
         return float("inf")

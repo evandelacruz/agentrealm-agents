@@ -559,6 +559,7 @@ class Runner:
     def tick(self) -> float:
         w, m = self.world, self.mem
         self.plan.acted = None  # set again only by a state acting on the head op this round (A36)
+        m.walk_skip = set()  # only a walk decided this round sets it
         if m.cancel_queue:
             # The rest of the server queue was planned from a position that no
             # longer holds (a door moved us): replace it with nothing.
@@ -740,6 +741,7 @@ class Runner:
         """
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op, m.boss, dict(m.greetings))
+        saved_threats = (set(m.walk_skip), set(m.planned_threats))
         saved_stuck = copy.deepcopy(m.nav_stuck)
         saved_plan = self.plan.snapshot()
         try:
@@ -755,6 +757,7 @@ class Runner:
         # No reflex, or one that asks for what the held queue already does:
         # the held queue keeps running, so memory keeps its plan (A63 runs 3, 4).
         m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
+        m.walk_skip, m.planned_threats = saved_threats
         self.rng.setstate(saved[3])
         return None
 
@@ -842,7 +845,7 @@ class Runner:
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
         m.pending, m.held_queue = None, None
         m.path, m.resend_held_queue = [], False
-        m.path_blockers, m.path_threats = set(), set()
+        m.path_blockers, m.path_threats, m.path_skip = set(), set(), set()
 
     def drop_held_queue(self) -> None:
         """Give up on the held queue. Its later results are no longer read, so
@@ -927,6 +930,7 @@ class Runner:
         """What the queue just sent already crosses: blocked cells and hostiles'
         reach. Only what turns up later makes it stale (A43, A63 run 4)."""
         w, m = self.world, self.mem
+        m.path_skip, m.walk_skip = m.walk_skip, set()
         m.path_blockers = path_blockers(w, m, self.cfg.policy, self.knowledge)
         m.path_threats = path_threats(w, m, self.cfg.policy)
 

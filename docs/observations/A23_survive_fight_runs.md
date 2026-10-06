@@ -109,7 +109,7 @@ Intents: 430 `Step`, 1,097 `Wait`, 2 `Use`. Call mix: 337 `zone`, 185 `tick`, 44
 | Won | **0** |
 | Fled | 1 episode, 3 decisions, all from townsfolk: rumor_teller 135 (2), apothecary 130 (1) at (424, 400) |
 | Retreated | 3 episodes, 3 decisions (one walk queue each), all started at **10/10** from `would_lose` (the planner had raised `fight_margin` to 2.0): gristlewick 240 at spawn, snotlings 215/216 and gristlewick 217 at (401, 370), salvager 160 at (391, 504) |
-| Heals used | **0** (never hurt; one apple picked up at 172 s by `pickup`) |
+| Heals used | **0** (never hurt; one apple, supply 62581, picked up at 172 s by `pickup`) |
 | Deaths | **0** (lives 10 → 10) |
 | Fought below the health floor | **no** (no swings; the floor rose to 6 once the planner set `retreat_hits` 3) |
 
@@ -117,7 +117,7 @@ Intents: 430 `Step`, 1,097 `Wait`, 2 `Use`. Call mix: 337 `zone`, 185 `tick`, 44
 
 | Time | Tick | Health | What |
 |---|---|---|---|
-| 0–302 s | 3996532–3999518 | 10/10 | 8 `self` reads, all 10/10; no hostile hit in any tick |
+| 0–302 s | 3996532–3999518 | 10/10 | all 8 `self` reads (0.3 s to 297.5 s) returned 10/10; no hostile hit in any tick (the planner's first State still showed `None/None`, see **Server behavior after the deploy**) |
 
 ### Retreat
 
@@ -142,7 +142,7 @@ Each Retreat got clear (the hostile left `hostile_range`, so `should_retreat` we
 ### Server behavior after the deploy
 
 No clear change. Two things to watch:
-- `self` on the sleeping character gave no health, so planner call 1 saw `health=None/None`. The first tick woke it, and later reads were 10/10.
+- Planner call 1 (0.7 s) saw `health=None/None`, although the `self` read at 0.3 s had already returned 10/10. The character was asleep at the start, and its health had not yet reached the State the planner reads. Later calls saw 10/10.
 - In the profiling run, Flee sent `Step(left)` from (397, 617) toward walkable `tile` (396, 617) about 30 times over 35 s. Position never changed and no rejection came back. The trace does not log `intent_results`, so this run cannot tell a silent no-op from a rejection the agent ignored.
 
 ### Planner
@@ -162,7 +162,9 @@ Call 1 set `retreat_hits` 3 and `fight_margin` 2.0, and queued `travel to town`,
 | travel (`hunting_ground` search: explore the whole map's frontier) | 36 |
 | retreat | 3 |
 | flee | 3 |
-| take apple | 2 |
+| take apple | 2 (both on supply 62581; see below) |
+
+The two `Take`s went one poll apart (ticks 3998233 and 3998236). The first took the apple: the `SupplyTaken` for 62581 is stamped tick 3998233. It reached the agent only on the next response, so the second `Take` went to a supply that was already gone. Only one apple was taken. The trace does not log `intent_results`, so it cannot tell whether the second `Take` was rejected or a no-op. The two position reads after it suggest a rejection.
 
 Intents: 325 `Step`, 849 `Wait`, 2 `Take`. Call mix: 211 `zone`, 132 `tick`, 64 `entities`, 37 `strategist`, 17 `terrain`, 8 `self`, 5 `position`, 1 `world`.
 
@@ -177,6 +179,8 @@ Intents: 325 `Step`, 849 `Wait`, 2 `Take`. Call mix: 211 `zone`, 132 `tick`, 64 
    t=3999518 @76:358,519 zone     @76:404,394 safe=True     (last read: still the ring, 125 cells away)
    ```
 
+   Backlog: **A27**, reopened as `partial` in this PR.
+
    Suspects: `zone_discovery.py:102–110` (ring at priority 0 always beats hunt probes at 1; `RESPAWN_PROBE_RADIUS` 8 at `:19`), `brain.py:91–94` (zones only in spare windows), `states/travel.py:38` and `:110` (`HUNT_PROBE_FRESH_SECONDS` 5).
 
 2. **The main thread blocks 5–17 s per decision, so the character stands idle and polls are late.** 17 gaps of 4–17 s with no call at all, 162 s of the 302 s run. Each gap ends in a `tick`, 15 of them held-queue polls. Reads take a median 0.3 s, so the time goes to computing the decision. The planner runs on its own thread and is not the cause: gaps also came with no call in flight (110–120 s). The profiling run shows where the time goes. The whole-map frontier explore of the hunting search took **13.7 s per call** (3 calls, 41.1 s). `reflex_while_held` took 53.5 s over 39 held polls, because it runs a full `_decide`. `navigation/planner.py` `danger()` ran 2.03 M times, with 30.9 M `chebyshev` calls under it. In a fight this would rule out urgent polling, because one decision outlasts a gristlewick's whole 16 s kill in Run 1.
@@ -188,6 +192,8 @@ Intents: 325 `Step`, 849 `Wait`, 2 `Take`. Call mix: 211 `zone`, 132 `tick`, 64 
    profile: explore_outcome 3 calls 41.1 s; reflex_while_held 39 calls 53.5 s; danger 2,030,476 calls
    ```
 
+   Backlog: **A64** (new in this PR).
+
    Suspects: `navigation/planner.py:542–566` (`nearest_target` runs one unbudgeted A* per frontier target in distance order, and `continue`s past every unreachable one, so 358 whole-map targets can mean hundreds of full-box floods), `navigation/planner.py:97–107` (`danger` loops over every hostile for every expanded cell, and `hostile = ["npc"]` makes all townsfolk hostiles), `states/travel.py:40` (`HUNT_SEARCH_AREA` radius `EXPLORE_ANYWHERE`), `runner.py:603–619` (the held-queue probe repeats the full decision on every poll).
 
 3. **Retreat and Flee fire on townsfolk.** 3 of the 6 survival episodes came from non-combat NPCs: Flee from rumor_teller 135 and apothecary 130 beside the town shops, and Retreat from salvager 160, 2 cells away, at 10/10. With `hostile = ["npc"]`, any NPC within `hostile_range` 2 forms a `combat_group`. `would_lose` then judges it unmeasured and outclassing at the planner's `fight_margin` 2.0, so a merchant turns the character around. Run 1 had the same with the farmer.
@@ -197,6 +203,8 @@ Intents: 325 `Step`, 849 `Wait`, 2 `Take`. Call mix: 211 `zone`, 132 `tick`, 64 
    t=3997512 @76:423,399 tick  Step (flee npc 130)      npc 130 = apothecary
    t=3999331 @76:391,504 tick  queue 10×Step 27×Wait (retreat → safe (390, 408))   salvager 160 at (393, 503)
    ```
+
+   Backlog: **A9**, reopened as `partial` in this PR.
 
    Suspects: `survival.py:50–58` and `:86–98` (`hostiles_in_range` and `combat_group` take every entity of a `policy.hostile` kind, with no way to tell a monster type from a townsperson), `survival.py:194–210` (`would_lose`), and `olympuff_m8.toml` `hostile = ["npc"]`.
 

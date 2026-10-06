@@ -225,6 +225,7 @@ Each has a test the agent or a hand session can run.
 | Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? Loot drops held supplies only until this is known (A57; Obs [`A57_live_play.md`](observations/A57_live_play.md)) | `Drop` a stowed supply and read the result (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Is the armed supply also listed in `held`? Loot counts held, worn, armed and stowed separately (A20) | Compare `inventory` before and after an `Arm` |
 | Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 assumes the Manual §16 cap once a `Take` of the upgrade applies (below), and measuring it is A57 (Obs [`A57_live_play.md`](observations/A57_live_play.md)) | Buy `middle_chest` and fill until `carry_capacity_full` (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
+| Where gems drop from cutting grass and bushes. The manual gives only a rate by ring (Items, slots and gear); the agent measures yield per 16×16-block region from its own cuts (PLAN.md A63). No region yield is measured yet | Read `gem_yield` in the world knowledge base after field play |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 
 ### Assumed until measured

@@ -127,5 +127,7 @@
 
   "A52": {"state": "done"},
 
-  "A53": {"state": "done"}
+  "A53": {"state": "done"},
+
+  "A63": {"state": "done", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield; Gather skips barren regions unless the op names one. Not yet run live."}
 }

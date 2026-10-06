@@ -1,12 +1,19 @@
-"""Gather: carry out the plan's ``gather_gems`` op from grass, bushes and gem piles in safe-ish ground (A22)."""
+"""Gather: carry out the plan's ``gather_gems`` op from grass, bushes and gem piles in safe-ish ground (A22).
+
+Grass and bushes in a region our own cuts showed barren are left alone (A63),
+unless the op names that region with ``x, y``."""
 
 from __future__ import annotations
 
+from typing import Callable
+
 from ..config import Policy
+from ..gem_yield import barren_regions, region_of
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
 from ..pathing import grid_params, next_step
+from ..plan import GoalOp
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets, safe_default
@@ -26,6 +33,7 @@ GOAL = "gather"
 class GatherState(State):
     """Executor for ``gather_gems``: ``Use`` grass and bushes or ``Take`` gem
     piles in safe-ish ground until the gem counter reaches the op's count.
+    Grass and bushes in a barren region are skipped unless the op names it.
     With no reachable target in view it explores safe ground for one."""
 
     name = "Gather"
@@ -39,7 +47,7 @@ class GatherState(State):
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        out = gather_outcome(world, ctx.memory, ctx.policy, knowledge=ctx.knowledge)
+        out = gather_outcome(world, ctx.memory, ctx.policy, knowledge=ctx.knowledge, op=my_op(ctx, self.name))
         if out.intents is None:
             out = safe_default(world, ctx)
             out.state, out.reason = self.name, f"look for gems: {out.reason}"
@@ -61,6 +69,7 @@ def gather_outcome(
     policy: Policy,
     *,
     knowledge: KnowledgeBase | None = None,
+    op: GoalOp | None = None,
     state: str = "Gather",
 ) -> StateOutcome:
     here = w.pos
@@ -68,28 +77,33 @@ def gather_outcome(
         return StateOutcome(None, "position unknown", state=state)
     view = w.view
 
+    skip = _barren_to_skip(w, knowledge, op)
+
+    def cuttable(p: Pos) -> bool:
+        return is_safe_ish(w, p, policy) and region_of(p) not in skip
+
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
     piles = [e for e in w.entities if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and is_safe_ish(w, e.pos, policy)]
     if piles:
         s = min(piles, key=lambda e: (chebyshev(e.pos, here), e.id))
         return StateOutcome([take(s.id)], f"take {s.code or s.id}", state=state)
 
-    if view.tiles.get(here) == "grass" and is_safe_ish(w, here, policy):
+    if view.tiles.get(here) == "grass" and cuttable(here):
         return StateOutcome([use_block(here)], "cut grass", state=state)
 
     bushes = [
-        p for p in view.tiles if view.tiles[p] == "bush" and chebyshev(p, here) <= BUSH_REACH and is_safe_ish(w, p, policy)
+        p for p in view.tiles if view.tiles[p] == "bush" and chebyshev(p, here) <= BUSH_REACH and cuttable(p)
     ]
     if bushes:
         p = min(bushes, key=lambda pos: (chebyshev(pos, here), pos))
         return StateOutcome([use_block(p)], "cut bush", state=state)
 
     # Follow only a path Gather planned, toward a target that still qualifies.
-    if m.goal == GOAL and not _still_wanted(w, m.gather_target, policy):
+    if m.goal == GOAL and not _still_wanted(w, m.gather_target, policy, cuttable):
         m.path, m.goal, m.gather_target = [], "", None
     step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is None:
-        _replan_gather(w, m, policy, plan_avoid, plan_costly)
+        _replan_gather(w, m, policy, plan_avoid, plan_costly, cuttable)
         step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is not None:
         return StateOutcome([set_position(step)], f"gather → {m.path[-1]}", state=state)
@@ -97,16 +111,31 @@ def gather_outcome(
     return StateOutcome(None, "no gather target", state=state)
 
 
-def _still_wanted(w: WorldModel, target: tuple[str, Pos] | None, policy: Policy) -> bool:
+def _barren_to_skip(w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None) -> set[tuple[int, int]]:
+    """Barren regions of this map (A63), less the one the op names with ``x, y``."""
+    skip = barren_regions(knowledge, w.map_id)
+    if skip and op is not None and "x" in op and "y" in op:
+        skip.discard(region_of((op["x"], op["y"])))
+    return skip
+
+
+def _still_wanted(w: WorldModel, target: tuple[str, Pos] | None, policy: Policy, cuttable: Callable[[Pos], bool]) -> bool:
     if target is None:
         return False
     kind, pos = target
     if kind == "pile":
         return any(is_gem_pile(e) and e.pos == pos for e in w.entities) and is_safe_ish(w, pos, policy)
-    return w.view.tiles.get(pos) == kind and is_safe_ish(w, pos, policy)
+    return w.view.tiles.get(pos) == kind and cuttable(pos)
 
 
-def _replan_gather(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos], costly: set[Pos]) -> None:
+def _replan_gather(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    blocked: set[Pos],
+    costly: set[Pos],
+    cuttable: Callable[[Pos], bool],
+) -> None:
     """Plan to the nearest pile, then bush, then grass; leave ``m.path`` alone if none.
 
     A failed plan keeps another state's path.
@@ -127,7 +156,7 @@ def _replan_gather(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos], 
 
     bush_at: dict[Pos, Pos] = {}
     for p, block in w.view.tiles.items():
-        if block != "bush" or not is_safe_ish(w, p, policy):
+        if block != "bush" or not cuttable(p):
             continue
         for stand in w.neighbours(p):
             if w.view.walkable(stand) and stand not in w.occupied():
@@ -138,7 +167,7 @@ def _replan_gather(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos], 
             m.path, m.goal, m.gather_target = found[1], GOAL, ("bush", bush_at[found[0]])
             return
 
-    grass = {p for p, block in w.view.tiles.items() if block == "grass" and is_safe_ish(w, p, policy)}
+    grass = {p for p, block in w.view.tiles.items() if block == "grass" and cuttable(p)}
     if grass:
         found = nearest_target(w, grass, params)
         if found and next_step(w, blocked, found[1]):

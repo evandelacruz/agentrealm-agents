@@ -134,6 +134,40 @@ class RetreatTest(unittest.TestCase):
             self.assertEqual(dispatch(w, c).state, "Retreat")
             self.assertEqual(planned.call_count, 1)
 
+    def test_a_losing_retreat_walk_is_planned_without_every_hostile(self):
+        """Review on #137: the runner leaves every hostile a losing Retreat
+        ignored out of its queue's threats (``Memory.walk_skip``)."""
+        from agentrealm_agent.states import retreat
+
+        w, m = world(["." * 9] * 6, at=(1, 0)), Memory()
+        safe_at(w, (8, 0))
+        w.health, w.lives = 3, 6
+        w.threat.record(("npc", "gnawer"), 5)
+        w.entities = [Entity("npc", 1, (0, 0), code="gnawer"), Entity("npc", 2, (5, 4), code="snotling")]
+        c = ctx(m=m, hostile=["npc"])
+        with mock.patch.object(retreat, "losing_ground", return_value=True):
+            out = retreat.retreat_step(w, c, "Retreat")
+        self.assertIn("losing ground", out.reason)
+        self.assertEqual(m.walk_skip, {("npc", 1), ("npc", 2)})
+        m.walk_skip = set()
+        out = retreat.retreat_step(w, c, "Retreat")
+        self.assertEqual(m.walk_skip, {("npc", 1)}, "not losing: only the pursuers")
+
+    def test_no_retreat_step_leaves_walk_skip_alone(self):
+        """Review on #137: with the safe tile unreachable, dispatch falls through
+        to another state's walk, which must not inherit Retreat's skip set."""
+        from agentrealm_agent.states import retreat
+
+        w, m = world(["..#.."], at=(1, 0)), Memory()
+        safe_at(w, (4, 0))
+        w.health, w.lives = 3, 6
+        w.threat.record(("npc", "gnawer"), 5)
+        w.entities = [Entity("npc", 1, (0, 0), code="gnawer")]
+        with mock.patch.object(retreat, "losing_ground", return_value=True):
+            out = retreat.retreat_step(w, ctx(m=m, hostile=["npc"]), "Retreat")
+        self.assertIsNone(out.intents)
+        self.assertEqual(m.walk_skip, set())
+
     def test_threshold_is_retreat_hits_times_the_hit(self):
         # risk 0.5 with lives well above the floor: retreat_hits applies as set.
         params = {"retreat_hits": 2, "risk": 0.5, "lives_floor": 3}

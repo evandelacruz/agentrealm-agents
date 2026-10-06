@@ -114,16 +114,16 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
         m.path = cost_path(w, goal, params, nav=nav_search(m, w, nav_key, goal)) or []
         m.goal = "safe"
         m.planned_threats = hostiles_reaching(w, policy, m.path, skip=pursuers)
-    # The runner leaves these out of the held queue's threats: the path weighs none of them.
-    m.walk_skip = set(pursuers)
     step = next_step(w, plan_avoid, m.path)
     if step is None and m.path:
         m.path = cost_path(w, goal, params, nav=nav_search(m, w, nav_key, goal)) or []
         step = next_step(w, plan_avoid, m.path)
     if step is None:
         return StateOutcome(None, "safe tile unreachable", state=state)
-    # The runner queues the walkable prefix of ``m.path`` from this first step.
-    m.retreat_walk = goal
+    # The runner queues the walkable prefix of ``m.path`` from this first step,
+    # and leaves these out of its threats: the path weighs none of them. Set
+    # only here, so a walk that falls through to another state never inherits it.
+    m.retreat_walk, m.walk_skip = goal, set(pursuers)
     reason = f"retreat → safe {goal}" + (" (losing ground)" if losing else "")
     return StateOutcome([set_position(step)], reason, reflex=True, state=state)
 

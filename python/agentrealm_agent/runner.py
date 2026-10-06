@@ -166,9 +166,10 @@ class Runner:
         later reload never puts it back (A16). Read before the strategist
         drains the signals this window."""
         ended = [s["op"] for s in self.mem.strategist_signals if s.get("trigger") in ("goal_done", "goal_failed")]
-        given_up = {
+        given_up = {  # the Travel walk's own give-ups only, not another walk's to the same cell
             (s.get("map_id"), tuple(s.get("target") or ()))
             for s in self.mem.nav_stuck.stuck_signals
+            if str(s.get("goal", "")).startswith("travel:")
         }
         for goal in list(self.directives.pinned_goals):
             op = parse_directives_goal(goal)

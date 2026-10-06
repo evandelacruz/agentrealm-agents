@@ -580,6 +580,23 @@ class SmokeScriptTest(unittest.TestCase):
         r.unpin_done_goals()
         self.assertEqual(r.directives.pinned_goals, [])
 
+    def test_another_walks_give_up_on_the_same_cell_keeps_the_pin(self):
+        from tests.test_strategist import FakeLLM, make
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
+            cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
+            acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=make(FakeLLM()))
+        self.addCleanup(r.trace.close)
+        r.world = WorldModel(character_id=1, map_id=OVERWORLD, pos=(0, 0), tick=10)
+        r.mem.nav_stuck.stuck_signals.append(
+            {"trigger": "stuck", "goal": "explore", "reason": "time", "target": [5, 6], "map_id": OVERWORLD}
+        )
+        r.unpin_done_goals()
+        self.assertEqual(r.directives.pinned_goals, [f"travel:point:{OVERWORLD}:5:6"])
+
     def test_a_dropped_pinned_op_is_unpinned(self):
         from tests.test_strategist import FakeLLM, make
 

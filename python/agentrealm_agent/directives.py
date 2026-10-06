@@ -192,7 +192,8 @@ class DirectivesWatch:
         self.directives = self._pin(self.directives)
 
     def unpin(self, goal: str) -> None:
-        """Drop a pinned goal for good (its op is done), here and from the directives in force."""
+        """Drop a pinned goal for good (its op is done or dropped, or its target
+        given up), here and from the directives in force."""
         if goal in self.pinned_goals:
             self.pinned_goals.remove(goal)
             self.directives.goals = [g for g in self.directives.goals if g != goal]

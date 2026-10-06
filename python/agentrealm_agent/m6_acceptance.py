@@ -5,14 +5,14 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 
-from .acceptance import AcceptanceHooks, CountingClient
+from .acceptance import CountingClient, PlannerHealth
 
 TARGET_STEPS = 200
 CALM_BUDGET_FRACTION = 0.25
 
 
-@dataclass
-class M6AcceptanceMetrics(AcceptanceHooks):
+@dataclass(kw_only=True)
+class M6AcceptanceMetrics(PlannerHealth):
     """Counts windows, API calls and steps while the runner drives a character.
 
     Calls are counted on the client itself (``wrap``), so every request a
@@ -89,6 +89,7 @@ class M6AcceptanceMetrics(AcceptanceHooks):
             )
         if self.api_errors:
             out.append(f"{len(self.api_errors)} API error(s): {', '.join(sorted(set(self.api_errors)))}")
+        out.extend(self.planner_failures())
         return out
 
     def summary_lines(self) -> list[str]:
@@ -101,6 +102,7 @@ class M6AcceptanceMetrics(AcceptanceHooks):
             f"({self.calm_call_fraction:.1%} of calm windows)",
             f"urgent windows: {self.urgent_windows}",
             f"API errors: {len(self.api_errors)}",
+            self.planner_summary_line(),
         ]
         if self.rejection_codes:
             other = [c for c in self.rejection_codes if c != "movement_cooldown"]

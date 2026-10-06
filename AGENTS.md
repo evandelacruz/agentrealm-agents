@@ -30,7 +30,7 @@ There is no ticketing system. PLAN.md is the spec and the backlog.
 Decided. Do not cross without flagging prominently.
 
 - **An ordinary API client.** HTTP only. Imports nothing from the server and never touches its databases. Something the API does not give is a server gap: write it into PLAN.md **Server gaps**, never build a side door.
-- **Python 3.11+, standard library only.** The AI planner (M4, A35) is the one place a dependency may enter (the `anthropic` SDK). It is on in every live run, but imported only when it runs, so `--no-planner` and `make test` stay standard library only. The one exception is [`tools/conductor`](tools/conductor/README.md): ops tooling for building this repo, not part of an agent. It is Node 22+ and TypeScript on `@cursor/sdk`, and needs `CURSOR_API_KEY` for every command but `prs`.
+- **Python 3.11+, standard library only.** The AI planner (M4, A35) is the one place a dependency may enter (the `anthropic` SDK, listed in `python/requirements.txt` and installed by `make setup`). It is on in every live run, but imported only when it runs, so `--no-planner` and `make test` stay standard library only. The one exception is [`tools/conductor`](tools/conductor/README.md): ops tooling for building this repo, not part of an agent. It is Node 22+ and TypeScript on `@cursor/sdk`, and needs `CURSOR_API_KEY` for every command but `prs`.
 - **Obeys the invariants a client can see.** At most one intent per tick, no standing orders, and when there is no decision it sends nothing.
 - **Stays inside the call budget.** One request per character per tick, burst of 3, reads included (PLAN.md **What the API gives today**).
 

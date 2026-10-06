@@ -227,12 +227,12 @@ class DispatcherFallThroughTest(unittest.TestCase):
         w = world(["...", "...", "..."], at=(0, 0))
         w.health, w.max_health = 5, 10
         w.record_respawn_anchor(7, (0, 0))
-        w.zones[7] = {(0, 0): ZoneFact(safe=True)}
+        w.zones[7] = {(x, y): ZoneFact(safe=True) for x in range(3) for y in range(3)}
         kb = KnowledgeBase.empty("sandbox")
         save_regen_yes(kb)
         out = dispatch(w, PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb))
         self.assertEqual((out.state, out.wait), ("Heal", False))
-        self.assertEqual(out.intents[0]["verb"], "SetPosition", "Heal never stands still in a safe zone")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", "Heal keeps moving inside a safe zone with room")
         self.assertTrue(out.reason.startswith("heal in safe ground: "), out.reason)
 
     def test_recover_waits_to_open_chest(self):
@@ -333,6 +333,46 @@ class DispatcherFallThroughTest(unittest.TestCase):
         out = dispatch(w, ctx(w))
         self.assertEqual(out.state, "Explore")
         self.assertEqual(out.intents[0]["verb"], "SetPosition", "never idle with no plan op")
+
+
+class SafeDefaultPushesTheBoundaryTest(unittest.TestCase):
+    """Live: hurt, safe ground fully explored, "look around" took 18% of
+    decisions while unexplored ground lay east. The safe default now walks
+    to the nearest frontier outside safe ground."""
+
+    def hurt_in_a_small_safe_zone(self) -> WorldModel:
+        from agentrealm_agent.world import ZoneFact
+
+        # A walled corridor whose only unknown edge is its east end (x=12).
+        w = world(["############", "#...........", "############"], at=(1, 1))
+        w.health, w.max_health, w.alive = 3, 10, True
+        w.record_respawn_anchor(7, (1, 1))
+        w.zones[7] = {(1, 1): ZoneFact(safe=True), (2, 1): ZoneFact(safe=True)}
+        return w
+
+    def test_explores_the_nearest_frontier_outside_safe_ground(self):
+        w = self.hurt_in_a_small_safe_zone()
+        m = Memory(heal_regen_absent=True)  # Heal yields: no food, no regen
+        out = dispatch(w, ctx(w, m))
+        self.assertEqual(out.state, "Explore")
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 2, "y": 1}])
+        self.assertIn("(11, 1)", out.reason)
+        self.assertNotIn("look around", out.reason)
+
+    def test_never_loops_look_around_while_the_frontier_is_reachable(self):
+        # From every cell on the way, safe ground behind it, it heads east.
+        w = self.hurt_in_a_small_safe_zone()
+        for x in range(1, 10):
+            w.pos, w.terrain_center = (x, 1), (x, 1)
+            out = dispatch(w, ctx(w, Memory(heal_regen_absent=True)))
+            self.assertNotIn("look around", out.reason)
+            self.assertEqual(out.intents, [{"verb": "SetPosition", "x": x + 1, "y": 1}])
+
+    def test_a_hostile_by_the_frontier_keeps_it_closed(self):
+        w = self.hurt_in_a_small_safe_zone()
+        w.entities = [Entity("npc", 5, (10, 1), "slime")]
+        out = dispatch(w, ctx(w, Memory(heal_regen_absent=True), hostile=["npc"], hostile_range=2))
+        self.assertIn("look around", out.reason)
 
 
 class SyncWakeTest(unittest.TestCase):

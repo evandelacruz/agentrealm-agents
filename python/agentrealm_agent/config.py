@@ -38,6 +38,9 @@ class CharacterConfig:
     world: str
     policy: Policy
     path: Path
+    # Directives goals set by the program, not the file: they go on top of the
+    # file's ``goals`` at every load (the M7 smoke's target, A16). Never read from TOML.
+    pinned_goals: list[str] = field(default_factory=list)
 
     def trace_path(self, character_id: int) -> Path:
         return STATE_DIR / f"{self.profile}.{character_id}.trace.jsonl"

@@ -7,15 +7,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .acceptance import AcceptanceHooks, CountingClient
+from .acceptance import CountingClient, PlannerHealth
 
 # A run at least this share of its target duration is judged on the full gate.
 FULL_RUN_FRACTION = 0.95
 
 
 @dataclass(kw_only=True)
-class TimedRunHooks(AcceptanceHooks):
-    """Deaths, API errors, and an optional wall-clock stop for long smoke runs."""
+class TimedRunHooks(PlannerHealth):
+    """Deaths, API errors, planner health (``PlannerHealth``), and an optional wall-clock stop for long smoke runs."""
 
     stop: threading.Event | None = None
     target_seconds: float | None = None  # wall-clock length of the run; None plays until stopped
@@ -51,4 +51,5 @@ class TimedRunHooks(AcceptanceHooks):
             out.append(f"{self.deaths} death(s) during run")
         if self.api_errors:
             out.append(f"{len(self.api_errors)} API error(s): {', '.join(sorted(set(self.api_errors)))}")
+        out.extend(self.planner_failures())
         return out

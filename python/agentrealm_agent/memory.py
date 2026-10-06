@@ -88,6 +88,7 @@ class Memory:
     # "yes" is saved to the knowledge base; a "no" holds for this run only.
     heal_regen_sample: tuple[int, int, int] | None = None
     heal_regen_absent: bool = False
+    heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
     heal_rearm: str | None = None  # weapon code armed before a drink; restored once (A24)
     heal_pending: tuple[int, str, str] | None = None  # (health before, supply code, "take"|"use") awaiting observation

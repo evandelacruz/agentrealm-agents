@@ -11,7 +11,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_agent import acceptance_smoke, config
 from agentrealm_agent.acceptance import AcceptanceHooks
 from agentrealm_agent.client import ApiError
 from agentrealm_agent.config import Policy
@@ -19,6 +19,8 @@ from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.acceptance_survival import LOOP_STEP_LIMIT, OSCILLATION_ABORT_COUNT, OSCILLATION_ABORT_TICKS
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, M7AcceptanceMetrics
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.runner import Runner
+from agentrealm_agent.strategist import Strategist
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
 from tests.fixtures.navigation import grids, sim
@@ -498,12 +500,153 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(seen, [[[{"verb": "Wait"}]]], "position read only after the Wait")
 
-    def test_aim_at_puts_goto_first(self):
+    def test_pin_goto_without_the_planner_puts_goto_first(self):
         cfg = config.load(REPO / "python" / "characters" / "olympuff_m7.toml")
         self.assertTrue(cfg.policy.pickup, "Recover needs pickup (A11)")
-        self.smoke.aim_at(cfg, OVERWORLD, (5, 6))
+        acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=False)
         self.assertEqual(cfg.policy.goals, ["goto", "explore"])
         self.assertEqual((cfg.policy.goto, cfg.policy.goto_map), ((5, 6), OVERWORLD))
+
+    def test_pin_goto_with_the_planner_is_a_directives_goal(self):
+        # Live: under the planner the policy goto was never pushed or walked.
+        cfg = config.load(REPO / "python" / "characters" / "olympuff_m7.toml")
+        acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+        self.assertEqual(cfg.pinned_goals, [f"travel:point:{OVERWORLD}:5:6"])
+
+    def test_planner_on_walks_to_the_pinned_target_and_plans_below_it(self):
+        from tests.test_strategist import FakeLLM, WAIT_ANSWER, make, round_trip
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
+            cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
+            acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+            planner = make(FakeLLM(WAIT_ANSWER))
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=planner)
+        self.addCleanup(r.trace.close)
+        target = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": OVERWORLD}
+        self.assertEqual(r.plan.current(), target)
+        r.world = WorldModel(character_id=1, map_id=OVERWORLD, pos=(0, 0), tick=10)
+        round_trip(planner, r)
+        self.assertEqual(r.plan.current(), target, "the planner cannot drop the target")
+        self.assertEqual([g["op"] for g in r.plan.goals], ["travel", "wait"])
+
+    def test_a_reached_pinned_target_never_comes_back_on_reload(self):
+        # Review: a directives reload after the agent stood on the target put
+        # `travel:point` back on top. Pinned goals are pinned once.
+        from agentrealm_agent.plan import Plan as PlanCls
+        from tests.test_strategist import FakeLLM, make
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        directives = Path(tmp.name) / "t.directives.toml"
+        with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
+            cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
+            acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=make(FakeLLM()))
+        self.addCleanup(r.trace.close)
+        r.world = WorldModel(character_id=1, map_id=OVERWORLD, pos=(5, 6), tick=10)
+        r.plan.advance(r.world, r.mem)  # stood on the target: the op pops done
+        self.assertIsNone(r.plan.current())
+        r.unpin_done_goals()
+        self.assertEqual(r.directives.pinned_goals, [])
+        # The user edits the directives file: the stack is rebuilt without the target.
+        directives.write_text('goals = ["buy:torch"]\n')
+        old = r.directives.directives.goals
+        self.assertTrue(r.directives.maybe_reload())
+        r.reload_directives(old)
+        self.assertEqual(r.plan.goals, [{"op": "buy", "code": "torch"}])
+        directives.unlink()
+        old = r.directives.directives.goals
+        self.assertTrue(r.directives.maybe_reload())
+        r.reload_directives(old)
+        self.assertIsNone(r.plan.current(), "deleting the file does not bring the target back")
+        self.assertIsInstance(r.plan, PlanCls)
+
+    def test_a_given_up_pinned_target_is_unpinned(self):
+        from tests.test_strategist import FakeLLM, make
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
+            cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
+            acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=make(FakeLLM()))
+        self.addCleanup(r.trace.close)
+        r.world = WorldModel(character_id=1, map_id=OVERWORLD, pos=(0, 0), tick=10)
+        r.mem.nav_stuck.stuck_signals.append(
+            {"trigger": "stuck", "goal": "travel:point", "reason": "time", "target": [5, 6], "map_id": OVERWORLD}
+        )
+        r.unpin_done_goals()
+        self.assertEqual(r.directives.pinned_goals, [])
+
+    def test_another_walks_give_up_on_the_same_cell_keeps_the_pin(self):
+        from tests.test_strategist import FakeLLM, make
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
+            cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
+            acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=make(FakeLLM()))
+        self.addCleanup(r.trace.close)
+        r.world = WorldModel(character_id=1, map_id=OVERWORLD, pos=(0, 0), tick=10)
+        r.mem.nav_stuck.stuck_signals.append(
+            {"trigger": "stuck", "goal": "explore", "reason": "time", "target": [5, 6], "map_id": OVERWORLD}
+        )
+        r.unpin_done_goals()
+        self.assertEqual(r.directives.pinned_goals, [f"travel:point:{OVERWORLD}:5:6"])
+
+    def test_a_dropped_pinned_op_is_unpinned(self):
+        from tests.test_strategist import FakeLLM, make
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
+            cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
+            acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=make(FakeLLM()))
+        self.addCleanup(r.trace.close)
+        r.world = WorldModel(character_id=1, map_id=OVERWORLD, pos=(0, 0), tick=10)
+        r.plan.drop_current("stalled", memory=r.mem)
+        r.unpin_done_goals()
+        self.assertEqual(r.directives.pinned_goals, [])
+
+    def test_a_pinned_target_not_yet_reached_survives_a_reload(self):
+        from tests.test_strategist import FakeLLM, make
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        directives = Path(tmp.name) / "t.directives.toml"
+        with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
+            cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
+            acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=make(FakeLLM()))
+        self.addCleanup(r.trace.close)
+        r.unpin_done_goals()
+        directives.write_text('goals = ["buy:torch"]\n')
+        old = r.directives.directives.goals
+        r.directives.maybe_reload()
+        r.reload_directives(old)
+        self.assertEqual([g["op"] for g in r.plan.goals], ["travel", "buy"])
+
+    def test_main_with_the_planner_pins_the_target(self):
+        seen = []
+        env = {"AGENTREALM_PLANNER_PROVIDER": "openai", "AGENTREALM_PLANNER_MODEL": "m", "OPENAI_API_KEY": "k"}
+        out = io.StringIO()
+        with mock.patch.object(self.smoke, "Client") as Client, \
+                mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
+                mock.patch.object(self.smoke.time, "sleep"), \
+                mock.patch.object(Strategist, "check"), \
+                mock.patch.object(self.smoke, "run_acceptance_smoke", side_effect=lambda c, cfg, cid, m, **kw: (seen.append(cfg), (10, None))[1]), \
+                mock.patch.dict("os.environ", env, clear=True), redirect_stdout(out), redirect_stderr(io.StringIO()):
+            client = Client.return_value
+            client.self_.return_value = {"alive": True}
+            client.world.return_value = {"town": {"map_id": OVERWORLD}}
+            client.position.return_value = {"map_id": OVERWORLD, "x": 10, "y": 20}
+            self.smoke.main(["--api-key", "k", "--character-id", "9", "--seconds", "10"])
+        self.assertEqual(seen[0].pinned_goals, [f"travel:point:{OVERWORLD}:160:20"])
+        self.assertNotIn("goto", seen[0].policy.goals)
 
 
 if __name__ == "__main__":

@@ -24,7 +24,11 @@ from agentrealm_agent.pathing import path_owned_by, plan_op_goal
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.strategist import (
+    BACKOFF_BASE_S,
+    BACKOFF_CAP_S,
     DEFAULT_ANTHROPIC_MODEL,
+    PlannerAuthError,
+    ProviderHTTPError,
     AnthropicClient,
     OpenAIChatClient,
     PlannerConfigError,
@@ -75,10 +79,11 @@ def fake_runner(goals: list[str] | None = None) -> SimpleNamespace:
     """The parts of a Runner the strategist reads and writes."""
     w = WorldModel(character_id=1, map_id=7, pos=(0, 0), tick=10)
     w.alive = True
+    plan = Plan.from_directives(directive_goals=goals or [], directive_params=dict(PARAM_DEFAULTS))
     return SimpleNamespace(
         world=w,
         mem=Memory(),
-        plan=Plan([{"op": "explore_area", "x": 0, "y": 0, "radius": 9999}], dict(PARAM_DEFAULTS)),
+        plan=plan or Plan([{"op": "explore_area", "x": 0, "y": 0, "radius": 9999}], dict(PARAM_DEFAULTS)),
         directives=SimpleNamespace(directives=Directives(params=dict(PARAM_DEFAULTS), goals=goals or [])),
         knowledge=None,
         tick_hz=10,
@@ -280,10 +285,40 @@ class AnswerTest(unittest.TestCase):
         self.assertEqual(logged_events(r), ["ask", "kept"])
 
     def test_directives_goals_override_the_planner(self):
+        # Directives ops stay on top; the planner's goals go below them.
         s, r = make(FakeLLM(WAIT_ANSWER)), fake_runner(goals=["gather_gems:5"])
+        head = r.plan.current()
         round_trip(s, r)
-        self.assertEqual(r.plan.current()["op"], "explore_area")
-        self.assertEqual(logged_events(r), ["ask", "kept"])
+        self.assertIs(r.plan.current(), head)
+        self.assertEqual([g["op"] for g in r.plan.goals], ["gather_gems", "wait"])
+        self.assertEqual(r.plan.directive_ops(), [head])
+        self.assertEqual(logged_events(r), ["ask", "applied"])
+
+    def test_planner_owns_the_stack_once_directives_ops_are_done(self):
+        llm = FakeLLM(WAIT_ANSWER, {"goals": [{"op": "buy", "code": "torch"}]})
+        s, r = make(llm, replan_s=15), fake_runner(goals=["travel:point:7:5:0"])
+        round_trip(s, r)
+        self.assertEqual([g["op"] for g in r.plan.goals], ["travel", "wait"])
+        r.world.pos = (5, 0)
+        r.plan.advance(r.world, r.mem)  # stood on the target: the travel op pops
+        self.assertEqual(r.plan.directive_ops(), [])
+        s.clock.now += 15
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals, [{"op": "buy", "code": "torch"}])
+
+    def test_snapshot_and_restore_keep_the_directives_boundary(self):
+        r = fake_runner(goals=["gather_gems:5", "buy:torch"])
+        saved = r.plan.snapshot()
+        r.plan.goals, r.plan.directive_end, r.plan.index = [{"op": "wait", "seconds": 1, "why": "probe"}], 0, 0
+        r.plan.restore(saved)
+        self.assertEqual(r.plan.directive_end, 2)
+        self.assertEqual([g["op"] for g in r.plan.directive_ops()], ["gather_gems", "buy"])
+
+    def test_a_reply_repeating_the_directives_op_does_not_stack_it_twice(self):
+        travel = {"op": "travel", "to": "point", "x": 5, "y": 0, "map_id": 7}
+        s, r = make(FakeLLM({"goals": [{**travel, "why": "the target"}, WAIT_ANSWER["goals"][0]]})), fake_runner(goals=["travel:point:7:5:0"])
+        round_trip(s, r)
+        self.assertEqual([g["op"] for g in r.plan.goals], ["travel", "wait"])
 
 
 class ProgressTest(unittest.TestCase):
@@ -441,7 +476,7 @@ class SafeDefaultTest(unittest.TestCase):
     def test_directives_goals_survive_an_invalid_reply(self):
         s, r = make(FakeLLM({"goals": []})), fake_runner(goals=["gather_gems:5"])
         round_trip(s, r)
-        self.assertEqual(r.plan.current()["op"], "explore_area")
+        self.assertEqual(r.plan.current()["op"], "gather_gems")
 
 
 class ParamsTest(unittest.TestCase):
@@ -457,7 +492,7 @@ class ParamsTest(unittest.TestCase):
         reply = {**WAIT_ANSWER, "params": {"retreat_hits": 3}}
         s, r = make(FakeLLM(reply)), fake_runner(goals=["gather_gems:5"])
         round_trip(s, r)
-        self.assertEqual(r.plan.current()["op"], "explore_area")
+        self.assertEqual(r.plan.current()["op"], "gather_gems")
         self.assertEqual(r.plan.params["retreat_hits"], 3)
 
     def test_params_carry_into_a_replaced_stack(self):
@@ -564,11 +599,185 @@ class FailureTest(unittest.TestCase):
         queue_signal(r.mem, {"trigger": "death", "tick": 3})
         round_trip(s, r)
         self.assertEqual(r.plan.current()["op"], "explore_area")
-        self.assertEqual(logged_events(r), ["ask", "error", "ask"])  # retried in the same window
+        self.assertEqual(logged_events(r), ["ask", "error"])  # backing off: no retry in the same window
+        s.clock.now += BACKOFF_BASE_S
+        s.on_window(r)
+        self.assertEqual(logged_events(r), ["ask", "error", "ask"])
         s.serve_one(timeout=0)
         self.assertEqual(llm.messages[1], llm.messages[0])  # the same triggers again
         s.on_window(r)
         self.assertEqual(r.plan.current()["op"], "wait")
+
+
+class BackoffTest(unittest.TestCase):
+    """Live: 30 calls failed with 401, six of them in 1.5 s. Failures now back off."""
+
+    def test_failures_back_off_exponentially_up_to_the_cap(self):
+        llm = FakeLLM(*[RuntimeError("anthropic http 401")] * 12)
+        s, r = make(llm, calls_per_min=1000), fake_runner()
+        delays = []
+        for _ in range(10):
+            s.on_window(r)
+            s.serve_one(timeout=0)
+            s.on_window(r)  # settles the failure
+            delays.append(s.retry_at - s.clock.now)
+            s.on_window(r)  # still backing off: nothing sent
+            self.assertEqual(llm.calls, len(delays))
+            s.clock.now = s.retry_at
+        self.assertEqual(delays[:4], [BACKOFF_BASE_S, 2 * BACKOFF_BASE_S, 4 * BACKOFF_BASE_S, 8 * BACKOFF_BASE_S])
+        self.assertEqual(max(delays), BACKOFF_CAP_S)
+
+    def test_a_good_reply_resets_the_backoff(self):
+        s, r = make(FakeLLM(RuntimeError("down"), WAIT_ANSWER)), fake_runner()
+        round_trip(s, r)
+        self.assertEqual(s.failures_in_a_row, 1)
+        s.clock.now += BACKOFF_BASE_S
+        round_trip(s, r)
+        self.assertEqual((s.failures_in_a_row, s.retry_at), (0, 0.0))
+
+
+class StartupCheckTest(unittest.TestCase):
+    """A refused key stops the run before play (exit 2, one line)."""
+
+    class Refusing:
+        def __init__(self, error):
+            self.error = error
+
+        def check(self):
+            raise self.error
+
+    def test_401_and_403_are_fatal(self):
+        for status in (401, 403):
+            s = make(self.Refusing(ProviderHTTPError(f"openai http {status}: bad key", status)))
+            with self.assertRaises(PlannerAuthError) as cm:
+                s.check()
+            self.assertIn(f"HTTP {status}", str(cm.exception))
+            self.assertNotIn("\n", str(cm.exception))
+
+    def test_sdk_errors_with_status_code_are_fatal(self):
+        err = RuntimeError("authentication_error")
+        err.status_code = 401  # what the anthropic SDK's AuthenticationError carries
+        with self.assertRaises(PlannerAuthError):
+            make(self.Refusing(err)).check()
+
+    def test_a_bad_model_is_fatal(self):
+        # A typo'd model is a 404; any 4xx but 429 stops the run before play.
+        for status in (400, 404, 422):
+            s = make(self.Refusing(ProviderHTTPError(f"openai http {status}: model not found", status)))
+            with self.assertRaises(PlannerConfigError) as cm:
+                s.check()
+            self.assertNotIsInstance(cm.exception, PlannerAuthError)
+            self.assertIn("AGENTREALM_PLANNER_MODEL", str(cm.exception))
+
+    def test_other_failures_are_left_to_the_run(self):
+        make(self.Refusing(ProviderHTTPError("openai http 429: rate limited", 429))).check()
+        make(self.Refusing(ProviderHTTPError("openai http 500", 500))).check()
+        make(self.Refusing(RuntimeError("openai network: timeout"))).check()
+        Strategist.off().check()  # test mode: nothing to check
+
+    def test_smoke_scripts_exit_2_on_a_refused_key(self):
+        from agentrealm_agent import acceptance_smoke
+
+        env = no_planner_env(AGENTREALM_PLANNER_PROVIDER="openai", AGENTREALM_PLANNER_MODEL="m", OPENAI_API_KEY="bad")
+        refused = ProviderHTTPError("openai http 401: invalid key", 401)
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(OpenAIChatClient, "check", side_effect=refused):
+            with self.assertRaises(PlannerAuthError):
+                acceptance_smoke.planner_for(False)
+            self.assertFalse(acceptance_smoke.planner_for(True).enabled)
+
+    def test_openai_check_reports_the_http_status(self):
+        import urllib.error
+
+        client = OpenAIChatClient("bad", "m")
+        refused = urllib.error.HTTPError("u", 401, "Unauthorized", {}, io.BytesIO(b"{}"))
+        with mock.patch("urllib.request.urlopen", side_effect=refused):
+            with self.assertRaises(ProviderHTTPError) as cm:
+                client.check()
+        self.assertEqual(cm.exception.status_code, 401)
+
+
+class AcceptanceCountTest(unittest.TestCase):
+    """Planner errors and accepted plans reach the acceptance metrics."""
+
+    def runner_with_metrics(self):
+        from agentrealm_agent.acceptance_run import TimedRunHooks
+
+        r = fake_runner()
+        r.acceptance = TimedRunHooks()
+        r.acceptance.on_planner(enabled=True)
+        return r
+
+    def test_failures_in_a_row_fail_the_run(self):
+        llm = FakeLLM(*[RuntimeError("openai http 500")] * 3)
+        s, r = make(llm, calls_per_min=1000), self.runner_with_metrics()
+        for _ in range(3):
+            round_trip(s, r)
+            s.clock.now = s.retry_at
+        self.assertEqual((r.acceptance.planner_errors, r.acceptance.plans_accepted), (3, 0))
+        self.assertIn("3 planner errors in a row (3 in all)", r.acceptance.base_failures())
+        self.assertIn("planner on but no plan accepted", r.acceptance.base_failures())
+        self.assertEqual(r.acceptance.planner_summary_line(), "planner: 0 plan(s) accepted, 3 error(s)")
+
+    def test_a_transient_error_the_backoff_recovers_from_passes(self):
+        llm = FakeLLM(RuntimeError("anthropic http 529: overloaded"), WAIT_ANSWER, RuntimeError("timeout"), WAIT_ANSWER)
+        s, r = make(llm, calls_per_min=1000, replan_s=15), self.runner_with_metrics()
+        for _ in range(4):
+            round_trip(s, r)
+            s.clock.now = max(s.retry_at, s.clock.now + 15)
+        self.assertEqual((r.acceptance.planner_errors, r.acceptance.plans_accepted), (2, 2))
+        self.assertEqual(r.acceptance.base_failures(), [])
+        self.assertEqual(r.acceptance.planner_summary_line(), "planner: 2 plan(s) accepted, 2 error(s)")
+
+    def test_a_refused_key_mid_run_fails_at_once(self):
+        llm = FakeLLM(WAIT_ANSWER, ProviderHTTPError("openai http 401: invalid key", 401))
+        s, r = make(llm, calls_per_min=1000, replan_s=15), self.runner_with_metrics()
+        round_trip(s, r)
+        s.clock.now += 15
+        round_trip(s, r)
+        self.assertEqual(r.acceptance.base_failures(), ["1 planner auth error(s) (401/403)"])
+
+    def test_accepted_plans_count_and_pass(self):
+        s, r = make(FakeLLM(WAIT_ANSWER, {"goals": [{"op": "buy", "code": "torch"}]}), replan_s=15), self.runner_with_metrics()
+        round_trip(s, r)
+        s.clock.now += 15
+        round_trip(s, r)
+        self.assertEqual((r.acceptance.plans_accepted, r.acceptance.planner_errors), (2, 0))
+        self.assertEqual(r.acceptance.base_failures(), [])
+
+    def test_only_a_reply_with_a_valid_op_or_an_empty_stack_is_accepted(self):
+        replies = [
+            {"notes": "thinking"},  # notes only: neither
+            {"params": {"retreat_hits": 3}},  # params only: neither
+            {"goals": [{"op": "fly", "why": "no such op"}]},  # every op invalid: an error
+            {"goals": []},  # an explicit empty stack: accepted
+            WAIT_ANSWER,  # a valid op: accepted
+        ]
+        s, r = make(FakeLLM(*replies), replan_s=15), self.runner_with_metrics()
+        for _ in replies:
+            round_trip(s, r)
+            s.clock.now += 15
+        self.assertEqual((r.acceptance.plans_accepted, r.acceptance.planner_errors), (2, 1))
+
+    def test_invalid_ops_count_toward_the_streak(self):
+        bad = {"goals": [{"op": "fly"}]}
+        s, r = make(FakeLLM(bad, bad, bad), replan_s=15), self.runner_with_metrics()
+        for _ in range(3):
+            round_trip(s, r)
+            s.clock.now += 15
+        self.assertIn("3 planner errors in a row (3 in all)", r.acceptance.base_failures())
+
+    def test_a_reply_that_is_not_a_plan_is_an_error(self):
+        s, r = make(FakeLLM("not json at all")), self.runner_with_metrics()
+        round_trip(s, r)
+        self.assertEqual((r.acceptance.plans_accepted, r.acceptance.planner_errors), (0, 1))
+
+    def test_planner_off_is_not_judged(self):
+        from agentrealm_agent.acceptance_run import TimedRunHooks
+
+        m = TimedRunHooks()
+        m.on_planner(enabled=False)
+        self.assertEqual(m.base_failures(), [])
+        self.assertEqual(m.planner_summary_line(), "planner: off (--no-planner)")
 
 
 class BudgetTest(unittest.TestCase):
@@ -580,6 +789,7 @@ class BudgetTest(unittest.TestCase):
         for _ in range(5):
             s.on_window(r)
             s.serve_one(timeout=0)
+            s.clock.now += 5  # past each backoff (2 s, then 4 s), well inside the minute
         self.assertEqual(llm.calls, 2)
         self.assertEqual(s.limit_reached(), "calls_per_min")
         s.clock.now += 60
@@ -811,7 +1021,7 @@ class FailFastTest(unittest.TestCase):
         self.assertIn("AGENTREALM_PLANNER_PROVIDER", self.raises(AGENTREALM_PLANNER_PROVIDER="llama"))
 
     def test_anthropic_sdk_not_installed(self):
-        self.assertIn("pip install anthropic", self.raises(ANTHROPIC_API_KEY="a"))
+        self.assertIn("make setup", self.raises(ANTHROPIC_API_KEY="a"))
 
     def test_no_planner_env_is_the_test_mode(self):
         with mock.patch.dict(os.environ, no_planner_env(AGENTREALM_NO_PLANNER="1"), clear=True):

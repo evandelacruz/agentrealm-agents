@@ -3,8 +3,9 @@
 
 Plays one hour (default) from wherever the character stands on the overworld.
 Before the runner starts it reads the world and the character's position, and
-sends the agent to one ``goto`` target 150 blocks east of that start (or
-``--target X,Y``); the rest of the hour it explores. Pass criteria are in
+sends the agent to one target 150 blocks east of that start (or
+``--target X,Y``): a directives goal (``pin_goto``), so the planner plans
+around it and cannot drop it. The rest of the hour the planner plays. Pass criteria are in
 ``agentrealm_agent/m7_acceptance.py`` and the README. Requires AGENTREALM_API_KEY.
 
 Sustained pacing aborts the run early with exit 1: more than
@@ -29,19 +30,13 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, navigation_start, planner_for, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, navigation_start, pin_goto, planner_for, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
 from agentrealm_agent.strategist import PlannerConfigError  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m7.toml"
-
-
-def aim_at(cfg: config.CharacterConfig, overworld: int, target: tuple[int, int]) -> None:
-    """Send the agent to ``target`` first, then let it explore for the rest of the hour."""
-    cfg.policy.goto, cfg.policy.goto_map = target, overworld
-    cfg.policy.goals = ["goto"] + [g for g in cfg.policy.goals if g != "goto"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -116,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         target = (x, y)
     else:
         target = (origin[0] + TARGET_DISTANCE, origin[1])
-    aim_at(cfg, overworld, target)
+    pin_goto(cfg, overworld, target, planner_on=planner.enabled)
     time.sleep(1.0)  # the runner's own world read follows: stay inside the burst of 3
 
     print(

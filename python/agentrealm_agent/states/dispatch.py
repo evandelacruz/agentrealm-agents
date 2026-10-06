@@ -22,6 +22,7 @@ from __future__ import annotations
 from ..navigation import oscillation
 from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import end_decision
+from ..healing import note_heal_window
 from ..pathing import note_goto_reached
 from ..plan import OP_STATE, PLAN_STALL_SECONDS, Plan
 from ..memory import Memory
@@ -118,6 +119,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     if oscillation.check(m, world) is not None:
         yielded.append("oscillation: paced between two cells")
     note_goto_reached(world, m, ctx.policy)
+    note_heal_window(m, world)
     if ctx.plan is not None:
         _settle_plan(ctx.plan, world, m)
     sync_boss(world, m, ctx.plan)

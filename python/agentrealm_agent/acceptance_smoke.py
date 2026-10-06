@@ -21,10 +21,30 @@ NO_PLANNER_HELP = "test mode: play without the AI planner (A35)"
 def planner_for(no_planner: bool) -> Strategist:
     """The AI planner for a live run, or the ``--no-planner`` test mode.
 
-    Raises ``PlannerConfigError`` (one line) when it is on and has no key:
-    call it before touching the character, so the run fails fast.
+    Raises ``PlannerConfigError`` (one line) when it is on and has no key,
+    and ``PlannerAuthError`` when the provider refuses the key on the one
+    check call: call it before touching the character, so the run fails fast.
     """
-    return Strategist.off() if no_planner else Strategist.from_env()
+    if no_planner:
+        return Strategist.off()
+    planner = Strategist.from_env()
+    planner.check()
+    return planner
+
+
+def pin_goto(cfg: config.CharacterConfig, map_id: int, target: tuple[int, int], *, planner_on: bool) -> None:
+    """Send the agent to ``target`` on ``map_id`` before anything else.
+
+    With the planner on, the target is a directives goal (``travel:point``),
+    which the planner cannot override; it keeps planning below it, and owns
+    the stack once the agent stands there. In the ``--no-planner`` test mode
+    it is the built-in plan's ``goto``, in front of the profile's goals.
+    """
+    if planner_on:
+        cfg.pinned_goals = [f"travel:point:{map_id}:{target[0]}:{target[1]}"]
+        return
+    cfg.policy.goto, cfg.policy.goto_map = target, map_id
+    cfg.policy.goals = ["goto"] + [g for g in cfg.policy.goals if g != "goto"]
 
 # Self reads before giving up on a character that stays asleep or downed, one
 # a second: well inside the call budget, and longer than the 5 s respawn delay.

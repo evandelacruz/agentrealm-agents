@@ -219,10 +219,20 @@ class HealStateTest(unittest.TestCase):
         w.health = 10
         self.assertEqual(dispatch(w, ctx()).state, "Explore")
 
-    def assert_heals_moving(self, out):
-        """In a safe zone Heal never stands still: it moves via the safe default."""
+    def assert_heals_in_zone(self, out):
+        """In a one-cell safe zone every safe-default step leaves it, so Heal rests there."""
         self.assertEqual(out.state, "Heal")
-        self.assertIsNotNone(out.intents, out.reason)
+        self.assertEqual(verbs(out), ["Wait"], out.reason)
+        self.assertEqual(out.reason, "heal: rest in the safe zone")
+
+    def test_moves_inside_a_larger_safe_zone(self):
+        # Room in the zone: Heal keeps moving via the safe default, on zone cells only.
+        w = grid(at=(0, 0))
+        for x in range(5):
+            for y in range(5):
+                w.zones[7][(x, y)] = ZoneFact(safe=True)
+        out = dispatch(w, ctx(Memory(), KnowledgeBase.empty("sandbox")))
+        self.assertEqual(out.state, "Heal")
         self.assertEqual(verbs(out), ["SetPosition"])
         self.assertTrue(out.reason.startswith("heal in safe ground: "), out.reason)
 
@@ -230,11 +240,11 @@ class HealStateTest(unittest.TestCase):
         w = grid(at=(0, 0))
         m, kb = Memory(), KnowledgeBase.empty("sandbox")
         out = dispatch(w, ctx(m, kb))
-        self.assert_heals_moving(out)
+        self.assert_heals_in_zone(out)
         self.assertIsNotNone(m.heal_regen_sample)
         w.tick, w.health = 7, 6
         out = dispatch(w, ctx(m, kb))
-        self.assert_heals_moving(out)
+        self.assert_heals_in_zone(out)
         self.assertEqual(regen_known(kb, Memory()), "yes")
 
     def test_regen_absent_is_kept_for_this_run_only(self):
@@ -262,7 +272,7 @@ class HealStateTest(unittest.TestCase):
         self.assertIsNone(m.heal_regen_sample)
         w.pos, w.tick = (0, 0), REGEN_MEASURE_TICKS + 20
         out = dispatch(w, ctx(m))
-        self.assert_heals_moving(out)
+        self.assert_heals_in_zone(out)
         self.assertEqual(m.heal_regen_sample, (REGEN_MEASURE_TICKS + 20, 5, REGEN_MEASURE_TICKS + 20))
         self.assertFalse(m.heal_regen_absent)
 
@@ -280,8 +290,136 @@ class HealStateTest(unittest.TestCase):
         save_regen_yes(kb)
         m = Memory()
         out = dispatch(w, ctx(m, kb=kb))
-        self.assert_heals_moving(out)
+        self.assert_heals_in_zone(out)
         self.assertIsNone(m.heal_regen_sample)  # known: no sample taken
+
+    def test_no_regen_stops_the_measure_walk_flip_flop(self):
+        # Live: at 3/10, no food, no regen, Heal swapped between `heal_measure`
+        # and "heal in safe ground" while the safe default walked out of the
+        # zone and back. Now it rests in the zone until the verdict, then
+        # never samples or walks to safe ground again, and asks the planner
+        # once for food and potions.
+        w = grid(at=(0, 0))
+        w.health = 3
+        m, kb = Memory(), KnowledgeBase.empty("sandbox")
+        reasons = []
+        for t in range(0, REGEN_MEASURE_TICKS + 1, 10):
+            w.tick = t
+            out = dispatch(w, ctx(m, kb))
+            reasons.append(out.reason)
+            self.assertEqual(w.pos, (0, 0))
+        self.assertTrue(m.heal_regen_absent)
+        self.assertFalse(any("heal_measure" in r for r in reasons), reasons)
+        asks = [s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]
+        self.assertEqual(len(asks), 1)
+        self.assertEqual((asks[0]["health"], asks[0]["regen"]), (3, "no"))
+        # Off the zone afterwards: no walk back, no new sample, no second ask.
+        for t, at in ((REGEN_MEASURE_TICKS + 10, (2, 2)), (REGEN_MEASURE_TICKS + 20, (0, 0))):
+            w.tick, w.pos = t, at
+            out = dispatch(w, ctx(m, kb))
+            self.assertNotEqual(out.state, "Heal")
+            self.assertNotIn("heal_measure", out.reason)
+        self.assertIsNone(m.heal_regen_sample)
+        self.assertEqual(len([s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]), 1)
+
+    def test_heal_supplies_asked_again_after_a_full_heal(self):
+        w = grid(at=(2, 2))
+        m = Memory(heal_regen_absent=True)
+        dispatch(w, ctx(m))
+        w.health = 10
+        dispatch(w, ctx(m))
+        w.health = 4
+        dispatch(w, ctx(m))
+        self.assertEqual(len([s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]), 2)
+
+    def test_heal_supplies_rearmed_by_a_full_heal_another_state_saw(self):
+        # Review: a full heal seen while Fight or Flee held the round re-arms the ask.
+        from agentrealm_agent.healing import note_heal_window
+
+        m = Memory(heal_supplies_asked=True)
+        w = grid()
+        w.health = 10
+        note_heal_window(m, w)
+        self.assertFalse(m.heal_supplies_asked)
+        m.heal_supplies_asked = True
+        w.health = 4
+        note_heal_window(m, w)
+        self.assertTrue(m.heal_supplies_asked)
+
+    def test_dispatch_rearms_the_ask_even_when_a_reflex_above_heal_runs(self):
+        m = Memory(heal_supplies_asked=True)
+        w = grid()
+        w.health = 10
+        w.entities = [Entity("npc", 3, (2, 2), "slime")]  # Retreat or Flee holds the round
+        out = dispatch(w, ctx(m))
+        self.assertNotEqual(out.state, "Heal")
+        self.assertFalse(m.heal_supplies_asked)
+
+    def test_a_long_rest_leaves_stuck_detection_untouched(self):
+        # Review repro: one-cell zone, regen "yes", health held at 3 for 1300
+        # ticks. The safe default used to commit a walk outside the zone each
+        # window and escalate it to REVEAL without one move.
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w = grid(at=(0, 0))
+        w.health = 3
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        m = Memory()
+        for t in range(0, 1301, 10):
+            w.tick = t
+            out = dispatch(w, ctx(m, kb))
+            self.assertEqual((out.state, verbs(out)), ("Heal", ["Wait"]), out.reason)
+        self.assertEqual(m.nav_stuck.attempts, {})
+        self.assertEqual(m.nav_stuck.stuck_signals, [])
+        w.health, w.tick = 10, 1310
+        out = dispatch(w, ctx(m, kb))
+        self.assertEqual(out.state, "Explore")
+        att = nav_stuck.active(m, w)
+        self.assertTrue(att is None or att.level < nav_stuck.REVEAL, out.reason)
+        self.assertNotIn("reveal", out.reason)
+
+    def test_resting_walks_only_inside_the_zone(self):
+        # A zone with an unexplored edge: Heal walks there through zone cells only.
+        w = grid(at=(0, 2))
+        for y in range(5):
+            w.zones[7][(0, y)] = ZoneFact(safe=True)
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        out = dispatch(w, ctx(Memory(), kb))
+        self.assertEqual(out.state, "Heal")
+        self.assertEqual(verbs(out), ["SetPosition"])
+        step = (out.intents[0]["x"], out.intents[0]["y"])
+        self.assertEqual(step[0], 0, "never off the zone column")
+
+    def zone_column(self):
+        w = grid(at=(0, 2))
+        for y in range(5):
+            w.zones[7][(0, y)] = ZoneFact(safe=True)
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        return w, kb
+
+    def test_an_explore_backoff_on_a_zone_frontier_keeps_heal_off_it(self):
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w, kb = self.zone_column()
+        m = Memory()
+        for cell in ((0, 1), (0, 3)):
+            m.nav_stuck.backoff_until[nav_stuck.goal_key("explore", 7, cell)] = 10_000
+        out = dispatch(w, ctx(m, kb))
+        self.assertEqual(out.state, "Heal")
+        self.assertRegex(out.reason, r"heal_explore → \(0, [04]\)")  # the next edge cells, not the backed-off ones
+
+    def test_a_heal_backoff_on_a_frontier_keeps_explore_off_it(self):
+        from agentrealm_agent.navigation import stuck as nav_stuck
+        from agentrealm_agent.pathing import safe_explore_targets
+
+        w, _ = self.zone_column()
+        m = Memory()
+        m.nav_stuck.backoff_until[nav_stuck.goal_key("heal_explore", 7, (0, 1))] = 10_000
+        self.assertNotIn((0, 1), safe_explore_targets(w, m, Policy(kind="scripted")))
+        self.assertIn((0, 3), safe_explore_targets(w, m, Policy(kind="scripted")))
 
     def test_regen_absent_does_not_pull_to_safe_ground(self):
         # Once this run has measured no regen, Heal sends nothing anywhere:

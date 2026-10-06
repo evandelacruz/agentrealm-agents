@@ -122,6 +122,7 @@ class M10AcceptanceMetrics(TimedRunHooks):
             f"duplicate break attempts: {self.duplicate_break_attempts}",
             f"deaths: {self.deaths}",
             f"API errors: {len(self.api_errors)}",
+            self.planner_summary_line(),
         ]
 
 

@@ -478,6 +478,7 @@ class Plan:
     acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
+    directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
 
     def snapshot(self) -> tuple:
         """The stack's progress, for :meth:`restore` after a side-effect-free probe."""
@@ -489,6 +490,7 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.block_before,
+            self.directive_end,
         )
 
     def restore(self, saved: tuple) -> None:
@@ -501,12 +503,17 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.block_before,
+            self.directive_end,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
 
     def current(self) -> GoalOp | None:
         """The op at the top of the stack, or None when it is empty."""
         return self.goals[self.index] if self.index < len(self.goals) else None
+
+    def directive_ops(self) -> list[GoalOp]:
+        """The directives ops still left: the planner's goals go below these (A35)."""
+        return self.goals[self.index : self.directive_end]
 
     def advance(self, world: WorldModel, memory: Memory | None = None) -> None:
         """Apply ``set_param`` ops reached in order and pop finished goals."""
@@ -572,7 +579,7 @@ class Plan:
             log.warning("plan: no valid directives goal in %r; using the built-in plan", directive_goals)
             return None
         floor = dict(directive_params)
-        return cls(list(ops), dict(floor), floor_params=floor)
+        return cls(list(ops), dict(floor), floor_params=floor, directive_end=len(ops))
 
     @classmethod
     def from_policy(
@@ -585,7 +592,8 @@ class Plan:
 def directive_stack_ops(directive_goals: list[str]) -> list[GoalOp]:
     """The stack ops directives ``goals`` set: manual steering, which outranks the planner.
 
-    Non-empty means the directives file owns the goal stack, so the strategist leaves it alone (A35).
+    They sit on top of the stack until each is done or dropped; the planner's
+    goals go below them, and own the stack once they are gone (A35).
     """
     return parse_directives_goals(directive_goals)
 

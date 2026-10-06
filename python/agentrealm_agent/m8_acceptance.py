@@ -208,6 +208,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
             f"fight below health floor: {self.fight_below_floor}",
             f"deaths: {self.deaths}",
             f"API errors: {len(self.api_errors)}",
+            self.planner_summary_line(),
         ]
 
 

@@ -80,11 +80,20 @@ def carried_heal(w: WorldModel, m: Memory) -> InventorySupply | None:
     return None
 
 
-def standing_in_safe_zone(w: WorldModel) -> bool:
-    if w.map_id is None or w.pos is None:
+def standing_in_safe_zone(w: WorldModel, pos: Pos | None = None) -> bool:
+    """Whether ``pos`` (default: where the character stands) is a known safe-zone cell."""
+    at = w.pos if pos is None else pos
+    if w.map_id is None or at is None:
         return False
-    fact = w.zones.get(w.map_id, {}).get(w.pos)
+    fact = w.zones.get(w.map_id, {}).get(at)
     return fact is not None and fact.safe is True
+
+
+def note_heal_window(m: Memory, w: WorldModel) -> None:
+    """Once per decision, whatever state runs: a full heal re-arms the
+    ``heal_supplies`` ask, so the next hurt spell asks the planner again."""
+    if w.health is not None and not hurt(w):
+        m.heal_supplies_asked = False
 
 
 def regen_known(knowledge: KnowledgeBase | None, m: Memory) -> str | None:

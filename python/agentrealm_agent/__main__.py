@@ -107,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run":
         try:
             planner = Strategist.off() if args.no_planner else Strategist.from_env()
+            planner.check()  # a refused key stops here, before play
         except PlannerConfigError as e:
             print(e, file=sys.stderr)
             return 2

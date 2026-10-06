@@ -64,8 +64,15 @@ plus output. Cache reads are not counted: they cost a tenth of input and
 1.5 times the prefix, so the first call and a cache miss never silence the
 planner (:func:`default_tokens_per_min`).
 
-Another provider is a class with the same ``complete(messages)`` method
-(``LLMClient``), picked in :func:`make_client`.
+Failures: :meth:`Strategist.check` makes one call before play, and a key
+the provider refuses (401 or 403) stops the run with one line
+(:class:`PlannerAuthError`). A call that fails mid-run backs off: the next
+waits :data:`BACKOFF_BASE_S`, doubling with each failure in a row up to
+:data:`BACKOFF_CAP_S`. Acceptance runs count every failure and every
+accepted plan (``acceptance.PlannerHealth``).
+
+Another provider is a class with the same ``complete(messages)`` and
+``check()`` methods (``LLMClient``), picked in :func:`make_client`.
 """
 
 from __future__ import annotations
@@ -88,7 +95,7 @@ from .directives import Directives
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .planner_reference import game_notes_text, reference_text
-from .plan import OP_FIELDS, MAX_WAIT_SECONDS, Plan, directive_stack_ops, parse_plan_payload
+from .plan import OP_FIELDS, MAX_WAIT_SECONDS, Plan, parse_plan_payload
 from .world import WorldModel
 
 log = logging.getLogger(__name__)
@@ -102,6 +109,10 @@ DEFAULT_TOKENS_PER_MIN = 40_000  # floor; the default also fits one prefix write
 PREFIX_BUDGET_FACTOR = 1.5
 DEFAULT_HURT_FRACTION = 0.5
 DEFAULT_IDLE_MINUTES = 10
+# After a failed call the next waits BACKOFF_BASE_S, doubling per failure in a row, at most BACKOFF_CAP_S.
+BACKOFF_BASE_S = 2.0
+BACKOFF_CAP_S = 120.0
+AUTH_STATUSES = (401, 403)  # the provider refused the key: fatal at startup
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5"
 DEFAULT_EFFORT = "low"
 PROVIDERS = ("anthropic", "openai")
@@ -111,6 +122,7 @@ KEY_ENV: dict[str, tuple[str, ...]] = {
     "openai": ("AGENTREALM_PLANNER_OPENAI_KEY", "OPENAI_API_KEY"),
 }
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
 OPENAI_PROMPT_CACHE_KEY = "agentrealm-planner"
 ANTHROPIC_MAX_TOKENS = 16_000
 # Models that take the server-side refusal fallback (beta header plus `fallbacks`).
@@ -131,6 +143,8 @@ Reply with one JSON object only, no markdown, with these keys:
 
 Each goal is an object with "op" and that op's fields; every op may also carry "why". These are the only ops (anything else is dropped):
 {_op_table()}
+
+Ops the directives file set (the user's manual steering) stay on top of the stack whatever you send; your goals go below them.
 
 "wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game.
 
@@ -170,9 +184,30 @@ def system_prompt(reference_sections: str = "") -> str:
 class LLMClient(Protocol):
     def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]: ...
 
+    def check(self) -> None:
+        """One cheap authenticated call; raises what the provider raised."""
+
 
 class PlannerConfigError(ValueError):
     """The planner is on but cannot run (no key, no SDK). One line, for the CLI to print."""
+
+
+class PlannerAuthError(PlannerConfigError):
+    """The provider refused the planner's key (401 or 403) on the startup check."""
+
+
+class ProviderHTTPError(RuntimeError):
+    """A provider answered with an HTTP error status."""
+
+    def __init__(self, message: str, status: int) -> None:
+        super().__init__(message)
+        self.status_code = status
+
+
+def error_status(e: BaseException) -> int | None:
+    """The HTTP status of a provider error (``anthropic`` SDK or ours), else None."""
+    status = getattr(e, "status_code", None)
+    return status if isinstance(status, int) else None
 
 
 def provider_key(provider: str) -> str:
@@ -268,6 +303,25 @@ class OpenAIChatClient:
         self.api_key = api_key
         self.model = model
 
+    def check(self) -> None:
+        """Read the model: 401 or 403 means the key is refused."""
+        req = urllib.request.Request(
+            f"{OPENAI_MODELS_URL}/{self.model}",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            method="GET",
+        )
+        self._send(req, timeout=30)
+
+    def _send(self, req: urllib.request.Request, *, timeout: float) -> dict[str, Any]:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")
+            raise ProviderHTTPError(f"openai http {e.code}: {detail}", e.code) from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"openai network: {e}") from e
+
     def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         body = json.dumps(
             {
@@ -287,14 +341,7 @@ class OpenAIChatClient:
             },
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"openai http {e.code}: {detail}") from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"openai network: {e}") from e
+        payload = self._send(req, timeout=120)
         choices = payload.get("choices") or []
         if not choices:
             raise RuntimeError("openai: empty choices")
@@ -319,6 +366,11 @@ class AnthropicClient:
         self.sdk = anthropic.Anthropic(api_key=api_key, max_retries=1)
         self.model = model
         self.effort = effort
+
+    def check(self) -> None:
+        """Read the model: the SDK raises ``AuthenticationError`` (401) or
+        ``PermissionDeniedError`` (403) for a refused key."""
+        self.sdk.models.retrieve(self.model)
 
     def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         system = [anthropic_system_block(m) for m in messages if m["role"] == "system"]
@@ -461,6 +513,7 @@ class Answer:
     raw: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
     error: str = ""  # set when the call failed
+    status: int | None = None  # the provider's HTTP status on a failed call, when it gave one
 
 
 @dataclass
@@ -474,6 +527,8 @@ class Strategist:
     in_flight: list[dict[str, Any]] | None = None  # triggers of the call being answered
     calls: int = 0  # calls this run, for the trace
     last_call_at: float | None = None
+    failures_in_a_row: int = 0  # failed calls since the last good one; sets the backoff
+    retry_at: float = 0.0  # after a failure, no call before this clock time
     spent: deque = field(default_factory=deque)  # [sent_at, tokens] per call in the budget window
     _last_map: tuple[int, int | None] | None = None  # (map_id, level) at the last window
     _hurt: bool = False
@@ -502,13 +557,38 @@ class Strategist:
             client = make_client(cfg)
         except ImportError:
             raise PlannerConfigError(
-                f"planner: provider {cfg.provider} needs `pip install {cfg.provider}`, or pass --no-planner"
+                f"planner: provider {cfg.provider} needs its SDK: run `make setup` (pip install -r python/requirements.txt), or pass --no-planner"
             ) from None
         return cls(config=cfg, client=client)
 
     @property
     def enabled(self) -> bool:
         return self.config.enabled and self.client is not None
+
+    def check(self) -> None:
+        """One call before play. Raises :class:`PlannerAuthError` when the
+        provider refuses the key (401 or 403), and :class:`PlannerConfigError`
+        on any other 4xx but 429 (a typo'd model is a 404). Rate limits,
+        server errors and the network are left to the run, which counts them
+        and backs off."""
+        if not self.enabled:
+            return
+        assert self.client is not None
+        try:
+            self.client.check()
+        except Exception as e:  # network, HTTP status
+            status = error_status(e)
+            if status in AUTH_STATUSES:
+                names = " or ".join(KEY_ENV[self.config.provider])
+                raise PlannerAuthError(
+                    f"planner: {self.config.provider} refused the key (HTTP {status}); fix {names}, or pass --no-planner"
+                ) from None
+            if status is not None and 400 <= status < 500 and status != 429:
+                raise PlannerConfigError(
+                    f"planner: {self.config.provider} rejected model {self.config.model!r} (HTTP {status}); "
+                    "fix AGENTREALM_PLANNER_MODEL, or pass --no-planner"
+                ) from None
+            log.warning("strategist: startup check failed: %s", e)
 
     # --- background thread: send the prompt, wait for the reply ---
 
@@ -545,6 +625,7 @@ class Strategist:
             answer.raw, answer.usage = self.client.complete(messages)
         except Exception as e:  # network, HTTP status, refusal
             answer.error = str(e) or type(e).__name__
+            answer.status = error_status(e)
         return answer
 
     # --- tick thread: everything else ---
@@ -572,6 +653,8 @@ class Strategist:
         if self.last_call_at is None or self.clock() - self.last_call_at >= self.config.replan_s:
             if not any(t["trigger"] == "timer" for t in self.inbox):
                 self.inbox.append({"trigger": "timer", "tick": runner.world.tick})
+        if self.clock() < self.retry_at:
+            return  # backing off after a failed call
         if self.inbox and not self.limit_reached():
             self._send(runner)
 
@@ -617,6 +700,23 @@ class Strategist:
         self.inbox.extend(drained)
         del self.inbox[:-INBOX_KEPT]
 
+    @staticmethod
+    def _report(acceptance: Any, reply: Any, goals: list[dict[str, Any]], record: dict[str, Any]) -> None:
+        """Tell the acceptance hooks what the reply was: a plan accepted (at
+        least one valid op, or an explicit empty stack), an error (not a JSON
+        object, or ops all invalid), or neither (no ``goals`` key: notes or
+        params only, the stack kept)."""
+        if not isinstance(reply, dict):
+            acceptance.on_strategist_error(record.get("invalid") or "reply is not a JSON object")
+            return
+        if "goals" not in reply:
+            return
+        sent = reply["goals"]
+        if goals or sent == []:
+            acceptance.on_strategist_reply()
+        else:
+            acceptance.on_strategist_error("reply has no valid goal op")
+
     def _send(self, runner: Any) -> None:
         messages = build_prompt(
             triggers=self.inbox,
@@ -648,8 +748,9 @@ class Strategist:
         equal to the one left keeps its progress, and the same op on top
         keeps its own (stall clock, wait start, block snapshot, path). No
         valid goal (or a reply that is not a JSON object) clears it: the
-        planner layer emits nothing and the dispatcher's safe default runs. Directives ``goals`` own the stack
-        and override all of this.
+        planner layer emits nothing and the dispatcher's safe default runs.
+        Directives ``goals`` override the planner: the directives ops still
+        left stay on top, and the planner's goals go below them (A35).
         """
         triggers, self.in_flight = self.in_flight or [], None
         reported = tokens_used(answer.usage)
@@ -663,9 +764,19 @@ class Strategist:
         }
         if answer.error:
             self.inbox = (triggers + self.inbox)[-INBOX_KEPT:]
+            self.failures_in_a_row += 1
+            delay = min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2 ** (self.failures_in_a_row - 1))
+            self.retry_at = self.clock() + delay
             log.warning("strategist: call failed: %s", answer.error)
-            runner.log("strategist", f"failed: {answer.error}", {"strategist": {"event": "error", "error": answer.error, **record}})
+            runner.log(
+                "strategist",
+                f"failed: {answer.error}; next call in {delay:.0f}s",
+                {"strategist": {"event": "error", "error": answer.error, "backoff_s": delay, **record}},
+            )
+            if runner.acceptance is not None:
+                runner.acceptance.on_strategist_error(answer.error, auth=answer.status in AUTH_STATUSES)
             return
+        self.failures_in_a_row, self.retry_at = 0, 0.0
         try:
             reply = parse_reply(answer.raw)
         except ValueError as e:
@@ -674,15 +785,17 @@ class Strategist:
         goals, params, notes = parse_plan_payload(
             reply, floor_params=dict(d.params), current_params=runner.plan.params
         )
+        if runner.acceptance is not None:
+            self._report(runner.acceptance, reply, goals, record)
         runner.plan.params = params
         record.update(goals=goals, params=runner.plan.params, notes=notes)
-        if directive_stack_ops(d.goals):
-            runner.log("strategist", "directives goals own the stack; stack kept", {"strategist": {"event": "kept", **record}})
-            return
         if isinstance(reply, dict) and "goals" not in reply:
             runner.log("strategist", "no goals in reply; stack kept", {"strategist": {"event": "kept", **record}})
             return
         old = runner.plan
+        pinned = old.directive_ops()  # directives ops left: they stay on top
+        # A reply that repeats a directives op does not stack it twice.
+        goals = pinned + [g for g in goals if not any(same_ops([g], [p]) for p in pinned)]
         if same_ops(goals, old.goals[old.index :]):
             # A timer reply that re-sends the stack (or leaves an empty one
             # empty): keep its progress (stall clock, wait start, block
@@ -696,6 +809,7 @@ class Strategist:
             notes=notes,
             floor_params=dict(d.params),
             tick_hz=runner.tick_hz,
+            directive_end=len(pinned),
         )
         head = old.current()
         if goals and head is not None and same_ops(goals[:1], [head]):
@@ -711,6 +825,7 @@ class Strategist:
         if not goals:
             runner.log("strategist", "no valid goals; stack cleared (dispatcher safe default)", {"strategist": {"event": "cleared", **record}})
             return
-        runner.log("strategist", f"plan replaced ({len(goals)} goals)", {"strategist": {"event": "applied", **record}})
+        below = f", under {len(pinned)} directives op(s)" if pinned else ""
+        runner.log("strategist", f"plan replaced ({len(goals) - len(pinned)} goals{below})", {"strategist": {"event": "applied", **record}})
         if runner.acceptance is not None:
             runner.acceptance.on_strategist_applied(goals)

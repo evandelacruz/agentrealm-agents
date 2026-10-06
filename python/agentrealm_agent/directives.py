@@ -175,12 +175,32 @@ class DirectivesWatch:
     (defaults on first load) and is retried once any of those differ from
     the failed version, even when the mtime matches the last good load.
     Deleting the file restores the defaults.
+
+    ``pinned_goals`` go on top of the file's ``goals`` at every load, with
+    or without a file: how a program (the M7 smoke script) sets a directives
+    goal without writing the user's file. Each is pinned once: :meth:`unpin`
+    drops it when its op is done, so a later reload never brings it back.
     """
 
     path: Path
+    pinned_goals: list[str] = field(default_factory=list)
     directives: Directives = field(default_factory=default_directives)
     _sig: tuple[int, int, int] | None = field(default=None, repr=False)
     _bad_sig: tuple[int, int, int] | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        self.directives = self._pin(self.directives)
+
+    def unpin(self, goal: str) -> None:
+        """Drop a pinned goal for good (its op is done or dropped, or its target
+        given up), here and from the directives in force."""
+        if goal in self.pinned_goals:
+            self.pinned_goals.remove(goal)
+            self.directives.goals = [g for g in self.directives.goals if g != goal]
+
+    def _pin(self, d: Directives) -> Directives:
+        d.goals = list(self.pinned_goals) + [g for g in d.goals if g not in self.pinned_goals]
+        return d
 
     def maybe_reload(self) -> bool:
         """Load when the file is new or changed. Returns True when directives updated."""
@@ -191,7 +211,7 @@ class DirectivesWatch:
             if self._sig is None:
                 return False
             self._sig = None
-            self.directives = default_directives()
+            self.directives = self._pin(default_directives())
             return True
         sig = _file_sig(st)
         if sig == self._sig or sig == self._bad_sig:
@@ -203,7 +223,7 @@ class DirectivesWatch:
             self._bad_sig = sig
             return False
         self._sig, self._bad_sig = sig, None
-        self.directives = loaded
+        self.directives = self._pin(loaded)
         return True
 
     def ensure_loaded(self) -> None:

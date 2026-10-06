@@ -3,9 +3,12 @@
 The executor for ``explore_area``, and the safe default when there is no
 plan op to carry out (PLAN.md **Architecture: AI plans, state machine
 executes**). The safe default explores safe ground (``safe_explore_path``):
-off hazards, away from hostiles, and, when hurt, inside safe zones so the
-character heals while it looks around. With no frontier left it steps to a
-safe neighbour, so a decision with nothing to do is never idle. Stuck
+off hazards, away from hostiles, and, when hurt, inside safe zones first so
+the character heals while it looks around. Once that ground is all explored
+or out of reach, it pushes the boundary: the nearest frontier outside, still
+off hazards and away from hostiles, with the survival reflexes above it.
+Only with no reachable frontier at all does it step to a safe neighbour
+("look around"), so a decision with nothing to do is never idle. Stuck
 detection escalates and gives up a walk that goes nowhere (A15); cells Step
 rejections ruled out and ``avoid_blocks`` hazards stay out of the path (A14).
 """
@@ -61,7 +64,7 @@ class ExploreState(State):
 
 
 def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:
-    """The safe default: explore safe ground (never idle)."""
+    """The safe default: explore safe ground, then push past it (never idle)."""
     return explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None)
 
 
@@ -108,7 +111,7 @@ def explore_outcome(
 
 
 def _look_around(w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], state: str) -> StateOutcome:
-    """No frontier in safe ground: step to a safe neighbour rather than stand idle."""
+    """No reachable frontier at all: step to a safe neighbour rather than stand idle."""
     options = [p for p in w.open_neighbours(w.pos, blocked) if not hostiles_near(w, p, policy)]
     if hurt(w):
         options = [p for p in options if is_safe_ish(w, p, policy)] or options

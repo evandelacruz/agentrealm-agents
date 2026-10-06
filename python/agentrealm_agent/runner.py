@@ -20,7 +20,7 @@ from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .pathing import goto_satisfied
-from .plan import Plan
+from .plan import Plan, parse_directives_goal
 from .item_table import (
     AppliedUse,
     absorb_attack_range,
@@ -69,7 +69,7 @@ from .scroll_investigation import (
 )
 from .zone_discovery import apply_town, apply_zone, zone_failed
 from .memory import queue_signal
-from .strategist import Strategist
+from .strategist import Strategist, same_ops
 
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
@@ -137,10 +137,12 @@ class Runner:
         trace = cfg.trace_path(character_id)
         trace.parent.mkdir(parents=True, exist_ok=True)
         self.trace = open(trace, "a", buffering=1)
-        self.directives = DirectivesWatch(cfg.directives_path)
+        self.directives = DirectivesWatch(cfg.directives_path, pinned_goals=list(cfg.pinned_goals))
         self.directives.ensure_loaded()
         self.acceptance = acceptance
         self.strategist = strategist if strategist is not None else Strategist.off()
+        if acceptance is not None:
+            acceptance.on_planner(enabled=self.strategist.enabled)
         self.plan = self._build_plan()
         self._level_timer = LevelTimer()
 
@@ -156,6 +158,26 @@ class Runner:
             plan = Plan.from_policy(policy, d.params, goto_satisfied=goto_satisfied(self.mem, policy))
         plan.tick_hz = self.tick_hz
         return plan
+
+    def unpin_done_goals(self) -> None:
+        """Pin once: a pinned directives goal whose op popped done or was
+        dropped (its ``goal_done`` or ``goal_failed`` signal), or whose target
+        stuck detection gave up on (a ``stuck`` signal), is unpinned, so a
+        later reload never puts it back (A16). Read before the strategist
+        drains the signals this window."""
+        ended = [s["op"] for s in self.mem.strategist_signals if s.get("trigger") in ("goal_done", "goal_failed")]
+        given_up = {  # the Travel walk's own give-ups only, not another walk's to the same cell
+            (s.get("map_id"), tuple(s.get("target") or ()))
+            for s in self.mem.nav_stuck.stuck_signals
+            if str(s.get("goal", "")).startswith("travel:")
+        }
+        for goal in list(self.directives.pinned_goals):
+            op = parse_directives_goal(goal)
+            if op is None:
+                continue
+            target = (op.get("map_id", self.world.map_id), (op["x"], op["y"])) if op["op"] == "travel" else None
+            if any(same_ops([op], [e]) for e in ended) or (target is not None and target in given_up):
+                self.directives.unpin(goal)
 
     def reload_directives(self, old_goals: list[str]) -> None:
         """Apply reloaded directives to the plan (A34).
@@ -238,6 +260,7 @@ class Runner:
                 # calm gap and entity_refresh would never come due. Responses
                 # carry the server's tick and correct it.
                 self.world.tick += 1
+                self.unpin_done_goals()
                 old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():
                     self.reload_directives(old_goals)

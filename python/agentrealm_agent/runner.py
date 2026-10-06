@@ -76,7 +76,7 @@ from .strategist import Strategist, same_ops
 # Land a little after a window opens, so a clock skew of a few ms does not put
 # two calls in one window.
 WINDOW_MARGIN = 0.05
-# Ticks past a queue's own length to wait for its results before giving up.
+# Ticks past a queue's own length to wait for its finished_queue before giving up.
 QUEUE_RESULT_SLACK = 2
 # Applied verbs that can change what is worn: Wear(supplyId) and Remove(slot)
 # (agentrealm.gg/docs/manual, Intent reference). Drop may take a worn supply,
@@ -526,16 +526,21 @@ class Runner:
         self._resolve_pending_break()
         self.gem_cuts.update(w, self.knowledge)
         self.note_held_path_stale()
-        if r.get("queue") and not rejected and not m.cancel_queue:
+        self.apply_finished_queue(r.get("finished_queue"))
+        queue = r.get("queue")
+        if queue and not rejected and not m.cancel_queue:
             # A rejection or a door already dropped our queue; an echoed server
             # queue on that same response must not bring the hold back.
-            m.held_queue = r.get("queue")
-        elif m.pending_intents is not None and m.pending_next_index < len(m.pending_intents):
+            m.held_queue = queue
+            if m.pending_intents is not None and queue.get("queue_id") == m.pending_queue:
+                # Every index below next_index has run, applied Waits included.
+                m.pending_next_index = max(m.pending_next_index, int(queue.get("next_index", 0)))
+        elif m.pending_intents is not None:
             if w.tick > m.queue_sent_tick + len(m.pending_intents) + QUEUE_RESULT_SLACK:
-                # The queue has had time to run out and its results never
-                # matched: stop waiting on them rather than hold forever. We
-                # may have walked without seeing it, so re-read position and
-                # forget the path and step clock planned from the old one.
+                # The queue has had time to run out and the server never said
+                # it finished: the handoff store lost it. We may have walked
+                # without seeing it, so re-read position and forget the path
+                # and step clock planned from the old one.
                 m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                 m.held_queue = None
                 m.need_position, m.path, m.last_step_tick = True, [], None
@@ -787,9 +792,22 @@ class Runner:
                 rejected = True
                 break
             m.pending_next_index = idx + 1
-        if m.pending_intents is not None and m.pending_next_index >= len(m.pending_intents):
-            m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
         return rejected
+
+    def apply_finished_queue(self, finished: dict | None) -> bool:
+        """Stop tracking our queue once the server says it ran to its end (B133).
+
+        ``finished_queue`` is the only sign a queue is done: an applied Wait
+        has no result, so results never add up to the queue's length. One
+        naming another queue (one we already replaced) is ignored. A
+        rejection ends the queue on its own, in ``on_result``.
+        """
+        m = self.mem
+        if not finished or m.pending_queue is None or finished.get("queue_id") != m.pending_queue:
+            return False
+        m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
+        m.pending = None
+        return True
 
     def _result_is_ours(self, res: dict) -> bool:
         # Only the queue_id our own submit was answered with: a result for any

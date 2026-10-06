@@ -49,7 +49,7 @@ class Memory:
     pending: dict | None = None  # last non-queue intent submitted, awaiting its result
     pending_queue: str | None = None  # the queue_id movement or intent was sent under
     pending_intents: list[dict] | None = None  # full queue last submitted with intents
-    pending_next_index: int = 0  # next intent index still awaiting a result
+    pending_next_index: int = 0  # next intent index not yet known to have run (results and queue.next_index)
     held_queue: dict | None = None  # server queue {"queue_id", "next_index"} while not empty
     queue_sent_tick: int = 0  # tick the last multi-intent queue was answered at
     cancel_queue: bool = False  # send [] next tick: the held queue was planned from a stale position

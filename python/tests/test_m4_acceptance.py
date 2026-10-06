@@ -75,6 +75,8 @@ class TestWorldServer:
     of the sign returns the clue, ``Take`` of the priced torch spends gems,
     ``Arm`` arms a held supply (a torch is not ``Wear``-able), and ``Use`` of a hedge with the torch armed
     burns it (``BlockChanged``). Every tick answers with a complete snapshot.
+    An applied ``Wait`` has no result, and a queue that ends carries
+    ``finished_queue`` until the next submit (B133).
     """
 
     def __init__(self, stop: threading.Event, windows: int = 3000):
@@ -89,6 +91,7 @@ class TestWorldServer:
         self.burnt: set = set()
         self.queue: list[dict] = []
         self.queue_id: str | None = None
+        self.finished: dict | None = None  # finished_queue while the queue is empty
         self.start = self.done = self.submits = 0
         self.results: list[dict] = []
         self.events: list[dict] = []
@@ -108,7 +111,10 @@ class TestWorldServer:
             self.done += 1
             res = {"tick": t, "queue_id": self.queue_id, "index": i, "outcome": "applied"}
             res.update(self._run(self.queue[i], t))
-            self.results.append(res)
+            if self.queue[i]["verb"] != "Wait" or res["outcome"] == "rejected":
+                self.results.append(res)  # an applied Wait has no result (B133)
+            if res["outcome"] == "rejected" or self.done == len(self.queue):
+                self.finished = {"queue_id": self.queue_id, "length": len(self.queue)}
             if res["outcome"] == "rejected":
                 self.queue, self.done = [], 0
 
@@ -211,9 +217,12 @@ class TestWorldServer:
             self.submits += 1
             self.queue_id = f"q{self.submits}"
             self.queue, self.start, self.done = list(intents), self.tick_now + 1, 0
+            self.finished = None
             r["queue_id"] = self.queue_id
         if self.done < len(self.queue):
             r["queue"] = {"queue_id": self.queue_id, "next_index": self.done}
+        elif self.finished is not None:
+            r["finished_queue"] = self.finished
         return r
 
 

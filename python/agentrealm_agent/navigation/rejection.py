@@ -95,11 +95,14 @@ def learn_step_rejection(
 ) -> None:
     """Reflex 1 plus A14: drop the plan and teach the map from the code.
 
-    A rejected step also ends the walk's commitment (``navigation.walk``), so
-    the next plan is taken as it comes.
+    A rejected step also ends the commitment of the walk it was on
+    (``navigation.walk``), so that goal's next plan is taken as it comes;
+    other goals keep theirs.
     """
+    goal = m.goal
     m.path, m.goal = [], ""
-    nav_walk.drop(m)
+    if goal:
+        nav_walk.drop(m, goal)
     m.corridors.clear()  # the corridor searches priced the map before this lesson (A13)
     nav = m.nav
     cell = (w.map_id, landing)

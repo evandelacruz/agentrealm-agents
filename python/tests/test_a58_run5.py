@@ -310,6 +310,14 @@ class CommitRulesTest(unittest.TestCase):
         learn_step_rejection(m, self.w, None, (1, 0), "block_occupied", 0)
         self.assertEqual(m.walks, {})
 
+    def test_a_rejected_step_ends_only_its_own_walk(self):
+        m = Memory()
+        explore = nav_walk.start(self.w, "explore", (0, 5), [(0, 1), (0, 2), (0, 3), (0, 4), (0, 5)])
+        m.walks = {"travel:point": self.walk, "explore": explore}
+        m.path, m.goal = list(self.kept), "travel:point"
+        learn_step_rejection(m, self.w, None, (1, 0), "not_traversable", 0)
+        self.assertEqual(m.walks, {"explore": explore}, "the other goal keeps its walk")
+
 
 class ExploreKeepsItsFrontierTest(unittest.TestCase):
     """The run 5 trigger on the most-used walk: a reveal makes the other

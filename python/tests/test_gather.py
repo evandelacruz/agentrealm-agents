@@ -246,7 +246,8 @@ class GatherReflexTest(unittest.TestCase):
     def test_flee_outranks_gather(self):
         w = grid(["ggggg"], at=(2, 0))
         safe(w, (0, 0))
-        w.entities = [Entity("npc", 4, (3, 0))]
+        w.entities = [Entity("npc", 4, (3, 0), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         m = Memory(path=[(1, 0)], goal="gather", gather_target=("grass", (0, 0)))
         out = dispatch(w, ctx(w, ["gather_gems:3"], m, on_hostile="flee", hostile=["npc"], hostile_range=2))
         self.assertEqual(out.state, "Flee")
@@ -400,7 +401,8 @@ class GatherStatusStaleTest(unittest.TestCase):
 
         w = grid(["ggggg"], at=(2, 0))
         m = Memory(gather_status=gather_mod.CUTTING)
-        w.entities = [Entity("npc", 4, (3, 0))]
+        w.entities = [Entity("npc", 4, (3, 0), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         c = ctx(w, ["gather_gems:3"], m, on_hostile="flee", hostile=["npc"], hostile_range=2)
         d = decide(w, m, c.policy, c.rng, directives=c.directives, plan=c.plan)
         self.assertIn("flee", d.reason.lower())

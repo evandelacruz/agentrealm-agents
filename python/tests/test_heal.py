@@ -212,6 +212,7 @@ class HealStateTest(unittest.TestCase):
         # Retreat or Flee (A9) answers the hostile; Heal waits until none is in range.
         w = grid()
         w.entities = [Entity("npc", 3, (2, 2), "slime")]
+        w.hostile_types.add(("npc", "slime"))  # a type seen attacking (survival.is_hostile)
         self.assertIn(dispatch(w, ctx()).state, ("Retreat", "Flee"))
 
     def test_full_health_yields_to_explore(self):

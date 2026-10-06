@@ -79,6 +79,30 @@ def type_key_from_damaged(ev: dict, *views: list[Any]) -> TypeKey | None:
     return None
 
 
+def hostile_type_from_event(ev: dict, *views: list[Any]) -> TypeKey | None:
+    """The NPC type an event shows hostile, or None.
+
+    An ``Attacked`` names the NPC that swung at us (``actor_kind``,
+    ``actor_id``), a ``Damaged`` the one that hit us (``source_kind``,
+    ``source_id``), both looked up in ``views`` like ``type_key_from_damaged``.
+    An ``NPCDied`` names its type itself: only a hostile dies (API Events).
+    """
+    kind = ev.get("kind")
+    if kind == "NPCDied":
+        code = ev.get("npc_type")
+        return ("npc", code) if isinstance(code, str) and code else None
+    if kind == "Attacked":
+        actor_kind, actor_id = ev.get("actor_kind"), ev.get("actor_id")
+    elif kind == "Damaged":
+        actor_kind, actor_id = ev.get("source_kind"), ev.get("source_id")
+    else:
+        return None
+    if actor_kind != "npc" or actor_id is None:
+        return None
+    e = _find(views, "npc", actor_id)
+    return type_key_for_entity(e) if e is not None else None
+
+
 def hostile_hit(ev: dict) -> bool:
     """An ``Attacked``, or a ``Damaged`` whose source is a hostile (not a trap or ``occupy`` ground)."""
     kind = ev.get("kind")

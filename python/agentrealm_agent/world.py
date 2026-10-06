@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .threat import ThreatTable, absorb_damaged, damage_amount, hitter, hostile_hit
+from .threat import ThreatTable, TypeKey, absorb_damaged, damage_amount, hitter, hostile_hit, hostile_type_from_event
 
 log = logging.getLogger(__name__)
 
@@ -70,11 +70,98 @@ class Entity:
         return self.kind == "npc" and self.health is not None
 
 
+class Tiles(dict):
+    """A map's tiles: a plain dict that keeps its own frontier up to date.
+
+    A big map's frontier is a pass over every known tile, and one decision
+    asks for it several times, so it is kept, and only the cells round a
+    changed one are looked at again (A23 Run 2). So change it only through
+    the dict methods below: anything that goes round them (``dict.__setitem__``
+    called directly) leaves the frontier stale.
+    """
+
+    # The frontier as last found, and the cells changed since. Either None:
+    # find it afresh.
+    _frontier: set[Pos] | None = None
+    _changes: set[Pos] | None = None
+    MAX_CHANGES = 4096  # more than this and a fresh pass is as quick
+
+    def frontier(self) -> set[Pos]:
+        """Known walkable tiles that touch an unknown one."""
+        found, changes = self._frontier, self._changes
+        if found is None or changes is None:
+            found = {p for p in self if self._on_frontier(p)}
+        else:
+            for c in changes:
+                for p in [c] + [(c[0] + dx, c[1] + dy) for dx, dy in NEIGHBOURS]:
+                    if self._on_frontier(p):
+                        found.add(p)
+                    else:
+                        found.discard(p)
+        self._frontier, self._changes = found, set()
+        return set(found)
+
+    def _on_frontier(self, p: Pos) -> bool:
+        if self.get(p) not in WALKABLE:
+            return False
+        x, y = p
+        for dx, dy in NEIGHBOURS:
+            if (x + dx, y + dy) not in self:
+                return True
+        return False
+
+    def _changed(self, keys) -> None:
+        changes = self._changes
+        if changes is None:
+            return
+        changes.update(keys)
+        if len(changes) > self.MAX_CHANGES:
+            self._changes = None
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, value)
+        self._changed((key,))
+
+    def __delitem__(self, key) -> None:
+        super().__delitem__(key)
+        self._changed((key,))
+
+    def __ior__(self, other):
+        self._changed(dict(other))
+        return super().__ior__(other)
+
+    def update(self, *args, **kwargs) -> None:
+        new = dict(*args, **kwargs)
+        super().update(new)
+        self._changed(new)
+
+    def setdefault(self, key, default=None):
+        self._changed((key,))
+        return super().setdefault(key, default)
+
+    def pop(self, key, *default):
+        self._changed((key,))
+        return super().pop(key, *default)
+
+    def popitem(self):
+        key, value = super().popitem()
+        self._changed((key,))
+        return key, value
+
+    def clear(self) -> None:
+        super().clear()
+        self._changes = None
+
+
 @dataclass
 class MapView:
     """What this character has seen of one map. Missing tiles are unknown."""
 
-    tiles: dict[Pos, str] = field(default_factory=dict)
+    # Always a ``Tiles`` (a dict passed in is wrapped), changed only through
+    # its own dict methods: one that bypasses them, like
+    # ``dict.__setitem__(tiles, …)``, or a plain dict assigned later, leaves
+    # the kept frontier stale.
+    tiles: Tiles = field(default_factory=Tiles)
     # occupy_damage named by terrain reads (Manual §9.2 legend), 0 included.
     damage: dict[Pos, int] = field(default_factory=dict)
     # Signs and statues (Manual §9.2): readable wall cells from terrain reads.
@@ -86,6 +173,10 @@ class MapView:
     # the flag off elsewhere.
     safe: set[Pos] = field(default_factory=set)
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.tiles, Tiles):
+            self.tiles = Tiles(self.tiles)
+
     def walkable(self, p: Pos) -> bool:
         return self.tiles.get(p) in WALKABLE
 
@@ -94,16 +185,8 @@ class MapView:
         return self.damage.get(p)
 
     def frontier(self) -> set[Pos]:
-        """Known walkable tiles that touch an unknown one."""
-        out = set()
-        for p, block in self.tiles.items():
-            if block not in WALKABLE:
-                continue
-            for dx, dy in NEIGHBOURS:
-                if (p[0] + dx, p[1] + dy) not in self.tiles:
-                    out.add(p)
-                    break
-        return out
+        """Known walkable tiles that touch an unknown one (``Tiles.frontier``)."""
+        return self.tiles.frontier()
 
 
 @dataclass
@@ -154,6 +237,13 @@ class WorldModel:
     attacker_tick: int | None = None  # tick of that hit; a later hit naming no one clears both
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
+    # NPC types that have shown they are hostile this run: one swung at or hit
+    # us, or one died in view (``NPCDied`` names only hostiles). Townsfolk and
+    # helpers never land here, so Flee and Retreat never answer them (A9, A23).
+    hostile_types: set[TypeKey] = field(default_factory=set)
+    # Where each entity stood before its latest move, and the tick that move
+    # was seen: ``survival.approaching`` reads it (A9).
+    entity_moves: dict[tuple[str, int], tuple[Pos, int]] = field(default_factory=dict)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
     # leaves the world when its last supply is withdrawn (B116).
@@ -263,8 +353,9 @@ class WorldModel:
         self.terrain_map = self.map_id
 
     def apply_entities(self, e: dict) -> None:
-        self.entities = self._entities_from_payload(e)
-        self.entities_tick = self.entities_read_tick = int(e.get("tick", self.tick))
+        tick = int(e.get("tick", self.tick))
+        self._set_entities(self._entities_from_payload(e), tick)
+        self.entities_tick = self.entities_read_tick = tick
         self.entities_read_at = (self.map_id, self.pos)
         # A separate read replaced the state the next delta would apply to.
         self.snapshot_version = None
@@ -361,7 +452,20 @@ class WorldModel:
                 self.chest_contents[cid] = supplies_from_list(entry["contents"])
             for eid in part.get("removed") or []:
                 self.chest_contents.pop(int(eid), None)
-        self.entities = list(by_key.values())
+        self._set_entities(list(by_key.values()), self.tick)
+
+    def _set_entities(self, entities: list[Entity], tick: int) -> None:
+        """Replaces the entity list, noting in ``entity_moves`` each one that moved."""
+        before = {self._entity_key(e): e.pos for e in self.entities}
+        for e in entities:
+            key = self._entity_key(e)
+            old = before.get(key)
+            if old is not None and old != e.pos:
+                self.entity_moves[key] = (old, tick)
+        seen = {self._entity_key(e) for e in entities}
+        for key in [k for k in self.entity_moves if k not in seen]:
+            del self.entity_moves[key]
+        self.entities = entities
 
     def _apply_terrain_delta(self, patch: dict) -> None:
         """Updates known tiles from an observation terrain patch."""
@@ -477,7 +581,7 @@ class WorldModel:
             self._apply_inventory(snap.get("inventory"))
         if "entities" in snap:
             entities = snap["entities"] or {}
-            self.entities = self._entities_from_payload(entities)
+            self._set_entities(self._entities_from_payload(entities), self.tick)
             self.chest_contents = self._chest_contents_from_entities(entities)
             self.entities_tick = self.tick
         terrain = snap.get("terrain")
@@ -549,7 +653,9 @@ class WorldModel:
         return flat
 
     def learn_threat(self, events: list[dict], earlier: list[Entity]) -> None:
-        """Folds this round trip's Damaged events into the threat table (A6).
+        """Folds this round trip's Damaged events into the threat table (A6),
+        and the NPC types its Attacked, Damaged and NPCDied events show hostile
+        into ``hostile_types``.
 
         Call after apply_observation, so a source first listed in the same
         response resolves to its type. A source that left view in that
@@ -560,6 +666,9 @@ class WorldModel:
         for ev in events:
             if ev.get("kind") == "Damaged":
                 absorb_damaged(self.threat, ev, self.entities, earlier)
+            key = hostile_type_from_event(ev, self.entities, earlier)
+            if key is not None:
+                self.hostile_types.add(key)
 
     def apply_observation(self, obs: dict | None) -> None:
         """Folds a tick observation into the model (Manual §7.2).

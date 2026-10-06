@@ -14,7 +14,7 @@ from .gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
 from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, remaining_walk_cells, walkable_prefix
 from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
-from .navigation.stuck import on_break_opened
+from .navigation.stuck import on_break_opened, on_break_tried
 from .navigation.stuck import on_rejection as nav_on_rejection
 from .navigation.stuck import on_step as nav_on_step
 from .client import ApiError, Client
@@ -1287,6 +1287,7 @@ class Runner:
             ours = verb == "Arm" or (verb == "Use" and block == pos)
             if ours and code not in TRANSIENT_BREAK_REJECTIONS:
                 record_attempt(self.knowledge, map_id=map_id, pos=pos, capability=cap, result="failed", tick=tick)
+                on_break_tried(m, w)
             return
         if intent is None or intent.get("verb") != "Use" or block != pos:
             return
@@ -1300,6 +1301,7 @@ class Runner:
                 tick=tick,
             )
             m.break_pending = None
+            on_break_tried(m, w)
 
     def _resolve_pending_break(self) -> None:
         m, w = self.mem, self.world

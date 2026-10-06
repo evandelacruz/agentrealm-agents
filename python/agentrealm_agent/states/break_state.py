@@ -105,9 +105,6 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
         return StateOutcome(None, "position unknown", state=state)
     if chebyshev(here, choice.pos) <= reach:
         m.break_pending = (w.map_id, choice.pos, choice.capability)
-        att = nav_stuck.active(m, w)
-        if att is not None and att.level == nav_stuck.BREAK:
-            att.arm_decisions = 0  # a Use is a real try: only arming with none counts against the level
         return StateOutcome(
             intents + [use_block(choice.pos)], f"break {choice.capability} @ {choice.pos}", state=state, progress=False
         )

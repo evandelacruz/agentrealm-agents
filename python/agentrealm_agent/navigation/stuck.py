@@ -14,7 +14,7 @@ progress window, so a level is left only when its own window fails:
   budget runs out or no frontier is reachable (give up).
 - BREAK (2): step 2, ``Break`` a nominated obstacle on the blocked route (A28).
   Arming is not progress: ``ARM_DECISION_LIMIT`` decisions that arm with no
-  ``Use`` between them fail it (``arm_only``).
+  break ``Use`` resolving between them fail it (``arm_only``).
 - REVEALED (4): walk the plan reveal found; failing again tries step 4.
 - ALT_ROUTE (5): step 4, replan through the door graph when enclosed (A28).
 - A break that opens the way, or an alt route that finds one, walks again
@@ -110,7 +110,7 @@ class NavAttempt:
     break_x: int | None = None  # stuck step 2: block under break, if any
     break_y: int | None = None
     break_cap: str | None = None
-    arm_decisions: int = 0  # stuck step 2: Break decisions that armed since the last Use
+    arm_decisions: int = 0  # stuck step 2: Break decisions that armed since a break Use last resolved
     # A short walk (``pathing.bounded_step``): the decision it was last
     # pursued on, and the tick it began waiting with no step.
     seen_decision: int | None = None
@@ -306,6 +306,14 @@ def walk_again(att: NavAttempt, w: WorldModel, from_level: int) -> None:
     att.reset_level = max(att.reset_level or WALK, from_level)
     att.level = WALK
     clear_break_target(att)
+
+
+def on_break_tried(m: Memory, w: WorldModel) -> None:
+    """A break ``Use`` resolved without opening the block (it did nothing, or
+    was refused): the tool was tried, so arming the next one starts a fresh count."""
+    att = active(m, w)
+    if att is not None and att.level == BREAK:
+        att.arm_decisions = 0
 
 
 def on_break_opened(m: Memory, w: WorldModel, att: NavAttempt | None) -> None:

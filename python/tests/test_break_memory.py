@@ -166,6 +166,12 @@ class RunnerBreakResultTest(unittest.TestCase):
         self.assertTrue(self.rejected(0, "not_traversable"))
         self.assertEqual(r.mem.break_pending, (7, (2, 0), "cut"), "its BlockChanged may still come")
 
+    def test_a_resolved_break_use_resets_the_arm_count(self):
+        att = nav_stuck.track(self.r.mem, self.r.world, "goto", (4, 0))
+        att.level, att.arm_decisions = nav_stuck.BREAK, 2
+        self.r.on_result({"tick": 3, "outcome": "applied_no_effect"}, 1)
+        self.assertEqual(att.arm_decisions, 0)
+
     def test_applied_no_effect_marks_the_pair_failed(self):
         self.assertFalse(self.r.on_result({"tick": 3, "outcome": "applied_no_effect"}, 1))
         self.assertIsNone(self.r.mem.break_pending)
@@ -345,19 +351,27 @@ class BreakArmsOnceTest(unittest.TestCase):
         self.assertEqual(att.level, nav_stuck.REVEAL, "arming is no progress: on to step 3")
         self.assertEqual(att.reasons[-1], "arm_only")
 
-    def test_a_use_try_resets_the_arm_count(self):
-        # A tool that fails and the next one armed beside the block: each arm
-        # comes with a Use, so the level is not failed for arming.
+    def test_in_reach_arm_that_never_lands_escalates(self):
+        # Review on #139: arm + Use queued every decision, neither runs.
         w = _sword_world(["....b."], at=(5, 0))
         w.held_supplies, w.armed_code = [InventorySupply(6, "pocket_knife")], None
         m = Memory()
         att = nav_stuck.track(m, w, "goto", (0, 0))
         att.level = nav_stuck.BREAK
         c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
-        for _ in range(nav_stuck.ARM_DECISION_LIMIT + 1):
-            out = BreakState().act(w, c)
-            self.assertEqual(out.intents, [arm(6), use_block((4, 0))])
-        self.assertEqual(att.level, nav_stuck.BREAK)
+        for _ in range(nav_stuck.ARM_DECISION_LIMIT):
+            self.assertEqual(BreakState().act(w, c).intents, [arm(6), use_block((4, 0))])
+        BreakState().act(w, c)
+        self.assertEqual(att.level, nav_stuck.REVEAL)
+
+    def test_a_resolved_use_resets_the_arm_count(self):
+        w = _sword_world(["....b."], at=(5, 0))
+        m = Memory()
+        att = nav_stuck.track(m, w, "goto", (0, 0))
+        att.level = nav_stuck.BREAK
+        att.arm_decisions = nav_stuck.ARM_DECISION_LIMIT - 1
+        nav_stuck.on_break_tried(m, w)
+        self.assertEqual(att.arm_decisions, 0, "the tool was tried: the next arm starts afresh")
 
 
 class BreakRearmTest(unittest.TestCase):

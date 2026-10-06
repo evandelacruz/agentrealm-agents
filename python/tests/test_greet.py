@@ -271,7 +271,10 @@ class WalkResumesTest(unittest.TestCase):
 
 
 class GreetIsNotASayOpTest(unittest.TestCase):
-    """Greet keeps its own record: a hello never settles a planner ``say`` op."""
+    """Greet keeps its own record: a hello never settles a planner ``say`` op.
+    The runner tags a Say as Greet's when it submits it, never by its text."""
+
+    REFUSED = {"outcome": "rejected", "rejection": {"category": "target", "code": "target_out_of_range"}}
 
     def runner(self) -> Runner:
         cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[], pickup=False), Path("t.toml"))
@@ -282,42 +285,42 @@ class GreetIsNotASayOpTest(unittest.TestCase):
         r.mem = Memory(need_self=False, need_position=False)
         return r
 
-    def greet(self, r: Runner, outcome: dict) -> None:
-        out = dispatch(r.world, ctx(None, r.knowledge, r.mem))
-        self.assertEqual(out.state, "Greet")
-        r.mem.pending = out.intents[0]
-        r.on_result({"tick": r.world.tick, **outcome}, 0)
+    def submit(self, r: Runner, outcome: dict) -> dict:
+        """Decide, submit as the runner does, and answer the Say with ``outcome``."""
+        d = r._decide(r.world, r.mem, plan=r.plan)
+        intents = r.intents_for(d)
+        say = next(i for i in intents if i["verb"] == "Say")
+        r.on_result({"tick": r.world.tick, **outcome}, intents.index(say))
+        r.world.tick += GREET_RETRY_TICKS
+        r.mem.last_speech_tick = None
+        return say
 
     def test_an_applied_hello_is_greeted_not_spoken(self):
         r = self.runner()
-        self.greet(r, {"outcome": "applied"})
+        self.assertEqual(self.submit(r, {"outcome": "applied"})["text"], "hello")
         self.assertEqual(greeted_npc_ids(r.knowledge), {4})
         self.assertEqual(spoken_npc_ids(r.knowledge), set())
 
     def test_a_say_op_still_says_its_text_after_the_hello(self):
         r = self.runner()
-        self.greet(r, {"outcome": "applied"})
-        r.world.tick += 50
-        r.mem.last_speech_tick = None
-        p = Plan([{"op": "say", "npc_id": 4, "text": "any news?"}], dict(PARAM_DEFAULTS))
-        out = dispatch(r.world, ctx(p, r.knowledge, r.mem))
-        self.assertEqual(out.state, "Investigate")
-        self.assertEqual(says(out), [{"verb": "Say", "npc_id": 4, "text": "any news?"}])
-        r.mem.pending = out.intents[0]
-        r.on_result({"tick": r.world.tick, "outcome": "applied"}, 0)
+        self.submit(r, {"outcome": "applied"})
+        r.plan = Plan([{"op": "say", "npc_id": 4, "text": "any news?"}], dict(PARAM_DEFAULTS))
+        self.assertEqual(self.submit(r, {"outcome": "applied"}), {"verb": "Say", "npc_id": 4, "text": "any news?"})
         self.assertEqual(spoken_npc_ids(r.knowledge), {4})
 
-    def test_a_say_op_of_hello_is_settled_by_the_hello(self):
+    def test_a_refused_say_op_of_hello_to_a_greeted_npc_ends_refused(self):
         r = self.runner()
-        self.greet(r, {"outcome": "applied"})
-        p = Plan([{"op": "say", "npc_id": 4, "text": "hello"}], dict(PARAM_DEFAULTS))
-        out = dispatch(r.world, ctx(p, r.knowledge, r.mem))
-        self.assertEqual(says(out), [], "the same words were already said")
-        self.assertIsNone(p.current())
+        self.submit(r, {"outcome": "applied"})
+        p = r.plan = Plan([{"op": "say", "npc_id": 4, "text": "hello"}], dict(PARAM_DEFAULTS))
+        for n in range(MAX_REJECTIONS):
+            self.assertEqual(self.submit(r, self.REFUSED)["text"], "hello")
+            self.assertEqual(r.mem.investigate_rejections[say_key(4)], n + 1)
+        r._decide(r.world, r.mem, plan=p)
+        self.assertIsNone(p.current(), "the op ends as refused")
 
     def test_a_refused_hello_spends_no_say_op_budget(self):
         r = self.runner()
-        self.greet(r, {"outcome": "rejected", "rejection": {"category": "target", "code": "target_out_of_range"}})
+        self.submit(r, self.REFUSED)
         self.assertNotIn(say_key(4), r.mem.investigate_rejections)
         self.assertEqual(greeted_npc_ids(r.knowledge), set())
 

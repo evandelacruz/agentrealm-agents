@@ -34,6 +34,8 @@ from ..world import Entity, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import say_to
 
+GREET_STATE = "Greet"
+
 # A greeting whose result has not come back yet is not sent again for this
 # many ticks (3 s); the runner records an applied one in ``greeted_npcs``.
 GREET_RETRY_TICKS = 30
@@ -107,7 +109,7 @@ class GreetState(State):
     held-queue probe, so a walk queue already running is never dropped for it.
     """
 
-    name = "Greet"
+    name = GREET_STATE
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive:

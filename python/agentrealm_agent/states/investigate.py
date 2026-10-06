@@ -10,11 +10,9 @@ knowledge base records it, or once the server has refused it
 from __future__ import annotations
 
 from ..investigation import (
-    GREET_TEXT,
     MAX_REJECTIONS,
     SPEECH_RANGE,
     cell_was_read,
-    greeted_npc_ids,
     in_sight,
     read_key,
     read_supply_key,
@@ -79,12 +77,8 @@ def _say(w: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
     npc = _npc(w, op)
     if npc is None:
         return _out(None, "no such NPC in sight")
-    # Greet's hello does not settle a say op (A65), unless the op says the very
-    # same words: the runner files that Say as the hello, and it was said.
-    said = npc.id in spoken_npc_ids(ctx.knowledge) or (
-        op["text"] == GREET_TEXT and npc.id in greeted_npc_ids(ctx.knowledge)
-    )
-    if _settled(ctx, say_key(npc.id), said):
+    # Only the op's own Say settles it: Greet's hello is filed apart (A65).
+    if _settled(ctx, say_key(npc.id), npc.id in spoken_npc_ids(ctx.knowledge)):
         return _out(None, f"said to npc {npc.id}: done")
     assert w.pos is not None
     if chebyshev(w.pos, npc.pos) <= SPEECH_RANGE:

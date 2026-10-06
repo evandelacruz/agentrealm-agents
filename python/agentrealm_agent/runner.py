@@ -58,8 +58,8 @@ from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
 from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
+from .states.greet import GREET_STATE
 from .investigation import (
-    GREET_TEXT,
     mark_cell_read,
     mark_npc_greeted,
     mark_npc_spoken,
@@ -697,6 +697,8 @@ class Runner:
             if verb == "Use":
                 return self._paced_action(intent, pace_uses, m.last_use_tick)
             if verb in ("Say", "Broadcast"):
+                # Tag whose Say this is: Greet's hello keeps its own record (A65).
+                m.greet_say_npc = intent.get("npc_id") if d.state == GREET_STATE else None
                 return self._paced_action(intent, pace_speech, m.last_speech_tick)
             m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
             m.pending = intent
@@ -953,7 +955,12 @@ class Runner:
             note_heal_pending(m, w, code, "use")
 
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
-        """Remember an applied Read/Say in the knowledge base; count a refused one."""
+        """Remember an applied Read/Say in the knowledge base; count a refused one.
+
+        Greet's hello is the Say ``intents_for`` tagged in ``greet_say_npc``
+        when it submitted a Greet decision: it lands in ``greeted_npcs`` and
+        counts no refusal, so it never settles or spends a ``say`` op (A65).
+        """
         if not intent or intent.get("verb") not in ("Read", "Say"):
             return
         target = intent.get("target") or {}
@@ -991,8 +998,9 @@ class Runner:
                 mark_supply_read(self.knowledge, sid)
         elif intent["verb"] == "Say" and intent.get("npc_id") is not None:
             npc_id = int(intent["npc_id"])
-            if intent.get("text") == GREET_TEXT and npc_id in self.mem.greetings:
-                # Greet's hello (A65): its own record, and no say op's refusal budget.
+            if self.mem.greet_say_npc == npc_id:
+                # Greet's hello, tagged when submitted (A65): its own record, and
+                # no say op's refusal budget.
                 if applied:
                     mark_npc_greeted(self.knowledge, npc_id)
                 return

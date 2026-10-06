@@ -64,7 +64,7 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Flee commits to an escape (A9).** Re-picking the greedy best step every decision cannot settle against two moving hostiles: each of their moves makes the cell just left the best again. Flee now plans a multi-step escape and walks it until it arrives, is blocked, or Flee stops. The first step is still the best single step (ties toward a known safe tile; standing still when cornered); the rest is a route to the nearest known safe tile when the agent gets to every cell of it before any hostile could, else up to 6 seen cells away from the hostiles under the same rule. Offline test `test_two_moving_hostiles_do_not_pin_flee_between_two_cells` rebuilds the runs 4/6 pin (two NPCs stepping back and forth, the agent on a diagonal pair); it fails on `main` and passes here.
 - **Survival pacing corrects itself in the guard (A15).** When only Flee and Retreat made the pacing moves, the oscillation guard hands the paced cells to them: on that same decision Flee plans a fresh escape that keeps off them, or Retreat routes around them. Nothing is given up and the smoke abort count is unchanged.
 - **Withdrawn:** the reverse-step skip in `flee_step`, the goto back-step block (`goto_back_avoid`, `nav_blocked_for_walk`), and the Break deferral while `should_flee`. `test_the_goto_walk_pacing_on_its_own_is_given_up` shows the guard alone ends run 5's goto pacing; `test_a_goto_behind_the_agent_takes_the_step_back` keeps a single step back allowed.
-- **Status:** offline only; no live run since run 6. **Next:** the full live hour once this merges.
+- **Status:** merged (#92, #93); the next live hour was run 7, below.
 
 ## Run 7 — FAIL: full hour, goto dropped short and Heal paced (~3600 s)
 
@@ -85,9 +85,10 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
   t=3511036 oscillation pacing [[404, 607], [404, 608]]: nothing given up, moved by Heal
   ```
 
-- **Root-cause hypothesis (fixer, no code in this PR):**
-  1. **Navigation:** Explore took the walk while the smoke `goto` to `(575, 375)` was still owed, after the two-level planner’s last corridor waypoint `(556, 369)` without a give-up on the ultimate target — likely **`pathing.replan` / Explore** treating a partial corridor leg as done (see tick window above).
-  2. **Regen:** **`HealState._walk_toward`** in `states/heal.py` replans a one- or two-step cost path to ground food each tick; on this terrain the best steps alternated across `(404, 607)` and `(404, 608)`, so Heal never reached `(400, 611)` or rested on a known safe tile for **`note_regen_sample`**. The oscillation guard correctly gives survival Heal moves **nothing** to give up, so the smoke script did not abort but the hour burned on pacing.
+- **Root cause (from the code; no agent change in this PR):**
+  1. **Navigation (A16 bug).** `(556, 369)` was the end of the goto's planned path (Explore labels a step with `m.path[-1]`), not the target. Arriving there, Explore's kept path has no next step, so it calls `pathing.replan`. `replan` tries `goto` first; when the goto plan has no seen, open first step, it falls through to `explore`, which gets the step. The goto's miss is handed to stuck detection only when no goal gets a step, so the goto attempt never failed a window, never escalated and was never given up, while `goto_navigation_pending` stayed true. Every later decision repeated that fallthrough. Why the goto plan found no open step from `(556, 369)` is not in this trace.
+  2. **Regen (A10 bug).** `HealState._walk_toward` keeps `m.path` and replans only when the goal or endpoint changes or the next step is blocked; it does not replan every tick. The gap is that nothing bounds the food walk. Each `heal_food` decision sends a `Step`, and `HealState.act` clears `heal_wait` whenever it sends intents, so A10's "no health back for 600 ticks, yield to Explore" never starts. The oscillation guard gives nothing up for Heal's own moves, as A15 specifies, so neither it nor the smoke abort stopped the walk. The run spent ~30k ticks on one food item at `(400, 611)`, pacing `(404, 607)` ↔ `(404, 608)`, never resting on a safe tile for `note_regen_sample`.
+- **Status:** both bugs filed in PLAN.md as open bugs on A16 (goto dropped without a give-up) and A10 (unbounded food walk); fixes are separate code PRs. **Next:** rerun the full live hour once both fixes merge.
 
 ## Done-when
 

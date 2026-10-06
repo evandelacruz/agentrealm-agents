@@ -41,7 +41,7 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 
-  "A58": {"state": "partial", "remaining": "Run 7 (full hour on main after #92/#93): exit 1 — goto (575,375) neither reached nor given up after stopping at corridor waypoint (556,369); safe-zone regen not measured after Heal paced heal_food between (404,607) and (404,608) for most of the hour. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "Run 7 (full hour on main after #92/#93): exit 1 — goto (575,375) neither reached nor given up after stopping at corridor waypoint (556,369); safe-zone regen not measured after Heal paced heal_food between (404,607) and (404,608) for most of the hour. Filed as open bugs on A16 (goto dropped without a give-up) and A10 (unbounded food walk); rerun after both fixes merge. Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 

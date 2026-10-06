@@ -200,7 +200,7 @@ Intents: 325 `Step`, 849 `Wait`, 2 `Take`. Call mix: 211 `zone`, 132 `tick`, 64 
 
    Suspects: `navigation/planner.py:542–566` (`nearest_target` runs one unbudgeted A* per frontier target in distance order, and `continue`s past every unreachable one, so 358 whole-map targets can mean hundreds of full-box floods), `navigation/planner.py:97–107` (`danger` loops over every hostile for every expanded cell, and `hostile = ["npc"]` makes all townsfolk hostiles), `states/travel.py:40` (`HUNT_SEARCH_AREA` radius `EXPLORE_ANYWHERE`), `runner.py:603–619` (the held-queue probe repeats the full decision on every poll).
 
-3. **Retreat and Flee fire on townsfolk.** 3 of the 6 survival episodes came from non-combat NPCs: Flee from rumor_teller 135 and apothecary 130 beside the town shops, and Retreat from salvager 160, 2 cells away, at 10/10. With `hostile = ["npc"]`, any NPC within `hostile_range` 2 forms a `combat_group`. `would_lose` then judges it unmeasured and outclassing at the planner's `fight_margin` 2.0, so a merchant turns the character around. Run 1 had the same with the farmer.
+3. **Retreat and Flee fire on townsfolk.** 2 of the 4 survival episodes (4 of the 6 survival decisions) came from non-combat NPCs: Flee from rumor_teller 135 and apothecary 130 beside the town shops, and Retreat from salvager 160, 2 cells away, at 10/10. With `hostile = ["npc"]`, any NPC within `hostile_range` 2 forms a `combat_group`. `would_lose` then judges it unmeasured and outclassing at the planner's `fight_margin` 2.0, so a merchant turns the character around. Run 1 had the same with the farmer.
 
    ```
    t=3997503 @76:424,400 tick  Step (flee npc 135)      npc 135 = rumor_teller

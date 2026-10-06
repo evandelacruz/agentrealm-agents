@@ -66,6 +66,29 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Withdrawn:** the reverse-step skip in `flee_step`, the goto back-step block (`goto_back_avoid`, `nav_blocked_for_walk`), and the Break deferral while `should_flee`. `test_the_goto_walk_pacing_on_its_own_is_given_up` shows the guard alone ends run 5's goto pacing; `test_a_goto_behind_the_agent_takes_the_step_back` keeps a single step back allowed.
 - **Status:** offline only; no live run since run 6. **Next:** the full live hour once this merges.
 
+## Run 7 — FAIL: full hour, goto dropped short and Heal paced (~3600 s)
+
+- **Character:** chosen at run time via `CHARACTER_NAME` (not committed).
+- **Verdict:** exit 1 after **3600.5 s** wall clock. **Did not pass** the A16 gate.
+- **Gate metrics:** deaths 0; retreat misses 0; recover withdraws 0; loop false; API errors 0; oscillation events 417 (gave up a target: 0); heal actions 2526; lives last seen 5; navigation target `(575, 375)` from `(425, 375)` **neither reached nor given up** (max Chebyshev from origin 237); safe-zone regen **not measured**.
+- **Goto (first ~13 min):** the agent walked east to `(556, 369)` (~19 blocks short of the smoke target) with queues labelled `goto → (556, 369)` and intermediate corridor waypoints. At tick **3475822** it stood on `(556, 369)` with the last goto queue still aimed at that waypoint; at **3475832** the next queue was **`explore → (525, 385)`** with no stuck give-up on `(575, 375)`. The hour then wandered south and west; Flee fired briefly (committed escape, no run 4/6-style pin) but never returned to finish the 150-block walk.
+- **Heal / regen (most of the hour):** from tick **3479055** onward **Heal** walked **`heal_food → (400, 611)`** with **2526** heal actions. From **3481152** through **3511049** the character paced between **`(404, 607)`** and **`(404, 608)`** (417 oscillation events, all `nothing given up, moved by Heal`). Example window:
+
+  ```
+  t=3482195 oscillation pacing [[404, 606], [404, 607]]: nothing given up, moved by Heal
+  t=3482196 queue 1×Step 2×Wait (heal_food → (400, 611))
+  t=3482201 @404,607 — (queue held)
+  t=3482212 @404,608 — (queue held)
+  t=3482264 oscillation pacing [[404, 607], [404, 608]]: nothing given up, moved by Heal
+  t=3482265 queue 1×Step 2×Wait (heal_food → (400, 611))
+  … same two cells and 1–2 step queues for the rest of the hour …
+  t=3511036 oscillation pacing [[404, 607], [404, 608]]: nothing given up, moved by Heal
+  ```
+
+- **Root-cause hypothesis (fixer, no code in this PR):**
+  1. **Navigation:** Explore took the walk while the smoke `goto` to `(575, 375)` was still owed, after the two-level planner’s last corridor waypoint `(556, 369)` without a give-up on the ultimate target — likely **`pathing.replan` / Explore** treating a partial corridor leg as done (see tick window above).
+  2. **Regen:** **`HealState._walk_toward`** in `states/heal.py` replans a one- or two-step cost path to ground food each tick; on this terrain the best steps alternated across `(404, 607)` and `(404, 608)`, so Heal never reached `(400, 611)` or rested on a known safe tile for **`note_regen_sample`**. The oscillation guard correctly gives survival Heal moves **nothing** to give up, so the smoke script did not abort but the hour burned on pacing.
+
 ## Done-when
 
 A58 stays open until a live hour exits 0 on the A16 gate and a redacted PASS transcript is committed under `docs/acceptance/m7_olympuff_PASS.transcript`.

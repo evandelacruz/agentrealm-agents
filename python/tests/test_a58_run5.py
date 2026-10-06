@@ -30,7 +30,7 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.pathing import bounded_step, clue_redirects, commit_walk, guided_step
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.world import WorldModel
+from agentrealm_agent.world import Entity, WorldModel
 
 START = (0, 0)
 GOTO = (6, 0)
@@ -296,6 +296,14 @@ class CommitRulesTest(unittest.TestCase):
         self.assertEqual(self.commit(back)[0], self.kept[1:], "cheaper, but steps back")
         self.w.view.tiles[(5, 0)] = "stone"
         self.assertEqual(self.commit(back)[0], back, "blocked: back it is")
+
+    def test_a_step_back_is_taken_when_the_kept_path_runs_nearer_hostiles(self):
+        """A16 Walk run 3: the kept route led a hurt walker into a known hostile."""
+        self.w.pos = (1, 0)
+        back = [(0, 0), (0, -1)] + [(x, -2) for x in range(1, 10)] + [self.target]
+        self.assertEqual(self.commit(back)[0], self.kept[1:], "no hostile: the walk keeps its path")
+        self.w.entities = [Entity("npc", 9, (5, 1))]
+        self.assertEqual(self.commit(back)[0], back, "the kept path runs past the hostile: back it is")
 
     def test_a_walked_path_lets_the_next_plan_in(self):
         """A window path that ends short of its target (A13) is walked; the next one is taken as it comes."""

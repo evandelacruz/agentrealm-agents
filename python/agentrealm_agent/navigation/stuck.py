@@ -15,6 +15,10 @@ progress window, so a level is left only when its own window fails:
 - BREAK (2): step 2, ``Break`` a nominated obstacle on the blocked route (A28).
 - REVEALED (4): walk the plan reveal found; failing again tries step 4.
 - ALT_ROUTE (5): step 4, replan through the door graph when enclosed (A28).
+- A break that opens the way, or an alt route that finds one, walks again
+  (WALK) on probation: if that walk fails before standing at least
+  ``RESET_PROGRESS_CELLS`` nearer the target than ever before, the ladder
+  carries on from the level that reset it, so it still ends in a give-up.
 - Step 5: give up, back off ``BACKOFF_BASE_TICKS * 2**n`` and queue a strategist
   ``stuck`` signal.
 
@@ -50,6 +54,10 @@ FOG_CAUTIOUS = 8
 # Escalation step 3: bounded reveal along the obstacle (§4.3).
 REVEAL_MOVE_BUDGET = 40
 REVEAL_SEARCH_NODES = 400  # FINE_NODE_BUDGET: seen ground searched for a frontier
+
+# A ladder reset (a break opened, an alt route found) is earned only by
+# standing this many cells nearer the target than the attempt ever had.
+RESET_PROGRESS_CELLS = 5
 
 # Escalation step 5: exponential backoff before retrying the goal (§4.5).
 BACKOFF_BASE_TICKS = 300
@@ -100,6 +108,12 @@ class NavAttempt:
     # pursued on, and the tick it began waiting with no step.
     seen_decision: int | None = None
     waiting_since: int | None = None
+    # Real progress, not the plan's: the nearest (Chebyshev) the agent stood
+    # to the target, and, while a reset to WALK is on probation, that nearest
+    # at the reset and the level that reset it.
+    closest: int | None = None
+    reset_closest: int | None = None
+    reset_level: int | None = None
 
 
 class Leg(NamedTuple):
@@ -272,12 +286,26 @@ def clear_break_target(att: NavAttempt) -> None:
     att.break_x, att.break_y, att.break_cap = None, None, None
 
 
-def on_break_opened(m: Memory, w: WorldModel, att: NavAttempt | None) -> None:
-    """A break cleared the way: reset escalation to walking the route again."""
-    if att is None:
-        return
+def walk_again(att: NavAttempt, w: WorldModel, from_level: int) -> None:
+    """``from_level`` found a way: walk it (WALK), on probation.
+
+    The reset holds only if the walk then stands ``RESET_PROGRESS_CELLS``
+    nearer the target than ever; otherwise :func:`escalate` resumes the
+    ladder after ``from_level``, so a way that leads nowhere cannot loop.
+    """
+    _note_position(att, w)
+    if att.reset_closest is None:
+        att.reset_closest = att.closest
+    att.reset_level = max(att.reset_level or WALK, from_level)
     att.level = WALK
     clear_break_target(att)
+
+
+def on_break_opened(m: Memory, w: WorldModel, att: NavAttempt | None) -> None:
+    """A break cleared the way: walk the route again, on probation (``walk_again``)."""
+    if att is None:
+        return
+    walk_again(att, w, BREAK)
     _fresh_window(att, w.tick)
     _drop_path(m, att)
 
@@ -307,6 +335,7 @@ def measure(path: list[Pos] | None, target: Pos) -> int | None:
 
 def observe(att: NavAttempt, w: WorldModel, path: list[Pos] | None) -> None:
     """Progress is the remaining measure falling below this window's best."""
+    _note_position(att, w)
     cost = measure(path, att.target)
     if cost is None:
         return
@@ -314,6 +343,14 @@ def observe(att: NavAttempt, w: WorldModel, path: list[Pos] | None) -> None:
         att.best, att.moves, att.window_tick = cost, 0, w.tick
     if att.best_ever is None or cost < att.best_ever:
         att.best_ever = cost
+
+
+def _note_position(att: NavAttempt, w: WorldModel) -> None:
+    if w.pos is None or w.map_id != att.map_id:
+        return
+    d = chebyshev(w.pos, att.target)
+    if att.closest is None or d < att.closest:
+        att.closest = d
 
 
 def _oscillating(recent: list[Pos]) -> bool:
@@ -343,6 +380,7 @@ def on_step(m: Memory, w: WorldModel) -> None:
         return
     att.moves += 1
     att.reject_streak = 0
+    _note_position(att, w)
     att.outline.add(w.pos)
     att.recent.append(w.pos)
     del att.recent[: -OSCILLATION_WINDOW * 2]
@@ -399,8 +437,21 @@ def _drop_path(m: Memory, att: NavAttempt) -> None:
 
 
 def escalate(m: Memory, w: WorldModel, att: NavAttempt, reason: str) -> bool:
-    """Leave the failed level for the next one. False when the attempt was given up."""
+    """Leave the failed level for the next one. False when the attempt was given up.
+
+    A walk on probation (``walk_again``) that failed without getting nearer
+    resumes the ladder after the level that reset it.
+    """
     att.reasons.append(reason)
+    if att.reset_level is not None:
+        earned = (
+            att.closest is not None
+            and att.reset_closest is not None
+            and att.closest <= att.reset_closest - RESET_PROGRESS_CELLS
+        )
+        if not earned and att.level in (WALK, CAUTIOUS):
+            att.level = att.reset_level
+        att.reset_closest = att.reset_level = None
     if att.level == WALK:
         att.level = CAUTIOUS
     elif att.level == CAUTIOUS:

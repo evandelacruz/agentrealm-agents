@@ -87,6 +87,7 @@ def fake_runner(goals: list[str] | None = None) -> SimpleNamespace:
         directives=SimpleNamespace(directives=Directives(params=dict(PARAM_DEFAULTS), goals=goals or [])),
         knowledge=None,
         tick_hz=10,
+        server_tick=10,
         log=mock.MagicMock(),
         acceptance=None,
     )
@@ -173,6 +174,21 @@ class TriggerTest(unittest.TestCase):
         r.world.tick = 610
         s._collect(r)
         self.assertEqual([t["trigger"] for t in s.inbox], ["idle", "idle"])
+
+    def test_idle_clock_starts_at_the_first_real_tick(self):
+        """A16 Walk run 3: seeded at tick 0, the first real tick looked like 6000 idle ticks."""
+        s, r = make(idle_minutes=0.5), fake_runner()
+        s._last_map = (7, None)
+        r.world.tick, r.server_tick = 0, None  # no tick heard yet
+        s._collect(r)
+        self.assertEqual(r.mem.strategist_progress_tick, -1)
+        r.world.tick = r.server_tick = 3_933_174
+        s._collect(r)
+        self.assertEqual(s.inbox, [], "no idle trigger on the first real tick")
+        self.assertEqual(r.mem.strategist_progress_tick, 3_933_174)
+        r.world.tick += 300
+        s._collect(r)
+        self.assertEqual([t["trigger"] for t in s.inbox], ["idle"])
 
     def test_plan_pops_queue_goal_done_and_failed(self):
         m = Memory()

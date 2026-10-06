@@ -93,7 +93,7 @@ def run_acceptance_smoke(
 
     ``prepare``, when given, runs on the loaded knowledge base before the
     runner starts (M9 clears earlier runs' entrance looks with it).
-    ``planner`` is the AI planner (A35), from :func:`planner_or_exit`.
+    ``planner`` is the AI planner (A35), from :func:`planner_for`.
 
     Returns the seconds played and the knowledge base the runner wrote to; judge
     the run on that one, not a reload, which misses the run if the save failed.

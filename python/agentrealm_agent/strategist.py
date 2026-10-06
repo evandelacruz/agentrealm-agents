@@ -15,7 +15,7 @@ never costs a tick and nothing needs a lock.
 One window, on the tick thread:
 
 1. Move new triggers into the inbox: clue, stuck, death, goal done or
-   dropped, idle (from ``Memory``), and new map, hurt and timer (raised here).
+   dropped, idle (from ``Memory``), and map change, hurt and timer (raised here).
 2. If an answer came back, apply it (see :meth:`Strategist._settle`).
 3. If nothing is in flight, the inbox has triggers and the budget allows it,
    build the prompt, log it to the trace, and hand it to the background thread.
@@ -26,8 +26,8 @@ the state that runs it; never a state that starts itself.
 
 Settings (environment variables, defaults in brackets):
 
-- ``AGENTREALM_PLANNER_PROVIDER`` [anthropic, or openai when only
-  ``OPENAI_API_KEY`` is set]: ``anthropic`` or ``openai``.
+- ``AGENTREALM_PLANNER_PROVIDER`` [anthropic, or openai when only an
+  OpenAI key is set]: ``anthropic`` or ``openai``.
 - ``AGENTREALM_PLANNER_MODEL`` [claude-sonnet-5-5 for anthropic; required for openai].
 - The provider's key: ``AGENTREALM_PLANNER_ANTHROPIC_KEY``, else
   ``ANTHROPIC_API_KEY``; ``AGENTREALM_PLANNER_OPENAI_KEY``, else
@@ -98,7 +98,7 @@ def _op_table() -> str:
     return "\n".join(f"- {name}: {fields}" for name, fields in OP_FIELDS.items())
 
 
-SYSTEM_PROMPT = f"""You are the planner for an Agent Realm character. You own its goal stack: the states run only the op on top, and with no plan the character explores safe ground and does nothing else.
+SYSTEM_PROMPT = f"""You are the planner for an Agent Realm character. You own its goal stack: the states work on the op on top. With an empty stack you are not steering, and the character falls back to its own default behavior from its profile (exploring).
 
 Reply with one JSON object only, no markdown, with these keys:
 - "goals": the whole new goal stack, top first. Omit the key to keep the current stack. An empty or invalid list clears it.
@@ -368,7 +368,7 @@ class Strategist:
     calls: int = 0  # calls this run, for the trace
     last_call_at: float | None = None
     spent: deque = field(default_factory=deque)  # [sent_at, tokens] per call in the budget window
-    _maps_seen: set[int] = field(default_factory=set)
+    _last_map: tuple[int, int | None] | None = None  # (map_id, level) at the last window
     _hurt: bool = False
     _idle_sent_for_tick: int = -1
     _requests: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=1), repr=False)
@@ -481,8 +481,10 @@ class Strategist:
     def _collect(self, runner: Any) -> None:
         """Move queued signals into the inbox and raise the map, hurt and idle triggers."""
         w, m = runner.world, runner.mem
-        if w.map_id is not None and w.map_id not in self._maps_seen:
-            self._maps_seen.add(w.map_id)
+        where = (w.map_id, w.map_level) if w.map_id is not None else None
+        if where is not None and where != self._last_map:
+            # Every change of map or level, re-entering one included (after a death, a retry).
+            self._last_map = where
             self.inbox.append({"trigger": "map", "map_id": w.map_id, "level": w.map_level, "tick": w.tick})
         if w.alive and w.health is not None and w.max_health:
             hurt = w.health < self.config.hurt_fraction * w.max_health
@@ -527,9 +529,11 @@ class Strategist:
         A failed call (network, HTTP, refusal) keeps the stack and puts its
         triggers back for the next call. Otherwise ``params`` merge onto the
         current ones at once, bounded by the directives floor as it is now,
-        and ``goals``, when the reply has the key, become the stack. No valid
-        goal (or a reply that is not a JSON object) clears it, so the
-        dispatcher's safe default runs. Directives ``goals`` own the stack
+        and ``goals``, when the reply has the key, become the stack. A stack
+        equal to the one left keeps its progress, and the same op on top
+        keeps its own (stall clock, wait start, block snapshot, path). No
+        valid goal (or a reply that is not a JSON object) clears it, so the
+        dispatcher's default runs. Directives ``goals`` own the stack
         and override all of this.
         """
         triggers, self.in_flight = self.in_flight or [], None
@@ -563,16 +567,29 @@ class Strategist:
         if isinstance(reply, dict) and "goals" not in reply:
             runner.log("strategist", "no goals in reply; stack kept", {"strategist": {"event": "kept", **record}})
             return
+        old = runner.plan
+        if goals and goals == old.goals[old.index :]:
+            # A timer reply that re-sends the stack: keep its progress (stall
+            # clock, wait start, block snapshot) and the path being walked.
+            old.notes = notes or old.notes
+            runner.log("strategist", "same stack; progress kept", {"strategist": {"event": "unchanged", **record}})
+            return
         runner.plan = Plan(
             list(goals),
-            dict(runner.plan.params),
+            dict(old.params),
             notes=notes,
             floor_params=dict(d.params),
             tick_hz=runner.tick_hz,
         )
-        runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
+        if goals and goals[0] == old.current():
+            # Same op on top: it carries on where it was; only the ops below it changed.
+            runner.plan.wait_started_tick = old.wait_started_tick
+            runner.plan.stalled_since_tick = old.stalled_since_tick
+            runner.plan.block_before = old.block_before
+        else:
+            runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
         if not goals:
-            runner.log("strategist", "no valid goals; stack cleared (safe default)", {"strategist": {"event": "cleared", **record}})
+            runner.log("strategist", "no valid goals; stack cleared (dispatcher default)", {"strategist": {"event": "cleared", **record}})
             return
         runner.log("strategist", f"plan replaced ({len(goals)} goals)", {"strategist": {"event": "applied", **record}})
         if runner.acceptance is not None:

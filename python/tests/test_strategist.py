@@ -118,20 +118,22 @@ class TriggerTest(unittest.TestCase):
         self.assertEqual([t["trigger"] for t in drain_triggers(m)], ["clue", "stuck", "death"])
         self.assertEqual((m.clue_signals, m.nav_stuck.stuck_signals, m.strategist_signals), ([], [], []))
 
-    def test_map_trigger_once_per_new_map(self):
+    def test_map_trigger_on_every_change_of_map_or_level(self):
         s, r = make(), fake_runner()
         s._collect(r)
         s._collect(r)
         r.world.map_id, r.world.map_level = 8, 2
         s._collect(r)
-        r.world.map_id = 7  # back on a map already seen
+        r.world.map_id, r.world.map_level = 7, None  # died: back on the start map
         s._collect(r)
-        self.assertEqual([(t["trigger"], t["map_id"]) for t in s.inbox], [("map", 7), ("map", 8)])
+        r.world.map_id, r.world.map_level = 8, 2  # re-entering the level is an event too
+        s._collect(r)
+        self.assertEqual([(t["trigger"], t["map_id"]) for t in s.inbox], [("map", 7), ("map", 8), ("map", 7), ("map", 8)])
         self.assertEqual(s.inbox[1]["level"], 2)
 
     def test_hurt_trigger_once_per_drop_below_the_threshold(self):
         s, r = make(hurt_fraction=0.5), fake_runner()
-        s._maps_seen.add(7)
+        s._last_map = (7, None)
         r.world.health, r.world.max_health = 12, 20
         s._collect(r)
         self.assertEqual(s.inbox, [])
@@ -147,7 +149,7 @@ class TriggerTest(unittest.TestCase):
 
     def test_idle_trigger_once_per_quiet_spell(self):
         s, r = make(idle_minutes=0.5), fake_runner()  # 300 ticks at 10 Hz
-        s._maps_seen.add(7)
+        s._last_map = (7, None)
         r.mem.strategist_progress_tick = 10
         r.world.tick = 309
         s._collect(r)
@@ -275,6 +277,53 @@ class AnswerTest(unittest.TestCase):
         round_trip(s, r)
         self.assertEqual(r.plan.current()["op"], "explore_area")
         self.assertEqual(logged_events(r), ["ask", "kept"])
+
+
+class ProgressTest(unittest.TestCase):
+    """A timer reply that re-sends the stack must not restart the op on top."""
+
+    def test_identical_reply_keeps_the_plan_and_its_progress(self):
+        stack = [{"op": "wait", "seconds": 20, "why": "boss spawns"}, {"op": "buy", "code": "torch"}]
+        s, r = make(FakeLLM({"goals": stack}), replan_s=15), fake_runner()
+        r.plan = Plan(list(stack), dict(PARAM_DEFAULTS), tick_hz=10)
+        r.plan.wait_started_tick, r.plan.stalled_since_tick = 5, 7
+        r.mem.path = [(1, 1), (2, 2)]
+        before = r.plan
+        round_trip(s, r)
+        self.assertIs(r.plan, before)
+        self.assertEqual((r.plan.wait_started_tick, r.plan.stalled_since_tick), (5, 7))
+        self.assertEqual(r.mem.path, [(1, 1), (2, 2)])
+        self.assertEqual(logged_events(r), ["ask", "unchanged"])
+
+    def test_identical_to_the_remaining_stack_after_a_pop(self):
+        stack = [{"op": "buy", "code": "torch"}, {"op": "break_block", "x": 3, "y": 0, "capability": "burn"}]
+        s, r = make(FakeLLM({"goals": stack[1:]})), fake_runner()
+        r.plan = Plan(list(stack), dict(PARAM_DEFAULTS), index=1, block_before="hedge")
+        before = r.plan
+        round_trip(s, r)
+        self.assertIs(r.plan, before)
+        self.assertEqual(r.plan.block_before, "hedge")  # not re-snapshotted after the block changed
+
+    def test_same_head_keeps_its_progress_when_the_rest_changes(self):
+        head = {"op": "use_block", "x": 3, "y": 0, "code": "key"}
+        s, r = make(FakeLLM({"goals": [head, {"op": "buy", "code": "rope"}]})), fake_runner()
+        r.plan = Plan([head, {"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS), block_before="gate", stalled_since_tick=4)
+        r.mem.path = [(1, 0)]
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals[1]["code"], "rope")
+        self.assertEqual((r.plan.block_before, r.plan.stalled_since_tick), ("gate", 4))
+        self.assertEqual(r.mem.path, [(1, 0)])
+        self.assertEqual(logged_events(r), ["ask", "applied"])
+
+    def test_a_stalled_head_still_times_out_under_timer_replans(self):
+        op = {"op": "explore_area", "x": 0, "y": 0, "radius": 9999}
+        s, r = make(FakeLLM(*[{"goals": [op]}] * 5), replan_s=15), fake_runner()
+        r.plan.tick_hz = 10
+        r.plan.note_stalled(0)
+        for _ in range(5):  # 75 s of timer replans re-sending the same op
+            round_trip(s, r)
+            s.clock.now += 15
+        self.assertTrue(r.plan.note_stalled(300))  # 30 s at 10 Hz since the first stall
 
 
 class SafeDefaultTest(unittest.TestCase):

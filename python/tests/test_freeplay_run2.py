@@ -37,6 +37,7 @@ from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.fight import retreat_tail
 from agentrealm_agent.states.gather import gather_outcome
+from agentrealm_agent.states.retreat import retreat_step
 from agentrealm_agent.strategist import build_prompt, hub_give_up_lines
 from agentrealm_agent.travel import sync_town
 from agentrealm_agent.world import Entity, WorldModel
@@ -227,6 +228,20 @@ class SafeWalksPickAReachableTileTest(unittest.TestCase):
         wall_in(w, WALLED)
         out = dispatch(w, c)
         self.assertEqual((out.state, out.reason), ("Retreat", "retreat → safe (-20, 10)"))
+
+    def test_an_escape_cell_never_marks_its_safe_tile_unreachable(self):
+        # Review on #140: a one-shot oscillation escape on the pocket's only
+        # entrance, or on the goal itself, is no proof the tile is walled in.
+        for paced in ({(7, 10)}, {WALLED}):
+            w, c = world(health=4), ctx(on_hostile="fight")
+            w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
+            hit(w)
+            safe(w, WALLED)
+            wall_in(w, WALLED)
+            w.view.tiles[(7, 10)] = "dirt"  # the pocket's only way in
+            retreat_step(w, c, "Retreat", paced=paced)
+            self.assertNotIn((MAP, WALLED), c.memory.safe_unreachable, paced)
+            self.assertEqual(dispatch(w, c).reason, f"retreat → safe {WALLED}", "next decision walks in")
 
     def test_fight_retreat_tail_heads_where_retreat_does(self):
         w, c = world(health=4), ctx(on_hostile="fight")

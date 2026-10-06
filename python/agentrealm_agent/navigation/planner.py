@@ -91,6 +91,16 @@ def known_prefix(path: list[Pos], view: MapView) -> list[Pos]:
     return out
 
 
+def danger(p: Pos, hostiles: list[Entity]) -> int:
+    """The hostiles' share of the cost onto ``p``: more the nearer they stand."""
+    out = 0
+    for h in hostiles:
+        d = chebyshev(p, h.pos)
+        if d < HOSTILE_DANGER_RADIUS:
+            out += max(0, HOSTILE_DANGER - d * 5)
+    return out
+
+
 class _Grid:
     """One search's view of the cost grid, with per-search state precomputed."""
 
@@ -123,11 +133,7 @@ class _Grid:
                 return None
             if p in self.occupied:
                 base += OCCUPANT
-            for h in self.hostiles:
-                d = chebyshev(p, h.pos)
-                if d < HOSTILE_DANGER_RADIUS:
-                    base += max(0, HOSTILE_DANGER - d * 5)
-            return base
+            return base + self.danger(p)
         if p in params.break_nominated:
             return None
         block = self.w.view.tiles.get(p)
@@ -147,11 +153,10 @@ class _Grid:
             base += COSTLY_STEP
         if p in self.occupied:
             base += OCCUPANT
-        for h in self.hostiles:
-            d = chebyshev(p, h.pos)
-            if d < HOSTILE_DANGER_RADIUS:
-                base += max(0, HOSTILE_DANGER - d * 5)
-        return base
+        return base + self.danger(p)
+
+    def danger(self, p: Pos) -> int:
+        return danger(p, self.hostiles)
 
 
 class _MacroCosts:
@@ -428,6 +433,13 @@ def path_cost(w: WorldModel, path: list[Pos], goal: Pos, params: CostGridParams 
         total += c
     end = path[-1] if path else w.pos
     return total + chebyshev(end, goal) * KNOWN_WALKABLE
+
+
+def hostile_cost(w: WorldModel, path: list[Pos], params: CostGridParams | None = None) -> int:
+    """The hostiles' share of what walking ``path`` costs (``_Grid.danger``)."""
+    kinds = (params or CostGridParams()).hostile_kinds
+    hostiles = [e for e in w.entities if e.kind in kinds]
+    return sum(danger(p, hostiles) for p in path)
 
 
 def cost_flood(

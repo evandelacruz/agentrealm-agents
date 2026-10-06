@@ -17,8 +17,10 @@ the walker turns round. So a walk keeps the path it chose until one of:
 - a new plan is cheaper by more than ``SWITCH_GAIN`` of the rest of it.
 
 A new path whose first step goes back to the cell the walk just came from
-is taken only when the old one is blocked, however much cheaper it looks.
-Equal paths therefore never alternate: the one already walked wins.
+is taken only when the old one is blocked, or when the new one is cheaper
+overall and the old one's hostile cost is higher by more than
+``SWITCH_GAIN`` (A16 Walk run 3); never for a route that only looks cheaper. Equal
+paths therefore never alternate: the one already walked wins.
 
 Each goal keeps its own walk (``Memory.walks``), so a goal whose kept path
 waits on fog keeps it while a later goal takes the move. Wherever a goal's
@@ -44,7 +46,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..world import Pos, WorldModel
-from .planner import CostGridParams, path_cost
+from .planner import CostGridParams, hostile_cost, path_cost
 
 if TYPE_CHECKING:
     from ..memory import Memory
@@ -130,8 +132,16 @@ def commit(
         kept_cost = path_cost(w, kept, walk.target, params) if kept else None
         if kept_cost is not None:
             found_cost = path_cost(w, found, target, params) if found else None
-            back = bool(found) and found[0] == came_from
-            if found_cost is None or back or found_cost >= (1 - SWITCH_GAIN) * kept_cost:
+            if found_cost is None:
+                return kept, walk
+            if found[0] == came_from:
+                # Turning back loses, unless it is cheaper overall and the kept
+                # path runs nearer the hostiles by more than SWITCH_GAIN.
+                if found_cost >= kept_cost or hostile_cost(w, found, params) >= (1 - SWITCH_GAIN) * hostile_cost(
+                    w, kept, params
+                ):
+                    return kept, walk
+            elif found_cost >= (1 - SWITCH_GAIN) * kept_cost:
                 return kept, walk
     if not found:
         return found, None

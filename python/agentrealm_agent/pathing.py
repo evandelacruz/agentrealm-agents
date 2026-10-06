@@ -481,8 +481,7 @@ def escalation_step(
                 continue
             found = plan(att)
             if next_step(w, avoid, found):
-                att.level = nav_stuck.WALK
-                nav_stuck.clear_break_target(att)
+                nav_stuck.walk_again(att, w, nav_stuck.ALT_ROUTE)
                 return _walk(m, w, att, avoid, found)
             if found:
                 return _wait(m, att, found)

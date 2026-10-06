@@ -708,6 +708,9 @@ class Strategist:
                 self.inbox.append({"trigger": "hurt", "health": w.health, "max_health": w.max_health, "tick": w.tick})
             self._hurt = hurt
         since = m.strategist_progress_tick
+        if since < 0 and runner.server_tick is not None:
+            # The idle clock starts at the first tick the server reported, not at 0.
+            since = m.strategist_progress_tick = w.tick
         idle_ticks = max(1, int(self.config.idle_minutes * 60 * runner.tick_hz))
         if since >= 0 and w.tick - since >= idle_ticks and self._idle_sent_for_tick != since:
             self._idle_sent_for_tick = since

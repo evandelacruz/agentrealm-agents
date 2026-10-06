@@ -188,6 +188,48 @@ class RevealTest(unittest.TestCase):
         self.assertEqual((att.level, att.reasons), (nav_stuck.CAUTIOUS, ["time"]))
 
 
+class BreakResetTest(unittest.TestCase):
+    """A break resets the ladder to WALK only if the walk then gets nearer (A16 Walk run 3)."""
+
+    def _climb_to_break(self, m, w, att):
+        while att.level != nav_stuck.BREAK:
+            self.assertTrue(nav_stuck.escalate(m, w, att, "moves"))
+
+    def test_break_then_no_progress_gives_up_within_a_bounded_number_of_attempts(self):
+        w, m = open_world(at=(0, 1)), Memory()
+        target = (150, 1)
+        att = nav_stuck.track(m, w, WALK, target)
+        m.goal = WALK
+        given_up = False
+        for failures in range(1, 20):
+            if att.level == nav_stuck.BREAK:
+                nav_stuck.on_break_opened(m, w, att)  # grass cut beside the route
+                self.assertEqual(att.level, nav_stuck.WALK)
+            m.goal = WALK
+            w.pos = (failures % 3, 1)  # paces near the cut, never nearer the target
+            nav_stuck.on_step(m, w)
+            if not nav_stuck.escalate(m, w, att, "moves"):
+                given_up = True
+                break
+        self.assertTrue(given_up, "the break loop never gave up")
+        self.assertLessEqual(failures, 6, "WALK, CAUTIOUS, BREAK, WALK, REVEAL, ALT_ROUTE")
+        self.assertIn((w.map_id, target), m.nav_stuck.given_up_travel)
+        self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
+
+    def test_break_then_real_progress_restarts_the_ladder(self):
+        w, m = open_world(width=40, at=(0, 1)), Memory()
+        att = nav_stuck.track(m, w, WALK, (39, 1))
+        m.goal = WALK
+        nav_stuck.on_step(m, w)
+        self._climb_to_break(m, w, att)
+        nav_stuck.on_break_opened(m, w, att)
+        m.goal = WALK  # the walk takes the route again
+        w.pos = (nav_stuck.RESET_PROGRESS_CELLS, 1)
+        nav_stuck.on_step(m, w)
+        self.assertTrue(nav_stuck.escalate(m, w, att, "moves"))
+        self.assertEqual(att.level, nav_stuck.CAUTIOUS, "the break earned its reset")
+
+
 class BackoffTest(unittest.TestCase):
     def test_given_up_target_is_retried_after_a_doubling_backoff(self):
         sc = grids.WATER_ENCLOSURE

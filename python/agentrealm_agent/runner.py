@@ -267,7 +267,7 @@ class Runner:
             sync_town(self.knowledge, world.get("town"))
             self._sync_minimap()
         self.strategist.start()
-        self.mem.strategist_progress_tick = self.world.tick
+        self.mem.strategist_progress_tick = -1  # unknown: the strategist seeds it from the first real tick
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
         not_before = 0.0
         try:

@@ -132,6 +132,18 @@ class RetreatTest(unittest.TestCase):
         w = self.hurt(health=1)
         self.assertEqual(dispatch(w, ctx(hostile=["npc"], on_hostile="ignore")).state, "Explore")
 
+    def test_survival_outranks_a_pinned_travel_op(self):
+        """A16 Walk run 3: a pinned walk never takes the move from Retreat or Heal."""
+        from agentrealm_agent.plan import Plan
+
+        w = self.hurt()
+        w.max_health = 10
+        c = ctx(hostile=["npc"])
+        c.plan = Plan([{"op": "travel", "to": "point", "x": 4, "y": 1}], dict(PARAM_DEFAULTS), directive_end=1)
+        self.assertEqual(dispatch(w, c).state, "Retreat")
+        w.entities = []  # out of combat, still hurt
+        self.assertEqual(dispatch(w, c).state, "Heal")
+
     def test_done_once_on_the_safe_tile(self):
         w = self.hurt()
         c = ctx(hostile=["npc"])

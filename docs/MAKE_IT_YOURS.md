@@ -144,7 +144,7 @@ Behavior:
 
 Things the example does on purpose, worth keeping in your own states:
 
-- **Its own memory.** The greeted set lives on the state, keyed by your character's id because one `STATES` tuple serves every character the process runs. It needs no knowledge base, and it marks a player when the `Say` is sent, so a refused hello is not retried: at most one per player per run. (Greet and Investigate instead record NPCs in the knowledge base after an applied `Say`, which persists across runs.)
+- **Its own memory.** The greeted set lives on the state, keyed by your character's id because one `STATES` tuple serves every character the process runs. It needs no knowledge base, and it marks a player when the `Say` is sent, so a refused hello is not retried: at most one per player per run. (Greet and Investigate instead record NPCs in the knowledge base after an applied `Say`, which persists across runs: Greet's hello in `greeted_npcs`, a `say` op's text in `spoken_npcs`.)
 - **Pacing and budget.** It returns one `Say` per decision window. The runner sends it through the speech pacer and inside the window's `POST tick`, so it costs no extra call.
 - **Priority.** Last among the reflexes, it waits for every survival state, and outranks the plan's executor for one window per player.
 

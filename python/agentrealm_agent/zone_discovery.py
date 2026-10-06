@@ -1,15 +1,20 @@
-"""Safe-tile discovery via ``get_zone`` (A7).
+"""Safe-tile discovery via ``get_zone`` and terrain reads (A7).
 
 Probes cells around respawn anchors and along the current path when the
 scheduler would otherwise skip a calm window, so later survival states
-have known safe tiles without spending urgent budget on zone reads.
+have known safe tiles without spending urgent budget on zone reads. A
+terrain read already marks safe-zone cells (``MapView.safe``), so those
+are known safe and never probed. The tradeoff: an agent's terrain read
+leaves out ``brightness``, so such a cell's brightness stays unread and
+counts as 1 (``investigation.sight_range``), which overstates sight in a dim
+safe zone. ``safe_zone_of`` is the safe zone a cell lies in.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .world import Pos, ZoneFact, chebyshev
+from .world import NEIGHBOURS, Pos, ZoneFact, chebyshev
 
 if TYPE_CHECKING:
     from .memory import Memory
@@ -33,8 +38,11 @@ def apply_town(w: WorldModel, town: dict | None) -> None:
 
 
 def zone_probed(w: WorldModel, map_id: int, pos: Pos) -> bool:
-    """Read already, or the read failed: either way, not probed again."""
-    return pos in w.zones.get(map_id, {}) or (map_id, pos) in w.zone_failed
+    """Read already, the read failed, or a terrain read showed it safe: not probed again."""
+    if pos in w.zones.get(map_id, {}) or (map_id, pos) in w.zone_failed:
+        return True
+    view = w.maps.get(map_id)
+    return view is not None and pos in view.safe
 
 
 def apply_zone(w: WorldModel, map_id: int, x: int, y: int, body: dict) -> ZoneFact:
@@ -54,10 +62,39 @@ def zone_failed(w: WorldModel, map_id: int, pos: Pos) -> None:
 
 
 def safe_tiles(w: WorldModel, map_id: int) -> set[Pos]:
-    """Known safe cells on a map (PLAN.md A7). **Heal** (A10) walks to them;
-    Recover reads it to pick a safe tile beside the death chest (A11); Retreat
-    will read it too (A9)."""
-    return {pos for pos, fact in w.zones.get(map_id, {}).items() if fact.safe}
+    """Known safe cells on a map, from zone and terrain reads (PLAN.md A7).
+    **Heal** (A10) walks to them; Recover reads it to pick a safe tile beside
+    the death chest (A11); Retreat will read it too (A9)."""
+    view = w.maps.get(map_id)
+    from_terrain = set(view.safe) if view is not None else set()
+    return from_terrain | {pos for pos, fact in w.zones.get(map_id, {}).items() if fact.safe}
+
+
+def safe_zone_of(w: WorldModel, map_id: int, pos: Pos, safe: set[Pos] | None = None) -> set[Pos]:
+    """The known safe cells joined (8-way) to ``pos``: one safe zone as far as
+    it is known. Empty when ``pos`` is not known safe. ``safe`` is
+    ``safe_tiles`` when the caller already has it."""
+    safe = safe_tiles(w, map_id) if safe is None else safe
+    if pos not in safe:
+        return set()
+    zone, todo = {pos}, [pos]
+    while todo:
+        x, y = todo.pop()
+        for dx, dy in NEIGHBOURS:
+            n = (x + dx, y + dy)
+            if n in safe and n not in zone:
+                zone.add(n)
+                todo.append(n)
+    return zone
+
+
+def known_safe(w: WorldModel, map_id: int, pos: Pos) -> bool:
+    """A zone or terrain read showed ``pos`` inside a safe zone (town, a respawn patch)."""
+    view = w.maps.get(map_id)
+    if view is not None and pos in view.safe:
+        return True
+    fact = w.zones.get(map_id, {}).get(pos)
+    return fact is not None and fact.safe
 
 
 def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:

@@ -12,6 +12,7 @@ from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
 from agentrealm_agent.states import gather as gather_mod
 from agentrealm_agent.states.gather_safe import GATHER_HOSTILE_RADIUS, gather_ground, is_safe_ish
 from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_agent.gem_yield import NO_EFFECT_ZONE_CUTS, GemYieldTracker
 from agentrealm_agent.zone_discovery import apply_zone
 
 
@@ -86,6 +87,12 @@ class GatherGroundTest(unittest.TestCase):
         w.entities = [Entity("npc", 1, (GATHER_HOSTILE_RADIUS + 1, 0))]
         self.assertTrue(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
 
+    def test_safe_zone_cells_qualify(self):
+        """Breaking a block works in a safe zone: Gather prefers the field, it does not ban safe ground."""
+        w = grid(["ggg"], at=(1, 0))
+        safe(w, (0, 0))
+        self.assertTrue(gather_ground(w, (0, 0), Policy()))
+
     def test_hazard_and_unknown_cells_disqualify(self):
         w = grid(["gl"], at=(0, 0))
         self.assertFalse(gather_ground(w, (1, 0), Policy(avoid_blocks=["lava"])))
@@ -114,16 +121,18 @@ class SafeIshTest(unittest.TestCase):
 
 
 class GatherActTest(unittest.TestCase):
-    def test_cuts_grass_on_safe_tile(self):
+    def test_field_grass_before_safe_grass(self):
+        """A63 run 2: 168 cuts of one town grass cell, every one applied_no_effect."""
         w = grid(["ggg"], at=(1, 0))
         safe(w, (1, 0))
-        out = outcome(w)
-        self.assertEqual(out.intents[0]["verb"], "Use")
-        self.assertEqual(out.intents[0]["target"], {"kind": "block", "x": 1, "y": 0})
+        m = Memory()
+        out = outcome(w, m)
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertEqual(m.gather_target, ("grass", (0, 0)))
 
     def test_cuts_adjacent_bush(self):
         w = grid([".b."], at=(0, 0))
-        safe(w, (0, 0), (1, 0))
+        safe(w, (0, 0))
         out = outcome(w)
         self.assertEqual(out.intents[0]["target"], {"kind": "block", "x": 1, "y": 0})
 
@@ -131,7 +140,6 @@ class GatherActTest(unittest.TestCase):
         # A longer weapon reach does not stretch block Use past adjacent.
         w = grid(["..b"], at=(0, 0))
         w.attack_range = 3
-        safe(w, (0, 0), (1, 0), (2, 0))
         m = Memory()
         out = outcome(w, m)
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
@@ -139,15 +147,20 @@ class GatherActTest(unittest.TestCase):
 
     def test_unlisted_supply_codes_are_not_treated_as_gem_piles(self):
         w = grid(["...", "..."], at=(1, 0))
-        safe(w, (1, 0), (2, 0))
         w.entities = [Entity("supply", 9, (2, 0), "gem_cache_5")]
         self.assertIsNone(outcome(w, pickup=False).intents)
 
     def test_priced_gem_supply_is_shop_stock_not_a_pile(self):
         w = grid(["...", "..."], at=(1, 0))
-        safe(w, (1, 0), (2, 0))
         w.entities = [Entity("supply", 9, (2, 0), "gem", gem_price=3)]
         self.assertIsNone(outcome(w, pickup=False).intents)
+
+    def test_takes_gem_pile_on_safe_ground(self):
+        """Piles are not cuts: free ones on safe ground are taken at once."""
+        w = grid(["g.g"], at=(1, 0))
+        safe(w, (1, 0), (2, 0))
+        w.entities = [Entity("supply", 9, (2, 0), "gem")]
+        self.assertEqual(outcome(w, pickup=False).intents[0]["verb"], "Take")
 
     def test_takes_gem_pile_in_range(self):
         w = grid(["g.g"], at=(1, 0))
@@ -167,9 +180,8 @@ class GatherActTest(unittest.TestCase):
 
 
 class GatherPathingTest(unittest.TestCase):
-    def test_walks_to_safe_grass(self):
+    def test_walks_to_field_grass(self):
         w = grid(["..g"], at=(0, 0))
-        safe(w, (2, 0))
         m = Memory()
         out = outcome(w, m)
         self.assertEqual(out.intents[0], {"verb": "SetPosition", "x": 1, "y": 0})
@@ -177,7 +189,6 @@ class GatherPathingTest(unittest.TestCase):
 
     def test_walks_beside_a_bush_before_grass(self):
         w = grid(["g...b"], at=(2, 0))
-        safe(w, (0, 0), (4, 0))
         m = Memory()
         outcome(w, m)
         self.assertEqual(m.gather_target, ("bush", (4, 0)))
@@ -206,7 +217,6 @@ class GatherPathingTest(unittest.TestCase):
 
     def test_target_that_stops_qualifying_is_dropped(self):
         w = grid(["...g"], at=(0, 0))
-        safe(w, (3, 0))
         m = Memory()
         outcome(w, m)
         self.assertEqual(m.gather_target, ("grass", (3, 0)))
@@ -257,6 +267,92 @@ class GatherReflexTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual(out.state, "Fight")
         self.assertEqual(out.intents[0]["target"], {"kind": "character", "character_id": 5})
+
+
+class GatherHeadsOutTest(unittest.TestCase):
+    """On safe ground with nothing to cut: walk out to the field (A63 run 2)."""
+
+    def test_cuts_safe_grass_when_no_field_cell_is_known(self):
+        w = grid(["ggg"], at=(1, 0))
+        safe(w, (0, 0), (1, 0), (2, 0))
+        self.assertEqual(outcome(w).reason, "cut grass")
+
+    def test_heads_to_the_nearest_field_cell(self):
+        w = grid(["........"], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(5)])
+        c = ctx(w, ["gather_gems:3"])
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertEqual(c.memory.gather_target, (gather_mod.OUT, (5, 0)))
+        self.assertEqual(c.memory.gather_status, gather_mod.HEADING_OUT)
+
+    def test_heads_to_the_frontier_when_no_field_cell_is_known(self):
+        w = grid(["...."], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(4)])
+        m = Memory()
+        out = outcome(w, m)
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertEqual(m.gather_target[0], gather_mod.OUT)
+
+    def test_no_effect_cuts_mark_the_safe_zone_uncuttable_and_it_heads_out(self):
+        w = grid(["ggggg..."], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(5)])
+        tracker, m = GemYieldTracker(), Memory()
+        for x in range(NO_EFFECT_ZONE_CUTS - 1):
+            tracker.note_no_effect(w, (x, 0), "grass", w.tick)
+        out = gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
+        self.assertEqual(m.gather_target, ("grass", (NO_EFFECT_ZONE_CUTS - 1, 0)), "below the bar: the rest stay cuttable")
+        self.assertEqual(m.gather_status, gather_mod.NO_EFFECT)
+        tracker.note_no_effect(w, (NO_EFFECT_ZONE_CUTS - 1, 0), "grass", w.tick)
+        m = Memory()
+        gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
+        self.assertEqual(m.gather_target, (gather_mod.OUT, (5, 0)), "the whole zone is uncuttable")
+        self.assertEqual(m.gather_status, gather_mod.HEADING_OUT, "heading out outranks a no-effect status")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+
+    def test_grass_found_on_arrival_ends_the_walk_out(self):
+        """Review on #126: a cut returned early left the OUT target and HEADING_OUT status behind."""
+        w = grid(["........"], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(5)])
+        m = Memory()
+        outcome(w, m)
+        self.assertEqual(m.gather_status, gather_mod.HEADING_OUT)
+        w.pos = (5, 0)
+        w.view.tiles[(5, 0)] = "grass"
+        out = outcome(w, m)
+        self.assertEqual(out.reason, "cut grass")
+        self.assertEqual((m.goal, m.gather_target), ("", None))
+        self.assertEqual(m.gather_status, gather_mod.CUTTING)
+
+    def test_out_walk_is_kept_while_the_grass_stays_unreachable(self):
+        """Review on #126: walled-off grass dropped the walk out every tick, replanning it (A15)."""
+        w = grid(["......###", "......#g#", "......###"], at=(0, 1))
+        safe(w, *[(x, y) for x in range(5) for y in range(3)])
+        m = Memory()
+        outcome(w, m)
+        self.assertEqual(m.gather_target[0], gather_mod.OUT)
+        path = list(m.path)
+        with mock.patch.object(gather_mod, "_replan_gather") as replan:
+            outcome(w, m)
+        replan.assert_not_called()
+        self.assertEqual(m.path, path)
+
+    def test_off_safe_ground_the_out_walk_is_dropped_for_field_grass(self):
+        w = grid([".....gg"], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(5)])
+        m = Memory()
+        outcome(w, m)
+        self.assertEqual(m.gather_target, ("grass", (5, 0)))
+        w.view.tiles[(5, 0)] = w.view.tiles[(6, 0)] = "dirt"
+        m.path, m.goal, m.gather_target = [], "", None
+        outcome(w, m)
+        self.assertEqual(m.gather_target, (gather_mod.OUT, (5, 0)))
+        w.pos = (5, 0)
+        w.view.tiles[(6, 0)] = "grass"
+        out = outcome(w, m)
+        self.assertEqual(m.gather_target, ("grass", (6, 0)))
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
 
 
 class GatherFallbackTest(unittest.TestCase):
@@ -339,9 +435,8 @@ class GatherDispatchTest(unittest.TestCase):
         out = dispatch(w, ctx(w, []))
         self.assertEqual(out.state, "Explore")
 
-    def test_no_target_in_sight_explores_safe_ground_itself(self):
+    def test_no_target_in_sight_explores_itself(self):
         w = grid(["....", "....", "...."], at=(1, 1))
-        safe(w, (0, 0), (1, 1))
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
         self.assertEqual(out.state, "Gather")
@@ -355,7 +450,6 @@ class GatherDispatchTest(unittest.TestCase):
         dispatch(w, c)
         w.pos = (1, 1)
         w.view.tiles[(1, 1)] = "grass"
-        safe(w, (1, 1))
         out = dispatch(w, c)
         self.assertEqual(out.state, "Gather")
         self.assertEqual(out.reason, "cut grass")

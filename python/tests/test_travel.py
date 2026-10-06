@@ -369,3 +369,33 @@ class HuntingGroundSearchTest(unittest.TestCase):
         w.tick += (HUNT_SEARCH_RESUME_SECONDS + 1) * plan.tick_hz
         dispatch(w, ctx)
         self.assertEqual(m.hunt_search.since, w.tick)
+
+    def test_probe_window_is_in_seconds(self):
+        from agentrealm_agent.states.travel import HUNT_PROBE_FRESH_SECONDS
+
+        w = grid([".........."], at=(0, 0))
+        plan = travel_plan(["travel:hunting_ground"])
+        plan.tick_hz = 20
+        m = Memory()
+        dispatch(w, ctx_for(m, KnowledgeBase.empty("sandbox"), plan))
+        self.assertEqual(m.hunt_search.probe_until, w.tick + HUNT_PROBE_FRESH_SECONDS * 20)
+
+    def test_break_on_the_search_walk_does_not_stall_the_op(self):
+        """Review on #123: Break at stuck step 2 of the search walk (labelled
+        ``explore_area``) must count as the Travel op's own walk."""
+        from agentrealm_agent.navigation import stuck as nav_stuck
+        from agentrealm_agent.plan import PLAN_STALL_SECONDS
+        from agentrealm_agent.states.base import StateOutcome
+        from agentrealm_agent.states.dispatch import _note_op_progress
+        from agentrealm_agent.states.intents import use_block
+
+        w = grid([".........."], at=(0, 0))
+        plan = travel_plan(["travel:hunting_ground"])
+        m = Memory()
+        att = nav_stuck.track(m, w, "explore_area", (9, 0))
+        att.level = nav_stuck.BREAK
+        breaking = StateOutcome([use_block((1, 0))], "break", state="Break", progress=False)
+        for _ in range(3):
+            _note_op_progress(plan, w, m, plan.current(), "Travel", breaking)
+            w.tick += PLAN_STALL_SECONDS * plan.tick_hz
+        self.assertEqual(plan.index, 0, "Break working the search walk keeps the op")

@@ -248,7 +248,7 @@ class HuntProbeTest(unittest.TestCase):
         w.tick = 100
         m = calm_mem(path=[(6, 5), (7, 5)])
         self.assertEqual(next_zone_probe(w, m), (7, (6, 5)), "no search: path cells")
-        m.hunt_search = HuntSearch({"op": "travel", "to": "hunting_ground"}, since=90, last=100)
+        m.hunt_search = HuntSearch({"op": "travel", "to": "hunting_ground"}, since=90, last=100, probe_until=150)
         map_id, pos = next_zone_probe(w, m)
         self.assertEqual(map_id, 7)
         self.assertEqual((pos[0] % HUNT_PROBE_SPACING, pos[1] % HUNT_PROBE_SPACING), (0, 0))
@@ -258,10 +258,8 @@ class HuntProbeTest(unittest.TestCase):
 
     def test_a_stale_search_probes_nothing(self):
         from agentrealm_agent.memory import HuntSearch
-        from agentrealm_agent.zone_discovery import HUNT_PROBE_FRESH_TICKS
-
         w = filled_world(at=(5, 5), perception=5)
-        w.tick = 100 + HUNT_PROBE_FRESH_TICKS + 1
+        w.tick = 151
         m = calm_mem()
-        m.hunt_search = HuntSearch({"op": "travel", "to": "hunting_ground"}, since=90, last=100)
+        m.hunt_search = HuntSearch({"op": "travel", "to": "hunting_ground"}, since=90, last=100, probe_until=150)
         self.assertIsNone(next_zone_probe(w, m))

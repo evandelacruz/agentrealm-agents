@@ -34,6 +34,8 @@ HUNT_SEARCH_SECONDS = 300
 # A search Travel has not worked on for this long starts over: the op was
 # off the top (a Retreat, a newer op) and is back.
 HUNT_SEARCH_RESUME_SECONDS = 60
+# Spare windows read zones for the search while Travel worked on it this recently.
+HUNT_PROBE_FRESH_SECONDS = 5
 # What a hunting-ground search explores: the whole map's frontier.
 HUNT_SEARCH_AREA: GoalOp = {"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE}
 
@@ -103,8 +105,9 @@ def search_hunting_ground(world: WorldModel, ctx: PlayContext, op: GoalOp) -> St
     assert plan is not None
     s = m.hunt_search
     if s is None or s.op != op or world.tick - s.last > HUNT_SEARCH_RESUME_SECONDS * plan.tick_hz:
-        s = m.hunt_search = HuntSearch(dict(op), world.tick, world.tick)
+        s = m.hunt_search = HuntSearch(dict(op), world.tick, world.tick, world.tick)
     s.last = world.tick
+    s.probe_until = world.tick + HUNT_PROBE_FRESH_SECONDS * plan.tick_hz
     gave_up = ""
     if world.tick - s.since >= HUNT_SEARCH_SECONDS * plan.tick_hz:
         gave_up = f"no hunting ground found in {HUNT_SEARCH_SECONDS}s of searching"

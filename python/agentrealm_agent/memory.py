@@ -25,12 +25,13 @@ class BossFight:
 @dataclass
 class HuntSearch:
     """Travel's search for a hunting ground (A27): the ``travel`` op it runs
-    for, the tick it began and the tick Travel last worked on it. While it
-    is fresh, spare windows read zones around the character for one."""
+    for, the tick it began, the tick Travel last worked on it, and the tick
+    until which spare windows read zones around the character for one."""
 
     op: dict
     since: int
     last: int
+    probe_until: int
 
 
 @dataclass

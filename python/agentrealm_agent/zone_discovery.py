@@ -21,8 +21,6 @@ RESPAWN_PROBE_RADIUS = 8
 # cell in every HUNT_PROBE_SPACING × HUNT_PROBE_SPACING square of the view,
 # so a search covers ground without reading every cell.
 HUNT_PROBE_SPACING = 4
-# Travel worked on the search within this many ticks: its probes still run.
-HUNT_PROBE_FRESH_TICKS = 50
 
 
 def apply_town(w: WorldModel, town: dict | None) -> None:
@@ -123,9 +121,9 @@ def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:
 def hunt_probes(w: WorldModel, m: Memory) -> list[Pos]:
     """Grid cells in view to read while Travel searches for a hunting ground
     (A27): ``get_zone`` gives ``strength_ceiling`` only on a hunting cell.
-    Empty when no search is fresh."""
+    Empty when no search is fresh (``HuntSearch.probe_until``)."""
     s = m.hunt_search
-    if s is None or w.pos is None or w.tick - s.last > HUNT_PROBE_FRESH_TICKS:
+    if s is None or w.pos is None or w.tick > s.probe_until:
         return []
     x0, y0, width, height = w.perception_rect()
     first_x = x0 + (-x0) % HUNT_PROBE_SPACING

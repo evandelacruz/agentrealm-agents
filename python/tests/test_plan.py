@@ -13,7 +13,7 @@ from agentrealm_agent import config
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
-from agentrealm_agent.pathing import path_for_plan_op, replan
+from agentrealm_agent.pathing import note_goto_reached, path_for_plan_op, replan
 from agentrealm_agent.plan import (
     EXPLORE_ANYWHERE,
     PLAN_STALL_SECONDS,
@@ -469,6 +469,26 @@ class RunnerPlanTest(unittest.TestCase):
         self.assertEqual(r.mem.goal_op, op, "same goals: path kept")
         self.reload(r, 'goals = ["buy:lamp"]\n')
         self.assertEqual((r.mem.path, r.mem.goal, r.mem.goal_op), ([], "", None))
+
+    def test_a_rebuilt_builtin_plan_does_not_walk_back_to_a_reached_goto(self):
+        # A16: a goals reload that falls back to the built-in plan must not add
+        # back the travel op for a goto the agent already stood on.
+        r = self.runner('goals = ["buy:torch"]\n', ["goto", "explore"])
+        r.cfg.policy.goto = (3, 0)
+        r.world.pos = (3, 0)
+        note_goto_reached(r.world, r.mem, r.cfg.policy)
+        r.world.pos = (0, 0)
+        self.reload(r, "goals = []\n")
+        self.assertNotIn("travel", [o["op"] for o in r.plan.goals])
+        self.assertEqual([o["op"] for o in r.plan.goals], ["explore_area"])
+        r._decide(r.world, r.mem, plan=r.plan)
+        self.assertNotIn(r.mem.goal, ("goto", "plan_travel"), "no walk back")
+
+    def test_a_rebuilt_builtin_plan_keeps_an_unreached_goto(self):
+        r = self.runner('goals = ["buy:torch"]\n', ["goto", "explore"])
+        r.cfg.policy.goto = (3, 0)
+        self.reload(r, "goals = []\n")
+        self.assertEqual([o["op"] for o in r.plan.goals], ["travel", "explore_area"])
 
     def test_reflex_probe_leaves_the_plan_alone(self):
         r = self.runner("", ["explore"])

@@ -101,6 +101,34 @@ class GotoPendingTest(unittest.TestCase):
         w.map_id = 2
         self.assertTrue(goto_navigation_pending(w, c.memory, c.policy))
 
+    def _satisfied(self, w, c):
+        """Both checks agree on whether the goto is satisfied (A16): pending and the goals loop."""
+        found, _ = plan_goal("goto", w, c.memory, c.policy, c.rng, set(), set(), c.knowledge)
+        pending = goto_navigation_pending(w, c.memory, c.policy)
+        self.assertEqual(pending, found is not None, "pending and plan_goal agree")
+        return not pending
+
+    def test_a_map_round_trip_keeps_it_satisfied_without_goto_map(self):
+        # Reach on map 1, warp to map 2 and back: policy.goto never changed.
+        w, c = world(), ctx(goto=True)
+        w.pos = GOTO
+        note_goto_reached(w, c.memory, c.policy)
+        w.map_id, w.pos = 2, (3, 0)
+        note_goto_reached(w, c.memory, c.policy)
+        w.map_id, w.pos = 1, (5, 0)
+        note_goto_reached(w, c.memory, c.policy)
+        self.assertTrue(self._satisfied(w, c))
+
+    def test_a_goto_map_change_is_owed_by_both_checks(self):
+        w, c = world(), ctx(goto=True)
+        w.pos = GOTO
+        note_goto_reached(w, c.memory, c.policy)
+        w.pos = (5, 0)
+        self.assertTrue(self._satisfied(w, c))
+        c.policy.goto_map = 1  # same map, set explicitly: a changed policy goto
+        note_goto_reached(w, c.memory, c.policy)
+        self.assertFalse(self._satisfied(w, c))
+
     def test_lifts_during_the_backoff_and_comes_back_after_it(self):
         w, c = world(), ctx(goto=True)
         nav_stuck.give_up(c.memory, w, nav_stuck.track(c.memory, w, "goto", GOTO), "no_path")

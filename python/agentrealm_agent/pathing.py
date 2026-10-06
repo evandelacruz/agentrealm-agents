@@ -58,18 +58,37 @@ def goto_target(w: WorldModel, policy: Policy) -> tuple[int | None, Pos] | None:
     return dest_map, tuple(policy.goto)
 
 
+def goto_key(policy: Policy) -> tuple[int | None, Pos] | None:
+    """The ``goto`` in ``policy.goals`` as configured, (``goto_map``, cell), or None.
+
+    Unlike ``goto_target`` it does not resolve an unset ``goto_map`` to the
+    current map, so a door round trip never makes it look like a new target.
+    """
+    if policy.goto is None or "goto" not in policy.goals:
+        return None
+    return policy.goto_map, tuple(policy.goto)
+
+
+def goto_satisfied(m: Memory, policy: Policy) -> bool:
+    """The policy goto was stood on and has not changed since (A16, A58 run 8)."""
+    key = goto_key(policy)
+    return key is not None and m.goto_reached == key
+
+
 def note_goto_reached(w: WorldModel, m: Memory, policy: Policy) -> None:
     """Remember that the agent stood on the goto target (A16, A58 run 8).
 
-    Dispatch calls this once per decision, before any state runs. A goto
-    target other than the one remembered (a new or changed ``policy.goto``)
-    clears it, so the new target is owed until it is reached in turn.
+    Dispatch calls this once per decision, before any state runs. The record
+    is the goto as configured (``goto_key``), so it holds across map changes,
+    and only a new or changed ``policy.goto`` or ``policy.goto_map`` clears
+    it: that target is owed until it is reached in turn.
     """
-    goto = goto_target(w, policy)
-    if m.goto_reached is not None and m.goto_reached != goto:
+    key = goto_key(policy)
+    if m.goto_reached is not None and m.goto_reached != key:
         m.goto_reached = None
+    goto = goto_target(w, policy)
     if goto is not None and w.map_id == goto[0] and w.pos == goto[1]:
-        m.goto_reached = goto
+        m.goto_reached = key
 
 
 def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
@@ -81,13 +100,13 @@ def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
     Heal is not deferred, so a hurt character still walks to safety.
 
     The goto is owed until the agent stands on its target. Once reached it
-    is satisfied (``note_goto_reached``): stepping off does not owe it again,
-    and Explore and the other states run as normal (A16, A58 run 8). A new or
-    changed target is owed again. An unreached goto that stuck detection gave
+    is satisfied (``goto_satisfied``): stepping off or leaving the map does
+    not owe it again, and Explore and the other states run as normal (A16,
+    A58 run 8). A new or changed ``policy.goto`` or ``goto_map`` is owed again. An unreached goto that stuck detection gave
     up on is not owed while backed off, and is owed again when the backoff ends.
     """
     goto = goto_target(w, policy)
-    if goto is None or m.goto_reached == goto:
+    if goto is None or goto_satisfied(m, policy):
         return False
     dest_map, target = goto
     if w.map_id != dest_map or w.pos is None or w.pos == target:
@@ -697,9 +716,8 @@ def plan_goal(
         return ([rng.choice(sorted(options))] if options else None), None
     if goal == "goto":
         # config.load guarantees goto is set when the goal is listed.
-        dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
-        target = tuple(policy.goto)
-        if m.goto_reached == (dest_map, target):  # satisfied: never walked back to (A16)
+        dest_map, target = goto_target(w, policy)
+        if goto_satisfied(m, policy):  # reached: never walked back to (A16)
             return None, None
         if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
             return None, None

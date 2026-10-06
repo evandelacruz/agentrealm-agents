@@ -60,7 +60,6 @@ def _plan_choice(w: WorldModel, ctx: PlayContext, op: GoalOp) -> BreakChoice | N
 def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> StateOutcome:
     """One Break round: the plan's ``break_block`` op, else stuck step 2."""
     m = ctx.memory
-    _, plan_avoid, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)
     op = my_op(ctx, state)
     att = nav_stuck.active(m, w)
     if op is not None:
@@ -74,7 +73,17 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
         if att is not None and att.level == nav_stuck.BREAK:
             nav_stuck.escalate(m, w, att, "no_break")
         return StateOutcome(None, "nothing to break", state=state)
+    return break_toward(w, ctx, choice, state)
 
+
+def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: str = "Break") -> StateOutcome:
+    """Open ``choice``'s block: arm its supply and ``Use`` it in reach, else step toward it.
+
+    **Break** runs it, and so does **Heal** for food behind a block the
+    weapon opens (A10).
+    """
+    m = ctx.memory
+    _, plan_avoid, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)
     reach = use_reach(ctx.knowledge, choice.supply.code)
     intents: list[dict] = []
     if w.armed_code != choice.supply.code:

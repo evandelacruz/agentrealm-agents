@@ -52,7 +52,10 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
     skip spends nothing this window: calm, and the last poll's queue still
     covers it (poll_cadence, M6). The reads rank above tick, so a calm gap's
     spare windows go to stale terrain first, then stale entities, then a
-    pending ``get_zone`` when the gap would otherwise be skipped (A7). Urgent
+    pending ``get_zone`` when the gap would otherwise be skipped (A7). Entities
+    are stale ``entity_refresh`` ticks after the last read or delta, and also
+    that long after the last real read once we have moved: deltas alone
+    missed hostiles a walk ran into (A16 Walk run 4). Urgent
     windows still take those reads, because entities come only from reads
     until snapshot deltas fold them in (M6 remaining), but never a zone read.
     idle reads nothing past position, zones included: it only polls for events.
@@ -80,7 +83,7 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
         return gate_tick_call(w, m, policy)
     if w.terrain_stale():
         return "terrain"
-    if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh:
+    if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh or w.entity_read_due(policy.entity_refresh):
         return "entities"
     return _tick_zone_or_skip(w, m, policy)
 

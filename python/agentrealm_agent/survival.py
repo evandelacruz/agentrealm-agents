@@ -6,11 +6,13 @@ import math
 from typing import TYPE_CHECKING
 
 from .threat import ThreatTable, type_key_for_entity
+from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe, safe_tiles
 
 if TYPE_CHECKING:
     from .config import Policy
+    from .knowledge_base import KnowledgeBase
 
 # Stated assumptions until measured (GAME_NOTES.md Open questions, "Assumed
 # until measured"). Only the win estimate reads them; A23 refines it.
@@ -114,17 +116,48 @@ def on_safe_tile(w: WorldModel) -> bool:
     return known_safe(w, w.map_id, w.pos)
 
 
-def nearest_safe_goal(w: WorldModel) -> Pos | None:
-    """Nearest known safe cell on the current map, or None."""
+def retreat_goal(w: WorldModel, knowledge: KnowledgeBase | None) -> Pos | None:
+    """Where Retreat heads: the nearest known safe cell on this map, with the
+    town cell the world read gave as one more candidate, or None (A9).
+
+    So a character that has read no safe zone yet still runs for town
+    instead of standing its ground (A16 Walk run 4).
+    """
     if w.map_id is None or w.pos is None:
         return None
-    here = w.pos
-    safes = safe_tiles(w, w.map_id)
-    if not safes:
+    goals = set(safe_tiles(w, w.map_id))
+    town = town_from_kb(knowledge)
+    if town is not None and town[0] == w.map_id:
+        goals.add(town[1])
+    if not goals:
         return None
-    if here in safes:
+    here = w.pos
+    if here in goals:
         return here
-    return min(safes, key=lambda p: (chebyshev(p, here), p))
+    return min(goals, key=lambda p: (chebyshev(p, here), p))
+
+
+# The corridor search each retreat danger profile keeps (``pathing.nav_search``):
+# a corridor priced on one profile is never reused on another, since a finished
+# corridor is replanned only when a tile on it gets dearer (A13).
+RETREAT_NAV = "safe:retreat"
+LOSING_NAV = "safe:losing"
+
+
+def pursuer_peaks(w: WorldModel, policy: Policy, everyone: bool = False) -> dict[tuple[str, int], int]:
+    """Danger peak 0 for the hostiles a retreat runs from: the fight's group and
+    whoever hit us last, or every hostile in view when ``everyone`` (A9).
+
+    So a retreat path takes the shortest way to safety instead of detouring
+    round a chaser that follows anyway (A23 survive-a-fight run 1), and still
+    keeps clear of hostiles it has not met. Their cells stay occupied, so it
+    never runs through one.
+    """
+    if everyone:
+        chasing = [e for e in w.entities if e.kind in policy.hostile]
+    else:
+        chasing = combat_group(w, policy) + [e for e in w.entities if is_attacker(w, e)]
+    return {(e.kind, e.id): 0 for e in chasing}
 
 
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:
@@ -190,6 +223,14 @@ def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]
         return False
     if policy.on_hostile == "fight" and would_lose(w, policy, params):
         return True
+    return at_health_floor(w, params, group)
+
+
+def at_health_floor(w: WorldModel, params: dict[str, float | int], group: list[Entity]) -> bool:
+    """The next effective ``retreat_hits`` hits from ``group`` could kill: the health floor (A9).
+
+    Retreat runs at or below it, and Flee never picks a fight it would lose there.
+    """
     eff = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
     hits = effective_retreat_hits(int(params["retreat_hits"]), eff)
     return retreat_by_health(w.health, hits, max_hit_damage(group, w.threat))

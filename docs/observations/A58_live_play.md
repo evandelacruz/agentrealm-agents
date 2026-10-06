@@ -64,7 +64,37 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Flee commits to an escape (A9).** Re-picking the greedy best step every decision cannot settle against two moving hostiles: each of their moves makes the cell just left the best again. Flee now plans a multi-step escape and walks it until it arrives, is blocked, or Flee stops. The first step is still the best single step (ties toward a known safe tile; standing still when cornered); the rest is a route to the nearest known safe tile when the agent gets to every cell of it before any hostile could, else up to 6 seen cells away from the hostiles under the same rule. Offline test `test_two_moving_hostiles_do_not_pin_flee_between_two_cells` rebuilds the runs 4/6 pin (two NPCs stepping back and forth, the agent on a diagonal pair); it fails on `main` and passes here.
 - **Survival pacing corrects itself in the guard (A15).** When only Flee and Retreat made the pacing moves, the oscillation guard hands the paced cells to them: on that same decision Flee plans a fresh escape that keeps off them, or Retreat routes around them. Nothing is given up and the smoke abort count is unchanged.
 - **Withdrawn:** the reverse-step skip in `flee_step`, the goto back-step block (`goto_back_avoid`, `nav_blocked_for_walk`), and the Break deferral while `should_flee`. `test_the_goto_walk_pacing_on_its_own_is_given_up` shows the guard alone ends run 5's goto pacing; `test_a_goto_behind_the_agent_takes_the_step_back` keeps a single step back allowed.
-- **Status:** offline only; no live run since run 6. **Next:** the full live hour once this merges.
+- **Status:** merged (#92, #93); the next live hour was run 7, below.
+
+## Run 7 — FAIL: full hour, goto dropped short and Heal paced (~3600 s)
+
+- **Character:** chosen at run time via `CHARACTER_NAME` (not committed).
+- **Verdict:** exit 1 after **3600.5 s** wall clock. **Did not pass** the A16 gate.
+- **Gate metrics:** deaths 0; retreat misses 0; recover withdraws 0; loop false; API errors 0; oscillation events 417 (gave up a target: 0); heal actions 2526; lives last seen 5; navigation target `(575, 375)` from `(425, 375)` **neither reached nor given up** (max Chebyshev from origin 237); safe-zone regen **not measured**.
+- **Goto (first ~13 min):** the agent walked east to `(556, 369)` (~19 blocks short of the smoke target) with queues labelled `goto → (556, 369)` and intermediate corridor waypoints. At tick **3475822** it stood on `(556, 369)` with the last goto queue still aimed at that waypoint; at **3475832** the next queue was **`explore → (525, 385)`** with no stuck give-up on `(575, 375)`. The hour then wandered south and west; Flee fired briefly (committed escape, no run 4/6-style pin) but never returned to finish the 150-block walk.
+- **Heal / regen (most of the hour):** from tick **3479055** onward **Heal** walked **`heal_food → (400, 611)`** with **2526** heal actions. From **3481152** through **3511049** the character paced between **`(404, 607)`** and **`(404, 608)`** (417 oscillation events, all `nothing given up, moved by Heal`). Example window:
+
+  ```
+  t=3482195 oscillation pacing [[404, 606], [404, 607]]: nothing given up, moved by Heal
+  t=3482196 queue 1×Step 2×Wait (heal_food → (400, 611))
+  t=3482201 @404,607 — (queue held)
+  t=3482212 @404,608 — (queue held)
+  t=3482264 oscillation pacing [[404, 607], [404, 608]]: nothing given up, moved by Heal
+  t=3482265 queue 1×Step 2×Wait (heal_food → (400, 611))
+  … same two cells and 1–2 step queues for the rest of the hour …
+  t=3511036 oscillation pacing [[404, 607], [404, 608]]: nothing given up, moved by Heal
+  ```
+
+- **Root cause (from the code; no agent change in this PR):**
+  1. **Navigation (A16 bug).** `(556, 369)` was the end of the goto's planned path (Explore labels a step with `m.path[-1]`), not the target. Arriving there, Explore's kept path has no next step, so it calls `pathing.replan`. `replan` tries `goto` first; when the goto plan has no seen, open first step, it falls through to `explore`, which gets the step. The goto's miss is handed to stuck detection only when no goal gets a step, so the goto attempt never failed a window, never escalated and was never given up, while `goto_navigation_pending` stayed true. Every later decision repeated that fallthrough. Why the goto plan found no open step from `(556, 369)` is not in this trace.
+  2. **Regen (A10 bug).** `HealState._walk_toward` keeps `m.path` and replans only when the goal or endpoint changes or the next step is blocked; it does not replan every tick. The gap is that nothing bounds the food walk. Each `heal_food` decision sends a `Step`, and `HealState.act` clears `heal_wait` whenever it sends intents, so A10's "no health back for 600 ticks, yield to Explore" never starts. The oscillation guard gives nothing up for Heal's own moves, as A15 specifies, so neither it nor the smoke abort stopped the walk. The run spent ~30k ticks on one food item at `(400, 611)`, pacing `(404, 607)` ↔ `(404, 608)`, never resting on a safe tile for `note_regen_sample`.
+- **Why the two cells.** The window search the planner falls back on when its node budget runs out never counted the cell the agent stood on. Beside food it could not reach, it always stepped to a neighbour, and from that neighbour the start was the best cell again. The same holds at the goto's last waypoint: there the target, once in sight, had no path at all.
+- **Fix (#101, tested offline):**
+  - `replan` tries only the `goto` while it is owed, so a goto with no step is escalated and given up by stuck detection on that target (A16).
+  - The window search lets the agent stay put; a cell no better than where it stands is no path.
+  - Every Heal walk, and Loot's walk to a pickup, is a stuck attempt (`pathing.bounded_step`), given up on no path, on no progress in 20 moves or 300 ticks, or by the oscillation guard (A10, A15).
+  - Regression tests in `python/tests/test_a58_run7.py`: `test_goto_stays_owed_until_stuck_detection_gives_it_up`, `test_explore_moves_only_while_the_goto_is_backed_off`, `test_heal_gives_the_food_up_instead_of_pacing`, `test_loot_gives_the_pickup_up_instead_of_pacing`, `test_the_planner_has_no_step_off_the_dead_end`, `test_heal_only_pacing_is_given_up_by_the_guard`, and the `bounded_step` window tests; plus `test_an_owed_goto_starting_in_fog_keeps_the_move` in `test_cost_grid.py`.
+- **Status:** **Next:** rerun the full live hour.
 
 ## Done-when
 

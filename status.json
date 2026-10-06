@@ -41,7 +41,7 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 
-  "A58": {"state": "partial", "remaining": "No live PASS yet. Runs 4 and 6 were stopped by hand with Flee pacing between two cells against two hostiles; run 5 aborted on sustained goto oscillation. Flee now commits to a multi-step escape and the oscillation guard forces one on Flee/Retreat pacing (A9, A15), tested offline only. The next full live hour runs after that merges. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "Run 7 (full hour on main after #92/#93): exit 1 — goto (575,375) neither reached nor given up after stopping at corridor waypoint (556,369); safe-zone regen not measured after Heal paced heal_food between (404,607) and (404,608) for most of the hour. Both fixed offline (goto owed until given up, bounded Heal and Loot walks); rerun the live hour. Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 

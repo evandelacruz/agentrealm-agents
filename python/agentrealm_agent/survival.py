@@ -61,10 +61,7 @@ def is_hostile(w: WorldModel, policy: Policy, e: Entity) -> bool:
     """
     if e.kind not in policy.hostile:
         return False
-    if e.kind != "npc" or e.is_boss or is_attacker(w, e):
-        return True
-    key = type_key_for_entity(e)
-    return key is not None and (key in w.hostile_types or w.threat.measured(key))
+    return e.kind != "npc" or known_hostile(w, e)
 
 
 def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
@@ -127,6 +124,16 @@ def threatening(w: WorldModel, group: list[Entity]) -> bool:
 def is_attacker(w: WorldModel, e: Entity) -> bool:
     """``e`` is the hostile the last hostile hit named as its source."""
     return w.attacker == (e.kind, e.id)
+
+
+def known_hostile(w: WorldModel, e: Entity) -> bool:
+    """``e`` has shown it is hostile: a boss, the last thing that hit us, or of a
+    type that has swung at us, hit us or died in view this run
+    (``WorldModel.hostile_types``, ``threat``). Helpers never do."""
+    if e.is_boss or is_attacker(w, e):
+        return True
+    key = type_key_for_entity(e)
+    return key is not None and (key in w.hostile_types or w.threat.measured(key))
 
 
 def combat_group(w: WorldModel, policy: Policy) -> list[Entity]:

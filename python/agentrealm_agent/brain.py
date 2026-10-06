@@ -105,6 +105,8 @@ class Decision:
     reflex: bool = False
     # Pre-built multi-intent queue (A23 **Fight** attack + retreat tail).
     submit_queue: list[dict] | None = None
+    # The state that decided, so the runner knows whose intent it submits (A65).
+    state: str = ""
 
 
 def decide(
@@ -139,7 +141,7 @@ def decide(
     intents = outcome.intents
     intent = intents[0] if intents else None
     submit_queue = intents if intents and outcome.paced else None
-    return Decision(intent, outcome.reason, outcome.reflex, submit_queue=submit_queue)
+    return Decision(intent, outcome.reason, outcome.reflex, submit_queue=submit_queue, state=outcome.state)
 
 
 def walkable_prefix(

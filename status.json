@@ -131,5 +131,7 @@
 
   "A63": {"state": "done", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield, gather_status and gather_run; Gather skips barren regions unless the op names one. Run 1 made no cut (Gather bar was safe zones only); run 2 cut one town cell 168 times with no effect. Both fixed (field cells first, no-effect cells held out, 3 no-effect cuts mark a region or safe zone uncuttable); rerun pending."},
 
-  "A64": {"state": "open", "note": "A23 run 2: decisions blocked the loop 5-17 s (nearest_target A* per target, danger() per hostile, full _decide in reflex_while_held)."}
+  "A64": {"state": "open", "note": "A23 run 2: decisions blocked the loop 5-17 s (nearest_target A* per target, danger() per hostile, full _decide in reflex_while_held)."},
+
+  "A65": {"state": "done", "note": "Planner State nearby_npcs and npcs_spoken_to; Greet reflex says hello once to a likely helper in sight (stays put, not known hostile; none off safe ground while NPCs are hostile). No live run yet."}
 }

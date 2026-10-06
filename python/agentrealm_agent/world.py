@@ -237,6 +237,9 @@ class WorldModel:
     attacker_tick: int | None = None  # tick of that hit; a later hit naming no one clears both
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
+    # NPC id -> (cell, tick it was first seen there): how long each NPC in
+    # view has stood still. Helpers stay put (GAME_NOTES NPCs); Greet (A65).
+    npc_still: dict[int, tuple[Pos, int]] = field(default_factory=dict)
     # NPC types that have shown they are hostile this run: one swung at or hit
     # us, or one died in view (``NPCDied`` names only hostiles). Townsfolk and
     # helpers never land here, so Flee and Retreat never answer them (A9, A23).
@@ -455,7 +458,8 @@ class WorldModel:
         self._set_entities(list(by_key.values()), self.tick)
 
     def _set_entities(self, entities: list[Entity], tick: int) -> None:
-        """Replaces the entity list, noting in ``entity_moves`` each one that moved."""
+        """Replaces the entity list, noting in ``entity_moves`` each one that moved
+        and in ``npc_still`` how long each NPC has stood still (A65)."""
         before = {self._entity_key(e): e.pos for e in self.entities}
         for e in entities:
             key = self._entity_key(e)
@@ -466,6 +470,22 @@ class WorldModel:
         for key in [k for k in self.entity_moves if k not in seen]:
             del self.entity_moves[key]
         self.entities = entities
+        self._note_npc_cells(tick)
+
+    def _note_npc_cells(self, tick: int) -> None:
+        """Keep ``npc_still`` for the NPCs in view: a moved NPC starts again."""
+        still = {}
+        for e in self.entities:
+            if e.kind != "npc":
+                continue
+            seen = self.npc_still.get(e.id)
+            still[e.id] = seen if seen is not None and seen[0] == e.pos else (e.pos, tick)
+        self.npc_still = still
+
+    def npc_still_ticks(self, e: Entity) -> int:
+        """How long ``e`` has stood on its cell while in view; 0 when it just moved or was never noted."""
+        seen = self.npc_still.get(e.id)
+        return self.tick - seen[1] if seen is not None and seen[0] == e.pos else 0
 
     def _apply_terrain_delta(self, patch: dict) -> None:
         """Updates known tiles from an observation terrain patch."""

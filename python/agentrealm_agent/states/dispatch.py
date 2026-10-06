@@ -38,6 +38,7 @@ from .explore import ExploreState
 from .fight import FightState
 from .flee import FleeState
 from .gather import GatherState
+from .greet import GreetState
 from .heal import HealState
 from .idle import IdleState
 from .investigate import InvestigateState
@@ -54,8 +55,8 @@ from .wait import WaitState
 
 # Act on what is happening now (PLAYABLE_AGENT_PLAN.md State machine). Sync
 # and Downed only wait, the forced waits. Escape, Retreat and Heal (A10)
-# are survival; Fight (A23) slots in before Flee; then Pickup in reach (A20)
-# and Recover (A11).
+# are survival; Fight (A23) slots in before Flee; then Pickup in reach (A20),
+# Recover (A11), and Greet (A65), a one-tick hello to an NPC in sight.
 REFLEXES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
@@ -66,6 +67,7 @@ REFLEXES: tuple[State, ...] = (
     FleeState(),
     PickupState(),
     RecoverState(),
+    GreetState(),
 )
 
 # Run only for the plan's top op (``plan.OP_STATE``). At most one guards for

@@ -62,7 +62,7 @@ OP_FIELDS: dict[str, str] = {
     "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" and "entrance" take x, y for a given one, else the nearest known',
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
-    "say": "text, and npc_id or npc_type",
+    "say": "text, and exactly one of npc_id (an id from State nearby_npcs) or npc_type (an NPC type code; the nearest NPC of that type in sight)",
     "buy": "code (a potion, a tool, gear)",
     "break_block": 'x, y, capability ("cut"|"chop"|"smash"|"burn"|"blast")',
     "use_block": "x, y, code (the supply to use on it)",

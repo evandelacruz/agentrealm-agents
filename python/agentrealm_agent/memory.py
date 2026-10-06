@@ -72,6 +72,8 @@ class Memory:
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     goto_reached: tuple[int | None, Pos] | None = None  # (policy.goto_map, cell) of the policy goto once stood on: satisfied, not owed again (A16)
     investigate_rejections: dict[str, int] = field(default_factory=dict)  # Read/Say key -> refused count (A30)
+    greetings: dict[int, tuple[int, int | None]] = field(default_factory=dict)  # npc id -> (greetings sent, tick of the last), Greet (A65)
+    greet_say_npc: int | None = None  # npc id of the last Say submitted when Greet decided it; None after any other Say (A65)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
     gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass" | "out", cell) Gather is walking toward (A22)
     gather_status: str = ""  # Gather's last decision: cutting, cuts have no effect here, heading out of safe ground, no cuttable cell in view, or region barren (planner State)

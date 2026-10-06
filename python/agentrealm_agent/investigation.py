@@ -5,9 +5,11 @@ top-level knowledge-base keys of its own (PLAYABLE_AGENT_PLAN Knowledge base):
 
 - ``read_cells``: ``{"<map_id>": ["x,y", ...]}``, readable cells whose
   ``Read`` applied;
-- ``spoken_npcs``: NPC ids whose ``Say`` applied.
+- ``spoken_npcs``: NPC ids a planner ``say`` op's ``Say`` applied to;
+- ``greeted_npcs``: NPC ids Greet's hello applied to (A65). Kept apart, so a
+  hello never settles a later ``say`` op with the planner's own text.
 
-Both grow only with what the world holds, one entry per sign or NPC. Clue
+Each grows only with what the world holds, one entry per sign or NPC. Clue
 text with place and time lives in ``kb.clues`` (``clues.py``, A32).
 """
 
@@ -20,10 +22,16 @@ from .world import Pos, WorldModel, chebyshev
 
 READ_CELLS_KEY = "read_cells"
 SPOKEN_NPCS_KEY = "spoken_npcs"
+GREETED_NPCS_KEY = "greeted_npcs"
+# What Greet says (A65).
+GREET_TEXT = "hello"
 # Say reaches an NPC this many blocks away.
 SPEECH_RANGE = 25
 # A Read or Say refused this many times ends its op (Investigate, A30).
 MAX_REJECTIONS = 3
+# The API does not mark helpers (PLAN.md Server gaps). Helpers stay put, so an
+# NPC that has stood on one cell this long in view (5 s) may be one (A65).
+HELPER_STILL_TICKS = 50
 
 
 def read_key(map_id: int, pos: Pos) -> str:
@@ -79,11 +87,11 @@ def mark_cell_read(kb: KnowledgeBase | None, map_id: int, pos: Pos) -> None:
             cells.append(_cell(pos))
 
 
-def spoken_npc_ids(kb: KnowledgeBase | None) -> set[int]:
+def _npc_ids(kb: KnowledgeBase | None, key: str) -> set[int]:
     if kb is None:
         return set()
     with kb.lock:
-        raw = kb.extra.get(SPOKEN_NPCS_KEY, [])
+        raw = kb.extra.get(key, [])
         if not isinstance(raw, list):
             return set()
         out: set[int] = set()
@@ -95,12 +103,28 @@ def spoken_npc_ids(kb: KnowledgeBase | None) -> set[int]:
         return out
 
 
-def mark_npc_spoken(kb: KnowledgeBase | None, npc_id: int) -> None:
+def _mark_npc(kb: KnowledgeBase | None, key: str, npc_id: int) -> None:
     if kb is None:
         return
     with kb.lock:
-        raw = kb.extra.get(SPOKEN_NPCS_KEY)
+        raw = kb.extra.get(key)
         if not isinstance(raw, list):
-            raw = kb.extra[SPOKEN_NPCS_KEY] = []
+            raw = kb.extra[key] = []
         if npc_id not in raw:
             raw.append(npc_id)
+
+
+def spoken_npc_ids(kb: KnowledgeBase | None) -> set[int]:
+    return _npc_ids(kb, SPOKEN_NPCS_KEY)
+
+
+def mark_npc_spoken(kb: KnowledgeBase | None, npc_id: int) -> None:
+    _mark_npc(kb, SPOKEN_NPCS_KEY, npc_id)
+
+
+def greeted_npc_ids(kb: KnowledgeBase | None) -> set[int]:
+    return _npc_ids(kb, GREETED_NPCS_KEY)
+
+
+def mark_npc_greeted(kb: KnowledgeBase | None, npc_id: int) -> None:
+    _mark_npc(kb, GREETED_NPCS_KEY, npc_id)

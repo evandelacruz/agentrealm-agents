@@ -23,6 +23,17 @@ class BossFight:
 
 
 @dataclass
+class HuntSearch:
+    """Travel's search for a hunting ground (A27): the ``travel`` op it runs
+    for, the tick it began and the tick Travel last worked on it. While it
+    is fresh, spare windows read zones around the character for one."""
+
+    op: dict
+    since: int
+    last: int
+
+
+@dataclass
 class Memory:
     """What the brain carries between windows besides the world model."""
 
@@ -54,6 +65,7 @@ class Memory:
     resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
     path_blockers: set = field(default_factory=set)  # blocked cells the walk queue already crossed when sent (A43)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
+    hunt_search: HuntSearch | None = None  # Travel's search for a hunting ground when none is known (A27)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     goto_reached: tuple[int | None, Pos] | None = None  # (policy.goto_map, cell) of the policy goto once stood on: satisfied, not owed again (A16)
     investigate_rejections: dict[str, int] = field(default_factory=dict)  # Read/Say key -> refused count (A30)

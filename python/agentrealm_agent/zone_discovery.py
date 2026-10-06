@@ -17,6 +17,12 @@ if TYPE_CHECKING:
 
 # Chebyshev radius around each respawn anchor for the first pass of probes.
 RESPAWN_PROBE_RADIUS = 8
+# While Travel searches for a hunting ground (A27), spare windows read one
+# cell in every HUNT_PROBE_SPACING × HUNT_PROBE_SPACING square of the view,
+# so a search covers ground without reading every cell.
+HUNT_PROBE_SPACING = 4
+# Travel worked on the search within this many ticks: its probes still run.
+HUNT_PROBE_FRESH_TICKS = 50
 
 
 def apply_town(w: WorldModel, town: dict | None) -> None:
@@ -60,7 +66,9 @@ def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:
     """The next revealed cell that still needs a zone read, or None.
 
     Cells within RESPAWN_PROBE_RADIUS of a respawn anchor come first, nearest
-    the anchor; then cells on the current path. Only revealed cells qualify,
+    the anchor; then, while Travel searches for a hunting ground, a sparse
+    grid of cells in view (``hunt_probes``), nearest first; then cells on the
+    current path. Only revealed cells qualify,
     since get_zone refuses an unrevealed one. Called once per spare window by
     choose_call, which hands the pick to the runner in Memory.zone_probe.
     """
@@ -99,15 +107,34 @@ def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:
             for dx in range(-RESPAWN_PROBE_RADIUS, RESPAWN_PROBE_RADIUS + 1):
                 add(map_id, (anchor[0] + dx, anchor[1] + dy), 0)
 
-    for step in m.path:
-        if w.map_id is not None:
-            add(w.map_id, step, 1)
+    if w.map_id is not None:
+        for pos in hunt_probes(w, m):
+            add(w.map_id, pos, 1)
+        for step in m.path:
+            add(w.map_id, step, 2)
 
     if not candidates:
         return None
     candidates.sort()
     _pri, _dist, map_id, pos = candidates[0]
     return map_id, pos
+
+
+def hunt_probes(w: WorldModel, m: Memory) -> list[Pos]:
+    """Grid cells in view to read while Travel searches for a hunting ground
+    (A27): ``get_zone`` gives ``strength_ceiling`` only on a hunting cell.
+    Empty when no search is fresh."""
+    s = m.hunt_search
+    if s is None or w.pos is None or w.tick - s.last > HUNT_PROBE_FRESH_TICKS:
+        return []
+    x0, y0, width, height = w.perception_rect()
+    first_x = x0 + (-x0) % HUNT_PROBE_SPACING
+    first_y = y0 + (-y0) % HUNT_PROBE_SPACING
+    return [
+        (x, y)
+        for y in range(first_y, y0 + height, HUNT_PROBE_SPACING)
+        for x in range(first_x, x0 + width, HUNT_PROBE_SPACING)
+    ]
 
 
 def _opt_int(v) -> int | None:

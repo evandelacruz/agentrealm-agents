@@ -308,13 +308,13 @@ This is what makes a second run better than the first, and it is what the strate
 
   Top level has exactly three keys. `goals` replaces the goal stack, tried in order. `params` is applied at once, within the limits below. `notes` is free text for the trace. Everything the agent should do, speech included, is a goal op; a `set_param` op changes a param only when the goal stack reaches it, within the same limits.
 
-- **Param limits.** The strategist may only tighten survival params, never loosen them past the directives file's value (or the default when the file sets none): it may raise `fight_margin`, `retreat_hits`, `lives_floor` and `potion_reserve`, and lower `risk`. `curiosity` it may set anywhere in its range. A value that loosens a survival param, or is out of range (see the param table), is dropped and logged. Only the directives file loosens them.
+- **Param limits.** The strategist may only tighten survival params, never loosen them past the directives file's value (or the default when the file sets none): it may raise `fight_margin`, `retreat_hits`, `lives_floor` and `potion_reserve`, and lower `risk`. `curiosity` it may set anywhere in its range. A value that loosens a survival param, or is out of range (see the param table), is dropped and logged, and so is a `set_param` op that would loosen one. The next prompt's State repeats each such rejection with its reason and the param's meaning (`last_reply_rejected`), so the planner learns which way a param goes. Only the directives file loosens them.
 
 - **Operations** form a fixed set. Each maps onto a state and has fixed fields; every op may also carry `why` (free text, logged). An op with an unknown name, a missing field, or a field of the wrong type is dropped and logged.
 
   | Op | Fields | State |
   |---|---|---|
-  | `travel` | `to` (`entrance`, `town`, `hunting_ground`, `shop`, `point`), `x`, `y`, optional `map_id` | `Travel` |
+  | `travel` | `to` (`entrance`, `town`, `hunting_ground`, `shop`, `point`), `x`, `y` (needed only for a `point`; `town` and `hunting_ground` take none; `shop` and `entrance` without them mean the nearest known), optional `map_id` | `Travel` |
   | `explore_area` | `x`, `y`, `radius` | `Explore` |
   | `read` | `x`, `y` for a readable cell, or `supply_id` for a scroll | `Investigate` |
   | `say` | `npc_id` or `npc_type`, `text` | `Investigate` |

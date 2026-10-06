@@ -5,30 +5,44 @@ nearest known shop or hunting ground, an entrance), then walks there across
 maps through known door warps (A26), with stuck escalation on each map's leg
 (A15). ``entrance`` at ``0, 0`` walks to the nearest unexplored door.
 Arriving finishes the op.
+
+A ``hunting_ground`` with none known searches for one: it explores the
+map's frontier while spare windows read zones around the character
+(``zone_discovery.hunt_probes``), until a read finds a hunting cell it may
+enter, the frontier runs out, or ``HUNT_SEARCH_SECONDS`` pass.
 """
 
 from __future__ import annotations
 
 from ..config import Policy
 from ..knowledge_base import KnowledgeBase
-from ..memory import Memory
+from ..memory import HuntSearch, Memory
 from ..navigation import doors_goal_path, route_first_leg
 from ..navigation import stuck as nav_stuck
 from ..navigation import walk as nav_walk
 from ..pathing import grid_params, guided_step, nav_search, next_step
-from ..plan import GoalOp
+from ..plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from ..travel.ops import travel_op_from_plan_goal
 from ..travel.resolve import ResolvedDestination, at_destination, resolve_travel
 from ..world import Pos, WorldModel
 from .base import PlayContext, State, StateOutcome, my_op
-from .explore import plan_sets
+from .explore import explore_outcome, plan_sets
 from .intents import set_position
+
+# A hunting-ground search gives up after this long (A27).
+HUNT_SEARCH_SECONDS = 300
+# A search Travel has not worked on for this long starts over: the op was
+# off the top (a Retreat, a newer op) and is back.
+HUNT_SEARCH_RESUME_SECONDS = 60
+# What a hunting-ground search explores: the whole map's frontier.
+HUNT_SEARCH_AREA: GoalOp = {"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE}
 
 
 class TravelState(State):
     """Executor for ``travel``. With no destination the knowledge base can
     resolve yet (``travel:shop`` before any priced supply is seen) it sends
-    nothing: the op stalls and is dropped (A34)."""
+    nothing: the op stalls and is dropped (A34). A ``hunting_ground`` with
+    none known searches for one instead (``search_hunting_ground``)."""
 
     name = "Travel"
 
@@ -45,6 +59,9 @@ class TravelState(State):
         op = my_op(ctx, self.name)
         assert op is not None and ctx.plan is not None
         dest = resolve_destination(world, ctx, op)
+        if dest is None and op["to"] == "hunting_ground":
+            return search_hunting_ground(world, ctx, op)
+        m.hunt_search = None
         if dest is None:
             return StateOutcome(None, f"travel:{op['to']} not resolved yet", state=self.name)
         if at_destination(world, dest):
@@ -76,6 +93,32 @@ class TravelState(State):
                 return StateOutcome(None, f"{goal}: next cell unseen, waiting", state=self.name, wait=True, progress=False)
         # Stuck at step 2: Break, below, opens the way this decision.
         return StateOutcome(None, f"{goal} blocked", state=self.name)
+
+
+def search_hunting_ground(world: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
+    """No hunting ground known: explore the frontier while spare windows read
+    zones for one (A27). Bounded: the op is dropped once the frontier runs
+    out or the search has run ``HUNT_SEARCH_SECONDS``."""
+    m, plan = ctx.memory, ctx.plan
+    assert plan is not None
+    s = m.hunt_search
+    if s is None or s.op != op or world.tick - s.last > HUNT_SEARCH_RESUME_SECONDS * plan.tick_hz:
+        s = m.hunt_search = HuntSearch(dict(op), world.tick, world.tick)
+    s.last = world.tick
+    gave_up = ""
+    if world.tick - s.since >= HUNT_SEARCH_SECONDS * plan.tick_hz:
+        gave_up = f"no hunting ground found in {HUNT_SEARCH_SECONDS}s of searching"
+    elif not explore_targets(HUNT_SEARCH_AREA, world):
+        gave_up = "no hunting ground found and nothing left to explore"
+    if gave_up:
+        m.hunt_search = None
+        plan.drop_current(gave_up, memory=m)
+        return StateOutcome(None, f"travel:hunting_ground: {gave_up}", state=TravelState.name)
+    out = explore_outcome(
+        world, m, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=HUNT_SEARCH_AREA, state=TravelState.name
+    )
+    out.reason = f"travel:hunting_ground searching: {out.reason}"
+    return out
 
 
 def resolve_destination(w: WorldModel, ctx: PlayContext, op: GoalOp) -> ResolvedDestination | None:

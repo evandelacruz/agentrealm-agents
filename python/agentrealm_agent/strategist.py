@@ -97,8 +97,10 @@ from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .gem_yield import summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
-from .plan import OP_FIELDS, MAX_WAIT_SECONDS, Plan, parse_plan_payload
-from .world import WorldModel
+from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
+from .survival import nearest_safe_goal
+from .travel.knowledge import town_from_kb
+from .world import Pos, WorldModel, chebyshev
 
 log = logging.getLogger(__name__)
 
@@ -136,6 +138,10 @@ def _op_table() -> str:
     return "\n".join(f"- {name}: {fields}" for name, fields in OP_FIELDS.items())
 
 
+def _param_table() -> str:
+    return "\n".join(f"- {name}: {meaning}" for name, meaning in PARAM_MEANINGS.items())
+
+
 SYSTEM_PROMPT = f"""You are the planner for an Agent Realm character. Plan from the game reference above: it is the game's own documentation of its rules, intents, combat, survival, items and maps. Where it and the measured facts disagree, trust the measured facts. You own its goal stack: the states work on the op on top. With an empty stack you are not steering: the dispatcher's safe default runs (exploring in safe ground).
 
 Reply with one JSON object only, no markdown, with these keys:
@@ -147,6 +153,13 @@ Each goal is an object with "op" and that op's fields; every op may also carry "
 {_op_table()}
 
 State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel, of any kind, whose destination is a cell listed under given_up_travel: stuck detection gave up on it this run.
+
+The survival params ("params" under State, set by "params" or a set_param op). Survival params may only tighten past params_floor; a change that loosens one is ignored:
+{_param_table()}
+
+Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first.
+
+When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
 "wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game.
 
@@ -483,6 +496,7 @@ def build_prompt(
     reference_sections: str = "",
     given_up_travel: Collection[tuple[int, tuple[int, int]]] = (),
     gather_status: str = "",
+    rejected: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -492,6 +506,7 @@ def build_prompt(
         f"map_level={w.map_level} armed={w.armed_code} lives={w.lives}",
         f"worn={json.dumps(w.worn_codes, sort_keys=True)} held={json.dumps(dict(sorted(Counter(s.code for s in w.held_supplies).items())))}",
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
+        *safety_lines(w, knowledge),
         f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
         *_gather_line(plan, gather_status),
         f"params={json.dumps(plan.params, sort_keys=True)}",
@@ -504,6 +519,8 @@ def build_prompt(
     if given_up_travel:
         cells = [f"{mid}:{x},{y}" for mid, (x, y) in sorted(given_up_travel, key=str)]
         state_lines.append(f"given_up_travel={json.dumps(cells)} (cells stuck detection gave up on: never travel to them again this run)")
+    if rejected:
+        state_lines.append(f"last_reply_rejected={json.dumps(list(rejected))} (parts of your previous reply that were not applied, and why)")
     clues: list[dict[str, Any]] = []
     if knowledge is not None:
         with knowledge.lock:
@@ -518,6 +535,47 @@ def build_prompt(
         {"role": "system", "content": system_prompt(reference_sections), "cache": True},
         {"role": "user", "content": "\n\n".join(user_parts)},
     ]
+
+
+def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
+    """Whether the character stands on safe ground, and how far and which
+    way the nearest known safe tile and the town are. ``unknown`` until a
+    zone read covers where it stands."""
+    if w.pos is None or w.map_id is None:
+        return []
+    fact = w.zones.get(w.map_id, {}).get(w.pos)
+    here = "unknown (zone not read here)" if fact is None else "yes" if fact.safe else "no"
+    safe = nearest_safe_goal(w)
+    town = town_from_kb(knowledge) or (w.respawn_anchors[0] if w.respawn_anchors else None)
+    return [
+        f"safe_ground={here}",
+        f"nearest_safe={_bearing(w, (w.map_id, safe)) if safe is not None else 'none known on this map'}",
+        f"town={_bearing(w, town) if town is not None else 'unknown'}",
+    ]
+
+
+def _bearing(w: WorldModel, where: tuple[int, Pos]) -> str:
+    """``map:x,y (N cells <direction>)``, or ``here``; another map gives no distance."""
+    map_id, pos = where
+    cell = f"{map_id}:{pos[0]},{pos[1]}"
+    if map_id != w.map_id or w.pos is None:
+        return f"{cell} (another map)"
+    if pos == w.pos:
+        return f"{cell} (here)"
+    return f"{cell} ({chebyshev(w.pos, pos)} cells {compass(w.pos, pos)})"
+
+
+def compass(a: Pos, b: Pos) -> str:
+    """Which way ``b`` lies from ``a``, eight-way; y grows southward."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    # A component under half the other counts as none: (10, 3) is east.
+    ns = "north" if dy < 0 else "south" if dy > 0 else ""
+    ew = "west" if dx < 0 else "east" if dx > 0 else ""
+    if abs(dy) * 2 < abs(dx):
+        ns = ""
+    if abs(dx) * 2 < abs(dy):
+        ew = ""
+    return f"{ns}-{ew}" if ns and ew else ns or ew
 
 
 def _gather_line(plan: Plan, gather_status: str) -> list[str]:
@@ -577,6 +635,7 @@ class Strategist:
     _hurt: bool = False
     _token_budget: int = 0  # resolved tokens_per_min (token_budget)
     _idle_sent_for_tick: int = -1
+    rejected: list[str] = field(default_factory=list)  # what the last reply had dropped or ignored, for the next State
     _requests: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=1), repr=False)
     _answers: queue.Queue = field(default_factory=queue.Queue, repr=False)
     _stop: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -773,7 +832,9 @@ class Strategist:
             reference_sections=self.config.reference_sections,
             given_up_travel=runner.mem.nav_stuck.given_up_travel,
             gather_status=runner.mem.gather_status,
+            rejected=self.rejected,
         )
+        self.rejected = []  # told once
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1
         self.last_call_at = self.clock()
@@ -831,9 +892,11 @@ class Strategist:
         except ValueError as e:
             reply, record["invalid"] = None, f"reply is not JSON: {e}"
         d = runner.directives.directives
-        goals, params, notes = parse_plan_payload(
-            reply, floor_params=dict(d.params), current_params=runner.plan.params
+        (goals, params, notes), self.rejected = collect_rejections(
+            lambda: parse_plan_payload(reply, floor_params=dict(d.params), current_params=runner.plan.params)
         )
+        if self.rejected:
+            record["rejected"] = self.rejected
         if runner.acceptance is not None:
             self._report(runner.acceptance, reply, goals, record)
         runner.plan.params = params

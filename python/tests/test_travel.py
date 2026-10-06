@@ -304,3 +304,68 @@ class RunnerTravelTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HuntingGroundSearchTest(unittest.TestCase):
+    """A23 survive-a-fight run 1: `travel:hunting_ground` with none known sent
+    no move and was dropped after 30 s. It now explores while spare windows
+    read zones, until one is found, the frontier runs out, or time is up."""
+
+    def test_searches_by_exploring_and_does_not_stall(self):
+        w = grid([".........."], at=(0, 0))
+        plan = travel_plan(["travel:hunting_ground"])
+        m = Memory()
+        out = dispatch(w, ctx_for(m, KnowledgeBase.empty("sandbox"), plan))
+        self.assertEqual(out.state, "Travel")
+        self.assertTrue(out.intents, "it explores")
+        self.assertIn("searching", out.reason)
+        self.assertIsNone(plan.stalled_since_tick, "a search step is progress")
+        self.assertIsNotNone(m.hunt_search)
+
+    def test_a_zone_read_that_finds_one_ends_the_search(self):
+        w = grid([".........."], at=(0, 0))
+        plan = travel_plan(["travel:hunting_ground"])
+        m = Memory()
+        ctx = ctx_for(m, KnowledgeBase.empty("sandbox"), plan)
+        dispatch(w, ctx)
+        w.zones.setdefault(1, {})[(8, 0)] = ZoneFact(safe=False, brightness=1.0, strength_ceiling=10)
+        out = dispatch(w, ctx)
+        self.assertEqual(out.state, "Travel")
+        self.assertIn("travel:hunting_ground →", out.reason)
+        self.assertIsNone(m.hunt_search)
+
+    def test_dropped_once_nothing_is_left_to_explore(self):
+        w = grid(["#####", "#...#", "#####"], at=(1, 1))
+        plan = travel_plan(["travel:hunting_ground", "travel:point:3:1"])
+        m = Memory()
+        out = dispatch(w, ctx_for(m, KnowledgeBase.empty("sandbox"), plan))
+        self.assertEqual(plan.index, 1, "the search had nowhere to go")
+        self.assertIsNone(m.hunt_search)
+        self.assertIn("nothing left to explore", out.reason if out.state == "Travel" else out.yielded[0])
+
+    def test_dropped_after_the_search_time(self):
+        from agentrealm_agent.states.travel import HUNT_SEARCH_SECONDS
+
+        w = grid([".........."], at=(0, 0))
+        plan = travel_plan(["travel:hunting_ground"])
+        m = Memory()
+        ctx = ctx_for(m, KnowledgeBase.empty("sandbox"), plan)
+        for _ in range(HUNT_SEARCH_SECONDS // 30):
+            dispatch(w, ctx)
+            w.tick += 30 * plan.tick_hz
+        self.assertEqual(plan.index, 0, "still searching within the bound")
+        dispatch(w, ctx)
+        self.assertEqual(plan.index, 1, "dropped at the bound")
+        self.assertIsNone(m.hunt_search)
+
+    def test_a_search_left_for_long_starts_over(self):
+        from agentrealm_agent.states.travel import HUNT_SEARCH_RESUME_SECONDS
+
+        w = grid([".........."], at=(0, 0))
+        plan = travel_plan(["travel:hunting_ground"])
+        m = Memory()
+        ctx = ctx_for(m, KnowledgeBase.empty("sandbox"), plan)
+        dispatch(w, ctx)
+        w.tick += (HUNT_SEARCH_RESUME_SECONDS + 1) * plan.tick_hz
+        dispatch(w, ctx)
+        self.assertEqual(m.hunt_search.since, w.tick)

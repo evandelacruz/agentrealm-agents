@@ -614,3 +614,76 @@ class DropOpsTest(unittest.TestCase):
         self.assertEqual(p.goals, self.plan().goals)
         self.assertEqual(p.directive_end, 2)
         self.assertEqual(m.strategist_signals, [])
+
+
+class SymbolicTravelTest(unittest.TestCase):
+    """A23 survive-a-fight run 1: the planner's `travel to: town` without
+    x, y was dropped as `missing x`, though town takes none."""
+
+    def test_symbolic_destinations_need_no_coordinates(self):
+        for to in ("town", "hunting_ground", "shop", "entrance"):
+            op = validate_goal_op({"op": "travel", "to": to, "why": "hurt"})
+            self.assertIsNotNone(op, to)
+            self.assertEqual((op["x"], op["y"]), (0, 0), "0, 0: the agent finds it")
+
+    def test_a_point_still_needs_coordinates(self):
+        self.assertIsNone(validate_goal_op({"op": "travel", "to": "point"}))
+        self.assertIsNone(validate_goal_op({"op": "travel", "to": "town", "x": 3}), "half a cell is a mistake")
+        self.assertIsNotNone(validate_goal_op({"op": "travel", "to": "shop", "x": 3, "y": 4}))
+
+    def test_a_town_op_without_coordinates_resolves_to_town(self):
+        from agentrealm_agent.travel.ops import travel_op_from_plan_goal
+
+        op = validate_goal_op({"op": "travel", "to": "town"})
+        self.assertEqual(travel_op_from_plan_goal(op).to, "town")
+        w = WorldModel(character_id=1, map_id=1, pos=(2, 2))
+        w.record_respawn_anchor(1, (2, 2))
+        self.assertTrue(goal_done(op, w, Plan([op], dict(PARAM_DEFAULTS))))
+
+
+class RejectionReasonTest(unittest.TestCase):
+    """The planner asked for `retreat_hits: 1` "to retreat sooner" in three
+    runs; the rejection now says which way the param goes."""
+
+    def test_rejections_are_collected_with_their_reason(self):
+        from agentrealm_agent.plan import collect_rejections
+
+        raw = {"goals": [{"op": "travel", "to": "point"}], "params": {"retreat_hits": 1}}
+        (goals, params, _), rejected = collect_rejections(
+            lambda: parse_plan_payload(raw, floor_params=dict(PARAM_DEFAULTS))
+        )
+        self.assertEqual(goals, [])
+        self.assertEqual(params["retreat_hits"], PARAM_DEFAULTS["retreat_hits"])
+        self.assertEqual(len(rejected), 2)
+        self.assertIn("missing `x`", rejected[0])
+        self.assertIn("retreat_hits 1 below floor 2", rejected[1])
+        self.assertIn("Higher retreats sooner", rejected[1])
+
+    def test_nothing_is_collected_outside(self):
+        from agentrealm_agent.plan import collect_rejections
+
+        validate_goal_op({"op": "nonsense"})
+        _, rejected = collect_rejections(lambda: validate_goal_op({"op": "wait", "seconds": 1, "why": "ok"}))
+        self.assertEqual(rejected, [])
+
+    def test_a_loosening_set_param_is_dropped_with_its_reason(self):
+        from agentrealm_agent.plan import collect_rejections
+
+        raw = {"goals": [{"op": "set_param", "name": "retreat_hits", "value": 1}, {"op": "set_param", "name": "retreat_hits", "value": 3}]}
+        (goals, _, _), rejected = collect_rejections(lambda: parse_plan_payload(raw, floor_params=dict(PARAM_DEFAULTS)))
+        self.assertEqual([g["value"] for g in goals], [3])
+        self.assertIn("retreat_hits 1 below floor 2", rejected[0])
+
+    def test_risk_rejection_says_it_may_only_fall(self):
+        from agentrealm_agent.plan import collect_rejections
+
+        _, rejected = collect_rejections(
+            lambda: apply_strategist_params(dict(PARAM_DEFAULTS), dict(PARAM_DEFAULTS), {"risk": 0.9})
+        )
+        self.assertIn("risk 0.9 above floor 0.5", rejected[0])
+        self.assertIn("only lower", rejected[0])
+
+    def test_every_param_has_a_meaning(self):
+        from agentrealm_agent.plan import PARAM_MEANINGS
+
+        self.assertEqual(set(PARAM_MEANINGS), set(PARAM_DEFAULTS))

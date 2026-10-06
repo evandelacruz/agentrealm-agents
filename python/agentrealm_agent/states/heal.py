@@ -21,7 +21,8 @@ from ..memory import Memory, queue_signal
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import bounded_step, grid_params, hostiles_in_range, nav_search
+from ..pathing import bounded_step, grid_params, nav_search
+from ..survival import hostiles_in_range
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .break_state import break_toward

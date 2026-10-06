@@ -372,8 +372,16 @@ class SafeDefaultPushesTheBoundaryTest(unittest.TestCase):
     def test_a_hostile_by_the_frontier_keeps_it_closed(self):
         w = self.hurt_in_a_small_safe_zone()
         w.entities = [Entity("npc", 5, (10, 1), "slime")]
+        w.hostile_types.add(("npc", "slime"))  # a type seen attacking (survival.is_hostile)
         out = dispatch(w, ctx(w, Memory(heal_regen_absent=True), hostile=["npc"], hostile_range=2))
         self.assertIn("look around", out.reason)
+
+    def test_a_townsperson_by_the_frontier_does_not_close_it(self):
+        w = self.hurt_in_a_small_safe_zone()
+        w.entities = [Entity("npc", 5, (10, 1), "villager")]
+        out = dispatch(w, ctx(w, Memory(heal_regen_absent=True), hostile=["npc"], hostile_range=2))
+        self.assertNotIn("look around", out.reason)
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 2, "y": 1}])
 
 
 class SyncWakeTest(unittest.TestCase):

@@ -50,7 +50,7 @@ def tempt(w: WorldModel) -> None:
 
 
 def play(w: WorldModel, plan: Plan | None, decisions: int = 30, **policy_kw) -> list[StateOutcome]:
-    """Decide and apply each move, the way the runner applies an applied Step.
+    """Decide and apply each move and take, the way the runner applies them.
     Each outcome's ``at`` is where the character stood after it."""
     m = Memory()
     ctx = PlayContext(
@@ -66,6 +66,8 @@ def play(w: WorldModel, plan: Plan | None, decisions: int = 30, **policy_kw) -> 
                 if m.path and m.path[0] == w.pos:
                     m.path = m.path[1:]
                 nav_stuck.on_step(m, w)
+            elif i.get("verb") == "Take":
+                w.entities = [e for e in w.entities if not (e.kind == "supply" and e.id == i["supply_id"])]
         o.at = w.pos
         w.tick += 4
     return out

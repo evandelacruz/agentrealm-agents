@@ -110,9 +110,9 @@ def gather_outcome(
     if here is None:
         return StateOutcome(None, "position unknown", state=state)
     skip = _barren_to_skip(w, knowledge, op)
-    dead_regions, dead_cells = gem_cuts.uncuttable(w) if gem_cuts is not None else (set(), set())
-    exhausted = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | dead_cells
     safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
+    dead_regions, dead_cells = gem_cuts.uncuttable(w, safe) if gem_cuts is not None else (set(), set())
+    exhausted = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | dead_cells
     out = _gather_step(w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state)
     if out.intents is None:
         m.gather_status = REGION_BARREN if region_of(here) in skip else NONE_CUTTABLE

@@ -201,6 +201,14 @@ class NoEffectCutTest(unittest.TestCase):
         self.assertNotIn("gem_yield", r.knowledge.extra, "never filed: no false miss toward barren")
         self.assertEqual(r.gem_cuts.run_counts(), {"cuts": 0, "no_effect_cuts": 1, "gems_gained": 0})
 
+    def test_a_break_probe_that_misses_is_not_a_no_effect_cut(self):
+        """Review on #126: Break's capability misses (A28) are not ground that does not cut."""
+        r = self.runner()
+        r.mem.break_pending = (MAP, (1, 1), "smash")
+        r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}
+        r.on_result({"outcome": "applied_no_effect", "tick": 100}, 0)
+        self.assertEqual((r.gem_cuts.no_effect, r.gem_cuts.no_effect_cuts), ([], 0))
+
     def test_the_hold_lapses_after_regrow_ticks(self):
         w, t = world(), GemYieldTracker()
         t.note_no_effect(w, (1, 1), "grass", 100)

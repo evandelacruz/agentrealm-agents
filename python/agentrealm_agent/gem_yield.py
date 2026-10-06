@@ -154,15 +154,18 @@ class GemYieldTracker:
         out = {c.pos for c in self.pending if c.map_id == map_id}
         return out | {p for mid, p, t in self.no_effect if mid == map_id and tick - t < REGROW_TICKS}
 
-    def uncuttable(self, w: WorldModel) -> tuple[set[tuple[int, int]], set[Pos]]:
+    def uncuttable(self, w: WorldModel, safe: set[Pos] | None = None) -> tuple[set[tuple[int, int]], set[Pos]]:
         """Regions, and known safe-zone cells, of ``w``'s map where
         ``NO_EFFECT_ZONE_CUTS`` or more cuts had no effect: (regions, cells).
-        A safe zone counts as one, however many regions it spans."""
+        A safe zone counts as one, however many regions it spans. ``safe`` is
+        ``safe_tiles`` when the caller already has it."""
         if w.map_id is None:
             return set(), set()
         self._prune(w.tick)
         here = [p for mid, p, _ in self.no_effect if mid == w.map_id]  # one per cut
-        safe = safe_tiles(w, w.map_id)
+        if not here:
+            return set(), set()
+        safe = safe_tiles(w, w.map_id) if safe is None else safe
         per_region: dict[tuple[int, int], int] = {}
         for p in here:
             if p not in safe:

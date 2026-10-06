@@ -838,13 +838,17 @@ class Runner:
                     npc_type = use_npc_type(intent, block, w.entities)
                     others = any(e.kind == "character" for e in w.entities)
                     self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type, others))
+                # Break's capability probe (A28), read before _note_break_use clears it.
+                probe = m.break_pending is not None and m.break_pending[1] == block
                 self._note_break_use(intent, result, block, index)
                 tile = w.view.tiles.get(block) if block is not None else None
                 on_block = intent["target"].get("kind") == "block" and tile in CUT_BLOCKS
                 if on_block and result.get("outcome") == "applied":
                     self.gem_cuts.note_cut(w, block, tile, m.last_use_tick, took=any(map(take_raises_gems, self._applied_take_codes)))
-                elif on_block and result.get("outcome") == "applied_no_effect":
+                elif on_block and result.get("outcome") == "applied_no_effect" and not probe:
                     # Nothing was cut, so nothing to file: Gather just moves on (A63).
+                    # A Break probe that misses is a capability miss (GAME_NOTES:
+                    # which item works is per block), not ground that does not cut.
                     self.gem_cuts.note_no_effect(w, block, tile, m.last_use_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])

@@ -20,6 +20,7 @@ from agentrealm_agent.memory import Memory, queue_signal
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent import __main__ as cli
+from agentrealm_agent.pathing import path_owned_by_plan, plan_op_goal
 from agentrealm_agent.plan import validate_goal_op
 from agentrealm_agent.strategist import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -339,6 +340,19 @@ class ProgressTest(unittest.TestCase):
         before = r2.plan
         round_trip(s2, r2)
         self.assertIs(r2.plan, before)  # same stack but for the reason
+
+    def test_reworded_head_keeps_its_path_owned(self):
+        head = {"op": "travel", "to": "point", "x": 5, "y": 0, "why": "the gate"}
+        reply = {"goals": [{**head, "why": "reworded"}, {"op": "buy", "code": "rope"}]}
+        s, r = make(FakeLLM(reply)), fake_runner()
+        r.plan = Plan([head], dict(PARAM_DEFAULTS))
+        r.mem.path, r.mem.goal, r.mem.goal_op = [(1, 0), (2, 0)], plan_op_goal(head), head
+        self.assertTrue(path_owned_by_plan(r.plan, r.mem))
+        round_trip(s, r)
+        self.assertIs(r.plan.current(), head)
+        self.assertEqual(r.plan.goals[1]["code"], "rope")
+        self.assertTrue(path_owned_by_plan(r.plan, r.mem))
+        self.assertEqual(r.mem.path, [(1, 0), (2, 0)])
 
     def test_a_longer_wait_is_a_new_wait(self):
         s, r = make(FakeLLM({"goals": [{"op": "wait", "seconds": 25, "why": "boss spawns"}]})), fake_runner()

@@ -595,6 +595,8 @@ class Strategist:
         head = old.current()
         if goals and head is not None and same_ops(goals[:1], [head]):
             # Same op on top: it carries on where it was; only the ops below it changed.
+            # Keep the old op itself (its `why` too), so the path set for it stays owned.
+            runner.plan.goals[0] = head
             runner.plan.wait_started_tick = old.wait_started_tick
             runner.plan.stalled_since_tick = old.stalled_since_tick
             runner.plan.block_before = old.block_before

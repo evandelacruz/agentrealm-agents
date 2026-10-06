@@ -121,10 +121,27 @@ class AttributionTest(unittest.TestCase):
         r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 2, "y": 1}}
         r.on_result({"outcome": "applied", "tick": 100}, 0)
         self.assertEqual([(c.pos, c.block, c.took) for c in r.gem_cuts.pending], [((2, 1), "grass", False)])
-        r._applied_take_codes = ["gem"]  # a Take applied earlier in this response
+        r._applied_take_codes = ["berry"]  # a food Take earlier in this response: not a gem rise
         r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 2, "y": 2}}
         r.on_result({"outcome": "applied", "tick": 100}, 0)
+        self.assertFalse(r.gem_cuts.pending[-1].took)
+        r._applied_take_codes.append("gem")  # a gem Take earlier in this response
+        r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 3, "y": 2}}
+        r.on_result({"outcome": "applied", "tick": 100}, 0)
         self.assertTrue(r.gem_cuts.pending[-1].took)
+
+    def test_only_a_gem_take_in_the_window_blocks_the_counter_credit(self):
+        r = Runner.__new__(Runner)
+        r.world, r.mem, r.knowledge, r.acceptance = world(gems=4), Memory(), kb(), None
+        r.gem_cuts, r._applied_uses, r._applied_take_codes, r._loadout_verbs = GemYieldTracker(), [], [], []
+        r.gem_cuts.note_cut(r.world, (1, 1), "grass", 100)
+        r.world.entities = [Entity("supply", 60, (1, 2), "berry")]
+        r.mem.pending = {"verb": "Take", "supply_id": 60}
+        r.on_result({"outcome": "applied", "tick": 101}, 0)
+        self.assertFalse(r.gem_cuts.pending[0].took)
+        r.world.tick, r.world.gems = 102, 5
+        r.gem_cuts.update(r.world, r.knowledge)
+        self.assertTrue(cuts(r.knowledge)[0]["gem"])
 
 
 class RegionSummaryTest(unittest.TestCase):

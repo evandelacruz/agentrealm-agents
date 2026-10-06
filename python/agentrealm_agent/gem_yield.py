@@ -7,8 +7,8 @@ none. Nothing here knows where: every number comes from cuts this agent made.
    type, the tick, and whether a gem came of it. The drop is tied to the cut
    by a free ``gem`` supply that appears on or next to the cell within
    ``GEM_WINDOW_TICKS`` (one that was not in view at the cut and no earlier
-   cut claimed), or by the gem counter rising in that window with no ``Take``
-   applied since the cut. Cuts still waiting at a death or a map change are
+   cut claimed), or by the gem counter rising in that window with no gem
+   ``Take`` applied since the cut (:func:`take_raises_gems`). Cuts still waiting at a death or a map change are
    dropped, not filed.
 2. **Summarise.** Cells fall in ``REGION_SIZE`` square regions per map. Each
    region keeps its cuts, gems and last tick of grass and bush cuts. A region
@@ -43,6 +43,13 @@ GATHER_BLOCKS = frozenset({"grass", "bush"})  # the cuts the region yield counts
 SUMMARY_RADIUS = 3  # regions this far (Chebyshev, in regions) from ours are "nearby"
 SUMMARY_BEST = 3  # best regions shown to the planner
 GEM_CODE = "gem"  # a ground gem (GAME_NOTES.md Gems)
+GEM_CACHE_PREFIX = "gem_cache"  # gem_cache_5/7/10 (GAME_NOTES.md Gems)
+
+
+def take_raises_gems(code: str | None) -> bool:
+    """A ``Take`` that can raise the gem counter: a gem, a gem cache, or a
+    supply whose code we could not read. Food or gear does not."""
+    return code is None or code == GEM_CODE or code.startswith(GEM_CACHE_PREFIX)
 
 
 def region_of(pos: Pos) -> tuple[int, int]:

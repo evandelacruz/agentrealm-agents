@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 
 from .break_memory import TRANSIENT_BREAK_REJECTIONS, record_attempt
-from .gem_yield import CUT_BLOCKS, GemYieldTracker
+from .gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
 from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
 from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
@@ -842,7 +842,7 @@ class Runner:
                 self._note_break_use(intent, result, block, index)
                 tile = w.view.tiles.get(block) if block is not None else None
                 if result.get("outcome") == "applied" and intent["target"].get("kind") == "block" and tile in CUT_BLOCKS:
-                    self.gem_cuts.note_cut(w, block, tile, m.last_use_tick, took=bool(self._applied_take_codes))
+                    self.gem_cuts.note_cut(w, block, tile, m.last_use_tick, took=any(map(take_raises_gems, self._applied_take_codes)))
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
@@ -850,7 +850,8 @@ class Runner:
             if intent and intent.get("verb") == "Take":
                 code = supply_code_for_take(intent, w.entities)
                 self._applied_take_codes.append(code)
-                self.gem_cuts.note_take()
+                if take_raises_gems(code):
+                    self.gem_cuts.note_take()
                 learn_chest_upgrade(w, code)
             self._note_heal_intent(intent, index)
             self._note_investigation(intent, result)

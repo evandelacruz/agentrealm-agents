@@ -62,6 +62,11 @@ class Memory:
     # The planned flee_path already excludes them; this only keeps them shut for
     # _committed_step's open check and its best-step comparison while that escape runs.
     flee_avoid: set[Pos] = field(default_factory=set)
+    # Whether fleeing works (A9, A58 run 9): (tick, gap to the nearest hostile)
+    # at each Flee decision, the tick Flee began, and whether it gave up running.
+    flee_gaps: list[tuple[int, int]] = field(default_factory=list)
+    flee_since: int = 0
+    flee_failed: bool = False
     strength: StrengthBracket = field(default_factory=StrengthBracket)
     loadout_key: tuple = ()  # reset strength bracket when armed/worn changes (A27)
     # Clues (A32): {"trigger": "clue", **kb.clues row} per new clue; the strategist (A35) drains them.

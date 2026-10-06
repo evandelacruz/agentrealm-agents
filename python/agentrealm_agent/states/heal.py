@@ -3,6 +3,7 @@ weapon a drink swapped out (A24)."""
 
 from __future__ import annotations
 
+from ..break_memory import nominate_on_path
 from ..config import Policy
 from ..healing import (
     carried_heal,
@@ -23,6 +24,7 @@ from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, hostiles_in_range, nav_search
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
+from .break_state import break_toward
 from .gather_safe import hostiles_near
 from .intents import arm, set_position, take, use_self
 from ..executor.intents import wait
@@ -35,7 +37,8 @@ FOOD_REACH = 3
 
 
 class HealState(State):
-    """Reflex, above Fight. Hurt and out of combat: food within ``FOOD_REACH``, then carried
+    """Reflex, above Fight. Hurt and out of combat: food within ``FOOD_REACH`` (cutting
+    through a block the weapon opens when nothing else leads there), then carried
     food or a potion, then safe ground. Every walk, to food or a safe tile, is
     bounded by stuck detection (``bounded_step``): one that goes nowhere gives
     its target up.
@@ -82,7 +85,7 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     if out := _act_food(w, m, policy, ctx):
         m.heal_regen_sample = None
         return out
-    if out := _act_carried(w, m):
+    if out := use_carried_heal(w, m):
         m.heal_regen_sample = None
         return out
     # Nothing left to drink: put the weapon back before walking.
@@ -200,14 +203,39 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
             nav_stuck.finish_in_reach(m, w, "heal_food")
             note_try(m, "take", food.id)
             return _out([take(food.id)], f"take food {food.code}")
+        if out := _cut_toward(w, m, policy, ctx, food.pos):
+            return out
         # Walking onto it also picks up food eaten on pickup (golden cap).
         if out := _walk_toward(w, m, policy, ctx, food.pos, goal="heal_food"):
             return out
     return None
 
 
-def _act_carried(w: WorldModel, m: Memory) -> StateOutcome | None:
-    """``Arm`` + ``Use`` self on carried food or a potion (API Use).
+def _cut_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at: Pos) -> StateOutcome | None:
+    """Open the block between us and food at ``at``, Break's way, when nothing
+    else leads there and what we hold opens it (a bush and a blade, A10).
+
+    None when there is a walk to ``at`` or no block on the way we can open:
+    the walk to it then decides, and gives it up if it goes nowhere. Food
+    behind bushes the weapon cuts was given up ``no_path`` before (A16 Walk run 4).
+    """
+    choice = nominate_on_path(w, ctx.knowledge, w.pos, at)
+    if choice is None:
+        return None
+    plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)
+    walk = cost_path(w, at, grid_params(policy, plan_avoid, plan_costly))
+    if walk and walk[-1] == at:
+        return None
+    out = break_toward(w, ctx, choice, HealState.name)
+    if not out.intents:
+        return None
+    out.reason = f"heal_food: {out.reason}"
+    return out
+
+
+def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
+    """``Arm`` + ``Use`` self on carried food or a potion (API Use). Retreat
+    runs it too, when it is losing ground (A9).
 
     The weapon armed before the first drink is remembered in ``heal_rearm``
     and put back by ``_rearm_weapon`` once there is nothing left to drink

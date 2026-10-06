@@ -1,6 +1,18 @@
 export const DEFAULT_ENV_NAME = "evandelacruz/agentrealm-agents";
 export const DEFAULT_REPO_URL = "https://github.com/evandelacruz/agentrealm-agents";
 export const DEFAULT_MODEL = process.env.CURSOR_MODEL ?? "composer-2.5";
+
+/**
+ * Composer models default to their `fast` variant. Pin it off: implementers run
+ * unattended, so the slower, cheaper variant is the right default.
+ * CURSOR_MODEL_FAST=true turns it back on.
+ */
+export const MODEL_PARAMS = [{ id: "fast", value: process.env.CURSOR_MODEL_FAST === "true" ? "true" : "false" }];
+
+export function modelSelection(id: string = DEFAULT_MODEL): { id: string; params?: { id: string; value: string }[] } {
+  // Only Composer models take the `fast` parameter.
+  return id.startsWith("composer") ? { id, params: MODEL_PARAMS } : { id };
+}
 export const DEFAULT_STARTING_REF = "main";
 
 /** The only label with meaning: the writer lock. Verdicts come from reviews, never labels. */

@@ -1,5 +1,5 @@
 import { Agent } from "@cursor/sdk";
-import { DEFAULT_MODEL, requireApiKey } from "./config.js";
+import { DEFAULT_MODEL, modelSelection, requireApiKey } from "./config.js";
 import { withWorkingLock } from "./gh.js";
 import { lockNote } from "./lock.js";
 
@@ -32,7 +32,7 @@ export async function followUp(options: FollowUpOptions): Promise<{
   return withWorkingLock(options.prUrl, async (started) => {
     const agent = await Agent.resume(options.agentId, {
       apiKey,
-      ...(options.model ? { model: { id: options.model } } : { model: { id: DEFAULT_MODEL } }),
+      model: modelSelection(options.model ?? DEFAULT_MODEL),
     });
 
     const run = await agent.send(prompt);

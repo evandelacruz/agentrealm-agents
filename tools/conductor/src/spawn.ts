@@ -2,6 +2,7 @@ import { Agent } from "@cursor/sdk";
 import {
   DEFAULT_ENV_NAME,
   DEFAULT_MODEL,
+  modelSelection,
   DEFAULT_REPO_URL,
   DEFAULT_STARTING_REF,
   requireApiKey,
@@ -84,7 +85,7 @@ export async function spawnImplementer(options: SpawnOptions): Promise<{
     const agent = await Agent.create({
       apiKey,
       name,
-      model: { id: modelId },
+      model: modelSelection(modelId),
       cloud,
     });
 

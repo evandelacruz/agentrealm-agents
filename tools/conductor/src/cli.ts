@@ -47,6 +47,7 @@ status options:
 Environment:
   CURSOR_API_KEY            Required for spawn / follow-up / status
   CURSOR_MODEL              Default model override
+  CURSOR_MODEL_FAST         "true" to use a Composer model's fast variant (default: off)
 `);
 }
 

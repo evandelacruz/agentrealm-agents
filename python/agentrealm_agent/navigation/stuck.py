@@ -87,7 +87,10 @@ class NavAttempt:
     break_x: int | None = None  # stuck step 2: block under break, if any
     break_y: int | None = None
     break_cap: str | None = None
-    waiting_since: int | None = None  # a short walk with no step since this tick (``pathing.bounded_step``)
+    # A short walk (``pathing.bounded_step``): the decision it was last
+    # pursued on, and the tick it began waiting with no step.
+    seen_decision: int | None = None
+    waiting_since: int | None = None
 
 
 class Leg(NamedTuple):
@@ -115,6 +118,7 @@ class NavStuckMemory:
     cells_map: int | None = None
     oscillations: list[dict] = field(default_factory=list)
     escape_from: set[Pos] = field(default_factory=set)
+    decision: int = 0  # counts decisions (dispatch), so a short walk knows it was pursued on the last one
 
 
 def goal_key(goal: str, map_id: int | None, target: Pos) -> str:
@@ -346,6 +350,21 @@ def _blocking_types(w: WorldModel, att: NavAttempt) -> set[str]:
             if block is not None and block not in WALKABLE:
                 out.add(block)
     return out
+
+
+def resume(m: Memory, att: NavAttempt, tick: int) -> None:
+    """A short walk's window and wait hold only while it is pursued on
+    consecutive decisions; otherwise both start again now (``pathing.bounded_step``).
+
+    Pursued means tried at all, step or not, so a walk that waits behind an
+    occupant keeps its wait, and one Heal left (health back, food eaten
+    on the way, a higher state's turn) starts fresh when it comes back.
+    """
+    now = m.nav_stuck.decision
+    if att.seen_decision not in (now, now - 1):
+        _fresh_window(att, tick)
+        att.waiting_since = None
+    att.seen_decision = now
 
 
 def _fresh_window(att: NavAttempt, tick: int) -> None:

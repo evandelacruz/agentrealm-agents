@@ -252,9 +252,11 @@ class HealWalkBoundedTest(unittest.TestCase):
     def test_food_and_an_owed_goto_both_behind_fog_are_not_held_forever(self):
         """Review on #101: the food's first step and the goto's are both unseen.
 
-        Heal tries the food, has no step and yields; Explore holds the goto.
-        Neither may restart the other's window, so the food is given up and
-        the goto escalates once ``PROGRESS_TICK_LIMIT`` has passed.
+        Heal tries the food, has no step and yields (backing off); Explore
+        holds the goto. The food must not restart the goto's window, so the
+        goto escalates once ``PROGRESS_TICK_LIMIT`` has passed. Heal only
+        comes back to the food once per backoff, so the food is never pursued
+        on consecutive decisions and nothing holds on it.
         """
         # A dead-end pocket whose only way out, east, is an unseen cell.
         w = WorldModel(character_id=1, map_id=1, pos=(0, 0), perception=5, health=5, max_health=10)
@@ -269,8 +271,7 @@ class HealWalkBoundedTest(unittest.TestCase):
         for _ in range(2 * nav_stuck.PROGRESS_TICK_LIMIT // 10 + 1):
             dispatch(w, c)
             w.tick += 10
-        signals = c.memory.nav_stuck.stuck_signals
-        self.assertEqual([(s["goal"], s["reason"]) for s in signals], [("heal_food", "time")])
+        self.assertEqual(c.memory.nav_stuck.stuck_signals, [])
         goto = nav_stuck.active(c.memory, w)
         self.assertEqual(goto.goal, "goto")
         self.assertGreater(goto.level, nav_stuck.CAUTIOUS, "the goto's windows ran out twice")
@@ -283,6 +284,31 @@ class HealWalkBoundedTest(unittest.TestCase):
         w.entities.append(Entity("npc", 3, (403, 606), "villager"))
         self.assertIsNone(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)]))
         self.assertEqual(m.nav_stuck.stuck_signals, [], "the wait has only just started")
+
+    def test_a_wait_left_and_taken_up_again_starts_over(self):
+        # Review on #101, path 1: blocked, Heal leaves, comes back still blocked.
+        w, m = pond_world(), Memory()
+        w.entities.append(Entity("npc", 3, (403, 606), "villager"))
+        self.assertIsNone(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)]))
+        m.nav_stuck.decision += 5
+        w.tick += 1000
+        self.assertIsNone(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)]))
+        self.assertEqual(m.nav_stuck.stuck_signals, [], "the wait has only just started again")
+        for _ in range(nav_stuck.PROGRESS_TICK_LIMIT // 10):
+            m.nav_stuck.decision += 1
+            w.tick += 10
+            bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)])
+        self.assertEqual([s["reason"] for s in m.nav_stuck.stuck_signals], ["time"], "waited on consecutive decisions")
+
+    def test_a_walk_left_and_taken_up_again_starts_a_fresh_window(self):
+        # Review on #101, path 2: a step, a long pause, a step from one cell further back.
+        w, m = pond_world(), Memory()
+        self.assertEqual(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)]), (403, 606))
+        m.nav_stuck.decision += 5
+        w.tick += 1000
+        w.pos = (405, 604)
+        self.assertEqual(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(404, 605)]), (404, 605))
+        self.assertEqual(m.nav_stuck.stuck_signals, [])
 
     def test_a_step_ends_the_wait(self):
         w, m = pond_world(), Memory()

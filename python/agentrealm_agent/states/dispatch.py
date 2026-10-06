@@ -83,6 +83,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     which walk the move belongs to (``navigation/oscillation.py``, A15).
     """
     m = ctx.memory
+    m.nav_stuck.decision += 1
     yielded: list[str] = []
     if oscillation.check(m, world) is not None:
         yielded.append("oscillation: paced between two cells")

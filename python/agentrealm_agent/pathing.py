@@ -594,16 +594,19 @@ def bounded_step(
 
     None when there is no move now: the caller tries something else. Only a
     walk that moves makes its attempt active, so one with no move never
-    restarts the window of the walk that does (``nav_stuck.track``).
+    restarts the window of the walk that does (``nav_stuck.track``). The
+    window and the wait hold only while the walk is pursued on consecutive
+    decisions (``nav_stuck.resume``).
     """
     if nav_stuck.backed_off(m, goal, w.map_id, at, w.tick):
         return None
+    att = nav_stuck.attempt(m, w, goal, at)
+    if att is None:
+        return None
+    nav_stuck.resume(m, att, w.tick)
     if not (m.goal == goal and m.path and m.path[-1] == at and next_step(w, avoid, m.path)):
         found = plan()
         if not found or not next_step(w, avoid, found):
-            att = nav_stuck.attempt(m, w, goal, at)
-            if att is None:
-                return None
             if att.waiting_since is None:
                 att.waiting_since = w.tick
             if not found:
@@ -612,13 +615,12 @@ def bounded_step(
                 nav_stuck.give_up(m, w, att, "time")
             return None
         m.path, m.goal = found, goal
-    att = nav_stuck.track(m, w, goal, at)
-    if att is not None:
-        att.waiting_since = None
-        nav_stuck.observe(att, w, m.path)
-        if reason := nav_stuck.stuck_reason(att, w.tick):
-            nav_stuck.give_up(m, w, att, reason)
-            return None
+    nav_stuck.track(m, w, goal, at)
+    att.waiting_since = None
+    nav_stuck.observe(att, w, m.path)
+    if reason := nav_stuck.stuck_reason(att, w.tick):
+        nav_stuck.give_up(m, w, att, reason)
+        return None
     return next_step(w, avoid, m.path)
 
 

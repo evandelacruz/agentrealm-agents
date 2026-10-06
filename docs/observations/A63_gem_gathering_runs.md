@@ -258,3 +258,118 @@ Intents: 130 `Step`, 211 `Wait`, 28 `Use`, 22 `Take`. Call mix: 221 `tick`, 58 `
    Suspects: `states/gather.py:128` (`CUTTING` for any walk) and the State, which has no reason for a walk (e.g. "keeping 6 from npc 269") and no time since the last cut. With `gem_yield.best` empty past 3 regions (`gem_yield.py:61`), the planner also lost the one productive region it could have sent the character back to.
 
 **Minor:** the authored pile cluster at (386–388, 535–536) and the lone gem at (400, 529) sat among hostiles and lava; Gather walks to any pile in view first (`states/gather.py:234`), checked against hostiles only at plan time, so the queue to (400, 529) ran on while npc 264 closed to 5 blocks.
+
+## Run 4: 20 gems by 257 s, one death on a Heal walk into a hostile pack, and lone Takes still doubled
+
+- **Code:** `main` at `5ff4f0f`, after #132 (navigation under 100 ms a decision), #131 (townsfolk not threats, outward hunt search), #129 (planner sees NPCs, Greet), #134 (stale Step, lone Take, shadowing hostile, play on after a death) and #133 (park before exit).
+- **Setup:** as Run 3, but `--seconds 600`: `gather_gems:20` directive, planner on, play goes on after a death (the new default), park phase on (default 60 s). Empty local knowledge base.
+- **Verdict:** exit 0, `PASS` after **601.7 s**. The character started at 10/10 health, 8 lives and 11 gems, at (400, 609) beside the southern safe zone.
+- **Gate summary:** deaths **1**; API errors **0**; fights below the health floor 0; gems earned **yes**; heal food take **yes**; armor, shop weapon, potion reserve, heal potion all **no**; 47 plans accepted, 0 errors.
+
+### Gems and gem yield
+
+| | |
+|---|---|
+| Gems | **11 → 21**. **20 at 257 s**, when `gather_gems:20` was done (it counts gems held, not gems gained). One more at 428 s, from a ground gem on the walk to town |
+| Gems per minute | **2.1** while gathering (9 in 257 s); **1.0** over the whole run |
+| Cuts (`Use` on grass) | **54 filed, 54 took effect, 0 `applied_no_effect`** (`gather_run`); no bush cuts. One more `Use` was a break |
+| `Take` | **24 sent for 13 supplies**: 10 gems (9 that our cuts dropped, 1 ground gem), 3 apples, 1 berry. **11 Takes were wasted**: 10 gems and the berry each took a second identical Take (defect 2) |
+| `gem_yield` records | 54 cuts and 8 gems filed, in six regions (table below). Barren marks **none**; uncuttable marks **none** |
+
+| Region (x0, y0) | Cuts | Gems | Yield | Mark |
+|---|---|---|---|---|
+| (400, 624) | 12 | 4 | 0.33 | none |
+| (400, 608) | 6 | 1 | 0.17 | none |
+| (400, 592) | 19 | 2 | 0.11 | none |
+| (400, 576) | 15 | 1 | 0.07 | none |
+| (416, 592) | 1 | 0 | 0 | none |
+| (416, 608) | 1 | 0 | 0 | none |
+
+`gather_run.gems_gained` was 10 and the filed cuts credit 8. One cut gem was not tied to its cut, and the ground gem has no cut.
+
+### Planner
+
+| | |
+|---|---|
+| Calls | 49 (24 `applied`, 23 `unchanged`, 2 `kept`); **4–6 a minute** |
+| Plans accepted / errors | **47 / 0** (script summary) |
+| Tokens | input 65,352, output 13,021, cache write 99,919 (call 1), cache read 4,796,112 |
+| Tokens per minute (budgeted) | **~104k in minute 1** (the one cache write), then **4.5–13.2k/min** (mean ~8.2k) |
+| Triggers | 30 timer, 13 stuck, 9 goal done, 8 clue, 2 hurt, 1 death, 1 goal failed, 1 heal supplies, 1 map |
+
+No churn on the pin. Once `gather_gems` was done, the planner's stack took over: travel to town, explore it, then shopping (bronze sword, small potions). The `travel:town` op was dropped when stuck detection gave its target (397, 401) up. The character reached town at about 450 s through `explore_area`. It had 21 gems from 257 s on and **bought nothing**: its walk to the potion shop at (422, 398) was still under way when the run ended. The planner read the clues and wrote them into its notes (call at 468 s: "eight statues in town, one faces the wrong way on purpose. It probably marks a secret").
+
+### Decision mix (307 decisions that sent intents; 477 more ticks held a queue)
+
+| Op / state | Decisions |
+|---|---|
+| gather_gems (pinned): `gather →` (walk to a cell or pile) | 69 |
+| gather_gems (pinned): `cut grass` | 57 |
+| gather_gems (pinned): `take gem` (Gather's and Pickup's, same reason text) | 19 |
+| retreat | 28 |
+| flee (npcs 240, 280, 269, 264) | 27 |
+| explore (fallback and planner) | 23 |
+| travel:town | 22 |
+| greet | 17 |
+| heal (food, measure, rest, explore the zone) | 17 |
+| travel:point, break, take apple/berry/food, shop, explore_area, read sign, move off | 5, 5, 5, 4, 3, 3, 3 |
+
+Intents: 791 `Step`, 1,851 `Wait`, 58 `Use`, 24 `Take`, 17 `Say`, 3 `Read`. Call mix: 785 `tick`, 319 `zone`, 230 `entities`, 58 `position`, 49 strategist asks, 47 `self`, 42 `terrain`, 1 `world`.
+
+### Outcomes
+
+- **Left low-yield regions on its own:** **not by yield.** It cut 19 times in (400, 592) for 2 gems and 15 times in (400, 576) for 1. It then left at 113 s because Heal walked it back to the safe tile, not because of yield. Its move into the best region, (400, 624), came at 175–200 s while Gather picked grass away from hostiles (`move off npc 280`, `move off npc 285`). No region reached the 30 cuts a barren mark needs.
+- **Deaths:** **1** (lives 8 → 7) at 130 s, near (394, 606), `Died` cause `killed`. In order: wartlurch npc 269 hit for 3 at 104 s, then gristlewick 280 hit for 1, wartlurch 290 for 2, wartlurch 289 for 3, and gristlewick 280 for 2. Respawned at (396, 610) at 135 s and played on (the #134 default works). Defect 1 has the cause.
+- **Other damage:** gristlewick 280 hit for 2 twice at 301–303 s near the start tile. Gristlewick 240 hit for 1, 1, 2 and 2 at 517–525 s west of town, taking health to 4/10. Heal walked into town and rested there.
+- **Park:** `parked safe at 76:412,391 after 0.3s, queue cleared`. The character was already in town.
+- **Decision latency:** the trace has no per-decision timer. It does show the time from the read before a deciding `tick` to that tick's response, which is the decision plus at most one 100 ms window plus the tick round trip: **p50 0.35 s, p95 0.89 s, max 1.12 s** (158 decisions). Read-to-read gaps, with no decision in them, are p50 0.30 s and p95 0.35 s. The largest gap between any two calls was 1.29 s, so Run 2's 5–17 s blocks are gone. The trace cannot confirm under 100 ms a decision.
+- **Greetings and clues:** **17 `Say` hellos** to 17 NPCs, each greeted once: 12 townsfolk (elder, smith, storekeeper, apothecary, tongues lady, pond fisher, statue carver, five rumor tellers), the southern bomb seller and **4 snotlings**. 26 `SpokenTo` events. **8 clues heard**, all NPC speech in town, each a planner `clue` trigger. The same sign at (399, 406) was read 3 times in 7 s.
+- **Oscillation:** 5 guard events. 4 were Gather and Retreat pacing (400, 609)↔(401, 608) at 151–175 s with nothing given up (defect 3). 1 was Travel pacing at (369, 429), which gave up `travel:town`.
+
+### #129–#134 checks
+
+- **#134 stale Step:** no Step from a stale position landed on a hazard. One flee was stopped by the new guard (`flee npc 240: stop, the step may land on a blocked cell`).
+- **#134 lone Take:** **not fixed in practice.** The Take is now held as a queue (each first Take's record carries `held_queue`), but a second identical Take still goes out 3 ticks later (defect 2).
+- **#134 shadowing hostile:** no 45 s stall under a follower. The longest gap with no cut while gathering was the 34 s pacing in defect 3.
+- **#134 play on after a death:** works. The run went on for 470 s after the death.
+- **#131:** townsfolk were not fled from or fought; all flee and retreat targets were gristlewicks and wartlurches.
+- **#133:** parked and cleared the queue.
+
+### Top 3 defects
+
+1. **Heal walks to a "safe" tile that sits beside a known hostile pack, and holds a 10-Step queue into it.** At 113 s, after wartlurch 269 hit for 3, Heal (`heal_measure`) queued 10 Steps to the nearest known safe tile (399, 609). That tile had gristlewick 280 three cells away and wartlurches 289–292 within 5–7, and wartlurch is a known hostile type (269 had just hit us). The queue ran to (396, 606), the hits started, and Flee from 280 stepped down-left into 289 and 290.
+
+   ```
+   t=4036239 @76:405,578 tick  queue 10×Step 27×Wait (heal_measure → (399, 609))
+   t=4036275 entities  npc:280@399,606, npc:291@392,609, npc:289@393,609, npc:292@394,609, npc:290@394,610, …
+   t=4036377 @76:396,606 tick  — (queue held) | Attacked, Damaged 1 by npc
+   t=4036382 @76:397,607 tick  Step(down_left) (flee npc 280)
+   t=4036389 @76:396,608 tick  Step(up_left) (flee npc 280) | Attacked, Damaged 2 by npc
+   t=4036398 @76:395,607 tick  — (queue held) | Attacked, Damaged 3 by npc
+   t=4036410 @?          tick  Step(down_left) (flee npc 280) | Attacked, Damaged 2 by npc, Died
+   ```
+
+   Suspects: `states/heal.py:169` (`_walk_to_safe` takes `nearest_known_safe` with no hostile check on the target, unlike `_explore_zone`'s `hostiles_near` filter at `:133`) and `runner.py:743` (a held Heal queue keeps walking until a reflex fires, which here was the first hit). The respawn tile is beside the same pack, so Heal, Retreat and respawn all pull the character back to it.
+
+2. **The Pickup reflex re-sends a held lone `Take`.** #134 now holds a lone `Take` as a queue. But on the next poll `reflex_while_held` runs Pickup, which sees the same supply (it leaves `w.entities` only on `SupplyTaken`, one response later) and fires a fresh `Take`. `held_step_matches` lets a held queue keep running only when the reflex is a `SetPosition`, so the identical `Take` replaces the queue. This happened 11 times out of 13 supplies.
+
+   ```
+   t=4037152 @76:405,624 tick  Take(62600) (take gem)                  held_queue 2721d352…
+   t=4037155 @76:405,624 tick  Take(62600) (take gem) | SupplyTaken    held_queue 306ddf52…
+   ```
+
+   Suspects: `runner.py:785` (`held_step_matches` covers `SetPosition` only), `runner.py:743`, and `states/pickup.py:33`. A reflex whose intent equals the held queue's unrun intent should leave the queue running.
+
+3. **Gather and Retreat pace for 34 s after the respawn.** Back on the safe tile (399, 609) with gristlewick 280 at (399, 606), Gather's shadow bar (weapon reach + 1 = 2, for a hostile that is not the attacker) allowed grass at (401, 607) and (402, 607). The walk there entered cells where `should_retreat` holds (`on_hostile = "fight"`, a fight it would lose, 280 threatening), so Retreat walked back to the safe tile, where Retreat is off and Gather starts again. The oscillation guard fired 4 times and gave nothing up, because a survival state did the moving. There was one cut in 34 s.
+
+   ```
+   t=4036515 @76:401,607 tick  Use(block:) (cut grass) | BlockChanged
+   t=4036520 @76:401,607 tick  Step(down_left) (retreat → safe (399, 609))
+   t=4036537 @76:399,609 tick  queue 3×Step 7×Wait (gather → (402, 607))
+   t=4036547 @76:401,607 tick  queue 1×Step 3×Wait (retreat → safe (399, 609))
+   oscillation ×4 (151–175 s): cells (400, 609), (401, 608); states Gather, Retreat; nothing given up
+   ```
+
+   Suspects: `states/gather_safe.py:31–35` (`gather_bar` judges only the target cell, at 2) against `survival.py:270–287` (`should_retreat` fires anywhere off a safe tile with the group in `hostile_range`). Gather could bar any cell where `should_retreat` would hold, or drop a target that Retreat has turned back from.
+
+**Minor:** Greet said hello to 4 snotlings. None attacked, but the type is unknown and the field is not where helpers stand. The same sign at (399, 406) was `Read` 3 times. With 21 gems and a shopping stack from 257 s on, nothing was bought in the remaining 340 s. Decision latency is not in the trace: a `decide_ms` field on each `tick` record would let a run confirm #132's budget.

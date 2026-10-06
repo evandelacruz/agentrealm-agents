@@ -4,7 +4,7 @@
 object; each does nothing here, so a metrics class overrides only the hooks it
 measures; M8 also reads tick events (``NPCDied``) through ``on_events``, and
 M11 level clears through ``on_level_clear``. The park phase after a run
-(A65) is not the scenario: no hook fires during it but ``on_park_start`` and
+(A66) is not the scenario: no hook fires during it but ``on_park_start`` and
 ``on_park_end``, and ``ParkSplit`` keeps its API errors apart. A new hook is declared here and
 called unconditionally, never looked up with ``hasattr``. ``CountingClient``
 records failed requests (and optionally every call).
@@ -101,15 +101,15 @@ class AcceptanceHooks:
         """The dispatch guard caught the character pacing between two cells (A15)."""
 
     def on_park_start(self) -> None:
-        """The run is over and the runner parks (A65). No other hook fires after this."""
+        """The run is over and the runner parks (A66). No other hook fires after this."""
 
     def on_park_end(self, report: ParkReport) -> None:
-        """The park phase ended: how, where, and after how long (A65)."""
+        """The park phase ended: how, where, and after how long (A66)."""
 
 
 @dataclass(kw_only=True)
 class ParkSplit(AcceptanceHooks):
-    """Keeps the park phase (A65) out of a run's API errors, and keeps its report.
+    """Keeps the park phase (A66) out of a run's API errors, and keeps its report.
 
     ``api_errors`` is the list ``wrap`` hands ``CountingClient``. What it
     records while the runner parks moves to ``park_api_errors``, so a gate

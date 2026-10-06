@@ -16,7 +16,7 @@ from agentrealm_agent.break_memory import record_attempt
 from agentrealm_agent.client import ApiError
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.investigation import mark_cell_read, mark_npc_spoken
+from agentrealm_agent.investigation import mark_cell_read, mark_npc_greeted, mark_npc_spoken
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.m10_acceptance import TARGET_SECONDS, M10AcceptanceMetrics, odd_block_opened
 from agentrealm_agent.memory import Memory
@@ -103,6 +103,15 @@ class NpcGateTest(unittest.TestCase):
         w.entities = [Entity("npc", 7, (3, 0), code="helper")]
         decide_tick(m, w, kb)
         mark_npc_spoken(kb, 7)
+        self.assertEqual(m.failures(full_run=True, knowledge=kb), [])
+
+    def test_greeted_npc_passes(self):
+        # Greet's hello is an applied Say too (A65).
+        m, kb = metrics(), KnowledgeBase("fixture")
+        w = open_world()
+        w.entities = [Entity("npc", 7, (3, 0), code="helper")]
+        decide_tick(m, w, kb)
+        mark_npc_greeted(kb, 7)
         self.assertEqual(m.failures(full_run=True, knowledge=kb), [])
 
 

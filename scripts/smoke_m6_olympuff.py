@@ -48,7 +48,7 @@ def run_smoke(
     park_seconds: float,
 ) -> M6AcceptanceMetrics:
     """Play until ``target_steps`` Steps apply or ``timeout_s`` passes, then
-    park for up to ``park_seconds`` (A65), which the metrics do not count."""
+    park for up to ``park_seconds`` (A66), which the metrics do not count."""
     stop, abort = threading.Event(), threading.Event()
     metrics = M6AcceptanceMetrics(target_steps=target_steps, stop=stop)
     knowledge: KnowledgeBase = load_knowledge(cfg.world)

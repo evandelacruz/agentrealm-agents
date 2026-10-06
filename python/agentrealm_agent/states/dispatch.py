@@ -38,6 +38,7 @@ from .explore import ExploreState
 from .fight import FightState
 from .flee import FleeState
 from .gather import GatherState
+from .greet import GreetState
 from .heal import HealState
 from .idle import IdleState
 from .investigate import InvestigateState
@@ -55,8 +56,8 @@ from .wait import WaitState
 
 # Act on what is happening now (PLAYABLE_AGENT_PLAN.md State machine). Sync
 # and Downed only wait, the forced waits. Escape, Retreat and Heal (A10)
-# are survival; Fight (A23) slots in before Flee; then Pickup in reach (A20)
-# and Recover (A11).
+# are survival; Fight (A23) slots in before Flee; then Pickup in reach (A20),
+# Recover (A11), and Greet (A65), a one-tick hello to an NPC in sight.
 REFLEXES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
@@ -67,6 +68,7 @@ REFLEXES: tuple[State, ...] = (
     FleeState(),
     PickupState(),
     RecoverState(),
+    GreetState(),
 )
 
 # Run only for the plan's top op (``plan.OP_STATE``). At most one guards for
@@ -93,7 +95,7 @@ EXECUTORS: tuple[State, ...] = (
 # The ``idle`` and ``wander`` policy kinds (M1); never guards for ``scripted``.
 STATES: tuple[State, ...] = REFLEXES + EXECUTORS + (IdleState(),)
 
-# The runner's park phase, after the run ends (A65): the survival reflexes,
+# The runner's park phase, after the run ends (A66): the survival reflexes,
 # then Park walking to safe ground. No plan op runs, and nothing else.
 SURVIVAL = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee")
 PARK_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name in SURVIVAL) + (ParkState(),)
@@ -202,7 +204,7 @@ def _breaking_for(owner: str | None, m: Memory, world: WorldModel) -> bool:
 
 def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> StateOutcome:
     """The first state, in ``STATES`` order, that runs and sends an intent or
-    waits; in the park phase, in ``PARK_STATES`` order (A65)."""
+    waits; in the park phase, in ``PARK_STATES`` order (A66)."""
     m = ctx.memory
     for state in PARK_STATES if m.parking else STATES:
         active = state.name == m.state and not state.done(world, ctx)

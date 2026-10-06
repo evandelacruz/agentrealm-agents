@@ -77,6 +77,7 @@ def _say(w: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
     npc = _npc(w, op)
     if npc is None:
         return _out(None, "no such NPC in sight")
+    # Only the op's own Say settles it: Greet's hello is filed apart (A65).
     if _settled(ctx, say_key(npc.id), npc.id in spoken_npc_ids(ctx.knowledge)):
         return _out(None, f"said to npc {npc.id}: done")
     assert w.pos is not None

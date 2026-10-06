@@ -21,14 +21,14 @@ NO_PLANNER_HELP = "test mode: play without the AI planner (A35)"
 
 
 def add_park_argument(ap: argparse.ArgumentParser) -> None:
-    """``--park-seconds``: the park phase after the run (A65)."""
+    """``--park-seconds``: the park phase after the run (A66)."""
     ap.add_argument("--park-seconds", type=float, default=DEFAULT_PARK_SECONDS, help=PARK_SECONDS_HELP)
 
 
 def alive_at_end_failures(client: Client, cid: int, metrics: ParkSplit) -> list[str]:
     """The end-of-run alive check, as gate failures.
 
-    A death in the park phase (A65) belongs to the park, which is reported on
+    A death in the park phase (A66) belongs to the park, which is reported on
     its own line (``ParkSplit.park_summary_line``), not to the scenario.
     """
     try:
@@ -137,7 +137,7 @@ def run_acceptance_smoke(
     ``prepare``, when given, runs on the loaded knowledge base before the
     runner starts (M9 clears earlier runs' entrance looks with it).
     ``planner`` is the AI planner (A35), from :func:`planner_for`.
-    After the stop, the runner parks for up to ``park_seconds`` (A65);
+    After the stop, the runner parks for up to ``park_seconds`` (A66);
     SIGINT or SIGTERM stops the run, and a second one cuts the park short.
 
     Returns the seconds played, the park phase not counted, and the knowledge

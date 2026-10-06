@@ -25,7 +25,7 @@ from .runner import Runner
 from .strategist import PlannerConfigError, Strategist
 
 # How long `run` waits for the driver thread to stop before saving, once it
-# has stopped waiting on the park phase (A65): the driver returned, or a
+# has stopped waiting on the park phase (A66): the driver returned, or a
 # second signal set ``abort``.
 SHUTDOWN_JOIN_SECONDS = ABORT_JOIN_SECONDS
 
@@ -207,7 +207,7 @@ def run(
     park_seconds: float = DEFAULT_PARK_SECONDS,
 ) -> int:
     """Play until SIGINT (Ctrl-C) or SIGTERM, then park for up to
-    ``park_seconds`` (A65); a second signal stops the park and exits
+    ``park_seconds`` (A66); a second signal stops the park and exits
     within ``SHUTDOWN_JOIN_SECONDS``."""
     try:
         client.self_(cid)

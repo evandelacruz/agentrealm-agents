@@ -500,7 +500,8 @@ class RunnerTest(unittest.TestCase):
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
         r.tick()
         self.assertIsNotNone(r.mem.held_queue)
-        r.world.entities = [Entity("npc", 9, (2, 1))]  # off the path, within hostile_range
+        r.world.entities = [Entity("npc", 9, (2, 1), "gnawer")]  # off the path, within hostile_range
+        r.world.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         r.tick()
         self.assertIsNotNone(fake.sent[1][0], "the flee replaces the held queue")
         self.assertEqual(fake.sent[1][0][-1], {"verb": "Step", "direction": "down"})

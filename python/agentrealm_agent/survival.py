@@ -26,6 +26,9 @@ GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYA
 # range: two of its swings, so a pursuer stepping just past ``hostile_range``
 # between hits does not end the flee (A9, A58 run 9).
 THREAT_MEMORY_TICKS = 2 * HOSTILE_ATTACK_INTERVAL_TICKS
+# A hostile's reach, assumed until measured: the API serves none (PLAN.md
+# Server gaps). A hostile this close is in reach of us.
+HOSTILE_REACH = 1
 
 
 def effective_risk(risk: float, lives: int, lives_floor: int) -> float:
@@ -47,6 +50,20 @@ def effective_fight_margin(fight_margin: float, eff_risk: float) -> float:
     return fight_margin * (1.5 - eff_risk)
 
 
+def is_hostile(w: WorldModel, policy: Policy, e: Entity) -> bool:
+    """``e`` is a threat: an entity of a ``policy.hostile`` kind that is a
+    character, a boss, the one that hit us last, or an NPC whose type has
+    shown itself hostile (``WorldModel.hostile_types``, ``threat``).
+
+    The API does not say which NPC types are hostile, so an NPC of a type
+    never seen attacking or dying is not one: townsfolk, shopkeepers and
+    helpers never start Flee, Retreat or a Fight (A23 survive-a-fight run 2).
+    """
+    if e.kind not in policy.hostile:
+        return False
+    return e.kind != "npc" or known_hostile(w, e)
+
+
 def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
     if w.pos is None:
         return []
@@ -54,7 +71,7 @@ def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
     return [
         e
         for e in w.entities
-        if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range
+        if is_hostile(w, policy, e) and chebyshev(e.pos, here) <= policy.hostile_range
     ]
 
 
@@ -75,12 +92,48 @@ def flee_from(w: WorldModel, policy: Policy) -> list[Entity]:
     in_range = hostiles_in_range(w, policy)
     if in_range or policy.on_hostile != "flee" or not recently_attacked(w):
         return in_range
-    return [e for e in w.entities if e.kind in policy.hostile and is_attacker(w, e)]
+    return [e for e in w.entities if is_hostile(w, policy, e) and is_attacker(w, e)]
+
+
+def approaching(w: WorldModel, e: Entity) -> bool:
+    """``e``'s latest move, within ``THREAT_MEMORY_TICKS``, brought it closer to us."""
+    moved = w.entity_moves.get((e.kind, e.id))
+    if moved is None or w.pos is None:
+        return False
+    before, tick = moved
+    return w.tick - tick <= THREAT_MEMORY_TICKS and chebyshev(e.pos, w.pos) < chebyshev(before, w.pos)
+
+
+def threatening(w: WorldModel, group: list[Entity]) -> bool:
+    """A hostile in ``group`` is coming for us: it hit us recently, stands in
+    reach (``HOSTILE_REACH``), or is approaching. A hostile that just stands
+    nearby is avoided, not run from (A9).
+
+    A boss always is: a boss fight is one Boss chose to start, so a fight we
+    would lose there means retreat out, not stepping in until it is in reach
+    (A38, review on #131)."""
+    if w.pos is None:
+        return False
+    if any(e.is_boss for e in group):
+        return True
+    if recently_attacked(w) and any(is_attacker(w, e) for e in group):
+        return True
+    return any(chebyshev(e.pos, w.pos) <= HOSTILE_REACH or approaching(w, e) for e in group)
 
 
 def is_attacker(w: WorldModel, e: Entity) -> bool:
     """``e`` is the hostile the last hostile hit named as its source."""
     return w.attacker == (e.kind, e.id)
+
+
+def known_hostile(w: WorldModel, e: Entity) -> bool:
+    """``e`` has shown it is hostile: a boss, the last thing that hit us, or of a
+    type that has swung at us, hit us or died in view this run
+    (``WorldModel.hostile_types``, ``threat``). Helpers never do."""
+    if e.is_boss or is_attacker(w, e):
+        return True
+    key = type_key_for_entity(e)
+    return key is not None and (key in w.hostile_types or w.threat.measured(key))
 
 
 def combat_group(w: WorldModel, policy: Policy) -> list[Entity]:
@@ -91,7 +144,7 @@ def combat_group(w: WorldModel, policy: Policy) -> list[Entity]:
     focus = min(in_range, key=lambda e: (chebyshev(e.pos, w.pos), e.id))
     group = [focus]
     for e in w.entities:
-        if e.kind not in policy.hostile or e.id == focus.id:
+        if not is_hostile(w, policy, e) or e.id == focus.id:
             continue
         if chebyshev(e.pos, focus.pos) <= GROUP_JOIN_RADIUS and e not in group:
             group.append(e)
@@ -154,7 +207,7 @@ def pursuer_peaks(w: WorldModel, policy: Policy, everyone: bool = False) -> dict
     never runs through one.
     """
     if everyone:
-        chasing = [e for e in w.entities if e.kind in policy.hostile]
+        chasing = [e for e in w.entities if is_hostile(w, policy, e)]
     else:
         chasing = combat_group(w, policy) + [e for e in w.entities if is_attacker(w, e)]
     return {(e.kind, e.id): 0 for e in chasing}
@@ -210,18 +263,22 @@ def would_lose(w: WorldModel, policy: Policy, params: dict[str, float | int]) ->
 
 
 def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:
-    """The next effective ``retreat_hits`` hits from the hostiles in range could kill.
+    """The next effective ``retreat_hits`` hits from the hostiles in range could
+    kill, or (``on_hostile = "fight"``) we would lose to a group that is
+    ``threatening`` us.
 
     A hit's size comes from what is attacking (the threat table), so with no
-    hostile in range there is nothing to retreat from. ``on_hostile = "ignore"``
-    never retreats.
+    hostile in range there is nothing to retreat from. A fight we would lose
+    against hostiles that are not coming for us is avoided, not retreated
+    from: Retreat started three times at full health from that (A23
+    survive-a-fight run 2). ``on_hostile = "ignore"`` never retreats.
     """
     if policy.on_hostile == "ignore" or on_safe_tile(w):
         return False
     group = combat_group(w, policy)
     if not group:
         return False
-    if policy.on_hostile == "fight" and would_lose(w, policy, params):
+    if policy.on_hostile == "fight" and would_lose(w, policy, params) and threatening(w, group):
         return True
     return at_health_floor(w, params, group)
 

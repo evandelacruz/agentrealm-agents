@@ -1,4 +1,4 @@
-"""Park before exiting (A65): the world does not pause when the client stops.
+"""Park before exiting (A66): the world does not pause when the client stops.
 
 A run that ends (its time limit, Ctrl-C, SIGTERM) leaves the character in
 the world. Standing on field ground, it can be killed while nobody plays it.

@@ -17,7 +17,7 @@ FULL_RUN_FRACTION = 0.95
 class TimedRunHooks(PlannerHealth, ParkSplit):
     """Deaths, API errors, planner health (``PlannerHealth``), and an optional wall-clock stop for long smoke runs.
 
-    The park phase after the stop (A65) counts toward none of them (``ParkSplit``)."""
+    The park phase after the stop (A66) counts toward none of them (``ParkSplit``)."""
 
     stop: threading.Event | None = None
     target_seconds: float | None = None  # wall-clock length of the run; None plays until stopped

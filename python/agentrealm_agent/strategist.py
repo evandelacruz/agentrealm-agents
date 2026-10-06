@@ -98,7 +98,8 @@ from .memory import Memory
 from .gem_yield import summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
-from .survival import retreat_goal
+from .investigation import HELPER_STILL_TICKS, greeted_npc_ids, in_sight, spoken_npc_ids
+from .survival import known_hostile, retreat_goal
 from .travel.knowledge import town_from_kb
 from .world import Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe
@@ -159,6 +160,8 @@ The survival params ("params" under State, set by "params" or a set_param op). S
 {_param_table()}
 
 Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first.
+
+NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir from here, spoken, greeted, hostile, stays_put); npcs_spoken_to counts the NPCs a say op of yours has spoken to so far, and npcs_greeted those Greet has said hello to. The game does not say which NPCs are helpers and which are monsters. "hostile" true means known hostile: a boss, the last thing that hit the character, or a type that has swung at it, hit it or died in view; false only means none of its type has done so yet, so it may still be a monster. "stays_put" true means it has stood on one cell for a while, as helpers do; judge the rest from its type and the clues. On safe ground (anywhere, if policy.hostile does not name NPCs), Greet says hello once to an NPC in sight that stays put and is not hostile, and marks it greeted; a helper answers any words with the same line, which lands in Clues. A greeting never counts as spoken: a say op to a greeted NPC still says your text. To talk to one further away, or with your own words, use a say op with its npc_id (from nearby_npcs) or its npc_type (any NPC of that type, the nearest first); the character walks within speech range and says your text. A helper's reply is added to Clues as a row of kind "npc".
 
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
@@ -509,6 +512,7 @@ def build_prompt(
         f"worn={json.dumps(w.worn_codes, sort_keys=True)} held={json.dumps(dict(sorted(Counter(s.code for s in w.held_supplies).items())))}",
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         *safety_lines(w, knowledge),
+        *npc_lines(w, knowledge),
         f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
         *_gather_line(plan, gather_status),
         f"gather_run={json.dumps(gather_run or {}, sort_keys=True)}",
@@ -559,6 +563,46 @@ def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
         f"nearest_safe={_bearing(w, (w.map_id, safe)) if safe is not None else 'none known on this map'}",
         f"town={_bearing(w, town) if town is not None else 'unknown'}",
     ]
+
+
+# The nearest NPCs in sight that State lists (A65).
+NEARBY_NPCS_SHOWN = 5
+
+
+def npc_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
+    """The nearest NPCs in sight, and how many were spoken to and greeted so far (A65).
+
+    Each NPC: ``id``, ``type``, ``cells`` (Chebyshev) and ``dir`` from here,
+    ``spoken`` (a ``say`` op's text was said to it, ``spoken_npcs``),
+    ``greeted`` (Greet's hello was, ``greeted_npcs``), ``hostile`` (``survival.known_hostile``:
+    a boss, our last hitter, or a type that has swung at us, hit us or died in view) and ``stays_put`` (on
+    one cell for ``HELPER_STILL_TICKS`` in view, as helpers do). The API names
+    no helpers, so these are the only hints.
+    """
+    spoken, greeted = spoken_npc_ids(knowledge), greeted_npc_ids(knowledge)
+    lines = [f"npcs_spoken_to={len(spoken)} npcs_greeted={len(greeted)}"]
+    if w.pos is None or w.map_id is None:
+        return lines
+    here, map_id = w.pos, w.map_id
+    npcs = sorted(
+        (e for e in w.entities if e.kind == "npc" and in_sight(w, map_id, here, e.pos)),
+        key=lambda e: (chebyshev(e.pos, here), e.id),
+    )[:NEARBY_NPCS_SHOWN]
+    rows = [
+        {
+            "id": e.id,
+            "type": e.code or None,
+            "cells": chebyshev(e.pos, here),
+            "dir": compass(here, e.pos) or "here",
+            "spoken": e.id in spoken,
+            "greeted": e.id in greeted,
+            "hostile": known_hostile(w, e),
+            "stays_put": w.npc_still_ticks(e) >= HELPER_STILL_TICKS,
+        }
+        for e in npcs
+    ]
+    lines.append(f"nearby_npcs={json.dumps(rows, sort_keys=True)}")
+    return lines
 
 
 def _bearing(w: WorldModel, where: tuple[int, Pos]) -> str:

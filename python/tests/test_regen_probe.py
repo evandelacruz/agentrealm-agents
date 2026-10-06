@@ -55,7 +55,7 @@ class FakeRunner:
     events = staticmethod(lambda w, hooks: None)
     windows = 0
 
-    park_report = None  # the park phase (A65) is not faked
+    park_report = None  # the park phase (A66) is not faked
 
     def __init__(
         self, cfg, client, cid, stop, out=print, knowledge=None, acceptance=None, strategist=None, park_seconds=0.0, abort=None
@@ -205,6 +205,7 @@ class ProbeProfileTest(unittest.TestCase):
         w = hurt_on_safe_tile()
         w.pos, w.terrain_center, w.health, w.lives = (2, 2), (2, 2), health, lives
         w.entities = [Entity("npc", 3, (3, 2), "slime")]
+        w.hostile_types.add(("npc", "slime"))  # a type seen attacking (survival.is_hostile)
         return dispatch(w, PlayContext(Memory(), cfg.policy, random.Random(0), params=params)).state
 
     def test_only_risk_and_fight_margin_move_off_the_defaults(self):

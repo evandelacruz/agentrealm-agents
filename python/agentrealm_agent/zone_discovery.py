@@ -2,7 +2,8 @@
 
 Probes cells around respawn anchors and along the current path when the
 scheduler would otherwise skip a calm window, so later survival states
-have known safe tiles without spending urgent budget on zone reads. A
+have known safe tiles without spending urgent budget on zone reads. While
+Travel searches for a hunting ground, its probes come first (``hunt_probe``). A
 terrain read already marks safe-zone cells (``MapView.safe``), so those
 are known safe and never probed. The tradeoff: an agent's terrain read
 leaves out ``brightness``, so such a cell's brightness stays unread and
@@ -23,9 +24,13 @@ if TYPE_CHECKING:
 # Chebyshev radius around each respawn anchor for the first pass of probes.
 RESPAWN_PROBE_RADIUS = 8
 # While Travel searches for a hunting ground (A27), spare windows read one
-# cell in every HUNT_PROBE_SPACING × HUNT_PROBE_SPACING square of the view,
-# so a search covers ground without reading every cell.
+# cell in every HUNT_PROBE_SPACING × HUNT_PROBE_SPACING square, in widening
+# rings around the character out to HUNT_PROBE_RADIUS, so a search covers
+# ground without reading every cell. One search reads at most
+# HUNT_PROBE_BUDGET cells.
 HUNT_PROBE_SPACING = 4
+HUNT_PROBE_RADIUS = 64
+HUNT_PROBE_BUDGET = 200
 
 
 def apply_town(w: WorldModel, town: dict | None) -> None:
@@ -100,15 +105,23 @@ def known_safe(w: WorldModel, map_id: int, pos: Pos) -> bool:
 def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:
     """The next revealed cell that still needs a zone read, or None.
 
-    Cells within RESPAWN_PROBE_RADIUS of a respawn anchor come first, nearest
-    the anchor; then, while Travel searches for a hunting ground, a sparse
-    grid of cells in view (``hunt_probes``), nearest first; then cells on the
-    current path. Only revealed cells qualify,
-    since get_zone refuses an unrevealed one. Called once per spare window by
-    choose_call, which hands the pick to the runner in Memory.zone_probe.
+    While Travel searches for a hunting ground, its probe comes first
+    (``hunt_probe``), counted against the search's budget. Otherwise cells
+    within RESPAWN_PROBE_RADIUS of a respawn anchor, nearest the anchor; then
+    cells on the current path. Only revealed cells qualify, since get_zone
+    refuses an unrevealed one. Called once per spare window by choose_call,
+    which hands the pick to the runner in Memory.zone_probe.
+
+    The search goes first because the respawn ring alone can fill every spare
+    window: with an empty knowledge base it took all 211 zone reads of a
+    five-minute search, and no hunt probe ever ran (A23 survive-a-fight run 2).
     """
     if w.pos is None:
         return None
+    probe = hunt_probe(w, m)
+    if probe is not None and w.map_id is not None and m.hunt_search is not None:
+        m.hunt_search.probes += 1
+        return w.map_id, probe
     here = w.pos
     candidates: list[tuple[int, int, int, Pos]] = []  # priority, sort dist, map_id, pos
     seen: set[tuple[int, Pos]] = set()
@@ -122,10 +135,7 @@ def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:
 
     def add(map_id: int, pos: Pos, priority: int) -> None:
         key = (map_id, pos)
-        if key in seen or zone_probed(w, map_id, pos):
-            return
-        view = w.maps.get(map_id)
-        if view is None or pos not in view.tiles:
+        if key in seen or not needs_zone_read(w, map_id, pos):
             return
         seen.add(key)
         if priority == 0:
@@ -143,10 +153,8 @@ def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:
                 add(map_id, (anchor[0] + dx, anchor[1] + dy), 0)
 
     if w.map_id is not None:
-        for pos in hunt_probes(w, m):
-            add(w.map_id, pos, 1)
         for step in m.path:
-            add(w.map_id, step, 2)
+            add(w.map_id, step, 1)
 
     if not candidates:
         return None
@@ -155,21 +163,48 @@ def next_zone_probe(w: WorldModel, m: Memory) -> tuple[int, Pos] | None:
     return map_id, pos
 
 
-def hunt_probes(w: WorldModel, m: Memory) -> list[Pos]:
-    """Grid cells in view to read while Travel searches for a hunting ground
-    (A27): ``get_zone`` gives ``strength_ceiling`` only on a hunting cell.
-    Empty when no search is fresh (``HuntSearch.probe_until``)."""
+def needs_zone_read(w: WorldModel, map_id: int, pos: Pos) -> bool:
+    """Revealed (get_zone refuses an unrevealed cell) and not read yet."""
+    view = w.maps.get(map_id)
+    return view is not None and pos in view.tiles and not zone_probed(w, map_id, pos)
+
+
+def hunt_probe(w: WorldModel, m: Memory) -> Pos | None:
+    """The next cell to read while Travel searches for a hunting ground (A27),
+    or None: ``get_zone`` gives ``strength_ceiling`` only on a hunting cell.
+
+    The search ranges outward from the character. It walks the map's
+    frontier, so the cells around it are the newest ground. It reads one cell
+    in every ``HUNT_PROBE_SPACING`` square, in widening rings of those grid
+    cells around the character, out to ``HUNT_PROBE_RADIUS``. Within a ring
+    the nearest cell comes first. A cell read already, or unrevealed, is
+    skipped.
+
+    None when no search is on, none is fresh (``HuntSearch.probe_until``),
+    or the search has spent its ``HUNT_PROBE_BUDGET`` reads. A read that
+    finds a hunting cell Travel may enter ends the search
+    (``states/travel.py``), and with it the probes.
+    """
     s = m.hunt_search
-    if s is None or w.pos is None or w.tick > s.probe_until:
-        return []
-    x0, y0, width, height = w.perception_rect()
-    first_x = x0 + (-x0) % HUNT_PROBE_SPACING
-    first_y = y0 + (-y0) % HUNT_PROBE_SPACING
-    return [
-        (x, y)
-        for y in range(first_y, y0 + height, HUNT_PROBE_SPACING)
-        for x in range(first_x, x0 + width, HUNT_PROBE_SPACING)
-    ]
+    if s is None or w.pos is None or w.map_id is None or w.tick > s.probe_until:
+        return None
+    if s.probes >= HUNT_PROBE_BUDGET:
+        return None
+    cx, cy = w.pos
+    # The grid cell nearest us: grid cells sit on multiples of the spacing.
+    gx = round(cx / HUNT_PROBE_SPACING) * HUNT_PROBE_SPACING
+    gy = round(cy / HUNT_PROBE_SPACING) * HUNT_PROBE_SPACING
+    for ring in range(HUNT_PROBE_RADIUS // HUNT_PROBE_SPACING + 1):
+        cells = [
+            (gx + i * HUNT_PROBE_SPACING, gy + j * HUNT_PROBE_SPACING)
+            for j in range(-ring, ring + 1)
+            for i in range(-ring, ring + 1)
+            if max(abs(i), abs(j)) == ring
+        ]
+        open_cells = [p for p in cells if needs_zone_read(w, w.map_id, p)]
+        if open_cells:
+            return min(open_cells, key=lambda p: (chebyshev(p, w.pos), p))
+    return None
 
 
 def _opt_int(v) -> int | None:

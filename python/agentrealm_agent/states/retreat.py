@@ -99,6 +99,7 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     # The nearest safe cell a path reaches, else town (free-play run 2). The
     # escape cells shut only this decision's route, not where it may lead.
     goal = retreat_safe_goal(m, w, policy, ctx.knowledge, plan_avoid, plan_costly)
+    lasting = grid_params(policy, set(plan_avoid), set(plan_costly))  # without this decision's escape: what no_way proves
     plan_avoid |= escape
     if goal is None:
         return StateOutcome(None, "safe tile unreachable", state=state)
@@ -127,7 +128,7 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
         m.path = cost_path(w, goal, params, nav=nav_search(m, w, nav_key, goal)) or []
         step = next_step(w, plan_avoid, m.path)
     if step is None:
-        if not m.path and no_way(w, goal, params):  # the next decision picks another safe cell
+        if not m.path and no_way(w, goal, lasting):  # proven walled in: the next decision picks another safe cell
             m.safe_unreachable[(w.map_id, goal)] = w.tick
         return StateOutcome(None, "safe tile unreachable", state=state)
     # The runner queues the walkable prefix of ``m.path`` from this first step,

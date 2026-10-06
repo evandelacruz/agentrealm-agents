@@ -152,9 +152,9 @@ class NavStuckMemory:
     # leave the stack for good, pinned or not, and are never walked again (A16).
     given_up_travel: dict[tuple[int, Pos], int] = field(default_factory=dict)
     # The hub ones among them (``HUB_GOALS``), (map_id, cell) -> where the
-    # agent stood when it gave up (map_id, cell): they lapse
-    # (``expire_hub_give_ups``).
-    given_up_hubs: dict[tuple[int, Pos], tuple[int | None, Pos | None]] = field(default_factory=dict)
+    # agent stood when it gave up (map_id, cell) and the backoff key: they
+    # lapse (``expire_hub_give_ups``).
+    given_up_hubs: dict[tuple[int, Pos], tuple[int | None, Pos | None, str]] = field(default_factory=dict)
     # The oscillation guard (navigation/oscillation.py): cells stood on at
     # recent decisions, the (walk goal, state) of the move into each, the
     # last decision's move, its events waiting for the trace, and the cells
@@ -532,7 +532,7 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
         if att.goal not in HUB_GOALS:
             stuck.given_up_hubs.pop(dest, None)  # given up as a point too: for the run
         elif stuck.given_up_travel[dest] == w.tick:
-            stuck.given_up_hubs[dest] = (w.map_id, w.pos)
+            stuck.given_up_hubs[dest] = (w.map_id, w.pos, backoff)
     stuck.stuck_signals.append(
         {
             "trigger": "stuck",
@@ -570,14 +570,17 @@ def hub_give_up_lapses(stuck: NavStuckMemory, dest: tuple[int, Pos]) -> tuple[in
 def expire_hub_give_ups(stuck: NavStuckMemory, w: WorldModel) -> list[tuple[int, Pos]]:
     """Forget the hub give-ups that lapsed, and return them: ``HUB_GIVE_UP_TICKS``
     passed, or the agent stands ``HUB_GIVE_UP_CELLS`` from where it gave up
-    (or on another map). Its ops may then be planned and walked again."""
+    (or on another map). Its backoff ends with it, so its ops may be planned
+    and walked again at once; the backoff's power is kept, so a later
+    give-up there still backs off longer."""
     lapsed = []
-    for dest, (mid, cell) in list(stuck.given_up_hubs.items()):
+    for dest, (mid, cell, key) in list(stuck.given_up_hubs.items()):
         since = stuck.given_up_travel.get(dest)
         moved = w.pos is not None and (mid != w.map_id or (cell is not None and chebyshev(cell, w.pos) >= HUB_GIVE_UP_CELLS))
         if since is None or w.tick - since >= HUB_GIVE_UP_TICKS or moved:
             del stuck.given_up_hubs[dest]
             stuck.given_up_travel.pop(dest, None)
+            stuck.backoff_until.pop(key, None)
             lapsed.append(dest)
     return lapsed
 

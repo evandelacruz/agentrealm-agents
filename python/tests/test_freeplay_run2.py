@@ -52,6 +52,11 @@ def give_up(m: Memory, w: WorldModel, goal: str, cell) -> None:
     nav_stuck.give_up(m, w, nav_stuck.track(m, w, goal, cell), "pacing")
 
 
+def elsewhere(w: WorldModel) -> WorldModel:
+    """``w`` as seen from another map: every hub give-up lapses."""
+    return WorldModel(character_id=w.character_id, map_id=-1, pos=(0, 0), tick=w.tick)
+
+
 class HubGiveUpLapsesTest(unittest.TestCase):
     def setUp(self):
         self.w = WorldModel(character_id=1, map_id=MAP, pos=(0, 0), tick=100)
@@ -75,6 +80,29 @@ class HubGiveUpLapsesTest(unittest.TestCase):
         self.assertEqual(nav_stuck.expire_hub_give_ups(stuck, self.w), [])
         self.w.pos = (0, -nav_stuck.HUB_GIVE_UP_CELLS)
         self.assertEqual(nav_stuck.expire_hub_give_ups(stuck, self.w), [(MAP, TOWN)])
+
+    def test_travel_walks_to_town_again_once_its_give_up_lapses(self):
+        # Review on #140: a lapse left Travel's backoff on, so it would not move.
+        w, c = world(), ctx()
+        w.respawn_anchors = [(MAP, (20, 10))]
+        c.plan = Plan([dict(TOWN_OP)], dict(PARAM_DEFAULTS))
+        for _ in range(4):  # from the 4th give-up the backoff outlasts the cooldown
+            give_up(c.memory, w, "travel:town", (20, 10))
+            nav_stuck.expire_hub_give_ups(c.memory.nav_stuck, elsewhere(w))
+        give_up(c.memory, w, "travel:town", (20, 10))
+        self.assertTrue(nav_stuck.backed_off(c.memory, "travel:town", MAP, (20, 10), w.tick))
+        w.tick += nav_stuck.HUB_GIVE_UP_TICKS
+        self.assertEqual(nav_stuck.expire_hub_give_ups(c.memory.nav_stuck, w), [(MAP, (20, 10))])
+        self.assertFalse(nav_stuck.backed_off(c.memory, "travel:town", MAP, (20, 10), w.tick))
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Travel")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
+
+    def test_a_distance_lapse_ends_the_backoff_too(self):
+        give_up(self.m, self.w, "travel:town", TOWN)
+        self.w.pos = (0, nav_stuck.HUB_GIVE_UP_CELLS)
+        nav_stuck.expire_hub_give_ups(self.m.nav_stuck, self.w)
+        self.assertFalse(nav_stuck.backed_off(self.m, "travel:town", MAP, TOWN, self.w.tick))
 
     def test_a_give_up_with_no_position_known_waits_out_its_cooldown(self):
         att = nav_stuck.track(self.m, self.w, "travel:town", TOWN)

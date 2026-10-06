@@ -185,7 +185,7 @@ Intents: 325 `Step`, 849 `Wait`, 2 `Take`. Call mix: 211 `zone`, 132 `tick`, 64 
 
    Since this run, #126 (merged at 14:01) skips any cell a terrain read already showed safe (`zone_discovery.zone_probed`). The town ring was all safe, so that change may clear this defect. A rerun will tell. The line numbers in this section are at `8966752`, the commit the run used.
 
-   Suspects: `zone_discovery.py:102–110` (ring at priority 0 always beats hunt probes at 1; `RESPAWN_PROBE_RADIUS` 8 at `:19`), `brain.py:91–94` (zones only in spare windows), `states/travel.py:38` and `:110` (`HUNT_PROBE_FRESH_SECONDS` 5).
+   Suspects (at `8966752`; on `main` now `zone_discovery.py:113–147` and `:24`): `zone_discovery.py:102–110` (ring at priority 0 always beats hunt probes at 1; `RESPAWN_PROBE_RADIUS` 8 at `:19`), `brain.py:91–94` (zones only in spare windows), `states/travel.py:38` and `:110` (`HUNT_PROBE_FRESH_SECONDS` 5).
 
 2. **The main thread blocks 5–17 s per decision, so the character stands idle and polls are late.** 17 gaps of 4–17 s with no call at all, 162 s of the 302 s run. Each gap ends in a `tick`, 15 of them held-queue polls. Reads take a median 0.3 s, so the time goes to computing the decision. The planner runs on its own thread and is not the cause: gaps also came with no call in flight (110–120 s). The profiling run shows where the time goes. The whole-map frontier explore of the hunting search took **13.7 s per call** (3 calls, 41.1 s). `reflex_while_held` took 53.5 s over 39 held polls, because it runs a full `_decide`. `navigation/planner.py` `danger()` ran 2.03 M times, with 30.9 M `chebyshev` calls under it. In a fight this would rule out urgent polling, because one decision outlasts a gristlewick's whole 16 s kill in Run 1.
 

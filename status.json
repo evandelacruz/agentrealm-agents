@@ -75,7 +75,7 @@
 
   "A26": {"state": "done"},
 
-  "A27": {"state": "partial", "remaining": "A23 run 2: with an empty knowledge base the 17x17 respawn ring (zone_discovery priority 0) takes every spare zone read, so hunt probes never run; probe_until (5 s) also lapses between slow decisions (A64)."},
+  "A27": {"state": "partial", "remaining": "A23 run 2 (at 8966752): ring zone reads starved hunt_probes; #126 now skips terrain-safe cells, so what stays open is the ring cells no terrain read has covered yet still outranking hunt_probes, and probe_until (5 s) lapsing between slow decisions (A64). Confirm with a rerun."},
 
   "A28": {"state": "done"},
 

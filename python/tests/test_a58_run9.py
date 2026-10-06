@@ -203,6 +203,7 @@ class PursuerNotOutrunTest(unittest.TestCase):
         c.params["risk"] = 1.0
         start = w.tick
         outs = pursue(w, c, npc_every=STEP_TICKS, start_gap=2, swings=False)
+        self.assertLessEqual(len(c.memory.flee_gaps), FLEE_PROBE_TICKS + 1, "kept to the probe window")
         early = [o.reason for t, o in outs if t - start <= FLEE_PROBE_TICKS]
         self.assertEqual(set(early), {"flee npc 7"}, early)
         self.assertTrue(any(o.reason.startswith("not outrunning npc 7:") for _, o in outs), [o.reason for _, o in outs])

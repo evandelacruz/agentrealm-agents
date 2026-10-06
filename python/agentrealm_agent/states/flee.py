@@ -170,6 +170,9 @@ class FleeState(State):
         if m.state != self.name:
             m.flee_gaps, m.flee_since, m.flee_failed = [], w.tick, False
         m.flee_gaps.append((w.tick, chebyshev(target.pos, w.pos)))
+        # Keep one sample at or before the probe window's start, nothing older.
+        while len(m.flee_gaps) > 1 and m.flee_gaps[1][0] <= w.tick - FLEE_PROBE_TICKS:
+            del m.flee_gaps[0]
         # Read once per decision: the oscillation guard caught Flee/Retreat
         # pacing (A15), and whichever escape runs below must keep off these cells.
         paced = oscillation.take_escape(m, w)

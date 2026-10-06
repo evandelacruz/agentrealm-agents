@@ -626,6 +626,14 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertIsNone(r.plan.current())
         self.assertEqual(r.plan.directive_ops(), [])
 
+    def test_dropping_the_head_drops_its_path_and_walks(self):
+        r, _, _ = self._pinned_runner()
+        r.mem.path, r.mem.goal, r.mem.goal_op = [(1, 0)], "explore", {"op": "explore_area"}
+        r.mem.walks["explore"] = object()
+        self._give_up_on_target(r)
+        r.drop_given_up_ops()
+        self.assertEqual((r.mem.path, r.mem.goal, r.mem.goal_op, r.mem.walks), ([], "", None, {}))
+
     def test_a_given_up_pinned_target_never_comes_back(self):
         # Second live Walk run: stuck detection gave up on the pinned point, and
         # Travel walked it again at every backoff end, since the op stayed in

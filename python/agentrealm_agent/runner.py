@@ -176,14 +176,22 @@ class Runner:
 
     def drop_given_up_ops(self) -> None:
         """A ``travel`` op to a point stuck detection gave up on leaves the
-        stack for good, wherever it sits, pinned or the planner's (A16).
-        Otherwise the backoff's end walks it again, and every planner reply
-        keeps a directives op on top. Its ``goal_failed`` signal unpins it."""
+        stack for good, wherever it sits (A16): a directives op, or a planner
+        op sent before the give-up. Otherwise the backoff's end walks it
+        again, and every planner reply keeps a directives op on top. Its
+        ``goal_failed`` signal unpins it. A planner reply that re-sends one
+        never reaches the stack (``Strategist._settle`` filters it), so this
+        fires once per op. A new head walks a path of its own."""
         given_up = self.mem.nav_stuck.given_up_travel
-        if given_up:
-            self.plan.drop_ops(
-                lambda op: point_dest(op, self.world.map_id) in given_up, "stuck detection gave up on its target", self.mem
-            )
+        if not given_up:
+            return
+        head = self.plan.current()
+        self.plan.drop_ops(
+            lambda op: point_dest(op, self.world.map_id) in given_up, "stuck detection gave up on its target", self.mem
+        )
+        if self.plan.current() is not head:
+            self.mem.path, self.mem.goal, self.mem.goal_op = [], "", None
+            self.mem.walks.clear()
 
     def reload_directives(self, old_goals: list[str]) -> None:
         """Apply reloaded directives to the plan (A34).
@@ -270,8 +278,8 @@ class Runner:
                 old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():
                     self.reload_directives(old_goals)
+                self.drop_given_up_ops()
                 self.strategist.on_window(self)
-                self.drop_given_up_ops()  # after the planner's reply, which may re-send one
                 call = choose_call(self.world, self.mem, self.cfg.policy)
                 urgent = self.acceptance is not None and is_urgent(self.world, self.mem, self.cfg.policy)
                 if call == "skip":

@@ -317,6 +317,20 @@ class AnswerTest(unittest.TestCase):
         self.assertEqual(r.plan.current()["op"], "explore_area")
         self.assertEqual(logged_events(r), ["ask", "kept"])
 
+    def test_a_resent_given_up_travel_never_reaches_the_stack_or_raises_a_trigger(self):
+        # Review on A16: a re-send dropped after it reached the stack queued
+        # goal_failed, which set off another call at once: a replan loop.
+        given_up = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": 7}
+        s = make(FakeLLM({"goals": [given_up, WAIT_ANSWER["goals"][0]]}, {"goals": [given_up]}))
+        r = fake_runner()
+        r.mem.nav_stuck.given_up_travel[(7, (5, 6))] = 1
+        round_trip(s, r)
+        self.assertEqual([g["op"] for g in r.plan.goals[r.plan.index :]], ["wait"])
+        self.assertEqual(r.mem.strategist_signals, [])
+        s.on_window(r)
+        self.assertEqual(s.inbox, [], "no new trigger, so no new call")
+        self.assertIsNone(s.in_flight)
+
     def test_directives_goals_override_the_planner(self):
         # Directives ops stay on top; the planner's goals go below them.
         s, r = make(FakeLLM(WAIT_ANSWER)), fake_runner(goals=["gather_gems:5"])

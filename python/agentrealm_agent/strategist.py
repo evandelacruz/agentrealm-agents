@@ -92,6 +92,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Protocol
 
 from .directives import Directives
+from .travel.ops import point_dest
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .planner_reference import game_notes_text, reference_text
@@ -807,6 +808,15 @@ class Strategist:
         if isinstance(reply, dict) and "goals" not in reply:
             runner.log("strategist", "no goals in reply; stack kept", {"strategist": {"event": "kept", **record}})
             return
+        given_up = runner.mem.nav_stuck.given_up_travel
+        if given_up:
+            # A travel to a point stuck detection gave up on never reaches the
+            # stack (A16): filtered here, so a re-send raises no goal_failed
+            # and cannot set off another call.
+            kept = [g for g in goals if point_dest(g, runner.world.map_id) not in given_up]
+            if len(kept) < len(goals):
+                record["given_up_filtered"] = [g for g in goals if g not in kept]
+                goals = kept
         old = runner.plan
         pinned = old.directive_ops()  # directives ops left: they stay on top
         # A reply that repeats a directives op does not stack it twice.

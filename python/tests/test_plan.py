@@ -571,3 +571,46 @@ class RunnerPlanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DropOpsTest(unittest.TestCase):
+    """``Plan.drop_ops`` (A16): removes matching ops anywhere left on the stack
+    and keeps ``directive_end`` on the directives part."""
+
+    PIN_A = {"op": "travel", "to": "point", "x": 1, "y": 1}
+    PIN_B = {"op": "travel", "to": "point", "x": 2, "y": 2}
+    MINE_A = {"op": "explore_area", "x": 0, "y": 0, "radius": 5}
+    MINE_B = {"op": "travel", "to": "point", "x": 3, "y": 3}
+
+    def plan(self) -> Plan:
+        return Plan([self.PIN_A, self.PIN_B, self.MINE_A, self.MINE_B], dict(PARAM_DEFAULTS), directive_end=2)
+
+    def test_dropping_a_planner_op_below_the_pins_keeps_them(self):
+        p, m = self.plan(), Memory()
+        p.drop_ops(lambda op: op == self.MINE_B, "test", m)
+        self.assertEqual(p.goals, [self.PIN_A, self.PIN_B, self.MINE_A])
+        self.assertEqual(p.directive_ops(), [self.PIN_A, self.PIN_B])
+        self.assertEqual([s["trigger"] for s in m.strategist_signals], ["goal_failed"])
+
+    def test_dropping_a_pinned_op_that_is_not_the_head(self):
+        p = self.plan()
+        p.stalled_since_tick = 5
+        p.drop_ops(lambda op: op == self.PIN_B, "test", Memory())
+        self.assertEqual(p.goals, [self.PIN_A, self.MINE_A, self.MINE_B])
+        self.assertEqual(p.directive_ops(), [self.PIN_A])
+        self.assertEqual(p.stalled_since_tick, 5, "the head's own clock is untouched")
+
+    def test_dropping_the_head_resets_its_clocks(self):
+        p = self.plan()
+        p.index, p.stalled_since_tick = 1, 5
+        p.drop_ops(lambda op: op == self.PIN_B, "test", Memory())
+        self.assertEqual(p.current(), self.MINE_A)
+        self.assertEqual(p.directive_ops(), [])
+        self.assertIsNone(p.stalled_since_tick)
+
+    def test_no_match_changes_nothing(self):
+        p, m = self.plan(), Memory()
+        p.drop_ops(lambda op: False, "test", m)
+        self.assertEqual(p.goals, self.plan().goals)
+        self.assertEqual(p.directive_end, 2)
+        self.assertEqual(m.strategist_signals, [])

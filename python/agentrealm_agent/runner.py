@@ -1095,6 +1095,8 @@ class Runner:
                 m.held_queue, m.resend_held_queue = None, False
                 m.warp_from = None
                 self._removed_code = None
+            if kind == "Respawned":
+                m.need_self = True  # alive again: the last self read still says downed (A5)
         # WorldModel.apply_events already parsed BlockChanged (A14).
         for map_id, p in w.changed_blocks:
             on_block_changed(m, map_id, p)

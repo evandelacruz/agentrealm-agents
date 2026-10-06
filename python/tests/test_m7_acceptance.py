@@ -360,7 +360,7 @@ class FakeSleeper:
         if self.downed_reads:
             self.downed_reads -= 1
             return {"alive": False}
-        return {"alive": True, "asleep": self.asleep}
+        return {"alive": True, "asleep": self.asleep, "placed": not self.asleep}
 
     def tick(self, cid, intents=None):
         self.ticks.append(intents)
@@ -462,7 +462,7 @@ class SmokeScriptTest(unittest.TestCase):
         client = FakeSleeper()
         self.smoke.wake(client, 9, pause=lambda s: None)
         self.assertEqual(client.ticks, [[{"verb": "Wait"}]], "one Wait wakes it")
-        self.assertEqual(client.self_(9), {"alive": True, "asleep": False})
+        self.assertEqual(client.self_(9), {"alive": True, "asleep": False, "placed": True})
 
     def test_start_waits_out_a_respawn(self):
         client = FakeSleeper(asleep=False, downed_reads=2)

@@ -152,34 +152,42 @@ class FightState(State):
         return not should_fight(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        w, m, policy = world, ctx.memory, ctx.policy
-        m.path = []
-        target = fight_target(w, policy, ctx.never_attack)
-        if target is None or w.pos is None:
+        target = fight_target(world, ctx.policy, ctx.never_attack)
+        if target is None or world.pos is None:
+            ctx.memory.path = []
             return StateOutcome(None, "no target", state=self.name)
-        if not in_weapon_reach(w, target, ctx.knowledge):
-            blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
-            toward = close_step(w, target, blocked)
-            if toward is None:
-                return StateOutcome(None, "cannot close", state=self.name)
-            m.path = []
-            return StateOutcome(
-                [set_position(toward)],
-                f"close on {target.kind} {target.id}",
-                reflex=True,
-                state=self.name,
-            )
-        uses = [attack_intent(target) for _ in range(ATTACK_USES)]
-        retreat = retreat_tail(w, m, policy, ctx, limit=8)
-        horizon = queue_horizon_intents()
-        queue = build_attack_queue(
-            uses,
-            retreat,
-            poll_interval_ticks=m.calm_poll_interval,
-            horizon_ticks=horizon,
-            ticks_since_last_use=_ticks_since_use(w, m.last_use_tick),
+        return engage(world, ctx, target, self.name)
+
+
+def engage(w: WorldModel, ctx: PlayContext, target: Entity, state: str) -> StateOutcome:
+    """Swing at ``target`` with a retreat tail queued behind, or step closer when out of weapon reach.
+
+    **Fight** runs it, and so does **Flee** when running away is not working (A9).
+    """
+    m, policy = ctx.memory, ctx.policy
+    m.path = []
+    if not in_weapon_reach(w, target, ctx.knowledge):
+        blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
+        toward = close_step(w, target, blocked)
+        if toward is None:
+            return StateOutcome(None, "cannot close", state=state)
+        return StateOutcome(
+            [set_position(toward)],
+            f"close on {target.kind} {target.id}",
+            reflex=True,
+            state=state,
         )
-        if not queue:
-            return StateOutcome(None, "attack queue empty", state=self.name)
-        label = f"fight {target.kind} {target.id}"
-        return StateOutcome(queue, label, reflex=True, state=self.name, paced=True)
+    uses = [attack_intent(target) for _ in range(ATTACK_USES)]
+    retreat = retreat_tail(w, m, policy, ctx, limit=8)
+    horizon = queue_horizon_intents()
+    queue = build_attack_queue(
+        uses,
+        retreat,
+        poll_interval_ticks=m.calm_poll_interval,
+        horizon_ticks=horizon,
+        ticks_since_last_use=_ticks_since_use(w, m.last_use_tick),
+    )
+    if not queue:
+        return StateOutcome(None, "attack queue empty", state=state)
+    label = f"fight {target.kind} {target.id}"
+    return StateOutcome(queue, label, reflex=True, state=state, paced=True)

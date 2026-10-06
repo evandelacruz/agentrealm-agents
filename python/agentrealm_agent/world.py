@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .threat import ThreatTable, absorb_damaged, damage_amount
+from .threat import ThreatTable, absorb_damaged, damage_amount, hitter, hostile_hit
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +112,10 @@ class WorldModel:
     movement: int = 1
     movement_speed: int = 2500  # thousandths of a block per second (GetSelf)
     alive: bool = True
+    placed: bool = True  # on a map: GetSelf's ``placed``; false once Died until Respawned (A5)
+    # Woke since the last position read: placed, whatever a self read says,
+    # since a wake does not refresh GetSelf's ``placed`` (GAME_NOTES Sleep).
+    woke: bool = False
     asleep: bool = False  # GetSelf and a sleeping round trip carry it (GAME_NOTES Sleep)
     lives: int = 0
     gems: int | None = None  # inventory counter from snapshots (A22)
@@ -135,6 +139,9 @@ class WorldModel:
     terrain_map: int | None = None
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
+    attacked_tick: int | None = None  # tick of the last hostile hit on us: Attacked, or Damaged from an NPC or character (A9)
+    attacker: tuple[str, int] | None = None  # (entity kind, id) the last hostile hit named as its source (A9)
+    attacker_tick: int | None = None  # tick of that hit; a later hit naming no one clears both
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
@@ -178,9 +185,16 @@ class WorldModel:
         self.alive = bool(s.get("alive", True))
         self.lives = int(s.get("lives", 0))
         if "asleep" in s:
-            self.asleep = bool(s["asleep"])
+            self._set_asleep(bool(s["asleep"]))
+        self.placed = bool(s.get("placed", True)) or (self.woke and self.alive and not self.asleep)
         # Absent while nothing, or no weapon, is armed (B100).
         self.attack_range = _opt_int(s.get("attack_range"))
+
+    def _set_asleep(self, asleep: bool) -> None:
+        """A wake puts us on a block: placed until a position read says where (A5)."""
+        if self.asleep and not asleep:
+            self.placed = self.woke = True
+        self.asleep = asleep
 
     def apply_position(self, p: dict) -> None:
         # `level` belongs to the map (Manual §5.3): a read that omits it keeps
@@ -198,6 +212,7 @@ class WorldModel:
         self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
         self.asleep = False  # a sleeping character is off the map (GAME_NOTES Sleep)
+        self.placed, self.woke = True, False
         if has_level:
             self.map_level = level
 
@@ -399,7 +414,7 @@ class WorldModel:
         if "alive" in body:
             self.alive = bool(body["alive"])
         if "asleep" in body:
-            self.asleep = bool(body["asleep"])
+            self._set_asleep(bool(body["asleep"]))
         if "position" in body:
             pos = body["position"]
             if pos is None:
@@ -478,6 +493,17 @@ class WorldModel:
             for ev in group.get("events") or []:
                 flat.append(ev)
                 kind = ev.get("kind")
+                if hostile_hit(ev):
+                    t = int(ev.get("tick", group["tick"]))
+                    self.attacked_tick = t
+                    source = hitter(ev)
+                    if source is not None:
+                        self.attacker, self.attacker_tick = source, t
+                    elif self.attacker_tick != t:
+                        # A hit naming no one (an Attacked, or a source we cannot
+                        # tell): we no longer know who is hitting us. One on the
+                        # same tick as a named Damaged is that same swing.
+                        self.attacker = self.attacker_tick = None
                 if kind == "Damaged":
                     amount = damage_amount(ev)
                     if amount is not None:
@@ -492,9 +518,12 @@ class WorldModel:
                     self.entities = [x for x in self.entities if not (x.kind == "supply" and x.id == ev.get("supply_id"))]
                 elif kind == "Died":
                     self.forget_position()
+                    self.placed = self.woke = False  # off the map until Respawned: no position read can answer (A5)
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
                 elif kind == "Respawned":
+                    self.placed, self.attacked_tick = True, None
+                    self.attacker = self.attacker_tick = None
                     self.carry_capacity = DEFAULT_CARRY_CAPACITY  # a new, empty blue chest (10), Manual §11
                     try:
                         self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))

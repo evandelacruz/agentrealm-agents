@@ -20,6 +20,10 @@ OUR_DAMAGE_PER_HIT = 1
 UNKILLED_HOSTILE_HEALTH = 10
 NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)
+# How long Flee keeps running from a hostile that hit us once it is out of
+# range: two of its swings, so a pursuer stepping just past ``hostile_range``
+# between hits does not end the flee (A9, A58 run 9).
+THREAT_MEMORY_TICKS = 2 * HOSTILE_ATTACK_INTERVAL_TICKS
 
 
 def effective_risk(risk: float, lives: int, lives_floor: int) -> float:
@@ -50,6 +54,31 @@ def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
         for e in w.entities
         if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range
     ]
+
+
+def recently_attacked(w: WorldModel) -> bool:
+    """A hostile hit us within ``THREAT_MEMORY_TICKS``: an ``Attacked``, or a
+    ``Damaged`` from an NPC or character. Traps and hazard ground do not count."""
+    return w.attacked_tick is not None and w.tick - w.attacked_tick <= THREAT_MEMORY_TICKS
+
+
+def flee_from(w: WorldModel, policy: Policy) -> list[Entity]:
+    """The hostiles Flee runs from: those in range, or, with ``on_hostile = "flee"``,
+    the one that hit us recently when it is in view (``attacker``).
+
+    A pursuer that steps just past ``hostile_range`` between its hits is
+    still chasing us (A58 run 9); a bystander in view is not. ``fight`` keeps
+    its own rule: it flees only a target in range it cannot beat or reach.
+    """
+    in_range = hostiles_in_range(w, policy)
+    if in_range or policy.on_hostile != "flee" or not recently_attacked(w):
+        return in_range
+    return [e for e in w.entities if e.kind in policy.hostile and is_attacker(w, e)]
+
+
+def is_attacker(w: WorldModel, e: Entity) -> bool:
+    """``e`` is the hostile the last hostile hit named as its source."""
+    return w.attacker == (e.kind, e.id)
 
 
 def combat_group(w: WorldModel, policy: Policy) -> list[Entity]:

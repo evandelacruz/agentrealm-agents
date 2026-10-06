@@ -1,9 +1,11 @@
-"""What the live acceptance runs (M6 A4, M7 A16, M8 A25, M9 A29, M10 A33) share.
+"""What the acceptance runs (M6 A4, M7 A16, M8 A25, M9 A29, M10 A33, M4 A36, M11 A40) share.
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
-measures; M8 also reads tick events (``NPCDied``) through ``on_events``.
-``CountingClient`` records failed requests (and optionally every call).
+measures; M8 also reads tick events (``NPCDied``) through ``on_events``, and
+M11 level clears through ``on_level_clear``. A new hook is declared here and
+called unconditionally, never looked up with ``hasattr``. ``CountingClient``
+records failed requests (and optionally every call).
 """
 
 from __future__ import annotations
@@ -44,11 +46,25 @@ class AcceptanceHooks:
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
+        acted_op: dict | None = None,
+        plan_op: dict | None = None,
     ) -> None:
         """A tick is about to be sent. ``w`` is the world the decision saw.
 
         ``intents`` is None when a held queue keeps running and nothing new is sent.
+        ``plan_op`` is the plan stack's head op (``Plan.current()``), or None (A40).
+        ``acted_op`` is the goal-stack op this decision acted on (``Plan.acted``):
+        set only when the state that owns the head op stepped toward it or sent
+        its Take or Use, None otherwise (a reflex, another goal, a held queue) (A36).
+        It is not the stack's head op, which a gate that needs it reads as its
+        own kwarg (``plan_op``, ``Plan.current()``).
         """
+
+    def on_strategist_trigger(self, trigger: dict) -> None:
+        """A trigger (``clue``, ``goal_done``, …) moved into the strategist's inbox (A36)."""
+
+    def on_strategist_applied(self, goals: list[dict]) -> None:
+        """The strategist replaced the goal stack with ``goals`` (A36)."""
 
     def on_step_applied(self) -> None:
         """One of our Steps applied."""
@@ -61,6 +77,9 @@ class AcceptanceHooks:
 
     def on_events(self, events: list[dict]) -> None:
         """Tick events after the response is applied (for example ``NPCDied``)."""
+
+    def on_level_clear(self, ceremony: dict) -> None:
+        """A round trip carried a one-shot ``level_clear_ceremony`` (A38, A40)."""
 
     def on_oscillation(self, event: dict) -> None:
         """The dispatch guard caught the character pacing between two cells (A15)."""

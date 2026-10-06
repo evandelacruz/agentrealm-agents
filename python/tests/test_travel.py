@@ -122,6 +122,22 @@ class TravelStateTest(unittest.TestCase):
         self.assertEqual(out.state, "Travel")
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
 
+    def test_fallback_round_acts_on_the_plan_travel_op(self):
+        # A36: arrived at its own op, Travel hands the round to plan pathing,
+        # which walks the stack's travel op under the Travel state.
+        from agentrealm_agent.directives import PARAM_DEFAULTS
+        from agentrealm_agent.plan import Plan
+
+        w = grid([".........."], at=(0, 0))
+        m = Memory()
+        refresh_travel_stack(m, ["travel:point:0:0"])
+        plan = Plan([{"op": "travel", "to": "point", "x": 5, "y": 0}], dict(PARAM_DEFAULTS))
+        ctx = ctx_for(m, KnowledgeBase.empty("sandbox"))
+        ctx.plan = plan
+        out = dispatch(w, ctx)
+        self.assertEqual(out.state, "Travel")
+        self.assertEqual(plan.acted, plan.current())
+
     def test_unresolved_shop_yields_to_explore(self):
         w = grid(["....."], at=(0, 0))
         m = Memory()

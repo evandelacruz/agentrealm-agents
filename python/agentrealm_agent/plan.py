@@ -50,6 +50,9 @@ OP_STATE: dict[str, str | None] = {
 EXPLORE_PATH_OPS = frozenset({"explore_area", "travel", "wait"})
 BOSS_PLAN_OPS = frozenset({"fight_boss"})
 SHOP_PLAN_OPS = frozenset({"buy"})
+BREAK_PLAN_OPS = frozenset({"break_block"})
+# Ops done once their target block changes from what it was when the op reached the top.
+BLOCK_CHANGE_OPS = frozenset({"use_block", "break_block"})
 SOLVE_OPS = frozenset({"compose", "use_block"})
 # `travel` destinations with a path today; `hunting_ground` waits on knowledge.
 TRAVEL_PATHED = frozenset({"entrance", "town", "point", "shop"})
@@ -433,7 +436,8 @@ class Plan:
     floor_params: dict[str, float | int] = field(default_factory=lambda: dict(PARAM_DEFAULTS))
     wait_started_tick: int | None = None
     stalled_since_tick: int | None = None  # first tick the current op found no path
-    use_block_before: str | None = None  # block_type at a `use_block` target when first seen as the head op
+    acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
+    block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
 
     def snapshot(self) -> tuple:
@@ -445,7 +449,7 @@ class Plan:
             dict(self.floor_params),
             self.wait_started_tick,
             self.stalled_since_tick,
-            self.use_block_before,
+            self.block_before,
         )
 
     def restore(self, saved: tuple) -> None:
@@ -457,7 +461,7 @@ class Plan:
             floor_params,
             self.wait_started_tick,
             self.stalled_since_tick,
-            self.use_block_before,
+            self.block_before,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
 
@@ -472,8 +476,8 @@ class Plan:
                 self.params = apply_set_param(self.floor_params, self.params, op)
                 self._pop_current()
                 continue
-            if op["op"] == "use_block" and self.use_block_before is None and world.map_id is not None:
-                self.use_block_before = world.view.tiles.get((op["x"], op["y"]))
+            if op["op"] in BLOCK_CHANGE_OPS and self.block_before is None and world.map_id is not None:
+                self.block_before = world.view.tiles.get((op["x"], op["y"]))
             if not goal_done(op, world, self):
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
@@ -496,6 +500,13 @@ class Plan:
             note_goal_done(memory, op, reason)
         self._pop_current()
 
+    def note_progress(self) -> None:
+        """The state that owns the head op acted on it this decision: a step
+        toward it, a Take or a Use for it. Resets the stall clock (A34) and
+        records the op in ``acted`` (A36)."""
+        self.stalled_since_tick = None
+        self.acted = self.current()
+
     def note_stalled(self, tick: int) -> bool:
         """Record that the current op found no path; True once it has stalled too long."""
         if self.stalled_since_tick is None:
@@ -506,7 +517,7 @@ class Plan:
         self.index += 1
         self.wait_started_tick = None
         self.stalled_since_tick = None
-        self.use_block_before = None
+        self.block_before = None
 
     @classmethod
     def from_directives(
@@ -613,14 +624,14 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
             )
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
-    if name == "use_block":
+    if name in BLOCK_CHANGE_OPS:
         # Done once the target's block_type differs from what it was when the
         # op reached the top: a successful Use destroys the block, which then
         # shows its destroyed type (GAME_NOTES Breaking blocks). BlockChanged
         # events and terrain reads both update the tile, so a missed window
         # does not lose the change.
         tile = world.view.tiles.get((op["x"], op["y"]))
-        return plan.use_block_before is not None and tile is not None and tile != plan.use_block_before
+        return plan.block_before is not None and tile is not None and tile != plan.block_before
     if name == "buy":
         return any(supply_matches(op["code"], s.code) for s in world.held_supplies + world.chest_supplies)
     # `fight_boss` finishes in Boss, which sees the defeat (A38).

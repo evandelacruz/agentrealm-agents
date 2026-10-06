@@ -1,4 +1,4 @@
-"""Shared helpers for live acceptance smoke scripts (M7 A16, M8 A25, M9 A29, M10 A33)."""
+"""Shared helpers for live acceptance smoke scripts (M7 A16, M8 A25, M9 A29, M10 A33, M11 A40)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from .client import Client
 from .executor.intents import wait
 from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
 from .runner import Runner
+
+DEFAULT_BASE = "https://api.agentrealm.gg"
 
 # Self reads before giving up on a character that stays asleep or downed, one
 # a second: well inside the call budget, and longer than the 5 s respawn delay.
@@ -56,7 +58,7 @@ def navigation_start(client: Client, cid: int) -> tuple[int, tuple[int, int]]:
     """The overworld's map id and where the character stands on it.
 
     Raises ValueError when the character is not on the overworld, where M7, M8
-    and M9 are judged.
+    and M9 are judged and M11 starts.
     """
     town = client.world(cid).get("town") or {}
     p = client.position(cid)

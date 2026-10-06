@@ -343,7 +343,11 @@ class Strategist:
             self.inbox.append(
                 {"trigger": "idle", "since_tick": since, "tick": w.tick, "idle_ticks": self.config.idle_ticks}
             )
-        self.inbox.extend(drain_triggers(m))
+        drained = drain_triggers(m)
+        if runner.acceptance is not None:
+            for trigger in drained:
+                runner.acceptance.on_strategist_trigger(trigger)
+        self.inbox.extend(drained)
         del self.inbox[:-INBOX_KEPT]
 
     def _send(self, runner: Any) -> None:
@@ -418,3 +422,5 @@ class Strategist:
         )
         runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
         runner.log("strategist", f"plan replaced ({len(goals)} goals)", {"strategist": {"event": "applied", **record}})
+        if runner.acceptance is not None:
+            runner.acceptance.on_strategist_applied(goals)

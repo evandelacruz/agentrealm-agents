@@ -10,8 +10,8 @@ from ..executor.intents import step
 from ..executor.movement import direction_between
 from ..knowledge_base import KnowledgeBase
 from ..navigation import cost_path
-from ..pathing import grid_params, nav_search, next_step
-from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks, retreat_goal, would_lose
+from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
+from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
@@ -94,11 +94,14 @@ def retreat_tail(
     *,
     limit: int,
 ) -> list[dict]:
-    """``Step`` intents toward ``retreat_goal``, up to ``limit``."""
-    goal = retreat_goal(w, ctx.knowledge)
-    if goal is None or w.pos is None or w.pos == goal:
+    """``Step`` intents toward Retreat's goal, the nearest safe cell a path
+    reaches (``pathing.retreat_safe_goal``), up to ``limit``."""
+    if w.pos is None:
         return []
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+    goal = retreat_safe_goal(m, w, policy, ctx.knowledge, plan_avoid, plan_costly)
+    if goal is None or w.pos == goal:
+        return []
     # Priced as Retreat prices its walk, so the two share one path and corridor.
     params = dataclasses.replace(grid_params(policy, plan_avoid, plan_costly), danger_peaks=pursuer_peaks(w, policy))
     if m.goal != "safe" or not m.path or m.path[-1] != goal:

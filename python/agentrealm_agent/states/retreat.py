@@ -2,7 +2,7 @@
 
 Priority 1. Runs with a hostile in range, somewhere safe to head for
 (``retreat_goal``: a known safe tile, or the town cell; it walks to the
-nearest one a path reaches, ``pathing.reachable_safe_goal``), and
+nearest one a path reaches, ``pathing.retreat_safe_goal``), and
 ``should_retreat`` from health and the threat table; never on a safe tile or
 during a boss fight (A38).
 """
@@ -12,8 +12,8 @@ from __future__ import annotations
 import dataclasses
 
 from ..directives import attack_forbidden
-from ..navigation import cost_path, oscillation
-from ..pathing import grid_params, nav_search, next_step, reachable_safe_goal
+from ..navigation import cost_path, no_way, oscillation
+from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
 from ..survival import (
     LOSING_NAV,
     RETREAT_NAV,
@@ -25,7 +25,6 @@ from ..survival import (
     retreat_goal,
     safe_goals,
     should_retreat,
-    town_cell,
     would_lose,
 )
 from ..world import Entity, Pos, WorldModel, chebyshev
@@ -78,7 +77,7 @@ class RetreatState(State):
 
 def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | None = None) -> StateOutcome:
     """A walk queue along a path to the nearest safe cell a path reaches, else
-    the town cell (``pathing.reachable_safe_goal``), or no intent when there is none.
+    the town cell (``pathing.retreat_safe_goal``), or no intent when there is none.
 
     While the queue it sent is still running, it holds the round (``wait``,
     not a reflex), so the runner lets the queue walk. Losing ground
@@ -97,9 +96,10 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     # shut, so a path stepping onto it is replanned around it below (A15).
     escape = oscillation.take_escape(m, w) if paced is None else paced
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+    # The nearest safe cell a path reaches, else town (free-play run 2). The
+    # escape cells shut only this decision's route, not where it may lead.
+    goal = retreat_safe_goal(m, w, policy, ctx.knowledge, plan_avoid, plan_costly)
     plan_avoid |= escape
-    # The nearest safe cell a path reaches, else town (free-play run 2).
-    goal = reachable_safe_goal(m, w, goals, grid_params(policy, plan_avoid, plan_costly), town_cell(w, ctx.knowledge))
     if goal is None:
         return StateOutcome(None, "safe tile unreachable", state=state)
     losing = losing_ground(w, ctx, goal)
@@ -127,7 +127,7 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
         m.path = cost_path(w, goal, params, nav=nav_search(m, w, nav_key, goal)) or []
         step = next_step(w, plan_avoid, m.path)
     if step is None:
-        if not m.path:  # no way there now: the next decision picks another safe cell
+        if not m.path and no_way(w, goal, params):  # the next decision picks another safe cell
             m.safe_unreachable[(w.map_id, goal)] = w.tick
         return StateOutcome(None, "safe tile unreachable", state=state)
     # The runner queues the walkable prefix of ``m.path`` from this first step,

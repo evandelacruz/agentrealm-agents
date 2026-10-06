@@ -31,10 +31,11 @@ from agentrealm_agent.gem_yield import (
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import grid_params, reachable_safe_goal
+from agentrealm_agent.pathing import SAFE_GOAL_CHECKS, grid_params, reachable_safe_goal
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
+from agentrealm_agent.states.fight import retreat_tail
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.strategist import build_prompt, hub_give_up_lines
 from agentrealm_agent.travel import sync_town
@@ -74,6 +75,20 @@ class HubGiveUpLapsesTest(unittest.TestCase):
         self.assertEqual(nav_stuck.expire_hub_give_ups(stuck, self.w), [])
         self.w.pos = (0, -nav_stuck.HUB_GIVE_UP_CELLS)
         self.assertEqual(nav_stuck.expire_hub_give_ups(stuck, self.w), [(MAP, TOWN)])
+
+    def test_a_give_up_with_no_position_known_waits_out_its_cooldown(self):
+        att = nav_stuck.track(self.m, self.w, "travel:town", TOWN)
+        self.w.pos = None  # unknown at the give-up, as after a warp
+        nav_stuck.give_up(self.m, self.w, att, "pacing")
+        self.w.pos = (0, 0)
+        self.assertEqual(nav_stuck.expire_hub_give_ups(self.m.nav_stuck, self.w), [])
+
+    def test_a_hub_cell_given_up_as_a_point_too_holds_for_the_run(self):
+        give_up(self.m, self.w, "travel:town", TOWN)
+        give_up(self.m, self.w, "travel:point", TOWN)
+        self.w.tick += nav_stuck.HUB_GIVE_UP_TICKS
+        self.assertEqual(nav_stuck.expire_hub_give_ups(self.m.nav_stuck, self.w), [])
+        self.assertIn((MAP, TOWN), self.m.nav_stuck.given_up_travel)
 
     def test_a_point_give_up_holds_for_the_run(self):
         give_up(self.m, self.w, "travel:point", TOWN)
@@ -149,6 +164,14 @@ class ReachableSafeGoalTest(unittest.TestCase):
         self.assertEqual(reachable_safe_goal(m, w, [WALLED], params, (-20, 10)), (-20, 10))
         self.assertIsNone(reachable_safe_goal(m, w, [WALLED], params, None))
 
+    def test_past_the_checks_the_nearest_candidate_is_still_tried(self):
+        w, m = world(), Memory()
+        far = [(-20, y) for y in range(0, 2 * SAFE_GOAL_CHECKS, 2)]
+        for cell in far:
+            wall_in(w, cell)
+        params = grid_params(Policy(kind="scripted"), set(), set())
+        self.assertEqual(reachable_safe_goal(m, w, far + [(25, 10), (12, 10)], params, None), (12, 10))
+
     def test_skips_a_safe_tile_heal_gave_up_on(self):
         w, m = world(), Memory()
         give_up(m, w, "heal_rest", (8, 10))
@@ -176,6 +199,13 @@ class SafeWalksPickAReachableTileTest(unittest.TestCase):
         wall_in(w, WALLED)
         out = dispatch(w, c)
         self.assertEqual((out.state, out.reason), ("Retreat", "retreat → safe (-20, 10)"))
+
+    def test_fight_retreat_tail_heads_where_retreat_does(self):
+        w, c = world(health=4), ctx(on_hostile="fight")
+        safe(w, WALLED, OPEN)
+        wall_in(w, WALLED)
+        self.assertTrue(retreat_tail(w, c.memory, c.policy, c, limit=3))
+        self.assertEqual(c.memory.path[-1], OPEN)
 
     def test_heal_walks_to_a_reachable_safe_tile(self):
         w, c = world(health=4), ctx()

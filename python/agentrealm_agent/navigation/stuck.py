@@ -529,7 +529,9 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     if att.goal.startswith("travel:"):
         dest = key_dest(backoff)
         stuck.given_up_travel.setdefault(dest, w.tick)
-        if att.goal in HUB_GOALS and stuck.given_up_travel[dest] == w.tick:
+        if att.goal not in HUB_GOALS:
+            stuck.given_up_hubs.pop(dest, None)  # given up as a point too: for the run
+        elif stuck.given_up_travel[dest] == w.tick:
             stuck.given_up_hubs[dest] = (w.map_id, w.pos)
     stuck.stuck_signals.append(
         {
@@ -572,7 +574,7 @@ def expire_hub_give_ups(stuck: NavStuckMemory, w: WorldModel) -> list[tuple[int,
     lapsed = []
     for dest, (mid, cell) in list(stuck.given_up_hubs.items()):
         since = stuck.given_up_travel.get(dest)
-        moved = w.pos is not None and (mid != w.map_id or cell is None or chebyshev(cell, w.pos) >= HUB_GIVE_UP_CELLS)
+        moved = w.pos is not None and (mid != w.map_id or (cell is not None and chebyshev(cell, w.pos) >= HUB_GIVE_UP_CELLS))
         if since is None or w.tick - since >= HUB_GIVE_UP_TICKS or moved:
             del stuck.given_up_hubs[dest]
             stuck.given_up_travel.pop(dest, None)

@@ -24,7 +24,7 @@ from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
 from .healing import hurt
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
-from .survival import is_hostile
+from .survival import is_hostile, safe_goals, town_cell
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -370,19 +370,22 @@ SAFE_GOAL_CHECKS = 4
 SAFE_UNREACHABLE_TICKS = nav_stuck.BACKOFF_BASE_TICKS
 # Heal's walks to safe ground: a cell either gave up on is skipped by every safe walk.
 SAFE_WALK_GOALS = ("heal_rest", "heal_measure")
+# Paths to safe ground: one of these that ends on a cell needs no search to it.
+SAFE_PATH_GOALS = ("safe", *SAFE_WALK_GOALS)
 
 
 def reachable_safe_goal(m: Memory, w: WorldModel, candidates: list[Pos], params: CostGridParams, town: Pos | None) -> Pos | None:
-    """The first of ``candidates`` (nearest first) a path reaches, else
-    ``town`` when a path reaches it, else None. The cell we stand on is
+    """The first of ``candidates`` (in the caller's order) a path reaches,
+    else ``town`` when a path reaches it, else None. The cell we stand on is
     taken as is.
 
-    Skipped: a cell a check found no way to within
+    Skipped: a cell ``params`` avoids, one a check found no way to within
     ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), and one a
-    Heal walk gave up on and still backs off. At most ``SAFE_GOAL_CHECKS``
-    candidates are searched; one the kept path already ends on needs no
-    search. "No way" is a search that proved it: one cut short by its budget
-    still counts as a way, since it walks toward the cell.
+    Heal walk gave up on and still backs off. The first ``SAFE_GOAL_CHECKS``
+    left are searched, then the nearest of the rest; a cell a kept safe
+    walk (``SAFE_PATH_GOALS``) already ends on needs no search. "No way" is a
+    search that proved it (``navigation.no_way``): one cut short by its
+    budget still counts as a way, since it walks toward the cell.
     """
     if w.pos is None or w.map_id is None:
         return None
@@ -391,26 +394,42 @@ def reachable_safe_goal(m: Memory, w: WorldModel, candidates: list[Pos], params:
     mid = w.map_id
 
     def skipped(p: Pos) -> bool:
+        if p in params.avoid:
+            return True
         seen = m.safe_unreachable.get((mid, p))
         if seen is not None and w.tick - seen < SAFE_UNREACHABLE_TICKS:
             return True
         return any(nav_stuck.backed_off(m, goal, mid, p, w.tick) for goal in SAFE_WALK_GOALS)
 
     def reaches(p: Pos) -> bool:
-        if m.path and m.path[-1] == p:
+        if m.goal in SAFE_PATH_GOALS and m.path and m.path[-1] == p:
             return True
         if no_way(w, p, params):
             m.safe_unreachable[(mid, p)] = w.tick
             return False
         return True
 
-    left = [p for p in candidates if not skipped(p)][:SAFE_GOAL_CHECKS]
-    for p in left:
+    left = [p for p in candidates if not skipped(p)]
+    here = w.pos
+    first = left[:SAFE_GOAL_CHECKS]
+    rest = left[SAFE_GOAL_CHECKS:]
+    if rest:
+        first.append(min(rest, key=lambda p: (chebyshev(p, here), p)))
+    for p in first:
         if reaches(p):
             return p
-    if town is not None and town not in left and not skipped(town) and reaches(town):
+    if town is not None and town not in first and not skipped(town) and reaches(town):
         return town
     return None
+
+
+def retreat_safe_goal(
+    m: Memory, w: WorldModel, policy: Policy, knowledge: KnowledgeBase | None, avoid: set[Pos], costly: set[Pos]
+) -> Pos | None:
+    """Where Retreat, Park and Fight's retreat tail walk: the nearest known
+    safe cell a path reaches, else the town cell (``reachable_safe_goal``)."""
+    params = grid_params(policy, avoid, costly)
+    return reachable_safe_goal(m, w, safe_goals(w, knowledge), params, town_cell(w, knowledge))
 
 
 def nav_search(m: Memory, w: WorldModel, plan: str, goal: Pos) -> NavSearchState:

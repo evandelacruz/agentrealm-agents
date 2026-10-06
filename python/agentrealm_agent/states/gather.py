@@ -219,11 +219,10 @@ def gather_outcome(
     here = w.pos
     if here is None:
         return StateOutcome(None, "position unknown", state=state)
-    skip, target = _regions(w, knowledge, op)
+    skip, target, named = _regions(w, knowledge, op)
     safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
     dead_regions, dead_cells = gem_cuts.uncuttable(w, safe) if gem_cuts is not None else (set(), set())
     exhausted = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | dead_cells
-    named = op is not None and "x" in op and "y" in op
     out, worked = _gather_step(w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state, shadow, target, named)
     walk = m.gather_target[0] if m.gather_target is not None and m.goal == GOAL else None
     if out.intents is None:
@@ -409,8 +408,8 @@ def _end_walk_out(m: Memory) -> None:
 
 def _regions(
     w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None
-) -> tuple[set[tuple[int, int]], tuple[int, int] | None]:
-    """The regions Gather skips, and its target region, if any.
+) -> tuple[set[tuple[int, int]], tuple[int, int] | None, bool]:
+    """The regions Gather skips, its target region, if any, and whether the op named it.
 
     Skipped: barren regions of this map (A63), and poor ones while a better
     region is known nearby. The target is the region the op names with
@@ -420,13 +419,13 @@ def _regions(
     if op is not None and "x" in op and "y" in op:
         named = region_of((op["x"], op["y"]))
         skip.discard(named)
-        return skip, named
+        return skip, named, True
     assert w.pos is not None
     better = better_region(knowledge, w.map_id, w.pos)
     if better is None:
-        return skip, None
+        return skip, None, False
     poor = poor_regions(knowledge, w.map_id)
-    return skip | poor, better if region_of(w.pos) in poor else None
+    return skip | poor, better if region_of(w.pos) in poor else None, False
 
 
 def _seen_region(w: WorldModel, region: tuple[int, int]) -> bool:

@@ -326,7 +326,7 @@ def poor(region: dict[str, Any]) -> bool:
 
 def good(region: dict[str, Any]) -> bool:
     cuts = int(region.get("cuts", 0))
-    return cuts >= GOOD_MIN_CUTS and int(region.get("gems", 0)) >= GOOD_YIELD * cuts and not poor(region)
+    return cuts >= GOOD_MIN_CUTS and int(region.get("gems", 0)) >= GOOD_YIELD * cuts
 
 
 def poor_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[int, int]]:

@@ -1,7 +1,6 @@
 import { Agent } from "@cursor/sdk";
 import {
   DEFAULT_ENV_NAME,
-  DEFAULT_MODEL,
   modelSelection,
   DEFAULT_REPO_URL,
   DEFAULT_STARTING_REF,
@@ -57,7 +56,6 @@ export async function spawnImplementer(options: SpawnOptions): Promise<{
   status?: string;
 }> {
   const apiKey = requireApiKey();
-  const modelId = options.model ?? DEFAULT_MODEL;
   const name = buildName(options.ids, options.name);
   const prompt = `${prependIds(options.prompt, options.ids)}${lockNote(options.prUrl)}`;
   const autoCreatePR = options.autoCreatePR ?? true;
@@ -85,7 +83,7 @@ export async function spawnImplementer(options: SpawnOptions): Promise<{
     const agent = await Agent.create({
       apiKey,
       name,
-      model: modelSelection(modelId),
+      model: modelSelection(options.model),
       cloud,
     });
 

@@ -1,0 +1,15 @@
+# A60 regen probe (scripts/probe_regen.py): explore and fight a hostile in
+# reach until hurt; Retreat at the usual threshold, then Heal walks to a known
+# safe tile and measures safe-zone regen for the shared knowledge base.
+world = "olympuff"
+
+[policy]
+kind = "scripted"
+goals = ["explore"]
+on_hostile = "fight"
+hostile = ["npc"]
+# Off: picking things up does not help the probe, and Loot walks would only
+# take it away from the hostiles it wants to meet.
+pickup = false
+avoid_blocks = ["fire", "lava"]
+entity_refresh = 20

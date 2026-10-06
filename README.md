@@ -91,6 +91,8 @@ Give-up rule: navigation passes on a give-up only when stuck detection gave up o
 
 No live hour has passed yet (A58); runs that did not are in [`docs/observations/A16_live_play.md`](docs/observations/A16_live_play.md) and [`docs/observations/A58_live_play.md`](docs/observations/A58_live_play.md). CI covers the gate, the runner hooks and the navigation fixtures in `python/tests/test_m7_acceptance.py` without live keys.
 
+Regen probe (A60): when the world knowledge base has no regen answer yet, run `make probe-regen CHARACTER_ID=…` (same selection as the M7 smoke) before the hour. [`scripts/probe_regen.py`](scripts/probe_regen.py) plays the normal agent on `python/characters/regen_probe.toml`, which fights a hostile in reach to get hurt, retreats at `should_retreat`, and lets Heal measure safe-zone regen on a known safe tile. It stops when regen answers (a "yes" is saved for the M7 gate), after 30 minutes (`--seconds`), or on the first death, and exits 0 only when regen answered.
+
 Live M8 smoke: `make smoke-m8-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m8_olympuff.py`](scripts/smoke_m8_olympuff.py), using profile `python/characters/olympuff_m8.toml` and a character you choose at run time. Start on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out).
 
 Pass criteria (PLAN.md A25, checked in [`m8_acceptance.py`](python/agentrealm_agent/m8_acceptance.py)):

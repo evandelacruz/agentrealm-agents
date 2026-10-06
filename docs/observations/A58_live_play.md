@@ -28,7 +28,7 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 
 ## Run 3 — aborted: pacing between two cells
 
-- **Character:** chosen at run time (not committed).
+- **Character:** chosen at run time, as in run 1 (not committed).
 - **Gate focus:** safe-zone regen must get a yes/no verdict during a hurt window in a safe tile; navigation already passed on run 1.
 - **Run 3a (stopped after ~5 min):** during the goto walk the character paced back and forth between two cells around x≈616–617 while the goto's stuck escalation was at step 2 (Break). Stopped by hand, so the gate never ran: no verdict, regen not measured.
 - **Run 3b (stopped after ~3 min):** the same pacing, now with an Equip `Wear` and Break walks taking turns with the goto walk. Stopped by hand, so the gate never ran: no verdict, regen not measured.
@@ -101,8 +101,8 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Character:** chosen at run time via `CHARACTER_ID` (not committed).
 - **Verdict:** exit 1 after **1708.6 s** wall clock (`ABORT: sustained oscillation`). **Did not pass** the A16 gate (run stopped before the hour).
 - **Gate metrics:** deaths 0; retreat misses 0; recover withdraws 0; loop false; API errors 0; heal actions 0; lives last seen 10; navigation target `(568, 490)` from `(418, 490)` **reached** (max Chebyshev from origin 160); give-ups on other goals 5; safe-zone regen **not measured**; oscillation events 5 (gave up a target: 5).
-- **Goto (~28 min wall):** the agent completed the 150-block east walk and stood on `(568, 490)` (smoke target). Explore then picked frontiers south/west of that cell.
-- **Pacing (~after goto reached):** **Explore** walks toward `explore_area` frontiers alternated with **goto** walks back toward `(568, 490)` whenever the character stepped off the target (A16 goto-first comes back). Four explore give-ups in 6000 ticks triggered the smoke abort; a fifth give-up was the last oscillation event before exit. Example window (final abort):
+- **Goto:** the agent completed the 150-block east walk and stood on `(568, 490)` (smoke target) before tick **3531805**, the first give-up, which was already pacing off the target; the exact reach tick is not in the saved trace excerpt. The whole run was 1709 s, and about 16,000 ticks of it (3531805 to 3547802) were pacing after the reach. Explore then picked frontiers south/west of that cell.
+- **Pacing (after the reach):** **Explore** walks toward frontiers alternated with **goto** walks back toward `(568, 490)` whenever the character stepped off the target (A16 goto-first comes back). The first oscillation give-up was a `look` frontier at **3531805**; then four `explore_area` give-ups at **3545075**, **3545761**, **3547112** and **3547802**, the fourth of which (four in 6000 ticks) fired the smoke abort. Example window (final abort):
 
   ```
   t=3547708 @558,485 queue 10×Step 28×Wait (goto → (568, 490))
@@ -114,10 +114,11 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
   ABORT: sustained oscillation … (last at tick 3547802 … moved by Explore)
   ```
 
-  Earlier give-ups on the same two-cell pair `(568, 490)` ↔ `(569, 480)` for `explore_area → (581, 463)` at ticks **3545075**, **3545761**, and **3547112**; one `look` frontier give-up at **3531805** between `(568, 490)` and `(578, 482)`.
+  The `look` give-up at **3531805** paced `(568, 490)` ↔ `(578, 482)`; the explore give-ups at **3545075**, **3545761** and **3547112** paced `(568, 490)` ↔ `(569, 480)` for `explore_area → (581, 463)`.
 
-- **Root cause (checked against code; no agent change in this PR):** After the smoke target is **reached**, `goto_navigation_pending` in `pathing.py` still returns true whenever the agent leaves that cell and the goto is not backed off, so `replan` tries only the goto again while Explore owns the active `explore_area` walk. The two queues ping-pong along the corridor between the target and the explore frontier; the oscillation guard correctly gives up each explore target (`navigation/oscillation.py`, `ExploreState` / `scripted_outcome` in `states/explore.py`), and the smoke abort counter fires after the fourth such give-up in 6000 ticks. Regen was never measured because the run aborted at full health (`heal actions: 0`) before any hurt safe-zone window.
-- **Status:** Waiting on an agent fix (treat the policy `goto` as satisfied once the acceptance target is reached, or stop re-owing it on step-off). **Next:** ship that fix offline, then rerun the full live hour (A58 run 9).
+- **Root cause: a spec defect, not an implementation bug.** A16's goto-first rule says the deferral comes back when the agent steps off the target, and `goto_navigation_pending` in `pathing.py` does exactly that: once the agent leaves the reached target, the goto is owed again, so `replan` tries only the goto while Explore owns its frontier walk. The two queues ping-pong between the target and the frontier; the oscillation guard correctly gives up each explore target (`navigation/oscillation.py`), and the smoke abort fires after the fourth give-up in 6000 ticks. **Decision (recorded in PLAN.md A16):** a policy `goto` is satisfied once the agent stands on its target and is not owed again on step-off; it stays owed only until reached or given up by stuck detection.
+- **Regen never measured.** The character was never hurt (`heal actions: 0`), so there was no hurt safe-zone window for `note_regen_sample`. Even a full hour may need the character to take damage before regen gets a verdict.
+- **Status:** Waiting on the A16 goto-first fix (a reached goto is satisfied, not re-owed on step-off), implemented with a regression test in a separate PR. **Next:** rerun the full live hour (A58 run 9).
 
 ## Done-when
 

@@ -39,7 +39,7 @@
 
   "A15": {"state": "done"},
 
-  "A16": {"state": "partial", "remaining": "Gate shipped; run 8 reached the goto target then aborted on sustained Explore/goto pacing after step-off (open bug in PLAN.md A16). Waiting on agent fix before the live PASS (A58)."},
+  "A16": {"state": "partial", "remaining": "goto-first: a reached goto is satisfied, not re-owed on step-off; implement with regression test (spec decided after A58 run 8, see PLAN.md A16). Gate and smoke script shipped; the live PASS is A58."},
 
   "A58": {"state": "partial", "remaining": "Waiting on A16 fix for post-reach goto/explore ping-pong (run 8: exit 1 ABORT at ~1709 s after navigation reached (568,490); regen not measured). Run 7 fixes (#101) landed; notes in docs/observations/A58_live_play.md."},
 

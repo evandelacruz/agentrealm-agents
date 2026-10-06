@@ -76,7 +76,7 @@ Call mix over the run: 167 `zone`, 132 `tick`, 17 `position`, 11 `terrain`, 10 `
 
 **Minor:** the one API error is a `position` read sent in the same window the character died, before the `Died` event arrived (`t=3934459 position error HTTP 409 not_on_map`). This is the A5 pattern from A58 run 9, now down to one call.
 
-## Run 4 — FAIL: death at 75 s, before any of the #119 fixes could be exercised
+## Run 4 — FAIL: death at 75 s, before most of the #119 walk fixes could be exercised
 
 - **Code:** `main` at `7f9c795` (after #119, the Walk run 3 fixes, and #120). Planner: Anthropic, default model. Fresh knowledge base (no `.state`).
 - **Verdict:** exit 1 after **75 s** (first death ends the run). Character started at 10/10 health, 10 lives, 0 gems, pocket knife armed, about 80 blocks west of the town cell.

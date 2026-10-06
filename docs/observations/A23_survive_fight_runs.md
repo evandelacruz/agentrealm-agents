@@ -81,7 +81,7 @@ Intents: 430 `Step`, 1,097 `Wait`, 2 `Use`. Call mix: 337 `zone`, 185 `tick`, 44
 
    Suspects: `travel/resolve.py:75–95` resolves only from cells already known (knowledge-base hunting cells, zone facts with a `strength_ceiling`), and no state or zone probe searches for an unknown hunting ground, so a `hunting_ground` op with none known just stalls for 30 s and drops.
 
-3. **The planner's hurt reply was half rejected and half wrong.** At 3/10 the planner sent `travel to: town` without `x`/`y`; `plan.py:110–111` requires `x` and `y` for every travel op, although `town` takes none (`travel/ops.py:36`, and directives shorthand fills in 0, 0), so the op was dropped. That left `wait 30` on top, with the reason "hostiles cannot hurt in town" while the character stood 14 cells outside it with 217 adjacent. It also asked for `retreat_hits: 1` "to retreat sooner" again, rejected by `plan.py:456` (third run with that misreading).
+3. **The planner's hurt reply was half rejected and half wrong.** At 3/10 the planner sent `travel to: town` without `x`/`y`; `plan.py:110–111` requires `x` and `y` for every travel op, although `town` takes none (`travel/ops.py:35`, and directives shorthand fills in 0, 0), so the op was dropped. That left `wait 30` on top, with the reason "hostiles cannot hurt in town" while the character stood 14 cells outside it with 217 adjacent. It also asked for `retreat_hits: 1` "to retreat sooner" again, rejected by `plan.py:456` (third run with that misreading).
 
    ```
    plan: dropped op {'op': 'travel', 'to': 'town', 'why': 'health 3/10, no potions or gems; retreat to the safe zone before doing anything else'}: missing `x`

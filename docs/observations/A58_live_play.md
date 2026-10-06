@@ -96,6 +96,30 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
   - Regression tests in `python/tests/test_a58_run7.py`: `test_goto_stays_owed_until_stuck_detection_gives_it_up`, `test_explore_moves_only_while_the_goto_is_backed_off`, `test_heal_gives_the_food_up_instead_of_pacing`, `test_loot_gives_the_pickup_up_instead_of_pacing`, `test_the_planner_has_no_step_off_the_dead_end`, `test_heal_only_pacing_is_given_up_by_the_guard`, and the `bounded_step` window tests; plus `test_an_owed_goto_starting_in_fog_keeps_the_move` in `test_cost_grid.py`.
 - **Status:** **Next:** rerun the full live hour.
 
+## Run 8 — FAIL: ABORT sustained oscillation after goto reached (~1709 s)
+
+- **Character:** chosen at run time via `CHARACTER_ID` (not committed).
+- **Verdict:** exit 1 after **1708.6 s** wall clock (`ABORT: sustained oscillation`). **Did not pass** the A16 gate (run stopped before the hour).
+- **Gate metrics:** deaths 0; retreat misses 0; recover withdraws 0; loop false; API errors 0; heal actions 0; lives last seen 10; navigation target `(568, 490)` from `(418, 490)` **reached** (max Chebyshev from origin 160); give-ups on other goals 5; safe-zone regen **not measured**; oscillation events 5 (gave up a target: 5).
+- **Goto:** the agent completed the 150-block east walk and stood on `(568, 490)` (smoke target) before tick **3531805**, the first give-up, which was already pacing off the target; the exact reach tick is not in the saved trace excerpt. The whole run was 1709 s, and about 16,000 ticks of it (3531805 to 3547802) were pacing after the reach. Explore then picked frontiers south/west of that cell.
+- **Pacing (after the reach):** **Explore** walks toward frontiers alternated with **goto** walks back toward `(568, 490)` whenever the character stepped off the target (A16 goto-first comes back). The first oscillation give-up was a `look` frontier at **3531805**; then four `explore_area` give-ups at **3545075**, **3545761**, **3547112** and **3547802**, the fourth of which (four in 6000 ticks) fired the smoke abort. Example window (final abort):
+
+  ```
+  t=3547708 @558,485 queue 10×Step 28×Wait (goto → (568, 490))
+  t=3547748 @568,490 — (queue held)
+  t=3547753 @568,490 queue 10×Step 28×Wait (explore_area → (541, 499))
+  t=3547792 @558,485 — (queue held)
+  t=3547802 @558,485 oscillation pacing [[558, 485], [568, 490]]: gave up explore_area → (541, 499)
+  t=3547803 @558,485 queue 10×Step 29×Wait (goto → (568, 490))
+  ABORT: sustained oscillation … (last at tick 3547802 … moved by Explore)
+  ```
+
+  The `look` give-up at **3531805** paced `(568, 490)` ↔ `(578, 482)`; the explore give-ups at **3545075**, **3545761** and **3547112** paced `(568, 490)` ↔ `(569, 480)` for `explore_area → (581, 463)`.
+
+- **Root cause: a spec defect, not an implementation bug.** A16's goto-first rule says the deferral comes back when the agent steps off the target, and `goto_navigation_pending` in `pathing.py` does exactly that: once the agent leaves the reached target, the goto is owed again, so `replan` tries only the goto while Explore owns its frontier walk. The two queues ping-pong between the target and the frontier; the oscillation guard correctly gives up each explore target (`navigation/oscillation.py`), and the smoke abort fires after the fourth give-up in 6000 ticks. **Proposal (PLAN.md A16):** proposed: a reached policy goto is satisfied and not re-owed on step-off; awaiting Evan.
+- **Regen never measured.** The character was never hurt (`heal actions: 0`), so there was no hurt safe-zone window for `note_regen_sample`. Even a full hour may need the character to take damage before regen gets a verdict.
+- **Status:** Two open blockers. (1) Navigation pacing: the A16 goto-first change is proposed: a reached policy goto is satisfied and not re-owed on step-off; awaiting Evan; once decided, implement it with a regression test. (2) Regen: unmeasured on every run so far (1 and 3–8); in run 8 the character was never hurt, so even with the A16 fix, run 9 can fail the regen gate. **Next:** after both are addressed, rerun the full live hour (A58 run 9).
+
 ## Done-when
 
 A58 stays open until a live hour exits 0 on the A16 gate and a redacted PASS transcript is committed under `docs/acceptance/m7_olympuff_PASS.transcript`.

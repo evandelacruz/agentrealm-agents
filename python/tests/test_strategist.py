@@ -31,6 +31,8 @@ from agentrealm_agent.strategist import (
     StrategistConfig,
     build_prompt,
     drain_triggers,
+    estimate_tokens,
+    trace_messages,
     parse_reply,
     tokens_used,
 )
@@ -243,7 +245,8 @@ class AnswerTest(unittest.TestCase):
         self.assertEqual(r.mem.path, [])
         self.assertEqual(logged_events(r), ["ask", "applied"])
         ask = r.log.call_args_list[0].args[2]["strategist"]
-        self.assertEqual(ask["messages"], llm.messages[0])
+        self.assertEqual(ask["messages"], trace_messages(llm.messages[0]))
+        self.assertIn("<cached prefix: ", ask["messages"][0]["content"])  # the trace skips the reference text
         self.assertIn({"trigger": "death", "tick": 3}, ask["triggers"])
 
     def test_prompt_has_whole_plan_every_clue_and_the_op_table(self):
@@ -690,9 +693,44 @@ class ProviderTest(unittest.TestCase):
         self.assertEqual(tokens_used(usage), 42)
         req = sdk.requests[0]
         self.assertEqual(sdk.api_key, "a-key")
-        self.assertEqual((req["model"], req["system"], req["messages"]), ("claude-sonnet-5-5", "sys", [{"role": "user", "content": "state"}]))
+        self.assertEqual(
+            (req["model"], req["system"], req["messages"]),
+            ("claude-sonnet-5-5", [{"type": "text", "text": "sys"}], [{"role": "user", "content": "state"}]),
+        )
         self.assertNotIn("temperature", req)
         self.assertEqual(req["extra_body"]["fallbacks"], "default")
+
+    def test_anthropic_caches_the_marked_system_block(self):
+        sdk = FakeAnthropicSDK(reply=json.dumps(WAIT_ANSWER))
+        s = self.from_env(sdk, ANTHROPIC_API_KEY="a")
+        s.client.complete([{"role": "system", "content": "ref", "cache": True}, {"role": "user", "content": "state"}])
+        req = sdk.requests[0]
+        self.assertEqual(req["system"], [{"type": "text", "text": "ref", "cache_control": {"type": "ephemeral"}}])
+        self.assertEqual(req["messages"], [{"role": "user", "content": "state"}])
+
+    def test_openai_sends_a_cache_key_and_counts_only_uncached_tokens(self):
+        sent = {}
+
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(req, timeout):
+            sent.update(json.loads(req.data))
+            usage = {"prompt_tokens": 1000, "completion_tokens": 10, "prompt_tokens_details": {"cached_tokens": 900}}
+            body = {"choices": [{"message": {"content": json.dumps(WAIT_ANSWER)}}], "usage": usage}
+            return Resp(json.dumps(body).encode())
+
+        with mock.patch("urllib.request.urlopen", urlopen):
+            _, usage = OpenAIChatClient("k", "m").complete(
+                [{"role": "system", "content": "ref", "cache": True}, {"role": "user", "content": "state"}]
+            )
+        self.assertEqual(sent["prompt_cache_key"], "agentrealm-planner")
+        self.assertEqual(sent["messages"][0], {"role": "system", "content": "ref"})  # no extra keys on the wire
+        self.assertEqual(tokens_used(usage), 110)
 
     def test_anthropic_refusal_is_a_failed_call(self):
         s = self.from_env(FakeAnthropicSDK(stop_reason="refusal"), ANTHROPIC_API_KEY="a")

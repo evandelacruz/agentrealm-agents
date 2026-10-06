@@ -54,7 +54,8 @@ The AI planner that owns the goal stack (A35, `strategist.py`). It is on in ever
 | `AGENTREALM_PLANNER_EFFORT` | `low` | Anthropic effort level |
 | `AGENTREALM_PLANNER_REPLAN_S` | 15 | With no event, replan this often |
 | `AGENTREALM_PLANNER_CALLS_PER_MIN` | 6 | Calls in any 60 s of play, failed ones included |
-| `AGENTREALM_PLANNER_TOKENS_PER_MIN` | 40000 | Prompt plus answer tokens in any 60 s of play; multiply by your model's price for a cost per minute |
+| `AGENTREALM_PLANNER_TOKENS_PER_MIN` | 40000 | Uncached prompt plus answer tokens in any 60 s of play; the cached game reference prefix (A62) is not counted, so add its cache-read price for a cost per minute |
+| `AGENTREALM_PLANNER_REFERENCE_SECTIONS` | (core, then the rest under about 60k tokens) | Which parts of the game reference go in the prompt: `all`, `core`, or a comma list added to the core (A62) |
 | `AGENTREALM_PLANNER_HURT_FRACTION` | 0.5 | Health below this share of max raises `hurt` |
 | `AGENTREALM_PLANNER_IDLE_MINUTES` | 10 | No applied Step for this long raises `idle` |
 

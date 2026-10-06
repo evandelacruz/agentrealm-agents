@@ -45,12 +45,24 @@ Settings (environment variables, defaults in brackets):
 - ``AGENTREALM_PLANNER_IDLE_MINUTES`` [10]: no applied Step for this long
   raises ``idle``.
 
+- ``AGENTREALM_PLANNER_REFERENCE_SECTIONS`` [core, then the rest under
+  about 60k tokens]: which parts of the game reference go in the prompt;
+  ``all``, ``core``, or a comma list (see :mod:`.planner_reference`).
+
+The system prompt is the game reference, then the measured facts in
+``docs/GAME_NOTES.md``, then the op contract below (:func:`system_prompt`).
+It is the same on every call, so it is cached: ``cache_control`` on
+Anthropic, a fixed ``prompt_cache_key`` on OpenAI (which caches long
+prefixes on its own). Only the user message (triggers, state, stack) changes.
+Cached prefix tokens do not count against ``tokens_per_min``.
+
 Another provider is a class with the same ``complete(messages)`` method
 (``LLMClient``), picked in :func:`make_client`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -66,6 +78,7 @@ from typing import Any, Callable, Protocol
 from .directives import Directives
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
+from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, Plan, directive_stack_ops, parse_plan_payload
 from .world import WorldModel
 
@@ -88,6 +101,7 @@ KEY_ENV: dict[str, tuple[str, ...]] = {
     "openai": ("AGENTREALM_PLANNER_OPENAI_KEY", "OPENAI_API_KEY"),
 }
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_PROMPT_CACHE_KEY = "agentrealm-planner"
 ANTHROPIC_MAX_TOKENS = 16_000
 # Models that take the server-side refusal fallback (beta header plus `fallbacks`).
 ANTHROPIC_FALLBACK_MODELS = frozenset({"claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5", "claude-fable-5-1"})
@@ -98,7 +112,7 @@ def _op_table() -> str:
     return "\n".join(f"- {name}: {fields}" for name, fields in OP_FIELDS.items())
 
 
-SYSTEM_PROMPT = f"""You are the planner for an Agent Realm character. You own its goal stack: the states work on the op on top. With an empty stack you are not steering: the dispatcher's safe default runs (exploring in safe ground).
+SYSTEM_PROMPT = f"""You are the planner for an Agent Realm character. Plan from the game reference above: it is the game's own documentation of its rules, intents, combat, survival, items and maps. Where it and the measured facts disagree, trust the measured facts. You own its goal stack: the states work on the op on top. With an empty stack you are not steering: the dispatcher's safe default runs (exploring in safe ground).
 
 Reply with one JSON object only, no markdown, with these keys:
 - "goals": the whole new goal stack, top first. Omit the key to keep the current stack. An empty or invalid list clears it.
@@ -116,8 +130,24 @@ Examples:
 """
 
 
+def system_prompt(reference_sections: str = "") -> str:
+    """The stable prefix: the game reference, the measured facts, then the op contract."""
+    parts = []
+    reference = reference_text(reference_sections)
+    if reference:
+        parts.append(reference.strip())
+    notes = game_notes_text()
+    if notes:
+        parts.append(
+            "# Measured facts (docs/GAME_NOTES.md)\n\n"
+            "What we measured in play. Prefer these over the reference when they disagree.\n\n" + notes.strip()
+        )
+    parts.append("# Planner contract\n\n" + SYSTEM_PROMPT.strip())
+    return "\n\n".join(parts) + "\n"
+
+
 class LLMClient(Protocol):
-    def complete(self, messages: list[dict[str, str]]) -> tuple[str, dict[str, Any]]: ...
+    def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]: ...
 
 
 class PlannerConfigError(ValueError):
@@ -148,6 +178,7 @@ class StrategistConfig:
     tokens_per_min: int = DEFAULT_TOKENS_PER_MIN
     hurt_fraction: float = DEFAULT_HURT_FRACTION
     idle_minutes: float = DEFAULT_IDLE_MINUTES
+    reference_sections: str = ""  # "" core then the rest under budget, "all", "core", or a comma list
 
     @property
     def enabled(self) -> bool:
@@ -192,6 +223,7 @@ class StrategistConfig:
             tokens_per_min=int(number("AGENTREALM_PLANNER_TOKENS_PER_MIN", DEFAULT_TOKENS_PER_MIN)),
             hurt_fraction=number("AGENTREALM_PLANNER_HURT_FRACTION", DEFAULT_HURT_FRACTION),
             idle_minutes=number("AGENTREALM_PLANNER_IDLE_MINUTES", DEFAULT_IDLE_MINUTES),
+            reference_sections=os.environ.get("AGENTREALM_PLANNER_REFERENCE_SECTIONS", "").strip(),
         )
 
 
@@ -209,12 +241,14 @@ class OpenAIChatClient:
         self.api_key = api_key
         self.model = model
 
-    def complete(self, messages: list[dict[str, str]]) -> tuple[str, dict[str, Any]]:
+    def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         body = json.dumps(
             {
                 "model": self.model,
-                "messages": messages,
+                "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
                 "response_format": {"type": "json_object"},
+                # OpenAI caches a long shared prefix itself; the key keeps our calls on one cache.
+                "prompt_cache_key": OPENAI_PROMPT_CACHE_KEY,
             }
         ).encode("utf-8")
         req = urllib.request.Request(
@@ -240,7 +274,12 @@ class OpenAIChatClient:
         content = choices[0].get("message", {}).get("content", "")
         if not isinstance(content, str):
             raise RuntimeError("openai: missing message content")
-        usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+        usage = dict(payload["usage"]) if isinstance(payload.get("usage"), dict) else {}
+        details = usage.get("prompt_tokens_details")
+        if isinstance(details, dict) and details.get("cached_tokens"):
+            # Report the cached prefix apart, as Anthropic does, so the budget skips it.
+            usage["cache_read_input_tokens"] = details["cached_tokens"]
+            usage["prompt_tokens"] = max(0, int(usage.get("prompt_tokens", 0)) - int(details["cached_tokens"]))
         return content.strip(), usage
 
 
@@ -254,9 +293,9 @@ class AnthropicClient:
         self.model = model
         self.effort = effort
 
-    def complete(self, messages: list[dict[str, str]]) -> tuple[str, dict[str, Any]]:
-        system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
-        turns = [m for m in messages if m["role"] != "system"]
+    def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+        system = [anthropic_system_block(m) for m in messages if m["role"] == "system"]
+        turns = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] != "system"]
         request: dict[str, Any] = {
             "model": self.model,
             "max_tokens": ANTHROPIC_MAX_TOKENS,
@@ -272,8 +311,21 @@ class AnthropicClient:
         if resp.stop_reason == "refusal":
             raise RuntimeError("anthropic: refused")
         text = "".join(block.text for block in resp.content if block.type == "text")
-        usage = {"input_tokens": resp.usage.input_tokens, "output_tokens": resp.usage.output_tokens}
+        usage = {
+            "input_tokens": resp.usage.input_tokens,  # uncached input only; the cache counts are apart
+            "output_tokens": resp.usage.output_tokens,
+            "cache_read_input_tokens": getattr(resp.usage, "cache_read_input_tokens", 0) or 0,
+            "cache_creation_input_tokens": getattr(resp.usage, "cache_creation_input_tokens", 0) or 0,
+        }
         return text.strip(), usage
+
+
+def anthropic_system_block(message: dict[str, Any]) -> dict[str, Any]:
+    """A system message as an Anthropic text block, with ``cache_control`` when marked ``cache``."""
+    block: dict[str, Any] = {"type": "text", "text": message["content"]}
+    if message.get("cache"):
+        block["cache_control"] = {"type": "ephemeral"}
+    return block
 
 
 def make_client(cfg: StrategistConfig) -> LLMClient:
@@ -284,10 +336,10 @@ def make_client(cfg: StrategistConfig) -> LLMClient:
 
 
 def tokens_used(usage: dict[str, Any]) -> int | None:
-    """Prompt plus answer tokens the API reported, or None when it reported none.
+    """Uncached prompt plus answer tokens the API reported, or None when it reported none.
 
     OpenAI names them ``prompt_tokens``/``completion_tokens``, Anthropic
-    ``input_tokens``/``output_tokens``.
+    ``input_tokens``/``output_tokens``. Cache reads and writes are not counted.
     """
     try:
         total = sum(
@@ -319,8 +371,20 @@ def same_ops(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> bool:
     return len(a) == len(b) and all(key(x) == key(y) for x, y in zip(a, b))
 
 
-def estimate_tokens(messages: list[dict[str, str]]) -> int:
-    return sum(len(msg["content"]) for msg in messages) // CHARS_PER_TOKEN + 1
+def estimate_tokens(messages: list[dict[str, Any]]) -> int:
+    """Characters over 4 for the part of the prompt that is not cached."""
+    return sum(len(msg["content"]) for msg in messages if not msg.get("cache")) // CHARS_PER_TOKEN + 1
+
+
+def trace_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The prompt for the trace, with the cached prefix as its size and digest, not its text."""
+    out = []
+    for msg in messages:
+        if msg.get("cache"):
+            digest = hashlib.sha256(msg["content"].encode("utf-8")).hexdigest()[:12]
+            msg = {**msg, "content": f"<cached prefix: {len(msg['content'])} chars, sha256 {digest}>"}
+        out.append(msg)
+    return out
 
 
 def build_prompt(
@@ -330,8 +394,10 @@ def build_prompt(
     plan: Plan,
     directives: Directives,
     knowledge: KnowledgeBase | None,
-) -> list[dict[str, str]]:
-    """The model's input: triggers, state, the remaining plan, every clue, and instructions."""
+    reference_sections: str = "",
+) -> list[dict[str, Any]]:
+    """The model's input: the cached system prefix (:func:`system_prompt`), then
+    one user message with triggers, state, the remaining plan, every clue, and instructions."""
     pos = f"{w.map_id}:{w.pos[0]},{w.pos[1]}" if w.pos and w.map_id is not None else "unknown"
     state_lines = [
         f"tick={w.tick} pos={pos} alive={w.alive} health={w.health}/{w.max_health} gems={w.gems}",
@@ -353,7 +419,7 @@ def build_prompt(
         "Directives instructions:\n" + (directives.instructions or "(none)"),
     ]
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt(reference_sections), "cache": True},
         {"role": "user", "content": "\n\n".join(user_parts)},
     ]
 
@@ -441,7 +507,7 @@ class Strategist:
             return
         self._answers.put(self._ask(messages))
 
-    def _ask(self, messages: list[dict[str, str]]) -> Answer:
+    def _ask(self, messages: list[dict[str, Any]]) -> Answer:
         assert self.client is not None
         answer = Answer()
         try:
@@ -521,6 +587,7 @@ class Strategist:
             plan=runner.plan,
             directives=runner.directives.directives,
             knowledge=runner.knowledge,
+            reference_sections=self.config.reference_sections,
         )
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1
@@ -530,7 +597,7 @@ class Strategist:
         runner.log(
             "strategist",
             f"ask (call {self.calls}, {len(self.in_flight)} trigger(s))",
-            {"strategist": {"event": "ask", "call": self.calls, "triggers": self.in_flight, "messages": messages}},
+            {"strategist": {"event": "ask", "call": self.calls, "triggers": self.in_flight, "messages": trace_messages(messages)}},
         )
         self._requests.put(messages)
 

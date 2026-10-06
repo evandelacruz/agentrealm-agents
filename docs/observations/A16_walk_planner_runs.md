@@ -75,3 +75,83 @@ Call mix over the run: 167 `zone`, 132 `tick`, 17 `position`, 11 `terrain`, 10 `
 3. **A spurious `idle` trigger fires 4 s into the run.** `runner.py:270` seeds `strategist_progress_tick` from `world.tick` before any tick is known (0). The first window with the real tick then satisfies `strategist.py:706–710` at once. Trace: call 2 `{"trigger": "idle", "since_tick": 0, "tick": 3933174, "idle_ticks": 6000}`. The planner wrote "idle for 6000 ticks" into its goals. It costs one call and misleads the plan.
 
 **Minor:** the one API error is a `position` read sent in the same window the character died, before the `Died` event arrived (`t=3934459 position error HTTP 409 not_on_map`). This is the A5 pattern from A58 run 9, now down to one call.
+
+## Run 4 — FAIL: death at 75 s, before most of the #119 walk fixes could be exercised
+
+- **Code:** `main` at `7f9c795` (after #119, the Walk run 3 fixes, and #120). Planner: Anthropic, default model. Fresh knowledge base (no `.state`).
+- **Verdict:** exit 1 after **75 s** (first death ends the run). Character started at 10/10 health, 10 lives, 0 gems, pocket knife armed, about 80 blocks west of the town cell.
+- **Gate summary:** deaths **1**; API errors **0**; navigation target (+150, 0) **neither** reached nor given up (max Chebyshev from origin **96**); give-ups on other goals 3 (all `heal_food`); returns to a given-up target 0; oscillation events 0; heal actions 1; retreat misses 0; regen not measured.
+
+### The four checks
+
+| Check | Result |
+|---|---|
+| Break loop escalates to give-up | **Not exercised.** The walk never reached BREAK: escalation got as far as `[cautious]` (from t=3954796), then the character died. |
+| Hurt walk avoids hostiles | **No, in practice.** After the first hit (7/10) the pinned walk resumed and, at 8/10, led straight into a group of three hostiles (gristlewick 217, snotlings 215/216 at (401–404, 353–361)). None of the three appears in an entity read before the first hit, so the #119 step-back rule (`navigation/walk.py:135–144`, known hostiles only) had nothing to act on. See defect 2. |
+| Spurious `idle` trigger | **Gone.** Call 2 fired on `timer` at t=3954448; no `idle` trigger in 6 calls. The 75 s run is shorter than a real idle window, so only the false start is ruled out. |
+| Planner ops run once the target is given up | **Not exercised.** The pinned target was never given up or reached, so `gather_gems`, `explore_area` and `buy` stayed below it and never ran. |
+
+### Planner
+
+| | |
+|---|---|
+| Calls | 6 (4 `applied`, 2 `unchanged`) |
+| Plans accepted / errors | **6 / 0** |
+| Tokens | input 3,511, output 1,380, cache write 98,054 (call 1), cache read 490,270 |
+| Tokens per minute (budgeted) | **~98.6k in minute 1** (the one cache write), then ~4.4k |
+
+The planner's part of the stack was sensible: `explore_area` near the start, then `gather_gems` ×15, `buy bronze_sword`, `buy small_potion`. On the three `heal_food` stuck triggers it noticed that bushes block the berries and the pocket knife cuts bushes, and moved `gather_gems` to the top of its part. On the hurt trigger (4/10) it tightened `fight_margin` 2.0 and `risk` 0.3, and again tried `retreat_hits: 1` "to retreat sooner", which `plan.py:456` rejected as below the floor (the run 3 misreading, unchanged).
+
+### Decision mix (39 decisions that sent intents; 43 more ticks held a queue)
+
+| Op / state | Decisions |
+|---|---|
+| flee (npc 221, then npc 217) | 20 |
+| travel (pinned `travel:point`, legs) | 13 |
+| `not outrunning npc 217: fight npc 217` (Flee falling back to a swing) | 5 |
+| heal_food | 1 |
+| break, explore, gather_gems, buy, equip | 0 |
+
+Intents: 140 `Step`, 321 `Wait`, 5 `Use`. Call mix: 82 `tick`, 76 `zone`, 24 `position`, 12 `strategist`, 11 `entities`, 9 `terrain`, 6 `self`.
+
+### Health
+
+10 → 8 → 7 (npc 221, t=3954429–3954447) → 8 (berry at (390, 350), t=3954733) → 6 → 4 → 2 → 1 → dead (gristlewick 217, t=3954911–3955034). From the first hit by 217 to death took **12 s**. All 76 zone reads came back `safe=False`, so no safe tile was known for Retreat.
+
+### Top 3 defects
+
+1. **Flee loses the chase to a gristlewick, then swings back below the health floor until it dies.** With no safe tile known, `instead_of_fleeing` falls through to "swing back at the hitter" whatever the win estimate says. Swings went out at 4/10 (twice), 2/10 (twice) and 1/10: at or below a floor of 4 (`retreat_hits` 2 × a hit of 2). The pocket knife landed one hit (`NPCDamaged` once).
+
+   ```
+   t=3954913 @76:402,361 tick  Step(down_right) (flee npc 217) | Attacked, Damaged 2 by npc
+   t=3954931 @76:404,361 tick  Step(right) (flee npc 217) | Attacked, Damaged 2 by npc
+   t=3954940 @76:405,361 tick  Use(npc:217) (not outrunning npc 217: fight npc 217)
+   t=3954946 @76:405,361 tick  Use(npc:217) (not outrunning npc 217: fight npc 217) | NPCAttacked, Attacked, Damaged 2 by npc
+   t=3955006 @76:410,366 tick  Step(up_right) (flee npc 217) | Attacked, Damaged 1 by npc
+   t=3955021 @76:411,365 tick  Use(npc:217) (not outrunning npc 217: fight npc 217) | Attacked
+   t=3955036 @? tick           Step(down_right) (flee npc 217) | Attacked, Damaged 2 by npc, Died
+   ```
+
+   Suspects: `states/flee.py:103–104` adds the swing-back option with no `would_lose` or floor check, so a losing fight is chosen once running and retreating both fail; `states/retreat.py:53–54` returns no intent when no safe tile is known, so the walk never heads for the town the world read named.
+
+2. **Entity reads stop while the walk is moving, so it walks into hostiles it has not read.** 11 entity reads in 75 s, none between t=3954454 and t=3954915 (46 s), while 76 zone reads went out in the same run. The tick deltas fold entities in and reset `entities_tick`, so the 20-tick `entity_refresh` never comes due. The three hostiles that killed the character show up in an entity read only one tick after the first hit, and the cautious walk's queue sent at t=3954900 had its first step land beside 217.
+
+   ```
+   t=3954454 @76:342,383 entities npc:221@340,385, …                     ← last read before the walk
+   t=3954900 @76:400,359 tick  queue 10×Step 27×Wait (travel:point → (417, 352) [cautious])
+   t=3954904 @76:401,360 tick  Step(down_right) (flee npc 217)
+   t=3954913 @76:402,361 tick  Step(down_right) (flee npc 217) | Attacked, Damaged 2 by npc
+   t=3954915 @76:402,361 entities npc:216@401,353, npc:215@401,354, npc:217@401,360, …
+   ```
+
+   Suspects: `world.py:482–483` (`_apply_delta_body` sets `entities_tick` on any entity delta) and `brain.py:82` (the refresh rule reads it). If deltas only carry nearby entities, a walk heading into new ground needs a real read on a fixed cadence.
+
+3. **Heal gives up berries behind bushes it could cut.** Three `heal_food` targets were given up as `no_path` with `blocking: ["bush"]`, though the pocket knife cuts bushes (the planner pointed this out in call 5). The character went into the fatal encounter at 8/10 instead of 10/10.
+
+   ```
+   call 5 triggers: stuck heal_food:76:393,337 no_path blocking [bush]; heal_food:76:389,340 …; heal_food:76:389,339 …
+   ```
+
+   Suspects: `states/heal.py:204` walks only; `pathing.py:619` gives up `no_path` without asking Break to open the blocker.
+
+**Minor:** the planner's hurt reply changed `fight_margin` and `risk` but the log line read `same stack; progress kept`, because the stack itself was unchanged. Params changed silently.

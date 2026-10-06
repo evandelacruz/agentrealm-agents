@@ -123,7 +123,7 @@ Invalid params are ignored with a log line; a broken file keeps the last good di
 
 ## Worked example: say hello to other players
 
-The repo ships **`ExampleGreetState`** in `python/agentrealm_agent/states/example_greet.py` (about 40 lines). It says hello once to each other player in sight. No shipped state talks to players (Investigate says hello to **NPCs**), so it adds behavior instead of shadowing a state that already runs.
+The repo ships **`ExampleGreetState`** in `python/agentrealm_agent/states/example_greet.py` (about 40 lines). It says hello once to each other player in sight. No shipped state talks to players (**Greet** and Investigate say hello to **NPCs**), so it adds behavior instead of shadowing a state that already runs.
 
 It is **not** in the shipped `STATES`, so the reference agent never runs it. It reacts to who is in sight and never moves the character, so it is a reflex. To try it in your copy, add one line to the end of `REFLEXES` in `states/dispatch.py`:
 
@@ -144,7 +144,7 @@ Behavior:
 
 Things the example does on purpose, worth keeping in your own states:
 
-- **Its own memory.** The greeted set lives on the state, keyed by your character's id because one `STATES` tuple serves every character the process runs. It needs no knowledge base, and it marks a player when the `Say` is sent, so a refused hello is not retried: at most one per player per run. (Investigate instead records NPCs in the knowledge base after an applied `Say`, which persists across runs.)
+- **Its own memory.** The greeted set lives on the state, keyed by your character's id because one `STATES` tuple serves every character the process runs. It needs no knowledge base, and it marks a player when the `Say` is sent, so a refused hello is not retried: at most one per player per run. (Greet and Investigate instead record NPCs in the knowledge base after an applied `Say`, which persists across runs.)
 - **Pacing and budget.** It returns one `Say` per decision window. The runner sends it through the speech pacer and inside the window's `POST tick`, so it costs no extra call.
 - **Priority.** Last among the reflexes, it waits for every survival state, and outranks the plan's executor for one window per player.
 

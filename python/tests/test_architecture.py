@@ -20,7 +20,7 @@ from agentrealm_agent.states import PlayContext, StateOutcome, dispatch
 from agentrealm_agent.world import Entity, WorldModel
 
 # Spelled out here, not imported, so the test reads the spec rather than the code.
-REFLEXES = {"Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee", "Pickup", "Recover"}
+REFLEXES = {"Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee", "Pickup", "Recover", "Greet"}
 SAFE_DEFAULT = "Explore"
 
 
@@ -87,10 +87,11 @@ class NoPlanTest(unittest.TestCase):
         acting = {o.state for o in outs if o.intents}
         self.assertTrue(acting, "something must act")
         self.assertLessEqual(acting, REFLEXES | {SAFE_DEFAULT}, acting)
-        # Nothing was read or greeted on the agent's own initiative.
+        # Nothing was read on the agent's own initiative, and the only Say is
+        # Greet's one-tick hello to an NPC in sight (A64): no walk to talk.
         verbs = {i["verb"] for o in outs for i in o.intents or []}
         self.assertNotIn("Read", verbs)
-        self.assertNotIn("Say", verbs)
+        self.assertTrue(all(o.state == "Greet" for o in outs for i in o.intents or [] if i["verb"] == "Say"))
 
     def test_nothing_to_do_is_never_idle(self):
         # Walled in, fully known: no frontier, no plan, nothing in sight.
@@ -160,7 +161,8 @@ class PlanOpTest(unittest.TestCase):
         w.entities = [Entity("npc", 61, (2, 1), "villager")]
         plan = travel(6, 1)
         plan.tick_hz = 1
-        outs = play(w, plan, decisions=12, hostile=["character"])
+        # Greet's hellos to the villager (A64) aside: they are not Travel's.
+        outs = [o for o in play(w, plan, decisions=12, hostile=["character"]) if o.state != "Greet"]
         self.assertTrue(outs[0].wait and outs[0].state == "Travel", outs[0].reason)
         held = [o for o in outs if o.state == "Travel"]
         self.assertTrue(all(o.wait and not o.intents for o in held))

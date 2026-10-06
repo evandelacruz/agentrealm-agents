@@ -342,7 +342,9 @@ class NavigationFixtureTest(unittest.TestCase):
         self.assertTrue(held, "Travel held the round while the way was taken")
         self.assertLessEqual(held[-1]["tick"] - held[0]["tick"], PLAN_STALL_SECONDS * DEFAULT_TICK_RATE_HZ)
         during = [row for row in r.trace if held[0]["tick"] <= row["tick"] <= held[-1]["tick"]]
-        self.assertTrue(all(row["intent"] is None for row in during), "no pacing while the way was taken")
+        # Greet's one-tick hello to the NPC (A64) is the only intent: no pacing.
+        moves = [row for row in during if row["intent"] is not None and row["intent"]["verb"] != "Say"]
+        self.assertEqual(moves, [], "no pacing while the way was taken")
 
 
 class TravelBackoffTest(unittest.TestCase):

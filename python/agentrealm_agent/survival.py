@@ -83,6 +83,16 @@ def is_attacker(w: WorldModel, e: Entity) -> bool:
     return w.attacker == (e.kind, e.id)
 
 
+def known_hostile(w: WorldModel, e: Entity) -> bool:
+    """``e`` has shown it is hostile: a boss, the last thing that hit us, or of a
+    type whose hits the threat table has measured. An NPC that has never hit
+    anyone we saw is not known hostile (helpers never attack)."""
+    if e.is_boss or is_attacker(w, e):
+        return True
+    key = type_key_for_entity(e)
+    return key is not None and w.threat.measured(key)
+
+
 def combat_group(w: WorldModel, policy: Policy) -> list[Entity]:
     """Hostiles in range plus any within ``GROUP_JOIN_RADIUS`` of the nearest."""
     in_range = hostiles_in_range(w, policy)

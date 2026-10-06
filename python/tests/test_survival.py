@@ -372,7 +372,8 @@ class FleeTest(unittest.TestCase):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("npc", 5, (2, 1))]
         safe_at(w, (1, 1))
-        self.assertEqual(dispatch(w, ctx()).state, "Explore")
+        # Not fled: on safe ground the NPC is no threat, so Greet says hello (A64).
+        self.assertEqual(dispatch(w, ctx()).state, "Greet")
 
     def test_nowhere_to_flee_sends_nothing(self):
         w = world(["###", "#.#", "###"], at=(1, 1))
@@ -386,7 +387,8 @@ class FleeTest(unittest.TestCase):
 
         w = world([".....", ".....", "....."], at=(0, 1))
         w.entities = [Entity("npc", 5, (4, 1))]
-        self.assertEqual(dispatch(w, ctx(hostile_range=2)).state, "Explore")
+        # Not fled: out of range it is no threat, so Greet says hello (A64).
+        self.assertEqual(dispatch(w, ctx(hostile_range=2)).state, "Greet")
         # An NPC out of hostile range can be spoken to for a ``say`` op (A30).
         c = ctx(hostile_range=2)
         c.plan = Plan([{"op": "say", "npc_id": 5, "text": "hello"}], dict(PARAM_DEFAULTS))

@@ -123,8 +123,7 @@ def route_step(
     known door warps (A26), with stuck escalation on this map's leg (A15).
 
     None when no step can be planned. With no known route to another map the
-    goal's path is cleared and nothing backs off. Travel and Investigate's
-    cross-map looks (A30) both walk with this.
+    goal's path is cleared and nothing backs off.
     """
     plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest_map, dest, goal)
     leg = _map_leg(m, w, goal, dest_map, dest, plan_avoid, plan)

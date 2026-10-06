@@ -92,15 +92,17 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Collection, Protocol
 
 from .directives import Directives
-from .travel.resolve import travel_given_up
-from .knowledge_base import KnowledgeBase
+from .travel.resolve import travel_dest, travel_given_up
+from .travel.strength import StrengthBracket, loadout_key
+from .knowledge_base import KnowledgeBase, knowledge_items
 from .memory import Memory
 from .gem_yield import summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, greeted_npc_ids, in_sight, spoken_npc_ids
 from .survival import known_hostile, retreat_goal
-from .travel.knowledge import town_from_kb
+from .travel.knowledge import iter_entrances, town_from_kb
+from .travel.ops import travel_op_from_plan_goal
 from .world import Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe
 
@@ -115,6 +117,7 @@ DEFAULT_TOKENS_PER_MIN = 40_000  # floor; the default also fits one prefix write
 PREFIX_BUDGET_FACTOR = 1.5
 DEFAULT_HURT_FRACTION = 0.5
 DEFAULT_IDLE_MINUTES = 10
+STALL_SECONDS = 30  # State shows a stall once nothing has changed for this long
 # After a failed call the next waits BACKOFF_BASE_S, doubling per failure in a row, at most BACKOFF_CAP_S.
 BACKOFF_BASE_S = 2.0
 BACKOFF_CAP_S = 120.0
@@ -162,6 +165,10 @@ The survival params ("params" under State, set by "params" or a set_param op). S
 Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first.
 
 NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir from here, spoken, greeted, hostile, stays_put); npcs_spoken_to counts the NPCs a say op of yours has spoken to so far, and npcs_greeted those Greet has said hello to. The game does not say which NPCs are helpers and which are monsters. "hostile" true means known hostile: a boss, the last thing that hit the character, or a type that has swung at it, hit it or died in view; false only means none of its type has done so yet, so it may still be a monster. "stays_put" true means it has stood on one cell for a while, as helpers do; judge the rest from its type and the clues. On safe ground (anywhere, if policy.hostile does not name NPCs), Greet says hello once to an NPC in sight that stays put and is not hostile, and marks it greeted; a helper answers any words with the same line, which lands in Clues. A greeting never counts as spoken: a say op to a greeted NPC still says your text. To talk to one further away, or with your own words, use a say op with its npc_id (from nearby_npcs) or its npc_type (any NPC of that type, the nearest first); the character walks within speech range and says your text. A helper's reply is added to Clues as a row of kind "npc".
+
+A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows in the stack without them, with "goes_to": the cell it walks to now, which the agent works out itself. It is already on the stack: re-sending it changes nothing.
+
+State stall shows how long the character has neither moved, gained gems, nor changed its loadout or cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
 
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
@@ -502,6 +509,8 @@ def build_prompt(
     gather_status: str = "",
     gather_run: dict[str, int] | None = None,
     rejected: Collection[str] = (),
+    stall: str = "",
+    strength: StrengthBracket | None = None,
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -516,12 +525,16 @@ def build_prompt(
         f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
         *_gather_line(plan, gather_status),
         f"gather_run={json.dumps(gather_run or {}, sort_keys=True)}",
+        f"stall={stall or 'none'}",
+        *entrance_lines(w, knowledge),
+        shop_price_line(w, knowledge),
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
     if plan.notes:
         state_lines.append(f"plan_notes={plan.notes!r}")
-    lines = stack_lines(plan)
+    bracket = strength or StrengthBracket()
+    lines = stack_lines(plan, lambda op: travel_dest(op, w, knowledge, bracket, given_up_travel))
     state_lines.append("stack (top first):" + "".join(f"\n  {line}" for line in lines) if lines else "stack: (empty)")
     if given_up_travel:
         cells = [f"{mid}:{x},{y}" for mid, (x, y) in sorted(given_up_travel, key=str)]
@@ -649,13 +662,96 @@ def repeats_pinned(op: dict[str, Any], pinned: list[dict[str, Any]]) -> bool:
     return False
 
 
-def stack_lines(plan: Plan) -> list[str]:
+def stack_lines(plan: Plan, goes_to: Callable[[dict[str, Any]], tuple[int, Pos] | None] | None = None) -> list[str]:
     """The ops left on the stack, top first, each marked ``pinned`` (a
-    directives op, which the planner cannot remove) or ``planner`` (A35)."""
+    directives op, which the planner cannot remove) or ``planner`` (A35).
+    Each op as :func:`shown_op` shows it, with ``goes_to`` for a symbolic travel."""
     return [
-        f"{'pinned' if i < plan.directive_end else 'planner'} {json.dumps(op, sort_keys=True)}"
+        f"{'pinned' if i < plan.directive_end else 'planner'} {json.dumps(shown_op(op, goes_to), sort_keys=True)}"
         for i, op in enumerate(plan.goals[plan.index :], plan.index)
     ]
+
+
+def shown_op(op: dict[str, Any], goes_to: Callable[[dict[str, Any]], tuple[int, Pos] | None] | None = None) -> dict[str, Any]:
+    """``op`` as State shows it. A travel the agent finds the cell for
+    (``travel_op_from_plan_goal`` reads no x, y) drops the ``0, 0`` placeholder
+    validation gave it, which reads like the map origin and invited re-sends
+    (free-play run 1), and says where it ``goes_to`` now instead."""
+    if op.get("op") != "travel" or travel_op_from_plan_goal(op).x is not None:
+        return op
+    shown = {k: v for k, v in op.items() if k not in ("x", "y")}
+    dest = goes_to(op) if goes_to is not None else None
+    if dest is not None:
+        shown["goes_to"] = f"{dest[0]}:{dest[1][0]},{dest[1][1]}"
+    else:
+        shown["goes_to"] = "nearest unexplored door" if op["to"] == "entrance" else "not known yet"
+    return shown
+
+
+# Level entrances State lists, nearest first.
+ENTRANCES_SHOWN = 8
+
+
+def entrance_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
+    """The known level entrances (``kb.entrances``), nearest first: cell,
+    bearing, and what a look at it filed (``block_type``, ``locked``, ``needs``)."""
+    rows = []
+    for map_id, pos, row in iter_entrances(knowledge):
+        entry: dict[str, Any] = {"cell": _bearing(w, (map_id, pos))}
+        for key in ("block_type", "locked", "needs"):
+            if row.get(key) is not None:
+                entry[key] = row[key]
+        here = w.map_id == map_id and w.pos is not None
+        rows.append(((0 if here else 1, chebyshev(w.pos, pos) if here else 0, map_id, pos), entry))
+    if not rows:
+        return ["level_entrances=none known"]
+    rows.sort(key=lambda t: t[0])
+    shown = [entry for _, entry in rows[:ENTRANCES_SHOWN]]
+    more = f" (+{len(rows) - len(shown)} more)" if len(rows) > len(shown) else ""
+    return [f"level_entrances={json.dumps(shown, sort_keys=True)}{more}"]
+
+
+def shop_price_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
+    """Every item seen for sale (``items`` rows with a ``gem_price``, and
+    priced supplies in sight), cheapest first, against the gems held."""
+    prices: dict[str, int] = {}
+    for code, row in knowledge_items(knowledge).items():
+        price = row.get("gem_price") if isinstance(row, dict) else None
+        if isinstance(price, int) and price > 0:
+            prices[code] = price
+    for e in w.entities:
+        if e.kind == "supply" and e.code and isinstance(e.gem_price, int) and e.gem_price > 0:
+            prices[e.code] = e.gem_price
+    if not prices:
+        return "shop_prices=none seen"
+    ordered = dict(sorted(prices.items(), key=lambda t: (t[1], t[0])))
+    gems = w.gems or 0
+    affordable = [code for code, price in ordered.items() if price <= gems]
+    return f"shop_prices={json.dumps(ordered)} gems={w.gems} can_buy_now={json.dumps(affordable)}"
+
+
+
+@dataclass
+class StallClock:
+    """When the character last moved, gained or spent gems, changed its
+    loadout or cleared a level: progress the planner can see (free-play run 1
+    stood still for six minutes with the stack unchanged)."""
+
+    key: tuple | None = None
+    since: int = 0
+
+    def note(self, w: WorldModel) -> None:
+        held = tuple(sorted(s.code for s in w.held_supplies))
+        key = (w.map_id, w.pos, w.gems, loadout_key(w), held, tuple(w.levels_cleared or ()))
+        if key != self.key:
+            self.key, self.since = key, w.tick
+
+    def line(self, w: WorldModel, tick_hz: int, reason: str) -> str:
+        """``""`` until ``STALL_SECONDS`` pass with no change, then how long and the last decision."""
+        seconds = (w.tick - self.since) // max(1, tick_hz)
+        if self.key is None or seconds < STALL_SECONDS:
+            return ""
+        return json.dumps({"seconds": seconds, "last_decision": reason or "unknown"}, sort_keys=True)
 
 
 @dataclass
@@ -687,6 +783,7 @@ class Strategist:
     _token_budget: int = 0  # resolved tokens_per_min (token_budget)
     _idle_sent_for_tick: int = -1
     rejected: list[str] = field(default_factory=list)  # what the last reply had dropped or ignored, for the next State
+    stall: StallClock = field(default_factory=StallClock)
     _requests: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=1), repr=False)
     _answers: queue.Queue = field(default_factory=queue.Queue, repr=False)
     _stop: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -831,6 +928,7 @@ class Strategist:
     def _collect(self, runner: Any) -> None:
         """Move queued signals into the inbox and raise the map, hurt and idle triggers."""
         w, m = runner.world, runner.mem
+        self.stall.note(w)
         where = (w.map_id, w.map_level) if w.map_id is not None else None
         if where is not None and where != self._last_map:
             # Every change of map or level, re-entering one included (after a death, a retry).
@@ -885,6 +983,8 @@ class Strategist:
             gather_status=runner.mem.gather_status,
             gather_run=runner.gem_cuts.run_counts(),
             rejected=self.rejected,  # replaced when this call's reply is read; kept if the call fails
+            stall=self.stall.line(runner.world, runner.tick_hz, runner.mem.last_decision),
+            strength=runner.mem.strength,
         )
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1

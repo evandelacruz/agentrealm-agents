@@ -252,7 +252,7 @@ class Runner:
     def _decide(self, w, m, *, plan: Plan | None = None):
         if m.parking:
             plan = None  # the run is over: no op runs while parking (A66)
-        return decide(
+        d = decide(
             w,
             m,
             self.cfg.policy,
@@ -264,6 +264,8 @@ class Runner:
             plan=plan,
             gem_cuts=self.gem_cuts,
         )
+        m.last_decision = f"{d.state}: {d.reason}" if d.state else d.reason
+        return d
 
     def log(self, call: str, detail: str, record: dict) -> None:
         w = self.world

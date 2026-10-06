@@ -180,7 +180,7 @@ def _cell_on_path_blocked(w: WorldModel, avoid: set[Pos], p: Pos) -> bool:
         return False
     if not w.view.walkable(p):
         return True
-    return p in w.occupied()
+    return p in w.occupied() or p in w.for_sale()
 
 
 def remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:

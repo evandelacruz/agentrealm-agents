@@ -152,19 +152,20 @@ def _capability_order(cap: str) -> tuple[int, str]:
 def pick_supply_for_capability(
     w: WorldModel, capability: str, kb: KnowledgeBase | None = None
 ) -> InventorySupply | None:
-    """Cheapest held supply that provides ``capability`` (weapons first)."""
+    """Cheapest supply that provides ``capability`` (weapons first), held or armed.
+
+    The armed supply wins a tie, so a break arms its tool once and keeps it.
+    An armed supply is not in ``held``: without the tie-break, two weapons
+    that both cut would each pick the other and flip the arm forever.
+    """
     cands: list[tuple[tuple[int, int, str], InventorySupply]] = []
-    for s in w.held_supplies:
-        caps = capabilities_for_code(s.code, kb)
-        if capability not in caps:
+    for s in held_supplies(w):
+        if capability not in capabilities_for_code(s.code, kb):
             continue
         weapon = 0 if s.code in WEAPONS else 1
-        cands.append(((weapon, _capability_order(capability)[0], s.code), s))
+        armed = 0 if s.code == w.armed_code else 1
+        cands.append(((weapon, armed, s.code), s))
     if not cands:
-        armed = w.armed_code
-        if armed and capability in capabilities_for_code(armed, kb):
-            sid = next((s.id for s in w.held_supplies if s.code == armed), -1)
-            return InventorySupply(sid, armed)
         return None
     cands.sort(key=lambda t: t[0])
     return cands[0][1]

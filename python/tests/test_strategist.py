@@ -24,7 +24,11 @@ from agentrealm_agent import __main__ as cli
 from agentrealm_agent.pathing import path_owned_by, plan_op_goal
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
+from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.travel.knowledge import entrance_key, sync_town
 from agentrealm_agent.strategist import (
+    STALL_SECONDS,
+    StallClock,
     repeats_pinned,
     BACKOFF_BASE_S,
     BACKOFF_CAP_S,
@@ -277,7 +281,7 @@ class AnswerTest(unittest.TestCase):
         self.assertIn({"trigger": "death", "tick": 3}, ask["triggers"])
 
     def test_prompt_has_whole_plan_every_clue_and_the_op_table(self):
-        kb = SimpleNamespace(lock=threading.Lock(), clues=[{"kind": "sign", "text": f"clue {i}"} for i in range(20)], extra={})
+        kb = SimpleNamespace(lock=threading.Lock(), clues=[{"kind": "sign", "text": f"clue {i}"} for i in range(20)], extra={}, entrances={}, items={})
         plan = Plan([{"op": "wait", "seconds": 0, "why": "test"}, {"op": "explore_area", "x": 3, "y": 4, "radius": 5}], dict(PARAM_DEFAULTS))
         messages = build_prompt(
             triggers=[{"trigger": "clue", "text": "torch"}],
@@ -540,6 +544,85 @@ class OpTableTest(unittest.TestCase):
         )
         for op in OP_FIELDS:
             self.assertIn(f"- {op}: ", messages[0]["content"])
+
+
+def state_of(w: WorldModel, plan: Plan, kb=None, **kw) -> str:
+    messages = build_prompt(
+        triggers=[], w=w, plan=plan, directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=kb, **kw
+    )
+    return messages[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
+
+
+class PlannerViewTest(unittest.TestCase):
+    """Free-play run 1: the planner had no stall signal, no entrances and no
+    prices in State, and re-sent ``travel:town`` shown at 0, 0 22 times."""
+
+    def setUp(self):
+        self.w = WorldModel(character_id=1, map_id=7, pos=(10, 10), tick=10, gems=21)
+        self.kb = KnowledgeBase.empty("sandbox")
+
+    def test_symbolic_travel_shows_where_it_goes_not_zero_zero(self):
+        sync_town(self.kb, {"map_id": 7, "x": 30, "y": 10})
+        plan = Plan([{"op": "travel", "to": "town", "x": 0, "y": 0}], dict(PARAM_DEFAULTS))
+        state = state_of(self.w, plan, self.kb)
+        self.assertIn('{"goes_to": "7:30,10", "op": "travel", "to": "town"}', state)
+        self.assertNotIn('"x": 0', state)
+
+    def test_unresolved_symbolic_travel_says_so(self):
+        plan = Plan([{"op": "travel", "to": "shop", "x": 0, "y": 0}], dict(PARAM_DEFAULTS))
+        self.assertIn('"goes_to": "not known yet"', state_of(self.w, plan, self.kb))
+
+    def test_a_point_travel_keeps_its_cell(self):
+        plan = Plan([{"op": "travel", "to": "point", "x": 0, "y": 0}], dict(PARAM_DEFAULTS))
+        self.assertIn('{"op": "travel", "to": "point", "x": 0, "y": 0}', state_of(self.w, plan, self.kb))
+
+    def test_known_entrances_are_listed_nearest_first(self):
+        self.kb.entrances[entrance_key(7, (40, 10))] = {"map_id": 7, "x": 40, "y": 10}
+        self.kb.entrances[entrance_key(7, (12, 10))] = {"map_id": 7, "x": 12, "y": 10, "locked": True, "needs": "key"}
+        self.kb.entrances[entrance_key(9, (1, 1))] = {"map_id": 9, "x": 1, "y": 1}
+        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("level_entrances="))
+        rows = json.loads(line.split("=", 1)[1])
+        self.assertEqual([r["cell"] for r in rows], ["7:12,10 (2 cells east)", "7:40,10 (30 cells east)", "9:1,1 (another map)"])
+        self.assertEqual((rows[0]["locked"], rows[0]["needs"]), (True, "key"))
+
+    def test_no_entrances_known(self):
+        self.assertIn("level_entrances=none known", state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb))
+
+    def test_shop_prices_against_gems_held(self):
+        self.kb.items["bronze_sword"] = {"gem_price": 15}
+        self.kb.items["middle_chest"] = {"gem_price": 40}
+        self.w.entities = [Entity("supply", 5, (11, 10), "small_potion", gem_price=3)]
+        state = state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb)
+        self.assertIn(
+            'shop_prices={"small_potion": 3, "bronze_sword": 15, "middle_chest": 40} gems=21 can_buy_now=["small_potion", "bronze_sword"]',
+            state,
+        )
+
+    def test_stall_shows_after_nothing_changes(self):
+        clock = StallClock()
+        clock.note(self.w)
+        self.w.tick += (STALL_SECONDS - 1) * 10
+        clock.note(self.w)
+        self.assertEqual(clock.line(self.w, 10, "Break: arm"), "")
+        self.w.tick += 20
+        clock.note(self.w)
+        self.assertEqual(json.loads(clock.line(self.w, 10, "Break: arm")), {"seconds": STALL_SECONDS + 1, "last_decision": "Break: arm"})
+        self.w.gems = 22  # a gem is progress
+        clock.note(self.w)
+        self.assertEqual(clock.line(self.w, 10, "Gather: cutting"), "")
+
+    def test_stall_reaches_the_prompt(self):
+        llm = FakeLLM({"goals": []}, {"goals": []})
+        s, r = make(llm), fake_runner()
+        r.mem.last_decision = "Travel: travel:town blocked"
+        s.on_window(r)
+        s.serve_one(timeout=0)
+        r.world.tick += STALL_SECONDS * 10
+        s.last_call_at = None
+        s.inbox.append({"trigger": "timer"})
+        s.on_window(r)
+        s.serve_one(timeout=0)
+        self.assertIn('stall={"last_decision": "Travel: travel:town blocked", "seconds": 30}', llm.messages[-1][1]["content"])
 
 
 class SafeDefaultTest(unittest.TestCase):

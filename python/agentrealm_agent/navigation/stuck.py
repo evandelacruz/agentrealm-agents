@@ -13,6 +13,7 @@ progress window, so a level is left only when its own window fails:
   when a plan shorter than any seen before turns up (then REVEALED), or the
   budget runs out or no frontier is reachable (give up).
 - BREAK (2): step 2, ``Break`` a nominated obstacle on the blocked route (A28).
+  Arming is not progress: ``ARM_DECISION_LIMIT`` decisions that arm fail it.
 - REVEALED (4): walk the plan reveal found; failing again tries step 4.
 - ALT_ROUTE (5): step 4, replan through the door graph when enclosed (A28).
 - A break that opens the way, or an alt route that finds one, walks again
@@ -47,6 +48,10 @@ PROGRESS_TICK_LIMIT = 300  # 30 s at 10 ticks/s
 REJECT_STREAK_LIMIT = 3
 OSCILLATION_WINDOW = 8
 OSCILLATION_UNIQUE_MAX = 3
+
+# Escalation step 2: decisions that arm a tool before the window fails.
+# A break arms once; more means the arm is going nowhere.
+ARM_DECISION_LIMIT = 3
 
 # Escalation step 1: prefer known ground over fog (§4.1).
 FOG_CAUTIOUS = 8
@@ -104,6 +109,7 @@ class NavAttempt:
     break_x: int | None = None  # stuck step 2: block under break, if any
     break_y: int | None = None
     break_cap: str | None = None
+    arm_decisions: int = 0  # stuck step 2: Break decisions in this window that armed
     # A short walk (``pathing.bounded_step``): the decision it was last
     # pursued on, and the tick it began waiting with no step.
     seen_decision: int | None = None
@@ -370,6 +376,8 @@ def stuck_reason(att: NavAttempt, tick: int) -> str | None:
         return "time"
     if _oscillating(att.recent):
         return "oscillation"
+    if att.arm_decisions >= ARM_DECISION_LIMIT:
+        return "arm_only"
     return None
 
 
@@ -426,6 +434,7 @@ def resume(m: Memory, att: NavAttempt, tick: int) -> None:
 
 def _fresh_window(att: NavAttempt, tick: int) -> None:
     att.best, att.moves, att.reject_streak, att.window_tick = None, 0, 0, tick
+    att.arm_decisions = 0
     att.recent.clear()
 
 
@@ -541,7 +550,7 @@ def level_note(att: NavAttempt | None) -> str:
 
 
 def _open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:
-    return p not in blocked and w.view.walkable(p) and p not in w.occupied()
+    return p not in blocked and w.view.walkable(p) and p not in w.occupied() and p not in w.for_sale()
 
 
 def reveal_step(w: WorldModel, att: NavAttempt, blocked: set[Pos]) -> Pos | None:

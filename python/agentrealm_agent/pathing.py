@@ -126,7 +126,7 @@ def flee_run(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], first: Po
     than the steps it takes to get there). The run ends on the cell it found
     furthest from the nearest hostile, preferring the longer run on ties.
     """
-    occupied = w.occupied() | blocked
+    occupied = w.occupied() | w.for_sale() | blocked
     came: dict[Pos, Pos | None] = {first: None}
     depth = {first: 1}
     frontier = [first]
@@ -160,7 +160,7 @@ def step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:
         return False
     if w.view.tiles.get(p) in DOORS:
         return True
-    return w.view.walkable(p) and p not in w.occupied()
+    return w.view.walkable(p) and p not in w.occupied() and p not in w.for_sale()
 
 
 def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos | None:

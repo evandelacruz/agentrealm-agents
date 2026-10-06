@@ -298,6 +298,54 @@ class BreakPricingTest(unittest.TestCase):
         self.assertEqual(set(self.params().break_costs), {(1, 0)})
 
 
+class BreakArmsOnceTest(unittest.TestCase):
+    """Free-play run 1: two cutting weapons flipped the arm 289 times, no step."""
+
+    def _world(self):
+        # A bush two cells away, so each decision arms (if it must) and steps.
+        w = _sword_world(["...b.."], at=(5, 0))
+        w.view.tiles[(1, 0)] = "dirt"
+        # The snapshot lists the armed supply apart from ``held``.
+        w.held_supplies = [InventorySupply(6, "pocket_knife")]
+        w.armed_code = "bronze_sword"
+        return w
+
+    def test_an_armed_tool_with_the_capability_is_kept(self):
+        w = self._world()
+        self.assertEqual(pick_supply_for_capability(w, "cut").code, "bronze_sword")
+        w.held_supplies, w.armed_code = [InventorySupply(5, "bronze_sword")], "pocket_knife"
+        self.assertEqual(pick_supply_for_capability(w, "cut").code, "pocket_knife")
+
+    def test_break_steps_without_rearming(self):
+        w = self._world()
+        m = Memory()
+        att = nav_stuck.track(m, w, "goto", (0, 0))
+        att.level = nav_stuck.BREAK
+        c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
+        out = BreakState().act(w, c)
+        self.assertEqual(len(out.intents), 1, out.intents)
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
+        self.assertNotIn(arm(6), out.intents)
+        self.assertIsNone(m.break_rearm)
+
+    def test_repeated_arm_decisions_escalate_past_break(self):
+        w = self._world()
+        w.armed_code = None  # every decision arms: an arm that never lands
+        w.held_supplies = [InventorySupply(6, "pocket_knife")]
+        m = Memory()
+        att = nav_stuck.track(m, w, "goto", (0, 0))
+        att.level = nav_stuck.BREAK
+        c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
+        for _ in range(nav_stuck.ARM_DECISION_LIMIT):
+            out = BreakState().act(w, c)
+            self.assertIn(arm(6), out.intents)
+            self.assertEqual(att.level, nav_stuck.BREAK)
+        out = BreakState().act(w, c)
+        self.assertNotIn(arm(6), out.intents or [])
+        self.assertEqual(att.level, nav_stuck.REVEAL, "arming is no progress: on to step 3")
+        self.assertEqual(att.reasons[-1], "arm_only")
+
+
 class BreakRearmTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

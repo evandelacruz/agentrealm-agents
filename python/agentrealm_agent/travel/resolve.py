@@ -143,4 +143,10 @@ def travel_given_up(
 
 
 def at_destination(w: WorldModel, dest: ResolvedDestination) -> bool:
-    return w.map_id == dest.map_id and w.pos == dest.pos
+    """On the cell; for a ``shop``, next to it. A shop cell holds a priced
+    supply, and stepping onto it would buy it (A21): Shop ``Take``s from beside it."""
+    if w.map_id != dest.map_id or w.pos is None:
+        return False
+    if dest.label == "shop":
+        return chebyshev(w.pos, dest.pos) <= 1
+    return w.pos == dest.pos

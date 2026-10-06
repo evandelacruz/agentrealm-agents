@@ -347,6 +347,25 @@ class BreakRearmTest(unittest.TestCase):
         self.assertFalse(BreakState().guard(self.r.world, self.ctx))
 
 
+    def test_break_for_the_top_ops_stuck_walk_keeps_the_op(self):
+        # Break opening the way for Travel's stuck walk is that walk's progress:
+        # the travel op's stall clock does not run, so it is not dropped mid-break.
+        w, m = self.r.world, self.r.mem
+        m.nav_stuck.attempts.clear()
+        att = nav_stuck.track(m, w, "travel:point", (4, 0))
+        att.level = nav_stuck.BREAK
+        att.break_x, att.break_y, att.break_cap = 2, 0, "smash"
+        op = {"op": "travel", "to": "point", "x": 4, "y": 0}
+        plan = Plan([op], dict(PARAM_DEFAULTS))
+        plan.stalled_since_tick = 0
+        self.ctx.plan = plan
+        w.tick = PLAN_STALL_SECONDS * plan.tick_hz * 2
+        out = dispatch(w, self.ctx)
+        self.assertEqual(out.state, "Break")
+        self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
+        self.assertIs(plan.current(), op, "the travel op survives the break")
+        self.assertIsNone(plan.stalled_since_tick)
+
     def stalled_plan(self) -> Plan:
         plan = Plan([{"op": "break_block", "x": 2, "y": 0, "capability": "smash"}], dict(PARAM_DEFAULTS))
         plan.stalled_since_tick = 0

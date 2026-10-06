@@ -145,8 +145,8 @@ def _note_op_progress(plan: Plan, world: WorldModel, m: Memory, op: dict, owner:
     """The executor moved the op forward, or its stall clock runs (A34).
 
     Any intent the executor sends for the op records it as acted on (A36);
-    only progress resets the clock. A reflex holding the round leaves the
-    clock alone; an op stalled for ``PLAN_STALL_SECONDS`` is dropped, so the
+    only progress resets the clock, and so does Break working the owner's
+    stuck escalation. A reflex holding the round leaves the clock alone; an op stalled for ``PLAN_STALL_SECONDS`` is dropped, so the
     stack never pins the agent.
     """
     if out.state == owner and out.intents:
@@ -157,6 +157,11 @@ def _note_op_progress(plan: Plan, world: WorldModel, m: Memory, op: dict, owner:
     if out.state == owner and out.wait and out.progress:
         return
     if out.state != owner and any(out.state == s.name for s in REFLEXES):
+        return
+    if out.state == BreakState.name != owner and out.intents:
+        # Break opening the block the owner's stuck walk nominated (A15) is
+        # that walk's progress: the op is not dropped mid-break.
+        plan.stalled_since_tick = None
         return
     if plan.note_stalled(world.tick):
         plan.drop_current(f"{owner}: no progress for {PLAN_STALL_SECONDS}s", memory=m)

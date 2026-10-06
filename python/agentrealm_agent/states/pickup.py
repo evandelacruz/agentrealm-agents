@@ -10,6 +10,7 @@ from __future__ import annotations
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..loot import pickup_room, worthwhile_pickups
+from ..navigation import stuck as nav_stuck
 from ..world import WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import drop, take, withdraw
@@ -52,4 +53,6 @@ class PickupState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         out = pickup_outcome(world, ctx.knowledge, state=self.name)
+        if out is not None:
+            nav_stuck.finish_in_reach(ctx.memory, world, "loot")  # a fetch walk to it is over
         return out if out is not None else StateOutcome(None, "nothing in reach", state=self.name)

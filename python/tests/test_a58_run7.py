@@ -151,18 +151,23 @@ def fetch_ctx() -> PlayContext:
 
 class UnreachableFoodTest(unittest.TestCase):
     def test_heal_gives_the_food_up_instead_of_pacing(self):
+        # Within Heal's FOOD_REACH the planner sees the whole pond: no path.
         w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"], pickup=False))
-        w.pos = (403, 608)  # within Heal's FOOD_REACH of the food
+        w.pos = (400, 608)
         outs = play(w, c, 80)
         signals = c.memory.nav_stuck.stuck_signals
-        # Given up at the dead end, retried once when the 300-tick backoff ends,
-        # given up again (now backed off 600). In between the safe default
-        # looks around, so the retry walks to the dead end again.
+        # Given up at once, retried once when the 300-tick backoff ends,
+        # given up again (now backed off 600).
         self.assertEqual([(s["goal"], s["target"], s["reason"]) for s in signals], [("heal_food", list(FOOD), "no_path")] * 2)
         self.assertEqual(c.memory.nav_stuck.oscillations, [], "no pacing at all")
-        heal_walk = [o.reason.startswith("heal_food") for o in outs]
-        self.assertEqual(sum(heal_walk), 6, "walked until the dead end, twice")
-        self.assertEqual(heal_walk[:4], [True, True, True, False], "given up at the dead end")
+        self.assertFalse(any(o.reason.startswith("heal_food") for o in outs), "never walked toward it")
+
+    def test_heal_leaves_food_beyond_its_reach_to_the_plan(self):
+        # Run 7's start, six cells from the food: a planner ``fetch_item`` op's, not Heal's.
+        w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"], pickup=False))
+        outs = play(w, c, 10)
+        self.assertEqual(c.memory.nav_stuck.stuck_signals, [])
+        self.assertFalse(any(o.reason.startswith("heal_food") for o in outs))
 
     def test_loot_gives_the_pickup_up_instead_of_pacing(self):
         w = pond_world(health=10)

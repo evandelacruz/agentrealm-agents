@@ -67,21 +67,23 @@ REFLEXES: tuple[State, ...] = (
 )
 
 # Run only for the plan's top op (``plan.OP_STATE``). At most one guards for
-# an op, so their order matters only for the side jobs: Break also opens a
-# block stuck escalation nominated (A15), and Break and Solve re-arm a
-# weapon they swapped out. Explore is last: it is also the safe default.
+# an op, so their order matters only for the side jobs. Break sits below the
+# walkers because it also opens the block a walk's stuck escalation nominated
+# (A15): the walker yields at step 2 and Break acts in the same decision.
+# Break and Solve re-arm a weapon they swapped out. Explore is last: it is
+# also the safe default.
 EXECUTORS: tuple[State, ...] = (
     EquipState(),
     LootState(),
     ShopState(),
     InvestigateState(),
-    BreakState(),
     SolveState(),
     GatherState(),
     TravelState(),
     BossState(),
     LevelState(),
     WaitState(),
+    BreakState(),
     ExploreState(),
 )
 

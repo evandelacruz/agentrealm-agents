@@ -58,7 +58,15 @@ class TravelState(State):
             m.goal_op = dict(op)
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
         out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly)
-        return out if out is not None else StateOutcome(None, f"travel:{dest.label} blocked", state=self.name)
+        if out is not None:
+            return out
+        goal = f"travel:{dest.label}"
+        if m.goal == goal and m.path and m.path[0] in world.occupied() and not nav_stuck.awaiting_break(m, world, goal):
+            # The route's first step is taken by an occupant: hold while its
+            # window runs (A15), rather than let the safe default step away and back.
+            return StateOutcome(None, f"{goal}: way taken, waiting", state=self.name, wait=True)
+        # Stuck at step 2: Break, below, opens the way this decision.
+        return StateOutcome(None, f"{goal} blocked", state=self.name)
 
 
 def resolve_destination(w: WorldModel, ctx: PlayContext, op: GoalOp) -> ResolvedDestination | None:

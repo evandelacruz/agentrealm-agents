@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from .break_memory import TRANSIENT_BREAK_REJECTIONS, record_attempt
 from .gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
-from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
+from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, remaining_walk_cells, walkable_prefix
 from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
 from .navigation.stuck import on_break_opened
@@ -38,6 +38,7 @@ from .equip import note_equip_result, sync_refusals
 from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
 from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, self_use_code
 from .shop import note_shop_result
+from .states.explore import plan_sets
 from .travel.resolve import travel_given_up
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.strength import loadout_key
@@ -56,7 +57,7 @@ from .executor import (
 from .acceptance import AcceptanceHooks
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
-from .world import DOORS, WorldModel, terrain_cells
+from .world import DOORS, Pos, WorldModel, terrain_cells
 from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
 from .states.greet import GREET_STATE
 from .investigation import (
@@ -468,9 +469,16 @@ class Runner:
             d = self.reflex_while_held()
             self.plan.acted = None  # the probe's decision is not this round's
             if d is not None:
+                starts = self.possible_positions()
                 self.drop_held_queue()
                 # Something must replace the held queue, or it keeps running.
-                intents = self._apply_never_attack(self.intents_for(d)) or [wait()]
+                intents = self._apply_never_attack(self.intents_for(d))
+                if intents and not self.steps_land_clear(intents, starts):
+                    # Stop where we are; position is re-read before the next plan.
+                    self.clear_held_tracking()
+                    d = Decision(None, f"{d.reason}: stop, the step may land on a blocked cell")
+                    intents = None
+                intents = intents or [wait()]
             elif m.resend_held_queue:
                 # Position was re-read when the path went stale (choose_call
                 # reads it before this poll), so the new walk starts from
@@ -543,15 +551,20 @@ class Runner:
             if m.pending_intents is not None and queue.get("queue_id") == m.pending_queue:
                 # Every index below next_index has run, applied Waits included.
                 m.pending_next_index = max(m.pending_next_index, int(queue.get("next_index", 0)))
-        elif m.pending_intents is not None:
-            if w.tick > m.queue_sent_tick + len(m.pending_intents) + QUEUE_RESULT_SLACK:
+        elif m.pending_intents is not None or m.pending is not None:
+            # A lone intent (a Take, say) is a queue too: held until its result
+            # or finished_queue, so it is not decided and sent again before it
+            # has run (A63 run 3).
+            sent = m.pending_intents if m.pending_intents is not None else [m.pending]
+            if w.tick > m.queue_sent_tick + len(sent) + QUEUE_RESULT_SLACK:
                 # The queue has had time to run out and the server never said
                 # it finished: the handoff store lost it. We may have walked
                 # without seeing it, so re-read position and forget the path
                 # and step clock planned from the old one.
                 m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
-                m.held_queue = None
-                m.need_position, m.path, m.last_step_tick = True, [], None
+                m.pending, m.held_queue = None, None
+                if any(i.get("verb") == "Step" for i in sent):
+                    m.need_position, m.path, m.last_step_tick = True, [], None
             else:
                 m.held_queue = {"queue_id": m.pending_queue, "next_index": m.pending_next_index}
         else:
@@ -564,6 +577,8 @@ class Runner:
             m.queued_ticks = 0
         elif m.pending_intents is not None:
             m.queued_ticks = len(m.pending_intents) - m.pending_next_index
+        elif m.pending is not None:
+            m.queued_ticks = 1
         else:
             m.queued_ticks = 1 if intents else 0
         m.hurt_last_poll = any(e.get("kind") == "Damaged" for e in events)
@@ -632,8 +647,10 @@ class Runner:
             m.greetings = saved[6]  # Greet's hello waits for a decision window: a probe sends none (A65)
         m.nav = saved[2]
         m.nav_stuck = saved_stuck
-        if d.reflex:
+        if d.reflex and not self.held_step_matches(d):
             return d
+        # No reflex, or one that walks where the held queue already steps:
+        # the held queue keeps running, so memory keeps its plan (A63 run 3).
         m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
         self.rng.setstate(saved[3])
         return None
@@ -649,6 +666,59 @@ class Runner:
             return
         if remaining_path_stale(self.world, m, self.cfg.policy, self.knowledge):
             m.resend_held_queue = m.need_position = True
+
+    def possible_positions(self) -> list[Pos]:
+        """Where the character may stand now: the tracked position, then each
+        cell the held queue's Steps with no result yet would have taken it to.
+
+        A Step can run before its result reaches us, so until then any of
+        these may be where the next queue starts (A63 run 3). The server runs
+        one intent a tick from the tick the queue was sent, so only the Steps
+        that elapsed ticks could have reached count.
+        """
+        w, m = self.world, self.mem
+        if w.pos is None:
+            return []
+        out, pos = [w.pos], w.pos
+        if m.pending_intents is None:
+            return out
+        ran_by = min(len(m.pending_intents), max(0, w.tick - m.queue_sent_tick) + 1)
+        for intent in m.pending_intents[m.pending_next_index : ran_by]:
+            if intent.get("verb") == "Step":
+                pos = step_landing(pos, intent["direction"])
+                out.append(pos)
+        return out
+
+    def held_step_matches(self, d: Decision) -> bool:
+        """``d`` walks to the cell the held queue's next Step already enters.
+
+        That queue may already have run the Step without its result reaching
+        us; re-aimed from the tracked position, a fresh Step would misaim, so
+        the held queue keeps running instead (A63 run 3)."""
+        if d.submit_queue is not None or d.intent is None or d.intent.get("verb") != "SetPosition":
+            return False
+        ahead = remaining_walk_cells(self.world, self.mem)
+        return bool(ahead) and ahead[0] == (d.intent["x"], d.intent["y"])
+
+    def steps_land_clear(self, intents: list[dict], starts: list[Pos]) -> bool:
+        """Every Step in ``intents`` lands on an open cell from each of ``starts``.
+
+        Directions are aimed from the tracked position; with a Step of the
+        old queue unconfirmed, the walk may start one or more cells further
+        on and land somewhere else. Each such landing must be known walkable,
+        off ``avoid_blocks`` hazards and the learned blocked cells.
+        """
+        w, m = self.world, self.mem
+        directions = [i["direction"] for i in intents if i.get("verb") == "Step"]
+        if len(starts) < 2 or not directions:
+            return True
+        blocked, _, _ = plan_sets(w, m, self.cfg.policy, self.knowledge)
+        for pos in starts[1:]:
+            for direction in directions:
+                pos = step_landing(pos, direction)
+                if pos in blocked or not (w.view.walkable(pos) or w.view.tiles.get(pos) in DOORS):
+                    return False
+        return True
 
     def clear_held_tracking(self) -> None:
         """Stop waiting on the held queue's results without forgetting position."""

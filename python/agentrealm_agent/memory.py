@@ -75,8 +75,13 @@ class Memory:
     greetings: dict[int, tuple[int, int | None]] = field(default_factory=dict)  # npc id -> (greetings sent, tick of the last), Greet (A65)
     greet_say_npc: int | None = None  # npc id of the last Say submitted when Greet decided it; None after any other Say (A65)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
-    gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass" | "out", cell) Gather is walking toward (A22)
-    gather_status: str = ""  # Gather's last decision: cutting, cuts have no effect here, heading out of safe ground, no cuttable cell in view, or region barren (planner State)
+    gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass" | "out" | "off", cell) Gather is walking toward (A22)
+    gather_status: str = ""  # Gather's last decision, e.g. cutting, walking to grass, blocked by hostile (planner State)
+    # Gather's stall clock: (tick this spell of Gather began, tick of its latest decision) (A63 run 3).
+    gather_spell: tuple[int, int] | None = None
+    # A hostile near Gather that has not hit us: (its id, tick its shadow clock
+    # started, tick Gather last saw it near) (A63 run 3).
+    gather_shadow: tuple[int, int, int] | None = None
     flee_path: list[Pos] = field(default_factory=list)  # Flee's committed escape, kept until it arrives, is blocked or Flee stops (A9, A58)
     # Cells the escape the oscillation guard forced keeps off: the ones it paced on (A15).
     # The planned flee_path already excludes them; this only keeps them shut for

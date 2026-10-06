@@ -231,7 +231,7 @@ class NoEffectCutTest(unittest.TestCase):
         self.assertEqual(m.gather_status, gather_mod.NO_EFFECT)
         t.note_cut(w, m.gather_target[1], "grass", w.tick)  # a cut that took effect
         gather_outcome(w, m, Policy(on_hostile="ignore"), op=op, gem_cuts=t)
-        self.assertEqual(m.gather_status, gather_mod.CUTTING)
+        self.assertEqual(m.gather_status, "walking to grass")
 
     def test_no_effect_status_is_local_and_lapses(self):
         w, t, m = field_world(), GemYieldTracker(), Memory()
@@ -319,17 +319,23 @@ class RegionSummaryTest(unittest.TestCase):
         record_cut(k, MAP, (2, 2), "grass", 100, True)
         self.assertFalse((0, 0) in gem_yield.barren_regions(k, MAP))
 
-    def test_summary_lists_best_and_barren_nearby(self):
+    def test_summary_lists_best_at_any_distance_and_barren_nearby(self):
+        # A63 run 3: past 3 regions the one productive region vanished from
+        # the planner's view; best regions now show at any distance, with it.
         k = kb()
         for i in range(BARREN_MIN_CUTS):
             record_cut(k, MAP, (1, 1), "grass", i, False)
+            record_cut(k, MAP, (300, 300), "grass", i, False)  # barren, too far to be nearby
         for i, gem in enumerate([True, False, False, False]):
             record_cut(k, MAP, (17, 1), "grass", i, gem)
         record_cut(k, MAP, (33, 1), "bush", 1, True)
-        record_cut(k, MAP, (200, 200), "bush", 1, True)  # too far to be nearby
+        record_cut(k, MAP, (200, 200), "bush", 1, True)  # far, still listed
         s = gem_yield.summary(world(at=(2, 2)), k)
         self.assertEqual(s["here"], {"x": 0, "y": 0, "cuts": BARREN_MIN_CUTS, "gems": 0})
-        self.assertEqual([(b["x"], b["yield"]) for b in s["best"]], [(32, 1.0), (16, 0.25)])
+        self.assertEqual(
+            [(b["x"], b["yield"], b["distance"]) for b in s["best"]],
+            [(32, 1.0, 30), (192, 1.0, 190), (16, 0.25, 14)],
+        )
         self.assertEqual(s["barren"], [{"x": 0, "y": 0, "cuts": BARREN_MIN_CUTS}])
 
     def test_summary_names_here_only_once_cut_there(self):
@@ -359,7 +365,7 @@ class RegionSummaryTest(unittest.TestCase):
             knowledge=k,
         )
         state = messages[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
-        self.assertIn('gem_yield={"barren": [], "best": [{"cuts": 1, "gems": 1, "x": 0, "y": 0, "yield": 1.0}]', state)
+        self.assertIn('gem_yield={"barren": [], "best": [{"cuts": 1, "distance": 0, "gems": 1, "x": 0, "y": 0, "yield": 1.0}]', state)
         self.assertIn("gem_yield", messages[0]["content"])
 
     def test_state_shows_gather_status_while_gather_gems_is_on_top(self):

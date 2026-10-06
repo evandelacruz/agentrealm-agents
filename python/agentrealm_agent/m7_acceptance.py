@@ -3,7 +3,9 @@
 The M7 done-when (docs/PLAYABLE_AGENT_PLAN.md, Milestones) and what this
 module checks for each clause:
 
-- Survives an hour: no ``Died`` event, alive when the hour ends.
+- Survives an hour: with ``stop_on_death`` (``--stop-on-death``), no ``Died``
+  event and alive when the hour ends; otherwise deaths are counted and
+  reported and play goes on after the respawn.
 - Retreats in time: no tick where ``should_retreat`` held on the world the
   decision saw while a non-survival state was running.
 - Recovers only when safe: every ``WithdrawFromChest`` Recover sends runs while

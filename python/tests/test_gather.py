@@ -10,7 +10,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, parse_directives_goal
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
 from agentrealm_agent.states import gather as gather_mod
-from agentrealm_agent.states.gather_safe import GATHER_HOSTILE_RADIUS, gather_ground, is_safe_ish
+from agentrealm_agent.states.gather_safe import GATHER_HOSTILE_RADIUS, GATHER_SHADOW_MARGIN, gather_ground, is_safe_ish
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.gem_yield import NO_EFFECT_ZONE_CUTS, GemYieldTracker
 from agentrealm_agent.zone_discovery import apply_zone
@@ -80,11 +80,22 @@ class GatherGroundTest(unittest.TestCase):
         w = grid(["ggg"], at=(1, 0))
         self.assertTrue(gather_ground(w, (1, 0), Policy()))
 
-    def test_hostile_within_the_radius_disqualifies(self):
+    def test_a_hostile_that_hit_us_bars_the_full_radius(self):
         w = grid(["g" * 12], at=(0, 0))
         w.entities = [Entity("npc", 1, (GATHER_HOSTILE_RADIUS, 0))]
+        w.attacker, w.attacked_tick, w.tick = ("npc", 1), 100, 100
         self.assertFalse(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
         w.entities = [Entity("npc", 1, (GATHER_HOSTILE_RADIUS + 1, 0))]
+        self.assertTrue(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
+
+    def test_a_hostile_that_has_not_hit_us_bars_only_weapon_reach_plus_a_step(self):
+        """A63 run 3: one following at 4–6 blocks without attacking stopped all cutting."""
+        w = grid(["g" * 12], at=(0, 0))
+        bar = w.attack_range + GATHER_SHADOW_MARGIN
+        w.hostile_types.add(("npc", "gnawer"))
+        w.entities = [Entity("npc", 1, (bar, 0), "gnawer")]
+        self.assertFalse(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
+        w.entities = [Entity("npc", 1, (bar + 1, 0), "gnawer")]
         self.assertTrue(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
 
     def test_safe_zone_cells_qualify(self):
@@ -175,7 +186,8 @@ class GatherActTest(unittest.TestCase):
 
     def test_skips_grass_with_a_hostile_near(self):
         w = grid(["ggg"], at=(1, 0))
-        w.entities = [Entity("npc", 4, (2, 0))]
+        w.entities = [Entity("npc", 4, (2, 0), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         self.assertIsNone(outcome(w, hostile=["npc"]).intents)
 
 
@@ -365,7 +377,7 @@ class GatherFallbackTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual(out.state, "Gather")
         self.assertEqual(c.memory.gather_target, ("grass", (30, 0)))
-        self.assertEqual(c.memory.gather_status, gather_mod.CUTTING)
+        self.assertEqual(c.memory.gather_status, "walking to grass", "a walk is not a cut (A63 run 3)")
 
     def test_explores_when_no_known_cell_is_cuttable(self):
         w = grid([".....", "....."], at=(0, 0))
@@ -469,3 +481,114 @@ class GatherDispatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GatherShadowTest(unittest.TestCase):
+    """A63 run 3: a hostile followed at 4–6 blocks for 40 s without attacking; Gather inched away and cut nothing."""
+
+    def shadowed(self, on_hostile: str, at=(10, 0)) -> tuple[WorldModel, PlayContext]:
+        w = grid(["g" * 40], at=at)
+        w.entities = [Entity("npc", 9, (at[0] + 4, 0), "wartlurch")]
+        w.hostile_types.add(("npc", "wartlurch"))  # a type seen attacking (survival.is_hostile)
+        c = ctx(w, ["gather_gems:3"], on_hostile=on_hostile, hostile=["npc"], hostile_range=2)
+        return w, c
+
+    def follow(self, w: WorldModel, c: PlayContext, seconds: int) -> None:
+        """Gather decides every second for ``seconds`` with the hostile still near."""
+        dispatch(w, c)
+        for _ in range(seconds):
+            w.tick += c.plan.tick_hz
+            gather_mod.shadowing_hostile(w, c.memory, c.policy, c.plan.tick_hz)
+
+    def test_a_hit_from_the_shadow_restarts_its_clock(self):
+        w, c = self.shadowed("flee")
+        self.follow(w, c, gather_mod.SHADOW_SECONDS - 5)
+        w.attacker, w.attacked_tick = ("npc", 9), w.tick  # it hits us
+        self.follow(w, c, 10)
+        w.attacker = None  # the hit has lapsed from threat memory
+        self.assertIsNone(gather_mod.shadowing_hostile(w, c.memory, c.policy, c.plan.tick_hz),
+                          "only 10 s without hitting us since the hit")
+
+    def test_a_gap_restarts_its_clock(self):
+        w, c = self.shadowed("flee")
+        self.follow(w, c, gather_mod.SHADOW_SECONDS - 1)
+        w.tick += gather_mod.SHADOW_GAP_SECONDS * c.plan.tick_hz  # another state ran meanwhile
+        self.assertIsNone(gather_mod.shadowing_hostile(w, c.memory, c.policy, c.plan.tick_hz))
+        self.assertEqual(c.memory.gather_shadow, (9, w.tick, w.tick))
+
+    def test_an_npc_of_a_type_never_seen_attacking_is_no_shadow(self):
+        w, c = self.shadowed("fight")
+        w.hostile_types.clear()  # townsfolk standing near (survival.is_hostile)
+        self.follow(w, c, gather_mod.SHADOW_SECONDS)
+        self.assertEqual(dispatch(w, c).intents[0]["verb"], "Use")
+
+    def test_cuts_beside_a_hostile_that_has_not_attacked(self):
+        w, c = self.shadowed("flee")
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual(out.intents[0]["verb"], "Use", "4 blocks off and harmless: keep cutting")
+        self.assertEqual(c.memory.gather_status, gather_mod.CUTTING)
+
+    def test_moves_well_off_from_a_long_shadow_in_one_walk(self):
+        w, c = self.shadowed("flee")
+        self.follow(w, c, gather_mod.SHADOW_SECONDS)
+        out = dispatch(w, c)
+        kind, goal = c.memory.gather_target
+        self.assertEqual(kind, gather_mod.OFF)
+        self.assertGreaterEqual(abs(goal[0] - 14), gather_mod.MOVE_OFF_DISTANCE, "not the nearest uncovered cell")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertEqual(c.memory.gather_status, gather_mod.MOVING_OFF)
+        # The next decision keeps the same walk, not a fresh nearest cell.
+        w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+        dispatch(w, c)
+        self.assertEqual(c.memory.gather_target, (gather_mod.OFF, goal))
+
+    def test_fights_a_long_shadow_when_the_profile_fights_and_wins(self):
+        w, c = self.shadowed("fight")
+        self.follow(w, c, gather_mod.SHADOW_SECONDS)
+        with mock.patch.object(gather_mod, "would_lose", return_value=False):
+            out = dispatch(w, c)
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", "closes on it")
+        self.assertIn("npc 9 shadows us", out.reason)
+        self.assertEqual(c.memory.gather_status, gather_mod.FIGHTING)
+
+    def test_moves_off_instead_when_the_fight_would_be_lost(self):
+        w, c = self.shadowed("fight")
+        self.follow(w, c, gather_mod.SHADOW_SECONDS)
+        with mock.patch.object(gather_mod, "would_lose", return_value=True):
+            dispatch(w, c)
+        self.assertEqual(c.memory.gather_status, gather_mod.MOVING_OFF)
+
+    def test_a_short_shadow_changes_nothing(self):
+        w, c = self.shadowed("fight")
+        self.follow(w, c, gather_mod.SHADOW_SECONDS - 1)
+        out = dispatch(w, c)
+        self.assertEqual(out.intents[0]["verb"], "Use")
+
+
+class GatherStatusTest(unittest.TestCase):
+    """A63 run 3: gather_status said "cutting" through 45 s of walking with no cut."""
+
+    def test_blocked_by_hostile_when_only_a_hostile_bars_the_grass(self):
+        w = grid(["..g"], at=(0, 0))
+        w.entities = [Entity("npc", 9, (2, 0), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))
+        m = Memory()
+        out = outcome(w, m, hostile=["npc"])
+        self.assertIsNone(out.intents)
+        self.assertEqual(m.gather_status, gather_mod.BLOCKED)
+
+    def test_flags_no_cut_for_a_while(self):
+        w = grid(["." * 30 + "g"], at=(0, 0))
+        m = Memory()
+        tracker = GemYieldTracker()
+        gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
+        self.assertEqual(m.gather_status, "walking to grass")
+        for _ in range(gather_mod.STALL_SECONDS):
+            w.tick += 10
+            gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
+        self.assertEqual(m.gather_status, f"walking to grass, no cut for {gather_mod.STALL_SECONDS} s")
+        tracker.last_cut_tick = w.tick
+        gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
+        self.assertEqual(m.gather_status, "walking to grass", "a cut restarts the clock")

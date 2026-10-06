@@ -249,7 +249,7 @@ class M9GateTest(unittest.TestCase):
         self.assertIn("no entrance catalog from minimap", m.failures())
 
     def test_survival_failures_match_m7(self):
-        m = M9AcceptanceMetrics()
+        m = M9AcceptanceMetrics(stop_on_death=True)
         m.on_death()
         self.assertIn("1 death(s)", m.failures(full_run=False)[0])
 

@@ -14,7 +14,9 @@ stop the run on the first of:
 - ``regen_known`` answers, "yes" (saved for every later run, so the M7 gate
   passes its regen clause) or "no" (this run only);
 - the cap, ``target_seconds`` (default 30 minutes);
-- a death: the first one ends the probe as a failure.
+- with ``stop_on_death`` (``--stop-on-death``), a death: the first one ends
+  the probe as a failure. Otherwise a death is counted and reported and the
+  probe plays on after the respawn.
 """
 
 from __future__ import annotations
@@ -72,7 +74,7 @@ class RegenProbeMetrics(SurvivalAcceptanceMetrics):
     def failures(self) -> list[str]:
         """Empty only when regen answered with no death."""
         out: list[str] = []
-        if self.deaths:
+        if self.deaths and self.stop_on_death:
             out.append(f"{self.deaths} death(s): the probe ends on the first")
         if self.regen is None:
             why = "never hurt" if not self.hurt_seen else "hurt, but no verdict yet"

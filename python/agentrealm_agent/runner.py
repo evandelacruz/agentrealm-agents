@@ -58,7 +58,15 @@ from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
 from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
-from .investigation import mark_cell_read, mark_npc_spoken, read_key, read_supply_key, say_key
+from .investigation import (
+    GREET_TEXT,
+    mark_cell_read,
+    mark_npc_greeted,
+    mark_npc_spoken,
+    read_key,
+    read_supply_key,
+    say_key,
+)
 from .scroll_investigation import (
     codes_from_entities_payload,
     codes_from_inventory_supplies,
@@ -982,9 +990,15 @@ class Runner:
                 # A scroll with no text (or a code learned wrong): never read it again.
                 mark_supply_read(self.knowledge, sid)
         elif intent["verb"] == "Say" and intent.get("npc_id") is not None:
-            key = say_key(int(intent["npc_id"]))
+            npc_id = int(intent["npc_id"])
+            if intent.get("text") == GREET_TEXT and npc_id in self.mem.greetings:
+                # Greet's hello (A64): its own record, and no say op's refusal budget.
+                if applied:
+                    mark_npc_greeted(self.knowledge, npc_id)
+                return
+            key = say_key(npc_id)
             if applied:
-                mark_npc_spoken(self.knowledge, int(intent["npc_id"]))
+                mark_npc_spoken(self.knowledge, npc_id)
         else:
             return
         if result.get("outcome") == "rejected":

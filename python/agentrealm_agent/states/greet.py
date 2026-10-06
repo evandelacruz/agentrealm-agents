@@ -9,14 +9,24 @@ names NPCs. ``Say`` reaches
 reach. Walking to an NPC is **Investigate**'s, for a planner ``say`` op.
 
 A helper's reply arrives as a ``SpokenTo`` event, which ``clues.py`` stores
-as a clue for the planner. An applied ``Say`` lands the NPC in the knowledge
-base's ``spoken_npcs`` (the runner records it), so each NPC is greeted once.
+as a clue for the planner. An applied hello lands the NPC in the knowledge
+base's ``greeted_npcs`` (the runner records it), so each NPC is greeted once.
+That record is Greet's own: ``spoken_npcs`` and the ``say`` op's refusal
+count belong to the planner's ``say`` ops, so a hello never settles one.
 """
 
 from __future__ import annotations
 
 from ..executor.pacing import SPEECH_INTERVAL_TICKS
-from ..investigation import HELPER_STILL_TICKS, MAX_REJECTIONS, SPEECH_RANGE, in_sight, spoken_npc_ids
+from ..investigation import (
+    GREET_TEXT,
+    HELPER_STILL_TICKS,
+    MAX_REJECTIONS,
+    SPEECH_RANGE,
+    greeted_npc_ids,
+    in_sight,
+    spoken_npc_ids,
+)
 from ..poll_cadence import THREAT_NEAR_BLOCKS
 from ..config import Policy
 from ..survival import hostiles_in_range, known_hostile, on_safe_tile, recently_attacked
@@ -25,7 +35,7 @@ from .base import PlayContext, State, StateOutcome
 from .intents import say_to
 
 # A greeting whose result has not come back yet is not sent again for this
-# many ticks (3 s); the runner records an applied one in ``spoken_npcs``.
+# many ticks (3 s); the runner records an applied one in ``greeted_npcs``.
 GREET_RETRY_TICKS = 30
 
 
@@ -70,7 +80,7 @@ def npc_to_greet(w: WorldModel, ctx: PlayContext) -> Entity | None:
         return None
     if not on_safe_tile(w) and "npc" in ctx.policy.hostile:
         return None
-    spoken = spoken_npc_ids(ctx.knowledge)
+    spoken = spoken_npc_ids(ctx.knowledge) | greeted_npc_ids(ctx.knowledge)
     here = w.pos
 
     def due(e: Entity) -> bool:
@@ -113,4 +123,4 @@ class GreetState(State):
             return StateOutcome(None, "no one to greet", state=self.name)
         sent, _ = ctx.memory.greetings.get(npc.id, (0, None))
         ctx.memory.greetings[npc.id] = (sent + 1, world.tick)
-        return StateOutcome([say_to(npc)], f"greet npc {npc.id} ({npc.code or '?'})", state=self.name)
+        return StateOutcome([say_to(npc, GREET_TEXT)], f"greet npc {npc.id} ({npc.code or '?'})", state=self.name)

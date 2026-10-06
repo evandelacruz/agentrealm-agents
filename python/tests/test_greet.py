@@ -11,7 +11,15 @@ from agentrealm_agent.clues import note_spoken_clue
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.executor.pacing import SPEECH_INTERVAL_TICKS
-from agentrealm_agent.investigation import HELPER_STILL_TICKS, MAX_REJECTIONS, mark_npc_spoken
+from agentrealm_agent.investigation import (
+    HELPER_STILL_TICKS,
+    MAX_REJECTIONS,
+    greeted_npc_ids,
+    mark_npc_greeted,
+    mark_npc_spoken,
+    say_key,
+    spoken_npc_ids,
+)
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan
@@ -92,14 +100,15 @@ class StateListsNpcsTest(unittest.TestCase):
         kb = KnowledgeBase.empty("sandbox")
         mark_npc_spoken(kb, 4)
         mark_npc_spoken(kb, 99)
-        self.assertIn("npcs_spoken_to=2", self.prompt(w, kb)[1]["content"])
+        mark_npc_greeted(kb, 5)
+        self.assertIn("npcs_spoken_to=2 npcs_greeted=1", self.prompt(w, kb)[1]["content"])
         self.assertEqual(
             self.rows(w, kb),
             [
                 {"id": 4, "type": "fake_helper", "cells": 3, "dir": "east",
-                 "spoken": True, "hostile": False, "stays_put": True},
+                 "spoken": True, "greeted": False, "hostile": False, "stays_put": True},
                 {"id": 5, "type": "fake_biter", "cells": 3, "dir": "north",
-                 "spoken": False, "hostile": True, "stays_put": False},
+                 "spoken": False, "greeted": True, "hostile": True, "stays_put": False},
             ],
         )
 
@@ -148,8 +157,8 @@ class GreetTest(unittest.TestCase):
         out = dispatch(w, ctx(travel(12, 4), kb, m))
         self.assertEqual(out.state, "Greet")
         self.assertEqual(out.intents, [{"verb": "Say", "npc_id": 4, "text": "hello"}])
-        # The runner records the applied Say; the NPC is never greeted again.
-        mark_npc_spoken(kb, 4)
+        # The runner records the applied hello; the NPC is never greeted again.
+        mark_npc_greeted(kb, 4)
         m.last_speech_tick = w.tick
         for _ in range(5):
             w.tick += GREET_RETRY_TICKS
@@ -160,8 +169,10 @@ class GreetTest(unittest.TestCase):
         place(w, helper(4, (8, 4)), helper(5, (5, 4)))
         kb = KnowledgeBase.empty("sandbox")
         self.assertEqual(says(dispatch(w, ctx(None, kb)))[0]["npc_id"], 5)
-        mark_npc_spoken(kb, 5)
+        mark_npc_greeted(kb, 5)
         self.assertEqual(says(dispatch(w, ctx(None, kb)))[0]["npc_id"], 4)
+        mark_npc_spoken(kb, 4)  # a say op's text counts too: nothing left to greet
+        self.assertEqual(says(dispatch(w, ctx(None, kb))), [])
 
     def test_retries_are_bounded(self):
         # The Say never lands (no result recorded): retried after a pause, at most MAX_REJECTIONS times.
@@ -251,12 +262,64 @@ class WalkResumesTest(unittest.TestCase):
                 if i["verb"] == "SetPosition":
                     w.pos = (i["x"], i["y"])
                 elif i["verb"] == "Say":
-                    mark_npc_spoken(kb, i["npc_id"])  # as the runner does on an applied Say
+                    mark_npc_greeted(kb, i["npc_id"])  # as the runner does on an applied hello
                     m.last_speech_tick = w.tick
             w.tick += 4
         self.assertEqual([o.state for o in outs], ["Greet", "Travel", "Travel", "Travel"])
         self.assertIsNotNone(p.current(), "the hello did not cost the travel op")
         self.assertGreater(w.pos[0], 2)
+
+
+class GreetIsNotASayOpTest(unittest.TestCase):
+    """Greet keeps its own record: a hello never settles a planner ``say`` op."""
+
+    def runner(self) -> Runner:
+        cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[], pickup=False), Path("t.toml"))
+        r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
+        self.addCleanup(r.trace.close)
+        r.world = field()
+        place(r.world, helper(4, (5, 4)))
+        r.mem = Memory(need_self=False, need_position=False)
+        return r
+
+    def greet(self, r: Runner, outcome: dict) -> None:
+        out = dispatch(r.world, ctx(None, r.knowledge, r.mem))
+        self.assertEqual(out.state, "Greet")
+        r.mem.pending = out.intents[0]
+        r.on_result({"tick": r.world.tick, **outcome}, 0)
+
+    def test_an_applied_hello_is_greeted_not_spoken(self):
+        r = self.runner()
+        self.greet(r, {"outcome": "applied"})
+        self.assertEqual(greeted_npc_ids(r.knowledge), {4})
+        self.assertEqual(spoken_npc_ids(r.knowledge), set())
+
+    def test_a_say_op_still_says_its_text_after_the_hello(self):
+        r = self.runner()
+        self.greet(r, {"outcome": "applied"})
+        r.world.tick += 50
+        r.mem.last_speech_tick = None
+        p = Plan([{"op": "say", "npc_id": 4, "text": "any news?"}], dict(PARAM_DEFAULTS))
+        out = dispatch(r.world, ctx(p, r.knowledge, r.mem))
+        self.assertEqual(out.state, "Investigate")
+        self.assertEqual(says(out), [{"verb": "Say", "npc_id": 4, "text": "any news?"}])
+        r.mem.pending = out.intents[0]
+        r.on_result({"tick": r.world.tick, "outcome": "applied"}, 0)
+        self.assertEqual(spoken_npc_ids(r.knowledge), {4})
+
+    def test_a_say_op_of_hello_is_settled_by_the_hello(self):
+        r = self.runner()
+        self.greet(r, {"outcome": "applied"})
+        p = Plan([{"op": "say", "npc_id": 4, "text": "hello"}], dict(PARAM_DEFAULTS))
+        out = dispatch(r.world, ctx(p, r.knowledge, r.mem))
+        self.assertEqual(says(out), [], "the same words were already said")
+        self.assertIsNone(p.current())
+
+    def test_a_refused_hello_spends_no_say_op_budget(self):
+        r = self.runner()
+        self.greet(r, {"outcome": "rejected", "rejection": {"category": "target", "code": "target_out_of_range"}})
+        self.assertNotIn(say_key(4), r.mem.investigate_rejections)
+        self.assertEqual(greeted_npc_ids(r.knowledge), set())
 
 
 class HeldQueueTest(unittest.TestCase):

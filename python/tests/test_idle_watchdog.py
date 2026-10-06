@@ -164,6 +164,45 @@ class IdleWatchdogTest(unittest.TestCase):
         self.assertEqual(len(m.idle.events), 2)
 
 
+    def test_survival_states_are_never_backed_off(self):
+        # Retreat with no reachable safe tile holds with no intent while the
+        # danger lasts; backing it off would hand a hurt character to Explore.
+        for state in ("Escape", "Retreat", "Flee", "Fight", "Boss"):
+            with self.subTest(state):
+                w, m = corridor(), Memory()
+                idle_watchdog.observe(m, w)
+                w.tick, m.state = LIMIT, state
+                event = idle_watchdog.check(m, w)
+                self.assertEqual(event["state"], state)
+                self.assertNotIn("held_off", event)
+                self.assertFalse(idle_watchdog.held_off(m, state, w.tick + 1))
+        w, m = corridor(), Memory()
+        idle_watchdog.observe(m, w)
+        w.tick, m.state = LIMIT, "Heal"
+        self.assertEqual(idle_watchdog.check(m, w)["held_off"], "Heal")
+
+    def test_server_wait_then_tick_jump_is_not_idle(self):
+        # A network outage: the server keeps ticking, and the next response's
+        # tick jumps far past the last one we saw, the cell unchanged.
+        w = corridor()
+        m = Memory()
+        c = ctx(Policy(kind="scripted", goals=["goto", "explore"], goto=(25, 0)), m)
+        idle_watchdog.observe(m, w, response=True)
+        w.tick = LIMIT // 2
+        idle_watchdog.note_server_wait(m)
+        w.tick += 1  # the runner counts a window locally and decides before the response
+        dispatch(w, c)
+        w.tick += 5 * LIMIT  # the response after the outage
+        idle_watchdog.observe(m, w, response=True)
+        self.assertEqual(idle_watchdog.idle_ticks(m, w.tick), 0)
+        w.tick += EVERY
+        dispatch(w, c)
+        self.assertEqual(m.idle.events, [], "the outage is not idle time")
+        w.tick += LIMIT
+        idle_watchdog.observe(m, w, response=True)
+        self.assertEqual(idle_watchdog.idle_ticks(m, w.tick), LIMIT + EVERY, "the wait ended at that response")
+
+
 class IdleRunnerTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

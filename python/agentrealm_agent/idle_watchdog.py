@@ -27,8 +27,10 @@ nothing productive, it redirects the agent:
 - the state that held the idle decisions is backed off the same way as a
   stuck target (``stuck.back_off``): dispatch skips it until the backoff
   ends, so a lower state (Explore at the bottom) takes the round. Explore
-  and Idle are the fallbacks the redirect lands on and are never backed
-  off; Explore's own idling is answered by giving up its frontier.
+  and Idle are the fallbacks the redirect lands on, and the survival
+  states (Escape, Retreat, Flee, Fight, Boss) hold while danger lasts, so
+  none of them is ever backed off (``NEVER_BACKED_OFF``); their idling is
+  answered by giving up their target.
 
 An ``idle_redirect`` event goes to the trace. The watchdog fires again
 after another ``IDLE_REDIRECT_SECONDS`` if the redirect did not help.
@@ -36,9 +38,10 @@ after another ``IDLE_REDIRECT_SECONDS`` if the redirect did not help.
 **Exempt** time is where acting is impossible: dead and waiting to
 respawn (Downed), asleep or not yet placed (Sync), or a server-forced
 wait the runner reports with ``note_server_wait`` (paused, network down,
-rate limited, not on the map). Exempt time restarts the clock. Heal resting
-with health not rising, and plan or directive ``wait`` holds, are not
-exempt.
+rate limited, not on the map). Exempt time restarts the clock; a server
+wait restarts it at the first response after it, so ticks the server ran
+meanwhile are not counted as idle. Heal resting with health not rising,
+and plan or directive ``wait`` holds, are not exempt.
 """
 
 from __future__ import annotations
@@ -78,8 +81,12 @@ WORLD_VERBS = frozenset(
     }
 )
 
-# The states a redirect falls through to: never backed off.
-FALLBACK_STATES = frozenset({"Explore", "Idle"})
+# States a redirect never backs off: the fallbacks it lands on (Explore,
+# Idle), and the survival states, which hold with no intent while the danger
+# lasts (Retreat with no reachable safe tile, Flee with nowhere to go, Fight
+# that cannot close). Backing those off would hand a hurt character to
+# Explore; giving up their target is enough. Heal is not among them.
+NEVER_BACKED_OFF = frozenset({"Explore", "Idle", "Escape", "Retreat", "Flee", "Fight", "Boss"})
 
 GIVE_UP_REASON = "idle"
 EVENTS_KEPT = 16  # newest kept until the runner writes them to the trace
@@ -92,6 +99,7 @@ class IdleWatch:
     productive_tick: int | None = None  # last tick something productive happened (or exempt time ended)
     cell: tuple[int | None, Pos | None] | None = None  # (map, position) last seen
     health: int | None = None  # health last seen
+    server_wait: bool = False  # a server-forced wait is under way; ends at the next response (``observe(response=True)``)
     redirect_tick: int | None = None  # tick of the last redirect
     tick_hz: int = DEFAULT_TICK_RATE_HZ
     events: list[dict] = field(default_factory=list)  # idle_redirect events waiting for the trace
@@ -107,15 +115,22 @@ def exempt(w: WorldModel) -> bool:
     return not w.alive or w.asleep or w.pos is None
 
 
-def observe(m: Memory, w: WorldModel, tick_hz: int | None = None) -> None:
-    """Note this round trip's cell and health; either changing (or exempt time) is productive."""
+def observe(m: Memory, w: WorldModel, tick_hz: int | None = None, *, response: bool = False) -> None:
+    """Note this round trip's cell and health; either changing (or exempt time) is productive.
+
+    ``response`` is True when ``w`` was just updated from a server response.
+    A server-forced wait ends there: its clock restarts at the response's
+    tick, which jumped past the ticks the server ran while we waited.
+    """
     idle = m.idle
     if tick_hz is not None:
         idle.tick_hz = tick_hz
     cell = (w.map_id, w.pos)
     healed = w.health is not None and idle.health is not None and w.health > idle.health
-    if idle.productive_tick is None or exempt(w) or cell != idle.cell or healed:
+    if idle.productive_tick is None or idle.server_wait or exempt(w) or cell != idle.cell or healed:
         idle.productive_tick = w.tick
+    if response:
+        idle.server_wait = False
     idle.cell, idle.health = cell, w.health
 
 
@@ -125,15 +140,16 @@ def note_applied(m: Memory, verb: str | None, tick: int) -> None:
         m.idle.productive_tick = tick
 
 
-def note_server_wait(m: Memory, tick: int) -> None:
-    """The server made us wait (paused, network, rate limit, not on the map): exempt time."""
-    m.idle.productive_tick = tick
+def note_server_wait(m: Memory) -> None:
+    """The server made us wait (paused, network, rate limit, not on the map): exempt
+    until the next response, whose tick the clock restarts from (``observe``)."""
+    m.idle.server_wait = True
 
 
 def idle_ticks(m: Memory, tick: int) -> int:
     """Ticks since the last productive one."""
     start = m.idle.productive_tick
-    return 0 if start is None else max(0, tick - start)
+    return 0 if start is None or m.idle.server_wait else max(0, tick - start)
 
 
 def idle_seconds(m: Memory, tick: int) -> float:
@@ -183,7 +199,7 @@ def check(m: Memory, w: WorldModel, plan: Plan | None = None) -> dict | None:
     if plan is not None and op is not None and op["op"] == "wait":
         event["dropped_op"] = dict(op)
         plan.drop_current(GIVE_UP_REASON, m)
-    if state and state not in FALLBACK_STATES:
+    if state and state not in NEVER_BACKED_OFF:
         event["held_off"] = state
         nav_stuck.back_off(m.nav_stuck, state_key(state), w.tick)
     m.state = ""  # the active state no longer holds the round

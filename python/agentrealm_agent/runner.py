@@ -467,7 +467,7 @@ class Runner:
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
-        idle_watchdog.observe(m, w, self.tick_hz)
+        idle_watchdog.observe(m, w, self.tick_hz, response=True)
         absorb_heal_pending(m, w, self.knowledge, events)
         self._learn_life_code(lives_before)
         ceremony = r.get("level_clear_ceremony")
@@ -1125,7 +1125,7 @@ class Runner:
         if e.status in (401, 403):
             raise e
         if e.paused or e.network or e.rate_limited or e.code in ("not_on_map", "character_not_live"):
-            idle_watchdog.note_server_wait(self.mem, self.world.tick)  # a server-forced wait is not idling (A61)
+            idle_watchdog.note_server_wait(self.mem)  # a server-forced wait is not idling (A61)
         if e.paused or e.network:
             return time.time() + (e.retry_after or 1.0)
         if e.rate_limited:

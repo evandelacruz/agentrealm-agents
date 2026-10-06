@@ -6,8 +6,10 @@ none. Nothing here knows where: every number comes from cuts this agent made.
 1. **Measure.** Each block our ``Use`` cut is one record: the cell, its block
    type, the tick, and whether a gem came of it. The drop is tied to the cut
    by a free ``gem`` supply that appears on or next to the cell within
-   ``GEM_WINDOW_TICKS`` (one that was not in view at the cut), or by the gem
-   counter rising in that window with no ``Take`` applied since the cut.
+   ``GEM_WINDOW_TICKS`` (one that was not in view at the cut and no earlier
+   cut claimed), or by the gem counter rising in that window with no ``Take``
+   applied since the cut. Cuts still waiting at a death or a map change are
+   dropped, not filed.
 2. **Summarise.** Cells fall in ``REGION_SIZE`` square regions per map. Each
    region keeps its cuts, gems and last tick of grass and bush cuts. A region
    with ``BARREN_MIN_CUTS`` or more such cuts and no gem is barren.
@@ -76,13 +78,16 @@ class GemYieldTracker:
     """Ties gem drops to the cuts that made them, then files each cut (one per runner)."""
 
     pending: list[PendingCut] = field(default_factory=list)
+    claimed: set[int] = field(default_factory=set)  # ground gems already credited to a cut
 
-    def note_cut(self, w: WorldModel, pos: Pos, block: str, tick: int) -> None:
-        """Our ``Use`` on ``pos`` applied while it showed ``block``."""
+    def note_cut(self, w: WorldModel, pos: Pos, block: str, tick: int, *, took: bool = False) -> None:
+        """Our ``Use`` on ``pos`` applied while it showed ``block``. ``took``: a
+        ``Take`` applied earlier in the same response, whose gem the counter
+        does not show yet."""
         if w.map_id is None or not block:
             return
         self.pending.append(
-            PendingCut(w.map_id, pos, block, tick, w.gems, {gid for gid, _ in _ground_gems(w)})
+            PendingCut(w.map_id, pos, block, tick, w.gems, {gid for gid, _ in _ground_gems(w)}, took=took)
         )
 
     def note_take(self) -> None:
@@ -93,17 +98,21 @@ class GemYieldTracker:
         """After a round trip is applied: credit gems, file cuts whose window closed."""
         if not self.pending:
             return
-        if not w.alive or w.map_id is None:
-            self.pending = []  # died or off the map: not a fair sample
+        # Died, off the map, or on another map before the window ran: not a
+        # fair sample, so not filed (a false miss would push toward barren).
+        self.pending = [c for c in self.pending if w.alive and c.map_id == w.map_id]
+        if not self.pending:
+            self.claimed.clear()
             return
         gems = _ground_gems(w)
-        claimed: set[int] = set()
         for cut in self.pending:
-            if cut.gem or cut.map_id != w.map_id:
+            if cut.gem:
                 continue
-            fresh = [gid for gid, p in gems if gid not in cut.gems_in_view and gid not in claimed and chebyshev(p, cut.pos) <= 1]
+            fresh = [
+                gid for gid, p in gems if gid not in cut.gems_in_view and gid not in self.claimed and chebyshev(p, cut.pos) <= 1
+            ]
             if fresh:
-                claimed.add(min(fresh))
+                self.claimed.add(min(fresh))
             elif cut.took or cut.gems_before is None or w.gems is None or w.gems <= cut.gems_before:
                 continue
             cut.gem = True
@@ -113,11 +122,13 @@ class GemYieldTracker:
                     other.gems_before += 1
         keep: list[PendingCut] = []
         for cut in self.pending:
-            if cut.map_id != w.map_id or cut.gem or w.tick > cut.tick + GEM_WINDOW_TICKS:
+            if cut.gem or w.tick > cut.tick + GEM_WINDOW_TICKS:
                 record_cut(kb, cut.map_id, cut.pos, cut.block, cut.tick, cut.gem)
             else:
                 keep.append(cut)
         self.pending = keep
+        if not keep:
+            self.claimed.clear()  # every later cut sees these gems as already in view
 
 
 def _map_row(kb: KnowledgeBase, map_id: int) -> dict[str, Any]:

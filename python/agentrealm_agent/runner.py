@@ -842,7 +842,7 @@ class Runner:
                 self._note_break_use(intent, result, block, index)
                 tile = w.view.tiles.get(block) if block is not None else None
                 if result.get("outcome") == "applied" and intent["target"].get("kind") == "block" and tile in CUT_BLOCKS:
-                    self.gem_cuts.note_cut(w, block, tile, m.last_use_tick)
+                    self.gem_cuts.note_cut(w, block, tile, m.last_use_tick, took=bool(self._applied_take_codes))
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):

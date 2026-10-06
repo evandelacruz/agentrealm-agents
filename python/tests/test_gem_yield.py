@@ -78,6 +78,34 @@ class AttributionTest(unittest.TestCase):
         t.update(w, k)
         self.assertFalse(cuts(k)[0]["gem"])
 
+    def test_gem_left_on_the_ground_credits_only_one_cut(self):
+        k, w, t = kb(), world(), GemYieldTracker()
+        t.note_cut(w, (2, 2), "grass", 100)
+        t.note_cut(w, (3, 2), "grass", 101)
+        w.tick, w.entities = 102, [Entity("supply", 50, (3, 3), "gem")]
+        t.update(w, k)
+        w.tick = 103
+        t.update(w, k)
+        w.tick = 110
+        t.update(w, k)
+        self.assertEqual([c["gem"] for c in cuts(k)], [True, False])
+        self.assertEqual(gem_yield.regions(k, MAP)["0,0"]["gems"], 1)
+
+    def test_take_earlier_in_the_response_is_not_the_cut(self):
+        k, w, t = kb(), world(gems=4), GemYieldTracker()
+        t.note_cut(w, (1, 1), "grass", 100, took=True)
+        w.tick, w.gems = 110, 5
+        t.update(w, k)
+        self.assertFalse(cuts(k)[0]["gem"])
+
+    def test_map_change_drops_pending_cuts(self):
+        k, w, t = kb(), world(), GemYieldTracker()
+        t.note_cut(w, (1, 1), "grass", 100)
+        w.map_id, w.tick = MAP + 1, 101
+        t.update(w, k)
+        self.assertEqual(t.pending, [])
+        self.assertNotIn("gem_yield", k.extra)
+
     def test_death_drops_pending_cuts(self):
         k, w, t = kb(), world(), GemYieldTracker()
         t.note_cut(w, (1, 1), "grass", 100)
@@ -92,7 +120,11 @@ class AttributionTest(unittest.TestCase):
         r.gem_cuts, r._applied_uses, r._applied_take_codes, r._loadout_verbs = GemYieldTracker(), [], [], []
         r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 2, "y": 1}}
         r.on_result({"outcome": "applied", "tick": 100}, 0)
-        self.assertEqual([(c.pos, c.block) for c in r.gem_cuts.pending], [((2, 1), "grass")])
+        self.assertEqual([(c.pos, c.block, c.took) for c in r.gem_cuts.pending], [((2, 1), "grass", False)])
+        r._applied_take_codes = ["gem"]  # a Take applied earlier in this response
+        r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 2, "y": 2}}
+        r.on_result({"outcome": "applied", "tick": 100}, 0)
+        self.assertTrue(r.gem_cuts.pending[-1].took)
 
 
 class RegionSummaryTest(unittest.TestCase):

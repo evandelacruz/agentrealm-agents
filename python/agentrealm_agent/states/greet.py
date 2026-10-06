@@ -1,7 +1,10 @@
-"""Greet: say hello once to a nearby NPC not yet spoken to (reflex, A64).
+"""Greet: say hello once to a nearby helper not yet spoken to (reflex, A64).
 
 The cheap, deterministic half of talking to NPCs, in the spirit of Pickup:
-it acts on what is in sight now and never walks. ``Say`` reaches
+it acts on what is in sight now and never walks. The API does not say which
+NPCs are helpers, so Greet takes an NPC for one only when it stays put and
+has not hit us, and greets none off safe ground while ``policy.hostile``
+names NPCs. ``Say`` reaches
 ``SPEECH_RANGE`` blocks, further than sight, so every NPC in sight is in
 reach. Walking to an NPC is **Investigate**'s, for a planner ``say`` op.
 
@@ -13,7 +16,7 @@ base's ``spoken_npcs`` (the runner records it), so each NPC is greeted once.
 from __future__ import annotations
 
 from ..executor.pacing import SPEECH_INTERVAL_TICKS
-from ..investigation import MAX_REJECTIONS, SPEECH_RANGE, in_sight, spoken_npc_ids
+from ..investigation import HELPER_STILL_TICKS, MAX_REJECTIONS, SPEECH_RANGE, in_sight, spoken_npc_ids
 from ..poll_cadence import THREAT_NEAR_BLOCKS
 from ..config import Policy
 from ..survival import hostiles_in_range, known_hostile, on_safe_tile, recently_attacked
@@ -40,11 +43,19 @@ def threat_near(w: WorldModel, policy: Policy) -> bool:
     return not on_safe_tile(w) and bool(hostiles_in_range(w, policy))
 
 
+def likely_helper(w: WorldModel, e: Entity) -> bool:
+    """``e`` looks like a helper: an NPC that has stood still ``HELPER_STILL_TICKS``
+    in view and has not shown itself hostile. Only a guess: the API names no helpers."""
+    return e.kind == "npc" and not known_hostile(w, e) and w.npc_still_ticks(e) >= HELPER_STILL_TICKS
+
+
 def npc_to_greet(w: WorldModel, ctx: PlayContext) -> Entity | None:
     """The nearest NPC in sight to greet now, or None.
 
-    It is not known hostile, not yet spoken to, and greeted fewer than
+    It is a ``likely_helper``, not yet spoken to, and greeted fewer than
     ``MAX_REJECTIONS`` times, the last one at least ``GREET_RETRY_TICKS`` ago.
+    Off safe ground, an NPC that ``policy.hostile`` covers is never greeted,
+    at any range: a monster that has not moved yet is still a monster.
     Nothing while a threat is near, our speech cooldown still runs, or the
     plan's top op is a ``say`` (Investigate says that op's own text).
     """
@@ -57,6 +68,8 @@ def npc_to_greet(w: WorldModel, ctx: PlayContext) -> Entity | None:
         return None
     if threat_near(w, ctx.policy):
         return None
+    if not on_safe_tile(w) and "npc" in ctx.policy.hostile:
+        return None
     spoken = spoken_npc_ids(ctx.knowledge)
     here = w.pos
 
@@ -67,9 +80,8 @@ def npc_to_greet(w: WorldModel, ctx: PlayContext) -> Entity | None:
     candidates = [
         e
         for e in w.entities
-        if e.kind == "npc"
+        if likely_helper(w, e)
         and e.id not in spoken
-        and not known_hostile(w, e)
         and chebyshev(e.pos, here) <= SPEECH_RANGE
         and in_sight(w, w.map_id, here, e.pos)
         and due(e)
@@ -78,11 +90,11 @@ def npc_to_greet(w: WorldModel, ctx: PlayContext) -> Entity | None:
 
 
 class GreetState(State):
-    """Reflex, last: ``Say`` hello once to a nearby NPC not yet spoken to.
+    """Reflex, last: ``Say`` hello once to a nearby likely helper not yet spoken to.
 
     One intent, one tick: the walk under way resumes on the next decision.
-    It does not drop a walk queue already running; it waits for the next
-    decision window.
+    It fires only at a decision window: it is not a reflex for the runner's
+    held-queue probe, so a walk queue already running is never dropped for it.
     """
 
     name = "Greet"

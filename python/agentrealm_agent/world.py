@@ -154,6 +154,9 @@ class WorldModel:
     attacker_tick: int | None = None  # tick of that hit; a later hit naming no one clears both
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
+    # NPC id -> (cell, tick it was first seen there): how long each NPC in
+    # view has stood still. Helpers stay put (GAME_NOTES NPCs); Greet (A64).
+    npc_still: dict[int, tuple[Pos, int]] = field(default_factory=dict)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
     # leaves the world when its last supply is withdrawn (B116).
@@ -264,6 +267,7 @@ class WorldModel:
 
     def apply_entities(self, e: dict) -> None:
         self.entities = self._entities_from_payload(e)
+        self._note_npc_cells()
         self.entities_tick = self.entities_read_tick = int(e.get("tick", self.tick))
         self.entities_read_at = (self.map_id, self.pos)
         # A separate read replaced the state the next delta would apply to.
@@ -362,6 +366,22 @@ class WorldModel:
             for eid in part.get("removed") or []:
                 self.chest_contents.pop(int(eid), None)
         self.entities = list(by_key.values())
+        self._note_npc_cells()
+
+    def _note_npc_cells(self) -> None:
+        """Keep ``npc_still`` for the NPCs in view: a moved NPC starts again."""
+        still = {}
+        for e in self.entities:
+            if e.kind != "npc":
+                continue
+            seen = self.npc_still.get(e.id)
+            still[e.id] = seen if seen is not None and seen[0] == e.pos else (e.pos, self.tick)
+        self.npc_still = still
+
+    def npc_still_ticks(self, e: Entity) -> int:
+        """How long ``e`` has stood on its cell while in view; 0 when it just moved or was never noted."""
+        seen = self.npc_still.get(e.id)
+        return self.tick - seen[1] if seen is not None and seen[0] == e.pos else 0
 
     def _apply_terrain_delta(self, patch: dict) -> None:
         """Updates known tiles from an observation terrain patch."""
@@ -478,6 +498,7 @@ class WorldModel:
         if "entities" in snap:
             entities = snap["entities"] or {}
             self.entities = self._entities_from_payload(entities)
+            self._note_npc_cells()
             self.chest_contents = self._chest_contents_from_entities(entities)
             self.entities_tick = self.tick
         terrain = snap.get("terrain")

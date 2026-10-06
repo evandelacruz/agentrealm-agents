@@ -161,8 +161,7 @@ class PlanOpTest(unittest.TestCase):
         w.entities = [Entity("npc", 61, (2, 1), "villager")]
         plan = travel(6, 1)
         plan.tick_hz = 1
-        # Greet's hellos to the villager (A64) aside: they are not Travel's.
-        outs = [o for o in play(w, plan, decisions=12, hostile=["character"]) if o.state != "Greet"]
+        outs = play(w, plan, decisions=12, hostile=["character"])
         self.assertTrue(outs[0].wait and outs[0].state == "Travel", outs[0].reason)
         held = [o for o in outs if o.state == "Travel"]
         self.assertTrue(all(o.wait and not o.intents for o in held))

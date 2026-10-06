@@ -24,6 +24,9 @@ SPOKEN_NPCS_KEY = "spoken_npcs"
 SPEECH_RANGE = 25
 # A Read or Say refused this many times ends its op (Investigate, A30).
 MAX_REJECTIONS = 3
+# The API does not mark helpers (PLAN.md Server gaps). Helpers stay put, so an
+# NPC that has stood on one cell this long in view (5 s) may be one (A64).
+HELPER_STILL_TICKS = 50
 
 
 def read_key(map_id: int, pos: Pos) -> str:

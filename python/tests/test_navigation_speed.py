@@ -10,12 +10,13 @@ import random
 import statistics
 import time
 import unittest
+from unittest import mock
 
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.navigation import CostGridParams, nearest_target
-from agentrealm_agent.navigation.planner import _nearest_target_one_by_one, danger, danger_map
+from agentrealm_agent.navigation.planner import HOSTILE_DANGER, _Grid, _nearest_target_one_by_one, danger_map
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.world import Entity, MapView, Tiles, WorldModel
 
@@ -27,6 +28,9 @@ BLOCKS = ["dirt"] * 6 + ["grass", "wall", "wall", "lava", "framed_door", None]
 # target is under 100 ms; the guard leaves room for a slow test machine,
 # and still fails long before Run 2's seconds.
 DECISION_P95_SECONDS = 0.3
+# Cells the cost grid may price in one such decision: a count, so it fails
+# the same on any machine. About 17k today; Run 2's code priced millions.
+DECISION_CELLS_PRICED = 40_000
 
 
 def random_world(rng: random.Random, size: int = 14) -> WorldModel:
@@ -91,15 +95,16 @@ class NearestTargetMatchesOneByOneTest(unittest.TestCase):
 
 
 class DangerMapTest(unittest.TestCase):
-    def test_matches_danger_on_every_cell(self):
-        rng = random.Random(5)
-        hostiles = [Entity("npc", i, (rng.randint(0, 12), rng.randint(0, 12))) for i in range(6)]
-        peaks = {("npc", 0): 0, ("npc", 1): 12}
-        for pk in (None, peaks):
-            table = danger_map(hostiles, pk)
-            for x in range(-8, 21):
-                for y in range(-8, 21):
-                    self.assertEqual(table.get((x, y), 0), danger((x, y), hostiles, pk))
+    def test_peak_less_five_a_block_out_to_the_radius(self):
+        hostiles = [Entity("npc", 0, (0, 0)), Entity("npc", 1, (3, 0)), Entity("npc", 2, (40, 40))]
+        table = danger_map(hostiles, {("npc", 2): 12})
+        self.assertEqual(table[(0, 0)], HOSTILE_DANGER + HOSTILE_DANGER - 15)
+        self.assertEqual(table[(-5, 2)], 5)  # 5 blocks from npc 0, 8 from npc 1
+        self.assertNotIn((-6, 0), table)
+        self.assertEqual(table[(40, 40)], 12)
+        self.assertEqual(table[(42, 40)], 2)
+        self.assertNotIn((43, 40), table)
+        self.assertEqual(danger_map(hostiles, {("npc", 0): 0, ("npc", 1): 0, ("npc", 2): 0}), {})
 
 
 class FrontierKeptUpToDateTest(unittest.TestCase):
@@ -137,10 +142,9 @@ class FrontierKeptUpToDateTest(unittest.TestCase):
         view.frontier().add((9, 9))
         self.assertEqual(view.frontier(), {(0, 0)})
 
-    def test_a_plain_dict_assigned_later_still_works(self):
-        view = MapView()
-        view.tiles = {(0, 0): "dirt"}
-        self.assertEqual(view.frontier(), {(0, 0)})
+    def test_a_dict_passed_in_is_wrapped(self):
+        view = MapView(tiles={(0, 0): "dirt"})
+        self.assertIsInstance(view.tiles, Tiles)
         view.tiles[(5, 5)] = "dirt"
         self.assertEqual(view.frontier(), {(0, 0), (5, 5)})
 
@@ -152,7 +156,8 @@ class BigMapDecisionSpeedTest(unittest.TestCase):
         w = big_world()
         self.assertGreater(len(w.view.tiles), 29_000)
         rng = random.Random(1)
-        times = []
+        times, priced = [], []
+        price = _Grid._price
         for _ in range(20):
             # A fresh decision from somewhere new, after a terrain read: the
             # planner replans from scratch, the worst case.
@@ -166,10 +171,20 @@ class BigMapDecisionSpeedTest(unittest.TestCase):
             w.view.tiles[START] = "grass"
             policy = Policy(kind="scripted", goals=["explore"])
             plan = Plan.from_policy(policy, dict(PARAM_DEFAULTS))
+            calls = 0
+
+            def counted(grid, p, **kw):
+                nonlocal calls
+                calls += 1
+                return price(grid, p, **kw)
+
             t0 = time.perf_counter()
-            d = decide(w, Memory(need_self=False), policy, random.Random(0), plan=plan)
+            with mock.patch.object(_Grid, "_price", counted):
+                d = decide(w, Memory(need_self=False), policy, random.Random(0), plan=plan)
             times.append(time.perf_counter() - t0)
+            priced.append(calls)
             self.assertTrue(d.reason.startswith("explore_area"), d.reason)
+        self.assertLess(max(priced), DECISION_CELLS_PRICED, priced)
         p95 = statistics.quantiles(times, n=20)[-1]
         self.assertLess(p95, DECISION_P95_SECONDS, f"p95 {p95 * 1000:.0f} ms, median {statistics.median(times) * 1000:.0f} ms")
 

@@ -75,7 +75,9 @@ class Tiles(dict):
 
     A big map's frontier is a pass over every known tile, and one decision
     asks for it several times, so it is kept, and only the cells round a
-    changed one are looked at again (A23 Run 2).
+    changed one are looked at again (A23 Run 2). So change it only through
+    the dict methods below: anything that goes round them (``dict.__setitem__``
+    called directly) leaves the frontier stale.
     """
 
     # The frontier as last found, and the cells changed since. Either None:
@@ -155,7 +157,11 @@ class Tiles(dict):
 class MapView:
     """What this character has seen of one map. Missing tiles are unknown."""
 
-    tiles: dict[Pos, str] = field(default_factory=Tiles)
+    # Always a ``Tiles`` (a dict passed in is wrapped), changed only through
+    # its own dict methods: one that bypasses them, like
+    # ``dict.__setitem__(tiles, …)``, or a plain dict assigned later, leaves
+    # the kept frontier stale.
+    tiles: Tiles = field(default_factory=Tiles)
     # occupy_damage named by terrain reads (Manual §9.2 legend), 0 included.
     damage: dict[Pos, int] = field(default_factory=dict)
     # Signs and statues (Manual §9.2): readable wall cells from terrain reads.
@@ -180,8 +186,6 @@ class MapView:
 
     def frontier(self) -> set[Pos]:
         """Known walkable tiles that touch an unknown one (``Tiles.frontier``)."""
-        if not isinstance(self.tiles, Tiles):  # a plain dict assigned after construction
-            self.tiles = Tiles(self.tiles)
         return self.tiles.frontier()
 
 

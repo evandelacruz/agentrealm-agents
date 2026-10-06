@@ -5,7 +5,6 @@ See docs/PLAYABLE_AGENT_PLAN.md Navigation and getting unstuck.
 
 from __future__ import annotations
 
-import copy
 import heapq
 from collections import defaultdict
 from collections.abc import Callable
@@ -95,26 +94,14 @@ def known_prefix(path: list[Pos], view: MapView) -> list[Pos]:
     return out
 
 
-def danger(p: Pos, hostiles: list[Entity], peaks: dict[tuple[str, int], int] | None = None) -> int:
-    """The hostiles' share of the cost onto ``p``: more the nearer they stand.
-
-    ``peaks`` overrides ``HOSTILE_DANGER`` for the hostiles it names.
-    """
-    out = 0
-    for h in hostiles:
-        d = chebyshev(p, h.pos)
-        if d < HOSTILE_DANGER_RADIUS:
-            peak = peaks.get((h.kind, h.id), HOSTILE_DANGER) if peaks else HOSTILE_DANGER
-            out += max(0, peak - d * 5)
-    return out
-
-
 def danger_map(hostiles: list[Entity], peaks: dict[tuple[str, int], int] | None = None) -> dict[Pos, int]:
-    """``danger`` for every cell it is not 0 on, worked out once per search.
+    """The hostiles' share of the cost onto each cell: more the nearer they stand.
 
-    A search asks for the danger of each cell it prices, and a big map has
-    tens of thousands of them: one lookup each beats a pass over every
-    hostile each (A23 Run 2).
+    Each hostile adds ``HOSTILE_DANGER`` minus 5 per block of Chebyshev
+    distance, out to ``HOSTILE_DANGER_RADIUS``; ``peaks`` overrides
+    ``HOSTILE_DANGER`` for the hostiles it names. Cells it leaves out cost
+    nothing. Laid out once per search: a big map prices tens of thousands of
+    cells, and a lookup each beats a pass over every hostile each (A23 Run 2).
     """
     out: dict[Pos, int] = {}
     for h in hostiles:
@@ -140,42 +127,37 @@ _RINGS = [
 class _Grid:
     """One search's view of the cost grid, with per-search state precomputed."""
 
-    def __init__(self, w: WorldModel, goals: set[Pos], params: CostGridParams):
+    def __init__(self, w: WorldModel, goals: set[Pos], params: CostGridParams, *, same_world: _Grid | None = None):
+        """``same_world``: a grid on this ``w`` and ``params`` whose prices
+        this one reuses (``nearest_target`` searches twice, A23 Run 2)."""
         self.w, self.goals, self.params = w, goals, params
         # The single goal of a cost_path search (A13); None for a flood.
         self.goal: Pos | None = next(iter(goals)) if len(goals) == 1 else None
-        self.occupied = w.occupied()
-        self.hostiles: list[Entity] = [e for e in w.entities if e.kind in params.hostile_kinds]
-        self._danger: dict[Pos, int] | None = None  # built on first use (``danger_map``)
-        # Each cell's cost, worked out once: a search prices a cell from
-        # every neighbour it expands (A23 Run 2). A grid lives for one
-        # search, so the world cannot change under it.
-        self._costs: dict[Pos, int | None] = {}
         self.tiles = w.view.tiles
-        # Fog is unbounded, so the search is boxed to the known extent plus
-        # start and goals, with a one-tile fog ring: any detour beyond the box
-        # crosses only fog and is no cheaper than walking the ring.
-        xs = [p[0] for p in w.view.tiles] + [w.pos[0]]
-        ys = [p[1] for p in w.view.tiles] + [w.pos[1]]
-        # The box without the goals: ``nearest_target`` checks they add nothing.
-        self.known_box = (min(xs) - 1, min(ys) - 1, max(xs) + 1, max(ys) + 1)
-        xs += [g[0] for g in goals]
-        ys += [g[1] for g in goals]
-        self.box = (min(xs) - 1, min(ys) - 1, max(xs) + 1, max(ys) + 1)
-
-    def retarget(self, goal: Pos) -> _Grid:
-        """This grid for the one ``goal`` inside its box, keeping what it priced.
-
-        Only cells among the goals price differently (a door is passable only
-        as a goal), so those are priced again.
-        """
-        assert self.in_box(goal)
-        out = copy.copy(self)
-        out.goals, out.goal = {goal}, goal
-        out._costs = dict(self._costs)
-        for p in self.goals:
-            out._costs.pop(p, None)
-        return out
+        if same_world is not None:
+            assert same_world.w is w and same_world.params is params
+            self.occupied, self.hostiles = same_world.occupied, same_world.hostiles
+            self._danger, self._costs = same_world.danger_map(), same_world._costs
+            self.known_box = same_world.known_box
+        else:
+            self.occupied = w.occupied()
+            self.hostiles: list[Entity] = [e for e in w.entities if e.kind in params.hostile_kinds]
+            self._danger: dict[Pos, int] | None = None  # built on first use (``danger_map``)
+            # Each non-goal cell's cost, worked out once: a search prices a
+            # cell from every neighbour it expands (A23 Run 2). A grid lives
+            # for one search, so the world cannot change under it.
+            self._costs: dict[Pos, int | None] = {}
+            # Fog is unbounded, so the search is boxed to the known extent
+            # plus start and goals, with a one-tile fog ring: any detour beyond
+            # the box crosses only fog and is no cheaper than walking the ring.
+            xs = [p[0] for p in self.tiles] + [w.pos[0]]
+            ys = [p[1] for p in self.tiles] + [w.pos[1]]
+            # The box without the goals: ``nearest_target`` checks they add nothing.
+            self.known_box = (min(xs) - 1, min(ys) - 1, max(xs) + 1, max(ys) + 1)
+        x0, y0, x1, y1 = self.known_box
+        for gx, gy in goals:
+            x0, y0, x1, y1 = min(x0, gx - 1), min(y0, gy - 1), max(x1, gx + 1), max(y1, gy + 1)
+        self.box = (x0, y0, x1, y1)
 
     def in_box(self, p: Pos) -> bool:
         x0, y0, x1, y1 = self.box
@@ -183,13 +165,18 @@ class _Grid:
 
     def cost(self, p: Pos) -> int | None:
         """Movement cost onto ``p``, or ``None`` when impassable."""
+        if p in self.goals:
+            return self._price(p, goal=True)
         costs = self._costs
         if p in costs:
             return costs[p]
-        out = costs[p] = self._price(p)
+        out = costs[p] = self._price(p, goal=False)
         return out
 
-    def _price(self, p: Pos) -> int | None:
+    def _price(self, p: Pos, *, goal: bool) -> int | None:
+        """``cost`` worked out. Whether ``p`` is a goal is the only thing it
+        reads about the goals, so a non-goal cell's price holds for any goals
+        and grids on one world share them (``same_world``)."""
         params = self.params
         if p in params.avoid:
             return None
@@ -206,7 +193,7 @@ class _Grid:
         block = self.tiles.get(p)
         if block is not None and block in DOORS:
             # Stepping onto a door warps, so a door is only ever the goal.
-            return KNOWN_WALKABLE if p in self.goals and params.allow_goal_door else None
+            return KNOWN_WALKABLE if goal and params.allow_goal_door else None
         if block is None:
             base = params.fog_cost
         elif block in WALKABLE:
@@ -223,9 +210,12 @@ class _Grid:
         return base + self.danger(p)
 
     def danger(self, p: Pos) -> int:
+        return self.danger_map().get(p, 0)
+
+    def danger_map(self) -> dict[Pos, int]:
         if self._danger is None:
             self._danger = danger_map(self.hostiles, self.params.danger_peaks)
-        return self._danger.get(p, 0)
+        return self._danger
 
 
 class _MacroCosts:
@@ -508,7 +498,8 @@ def hostile_cost(w: WorldModel, path: list[Pos], params: CostGridParams | None =
     """The hostiles' share of what walking ``path`` costs (``_Grid.danger``)."""
     params = params or CostGridParams()
     hostiles = [e for e in w.entities if e.kind in params.hostile_kinds]
-    return sum(danger(p, hostiles, params.danger_peaks) for p in path)
+    shares = danger_map(hostiles, params.danger_peaks)
+    return sum(shares.get(p, 0) for p in path)
 
 
 def cost_flood(
@@ -527,26 +518,49 @@ def cost_flood(
     if start in targets:
         out[start] = ([], 0)
     remaining = set(targets) - {start}
-    if not remaining:
-        return out
-    grid = _Grid(w, remaining, params)
+    if remaining:
+        out.update(_flood(_Grid(w, remaining, params), remaining))
+    return out
+
+
+def _flood(grid: _Grid, targets: set[Pos], *, cheapest_only: bool = False) -> dict[Pos, tuple[list[Pos], int]]:
+    """``cost_flood`` on ``grid``, whose goals are ``targets``.
+
+    ``cheapest_only`` stops once the cheapest targets are found, so only
+    those that tie for the least cost come back, and the flood reads no
+    further than their cost (``nearest_target``).
+    """
+    w = grid.w
+    assert w.pos is not None
+    start = w.pos
+    out: dict[Pos, tuple[list[Pos], int]] = {}
+    remaining = set(targets)
     frontier: list[tuple[int, Pos]] = [(0, start)]
     came: dict[Pos, Pos] = {}
     cost: dict[Pos, int] = {start: 0}
+    least: int | None = None
+    x0, y0, x1, y1 = grid.box
+    step_cost = grid.cost
     while frontier and remaining:
         g, cur = heapq.heappop(frontier)
+        if least is not None and g > least:
+            break
         if g > cost.get(cur, 10**9):
             continue
         if cur in remaining:
             remaining.discard(cur)
             out[cur] = (_unwind(came, start, cur), g)
+            if cheapest_only:
+                least = g
             if w.view.tiles.get(cur) in DOORS:
                 continue
+        cx, cy = cur
         for dx, dy in NEIGHBOURS:
-            n = (cur[0] + dx, cur[1] + dy)
-            if not grid.in_box(n):
+            nx, ny = cx + dx, cy + dy
+            if not (x0 <= nx <= x1 and y0 <= ny <= y1):  # ``grid.in_box``, inlined: the hot loop
                 continue
-            sc = grid.cost(n)
+            n = (nx, ny)
+            sc = step_cost(n)
             if sc is None:
                 continue
             ng = g + sc
@@ -611,7 +625,7 @@ def nearest_target(
     same target (A15). Targets are known tiles, so this stays the one
     unbudgeted search of A12 rather than the two-level search.
 
-    One Dijkstra from where we stand finds the target: it stops at the
+    One flood from where we stand (``_flood``, as ``cost_flood``) finds the target: it stops at the
     cheapest, so it reads no further than that target's cost, and a target
     nothing reaches costs no more than one flood however many there are.
     Then one A* to it gives the path ``cost_path`` would walk. A big map
@@ -629,52 +643,14 @@ def nearest_target(
         # A target past the known ground widens the box the search may use,
         # and each target's own search sees only its own (``_search``).
         return _nearest_target_one_by_one(w, targets, params)
-    cheapest = _cheapest_targets(grid, start, targets)
+    cheapest = _flood(grid, targets, cheapest_only=True)
     if not cheapest:
         return None
     best = min(cheapest, key=lambda t: (chebyshev(start, t), t))
-    found = _astar(grid.retarget(best), 10**9)
+    # The A* path, not the flood's: the one ``cost_path`` walks to ``best``.
+    found = _astar(_Grid(w, {best}, params, same_world=grid), 10**9)
     assert found.path is not None
     return best, found.path
-
-
-def _cheapest_targets(grid: _Grid, start: Pos, targets: set[Pos]) -> list[Pos]:
-    """The targets that tie for the least path cost from ``start``; empty when none is reachable.
-
-    Dijkstra on ``grid``, whose goals are ``targets``: a door target may be
-    entered (with ``allow_goal_door``) but never walked through, as in
-    ``cost_flood``.
-    """
-    x0, y0, x1, y1 = grid.box
-    priced, price = grid._costs, grid.cost
-    frontier: list[tuple[int, Pos]] = [(0, start)]
-    cost: dict[Pos, int] = {start: 0}
-    found: list[Pos] = []
-    found_cost = 0
-    while frontier:
-        g, cur = heapq.heappop(frontier)
-        if found and g > found_cost:
-            break
-        if g > cost[cur]:
-            continue
-        if cur in targets:
-            found.append(cur)
-            found_cost = g
-            continue  # anything beyond it costs more
-        cx, cy = cur
-        for dx, dy in NEIGHBOURS:
-            nx, ny = cx + dx, cy + dy
-            if not (x0 <= nx <= x1 and y0 <= ny <= y1):
-                continue
-            n = (nx, ny)
-            sc = priced[n] if n in priced else price(n)
-            if sc is None:
-                continue
-            ng = g + sc
-            if ng < cost.get(n, 10**9):
-                cost[n] = ng
-                heapq.heappush(frontier, (ng, n))
-    return found
 
 
 def _nearest_target_one_by_one(

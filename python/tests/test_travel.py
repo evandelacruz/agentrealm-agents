@@ -11,19 +11,20 @@ from agentrealm_agent import config
 from agentrealm_agent import knowledge_base as kb_mod
 from agentrealm_agent.client import ApiError
 from agentrealm_agent.config import CharacterConfig, Policy
+from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation.rejection import learn_step_rejection, navigation_avoid_costly
+from agentrealm_agent.plan import Plan, parse_directives_goals
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.travel import (
     StrengthBracket,
     TravelOp,
-    parse_travel_goals,
+    parse_travel_string,
     record_hunting_zone,
     record_shop_cell,
-    refresh_travel_stack,
     resolve_travel,
     sync_town,
 )
@@ -41,26 +42,36 @@ def grid(rows: list[str], at=(0, 0), map_id=1, perception=5) -> WorldModel:
     return w
 
 
-def ctx_for(m: Memory, kb: KnowledgeBase | None = None) -> PlayContext:
-    return PlayContext(m, Policy(kind="scripted"), random.Random(0), knowledge=kb)
+def travel_plan(goals: list[str]) -> Plan:
+    """The plan stack directives ``travel:*`` goals set."""
+    return Plan(parse_directives_goals(goals), dict(PARAM_DEFAULTS))
+
+
+def ctx_for(m: Memory, kb: KnowledgeBase | None = None, plan: Plan | None = None) -> PlayContext:
+    return PlayContext(m, Policy(kind="scripted"), random.Random(0), knowledge=kb, plan=plan)
 
 
 class TravelParseTest(unittest.TestCase):
-    def test_parse_travel_goals(self):
-        ops = parse_travel_goals(["travel:town", "travel:entrance:120:40", "travel:point:3:4:5", "explore"])
+    def test_parse_travel_string(self):
+        ops = [parse_travel_string(g) for g in ("travel:town", "travel:entrance:120:40", "travel:point:3:4:5")]
         self.assertEqual([o.to for o in ops], ["town", "entrance", "point"])
         self.assertEqual((ops[1].x, ops[1].y, ops[1].map_id), (120, 40, None))
         self.assertEqual((ops[2].map_id, ops[2].x, ops[2].y), (3, 4, 5))
+        self.assertIsNone(parse_travel_string("explore"))
 
     def test_malformed_goals_are_ignored(self):
         for g in ("travel:point:a:5:6", "travel:entrance", "travel:town:1:2", "travel:point:1", "travel:moon", "x:travel:town"):
-            self.assertEqual(parse_travel_goals([g]), [], g)
+            self.assertIsNone(parse_travel_string(g), g)
 
-    def test_refresh_travel_stack_resets_index(self):
-        m = Memory(travel_ops=[TravelOp("town")], travel_index=1)
-        refresh_travel_stack(m, ["travel:point:3:4"])
-        self.assertEqual(m.travel_ops[0].to, "point")
-        self.assertEqual(m.travel_index, 0)
+    def test_directives_travel_goals_become_plan_ops(self):
+        ops = parse_directives_goals(["travel:town", "travel:point:3:4:5", "travel:moon"])
+        self.assertEqual(
+            ops,
+            [
+                {"op": "travel", "to": "town", "x": 0, "y": 0},
+                {"op": "travel", "to": "point", "x": 4, "y": 5, "map_id": 3},
+            ],
+        )
 
 
 class StrengthBracketTest(unittest.TestCase):
@@ -116,68 +127,79 @@ class ResolveTravelTest(unittest.TestCase):
 class TravelStateTest(unittest.TestCase):
     def test_travel_beats_explore(self):
         w = grid([".........."], at=(0, 0))
-        m = Memory()
-        refresh_travel_stack(m, ["travel:point:3:0"])
-        out = dispatch(w, ctx_for(m, KnowledgeBase.empty("sandbox")))
+        plan = travel_plan(["travel:point:3:0"])
+        out = dispatch(w, ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan))
         self.assertEqual(out.state, "Travel")
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
+        self.assertEqual(plan.acted, plan.current(), "a step toward the op is progress")
 
-    def test_fallback_round_acts_on_the_plan_travel_op(self):
-        # A36: arrived at its own op, Travel hands the round to plan pathing,
-        # which walks the stack's travel op under the Travel state.
-        from agentrealm_agent.directives import PARAM_DEFAULTS
-        from agentrealm_agent.plan import Plan
-
+    def test_walk_goal_is_labelled_with_the_travel_kind(self):
         w = grid([".........."], at=(0, 0))
         m = Memory()
-        refresh_travel_stack(m, ["travel:point:0:0"])
         plan = Plan([{"op": "travel", "to": "point", "x": 5, "y": 0}], dict(PARAM_DEFAULTS))
-        ctx = ctx_for(m, KnowledgeBase.empty("sandbox"))
-        ctx.plan = plan
-        out = dispatch(w, ctx)
+        out = dispatch(w, ctx_for(m, KnowledgeBase.empty("sandbox"), plan))
         self.assertEqual(out.state, "Travel")
-        self.assertEqual(plan.acted, plan.current())
+        self.assertEqual(m.goal, "travel:point")
+        self.assertEqual(m.path[-1], (5, 0))
 
-    def test_unresolved_shop_yields_to_explore(self):
+    def test_no_travel_op_means_no_travel(self):
+        w = grid([".........."], at=(0, 0))
+        out = dispatch(w, ctx_for(Memory(), KnowledgeBase.empty("sandbox")))
+        self.assertNotEqual(out.state, "Travel")
+        self.assertEqual(out.state, "Explore", "no plan: the safe default")
+
+    def test_unresolved_shop_sends_nothing_and_stays_on_top(self):
         w = grid(["....."], at=(0, 0))
-        m = Memory()
-        refresh_travel_stack(m, ["travel:shop"])
-        ctx = ctx_for(m, KnowledgeBase.empty("sandbox"))
+        plan = travel_plan(["travel:shop"])
+        ctx = ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan)
         out = dispatch(w, ctx)
-        self.assertEqual(out.state, "Explore")
-        self.assertEqual(m.travel_index, 0, "kept until the knowledge base can resolve it")
+        self.assertEqual(out.state, "Explore", "the safe default moves meanwhile")
+        self.assertEqual(plan.current()["to"], "shop", "kept until the knowledge base can resolve it")
+        self.assertIsNotNone(plan.stalled_since_tick, "its stall clock runs")
         record_shop_cell(ctx.knowledge, 1, (3, 0))
         self.assertEqual(dispatch(w, ctx).state, "Travel")
 
-    def test_unresolved_op_is_dropped_for_a_later_one(self):
+    def test_unresolved_op_is_dropped_after_the_stall_window(self):
+        from agentrealm_agent.plan import PLAN_STALL_SECONDS
+
         w = grid(["....."], at=(0, 0))
-        m = Memory()
-        refresh_travel_stack(m, ["travel:shop", "travel:point:3:0"])
-        out = dispatch(w, ctx_for(m, KnowledgeBase.empty("sandbox")))
-        self.assertEqual(out.state, "Travel")
-        self.assertEqual(m.travel_index, 1)
+        plan = travel_plan(["travel:shop", "travel:point:3:0"])
+        ctx = ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan)
+        dispatch(w, ctx)
+        self.assertEqual(plan.index, 0)
+        w.tick += PLAN_STALL_SECONDS * plan.tick_hz
+        dispatch(w, ctx)
+        self.assertEqual(plan.index, 1, "the stalled op is dropped")
+        self.assertEqual(dispatch(w, ctx).state, "Travel")
 
     def test_arrival_drops_the_op_and_moves_on(self):
         w = grid(["...."], at=(1, 0))
-        m = Memory()
-        refresh_travel_stack(m, ["travel:point:1:0", "travel:point:3:0"])
-        ctx = ctx_for(m)
+        plan = travel_plan(["travel:point:1:0", "travel:point:3:0"])
+        ctx = ctx_for(Memory(), plan=plan)
         out = dispatch(w, ctx)
-        self.assertEqual((out.state, m.travel_index), ("Travel", 1))
+        self.assertEqual((out.state, plan.index), ("Travel", 1))
         w.pos = (3, 0)
         out = dispatch(w, ctx)
-        self.assertEqual(m.travel_index, 2, "arriving at the last op drops it")
+        self.assertEqual(plan.index, 2, "arriving at the last op drops it")
         w.pos = (0, 0)
         self.assertEqual(dispatch(w, ctx).state, "Explore", "a reached op is not revisited")
+
+    def test_town_arrival_is_finished_by_travel(self):
+        kb = KnowledgeBase.empty("sandbox")
+        sync_town(kb, {"map_id": 1, "x": 2, "y": 0})
+        w = grid(["...."], at=(2, 0))
+        plan = travel_plan(["travel:town"])
+        out = dispatch(w, ctx_for(Memory(), kb, plan))
+        self.assertEqual(out.state, "Explore", "Travel sends nothing on arrival")
+        self.assertIsNone(plan.current(), "Travel finishes the op on arrival")
 
     def test_done_does_not_move_the_stack(self):
         from agentrealm_agent.states.travel import TravelState
 
         w = grid(["..."], at=(1, 0))
-        m = Memory()
-        refresh_travel_stack(m, ["travel:point:1:0", "travel:point:2:0"])
-        TravelState().done(w, ctx_for(m))
-        self.assertEqual(m.travel_index, 0)
+        plan = travel_plan(["travel:point:1:0", "travel:point:2:0"])
+        TravelState().done(w, ctx_for(Memory(), plan=plan))
+        self.assertEqual(plan.index, 0)
 
 
 class CrossMapTravelTest(unittest.TestCase):
@@ -201,8 +223,7 @@ class CrossMapTravelTest(unittest.TestCase):
         record_warp(kb, 1, (3, 0), "framed_door", 2, (0, 0))
         sync_town(kb, {"map_id": 2, "x": 2, "y": 0})
         m = Memory()
-        refresh_travel_stack(m, ["travel:town"])
-        out = dispatch(w, ctx_for(m, kb))
+        out = dispatch(w, ctx_for(m, kb, travel_plan(["travel:town"])))
         self.assertEqual(out.state, "Travel")
         self.assertEqual(m.path[-1], (3, 0))
 

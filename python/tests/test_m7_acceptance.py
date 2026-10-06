@@ -72,7 +72,7 @@ def decide(m, w, mem=None, *, state="Explore", reason="explore", intents=STEP, k
     )
 
 
-def give_up_signal(target, *, map_id=OVERWORLD, tick=5, goal="plan_travel", reason="no_path"):
+def give_up_signal(target, *, map_id=OVERWORLD, tick=5, goal="travel:point", reason="no_path"):
     return {
         "trigger": "stuck",
         "reason": reason,
@@ -210,8 +210,8 @@ class LoopGateTest(unittest.TestCase):
 
 
 def gave_up(tick: int) -> dict:
-    """A guard event that gave up the goto."""
-    return {"tick": tick, "cells": [[1, 0], [2, 0]], "states": ["Break", "Explore"], "goal": "goto", "target": [150, 0]}
+    """A guard event that gave up the goto's travel op."""
+    return {"tick": tick, "cells": [[1, 0], [2, 0]], "states": ["Break", "Travel"], "goal": "travel:point", "target": [150, 0]}
 
 
 def kept(tick: int) -> dict:
@@ -229,7 +229,7 @@ class OscillationAbortTest(unittest.TestCase):
         m.on_oscillation(gave_up(OSCILLATION_ABORT_COUNT * 100))
         self.assertTrue(stop.is_set())
         self.assertTrue(any("sustained oscillation" in f for f in m.failures(full_hour=False)))
-        self.assertIn("goto", m.oscillation_abort)
+        self.assertIn("travel:point", m.oscillation_abort)
 
     def test_survival_only_pacing_never_aborts(self):
         stop = threading.Event()
@@ -279,7 +279,8 @@ class RunnerHookTest(RunnerCase):
         self.assertTrue(stop.is_set())
         self.assertGreater(server.windows, 0, "stopped by the clock, not when the windows ran out")
         self.assertTrue(m.target_reached)
-        self.assertEqual(m.max_distance, 80)
+        # Past the goto the plan is empty, and the safe default keeps exploring.
+        self.assertGreaterEqual(m.max_distance, 80)
         self.assertFalse(m.loop_detected)
         self.assertEqual(m.failures(full_hour=False), [])
 

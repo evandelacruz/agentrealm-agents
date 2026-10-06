@@ -1,8 +1,8 @@
-"""Reflex 4 pickup helper (A20): not a ``STATES`` entry.
+"""Pickup: take a worthwhile supply underfoot or adjacent (reflex 4, A20).
 
-``reflex_outcome`` (explore.py) calls ``pickup_outcome`` when ``policy.pickup``
-is on, so Explore and every state that runs the reflexes first take a
-worthwhile supply within one block. **Loot** also calls it directly.
+A reflex: it acts on what is in reach now, whatever the plan says, and
+never walks. Walking to a supply further away is **Loot**'s, for a
+``fetch_item`` op.
 """
 
 from __future__ import annotations
@@ -10,8 +10,9 @@ from __future__ import annotations
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..loot import pickup_room, worthwhile_pickups
+from ..navigation import stuck as nav_stuck
 from ..world import WorldModel, chebyshev
-from .base import StateOutcome
+from .base import PlayContext, State, StateOutcome
 from .intents import drop, take, withdraw
 
 
@@ -34,3 +35,24 @@ def pickup_outcome(w: WorldModel, knowledge: KnowledgeBase | None, *, state: str
             intent, reason = withdraw(p.chest_id, [p.supply_id]), f"withdraw {label} from chest {p.chest_id}"
         return StateOutcome([intent], reason, reflex=True, state=state)
     return None
+
+
+class PickupState(State):
+    """Reflex, after Recover. Runs while ``policy.pickup`` is on and a
+    worthwhile supply is within one block."""
+
+    name = "Pickup"
+
+    def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
+        if ctx.policy.kind != "scripted" or not ctx.policy.pickup or not world.alive:
+            return False
+        return pickup_outcome(world, ctx.knowledge, state=self.name) is not None
+
+    def done(self, world: WorldModel, ctx: PlayContext) -> bool:
+        return not self.guard(world, ctx)
+
+    def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
+        out = pickup_outcome(world, ctx.knowledge, state=self.name)
+        if out is not None:
+            nav_stuck.finish_in_reach(ctx.memory, world, "loot")  # a fetch walk to it is over
+        return out if out is not None else StateOutcome(None, "nothing in reach", state=self.name)

@@ -6,6 +6,7 @@ from unittest import mock
 
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import Policy
+from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.navigation import (
     CostGridParams,
     NavSearchState,
@@ -17,6 +18,7 @@ from agentrealm_agent.navigation import (
 )
 from agentrealm_agent.navigation import planner
 from agentrealm_agent.navigation.planner import COSTLY_STEP, _coarse_search, _Grid, _MacroCosts
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
 
@@ -232,19 +234,27 @@ class TwoLevelSearchTest(unittest.TestCase):
         self.assertEqual(found[1][-1], (50, 0))
 
 
+def decide_builtin(w: WorldModel, m: Memory, policy: Policy):
+    """One decision under the built-in plan for ``policy`` (goto → a travel point op)."""
+    return decide(w, m, policy, random.Random(0), plan=Plan.from_policy(policy, dict(PARAM_DEFAULTS)))
+
+
+GOTO = "travel:point"  # the walk label of a goto's travel op
+
+
 class TwoLevelBrainTest(unittest.TestCase):
     def test_corridor_search_resumes_across_decides(self):
         w = strip(100)
         m = Memory()
         policy = Policy(kind="scripted", goals=["goto"], goto=[90, 0])
         with mock.patch.object(planner, "COARSE_NODE_BUDGET", 2), mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
-            d = decide(w, m, policy, random.Random(0))
+            d = decide_builtin(w, m, policy)
             self.assertEqual((d.intent["x"], d.intent["y"]), (1, 0))
-            nav = m.corridors["goto"]
+            nav = m.corridors[GOTO]
             self.assertEqual(len(nav.closed), 2)
             w.pos, m.path = m.path[-1], []  # walked the plan out; replan
-            decide(w, m, policy, random.Random(0))
-            self.assertIs(m.corridors["goto"], nav)
+            decide_builtin(w, m, policy)
+            self.assertIs(m.corridors[GOTO], nav)
             self.assertEqual(len(nav.closed), 4)
 
     def test_chest_and_goto_keep_separate_searches(self):
@@ -254,10 +264,10 @@ class TwoLevelBrainTest(unittest.TestCase):
         m = Memory()
         policy = Policy(kind="scripted", goals=["goto"], goto=[0, 60], pickup=True)
         with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
-            decide(w, m, policy, random.Random(0))
+            decide_builtin(w, m, policy)
             chest = m.corridors["chest"]
             m.path, m.goal = [], ""
-            decide(w, m, policy, random.Random(0))
+            decide_builtin(w, m, policy)
         self.assertIs(m.corridors["chest"], chest)
         self.assertEqual(chest.goal, (89, 0))
 
@@ -266,8 +276,8 @@ class TwoLevelBrainTest(unittest.TestCase):
         m = Memory()
         policy = Policy(kind="scripted", goals=["goto"], goto=[90, 0])
         with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
-            decide(w, m, policy, random.Random(0))
-        self.assertIn("goto", m.corridors)
+            decide_builtin(w, m, policy)
+        self.assertIn(GOTO, m.corridors)
         learn_step_rejection(m, w, None, (1, 0), "not_traversable", w.tick)
         self.assertEqual(m.corridors, {})
 
@@ -276,41 +286,31 @@ class TwoLevelBrainTest(unittest.TestCase):
         m = Memory()
         policy = Policy(kind="scripted", goals=["goto"], goto=[90, 0])
         with mock.patch.object(planner, "FINE_NODE_BUDGET", 5):
-            decide(w, m, policy, random.Random(0))
-            first = m.corridors["goto"]
+            decide_builtin(w, m, policy)
+            first = m.corridors[GOTO]
             w2 = WorldModel(character_id=1, map_id=2, pos=(0, 0), perception=3)
             w2.view.tiles.update(w.view.tiles)
             w2.terrain_center, w2.terrain_map = (0, 0), 2
             m.path, m.goal = [], ""
-            decide(w2, m, Policy(kind="scripted", goals=["goto"], goto=[90, 0], goto_map=2), random.Random(0))
-        self.assertIsNot(m.corridors["goto"], first)
-        self.assertEqual(m.corridors["goto"].map_id, 2)
+            decide_builtin(w2, m, Policy(kind="scripted", goals=["goto"], goto=[90, 0], goto_map=2))
+        self.assertIsNot(m.corridors[GOTO], first)
+        self.assertEqual(m.corridors[GOTO].map_id, 2)
 
 
 class KnownPrefixBrainTest(unittest.TestCase):
-    def test_goal_starting_in_fog_falls_through_to_the_next_goal(self):
-        # doors' path starts on an unseen tile; explore takes the move.
+    def test_goal_starting_in_fog_falls_through_to_the_safe_default(self):
+        # doors' travel path starts on an unseen tile; the safe default explores instead.
         w = grid([".."])
         w.view.tiles[(0, 5)] = "framed_door"
         policy = Policy(kind="scripted", goals=["doors", "explore"])
         self.assertNotIn(cost_path(w, (0, 5), CostGridParams(allow_goal_door=True))[0], w.view.tiles)
-        d = decide(w, Memory(), policy, random.Random(0))
+        d = decide_builtin(w, Memory(), policy)
         self.assertEqual((d.intent["x"], d.intent["y"]), (1, 0))
-
-    def test_an_owed_goto_starting_in_fog_keeps_the_move(self):
-        # A16 goto first: explore never takes the move from an owed goto; the
-        # goto waits out its stuck window instead (A15).
-        w = grid([".."])
-        m = Memory()
-        policy = Policy(kind="scripted", goals=["goto", "explore"], goto=[0, 5])
-        self.assertNotIn(cost_path(w, (0, 5))[0], w.view.tiles)
-        d = decide(w, m, policy, random.Random(0))
-        self.assertIsNone(d.intent)
-        self.assertEqual(m.goal, "goto")
+        self.assertTrue(d.reason.startswith("explore"), d.reason)
 
     def test_no_goal_with_a_seen_first_step_sends_nothing(self):
         w = grid(["."])
-        d = decide(w, Memory(), Policy(kind="scripted", goals=["goto"], goto=[0, 5]), random.Random(0))
+        d = decide_builtin(w, Memory(), Policy(kind="scripted", goals=["goto"], goto=[0, 5]))
         self.assertIsNone(d.intent)
 
 

@@ -1,23 +1,20 @@
-"""Heal: food, carried food or potion, safe-zone rest, town wait and buy signal (A10);
-re-arm the weapon a drink swapped out (A24)."""
+"""Heal: food, carried food or potion, then safe ground (A10); re-arm the
+weapon a drink swapped out (A24)."""
 
 from __future__ import annotations
 
 from ..config import Policy
 from ..healing import (
-    back_off,
     carried_heal,
     food_in_sight,
     hurt,
     nearest_known_safe,
     note_regen_sample,
     note_try,
-    raise_buy_potion,
     rearm_after_drink,
     regen_known,
     save_regen_yes,
     standing_in_safe_zone,
-    wait_exhausted,
 )
 from ..memory import Memory
 from ..navigation import cost_path
@@ -26,18 +23,26 @@ from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, hostiles_in_range, nav_search
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
+from .explore import safe_default
 from .intents import arm, set_position, take, use_self
 
 # Food lying in sight that Heal tries to path to, nearest first.
 FOOD_CANDIDATES = 3
+# A reflex takes only food close by: walking further for food is a planner
+# op (``fetch_item``), not something Heal starts on its own.
+FOOD_REACH = 3
 
 
 class HealState(State):
-    """Above Explore. Every branch that sends nothing is bounded: no reachable
-    safe tile yields at once, and a wait with no health back yields after
-    ``HEAL_WAIT_TICKS``; Heal then stays out for ``HEAL_BACKOFF_TICKS``.
-    Every walk, to food or a safe tile, is bounded by stuck detection
-    (``bounded_step``): one that goes nowhere gives its target up.
+    """Reflex, above Fight. Hurt and out of combat: food within ``FOOD_REACH``, then carried
+    food or a potion, then safe ground. Every walk, to food or a safe tile, is
+    bounded by stuck detection (``bounded_step``): one that goes nowhere gives
+    its target up.
+
+    In a safe zone Heal never stands still: it keeps exploring safe ground
+    (the safe default) and samples regen as it goes. Once this run has
+    measured no regen, Heal stops pulling the character to safe zones and
+    sends nothing, so the plan's executor moves.
 
     Heal also runs, even at full health or with a hostile in range, while the
     weapon a drink swapped out is still to be re-armed (A24). That is one
@@ -56,15 +61,12 @@ class HealState(State):
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         if not _wants_heal(world, ctx):
             return _rearm_weapon(world, ctx.memory)
-        out = _choose(world, ctx)
-        if out.intents:
-            ctx.memory.heal_wait = None
-        return out
+        return _choose(world, ctx)
 
 
 def _wants_heal(w: WorldModel, ctx: PlayContext) -> bool:
-    """Hurt, out of combat, and not backing off after a fruitless wait."""
-    return w.tick >= ctx.memory.heal_backoff_until and hurt(w) and not hostiles_in_range(w, ctx.policy)
+    """Hurt and out of combat."""
+    return hurt(w) and not hostiles_in_range(w, ctx.policy)
 
 
 def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
@@ -78,39 +80,32 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     if out := _act_carried(w, m):
         m.heal_regen_sample = None
         return out
-    # Nothing left to drink: put the weapon back before resting or walking.
+    # Nothing left to drink: put the weapon back before walking.
     if m.heal_rearm is not None:
         return _rearm_weapon(w, m)
 
     known = regen_known(ctx.knowledge, m)
+    if known == "no":
+        return _out(None, "no safe-zone regen this run")
     if not standing_in_safe_zone(w):
         m.heal_regen_sample = None
-        goal = {"yes": "heal_rest", "no": "heal_town"}.get(known, "heal_measure")
+        goal = "heal_rest" if known == "yes" else "heal_measure"
         if out := _walk_to_safe(w, m, policy, ctx, goal=goal):
             return out
-        back_off(m, w)
-        return _out(None, "no reachable safe tile, yield to Explore")
-
-    if wait_exhausted(m, w):
-        return _out(None, "no health back, yield to Explore")
+        return _out(None, "no reachable safe tile")
     if known is None:
         verdict = note_regen_sample(m, w)
         if verdict == "yes":
             save_regen_yes(ctx.knowledge)
-            known = "yes"
         elif verdict == "no":
             m.heal_regen_absent = True  # this run only: never saved (one noisy window)
-            known = "no"
-        else:
-            return _out(None, "measure safe-zone regen", wait=True)
-    if known == "yes":
-        return _out(None, "rest in safe zone", wait=True)
-    raise_buy_potion(m, why="hurt in town, no food or potion")
-    return _out(None, "wait in town, buy potion", wait=True)
+    out = safe_default(w, ctx)
+    out.state, out.reason = HealState.name, f"heal in safe ground: {out.reason}"
+    return out
 
 
-def _out(intents: list[dict] | None, reason: str, *, wait: bool = False) -> StateOutcome:
-    return StateOutcome(intents, reason, state=HealState.name, wait=wait)
+def _out(intents: list[dict] | None, reason: str) -> StateOutcome:
+    return StateOutcome(intents, reason, state=HealState.name)
 
 
 def _plan_blocked(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> tuple[set[Pos], set[Pos]]:
@@ -145,7 +140,8 @@ def _walk_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at:
 def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> StateOutcome | None:
     here = w.pos
     assert here is not None
-    for food in food_in_sight(w, m)[:FOOD_CANDIDATES]:
+    close = [f for f in food_in_sight(w, m) if chebyshev(f.pos, here) <= FOOD_REACH]
+    for food in close[:FOOD_CANDIDATES]:
         if chebyshev(food.pos, here) <= 1:
             nav_stuck.finish_in_reach(m, w, "heal_food")
             note_try(m, "take", food.id)

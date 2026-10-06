@@ -23,8 +23,17 @@ from agentrealm_agent.navigation import planner
 from agentrealm_agent.navigation.planner import CostGridParams
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states.intents import read_block
-from agentrealm_agent.world import Entity
-from tests.test_investigate import world
+from agentrealm_agent.world import Entity, WorldModel
+
+
+def world(rows: list[str], at=(1, 1), perception=3) -> WorldModel:
+    glyph = {".": "dirt", "#": "wall"}
+    w = WorldModel(character_id=1, map_id=7, pos=at, perception=perception)
+    for y, row in enumerate(rows):
+        for x, g in enumerate(row):
+            w.view.tiles[(x, y)] = glyph[g]
+    w.terrain_center, w.terrain_map = at, 7
+    return w
 
 
 def spoken(speaker_id: int, text: str) -> dict:
@@ -59,6 +68,7 @@ class ClueCaptureTest(unittest.TestCase):
     def test_runner_read_stores_clue(self):
         cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted"), Path("t.toml"))
         r = Runner(cfg, mock.Mock(), 1, mock.Mock(), out=lambda _: None, knowledge=self.kb)
+        self.addCleanup(r.trace.close)
         r.world = world(["....."], at=(0, 0))
         r.mem = Memory()
         r.mem.pending = read_block((1, 1))

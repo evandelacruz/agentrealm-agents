@@ -13,7 +13,7 @@ from ..pathing import grid_params, guided_step, nav_search
 from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
-from .explore import plan_sets, reflex_outcome, scripted_outcome
+from .explore import plan_sets
 from .intents import drop, set_position, withdraw, withdraw_all
 
 
@@ -140,7 +140,7 @@ def _skip_reason(w: WorldModel) -> str:
 
 
 class RecoverState(State):
-    """Priority 3: above Explore. Escape, Retreat and Flee outrank it; the fight and pickup reflexes still run first (PLAN.md)."""
+    """Reflex, after Flee and Pickup: walks to the death chest when its spot is safe."""
 
     name = "Recover"
 
@@ -159,11 +159,6 @@ class RecoverState(State):
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         m, policy = ctx.memory, ctx.policy
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
-        reflex = reflex_outcome(
-            world, policy, never_attack=ctx.never_attack, state=self.name, knowledge=ctx.knowledge
-        )
-        if reflex is not None:
-            return reflex
         out = recover_outcome(
             world, m, policy, plan_avoid, plan_costly, knowledge=ctx.knowledge, state=self.name
         )
@@ -171,9 +166,5 @@ class RecoverState(State):
             return out
         if nav_stuck.awaiting_break(m, world, "chest"):
             return StateOutcome(None, "chest walk stuck: break", state=self.name)
-        # No step toward the chest: fall back to Explore's goals this round.
-        fallback = scripted_outcome(
-            world, m, policy, ctx.rng, never_attack=ctx.never_attack, knowledge=ctx.knowledge, plan=ctx.plan, state=self.name
-        )
-        fallback.reason = f"{_skip_reason(world)}; {fallback.reason}"
-        return fallback
+        # No step toward the chest: the next state has the round.
+        return StateOutcome(None, _skip_reason(world), state=self.name)

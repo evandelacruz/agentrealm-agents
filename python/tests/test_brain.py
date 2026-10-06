@@ -5,8 +5,10 @@ import unittest
 
 from agentrealm_agent.brain import Memory, choose_call, decide
 from agentrealm_agent.config import Policy
+from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.navigation import cost_path
 from agentrealm_agent.navigation.rejection import NavMemory
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.world import Entity, WorldModel, terrain_cells
 from agentrealm_agent.zone_discovery import apply_zone
 
@@ -24,6 +26,11 @@ def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
 
 def scripted(**kw) -> Policy:
     return Policy(kind="scripted", **kw)
+
+
+def planned(w: WorldModel, m: Memory, pol: Policy, rng: random.Random, **kw):
+    """``decide`` with the built-in plan ``Plan.from_policy`` makes of ``pol.goals``."""
+    return decide(w, m, pol, rng, plan=Plan.from_policy(pol, dict(PARAM_DEFAULTS)), **kw)
 
 
 class PathTest(unittest.TestCase):
@@ -57,7 +64,7 @@ class ExploreTest(unittest.TestCase):
             w.view.tiles.setdefault((x, -1), "")
             w.view.tiles.setdefault((x, 2), "")
         w.view.tiles[(-1, 0)] = w.view.tiles[(-1, 1)] = ""
-        d = decide(w, Memory(), scripted(goals=["explore"]), random.Random(0))
+        d = planned(w, Memory(), scripted(goals=["explore"]), random.Random(0))
         self.assertEqual(d.intent["verb"], "SetPosition")
         self.assertEqual(d.intent["x"], 1)
 
@@ -104,9 +111,7 @@ class ReflexTest(unittest.TestCase):
                 if name.startswith("fight swings"):
                     w.health, w.lives = 500, 10
                     w.threat.record(("character", "peer"), 1)
-                    from agentrealm_agent.directives import PARAM_DEFAULTS
-
-                    d = decide(
+                    d = planned(
                         w,
                         Memory(),
                         pol,
@@ -114,16 +119,17 @@ class ReflexTest(unittest.TestCase):
                         params={**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1},
                     )
                 else:
-                    d = decide(w, Memory(), pol, random.Random(0))
+                    d = planned(w, Memory(), pol, random.Random(0))
                 self.assertIsNotNone(d.intent, d.reason)
                 self.assertEqual(d.intent["verb"], verb, d.reason)
                 self.assertTrue(check(d.intent), d.intent)
 
-    def test_no_goal_sends_nothing(self):
-        # Invariant 4: no standing orders. Nothing to do means no intent.
+    def test_no_plan_op_runs_the_safe_default(self):
+        # No goals make no op: with an empty stack the safe default explores
+        # safe ground, so a decision is never idle.
         w = world(["..."])
-        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
-        self.assertIsNone(d.intent)
+        d = planned(w, Memory(), scripted(goals=[]), random.Random(0))
+        self.assertEqual(d.intent["verb"], "SetPosition", d.reason)
 
     def test_replanning_keeps_off_a_rejected_tile(self):
         # Reflex 1 (PLAN.md): after a rejected step, the replan does not
@@ -131,13 +137,13 @@ class ReflexTest(unittest.TestCase):
         cases = [
             ("goto", scripted(goals=["goto"], goto=(2, 0), pickup=False)),
             ("explore", scripted(goals=["explore"], pickup=False)),
-            ("wander", scripted(goals=["wander"], pickup=False)),
+            ("safe default", scripted(goals=[], pickup=False)),
         ]
         for name, pol in cases:
             with self.subTest(name):
                 w = world([".....", "....."])
                 m = Memory(nav=NavMemory(wait_tile=(w.map_id, (1, 0))))
-                d = decide(w, m, pol, random.Random(0))
+                d = planned(w, m, pol, random.Random(0))
                 self.assertIsNotNone(d.intent, d.reason)
                 self.assertNotEqual((d.intent["x"], d.intent["y"]), (1, 0), d.reason)
                 self.assertIsNone(m.nav.wait_tile, "the block lasts one decision")
@@ -146,21 +152,27 @@ class ReflexTest(unittest.TestCase):
         # avoid_blocks are walkable, so without this the plan walks into lava
         # and reflex 2 steps back out.
         w = world(["...", ".~.", "..."])
-        d = decide(w, Memory(), scripted(goals=["goto"], goto=(2, 2), pickup=False), random.Random(0))
+        d = planned(w, Memory(), scripted(goals=["goto"], goto=(2, 2), pickup=False), random.Random(0))
         self.assertNotEqual((d.intent["x"], d.intent["y"]), (1, 1), d.reason)
 
-    def test_surrounded_by_lava_the_plan_crosses_as_little_as_it_can(self):
+    def test_surrounded_by_lava_escape_crosses_as_little_as_it_can(self):
         # Straight east is 3 steps over 2 lava tiles; via the top row it is
-        # 4 steps over 1.
+        # 4 steps over 1. Escape walks the safe default's path, so the only
+        # frontier left is the east column: the rest of the edge is known void.
         w = world([".....", "~~~~.", "~~~~.", "~~~~."], at=(1, 2))
+        for x in range(-1, 6):
+            for y in range(-1, 5):
+                if (x, y) != (5, 2):
+                    w.view.tiles.setdefault((x, y), "")
+        self.assertEqual(w.view.frontier(), {(4, 1), (4, 2), (4, 3)})
         m = Memory()
-        d = decide(w, m, scripted(goals=["goto"], goto=(4, 2), pickup=False), random.Random(0))
+        d = planned(w, m, scripted(goals=["goto"], goto=(4, 2), pickup=False), random.Random(0))
         self.assertEqual((d.intent["x"], d.intent["y"]), (2, 1), d.reason)
-        self.assertEqual(m.path, [(2, 1), (3, 0), (4, 1), (4, 2)])
+        self.assertEqual(m.path, [(2, 1), (3, 0), (4, 1)])
 
     def test_doors_goal_steps_onto_the_door(self):
         w = world(["..D"])
-        d = decide(w, Memory(), scripted(goals=["doors"]), random.Random(0))
+        d = planned(w, Memory(), scripted(goals=["doors"]), random.Random(0))
         self.assertEqual((d.intent["x"], d.intent["y"]), (1, 0))
 
 
@@ -175,16 +187,16 @@ class DeathChestTest(unittest.TestCase):
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
 
         m = Memory()
-        d = decide(w, m, scripted(goals=["hold"]), random.Random(0))
+        d = decide(w, m, scripted(goals=[]), random.Random(0))
         self.assertEqual((d.intent["verb"], d.intent["x"]), ("SetPosition", 3))
 
         # Next to it, the contents are not known until a snapshot lists them.
         w.pos = (1, 0)
-        self.assertIsNone(decide(w, Memory(), scripted(goals=["hold"]), random.Random(0)).intent)
+        self.assertIsNone(decide(w, Memory(), scripted(goals=[]), random.Random(0)).intent)
         w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": [
             {"id": 80, "x": 0, "y": 0, "contents": [{"id": 1321, "supply_subtype_code": "bronze_sword"}]},
         ]}}})
-        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
+        d = decide(w, Memory(), scripted(goals=[]), random.Random(0))
         self.assertEqual(d.intent, {"verb": "WithdrawFromChest", "chest_id": 80})
 
         # Emptied, a dropped chest leaves the world (B116): gone from the

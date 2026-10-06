@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 POLICY_KINDS = ("idle", "wander", "scripted")
-GOALS = ("explore", "doors", "goto", "hold", "wander")
+GOALS = ("explore", "doors", "goto")  # built-in planner inputs (plan.builtin_goals)
 ON_HOSTILE = ("flee", "fight", "ignore")
 HOSTILE_KINDS = ("npc", "character")
 

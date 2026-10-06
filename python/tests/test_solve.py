@@ -5,12 +5,21 @@ import unittest
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.fragments import compose_supply_ids, fragment_set_complete, holds_whole
-from agentrealm_agent.item_table import FragmentMeta, InventorySupply, parse_fragment, supplies_from_list
+from agentrealm_agent.fragments import (
+    compose_supply_ids,
+    fragment_set_complete,
+    holds_whole,
+)
+from agentrealm_agent.item_table import (
+    FragmentMeta,
+    InventorySupply,
+    parse_fragment,
+    supplies_from_list,
+)
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan, goal_done
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.states.solve import SolveState, solve_op, solve_outcome
+from agentrealm_agent.states.solve import SolveState, solve_outcome
 from agentrealm_agent.world import WorldModel
 
 
@@ -167,7 +176,7 @@ class SolveStateTest(unittest.TestCase):
             frag(2, "frag_b", "rusty_key", 2, missing=()),
         ]
         plan = Plan([{"op": "compose", "composes_into": "rusty_key"}], dict(PARAM_DEFAULTS))
-        out = solve_outcome(w, Memory(), Policy(kind="scripted"), plan, never_attack=[])
+        out = solve_outcome(w, Memory(), Policy(kind="scripted"), plan.current())
         self.assertEqual(out.intents[0]["verb"], "Compose")
         self.assertEqual(sorted(out.intents[0]["supply_ids"]), [1, 2])
 
@@ -175,7 +184,7 @@ class SolveStateTest(unittest.TestCase):
         w = grid(["."])
         w.held_supplies = [frag(1, "frag_a", "rusty_key", 1, missing=(2,))]
         plan = Plan([{"op": "compose", "composes_into": "rusty_key"}], dict(PARAM_DEFAULTS))
-        out = solve_outcome(w, Memory(), Policy(kind="scripted"), plan, never_attack=[])
+        out = solve_outcome(w, Memory(), Policy(kind="scripted"), plan.current())
         self.assertIsNone(out.intents)
         self.assertIn("missing", out.reason)
 
@@ -183,7 +192,7 @@ class SolveStateTest(unittest.TestCase):
         w = grid([".D."], at=(1, 0))
         w.held_supplies = [InventorySupply(5, "rusty_key")]
         plan = Plan([{"op": "use_block", "x": 2, "y": 0, "code": "rusty_key"}], dict(PARAM_DEFAULTS))
-        out = solve_outcome(w, Memory(), Policy(kind="scripted"), plan, never_attack=[])
+        out = solve_outcome(w, Memory(), Policy(kind="scripted"), plan.current())
         self.assertEqual([i["verb"] for i in out.intents], ["Arm", "Use"])
         self.assertEqual(out.intents[1]["target"], {"kind": "block", "x": 2, "y": 0})
 
@@ -209,7 +218,7 @@ class SolveStateTest(unittest.TestCase):
     def test_rearm_sent_once_and_skipped_when_weapon_gone(self):
         w = grid(["."])
         m = Memory(solve_rearm="bronze_sword")
-        out = solve_outcome(w, m, Policy(kind="scripted"), Plan([], dict(PARAM_DEFAULTS)), never_attack=[])
+        out = solve_outcome(w, m, Policy(kind="scripted"), None)
         self.assertIsNone(out.intents)
         self.assertIn("not in hand", out.reason)
         self.assertIsNone(m.solve_rearm)
@@ -219,17 +228,9 @@ class SolveStateTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(5, "rusty_key")]
         w.armed_code = "rusty_key"
         plan = Plan([{"op": "use_block", "x": 3, "y": 0, "code": "rusty_key"}], dict(PARAM_DEFAULTS))
-        out = solve_outcome(w, Memory(), Policy(kind="scripted"), plan, never_attack=[])
+        out = solve_outcome(w, Memory(), Policy(kind="scripted"), plan.current())
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 0))
-
-    def test_plan_compose_not_dropped_by_replan(self):
-        from agentrealm_agent.pathing import replan
-
-        w = grid(["."])
-        plan = Plan([{"op": "compose", "composes_into": "rusty_key"}], dict(PARAM_DEFAULTS))
-        replan(w, Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0), set(), set(), plan=plan)
-        self.assertEqual(solve_op(plan)["op"], "compose")
 
 
 class SolveStallTest(unittest.TestCase):
@@ -276,11 +277,21 @@ class SolveStallTest(unittest.TestCase):
         plan = Plan([{"op": "use_block", "x": 3, "y": 0, "code": "rusty_key"}], dict(PARAM_DEFAULTS))
         plan.stalled_since_tick = 0
         w.tick = 10_000
-        out = solve_outcome(w, Memory(), Policy(kind="scripted"), plan, never_attack=[])
+        out = dispatch(w, ctx(w, plan))
+        self.assertEqual(out.state, "Solve")
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertTrue(out.progress)
         self.assertIsNone(plan.stalled_since_tick)
         self.assertEqual(plan.current()["op"], "use_block")
 
+    def test_use_try_is_not_progress(self):
+        w = grid(["..D"], at=(1, 0))
+        w.held_supplies = [InventorySupply(5, "rusty_key")]
+        w.armed_code = "rusty_key"
+        op = {"op": "use_block", "x": 2, "y": 0, "code": "rusty_key"}
+        out = solve_outcome(w, Memory(), Policy(kind="scripted"), op)
+        self.assertEqual(out.intents[0]["verb"], "Use")
+        self.assertFalse(out.progress)
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,10 +7,11 @@ from unittest import mock
 
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import default_directives
+from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation.rejection import NavMemory
-from agentrealm_agent.states import STATES, PlayContext, State, StateOutcome, dispatch, scripted_outcome
+from agentrealm_agent.plan import Plan
+from agentrealm_agent.states import STATES, PlayContext, State, StateOutcome, dispatch
 from agentrealm_agent.world import Entity, WorldModel
 
 dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")
@@ -26,13 +27,18 @@ def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:
     return w
 
 
-def ctx(w: WorldModel, m: Memory | None = None, **policy_kw) -> PlayContext:
+def ctx(w: WorldModel, m: Memory | None = None, plan: Plan | None = None, **policy_kw) -> PlayContext:
     return PlayContext(
         m or Memory(),
         Policy(kind="scripted", **policy_kw),
         random.Random(0),
         directives=default_directives(),
+        plan=plan,
     )
+
+
+def plan_of(*ops: dict) -> Plan:
+    return Plan(list(ops), dict(PARAM_DEFAULTS))
 
 
 class DispatchPriorityTest(unittest.TestCase):
@@ -50,12 +56,28 @@ class DispatchPriorityTest(unittest.TestCase):
         self.assertEqual(out.state, "Downed")
         self.assertIsNone(out.intents)
 
-    def test_loot_beats_explore(self):
+    def test_pickup_beats_explore(self):
         w = world(["..."], at=(1, 1))
         w.entities = [Entity("supply", 8, (1, 2), "heart")]
         out = dispatch(w, ctx(w))
-        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.state, "Pickup")
         self.assertEqual(out.intents[0]["verb"], "Take")
+        self.assertTrue(out.reflex)
+
+    def test_loot_runs_only_for_a_fetch_item_op(self):
+        w = world(["....."] * 3, at=(0, 1))
+        w.entities = [Entity("supply", 8, (4, 1), "heart")]
+        out = dispatch(w, ctx(w, pickup=False, plan=plan_of({"op": "fetch_item", "code": "heart"})))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        out = dispatch(w, ctx(w, pickup=False))
+        self.assertEqual(out.state, "Explore", "no op: the safe default, not Loot")
+
+    def test_executor_waits_for_its_op(self):
+        w = world(["....."] * 3, at=(0, 1))
+        out = dispatch(w, ctx(w, plan=plan_of({"op": "travel", "to": "point", "x": 4, "y": 1})))
+        self.assertEqual(out.state, "Travel")
+        self.assertEqual(out.reason.split(" ")[0], "travel:point")
 
     def test_explore_returns_intent_list(self):
         w = world(["....", "...."])
@@ -197,7 +219,7 @@ class DispatcherFallThroughTest(unittest.TestCase):
         out = dispatch(w, ctx(w, on_hostile="flee", hostile=["npc"], hostile_range=2))
         self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Flee", None, "nowhere to flee", True))
 
-    def test_heal_resting_waits(self):
+    def test_heal_in_safe_zone_keeps_moving(self):
         from agentrealm_agent.healing import save_regen_yes
         from agentrealm_agent.knowledge_base import KnowledgeBase
         from agentrealm_agent.world import ZoneFact
@@ -209,7 +231,9 @@ class DispatcherFallThroughTest(unittest.TestCase):
         kb = KnowledgeBase.empty("sandbox")
         save_regen_yes(kb)
         out = dispatch(w, PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb))
-        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Heal", None, "rest in safe zone", True))
+        self.assertEqual((out.state, out.wait), ("Heal", False))
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", "Heal never stands still in a safe zone")
+        self.assertTrue(out.reason.startswith("heal in safe ground: "), out.reason)
 
     def test_recover_waits_to_open_chest(self):
         from agentrealm_agent.zone_discovery import apply_zone
@@ -230,9 +254,8 @@ class DispatcherFallThroughTest(unittest.TestCase):
     def test_escape_with_no_route_falls_through(self):
         w = world(["###", "#~#", "###"], at=(1, 1))
         out = dispatch(w, ctx(w, avoid_blocks=["lava"]))
-        self.assert_yielded(out, "Escape", "Explore")
-        self.assertEqual(out.yielded[0], "Escape: no escape route")
-        self.assertEqual((out.state, out.intents), ("", None))
+        self.assertEqual(out.yielded, ["Escape: no escape route"])
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, "boxed in", True))
 
     def test_retreat_with_safe_tile_walled_off_falls_through(self):
         from agentrealm_agent.directives import PARAM_DEFAULTS
@@ -273,47 +296,43 @@ class DispatcherFallThroughTest(unittest.TestCase):
             out = dispatch(w, c)
         self.assertEqual(out.yielded[0], "Fight: no target")
 
-    def test_loot_whose_pickup_vanishes_falls_through(self):
-        loot_module = importlib.import_module("agentrealm_agent.states.loot")
+    def test_loot_with_nothing_to_fetch_falls_through_to_safe_default(self):
         w = world(["....", "....", "...."], at=(1, 1))
-        seen = StateOutcome([{"verb": "Take", "supply_id": 3}], "take 3", state="Loot")
-        calls = iter([seen])
-        with mock.patch.object(loot_module, "loot_outcome", side_effect=lambda *a, **k: next(calls, None)):
-            out = dispatch(w, ctx(w, pickup=True, goals=["explore"]))
-        self.assertEqual(out.yielded, ["Loot: nothing to loot"])
+        out = dispatch(w, ctx(w, plan=plan_of({"op": "fetch_item", "code": "heart"})))
+        self.assertEqual(out.yielded, ["Loot: no heart in sight"])
         self.assertEqual(out.state, "Explore")
         self.assertIsNotNone(out.intents)
 
-    def test_investigate_whose_target_vanishes_falls_through(self):
-        from agentrealm_agent.interest_list import InterestItem, read_key
-
-        investigate_module = importlib.import_module("agentrealm_agent.states.investigate")
+    def test_investigate_whose_npc_is_gone_falls_through_to_safe_default(self):
         w = world(["....", "....", "...."], at=(1, 1))
-        item = InterestItem("read_block", "read sign @0,0", read_key(7, (0, 0)), map_id=7, pos=(0, 0))
-        calls = iter([item])
-        with mock.patch.object(investigate_module, "pick_interest_tick", side_effect=lambda *a, **k: next(calls, None)):
-            out = dispatch(w, ctx(w, goals=["explore"]))
-        self.assertEqual(out.yielded, ["Investigate: nothing to investigate"])
+        op = {"op": "say", "npc_type": "fake_sage", "text": "hello"}
+        out = dispatch(w, ctx(w, plan=plan_of(op)))
+        self.assertEqual(out.yielded, ["Investigate: no such NPC in sight"])
         self.assertEqual(out.state, "Explore")
         self.assertIsNotNone(out.intents)
 
-    def test_travel_walled_off_falls_through(self):
-        from agentrealm_agent.travel.ops import TravelOp
-
+    def test_travel_walled_off_falls_through_to_safe_default(self):
         w = world(["#####", "#.#.#", "#####"], at=(1, 1))
-        m = Memory(travel_ops=[TravelOp("point", map_id=7, x=3, y=1)])
-        out = dispatch(w, PlayContext(m, Policy(kind="scripted", goals=["explore"]), random.Random(0)))
-        self.assert_yielded(out, "Travel", "Explore")
+        out = dispatch(w, ctx(w, plan=plan_of({"op": "travel", "to": "point", "x": 3, "y": 1})))
+        self.assert_yielded(out, "Travel")
         self.assertIn("blocked", out.yielded[0])
-        self.assertEqual((out.state, out.intents), ("", None))
-        self.assertEqual(out.reason, f"no state ({'; '.join(out.yielded)})")
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, "boxed in", True))
 
-    def test_explore_with_no_move_falls_through_to_no_state(self):
-        w = world(["###", "#.#", "###"], at=(1, 1))
-        out = dispatch(w, ctx(w, goals=["explore"]))
-        self.assertEqual((out.state, out.intents), ("", None))
-        self.assertEqual(out.yielded, ["Explore: no goal reachable"])
-        self.assertEqual(out.reason, "no state (Explore: no goal reachable)")
+    def test_explore_area_with_no_step_falls_through_to_safe_default(self):
+        # The op's frontier (column 3) is walled off.
+        w = world(["###.", "#.#.", "###."], at=(1, 1))
+        c = ctx(w, plan=plan_of({"op": "explore_area", "x": 1, "y": 1, "radius": 5}))
+        out = dispatch(w, c)
+        # Explore itself runs the safe default when its op has no step.
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, "boxed in", True))
+        self.assertFalse(out.progress, "the safe default's move is no progress on the op")
+        self.assertEqual(c.plan.current()["op"], "explore_area")
+
+    def test_safe_default_with_nothing_to_explore_looks_around(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        out = dispatch(w, ctx(w))
+        self.assertEqual(out.state, "Explore")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", "never idle with no plan op")
 
 
 class SyncWakeTest(unittest.TestCase):
@@ -345,7 +364,7 @@ class DecideShimTest(unittest.TestCase):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 8, (1, 2))]
         pol = Policy(kind="scripted", pickup=True)
-        out = scripted_outcome(w, Memory(), pol, random.Random(0), never_attack=[])
+        out = dispatch(w, PlayContext(Memory(), pol, random.Random(0)))
         d = decide(w, Memory(), pol, random.Random(0))
         self.assertTrue(out.reflex)
         self.assertEqual(out.intents, [d.intent])

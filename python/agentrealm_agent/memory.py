@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from .navigation import NavSearchState
 from .navigation.rejection import NavMemory
 from .navigation.stuck import NavStuckMemory
-from .travel.ops import TravelOp
 from .travel.strength import StrengthBracket
 from .world import Pos
 
@@ -55,11 +54,9 @@ class Memory:
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
     goto_reached: tuple[int | None, Pos] | None = None  # (policy.goto_map, cell) of the policy goto once stood on: satisfied, not owed again (A16)
+    investigate_rejections: dict[str, int] = field(default_factory=dict)  # Read/Say key -> refused count (A30)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
-    investigate_rejections: dict[str, int] = field(default_factory=dict)  # interest item key -> refused Read/Say count (A30)
-    curiosity_spans: list[tuple[int, int]] = field(default_factory=list)  # (start tick, length) charged Investigate/Break queues (A30)
     gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass", cell) Gather is walking toward (A22)
-    gather_backoff_until: int = -1  # Gather yields to Explore until this tick (A22)
     flee_path: list[Pos] = field(default_factory=list)  # Flee's committed escape, kept until it arrives, is blocked or Flee stops (A9, A58)
     # Cells the escape the oscillation guard forced keeps off: the ones it paced on (A15).
     # The planned flee_path already excludes them; this only keeps them shut for
@@ -70,21 +67,16 @@ class Memory:
     flee_gaps: list[tuple[int, int]] = field(default_factory=list)
     flee_since: int = 0
     flee_failed: bool = False
-    travel_ops: list[TravelOp] = field(default_factory=list)  # parsed travel:* directives goals (A27)
-    travel_index: int = 0
     strength: StrengthBracket = field(default_factory=StrengthBracket)
     loadout_key: tuple = ()  # reset strength bracket when armed/worn changes (A27)
-    # Heal (A10): strategist buy ops; Shop (A21) consumes them later.
-    buy_signals: list[dict] = field(default_factory=list)
-    buy_signals_seen: set[tuple[str, str]] = field(default_factory=set)
     # Clues (A32): {"trigger": "clue", **kb.clues row} per new clue; the strategist (A35) drains them.
     clue_signals: list[dict] = field(default_factory=list)
     # Strategist (A35): death, goal_done and goal_failed triggers, via queue_signal; clue and stuck live elsewhere.
     strategist_signals: list[dict] = field(default_factory=list)
     strategist_progress_tick: int = 0  # last tick with an applied Step (the idle trigger counts from it)
     # Shop (A21): (supply id, code, gems before, supply pos, map id, tick sent)
-    # of the Take in flight. Its buy signal is consumed on an applied Take or a
-    # gem drop, kept on a rejection; it expires on leaving the shop cell or a timeout.
+    # of the Take in flight. Settled on an applied Take or a gem drop, counted
+    # as a refusal on a rejection; it expires on leaving the shop cell or a timeout.
     shop_pending: tuple[int, str, int | None, tuple[int, int], int | None, int] | None = None
     # Shop (A21): supply id -> rejected Take count; cleared when shop_refusal_key
     # (loadout, gems, map) changes, since any of those can turn a refusal around.
@@ -94,8 +86,6 @@ class Memory:
     # "yes" is saved to the knowledge base; a "no" holds for this run only.
     heal_regen_sample: tuple[int, int, int] | None = None
     heal_regen_absent: bool = False
-    heal_wait: tuple[int, int] | None = None  # (tick, health) Heal began sending nothing, reset when health rises
-    heal_backoff_until: int = -1  # Heal yields to Explore until this tick
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
     heal_rearm: str | None = None  # weapon code armed before a drink; restored once (A24)
     heal_pending: tuple[int, str, str] | None = None  # (health before, supply code, "take"|"use") awaiting observation
@@ -104,9 +94,6 @@ class Memory:
     solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)
     break_rearm: str | None = None  # code armed before Break, restored when break finishes (A28)
     break_pending: tuple[int, Pos, str] | None = None  # map, block and capability a Use in flight targets (A28)
-    break_odd: tuple[int, Pos] | None = None  # map and odd block Break is walking toward (A31)
-    break_odd_refusals: dict[tuple[int, Pos], int] = field(default_factory=dict)  # (map, odd block) -> times Break found no route to it (A31)
-    break_odd_pick: tuple | None = None  # (inputs, choice): the odd pick cached for one decision window (A31)
     equip_refused: set[tuple[str | None, str]] = field(default_factory=set)  # (subtype, slot) Equip was refused; (None, slot) for Remove (A19)
     equip_refused_sig: tuple | None = None  # loadout and inventory the refusals hold for; None until the next observation syncs it (A19)
     equip_not_wearable: set[str] = field(default_factory=set)  # subtypes Wear rejected with not_wearable for the run (A55)

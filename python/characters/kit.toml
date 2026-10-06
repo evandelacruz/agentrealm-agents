@@ -1,9 +1,10 @@
-# A brawler: holds its ground and swings at any character that comes close.
+# A brawler: with no goals it explores safe ground (the safe default) and
+# swings at any character that comes close.
 world = "sandbox"
 
 [policy]
 kind = "scripted"
-goals = ["wander"]
+goals = []
 on_hostile = "fight"
 hostile = ["character"]
 hostile_range = 1

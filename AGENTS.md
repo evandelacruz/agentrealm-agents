@@ -47,7 +47,7 @@ Decided. Do not cross without flagging prominently.
 - Do not add dependencies, or change moderation or the call budget or pacing, without flagging prominently.
 - If blocked by an open architecture, legal, or moderation question, an open design question, or a server gap, **halt and say why**. Do not invent. Check PLAN.md and the published docs first.
 - Backlog items are PR-sized. If one still needs a second PR, ship a reviewable slice, mark the ID `partial` with a `remaining` note in `status.json`, and let the next pass continue it.
-- In `status.json`, edit only the entries of the IDs your PR covers, and keep the blank line between entries. Two PRs on different IDs then never touch adjacent lines, so they do not conflict.
+- In `status.json`, edit only the entries of the IDs your PR covers, and keep the blank line between entries. Two PRs on different IDs then never touch adjacent lines, so they do not conflict. The exception is a new ID appended after the last entry: it adds a comma to that entry's line, so it can conflict with a PR that edits that entry. Merge `main` and keep both.
 
 ## Writer lock
 

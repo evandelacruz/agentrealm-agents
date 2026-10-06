@@ -82,7 +82,7 @@ def not_outrunning(w: WorldModel, m: Memory) -> bool:
 
 
 def instead_of_fleeing(
-    w: WorldModel, ctx: PlayContext, target: Entity, hostiles: list[Entity], blocked: set[Pos]
+    w: WorldModel, ctx: PlayContext, target: Entity, hostiles: list[Entity], blocked: set[Pos], paced: set[Pos]
 ) -> StateOutcome | None:
     """Fight back or retreat once running away has failed (A9), or None to keep running.
 
@@ -90,7 +90,8 @@ def instead_of_fleeing(
     step away (cornered); walk to the nearest known safe tile, Retreat's
     way; swing back anyway when ``target`` is the one hitting us and in
     weapon reach, since running and retreating both failed. A target
-    ``never_attack`` forbids is never fought.
+    ``never_attack`` forbids is never fought. ``paced`` is the oscillation
+    guard's escape, already taken this decision (A15).
     """
     may_hit = not attack_forbidden(target, ctx.never_attack)
     cornered = flee_step(w, hostiles, blocked) is None
@@ -98,7 +99,7 @@ def instead_of_fleeing(
     options = []
     if may_hit and (cornered or wins):
         options.append(lambda: engage(w, ctx, target, FleeState.name))
-    options.append(lambda: retreat_step(w, ctx, FleeState.name))
+    options.append(lambda: retreat_step(w, ctx, FleeState.name, paced))
     hitter_in_reach = is_attacker(w, target) and in_weapon_reach(w, target, ctx.knowledge)
     if may_hit and hit_while_fleeing(w, ctx.memory) and hitter_in_reach:
         options.append(lambda: engage(w, ctx, target, FleeState.name))
@@ -169,16 +170,18 @@ class FleeState(State):
         if m.state != self.name:
             m.flee_gaps, m.flee_since, m.flee_failed = [], w.tick, False
         m.flee_gaps.append((w.tick, chebyshev(target.pos, w.pos)))
+        # Read once per decision: the oscillation guard caught Flee/Retreat
+        # pacing (A15), and whichever escape runs below must keep off these cells.
+        paced = oscillation.take_escape(m, w)
         if m.flee_failed or not_outrunning(w, m):
             m.flee_failed = True
-            instead = instead_of_fleeing(w, ctx, target, hostiles, blocked)
+            instead = instead_of_fleeing(w, ctx, target, hostiles, blocked, paced)
             if instead is not None:
                 return instead
         safes = safe_tiles(w, w.map_id) if w.map_id is not None else set()
         # Start over when Flee did not run last decision (the threat was
-        # gone in between) or the oscillation guard caught Flee/Retreat
-        # pacing (A15); a caught escape keeps off the paced cells.
-        paced = oscillation.take_escape(m, w)
+        # gone in between) or the guard caught pacing; a caught escape keeps
+        # off the paced cells.
         if m.state != self.name or paced:
             m.flee_path = []
         away = _committed_step(w, m, hostiles, blocked | m.flee_avoid)

@@ -153,6 +153,50 @@ class PursuerNotOutrunTest(unittest.TestCase):
         self.assertEqual(out.state, "Flee")
         self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
 
+    def test_a_failed_retreat_leaves_the_oscillation_escape_to_flee(self):
+        """Flee gave up running, the known safe tile is walled off: Retreat's try sends
+        nothing, and the paced cells must still reach Flee's own escape (A15, review on #107)."""
+        w, c = world(), ctx()
+        for y in range(-2, 3):
+            for x in (-2, 2):
+                w.view.tiles[(x, y)] = "wall"
+        for x in range(-2, 3):
+            for y in (-2, 2):
+                w.view.tiles[(x, y)] = "wall"
+        apply_zone(w, 1, 0, 0, {"safe": True})  # walled in: unreachable
+        w.entities = [Entity("npc", 7, (11, 10), code="pursuer")]
+        m = c.memory
+        m.state, m.flee_since, m.flee_failed, m.flee_gaps = "Flee", w.tick, True, [(w.tick, 1)]
+        here, back = (10, 10), (9, 9)  # Flee has been pacing between these (A15 guard)
+        m.flee_path = [back]
+        m.nav_stuck.cells_map = w.map_id
+        m.nav_stuck.recent_cells = [back, here, back, here, back]
+        m.nav_stuck.recent_moves = [("", "Flee")] * 5
+        m.nav_stuck.last_move = ("", "Flee")
+        w.tick += 5
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Flee")
+        self.assertTrue(out.reason.startswith("flee npc 7"), out.reason)
+        self.assertEqual(m.flee_avoid, {back})
+        self.assertNotIn(back, m.flee_path)
+
+    def test_flees_retreat_keeps_off_the_paced_cell(self):
+        """Running failed and the safe tile is straight west: Retreat's step keeps off the paced cell (A15)."""
+        w, c = world(), ctx()
+        apply_zone(w, 1, 4, 10, {"safe": True})
+        w.entities = [Entity("npc", 7, (11, 10), code="pursuer")]
+        m = c.memory
+        m.state, m.flee_since, m.flee_failed, m.flee_gaps = "Flee", w.tick, True, [(w.tick, 1)]
+        here, back = (10, 10), (9, 9)  # (9, 9) is Retreat's first step with nothing paced
+        m.nav_stuck.cells_map = w.map_id
+        m.nav_stuck.recent_cells = [back, here, back, here, back]
+        m.nav_stuck.recent_moves = [("", "Flee")] * 5
+        m.nav_stuck.last_move = ("", "Flee")
+        w.tick += 5
+        out = dispatch(w, c)
+        self.assertIn("retreat → safe (4, 10)", out.reason)
+        self.assertNotEqual((out.intents[0]["x"], out.intents[0]["y"]), back)
+
     def test_a_pursuer_keeping_pace_without_hitting_is_fought_once_the_gap_stalls(self):
         w, c = world(), ctx()
         w.health = w.max_health = 100
@@ -300,6 +344,19 @@ class NoPositionReadWhileDownedTest(unittest.TestCase):
         w.apply_self({"lives": 9, "alive": True, "asleep": True, "placed": False})
         self.assertEqual(choose_call(w, m, pol), "tick")
         w.apply_observation({"version": 2, "delta": {"asleep": False}})
+        self.assertEqual(choose_call(w, m, pol), "position")
+        # Sync re-reads self after the wake; GetSelf may still say not placed.
+        w.apply_self({"lives": 9, "alive": True, "asleep": False, "placed": False})
+        self.assertEqual(choose_call(w, m, pol), "position")
+        w.apply_position({"map_id": 1, "x": 3, "y": 4})
+        w.apply_self({"lives": 9, "alive": True, "asleep": False, "placed": False})
+        self.assertFalse(w.placed, "after the position read, self is believed again")
+
+    def test_a_wake_seen_only_in_a_self_read_reads_position(self):
+        w, m, pol = world(), Memory(need_position=True, need_self=False), ctx().policy
+        w.pos = None
+        w.apply_self({"lives": 9, "alive": True, "asleep": True, "placed": False})
+        w.apply_self({"lives": 9, "alive": True, "asleep": False, "placed": False})
         self.assertEqual(choose_call(w, m, pol), "position")
 
     def test_respawned_reads_position_again(self):

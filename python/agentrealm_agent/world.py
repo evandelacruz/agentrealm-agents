@@ -113,6 +113,9 @@ class WorldModel:
     movement_speed: int = 2500  # thousandths of a block per second (GetSelf)
     alive: bool = True
     placed: bool = True  # on a map: GetSelf's ``placed``; false once Died until Respawned (A5)
+    # Woke since the last position read: placed, whatever a self read says,
+    # since a wake does not refresh GetSelf's ``placed`` (GAME_NOTES Sleep).
+    woke: bool = False
     asleep: bool = False  # GetSelf and a sleeping round trip carry it (GAME_NOTES Sleep)
     lives: int = 0
     gems: int | None = None  # inventory counter from snapshots (A22)
@@ -180,12 +183,18 @@ class WorldModel:
         if "movement_speed" in s:
             self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
-        self.placed = bool(s.get("placed", True))
         self.lives = int(s.get("lives", 0))
         if "asleep" in s:
-            self.asleep = bool(s["asleep"])
+            self._set_asleep(bool(s["asleep"]))
+        self.placed = bool(s.get("placed", True)) or (self.woke and self.alive and not self.asleep)
         # Absent while nothing, or no weapon, is armed (B100).
         self.attack_range = _opt_int(s.get("attack_range"))
+
+    def _set_asleep(self, asleep: bool) -> None:
+        """A wake puts us on a block: placed until a position read says where (A5)."""
+        if self.asleep and not asleep:
+            self.placed = self.woke = True
+        self.asleep = asleep
 
     def apply_position(self, p: dict) -> None:
         # `level` belongs to the map (Manual §5.3): a read that omits it keeps
@@ -203,7 +212,7 @@ class WorldModel:
         self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
         self.asleep = False  # a sleeping character is off the map (GAME_NOTES Sleep)
-        self.placed = True
+        self.placed, self.woke = True, False
         if has_level:
             self.map_level = level
 
@@ -405,9 +414,7 @@ class WorldModel:
         if "alive" in body:
             self.alive = bool(body["alive"])
         if "asleep" in body:
-            if self.asleep and not body["asleep"]:
-                self.placed = True  # woke on a block; the round trip does not carry placed (A5)
-            self.asleep = bool(body["asleep"])
+            self._set_asleep(bool(body["asleep"]))
         if "position" in body:
             pos = body["position"]
             if pos is None:
@@ -511,7 +518,7 @@ class WorldModel:
                     self.entities = [x for x in self.entities if not (x.kind == "supply" and x.id == ev.get("supply_id"))]
                 elif kind == "Died":
                     self.forget_position()
-                    self.placed = False  # off the map until Respawned: no position read can answer (A5)
+                    self.placed = self.woke = False  # off the map until Respawned: no position read can answer (A5)
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
                 elif kind == "Respawned":

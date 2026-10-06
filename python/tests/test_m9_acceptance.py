@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import math
 import tempfile
 import threading
 import tomllib
@@ -380,6 +381,21 @@ class TownHandoffTest(unittest.TestCase):
         self.assertEqual(load_directives(self.path).instructions, text)
         for ch in [chr(c) for c in range(0x20)] + ["\x7f"]:
             self.assertEqual(tomllib.loads("x = " + self.smoke.toml_value(ch))["x"], ch)
+
+    def test_send_to_town_with_non_finite_params_keeps_defaults(self):
+        for raw in ("inf", "-inf", "nan"):
+            self.path.write_text(f"[params]\nfight_margin = {raw}\ncuriosity = {raw}\nrisk = 0.25\n")
+            self.smoke.send_to_town(self.path)
+            d = load_directives(self.path)
+            self.assertEqual(d.goals, ["travel:town"])
+            self.assertEqual(d.params["fight_margin"], PARAM_DEFAULTS["fight_margin"])
+            self.assertEqual(d.params["curiosity"], PARAM_DEFAULTS["curiosity"])
+            self.assertEqual(d.params["risk"], 0.25)
+
+    def test_toml_value_round_trips_every_param_type(self):
+        for v in (True, False, 0, 3, -2, 1.5, 0.1, 1e300, float("inf"), float("-inf")):
+            self.assertEqual(tomllib.loads("x = " + self.smoke.toml_value(v))["x"], v)
+        self.assertTrue(math.isnan(tomllib.loads("x = " + self.smoke.toml_value(float("nan")))["x"]))
 
     def test_send_to_town_with_no_file_writes_defaults(self):
         self.smoke.send_to_town(self.path)

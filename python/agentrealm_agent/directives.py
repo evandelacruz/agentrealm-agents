@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -25,6 +26,8 @@ PARAM_DEFAULTS: dict[str, float | int] = {
 
 def _valid_param(name: str, value: object) -> float | int | None:
     if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
         return None
     if name in ("retreat_hits", "lives_floor", "potion_reserve"):
         if isinstance(value, float) and not value.is_integer():

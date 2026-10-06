@@ -14,7 +14,7 @@ Requires AGENTREALM_API_KEY.
 from __future__ import annotations
 
 import argparse
-import json
+import math
 import os
 import sys
 import time
@@ -40,7 +40,7 @@ TOWN_GOAL = "travel:town"
 
 
 def toml_value(v) -> str:
-    """``v`` as a TOML value: strings and string lists escaped by hand, numbers and bools as JSON.
+    """``v`` as a TOML value: a string, bool, int, float, or list of those.
 
     Control characters and DEL become ``\\uXXXX``; everything else, non-BMP
     characters included, stays literal (JSON's surrogate pair escapes are not TOML).
@@ -55,9 +55,19 @@ def toml_value(v) -> str:
             else:
                 out.append(ch)
         return '"' + "".join(out) + '"'
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        if math.isnan(v):
+            return "nan"
+        if math.isinf(v):
+            return "inf" if v > 0 else "-inf"
+        return repr(v)
     if isinstance(v, list):
         return "[" + ", ".join(toml_value(x) for x in v) + "]"
-    return json.dumps(v)
+    raise TypeError(f"no TOML encoding for {type(v).__name__}")
 
 
 def directives_toml(d: Directives) -> str:

@@ -1231,6 +1231,14 @@ class SafetyStateTest(unittest.TestCase):
         self.assertIn("nearest_safe=7:4,4 (here)", state)
         self.assertIn("town=unknown", state)
 
+    def test_terrain_safe_cell_with_no_zone_read_is_safe_ground(self):
+        """A terrain read's ``safe`` flag counts, with no ``get_zone`` (A7)."""
+        w = WorldModel(character_id=1, map_id=7, pos=(4, 4), tick=5)
+        w.view.safe |= {(4, 4), (5, 4)}
+        state = self.state(w)
+        self.assertIn("safe_ground=yes", state)
+        self.assertIn("nearest_safe=7:4,4 (here)", state)
+
     def test_nothing_known(self):
         w = WorldModel(character_id=1, map_id=7, pos=(4, 4), tick=5)
         w.record_respawn_anchor(3, (1, 1))

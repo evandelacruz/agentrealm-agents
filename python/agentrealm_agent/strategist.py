@@ -541,8 +541,9 @@ def build_prompt(
 
 def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     """Whether the character stands on safe ground, and how far and which
-    way the nearest known safe tile and the town are. ``unknown`` until a
-    zone read covers where it stands."""
+    way the nearest known safe tile and the town are. ``yes`` once a zone or
+    terrain read shows the cell safe; ``unknown`` until a zone read covers a
+    cell no terrain read marked safe."""
     if w.pos is None or w.map_id is None:
         return []
     fact = w.zones.get(w.map_id, {}).get(w.pos)

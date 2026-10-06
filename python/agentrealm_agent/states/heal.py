@@ -123,13 +123,11 @@ def _explore_zone(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) ->
     assert here is not None
     blocked, _ = _plan_blocked(w, m, policy, ctx)
     goal = "heal_explore"
+    frontier = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {here}, w.tick)
     edge = sorted(
         (chebyshev(here, p), p)
-        for p in w.view.frontier() - {here}
-        if standing_in_safe_zone(w, p)
-        and p not in blocked
-        and not hostiles_near(w, p, policy)
-        and not nav_stuck.backed_off(m, goal, w.map_id, p, w.tick)
+        for p in frontier
+        if standing_in_safe_zone(w, p) and p not in blocked and not hostiles_near(w, p, policy)
     )
     if edge:
         # Off-zone cells are walls for this walk, so it never steps out of the zone.

@@ -57,8 +57,16 @@ BACKOFF_BASE_TICKS = 300
 WALK, CAUTIOUS, BREAK, REVEAL, REVEALED, ALT_ROUTE = 0, 1, 2, 3, 4, 5
 
 # Goals that share one key per cell, so a frontier or door dropped under one
-# is skipped by the others (Explore's goals and Level's walks).
-SHARED_KEYS = {"explore": "frontier", "explore_area": "frontier", "level:frontier": "frontier", "level:door": "doors"}
+# is skipped by the others (Explore's goals, Level's walks, Heal's zone walk).
+# Every walk to a frontier cell must be registered here as "frontier", or a
+# cell one walk gave up on stays open to the others.
+SHARED_KEYS = {
+    "explore": "frontier",
+    "explore_area": "frontier",
+    "level:frontier": "frontier",
+    "level:door": "doors",
+    "heal_explore": "frontier",
+}
 FRONTIER_GOALS = frozenset(g for g, kind in SHARED_KEYS.items() if kind == "frontier")
 
 ATTEMPTS_KEPT = 32

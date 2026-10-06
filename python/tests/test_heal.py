@@ -392,6 +392,35 @@ class HealStateTest(unittest.TestCase):
         step = (out.intents[0]["x"], out.intents[0]["y"])
         self.assertEqual(step[0], 0, "never off the zone column")
 
+    def zone_column(self):
+        w = grid(at=(0, 2))
+        for y in range(5):
+            w.zones[7][(0, y)] = ZoneFact(safe=True)
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        return w, kb
+
+    def test_an_explore_backoff_on_a_zone_frontier_keeps_heal_off_it(self):
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w, kb = self.zone_column()
+        m = Memory()
+        for cell in ((0, 1), (0, 3)):
+            m.nav_stuck.backoff_until[nav_stuck.goal_key("explore", 7, cell)] = 10_000
+        out = dispatch(w, ctx(m, kb))
+        self.assertEqual(out.state, "Heal")
+        self.assertRegex(out.reason, r"heal_explore → \(0, [04]\)")  # the next edge cells, not the backed-off ones
+
+    def test_a_heal_backoff_on_a_frontier_keeps_explore_off_it(self):
+        from agentrealm_agent.navigation import stuck as nav_stuck
+        from agentrealm_agent.pathing import safe_explore_targets
+
+        w, _ = self.zone_column()
+        m = Memory()
+        m.nav_stuck.backoff_until[nav_stuck.goal_key("heal_explore", 7, (0, 1))] = 10_000
+        self.assertNotIn((0, 1), safe_explore_targets(w, m, Policy(kind="scripted")))
+        self.assertIn((0, 3), safe_explore_targets(w, m, Policy(kind="scripted")))
+
     def test_regen_absent_does_not_pull_to_safe_ground(self):
         # Once this run has measured no regen, Heal sends nothing anywhere:
         # the plan's executor (or the safe default) moves instead.

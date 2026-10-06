@@ -16,6 +16,7 @@ from ..pathing import grid_params, nav_search, next_step
 from ..survival import (
     LOSING_NAV,
     RETREAT_NAV,
+    hostile_reach,
     is_attacker,
     on_safe_tile,
     pursuer_peaks,
@@ -43,7 +44,8 @@ class RetreatState(State):
     It sends the whole path as one queue, as a walk does, and lets that
     queue run: a reflex replacing it every round trip got one step out of
     each queue (A16 Walk run 4). Its path weighs no danger from the hostiles
-    it runs from (``survival.pursuer_peaks``). When it is losing ground, it drinks or
+    it runs from (``survival.pursuer_peaks``) and goes round the reach of any
+    other known hostile (``survival.hostile_reach``). When it is losing ground, it drinks or
     eats what it carries, fights back a hitter its weapon has hurt and the
     win estimate says it beats, or else replans weighing no hostile at all
     (``retreat_step``)."""
@@ -98,12 +100,15 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
         return StateOutcome(None, f"retreat → safe {goal}: queue under way", state=state, wait=True)
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
     plan_avoid |= escape
-    params = dataclasses.replace(
-        grid_params(policy, plan_avoid, plan_costly), danger_peaks=pursuer_peaks(w, policy, everyone=losing)
-    )
+    pursuers = pursuer_peaks(w, policy, everyone=losing)
+    # Cells in reach of a hostile it is not running from cost a detour, and a
+    # kept path that now crosses one is planned again (A63 run 4).
+    reach = hostile_reach(w, policy, skip=pursuers)
+    plan_costly |= reach
+    params = dataclasses.replace(grid_params(policy, plan_avoid, plan_costly), danger_peaks=pursuers)
     # Each danger profile keeps its own corridor (``RETREAT_NAV``, ``LOSING_NAV``).
     nav_key = LOSING_NAV if losing else RETREAT_NAV
-    if m.goal != "safe" or not m.path or m.path[-1] != goal:
+    if m.goal != "safe" or not m.path or m.path[-1] != goal or not reach.isdisjoint(m.path):
         m.path = cost_path(w, goal, params, nav=nav_search(m, w, nav_key, goal)) or []
         m.goal = "safe"
     step = next_step(w, plan_avoid, m.path)

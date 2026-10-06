@@ -23,6 +23,7 @@ from .pathing import step_open
 from .poll_cadence import gate_tick_call, is_urgent
 from .states import PlayContext, dispatch
 from .states.intents import set_position, take, use_on, withdraw_all
+from .survival import hostile_reach, pursuer_peaks
 from .world import DOORS, Pos, WorldModel
 from .zone_discovery import next_zone_probe
 
@@ -32,6 +33,7 @@ __all__ = [
     "choose_call",
     "decide",
     "path_blockers",
+    "path_threats",
     "remaining_path_stale",
     "set_position",
     "take",
@@ -214,10 +216,27 @@ def path_blockers(w: WorldModel, m: Memory, policy: Policy, knowledge: Knowledge
     return out
 
 
-def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> bool:
-    """True when the rest of a held walk queue no longer matches the map (A43).
+def path_threats(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
+    """Cells the rest of the held walk queue steps onto within reach of a known
+    hostile (``survival.hostile_reach``), leaving out those we run from.
 
-    A cell that was already blocked when the queue was sent does not count:
-    the replan could not avoid it, so resending would only send it again.
+    Retreat's path weighs no danger from its pursuers (``pursuer_peaks``), and
+    they follow it anyway, so their reach never makes its queue stale.
     """
-    return bool(path_blockers(w, m, policy, knowledge) - m.path_blockers)
+    cells = remaining_walk_cells(w, m)
+    if not cells or not w.alive or policy.kind == "idle":
+        return set()
+    return set(cells) & hostile_reach(w, policy, skip=pursuer_peaks(w, policy))
+
+
+def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> bool:
+    """True when the rest of a held walk queue no longer matches the map (A43),
+    or now crosses a known hostile's reach (A63 run 4).
+
+    A cell that was already blocked, or in reach, when the queue was sent does
+    not count: the replan could not avoid it, so resending would only send it
+    again.
+    """
+    if path_blockers(w, m, policy, knowledge) - m.path_blockers:
+        return True
+    return bool(path_threats(w, m, policy) - m.path_threats)

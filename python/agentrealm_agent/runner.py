@@ -11,7 +11,17 @@ from dataclasses import dataclass
 
 from .break_memory import TRANSIENT_BREAK_REJECTIONS, record_attempt
 from .gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
-from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, remaining_walk_cells, walkable_prefix
+from .brain import (
+    Decision,
+    Memory,
+    choose_call,
+    decide,
+    path_blockers,
+    path_threats,
+    remaining_path_stale,
+    remaining_walk_cells,
+    walkable_prefix,
+)
 from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
 from .navigation.stuck import on_break_opened
@@ -740,10 +750,10 @@ class Runner:
             m.greetings = saved[6]  # Greet's hello waits for a decision window: a probe sends none (A65)
         m.nav = saved[2]
         m.nav_stuck = saved_stuck
-        if d.reflex and not self.held_step_matches(d):
+        if d.reflex and not self.held_queue_matches(d):
             return d
-        # No reflex, or one that walks where the held queue already steps:
-        # the held queue keeps running, so memory keeps its plan (A63 run 3).
+        # No reflex, or one that asks for what the held queue already does:
+        # the held queue keeps running, so memory keeps its plan (A63 runs 3, 4).
         m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
         self.rng.setstate(saved[3])
         return None
@@ -782,16 +792,29 @@ class Runner:
                 out.append(pos)
         return out
 
-    def held_step_matches(self, d: Decision) -> bool:
-        """``d`` walks to the cell the held queue's next Step already enters.
+    def held_queue_matches(self, d: Decision) -> bool:
+        """``d`` asks for what the held queue already does.
 
-        That queue may already have run the Step without its result reaching
-        us; re-aimed from the tracked position, a fresh Step would misaim, so
-        the held queue keeps running instead (A63 run 3)."""
-        if d.submit_queue is not None or d.intent is None or d.intent.get("verb") != "SetPosition":
+        A walk matches when it goes to the cell the held queue's next Step
+        already enters: that queue may already have run the Step without its
+        result reaching us, and a fresh Step re-aimed from the tracked
+        position would misaim (A63 run 3). Any other intent matches when it
+        is the held queue's remaining intents, Waits aside: a Pickup re-sending
+        the Take that is still held wasted 11 of 24 Takes (A63 run 4).
+        """
+        if d.submit_queue is None and d.intent is not None and d.intent.get("verb") == "SetPosition":
+            ahead = remaining_walk_cells(self.world, self.mem)
+            return bool(ahead) and ahead[0] == (d.intent["x"], d.intent["y"])
+        wanted = d.submit_queue if d.submit_queue is not None else [d.intent] if d.intent is not None else []
+        m = self.mem
+        if m.pending is not None:
+            held = [m.pending]
+        elif m.pending_intents is not None:
+            held = m.pending_intents[m.pending_next_index :]
+        else:
             return False
-        ahead = remaining_walk_cells(self.world, self.mem)
-        return bool(ahead) and ahead[0] == (d.intent["x"], d.intent["y"])
+        acts = [i for i in wanted if i.get("verb") != "Wait"]
+        return bool(acts) and acts == [i for i in held if i.get("verb") != "Wait"]
 
     def steps_land_clear(self, intents: list[dict], starts: list[Pos]) -> bool:
         """Every Step in ``intents`` lands on an open cell from each of ``starts``.
@@ -896,6 +919,7 @@ class Runner:
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
         m.path_blockers = path_blockers(w, m, self.cfg.policy, self.knowledge)
+        m.path_threats = path_threats(w, m, self.cfg.policy)
         return intents
 
     def heard_tick(self, tick) -> None:

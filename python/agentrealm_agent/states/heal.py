@@ -22,6 +22,7 @@ from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, hostiles_in_range, nav_search
+from ..survival import hostile_reach
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .break_state import break_toward
@@ -160,9 +161,12 @@ def _out(intents: list[dict] | None, reason: str) -> StateOutcome:
 
 
 def _plan_blocked(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> tuple[set[Pos], set[Pos]]:
+    """Heal's (avoid, costly): hazards are both; cells in a known hostile's
+    reach are costly, so a walk to food or safe ground goes round a pack
+    instead of through it (A63 run 4)."""
     nav_avoid, nav_costly = navigation_avoid_costly(m.nav, ctx.knowledge, w.map_id, w.tick)
     hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
-    return nav_avoid | hazards, nav_costly | hazards
+    return nav_avoid | hazards, nav_costly | hazards | hostile_reach(w, policy)
 
 
 def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *, goal: str) -> StateOutcome | None:
@@ -179,10 +183,15 @@ def _walk_toward(
 
     The walk is bounded like any other (``bounded_step``, A15): no path, or
     no progress in its window, gives ``at`` up with a backoff, so Heal tries
-    the next food, a carried supply or a safe tile instead of pacing.
+    the next food, a carried supply or a safe tile instead of pacing. A kept
+    path that now crosses a known hostile's reach is planned again.
     """
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)
     plan_avoid = plan_avoid | avoid
+    if m.goal == goal and not hostile_reach(w, policy).isdisjoint(m.path):
+        # A hostile seen since the path was planned stands in reach of it: plan
+        # again on the grid that prices its reach (A63 run 4).
+        m.path = []
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly)

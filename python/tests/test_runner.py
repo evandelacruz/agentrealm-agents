@@ -658,6 +658,48 @@ class RunnerTest(unittest.TestCase):
             self.assertIsNone(fake.sent[-1][0])
         self.assertFalse(r.mem.resend_held_queue)
 
+    def test_a_known_pack_in_reach_of_a_held_heal_walk_replans_it(self):
+        # A63 run 4: Heal's 10-Step queue to the safe tile walked on into a
+        # pack of known hostiles seen after it was sent. A known hostile now in
+        # reach of the rest of the walk, though not on it, replans the walk
+        # round that reach.
+        from agentrealm_agent.world import ZoneFact
+
+        fake = FakeClient([{"tick": 10 + i, "window_remaining_ms": 0} for i in range(3)])
+        r = self.runner(fake, Policy(goals=[], pickup=False))
+        w = r.world
+        for x in range(-1, 11):
+            for y in range(-1, 7):
+                w.view.tiles[(x, y)] = "wall" if x in (-1, 10) or y in (-1, 6) else "dirt"
+        w.health, w.max_health = 5, 10
+        w.zones[7] = {(9, 0): ZoneFact(safe=True), (0, 0): ZoneFact(safe=False)}
+        w.hostile_types.add(("npc", "wartlurch"))
+        r.tick()
+        self.assertEqual(r.mem.state, "Heal")
+        self.assertIn((5, 0), self._walk_cells((0, 0), fake.sent[0][0]))
+        fake.entities = lambda cid, map_id, *rect: {"tick": 10, "npcs": [
+            {"id": 9, "x": 5, "y": 2, "npc_type_code": "wartlurch"}]}
+        r.step("entities")
+        resent = self._resend(r, fake)
+        self.assertEqual(resent[0]["verb"], "Step")
+        cells = self._walk_cells((0, 0), resent)
+        reach = r.cfg.policy.hostile_range
+        self.assertTrue(all(max(abs(x - 5), abs(y - 2)) > reach for x, y in cells), cells)
+
+    def test_a_hostile_already_in_reach_when_sent_does_not_resend(self):
+        # The walk could not go round it, so a resend would only send it again.
+        fake = FakeClient([{"tick": 10 + i, "window_remaining_ms": 0} for i in range(2)])
+        r = self.runner(fake, Policy(goals=[], pickup=False, on_hostile="ignore"))
+        r.world.hostile_types.add(("npc", "wartlurch"))
+        r.world.entities = [Entity("npc", 9, (4, 2), "wartlurch")]  # in reach of the end of the only row
+        r.mem.path = [(1, 0), (2, 0), (3, 0), (4, 0)]
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(set_position((1, 0)), "walk")):
+            r.tick()
+        self.assertEqual(self._walk_cells((0, 0), fake.sent[0][0])[-1], (4, 0))
+        self.assertTrue(r.mem.path_threats)
+        r.note_held_path_stale()
+        self.assertFalse(r.mem.resend_held_queue)
+
     def test_blocker_already_on_the_queue_when_sent_does_not_resend(self):
         fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
         r = self._goto_held(fake)
@@ -821,6 +863,36 @@ class RunnerTest(unittest.TestCase):
             r.tick()
             self.assertEqual(fake.sent[3][0], [take(9)], "decided again only after it ran")
         self.assertFalse(r.mem.need_position, "a Take moved nothing")
+
+    def test_pickup_does_not_resend_the_take_it_holds(self):
+        # A63 run 4: 11 of 24 Takes were repeats. Pickup is a reflex, so it
+        # fired on every round trip while its Take was held and replaced it.
+        applied = {"tick": 12, "queue_id": "q1", "index": 0, "outcome": "applied"}
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+            {"tick": 12, "window_remaining_ms": 0, "intent_results": [applied],
+             "finished_queue": {"queue_id": "q1", "length": 1}},
+        ])
+        r = self.runner(fake, Policy(goals=[], pickup=True))
+        r.world.entities = [Entity("supply", 5, (0, 1))]
+        r.tick()
+        self.assertEqual(fake.sent[0][0], [take(5)])
+        r.tick()
+        self.assertIsNone(fake.sent[1][0], "the held Take is not sent again")
+        self.assertEqual(r.mem.pending_queue, "q1")
+        r.tick()
+        self.assertIsNone(fake.sent[2][0])
+        self.assertIsNone(r.mem.held_queue, "its result and finished_queue end the hold")
+
+    def test_a_different_reflex_intent_still_replaces_a_held_take(self):
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}, {"tick": 11, "window_remaining_ms": 0}])
+        r = self.runner(fake, Policy(goals=[], pickup=True))
+        r.world.entities = [Entity("supply", 5, (0, 1))]
+        r.tick()
+        r.world.entities = [Entity("supply", 6, (1, 1))]
+        r.tick()
+        self.assertEqual(fake.sent[1][0], [take(6)], "another supply is another intent")
 
 
 class NeverAttackRunnerTest(RunnerTest):

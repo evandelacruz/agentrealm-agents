@@ -194,6 +194,27 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(out.state, "Heal")
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 1}])
 
+    def test_walk_to_safe_goes_round_a_known_pack_seen_since_it_was_planned(self):
+        """A63 run 4: Heal's walk to the safe tile kept the path it planned and
+        sent a 10-Step queue into a pack of known-hostile NPCs."""
+        from agentrealm_agent.navigation import walk as nav_walk
+        from agentrealm_agent.survival import hostile_reach
+
+        w, m = grid(at=(11, 0), size=12), Memory()
+        for i in range(-1, 13):  # walled in: no way round through fog
+            for cell in ((i, -1), (i, 12), (-1, i), (12, i)):
+                w.view.tiles[cell] = "wall"
+        straight = [(x, 0) for x in range(10, -1, -1)]
+        m.path, m.goal = list(straight), "heal_measure"
+        m.walks["heal_measure"] = nav_walk.start(w, "heal_measure", (0, 0), straight)
+        w.hostile_types.add(("npc", "wartlurch"))
+        w.entities = [Entity("npc", 20 + i, p, "wartlurch") for i, p in enumerate([(5, 0), (5, 1), (6, 0)])]
+        c = ctx(m)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Heal")
+        self.assertEqual(m.path[-1], (0, 0))
+        self.assertTrue(hostile_reach(w, c.policy).isdisjoint(m.path), m.path)
+
     def test_no_safe_tile_yields_to_the_safe_default(self):
         w = grid(at=(2, 2))
         w.zones[7] = {}

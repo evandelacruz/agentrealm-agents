@@ -67,6 +67,7 @@ class Memory:
     hurt_last_poll: bool = False  # the last poll's events carried Damaged
     resend_held_queue: bool = False  # replace the held walk queue on the next poll (A43)
     path_blockers: set = field(default_factory=set)  # blocked cells the walk queue already crossed when sent (A43)
+    path_threats: set = field(default_factory=set)  # cells in a hostile's reach the walk queue already crossed when sent (A63)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     hunt_search: HuntSearch | None = None  # Travel's search for a hunting ground when none is known (A27)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)

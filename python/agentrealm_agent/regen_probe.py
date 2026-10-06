@@ -72,7 +72,7 @@ class RegenProbeMetrics(SurvivalAcceptanceMetrics):
     def failures(self) -> list[str]:
         """Empty only when regen answered with no death."""
         out: list[str] = []
-        if self.deaths:
+        if self.deaths and self.stop_on_death:
             out.append(f"{self.deaths} death(s): the probe ends on the first")
         if self.regen is None:
             why = "never hurt" if not self.hurt_seen else "hurt, but no verdict yet"

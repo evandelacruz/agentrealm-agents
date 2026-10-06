@@ -181,7 +181,7 @@ def _cell_on_path_blocked(w: WorldModel, avoid: set[Pos], p: Pos) -> bool:
     return p in w.occupied()
 
 
-def _remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
+def remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
     """Tiles the held walk queue still steps onto, from tracked position.
 
     Only the queue on the server counts: the plan past its horizon is
@@ -202,7 +202,7 @@ def _remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
 
 def path_blockers(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> set[Pos]:
     """Cells the rest of the held walk queue steps onto that are not open now."""
-    cells = _remaining_walk_cells(w, m)
+    cells = remaining_walk_cells(w, m)
     if not cells or not w.alive or policy.kind == "idle":
         return set()
     avoid = _plan_avoid(w, m, policy, knowledge)

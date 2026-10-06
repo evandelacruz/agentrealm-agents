@@ -23,7 +23,7 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, planner_for, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, STOP_ON_DEATH_HELP, planner_for, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.m10_acceptance import FULL_RUN_FRACTION, TARGET_SECONDS, M10AcceptanceMetrics  # noqa: E402
@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     ap.add_argument("--no-planner", action="store_true", help=NO_PLANNER_HELP)
+    ap.add_argument("--stop-on-death", action="store_true", help=STOP_ON_DEATH_HELP)
     ap.add_argument(
         "--seconds",
         type=float,
@@ -100,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         f"→ {args.seconds:.0f}s explore, base {args.base_url}",
         flush=True,
     )
-    metrics = M10AcceptanceMetrics(target_seconds=args.seconds)
+    metrics = M10AcceptanceMetrics(stop_on_death=args.stop_on_death, target_seconds=args.seconds)
 
     def out(line: str) -> None:
         print(line, flush=True)
@@ -115,8 +116,10 @@ def main(argv: list[str] | None = None) -> int:
         failures.append(f"ran {elapsed:.0f}s < target {args.seconds:.0f}s")
     try:
         alive = client.self_(cid).get("alive", True)
-        if not alive:
+        if not alive and args.stop_on_death:
             failures.append("character not alive at end")
+        elif not alive:
+            print("character not alive at end (respawning)", flush=True)
     except ApiError as e:
         failures.append(f"self read failed: {e.code}")
     if failures:

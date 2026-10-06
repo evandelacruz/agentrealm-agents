@@ -58,8 +58,10 @@ MAX_RECORDS = 500  # cut records kept per map; region totals are kept in full
 REGROW_TICKS = 600
 CUT_BLOCKS = BREAKABLE | {"grass"}  # blocks a cut or break is recorded on
 GATHER_BLOCKS = frozenset({"grass", "bush"})  # the cuts the region yield counts
-SUMMARY_RADIUS = 3  # regions this far (Chebyshev, in regions) from ours are "nearby"
-SUMMARY_BEST = 3  # best regions shown to the planner
+SUMMARY_RADIUS = 3  # barren regions this far (Chebyshev, in regions) from ours are shown
+# Best regions shown to the planner, at any distance: walking out of range of
+# the one productive region must not hide it (A63 run 3).
+SUMMARY_BEST = 3
 # This many no-effect cuts in one region, or one safe zone, mark it uncuttable.
 NO_EFFECT_ZONE_CUTS = 3
 MAX_NO_EFFECT = 500  # no-effect cuts remembered, oldest dropped first
@@ -122,6 +124,7 @@ class GemYieldTracker:
     # The latest no-effect cut (map_id, cell, tick), cleared by a cut that takes effect.
     last_no_effect: tuple[int, Pos, int] | None = None
     gems_gained: int = 0  # rises of the gem counter this run, spending not taken off
+    last_cut_tick: int | None = None  # tick of this run's latest cut that took effect: Gather's stall clock
 
     def note_cut(self, w: WorldModel, pos: Pos, block: str, tick: int, *, took: bool = False) -> None:
         """Our ``Use`` on ``pos`` applied while it showed ``block``. ``took``: a
@@ -132,6 +135,7 @@ class GemYieldTracker:
         if block in GATHER_BLOCKS:
             self.cuts += 1
             self.last_no_effect = None
+            self.last_cut_tick = tick
         self.pending.append(
             PendingCut(w.map_id, pos, block, tick, w.gems, {gid for gid, _ in _ground_gems(w)}, took=took)
         )
@@ -342,13 +346,22 @@ def _parse(key: str) -> tuple[int, int] | None:
     return rx, ry
 
 
+def blocks_to_region(pos: Pos, region: tuple[int, int]) -> int:
+    """Chebyshev blocks from ``pos`` to the nearest block of ``region`` (0 inside it)."""
+    x0, y0 = region[0] * REGION_SIZE, region[1] * REGION_SIZE
+    dx = max(x0 - pos[0], 0, pos[0] - (x0 + REGION_SIZE - 1))
+    dy = max(y0 - pos[1], 0, pos[1] - (y0 + REGION_SIZE - 1))
+    return max(dx, dy)
+
+
 def summary(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, Any]:
-    """The planner's ``gem_yield``: the best sampled regions near us and the barren ones.
+    """The planner's ``gem_yield``: the best sampled regions, at any distance,
+    and the barren ones near us.
 
     A region is named by its corner block ``x, y`` (``REGION_SIZE`` on a side),
-    so a ``gather_gems`` op can name it back. ``here`` is the region we stand
-    in, shown only once our cuts sampled it: an unsampled region has nothing
-    to name.
+    so a ``gather_gems`` op can name it back; a best region also carries its
+    ``distance`` in blocks. ``here`` is the region we stand in, shown only once
+    our cuts sampled it: an unsampled region has nothing to name.
     """
     if w.pos is None or w.map_id is None:
         return {}
@@ -358,17 +371,19 @@ def summary(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, Any]:
     sampled_here: dict[str, int] | None = None
     for key, region in regions(kb, w.map_id).items():
         r = _parse(key)
-        if r is None or chebyshev(r, here) > SUMMARY_RADIUS:
+        if r is None:
             continue
         cuts, gems = int(region.get("cuts", 0)), int(region.get("gems", 0))
         corner = {"x": r[0] * REGION_SIZE, "y": r[1] * REGION_SIZE}
         if r == here and cuts:
             sampled_here = {**corner, "cuts": cuts, "gems": gems}
         if barren(region):
-            dry.append({**corner, "cuts": cuts})
+            if chebyshev(r, here) <= SUMMARY_RADIUS:
+                dry.append({**corner, "cuts": cuts})
         elif cuts and gems:
-            entry = {**corner, "cuts": cuts, "gems": gems, "yield": round(gems / cuts, 2)}
-            best.append((gems / cuts, -chebyshev(r, here), entry))
+            distance = blocks_to_region(w.pos, r)
+            entry = {**corner, "cuts": cuts, "gems": gems, "yield": round(gems / cuts, 2), "distance": distance}
+            best.append((gems / cuts, -distance, entry))
     best.sort(key=lambda t: (t[0], t[1]), reverse=True)
     out: dict[str, Any] = {"region_size": REGION_SIZE}
     if sampled_here is not None:

@@ -13,20 +13,25 @@ effect, and regions or safe zones where cuts keep having none
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Callable, Iterable
 
 from ..config import Policy
+from ..directives import attack_forbidden
+from ..executor import DEFAULT_TICK_RATE_HZ
 from ..gem_yield import GemYieldTracker, barren_regions, exhausted_cells, region_of
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
+from ..survival import is_attacker, recently_attacked, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets, safe_default
-from .gather_safe import gather_ground
+from .fight import engage
+from .gather_safe import GATHER_HOSTILE_RADIUS, gather_ground
 from .intents import set_position, take, use_block
 
 # Authored gem piles spawn as ground supplies (Obs, GAME_NOTES.md Gems).
@@ -38,15 +43,30 @@ GEM_PILE_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
 BUSH_REACH = 1
 GOAL = "gather"
 OUT = "out"  # ``m.gather_target`` kind: walking off safe ground to field ground or the frontier
+OFF = "off"  # ``m.gather_target`` kind: moving off from a hostile that shadows us
 # Known targets tried per replan, nearest first: bounds the searches when the
 # closest ones turn out unreachable (across water, say).
 GATHER_CANDIDATES = 16
+# A hostile within GATHER_HOSTILE_RADIUS this long without hitting us is
+# shadowing us: Gather fights it or moves well off (A63 run 3, 40 s of it).
+SHADOW_SECONDS = 15
+# Moving off goes to cells at least this far from the shadowing hostile, in one walk.
+MOVE_OFF_DISTANCE = 2 * GATHER_HOSTILE_RADIUS
+# No cut that took effect for this long is a stall, said in ``gather_status``.
+STALL_SECONDS = 30
 # Gather's last decision, for the planner's State (``Memory.gather_status``).
 CUTTING = "cutting"
+TAKING = "taking a gem"
+WALKING = "walking to {}"  # grass, a bush, a gem pile
 NO_EFFECT = "cuts have no effect here"
 HEADING_OUT = "heading out of safe ground"
 NONE_CUTTABLE = "no cuttable cell in view"
 REGION_BARREN = "region barren"
+BLOCKED = "blocked by hostile"
+MOVING_OFF = "moving off from a hostile that shadows"
+FIGHTING = "fighting a hostile that shadows"
+STALLED = "{}, no cut for {} s"
+WALK_TARGETS = {"grass": "grass", "bush": "a bush", "pile": "a gem pile"}
 
 
 class GatherState(State):
@@ -56,7 +76,11 @@ class GatherState(State):
     Grass and bushes in a barren region (unless the op names it), or where
     cuts had no effect, are skipped. On safe ground with nothing to cut, it
     heads out to field ground or the frontier;
-    with nowhere to head, it explores (the safe default) to reveal more."""
+    with nowhere to head, it explores (the safe default) to reveal more.
+
+    A hostile that stays near for ``SHADOW_SECONDS`` without hitting us is
+    fought when ``on_hostile = fight`` and the win estimate passes, else
+    Gather moves well off from it in one walk (A63 run 3)."""
 
     name = "Gather"
 
@@ -70,12 +94,60 @@ class GatherState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         op = my_op(ctx, self.name)
-        out = gather_outcome(world, ctx.memory, ctx.policy, knowledge=ctx.knowledge, op=op, gem_cuts=ctx.gem_cuts)
+        m = ctx.memory
+        tick_hz = ctx.plan.tick_hz if ctx.plan is not None else DEFAULT_TICK_RATE_HZ
+        shadow = shadowing_hostile(world, m, ctx.policy, tick_hz)
+        if shadow is not None:
+            fight = fight_shadow(world, ctx, shadow)
+            if fight is not None:
+                m.gather_status = FIGHTING
+                return fight
+        out = gather_outcome(
+            world, m, ctx.policy, knowledge=ctx.knowledge, op=op, gem_cuts=ctx.gem_cuts, shadow=shadow, tick_hz=tick_hz
+        )
         if out.intents is not None:
             return out
         out = safe_default(world, ctx)
         out.state, out.reason = self.name, f"look for gems: {out.reason}"
         return out
+
+
+def shadowing_hostile(w: WorldModel, m: Memory, policy: Policy, tick_hz: int) -> Entity | None:
+    """The hostile that has stayed within ``GATHER_HOSTILE_RADIUS`` of us for
+    ``SHADOW_SECONDS`` without hitting us, else None (A63 run 3).
+
+    Tracks one hostile at a time in ``m.gather_shadow``: the nearest, until it
+    leaves the radius. One that hit us is the survival states' to handle.
+    """
+    here = w.pos
+    if here is None:
+        return None
+    near = {e.id: e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= GATHER_HOSTILE_RADIUS}
+    if m.gather_shadow is None or m.gather_shadow[0] not in near:
+        nearest = min(near.values(), key=lambda e: (chebyshev(e.pos, here), e.id), default=None)
+        m.gather_shadow = (nearest.id, w.tick) if nearest is not None else None
+        return None
+    e = near[m.gather_shadow[0]]
+    if recently_attacked(w) and is_attacker(w, e):
+        return None
+    return e if w.tick - m.gather_shadow[1] >= SHADOW_SECONDS * tick_hz else None
+
+
+def fight_shadow(w: WorldModel, ctx: PlayContext, e: Entity) -> StateOutcome | None:
+    """Close on and swing at the shadowing ``e`` when ``on_hostile = fight``,
+    it may be attacked, and the win estimate (counting it as in range) passes;
+    else None."""
+    policy = ctx.policy
+    if policy.on_hostile != "fight" or attack_forbidden(e, ctx.never_attack) or w.pos is None:
+        return None
+    in_range = dataclasses.replace(policy, hostile_range=max(policy.hostile_range, chebyshev(w.pos, e.pos)))
+    if would_lose(w, in_range, ctx.params):
+        return None
+    out = engage(w, ctx, e, GatherState.name)
+    if not out.intents:
+        return None
+    out.reason = f"{e.kind} {e.id} shadows us: {out.reason}"
+    return out
 
 
 def is_gem_pile(e: Entity) -> bool:
@@ -96,15 +168,24 @@ def gather_outcome(
     op: GoalOp | None = None,
     gem_cuts: GemYieldTracker | None = None,
     state: str = "Gather",
+    shadow: Entity | None = None,
+    tick_hz: int = DEFAULT_TICK_RATE_HZ,
 ) -> StateOutcome:
     """Gather's move this decision, or no intents with nothing to work.
 
+    ``shadow`` is a hostile that shadows us (``shadowing_hostile``): Gather
+    walks to ground ``MOVE_OFF_DISTANCE`` from it before anything else.
+
     Sets ``m.gather_status`` from results, not intents alone. With intents:
-    ``HEADING_OUT`` when walking off safe ground; ``CUTTING`` for a pile
-    ``Take`` or walk; else ``NO_EFFECT`` when standing where cuts are known
-    not to work, or the latest cut had no effect in this region and none
-    worked since; else ``CUTTING``. With none, ``REGION_BARREN`` when
-    standing in a skipped barren region, else ``NONE_CUTTABLE``.
+    ``HEADING_OUT`` when walking off safe ground; ``MOVING_OFF`` when moving
+    off from ``shadow``; ``TAKING`` for a pile ``Take``, ``WALKING`` to a
+    pile; else ``NO_EFFECT`` when standing where cuts are known not to work,
+    or the latest cut had no effect in this region and none worked since;
+    else ``WALKING`` and the target for any other walk; else ``CUTTING``.
+    With none, ``BLOCKED`` when known grass or a bush is barred only by a
+    hostile near it, ``REGION_BARREN`` when standing in a skipped barren
+    region, else ``NONE_CUTTABLE``. Any status but ``CUTTING`` adds how long
+    it has been when no cut has taken effect for ``STALL_SECONDS`` (``STALLED``).
     """
     here = w.pos
     if here is None:
@@ -113,20 +194,59 @@ def gather_outcome(
     safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
     dead_regions, dead_cells = gem_cuts.uncuttable(w, safe) if gem_cuts is not None else (set(), set())
     exhausted = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | dead_cells
-    out = _gather_step(w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state)
+    out = _gather_step(w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state, shadow)
+    walk = m.gather_target[0] if m.gather_target is not None and m.goal == GOAL else None
     if out.intents is None:
-        m.gather_status = REGION_BARREN if region_of(here) in skip else NONE_CUTTABLE
-    elif out.intents[0].get("verb") == "SetPosition" and m.gather_target is not None and m.gather_target[0] == OUT:
+        if _barred_by_hostile(w, policy, skip | dead_regions, exhausted):
+            m.gather_status = BLOCKED
+        else:
+            m.gather_status = REGION_BARREN if region_of(here) in skip else NONE_CUTTABLE
+    elif out.intents[0].get("verb") == "SetPosition" and walk == OUT:
         m.gather_status = HEADING_OUT
-    elif out.intents[0].get("verb") == "Take" or (m.gather_target is not None and m.gather_target[0] == "pile"):
-        m.gather_status = CUTTING
+    elif out.intents[0].get("verb") == "SetPosition" and walk == OFF:
+        m.gather_status = MOVING_OFF
+    elif out.intents[0].get("verb") == "Take":
+        m.gather_status = TAKING
+    elif walk == "pile":
+        m.gather_status = WALKING.format(WALK_TARGETS["pile"])
     elif here in dead_cells or region_of(here) in dead_regions or (
         gem_cuts is not None and gem_cuts.no_effect_near(w.map_id, here, w.tick)
     ):
         m.gather_status = NO_EFFECT
+    elif out.intents[0].get("verb") == "SetPosition":
+        m.gather_status = WALKING.format(WALK_TARGETS.get(walk or "", "a cell to cut"))
     else:
         m.gather_status = CUTTING
+    idle = _seconds_without_cut(w, m, gem_cuts, tick_hz)
+    if m.gather_status != CUTTING and idle >= STALL_SECONDS:
+        m.gather_status = STALLED.format(m.gather_status, idle)
     return out
+
+
+def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | None, tick_hz: int) -> int:
+    """Seconds since the latest cut that took effect, or since this spell of
+    Gather began when later. A gap of ``STALL_SECONDS`` between two Gather
+    decisions (another op or state ran) starts a new spell."""
+    since, seen = m.gather_spell or (w.tick, w.tick)
+    if w.tick - seen >= STALL_SECONDS * tick_hz:
+        since = w.tick
+    m.gather_spell = (since, w.tick)
+    last_cut = gem_cuts.last_cut_tick if gem_cuts is not None and gem_cuts.last_cut_tick is not None else since
+    return max(0, w.tick - max(since, last_cut)) // max(1, tick_hz)
+
+
+def _barred_by_hostile(w: WorldModel, policy: Policy, skip: set[tuple[int, int]], exhausted: set[Pos]) -> bool:
+    """Known grass or a bush Gather would cut, but for a hostile near it."""
+    if not any(e.kind in policy.hostile for e in w.entities):
+        return False
+    return any(
+        block in ("grass", "bush")
+        and p not in exhausted
+        and region_of(p) not in skip
+        and block not in policy.avoid_blocks
+        and not gather_ground(w, p, policy)
+        for p, block in w.view.tiles.items()
+    )
 
 
 def _gather_step(
@@ -139,6 +259,7 @@ def _gather_step(
     safe: set[Pos],
     knowledge: KnowledgeBase | None,
     state: str,
+    shadow: Entity | None = None,
 ) -> StateOutcome:
     view = w.view
     cuttable = {
@@ -150,6 +271,10 @@ def _gather_step(
     preferred = {p for p in cuttable if p not in safe} or cuttable
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
+    if shadow is not None:
+        off = _move_off(w, m, policy, shadow, plan_avoid, plan_costly, preferred, state)
+        if off is not None:
+            return off
     piles = [e for e in w.entities if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and gather_ground(w, e.pos, policy)]
     if piles:
         _end_walk_out(m)
@@ -177,6 +302,41 @@ def _gather_step(
         return StateOutcome([set_position(step)], f"gather → {m.path[-1]}", state=state)
 
     return StateOutcome(None, "no gather target", state=state)
+
+
+def _move_off(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    shadow: Entity,
+    blocked: set[Pos],
+    costly: set[Pos],
+    preferred: set[Pos],
+    state: str,
+) -> StateOutcome | None:
+    """One step of a single walk to ground ``MOVE_OFF_DISTANCE`` from ``shadow``,
+    grass there first, rather than inching to the nearest cell it does not
+    cover (A63 run 3). None once there, or with nowhere to go: the shadow's
+    clock restarts and Gather carries on.
+    """
+    here = w.pos
+    assert here is not None
+    if not (m.goal == GOAL and m.gather_target is not None and m.gather_target[0] == OFF):
+        m.path, m.goal, m.gather_target = [], "", None
+        params = grid_params(policy, blocked, costly)
+        far = {p for p in w.view.tiles if chebyshev(p, shadow.pos) >= MOVE_OFF_DISTANCE and w.view.walkable(p) and p not in blocked}
+        for cells in ({p for p in far if p in preferred}, far):
+            found = nearest_target(w, _nearest(here, cells), params) if cells else None
+            if found and next_step(w, blocked, found[1]):
+                m.path, m.goal, m.gather_target = found[1], GOAL, (OFF, found[0])
+                break
+    step = next_step(w, blocked, m.path) if m.goal == GOAL else None
+    if step is None or m.gather_target is None or m.gather_target[0] != OFF:
+        if m.goal == GOAL:
+            m.path, m.goal, m.gather_target = [], "", None
+        m.gather_shadow = None
+        return None
+    return StateOutcome([set_position(step)], f"move off {shadow.kind} {shadow.id} → {m.path[-1]}", state=state)
 
 
 def _end_walk_out(m: Memory) -> None:

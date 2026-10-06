@@ -16,6 +16,7 @@ from .strategist import Strategist
 
 DEFAULT_BASE = "https://api.agentrealm.gg"
 NO_PLANNER_HELP = "test mode: play without the AI planner (A35)"
+STOP_ON_DEATH_HELP = "fail the run and end it at the first death; by default deaths are counted and reported and play goes on after the respawn"
 
 
 def planner_for(no_planner: bool) -> Strategist:

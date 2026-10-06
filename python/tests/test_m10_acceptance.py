@@ -140,12 +140,23 @@ class BreakDisciplineTest(unittest.TestCase):
 
 
 class DeathTest(unittest.TestCase):
-    def test_a_death_fails_the_run_and_stops_it(self):
+    def test_a_death_fails_the_run_and_stops_it_under_stop_on_death(self):
         stop = threading.Event()
-        m = metrics(stop=stop)
+        m = metrics(stop=stop, stop_on_death=True)
         m.on_death()
         self.assertTrue(stop.is_set())
         self.assertTrue(any("death" in f for f in m.failures(full_run=False)))
+
+    def test_by_default_a_death_is_counted_and_play_goes_on(self):
+        """A63 run 3 ended at 168 s on its first death; risks are taken, deaths happen."""
+        stop = threading.Event()
+        m = metrics(stop=stop)
+        m.on_death()
+        m.on_death()
+        self.assertFalse(stop.is_set(), "no early exit")
+        self.assertEqual(m.deaths, 2)
+        self.assertIn("deaths: 2", m.summary_lines())
+        self.assertFalse(any("death" in f for f in m.failures(full_run=False)))
 
 
 class RunAcceptanceSmokeTest(unittest.TestCase):

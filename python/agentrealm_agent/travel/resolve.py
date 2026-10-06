@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from ..knowledge_base import KnowledgeBase
 from ..world import Pos, WorldModel, chebyshev
 from .knowledge import entrance_from_kb, iter_hunting_cells, iter_shop_cells, town_from_kb
-from .ops import TravelOp
+from .ops import TravelOp, travel_op_from_plan_goal
 from .strength import StrengthBracket
 
 
@@ -95,6 +95,20 @@ def _resolve_hunting(
     else:
         pick = min(tier, key=lambda t: (0 if t[0] == w.map_id else 1, chebyshev(here, t[1]), t))
     return ResolvedDestination(pick[0], pick[1], "hunting_ground")
+
+
+def travel_dest(
+    op: dict, w: WorldModel, kb: KnowledgeBase | None, bracket: StrengthBracket
+) -> tuple[int, Pos] | None:
+    """The map and cell a plan ``travel`` op walks to now, whatever its
+    ``to``, or None for any other op and for one that does not resolve
+    (an ``entrance`` at ``0, 0`` walks to the nearest unexplored door, which
+    changes as doors are explored). Stuck detection's Travel give-ups are
+    matched against this (A16)."""
+    if op.get("op") != "travel":
+        return None
+    dest = resolve_travel(travel_op_from_plan_goal(op), w, kb, bracket)
+    return (dest.map_id, dest.pos) if dest is not None else None
 
 
 def at_destination(w: WorldModel, dest: ResolvedDestination) -> bool:

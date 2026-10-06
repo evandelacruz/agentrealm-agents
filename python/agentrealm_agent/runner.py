@@ -37,7 +37,7 @@ from .equip import note_equip_result, sync_refusals
 from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
 from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, self_use_code
 from .shop import note_shop_result
-from .travel.ops import point_dest
+from .travel.resolve import travel_dest
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.strength import loadout_key
 from .executor import (
@@ -171,12 +171,13 @@ class Runner:
             op = parse_directives_goal(goal)
             if op is None:
                 continue
-            if any(same_ops([op], [e]) for e in ended) or point_dest(op, self.world.map_id) in given_up:
+            if any(same_ops([op], [e]) for e in ended) or self.travel_dest(op) in given_up:
                 self.directives.unpin(goal)
 
     def drop_given_up_ops(self) -> None:
-        """A ``travel`` op to a point stuck detection gave up on leaves the
-        stack for good, wherever it sits (A16): a directives op, or a planner
+        """A ``travel`` op whose destination stuck detection gave up on, by
+        the cell it resolves to whatever its ``to``, leaves the stack for
+        good, wherever it sits (A16): a directives op, or a planner
         op sent before the give-up. Otherwise the backoff's end walks it
         again, and every planner reply keeps a directives op on top. Its
         ``goal_failed`` signal unpins it. A planner reply that re-sends one
@@ -187,11 +188,15 @@ class Runner:
             return
         head = self.plan.current()
         self.plan.drop_ops(
-            lambda op: point_dest(op, self.world.map_id) in given_up, "stuck detection gave up on its target", self.mem
+            lambda op: self.travel_dest(op) in given_up, "stuck detection gave up on its target", self.mem
         )
         if self.plan.current() is not head:
             self.mem.path, self.mem.goal, self.mem.goal_op = [], "", None
             self.mem.walks.clear()
+
+    def travel_dest(self, op: dict) -> tuple[int, tuple[int, int]] | None:
+        """Where a ``travel`` op walks to now (``travel.resolve.travel_dest``)."""
+        return travel_dest(op, self.world, self.knowledge, self.mem.strength)
 
     def reload_directives(self, old_goals: list[str]) -> None:
         """Apply reloaded directives to the plan (A34).

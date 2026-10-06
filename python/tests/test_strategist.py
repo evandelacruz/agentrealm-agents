@@ -331,6 +331,13 @@ class AnswerTest(unittest.TestCase):
         self.assertEqual(s.inbox, [], "no new trigger, so no new call")
         self.assertIsNone(s.in_flight)
 
+    def test_a_resent_given_up_shop_is_filtered_whatever_its_to(self):
+        shop = {"op": "travel", "to": "shop", "x": 5, "y": 6}
+        s, r = make(FakeLLM({"goals": [shop, WAIT_ANSWER["goals"][0]]})), fake_runner()
+        r.mem.nav_stuck.given_up_travel[(7, (5, 6))] = 1
+        round_trip(s, r)
+        self.assertEqual([g["op"] for g in r.plan.goals[r.plan.index :]], ["wait"])
+
     def test_directives_goals_override_the_planner(self):
         # Directives ops stay on top; the planner's goals go below them.
         s, r = make(FakeLLM(WAIT_ANSWER)), fake_runner(goals=["gather_gems:5"])

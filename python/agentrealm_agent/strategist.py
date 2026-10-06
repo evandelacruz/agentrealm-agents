@@ -89,10 +89,10 @@ import urllib.error
 import urllib.request
 from collections import Counter, deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Protocol
+from typing import Any, Callable, Collection, Protocol
 
 from .directives import Directives
-from .travel.ops import point_dest
+from .travel.resolve import travel_dest
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .planner_reference import game_notes_text, reference_text
@@ -145,7 +145,7 @@ Reply with one JSON object only, no markdown, with these keys:
 Each goal is an object with "op" and that op's fields; every op may also carry "why". These are the only ops (anything else is dropped):
 {_op_table()}
 
-State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel to a point listed under given_up_travel: stuck detection gave up on it this run.
+State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel, of any kind, whose destination is a cell listed under given_up_travel: stuck detection gave up on it this run.
 
 "wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game.
 
@@ -476,7 +476,7 @@ def build_prompt(
     directives: Directives,
     knowledge: KnowledgeBase | None,
     reference_sections: str = "",
-    given_up_travel: Iterable[tuple[int | None, tuple[int, int]]] = (),
+    given_up_travel: Collection[tuple[int, tuple[int, int]]] = (),
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -495,7 +495,7 @@ def build_prompt(
     state_lines.append("stack (top first):" + "".join(f"\n  {line}" for line in lines) if lines else "stack: (empty)")
     if given_up_travel:
         cells = [f"{mid}:{x},{y}" for mid, (x, y) in sorted(given_up_travel, key=str)]
-        state_lines.append(f"given_up_travel={json.dumps(cells)} (never travel to these again this run)")
+        state_lines.append(f"given_up_travel={json.dumps(cells)} (cells stuck detection gave up on: never travel to them again this run)")
     clues: list[dict[str, Any]] = []
     if knowledge is not None:
         with knowledge.lock:
@@ -810,10 +810,13 @@ class Strategist:
             return
         given_up = runner.mem.nav_stuck.given_up_travel
         if given_up:
-            # A travel to a point stuck detection gave up on never reaches the
+            # A travel to a cell stuck detection gave up on never reaches the
             # stack (A16): filtered here, so a re-send raises no goal_failed
             # and cannot set off another call.
-            kept = [g for g in goals if point_dest(g, runner.world.map_id) not in given_up]
+            def dest(g):
+                return travel_dest(g, runner.world, runner.knowledge, runner.mem.strength)
+
+            kept = [g for g in goals if dest(g) not in given_up]
             if len(kept) < len(goals):
                 record["given_up_filtered"] = [g for g in goals if g not in kept]
                 goals = kept

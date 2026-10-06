@@ -62,16 +62,6 @@ def travel_op_from_plan_goal(op: dict[str, Any]) -> TravelOp:
     )
 
 
-def point_dest(op: dict[str, Any], map_id: int | None) -> tuple[int | None, tuple[int, int]] | None:
-    """The map and cell a ``travel`` op to a ``point`` walks to (its own
-    ``map_id``, else ``map_id``, the current map), or None for any other op.
-    Stuck detection's give-ups are matched against this (A16)."""
-    if op.get("op") != "travel" or op.get("to") != "point":
-        return None
-    mid = op.get("map_id")
-    return (mid if isinstance(mid, int) else map_id, (op["x"], op["y"]))
-
-
 def _opt_int(v: Any) -> int | None:
     if v is None or isinstance(v, bool):
         return None

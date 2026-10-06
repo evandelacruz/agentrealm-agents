@@ -610,11 +610,41 @@ class SmokeScriptTest(unittest.TestCase):
         return r, planner, Path(tmp.name) / "t.directives.toml"
 
     @staticmethod
-    def _give_up_on_target(r):
+    def _give_up_on_target(r, goal="travel:point", cell=(5, 6)):
         from agentrealm_agent.navigation import stuck as nav_stuck
 
-        att = nav_stuck.track(r.mem, r.world, "travel:point", (5, 6))
+        att = nav_stuck.track(r.mem, r.world, goal, cell)
         nav_stuck.give_up(r.mem, r.world, att, "moves")
+
+    def test_a_travel_shop_give_up_drops_every_travel_to_that_shop(self):
+        # Review: give-ups were recorded for every Travel label but matched only
+        # `to: point`, so a given-up travel:shop stayed and looped. Matching is
+        # by the cell each travel op resolves to now, whatever its `to`.
+        from agentrealm_agent.plan import Plan as PlanCls
+
+        r, _, _ = self._pinned_runner()
+        shop = {"op": "travel", "to": "shop", "x": 9, "y": 9}
+        point = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": OVERWORLD}
+        r.plan = PlanCls([shop, point], dict(PARAM_DEFAULTS))
+        self._give_up_on_target(r, "travel:shop", (9, 9))
+        r.drop_given_up_ops()
+        self.assertEqual(r.plan.goals[r.plan.index :], [point], "the shop op leaves; a travel elsewhere stays")
+        gate = metrics(target=(5, 6))
+        r.world.tick += 1
+        decide(gate, r.world, r.mem, state="Travel", acted_op=shop)
+        self.assertEqual(gate.given_up_returns, 1, "a return to the given-up shop fails the gate")
+
+    def test_a_travel_town_give_up_does_not_ban_an_unrelated_point(self):
+        r, _, _ = self._pinned_runner()
+        r.world.respawn_anchors = [(OVERWORLD, (9, 9))]
+        self._give_up_on_target(r, "travel:town", (9, 9))
+        r.drop_given_up_ops()
+        r.unpin_done_goals()
+        self.assertEqual(r.plan.current(), {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": OVERWORLD})
+        self.assertEqual(r.directives.pinned_goals, [f"travel:point:{OVERWORLD}:5:6"])
+        r.plan.goals.append({"op": "travel", "to": "town", "x": 0, "y": 0})
+        r.drop_given_up_ops()
+        self.assertEqual([g["to"] for g in r.plan.goals[r.plan.index :]], ["point"], "travel:town itself leaves")
 
     def test_a_given_up_pinned_target_is_unpinned_and_leaves_the_stack(self):
         r, _, _ = self._pinned_runner()
@@ -640,7 +670,6 @@ class SmokeScriptTest(unittest.TestCase):
         # the stack's directives part, which every planner reply kept on top.
         # Replay: give up, then 300 s of windows with planner replies that try
         # to bring the target back, a directives reload, and the backoff long run out.
-        from agentrealm_agent.travel.ops import point_dest
         from tests.test_strategist import round_trip
 
         target_op = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": OVERWORLD}
@@ -666,7 +695,7 @@ class SmokeScriptTest(unittest.TestCase):
             else:
                 planner.on_window(r)
             r.drop_given_up_ops()
-            left = [op for op in r.plan.goals[r.plan.index :] if point_dest(op, OVERWORLD) == (OVERWORLD, (5, 6))]
+            left = [op for op in r.plan.goals[r.plan.index :] if r.travel_dest(op) == (OVERWORLD, (5, 6))]
             self.assertEqual(left, [], f"travel to the given-up target is back at {second} s")
             decide(gate, r.world, r.mem, state="Travel", acted_op=r.plan.current())
         self.assertGreater(r.world.tick, r.mem.nav_stuck.backoff_until[f"travel:point:{OVERWORLD}:5,6"])

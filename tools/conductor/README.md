@@ -90,7 +90,7 @@ Prompt text may be passed as trailing args or on stdin.
 | | |
 |---|---|
 | Environment | `evandelacruz/agentrealm-agents` (named Cursor cloud env; includes this repo) |
-| Model | `composer-2.5` (override with `--model` or `CURSOR_MODEL`) |
+| Model | `composer-2.5` (override with `--model` or `CURSOR_MODEL`); Composer runs with `fast=false` (set `CURSOR_MODEL_FAST=true` for the fast variant) |
 | Auto-PR | on (`--no-pr` to disable) |
 | PR state | ready for review (not draft), enforced by the conductor skill and implementer brief; mark with `gh pr ready` if a draft appears |
 | Starting ref | env’s repo checkout (override with `--ref` only when using `--repo`) |

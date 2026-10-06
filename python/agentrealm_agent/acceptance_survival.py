@@ -1,7 +1,7 @@
 """Survival gates shared by live acceptance runs (M7 A16, M9 A29, M11 A40).
 
-Death, retreat timing, Recover safe tiles, Step loops and API errors are
-judged the same way on long exploration runs as on the M7 hour. Each gate
+Death, retreat timing, Recover safe tiles, Step loops, idle stretches (A61)
+and API errors are judged the same way on long exploration runs as on the M7 hour. Each gate
 names its own survival states (M11 adds Boss). ``OscillationAbortTracker``
 is the sustained-pacing abort M7 and M11 share.
 """
@@ -15,6 +15,7 @@ from .acceptance_run import TimedRunHooks
 from .config import Policy
 from .executor.movement import step_landing
 from .healing import regen_known
+from .idle_watchdog import idle_seconds
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .survival import should_retreat
@@ -29,6 +30,10 @@ LOOP_STEP_LIMIT = 24  # Step-sending decisions in a row at one cell with one rea
 # so a target that keeps making the agent pace trips this within minutes.
 OSCILLATION_ABORT_COUNT = 3
 OSCILLATION_ABORT_TICKS = 6000
+
+# Longest the character may go with nothing productive (A61). The watchdog
+# redirects at 60 s; a stretch past this means the redirect did not help.
+IDLE_GATE_SECONDS = 90
 
 # States that are already the right answer when should_retreat holds.
 SURVIVAL_STATES = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Flee")
@@ -45,6 +50,8 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
     recover_unsafe: int = 0
     heal_actions: int = 0
     loop_detected: bool = False
+    idle_redirects: int = 0  # idle watchdog redirects (A61)
+    longest_idle_seconds: float = 0.0  # longest stretch with nothing productive, exempt time excluded (A61)
     _loop_key: tuple[Pos, str] | None = None
     _loop_streak: int = 0
 
@@ -74,6 +81,7 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
                     self.recover_unsafe += 1
         if intents is not None:
             self._note_loop(w, reason, intents)
+        self.longest_idle_seconds = max(self.longest_idle_seconds, idle_seconds(m, w.tick))
         if track_regen:
             return regen_known(knowledge, m)
         return None
@@ -89,6 +97,9 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
         if self._loop_streak >= LOOP_STEP_LIMIT:
             self.loop_detected = True
 
+    def on_idle_redirect(self, event: dict) -> None:
+        self.idle_redirects += 1
+
     def survival_failures(self) -> list[str]:
         out = list(self.base_failures())
         if self.retreat_misses:
@@ -97,6 +108,8 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
             out.append(f"{self.recover_unsafe} Recover withdraw(s) from a cell not known safe")
         if self.loop_detected:
             out.append(f"loop: {LOOP_STEP_LIMIT} Steps in a row at one cell with one reason")
+        if self.longest_idle_seconds > IDLE_GATE_SECONDS:
+            out.append(f"idle {self.longest_idle_seconds:.0f} s with nothing productive (limit {IDLE_GATE_SECONDS} s)")
         return out
 
     def survival_summary_lines(self) -> list[str]:
@@ -106,6 +119,7 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
             f"recover withdraws: {self.recover_withdraws} (from a cell not known safe: {self.recover_unsafe})",
             f"heal actions: {self.heal_actions}",
             f"loop detected: {self.loop_detected}",
+            f"idle redirects: {self.idle_redirects} (longest idle: {self.longest_idle_seconds:.0f} s)",
             f"API errors: {len(self.api_errors)}",
         ]
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import random
 import unittest
+from unittest import mock
 
+from agentrealm_agent import idle_watchdog
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
@@ -274,6 +276,7 @@ class NavigationFixtureTest(unittest.TestCase):
         self.assertEqual(r.outcome, "reached", sc.name)
         self.assertLessEqual(r.moves, 80, sc.name)
 
+    @mock.patch.object(idle_watchdog, "IDLE_REDIRECT_SECONDS", 3600)  # every stuck level, not the watchdog (A61)
     def test_npc_corridor_waits_before_giving_up(self):
         sc = grids.NPC_CORRIDOR
         r = sim.run(sc, sim.scripted(goals=["goto"], goto=sc.goal))

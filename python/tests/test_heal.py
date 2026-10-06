@@ -2,7 +2,9 @@
 
 import random
 import unittest
+from unittest import mock
 
+from agentrealm_agent import idle_watchdog
 from agentrealm_agent.config import Policy
 from agentrealm_agent.healing import (
     HEAL_BACKOFF_TICKS,
@@ -286,6 +288,7 @@ class HealStateTest(unittest.TestCase):
         dispatch(w, ctx(m))
         self.assertEqual(len(m.buy_signals), 1)
 
+    @mock.patch.object(idle_watchdog, "IDLE_REDIRECT_SECONDS", 3600)  # Heal's own bound, not the watchdog's (A61)
     def test_wait_without_health_back_is_bounded(self):
         w = grid(at=(0, 0))
         m = Memory(heal_regen_absent=True)

@@ -7,6 +7,7 @@ each class in this package and in ``docs/CHARACTER_AND_STATES.md``.
 
 from __future__ import annotations
 
+from .. import idle_watchdog
 from ..navigation import oscillation
 from ..navigation.rejection import end_decision
 from ..pathing import note_goto_reached
@@ -83,12 +84,19 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     is pacing between two cells, whichever states are doing it, and if so
     gives up the target it walks to; after the pick, ``note_move`` tells it
     which walk the move belongs to (``navigation/oscillation.py``, A15).
+
+    The idle watchdog runs there too: after ``IDLE_REDIRECT_SECONDS`` with
+    nothing productive it gives up the target and any plan ``wait``, and
+    backs off the state that was idling, which is then skipped until its
+    backoff ends (``idle_watchdog.py``, A61).
     """
     m = ctx.memory
     m.nav_stuck.decision += 1
     yielded: list[str] = []
     if oscillation.check(m, world) is not None:
         yielded.append("oscillation: paced between two cells")
+    if (idle := idle_watchdog.check(m, world, ctx.plan)) is not None:
+        yielded.append(f"idle: {idle['state']} did nothing for {idle['ticks_idle']} ticks")
     note_goto_reached(world, m, ctx.policy)
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
@@ -104,6 +112,8 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
     """The first state, in ``STATES`` order, that runs and sends an intent or waits."""
     m = ctx.memory
     for state in STATES:
+        if idle_watchdog.held_off(m, state.name, world.tick):
+            continue  # redirected away from for idling (A61)
         active = state.name == m.state and not state.done(world, ctx)
         if not (active or state.guard(world, ctx)):
             continue

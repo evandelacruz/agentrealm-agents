@@ -74,6 +74,8 @@ While the `goto` target is still owed, the walk comes first: Loot, Shop, Investi
 
 If two states take turns moving the character so it paces between two cells (6 cell changes over at most 2 cells), the oscillation guard in dispatch gives up the target it was walking to, backs it off like any stuck give-up (reason `pacing`), and writes an `oscillation` event to the trace; Retreat, Fight and Flee pacing with steps of their own back nothing off, while a Heal or Loot walk that paces has its food, pickup or safe tile given up; dispatch then picks something else (`navigation/oscillation.py`). Heal and Loot walks are also given up on no route or no progress in 20 moves or 30 s, so Heal cannot pace beside food it cannot reach. The smoke script aborts with exit 1 and an `ABORT: sustained oscillation` message when the guard gives up a target more than 3 times in 6000 ticks, so a live run never spends its hour pacing. Guard events that gave nothing up (survival states doing the moving) are reported, never an abort.
 
+The agent never stands around doing nothing: after 60 s of game time with no cell change, no world-changing intent applied and no health back, the idle watchdog in dispatch gives up the current target, drops a plan `wait`, and backs off the idling state so Explore or the next plan goal runs, tracing an `idle_redirect` event (`idle_watchdog.py`, A61). Dead, asleep and server-forced waits do not count.
+
 Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_agent/m7_acceptance.py)):
 
 - no death (the first one ends the run), and alive at the end of the hour;
@@ -81,6 +83,7 @@ Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_ag
 - Recover withdraws only while standing on a known safe tile (the cell the queue puts it on when the `WithdrawFromChest` runs);
 - no loop: 24 Step-sending decisions in a row at one cell with one reason (waiting, such as Heal resting, is not a loop);
 - no sustained oscillation: more than 3 `oscillation` events that gave up a target within 6000 ticks stops the run at once (events where survival states did the moving and nothing was given up do not count; a Heal or Loot walk given up by the guard counts);
+- no idle stretch (nothing productive, dead, asleep and server-forced waits excluded) longer than 90 s; the summary reports idle redirects and the longest stretch (A61);
 - no API error;
 - on a run of at least 95% of an hour, safe-zone regen measured (yes or no), and the navigation target reached or given up on.
 

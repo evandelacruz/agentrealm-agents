@@ -15,6 +15,7 @@ import random
 import unittest
 from unittest import mock
 
+from agentrealm_agent import idle_watchdog
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_base import KnowledgeBase
@@ -268,9 +269,11 @@ class HealWalkBoundedTest(unittest.TestCase):
         w.terrain_center, w.terrain_map = w.pos, 1
         w.entities = [Entity("supply", 7, (3, 0), "apple")]
         c = ctx(Policy(kind="scripted", goals=["goto", "explore"], goto=(5, 0), pickup=False))
-        for _ in range(2 * nav_stuck.PROGRESS_TICK_LIMIT // 10 + 1):
-            dispatch(w, c)
-            w.tick += 10
+        # Stuck windows only: the idle watchdog (A61) would give the goto up at the same tick.
+        with mock.patch.object(idle_watchdog, "IDLE_REDIRECT_SECONDS", 3600):
+            for _ in range(2 * nav_stuck.PROGRESS_TICK_LIMIT // 10 + 1):
+                dispatch(w, c)
+                w.tick += 10
         self.assertEqual(c.memory.nav_stuck.stuck_signals, [])
         goto = nav_stuck.active(c.memory, w)
         self.assertEqual(goto.goal, "goto")

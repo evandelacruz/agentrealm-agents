@@ -411,6 +411,13 @@ def reveal_found_way(att: NavAttempt, w: WorldModel, path: list[Pos] | None) -> 
     return True
 
 
+def back_off(stuck: NavStuckMemory, key: str, tick: int) -> None:
+    """Hold ``key`` off for ``BACKOFF_BASE_TICKS``, doubled on each back-off of the same key."""
+    power = stuck.backoff_power.get(key, 0)
+    stuck.backoff_until[key] = tick + BACKOFF_BASE_TICKS * (2**power)
+    stuck.backoff_power[key] = power + 1
+
+
 def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None) -> None:
     """Step 5: back off the goal, drop its path and raise the strategist's ``stuck`` trigger.
 
@@ -420,10 +427,7 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     if reason is not None:
         att.reasons.append(reason)
     stuck = m.nav_stuck
-    backoff = att.backoff_key or att.key
-    power = stuck.backoff_power.get(backoff, 0)
-    stuck.backoff_until[backoff] = w.tick + BACKOFF_BASE_TICKS * (2**power)
-    stuck.backoff_power[backoff] = power + 1
+    back_off(stuck, att.backoff_key or att.key, w.tick)
     stuck.stuck_signals.append(
         {
             "trigger": "stuck",

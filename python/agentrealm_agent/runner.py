@@ -53,6 +53,7 @@ from .executor import (
     wait,
 )
 from .acceptance import AcceptanceHooks
+from . import idle_watchdog
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, WorldModel, terrain_cells
@@ -436,6 +437,7 @@ class Runner:
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
         self.trace_oscillations()
+        self.trace_idle_redirects()
         if self.acceptance is not None:
             # Before the response is applied, so it judges the world this decision saw.
             self.acceptance.before_tick(
@@ -465,6 +467,7 @@ class Runner:
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        idle_watchdog.observe(m, w, self.tick_hz)
         absorb_heal_pending(m, w, self.knowledge, events)
         self._learn_life_code(lives_before)
         ceremony = r.get("level_clear_ceremony")
@@ -562,6 +565,7 @@ class Runner:
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op, m.boss)
         saved_stuck = copy.deepcopy(m.nav_stuck)
+        saved_idle = copy.deepcopy(m.idle)
         saved_plan = self.plan.snapshot()
         try:
             d = self._decide(self.world, m, plan=self.plan)
@@ -570,6 +574,7 @@ class Runner:
             m.boss = saved[5]  # boss memory belongs to the stack (A38)
         m.nav = saved[2]
         m.nav_stuck = saved_stuck
+        m.idle = saved_idle  # the idle watchdog redirects only on a real decision (A61)
         if d.reflex:
             return d
         m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
@@ -717,6 +722,20 @@ class Runner:
             m.pending = None
         return paced
 
+    def trace_idle_redirects(self) -> None:
+        """Write each ``idle_redirect`` the idle watchdog raised to the trace (A61)."""
+        idle = self.mem.idle
+        events, idle.events = idle.events, []
+        for event in events:
+            detail = f"{event['state']} idle {event['ticks_idle']} ticks at {event['cell']}"
+            if "goal" in event:
+                detail += f": gave up {event['goal']} → {tuple(event['target'])}"
+            if "dropped_op" in event:
+                detail += f", dropped {event['dropped_op']['op']}"
+            self.log("idle_redirect", detail, event)
+            if self.acceptance is not None:
+                self.acceptance.on_idle_redirect(event)
+
     def apply_intent_results(self, results: list[dict]) -> bool:
         """Fold intent results since the last call. True if the last one rejected."""
         w, m = self.world, self.mem
@@ -770,6 +789,8 @@ class Runner:
             code = (result.get("rejection") or {}).get("code")
             note_equip_result(m, w, intent, result.get("outcome") == "rejected", code)
         if result.get("outcome") != "rejected":
+            if result.get("outcome") == "applied" and intent:
+                idle_watchdog.note_applied(m, intent.get("verb"), int(result.get("tick", w.tick)))
             if intent and intent.get("verb") == "Step" and w.pos is not None:
                 w.pos = step_landing(w.pos, intent["direction"])
                 m.last_step_tick = int(result.get("tick", w.tick))
@@ -1103,6 +1124,8 @@ class Runner:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})
         if e.status in (401, 403):
             raise e
+        if e.paused or e.network or e.rate_limited or e.code in ("not_on_map", "character_not_live"):
+            idle_watchdog.note_server_wait(self.mem, self.world.tick)  # a server-forced wait is not idling (A61)
         if e.paused or e.network:
             return time.time() + (e.retry_after or 1.0)
         if e.rate_limited:

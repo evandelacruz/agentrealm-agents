@@ -84,6 +84,9 @@ class AcceptanceHooks:
     def on_oscillation(self, event: dict) -> None:
         """The dispatch guard caught the character pacing between two cells (A15)."""
 
+    def on_idle_redirect(self, event: dict) -> None:
+        """The idle watchdog redirected a character that did nothing productive (A61)."""
+
 
 class CountingClient:
     """Forwards to a client, appending each failed request to ``errors`` and,

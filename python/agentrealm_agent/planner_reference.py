@@ -91,7 +91,7 @@ def split_sections(reference: str) -> list[Section]:
     return sections
 
 
-def missing_core(sections: list[Section]) -> list[str]:
+def missing_sections(sections: list[Section]) -> list[str]:
     """The :data:`CORE_SECTIONS` and :data:`LAST_SECTIONS` entries no section matches (a renamed site heading)."""
     return [c for c in CORE_SECTIONS + LAST_SECTIONS if not any(s.key.startswith(c) for s in sections)]
 
@@ -130,6 +130,13 @@ def read_text(path: Path) -> str:
         return ""
 
 
+def omission_reason(section: Section, choice: str) -> str:
+    """Why ``select_sections`` left ``section`` out, in the words of the prompt's note."""
+    if section.key.startswith(LAST_SECTIONS):
+        return "as setup and history"
+    return "for size" if not choice.strip() else "as not asked for"
+
+
 @lru_cache(maxsize=8)
 def reference_text(choice: str = "") -> str:
     """The game reference as it goes in the prompt; "" when the file is missing."""
@@ -139,16 +146,23 @@ def reference_text(choice: str = "") -> str:
     sections = split_sections(reference)
     picked = select_sections(sections, choice)
     head = sections[0].text if sections and not sections[0].key.startswith("/") else ""
-    left_out: list[str] = []
+    left_out: dict[str, list[str]] = {}
     for s in sections:
         if s in picked or not s.key.startswith("/"):
             continue
         page = s.key.split(" / ", 1)[0]
-        whole_page = all(t not in picked for t in sections if t.key.startswith(page + " / "))
+        reason = omission_reason(s, choice)
+        whole_page = all(
+            t not in picked and omission_reason(t, choice) == reason
+            for t in sections
+            if t.key.startswith(page + " / ")
+        )
         name = page if whole_page else s.key
-        if name not in left_out:
-            left_out.append(name)
-    note = f"\n(Sections left out for size: {'; '.join(left_out)}.)\n" if left_out else ""
+        names = left_out.setdefault(reason, [])
+        if name not in names:
+            names.append(name)
+    note = "".join(f"\n(Sections left out {reason}: {'; '.join(names)}.)" for reason, names in left_out.items())
+    note += "\n" if note else ""
     return head + note + "".join(s.text for s in picked if s.text != head)
 
 

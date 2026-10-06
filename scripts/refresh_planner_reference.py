@@ -248,15 +248,16 @@ def render(pages: list[tuple[str, str, str]], fetched: dt.date) -> str:
 
 
 def check_core(text: str) -> None:
-    """Stop before writing when a core section the planner always sends is gone (a renamed heading)."""
+    """Stop before writing when a core or last section the planner names is gone (a renamed heading)."""
     sys.path.insert(0, str(OUT.parents[2]))
-    from agentrealm_agent.planner_reference import CORE_SECTIONS, missing_core, split_sections
+    from agentrealm_agent.planner_reference import CORE_SECTIONS, LAST_SECTIONS, missing_sections, split_sections
 
-    missing = missing_core(split_sections(text))
+    missing = missing_sections(split_sections(text))
     if missing:
         raise SystemExit(
-            "refresh: core section(s) not found: " + "; ".join(missing)
-            + f". Update CORE_SECTIONS in planner_reference.py ({len(CORE_SECTIONS)} entries) to the new headings."
+            "refresh: section(s) not found: " + "; ".join(missing)
+            + f". Update CORE_SECTIONS ({len(CORE_SECTIONS)} entries) or LAST_SECTIONS ({len(LAST_SECTIONS)} entries)"
+            + " in planner_reference.py to the new headings."
         )
 
 

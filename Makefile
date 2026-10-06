@@ -1,4 +1,4 @@
-.PHONY: test conductor-test smoke-m6-olympuff smoke-m7-olympuff smoke-m8-olympuff smoke-m9-olympuff smoke-m10-olympuff smoke-m11-olympuff
+.PHONY: test conductor-test smoke-m6-olympuff smoke-m7-olympuff smoke-m8-olympuff smoke-m9-olympuff smoke-m10-olympuff smoke-m11-olympuff probe-regen
 test: ## Run unit tests (no server)
 	cd python && python3 -m unittest discover -s tests
 
@@ -26,3 +26,6 @@ smoke-m10-olympuff: ## Live M10 acceptance on Olympuff (A33; needs AGENTREALM_AP
 
 smoke-m11-olympuff: ## Live M11 acceptance on Olympuff (A40; needs AGENTREALM_API_KEY, the strategist (AGENTREALM_STRATEGIST_MODEL and AGENTREALM_STRATEGIST_API_KEY or OPENAI_API_KEY), and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID; left the level means back on the overworld map)
 	python3 scripts/smoke_m11_olympuff.py $(CHARACTER_FLAGS)
+
+probe-regen: ## Regen probe (A60): get hurt, then measure safe-zone regen for the A16 gate; run before the M7 hour if the knowledge base has no regen answer (needs AGENTREALM_API_KEY and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID)
+	python3 scripts/probe_regen.py $(CHARACTER_FLAGS)

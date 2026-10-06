@@ -737,12 +737,34 @@ class AcceptanceCountTest(unittest.TestCase):
         self.assertEqual(r.acceptance.base_failures(), ["1 planner auth error(s) (401/403)"])
 
     def test_accepted_plans_count_and_pass(self):
-        s, r = make(FakeLLM(WAIT_ANSWER, {"notes": "keep going"}), replan_s=15), self.runner_with_metrics()
+        s, r = make(FakeLLM(WAIT_ANSWER, {"goals": [{"op": "buy", "code": "torch"}]}), replan_s=15), self.runner_with_metrics()
         round_trip(s, r)
         s.clock.now += 15
         round_trip(s, r)
         self.assertEqual((r.acceptance.plans_accepted, r.acceptance.planner_errors), (2, 0))
         self.assertEqual(r.acceptance.base_failures(), [])
+
+    def test_only_a_reply_with_a_valid_op_or_an_empty_stack_is_accepted(self):
+        replies = [
+            {"notes": "thinking"},  # notes only: neither
+            {"params": {"retreat_hits": 3}},  # params only: neither
+            {"goals": [{"op": "fly", "why": "no such op"}]},  # every op invalid: an error
+            {"goals": []},  # an explicit empty stack: accepted
+            WAIT_ANSWER,  # a valid op: accepted
+        ]
+        s, r = make(FakeLLM(*replies), replan_s=15), self.runner_with_metrics()
+        for _ in replies:
+            round_trip(s, r)
+            s.clock.now += 15
+        self.assertEqual((r.acceptance.plans_accepted, r.acceptance.planner_errors), (2, 1))
+
+    def test_invalid_ops_count_toward_the_streak(self):
+        bad = {"goals": [{"op": "fly"}]}
+        s, r = make(FakeLLM(bad, bad, bad), replan_s=15), self.runner_with_metrics()
+        for _ in range(3):
+            round_trip(s, r)
+            s.clock.now += 15
+        self.assertIn("3 planner errors in a row (3 in all)", r.acceptance.base_failures())
 
     def test_a_reply_that_is_not_a_plan_is_an_error(self):
         s, r = make(FakeLLM("not json at all")), self.runner_with_metrics()

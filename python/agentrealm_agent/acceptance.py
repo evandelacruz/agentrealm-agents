@@ -65,10 +65,11 @@ class AcceptanceHooks:
         """The runner starts, with the AI planner on or off (``--no-planner``)."""
 
     def on_strategist_reply(self) -> None:
-        """The planner answered with a usable plan (a JSON object), applied or kept."""
+        """The planner answered with a plan: at least one valid op, or an explicit empty stack."""
 
     def on_strategist_error(self, error: str, *, auth: bool = False) -> None:
-        """A planner call failed (network, HTTP status, refusal) or its reply was not a plan.
+        """A planner call failed (network, HTTP status, refusal), or its reply
+        was not a JSON object or held only invalid ops.
 
         ``auth`` is True when the provider refused the key (HTTP 401 or 403)."""
 

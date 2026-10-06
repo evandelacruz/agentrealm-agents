@@ -700,6 +700,23 @@ class Strategist:
         self.inbox.extend(drained)
         del self.inbox[:-INBOX_KEPT]
 
+    @staticmethod
+    def _report(acceptance: Any, reply: Any, goals: list[dict[str, Any]], record: dict[str, Any]) -> None:
+        """Tell the acceptance hooks what the reply was: a plan accepted (at
+        least one valid op, or an explicit empty stack), an error (not a JSON
+        object, or ops all invalid), or neither (no ``goals`` key: notes or
+        params only, the stack kept)."""
+        if not isinstance(reply, dict):
+            acceptance.on_strategist_error(record.get("invalid") or "reply is not a JSON object")
+            return
+        if "goals" not in reply:
+            return
+        sent = reply["goals"]
+        if goals or sent == []:
+            acceptance.on_strategist_reply()
+        else:
+            acceptance.on_strategist_error("reply has no valid goal op")
+
     def _send(self, runner: Any) -> None:
         messages = build_prompt(
             triggers=self.inbox,
@@ -764,15 +781,12 @@ class Strategist:
             reply = parse_reply(answer.raw)
         except ValueError as e:
             reply, record["invalid"] = None, f"reply is not JSON: {e}"
-        if runner.acceptance is not None:
-            if isinstance(reply, dict):
-                runner.acceptance.on_strategist_reply()
-            else:
-                runner.acceptance.on_strategist_error(record.get("invalid") or "reply is not a JSON object")
         d = runner.directives.directives
         goals, params, notes = parse_plan_payload(
             reply, floor_params=dict(d.params), current_params=runner.plan.params
         )
+        if runner.acceptance is not None:
+            self._report(runner.acceptance, reply, goals, record)
         runner.plan.params = params
         record.update(goals=goals, params=runner.plan.params, notes=notes)
         if isinstance(reply, dict) and "goals" not in reply:

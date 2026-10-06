@@ -41,9 +41,11 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 
-  "A58": {"state": "partial", "remaining": "Regen unmeasured on every run (1 and 3-8); in run 8 the character was never hurt, so run 9 can fail the regen gate. Run 8's post-reach goto/explore ping-pong is fixed offline (A16: a reached goto is satisfied); rerun the live hour. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "Waiting on A9 (run 9 death during flee after goto reached) and A5 (mid-flee interleaving; respawn-window position 409s). #103 (A16) merged and cleared run 8 navigation; run 9 (main 8b30a0b) failed at ~211 s. Regen still unmeasured (hurt but died in Flee); run the A60 regen probe (make probe-regen). Live tests are 5-minute runs (--seconds 300) until the basics pass. Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
+
+  "A60": {"state": "done", "note": "Probe, profile and offline tests shipped; not run live. A58 runs it before the hour when the knowledge base has no regen answer."},
 
   "A17": {"state": "done"},
 

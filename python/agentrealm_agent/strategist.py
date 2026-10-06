@@ -94,6 +94,7 @@ from typing import Any, Callable, Protocol
 from .directives import Directives
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
+from .gem_yield import summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, Plan, parse_plan_payload
 from .world import WorldModel
@@ -161,7 +162,9 @@ The character's arc, in order. Judge the stage from State (health, gems, armed, 
 1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known.
 2. Build up loot, gear and supplies. Gather gems, pick up items, buy potions and gear, equip the best (gather_gems, fetch_item, buy, equip). Ready when health is at least 80% of max, at least 3 potions are held, a weapon better than the starting weapon is armed, and armor is worn (State: health, held, armed, worn).
 3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar.
-4. Beat the world. Clear every level to transcend: done when levels_cleared holds level_count levels."""
+4. Beat the world. Clear every level to transcend: done when levels_cleared holds level_count levels.
+
+Gems by area (stage 2). Gem drops from grass and bushes vary by area, and some areas drop none. State gem_yield is measured from the character's own cuts: the best regions nearby with their yield (gems per cut) and the barren ones. Hunt gems where the yield is good, leave a region that shows no gems after a fair sample (Gather skips barren regions unless gather_gems names one with x, y), and explore regions not yet sampled to sample them."""
 
 
 def system_prompt(reference_sections: str = "") -> str:
@@ -484,6 +487,7 @@ def build_prompt(
         f"map_level={w.map_level} armed={w.armed_code} lives={w.lives}",
         f"worn={json.dumps(w.worn_codes, sort_keys=True)} held={json.dumps(dict(sorted(Counter(s.code for s in w.held_supplies).items())))}",
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
+        f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]

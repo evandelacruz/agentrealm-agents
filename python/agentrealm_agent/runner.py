@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 
 from .break_memory import TRANSIENT_BREAK_REJECTIONS, record_attempt
+from .gem_yield import CUT_BLOCKS, GemYieldTracker
 from .brain import Decision, Memory, choose_call, decide, path_blockers, remaining_path_stale, walkable_prefix
 from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
@@ -122,6 +123,7 @@ class Runner:
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
         self._applied_take_codes: list[str | None] = []  # A47: codes of this response's applied Takes
         self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
+        self.gem_cuts = GemYieldTracker()  # A63: our cuts waiting to see whether a gem came of them
         self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
         self._removed_map: int | None = None  # A18: map the character was on when it was taken off
         self.world = WorldModel(character_id)
@@ -503,6 +505,7 @@ class Runner:
         self._learn_items_from_tick(r.get("observation"), events, earlier, worn_before)
         self.on_events(events)
         self._resolve_pending_break()
+        self.gem_cuts.update(w, self.knowledge)
         self.note_held_path_stale()
         if r.get("queue") and not rejected and not m.cancel_queue:
             # A rejection or a door already dropped our queue; an echoed server
@@ -817,6 +820,9 @@ class Runner:
                     others = any(e.kind == "character" for e in w.entities)
                     self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type, others))
                 self._note_break_use(intent, result, block, index)
+                tile = w.view.tiles.get(block) if block is not None else None
+                if result.get("outcome") == "applied" and intent["target"].get("kind") == "block" and tile in CUT_BLOCKS:
+                    self.gem_cuts.note_cut(w, block, tile, m.last_use_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
@@ -824,6 +830,7 @@ class Runner:
             if intent and intent.get("verb") == "Take":
                 code = supply_code_for_take(intent, w.entities)
                 self._applied_take_codes.append(code)
+                self.gem_cuts.note_take()
                 learn_chest_upgrade(w, code)
             self._note_heal_intent(intent, index)
             self._note_investigation(intent, result)

@@ -64,7 +64,7 @@ OP_FIELDS: dict[str, str] = {
     "use_block": "x, y, code (the supply to use on it)",
     "compose": "composes_into (the whole item to make)",
     "fetch_item": "code, optional x, y",
-    "gather_gems": "count",
+    "gather_gems": "count, optional x, y (gather in that block's region even if it shows barren)",
     "equip": "optional code (else the best held gear is armed and worn)",
     "enter_level": "x, y (the level door)",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
@@ -206,7 +206,13 @@ def _validate_fetch_item(op: dict[str, Any]) -> bool:
 
 
 def _validate_gather_gems(op: dict[str, Any]) -> bool:
-    return _require_fields(op, ("count",)) and _is_int(op["count"]) and op["count"] >= 0
+    if not (_require_fields(op, ("count",)) and _is_int(op["count"]) and op["count"] >= 0):
+        return False
+    if "x" in op or "y" in op:
+        if not _is_int(op.get("x")) or not _is_int(op.get("y")):
+            _drop("bad gather_gems coordinates", op)
+            return False
+    return True
 
 
 def _validate_hunt(op: dict[str, Any]) -> bool:

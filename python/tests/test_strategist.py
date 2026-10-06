@@ -258,7 +258,7 @@ class AnswerTest(unittest.TestCase):
         self.assertIn({"trigger": "death", "tick": 3}, ask["triggers"])
 
     def test_prompt_has_whole_plan_every_clue_and_the_op_table(self):
-        kb = SimpleNamespace(lock=threading.Lock(), clues=[{"kind": "sign", "text": f"clue {i}"} for i in range(20)])
+        kb = SimpleNamespace(lock=threading.Lock(), clues=[{"kind": "sign", "text": f"clue {i}"} for i in range(20)], extra={})
         plan = Plan([{"op": "wait", "seconds": 0, "why": "test"}, {"op": "explore_area", "x": 3, "y": 4, "radius": 5}], dict(PARAM_DEFAULTS))
         messages = build_prompt(
             triggers=[{"trigger": "clue", "text": "torch"}],

@@ -217,7 +217,7 @@ class RunAcceptanceSmokeTest(unittest.TestCase):
         seen = {}
 
         class FakeRunner:
-            def __init__(self, cfg, client, cid, stop, emit, *, knowledge, acceptance):
+            def __init__(self, cfg, client, cid, stop, emit, *, knowledge, acceptance, strategist=None):
                 seen["kb"], seen["stop"], seen["metrics"] = knowledge, stop, acceptance
 
             def run(self):
@@ -280,13 +280,13 @@ class SmokeScriptTest(unittest.TestCase):
     def main(self, argv, env=None):
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict("os.environ", env or {}, clear=True), redirect_stdout(out), redirect_stderr(err):
-            code = self.smoke.main(argv)
+            code = self.smoke.main(["--no-planner", *argv])  # offline: the planner test mode
         return code, out.getvalue(), err.getvalue()
 
     def run_main(self, seconds: float, played):
         """``played(metrics, kb)`` stands in for the run; ``kb`` is the runner's in-memory one."""
 
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None, planner=None):
             kb = KnowledgeBase("olympuff")
             played(metrics, kb)
             return seconds, kb

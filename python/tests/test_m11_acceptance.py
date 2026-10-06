@@ -181,7 +181,8 @@ class OscillationStopTest(unittest.TestCase):
         self.assert_abort_stops(metrics())
 
 
-STRATEGIST_ENV = {"AGENTREALM_STRATEGIST_MODEL": "fake-model", "AGENTREALM_STRATEGIST_API_KEY": "fake-key"}
+# The planner on with a fake key: OpenAI needs no SDK, and run_acceptance_smoke is faked, so nothing is sent.
+PLANNER_ENV = {"AGENTREALM_PLANNER_PROVIDER": "openai", "AGENTREALM_PLANNER_MODEL": "fake-model", "OPENAI_API_KEY": "fake-key"}
 
 
 class SharedRunSmokeTest(unittest.TestCase):
@@ -189,7 +190,7 @@ class SharedRunSmokeTest(unittest.TestCase):
         seen = {}
 
         class FakeRunner:
-            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance):
+            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance, strategist=None):
                 seen["stop"] = stop
                 self.acceptance = acceptance
 
@@ -226,7 +227,7 @@ class SmokeScriptTest(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def run_main(self, seconds: float, played):
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None, planner=None):
             played(metrics)
             return seconds, None
 
@@ -238,18 +239,25 @@ class SmokeScriptTest(unittest.TestCase):
             client.world.return_value = {"town": {"map_id": OVERWORLD, "x": 0, "y": 0}}
             client.position.return_value = {"map_id": OVERWORLD, "x": 10, "y": 20}
             client.self_.return_value = {"alive": True}
-            return self.main(["--api-key", "k", "--character-id", "9", "--seconds", str(seconds)], STRATEGIST_ENV)
+            return self.main(["--api-key", "k", "--character-id", "9", "--seconds", str(seconds)], PLANNER_ENV)
 
     def test_no_api_key_exits_2(self):
         code, _, err = self.main([])
         self.assertEqual(code, 2)
         self.assertIn("AGENTREALM_API_KEY", err)
 
-    def test_no_strategist_exits_2_before_any_call(self):
+    def test_no_planner_key_exits_2_before_any_call(self):
         with mock.patch.object(self.smoke, "Client") as Client:
             code, _, err = self.main(["--api-key", "k", "--character-id", "9"])
         self.assertEqual(code, 2)
-        self.assertIn("AGENTREALM_STRATEGIST_MODEL", err)
+        self.assertIn("ANTHROPIC_API_KEY", err)
+        Client.assert_not_called()
+
+    def test_no_planner_flag_exits_2_before_any_call(self):
+        with mock.patch.object(self.smoke, "Client") as Client:
+            code, _, err = self.main(["--api-key", "k", "--character-id", "9", "--no-planner"])
+        self.assertEqual(code, 2)
+        self.assertIn("needs the AI planner", err)
         Client.assert_not_called()
 
     def test_short_run_passes_without_levels(self):

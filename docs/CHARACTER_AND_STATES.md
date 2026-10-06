@@ -39,15 +39,18 @@ With `policy.pickup` on, **Recover** walks back to a dropped death chest on this
 
 ## Strategist
 
-An optional LLM that rewrites the goal stack when something happens (A35, `strategist.py`). It is off unless both are set:
+The AI planner that owns the goal stack (A35, `strategist.py`). It is on in every live run; `run --no-planner` (or `AGENTREALM_NO_PLANNER=1`) is a test mode that plays the built-in plan from `policy.goals`. With the planner on and no key, startup fails with one line.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AGENTREALM_STRATEGIST_MODEL` | (none) | Model name sent to the OpenAI chat completions API |
-| `AGENTREALM_STRATEGIST_API_KEY` or `OPENAI_API_KEY` | (none) | API key |
-| `AGENTREALM_STRATEGIST_MIN_INTERVAL_S` | 60 | Seconds between calls |
-| `AGENTREALM_STRATEGIST_MAX_CALLS` | 48 | Calls per run |
-| `AGENTREALM_STRATEGIST_MAX_TOKENS` | 200000 | Prompt plus answer tokens per run; multiply by your model's price for a dollar cap |
-| `AGENTREALM_STRATEGIST_IDLE_MINUTES` | 10 | No applied Step for this long raises the `idle` trigger |
+| `AGENTREALM_PLANNER_PROVIDER` | `anthropic` (`openai` when only `OPENAI_API_KEY` is set) | `anthropic` (official `anthropic` SDK) or `openai` (chat completions over stdlib `urllib`) |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | (none) | The provider's key, from the environment only |
+| `AGENTREALM_PLANNER_MODEL` | `claude-sonnet-5-5` for anthropic; required for openai | Model id |
+| `AGENTREALM_PLANNER_EFFORT` | `low` | Anthropic effort level |
+| `AGENTREALM_PLANNER_REPLAN_S` | 15 | With no event, replan this often |
+| `AGENTREALM_PLANNER_CALLS_PER_MIN` | 6 | Calls in any 60 s of play, failed ones included |
+| `AGENTREALM_PLANNER_TOKENS_PER_MIN` | 40000 | Prompt plus answer tokens in any 60 s of play; multiply by your model's price for a cost per minute |
+| `AGENTREALM_PLANNER_HURT_FRACTION` | 0.5 | Health below this share of max raises `hurt` |
+| `AGENTREALM_PLANNER_IDLE_MINUTES` | 10 | No applied Step for this long raises `idle` |
 
-Triggers: a new clue, a navigation give-up (`stuck`), a death, entering a level, a plan op finished or dropped, and `idle`. Every call counts toward the limits, failed ones included, and a failed call keeps its triggers for the next one. The prompt and the reply go to the trace. A reply's `params` merge in at once, key by key (a key it leaves out keeps its value), and may only tighten survival params past the directives file's values. Its `goals` replace the goal stack, unless none is valid or directives `goals` are set, which always win over the strategist. With the strategist off, triggers are logged and dropped, and clues still steer **Explore** (A32). To use another provider, write a class with the same `complete(messages)` method as `OpenAIChatClient`.
+Triggers: an op done or dropped, a navigation give-up (`stuck`), a death, `hurt`, a new clue, a new map, a directives `goals` change, `idle`, and the `timer`. Any of them sends a call as soon as none is in flight and the budget allows; the budget is a rolling minute, so a long session never runs dry. A failed call keeps its triggers for the next one and keeps the stack. The prompt and the reply go to the trace. A reply's `params` merge in at once, key by key, and may only tighten survival params past the directives file's values. Its `goals` become the stack; a reply without a `goals` key keeps it, and one with no valid goal clears it, so the dispatcher's safe default runs. `wait` needs a `why` and at most 30 s. Directives `goals` always win over the planner. The op table (`plan.OP_FIELDS`) is the contract: when the planner needs something new, add an op and the state that runs it. To use another provider, write a class with the same `complete(messages)` method as `OpenAIChatClient` and pick it in `make_client`.

@@ -45,6 +45,30 @@ OP_STATE: dict[str, str | None] = {
     "set_param": None,
 }
 
+# The op table: the contract with the planner (A35), shown to the model as is.
+# A behavior the planner needs and the states lack becomes a new op here (with
+# its validator below and the state that runs it), never a state that starts itself.
+OP_FIELDS: dict[str, str] = {
+    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id',
+    "explore_area": "x, y, radius",
+    "read": "x, y, or supply_id",
+    "say": "text, and npc_id or npc_type",
+    "buy": "code",
+    "break_block": 'x, y, capability ("cut"|"chop"|"smash"|"burn"|"blast")',
+    "use_block": "x, y, code (the supply to use on it)",
+    "compose": "composes_into (the whole item to make)",
+    "fetch_item": "code, optional x, y",
+    "gather_gems": "count",
+    "hunt": "npc_type, optional x, y",
+    "enter_level": "x, y (the level door)",
+    "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
+    "avoid": "npc_type, or block_type, or x, y, radius",
+    "wait": "seconds, why",
+    "set_param": "name, value",
+}
+# A planner `wait` is a short hold with a reason, never a way to park the agent.
+WAIT_MAX_SECONDS = 30
+
 # Ops the shipped Explore pathing can drive today. Every other op is dropped
 # with a log line when it reaches the top of the stack (A34 slice).
 EXPLORE_PATH_OPS = frozenset({"explore_area", "travel", "wait"})
@@ -59,7 +83,7 @@ TRAVEL_PATHED = frozenset({"entrance", "town", "point", "shop"})
 
 # Built-in `explore` explores the whole map: no center, no radius bound.
 EXPLORE_ANYWHERE = 1 << 30
-# Built-in `hold`: one hour, re-entered from policy.goals when it ends.
+# Built-in `hold` (test mode only): one hour, re-entered from policy.goals when it ends.
 HOLD_SECONDS = 3600
 # An op that finds no path for this long is dropped and logged.
 PLAN_STALL_SECONDS = 30
@@ -238,7 +262,15 @@ def _validate_avoid(op: dict[str, Any]) -> bool:
 
 
 def _validate_wait(op: dict[str, Any]) -> bool:
-    return _require_fields(op, ("seconds",)) and _is_int(op["seconds"]) and op["seconds"] >= 0
+    if not _require_fields(op, ("seconds", "why")):
+        return False
+    if not _is_str(op["why"]):
+        _drop("wait needs a reason in `why`", op)
+        return False
+    if not _is_int(op["seconds"]) or not 0 <= op["seconds"] <= WAIT_MAX_SECONDS:
+        _drop(f"wait seconds must be 0..{WAIT_MAX_SECONDS}", op)
+        return False
+    return True
 
 
 def _validate_set_param(op: dict[str, Any]) -> bool:
@@ -552,7 +584,10 @@ def directive_stack_ops(directive_goals: list[str]) -> list[GoalOp]:
 
 
 def builtin_goals(policy: Policy, *, goto_satisfied: bool = False) -> list[GoalOp]:
-    """``policy.goals`` as ops, one for one, when directives set no goals and there is no model.
+    """``policy.goals`` as ops, one for one, when directives set no goals and the planner is off.
+
+    That is the ``--no-planner`` test mode only: with the planner on, the
+    stack starts empty and only the planner or directives fill it (A35).
 
     ``wander`` has no op; it is left to ``policy.goals``, which ``replan``
     falls back to whenever the stack has no path (or is empty). A ``goto``
@@ -572,7 +607,7 @@ def builtin_goals(policy: Policy, *, goto_satisfied: bool = False) -> list[GoalO
                 op["map_id"] = policy.goto_map
             ops.append(op)
         elif goal == "hold":
-            ops.append({"op": "wait", "seconds": HOLD_SECONDS})
+            ops.append({"op": "wait", "seconds": HOLD_SECONDS, "why": "policy hold"})
     return ops
 
 

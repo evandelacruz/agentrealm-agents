@@ -393,7 +393,7 @@ class SmokeScriptTest(unittest.TestCase):
     def main(self, argv, env=None):
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict("os.environ", env or {}, clear=True), redirect_stdout(out), redirect_stderr(err):
-            code = self.smoke.main(argv)
+            code = self.smoke.main(["--no-planner", *argv])  # offline: the planner test mode
         return code, out.getvalue(), err.getvalue()
 
     def test_no_api_key_exits_2(self):
@@ -404,7 +404,7 @@ class SmokeScriptTest(unittest.TestCase):
     def run_main(self, seconds: float, played):
         """``main`` against a fake client; ``played(metrics)`` stands in for the hour."""
 
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None, planner=None):
             played(metrics)
             return seconds, None
 

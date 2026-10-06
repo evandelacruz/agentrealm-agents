@@ -55,7 +55,7 @@ class FakeRunner:
     events = staticmethod(lambda w, hooks: None)
     windows = 0
 
-    def __init__(self, cfg, client, cid, stop, out=print, knowledge=None, acceptance=None):
+    def __init__(self, cfg, client, cid, stop, out=print, knowledge=None, acceptance=None, strategist=None):
         self.cfg, self.stop, self.knowledge, self.hooks = cfg, stop, knowledge, acceptance
 
     def run(self) -> None:
@@ -110,7 +110,7 @@ class ProbeRunTest(unittest.TestCase):
     def run_probe(self, *extra: str) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
-            code = self.probe.main(["--api-key", "k", "--character-id", "9", *extra])
+            code = self.probe.main(["--api-key", "k", "--character-id", "9", "--no-planner", *extra])
         return code, out.getvalue(), err.getvalue()
 
     def saved_regen(self):

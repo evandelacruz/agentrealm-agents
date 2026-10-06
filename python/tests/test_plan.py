@@ -273,7 +273,7 @@ class JsonPlanTest(unittest.TestCase):
         self.assertEqual(params["fight_margin"], 2.0)
 
     def test_load_plan_json(self):
-        text = json.dumps({"goals": [{"op": "wait", "seconds": 0}], "notes": "n"})
+        text = json.dumps({"goals": [{"op": "wait", "seconds": 0, "why": "test"}], "notes": "n"})
         plan = load_plan_json(text, floor_params=dict(PARAM_DEFAULTS))
         self.assertEqual(plan.notes, "n")
         self.assertEqual(plan.current()["op"], "wait")

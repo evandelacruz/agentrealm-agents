@@ -214,7 +214,7 @@ class TestWorldServer:
 
 class ClueModel:
     """The fake LLM: answers the first prompt that carries the clue with
-    ``reply``, and every later one with no goals, so the stack is kept."""
+    ``reply``, and every later one without a ``goals`` key, so the stack is kept."""
 
     def __init__(self, reply: dict):
         self.reply = reply
@@ -226,7 +226,7 @@ class ClueModel:
         answered = any(CLUE in p for p in self.prompts[:-1])
         if CLUE in prompt and not answered:
             return json.dumps(self.reply), {"prompt_tokens": 100, "completion_tokens": 50}
-        return json.dumps({"goals": [], "notes": "keep"}), {"prompt_tokens": 100, "completion_tokens": 10}
+        return json.dumps({"notes": "keep"}), {"prompt_tokens": 100, "completion_tokens": 10}
 
 
 class InlineStrategist(Strategist):
@@ -249,10 +249,10 @@ class TestWorldCase(unittest.TestCase):
         metrics = M4AcceptanceMetrics(required=REQUIRED)
         server = TestWorldServer(stop, windows)
         model = ClueModel(reply)
-        strategist = InlineStrategist(config=StrategistConfig(model="m", api_key="k", min_interval_s=0), client=model)
+        strategist = InlineStrategist(config=StrategistConfig(provider="openai", model="m", api_key="k"), client=model)
         cfg = CharacterConfig("T", "testworld", Policy(goals=["hold"], pickup=False, entity_refresh=20), Path("t.toml"))
         r = runner.Runner(cfg, metrics.wrap(server), 1, stop, out=lambda _: None,
-                          knowledge=KnowledgeBase.empty("testworld"), acceptance=metrics)
+                          knowledge=KnowledgeBase.empty("testworld"), acceptance=metrics, strategist=strategist)
         self.addCleanup(r.trace.close)
         r.world = WorldModel(character_id=1)
         r.mem = Memory()
@@ -263,8 +263,7 @@ class TestWorldCase(unittest.TestCase):
                 stop.set()
 
         server.on_wait = on_wait
-        with mock.patch.object(runner.Strategist, "from_env", return_value=strategist), \
-                mock.patch.object(runner.Pacer, "wait_next_window", lambda _self, nb=0.0: server.wait(nb)):
+        with mock.patch.object(runner.Pacer, "wait_next_window", lambda _self, nb=0.0: server.wait(nb)):
             r.run()
         return metrics, server, model
 
@@ -273,14 +272,15 @@ class M4DoneWhenTest(TestWorldCase):
     def test_clue_to_plan_to_buy_travel_break_enter(self):
         metrics, server, model = self.play()
         self.assertEqual(metrics.failures(), [], metrics.summary_lines())
-        self.assertIn(CLUE, model.prompts[0], "the first call answers the sign's clue")
+        clue_calls = [i for i, p in enumerate(model.prompts) if CLUE in p]
+        self.assertTrue(clue_calls, "a call carried the sign's clue")  # timer calls may come first
         self.assertEqual(server.gems, 20 - TORCH_PRICE, "the torch was bought")
         self.assertEqual(server.burnt, {HEDGE}, "the planned hedge burned, and no other")
         self.assertEqual(server.pos, ENTRANCE, "walked through the gap onto the entrance")
         self.assertGreater(server.windows, 0, "finished before the windows ran out")
 
     def test_plan_without_the_ops_fails(self):
-        metrics, server, _ = self.play({"goals": [{"op": "wait", "seconds": 1}], "notes": "no idea"}, windows=600)
+        metrics, server, _ = self.play({"goals": [{"op": "wait", "seconds": 1, "why": "no idea"}], "notes": "no idea"}, windows=600)
         failures = metrics.failures()
         for op in REQUIRED:
             self.assertIn(f"strategist never planned {op_key(op)}", failures)

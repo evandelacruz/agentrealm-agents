@@ -358,6 +358,7 @@ def replan(
 
     A path whose first step lies in fog is skipped like an unreachable goal,
     so a later goal (explore, say) gets the move while terrain reads catch up.
+    An owed ``goto`` is the exception (below).
     When a plan is active, its current op is tried before ``policy.goals``.
     When no goal gets a step, returns the first goal with a target on this map,
     its leg, and whether a route was found (its first step was not open),

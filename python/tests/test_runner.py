@@ -696,7 +696,28 @@ class RunnerTest(unittest.TestCase):
         with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(set_position((1, 0)), "walk")):
             r.tick()
         self.assertEqual(self._walk_cells((0, 0), fake.sent[0][0])[-1], (4, 0))
-        self.assertTrue(r.mem.path_threats)
+        self.assertEqual(r.mem.path_threats, {("npc", 9)})
+        r.note_held_path_stale()
+        self.assertFalse(r.mem.resend_held_queue)
+        r.world.entities = [Entity("npc", 9, (3, 2), "wartlurch")]  # it moves, still in reach
+        r.note_held_path_stale()
+        self.assertFalse(r.mem.resend_held_queue, "the same hostile moving is no new threat")
+        r.world.entities.append(Entity("npc", 10, (4, 2), "wartlurch"))
+        r.note_held_path_stale()
+        self.assertTrue(r.mem.resend_held_queue, "a second hostile in reach is")
+
+    def test_a_submitted_queue_records_what_it_already_crosses(self):
+        # A Fight or Boss queue's Steps are judged against what they crossed
+        # when sent, not against the walk sent before them.
+        fake = FakeClient([{"tick": 10 + i, "window_remaining_ms": 0} for i in range(2)])
+        r = self.runner(fake, Policy(goals=[], pickup=False, on_hostile="ignore"))
+        r.world.hostile_types.add(("npc", "wartlurch"))
+        r.world.entities = [Entity("npc", 9, (4, 2), "wartlurch")]
+        r.mem.path_threats = {("npc", 99)}  # left over from an older walk
+        tail = [{"verb": "Step", "direction": "right"}] * 4
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(None, "fight", submit_queue=tail)):
+            r.tick()
+        self.assertEqual(r.mem.path_threats, {("npc", 9)})
         r.note_held_path_stale()
         self.assertFalse(r.mem.resend_held_queue)
 

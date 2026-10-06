@@ -842,6 +842,7 @@ class Runner:
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
         m.pending, m.held_queue = None, None
         m.path, m.resend_held_queue = [], False
+        m.path_blockers, m.path_threats = set(), set()
 
     def drop_held_queue(self) -> None:
         """Give up on the held queue. Its later results are no longer read, so
@@ -874,6 +875,7 @@ class Runner:
         if d.submit_queue is not None:
             m.pending_intents, m.pending_queue, m.pending_next_index = d.submit_queue, None, 0
             m.pending = None
+            self._note_sent_walk()
             return d.submit_queue
         if d.intent is None:
             return None
@@ -918,9 +920,15 @@ class Runner:
             m.path = m.path[queued:]
         m.pending_intents, m.pending_queue, m.pending_next_index = intents, None, 0
         m.pending = None
+        self._note_sent_walk()
+        return intents
+
+    def _note_sent_walk(self) -> None:
+        """What the queue just sent already crosses: blocked cells and hostiles'
+        reach. Only what turns up later makes it stale (A43, A63 run 4)."""
+        w, m = self.world, self.mem
         m.path_blockers = path_blockers(w, m, self.cfg.policy, self.knowledge)
         m.path_threats = path_threats(w, m, self.cfg.policy)
-        return intents
 
     def heard_tick(self, tick) -> None:
         """A read's tick: the server clock moved at least this far."""

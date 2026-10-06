@@ -216,9 +216,11 @@ def pursuer_peaks(w: WorldModel, policy: Policy, everyone: bool = False) -> dict
     return {(e.kind, e.id): 0 for e in chasing}
 
 
-def hostile_reach(w: WorldModel, policy: Policy, skip: Collection[tuple[str, int]] = ()) -> set[Pos]:
+def hostile_reach(
+    w: WorldModel, policy: Policy, skip: Collection[tuple[str, int]] = (), only: Entity | None = None
+) -> set[Pos]:
     """Cells within ``policy.hostile_range`` of a known hostile (``is_hostile``),
-    leaving out those whose (kind, id) is in ``skip``.
+    leaving out those whose (kind, id) is in ``skip``; of ``only`` alone when given.
 
     Standing there starts Retreat, Flee or Fight, so a Heal or Retreat walk
     prices them as ``costly`` and a held walk queue that comes to cross one is
@@ -226,7 +228,7 @@ def hostile_reach(w: WorldModel, policy: Policy, skip: Collection[tuple[str, int
     """
     reach = policy.hostile_range
     out: set[Pos] = set()
-    for e in w.entities:
+    for e in w.entities if only is None else [only]:
         if (e.kind, e.id) in skip or not is_hostile(w, policy, e):
             continue
         hx, hy = e.pos

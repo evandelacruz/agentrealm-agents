@@ -216,26 +216,34 @@ def path_blockers(w: WorldModel, m: Memory, policy: Policy, knowledge: Knowledge
     return out
 
 
-def path_threats(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
-    """Cells the rest of the held walk queue steps onto within reach of a known
-    hostile (``survival.hostile_reach``), leaving out those we run from.
+def path_threats(w: WorldModel, m: Memory, policy: Policy) -> set[tuple[str, int]]:
+    """The known hostiles (kind, id) with a cell the rest of the held walk
+    queue steps onto within their reach (``survival.hostile_reach``), leaving
+    out the fight's group and the last hitter (``pursuer_peaks``).
 
-    Retreat's path weighs no danger from its pursuers (``pursuer_peaks``), and
-    they follow it anyway, so their reach never makes its queue stale.
+    Retreat's path weighs no danger from those, and they follow it anyway, so
+    they never make its queue stale. Hostiles, not cells: one that moves while
+    in reach of the walk shifts its reach but is no new threat.
     """
-    cells = remaining_walk_cells(w, m)
+    cells = set(remaining_walk_cells(w, m))
     if not cells or not w.alive or policy.kind == "idle":
         return set()
-    return set(cells) & hostile_reach(w, policy, skip=pursuer_peaks(w, policy))
+    skip = pursuer_peaks(w, policy)
+    return {
+        (e.kind, e.id)
+        for e in w.entities
+        if (e.kind, e.id) not in skip and not cells.isdisjoint(hostile_reach(w, policy, skip=skip, only=e))
+    }
 
 
 def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> bool:
     """True when the rest of a held walk queue no longer matches the map (A43),
-    or now crosses a known hostile's reach (A63 run 4).
+    or now crosses the reach of a known hostile it did not cross when sent
+    (A63 run 4).
 
-    A cell that was already blocked, or in reach, when the queue was sent does
-    not count: the replan could not avoid it, so resending would only send it
-    again.
+    A cell that was already blocked, or a hostile already in reach, when the
+    queue was sent does not count: the replan could not avoid it, so resending
+    would only send it again.
     """
     if path_blockers(w, m, policy, knowledge) - m.path_blockers:
         return True

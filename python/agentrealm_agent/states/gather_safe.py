@@ -1,10 +1,13 @@
 """Which ground **Gather** may work, and which counts as safe-ish (A22). Not a ``STATES`` entry.
 
-``GatherState`` targets a gem pile, grass or bush only where ``gather_ground``
-holds: known ground off hazards with no known hostile near. That includes the
-open field, where the gems are; staying alive there is the reflexes' job
-(Retreat, Flee, Fight, Heal), not Gather's. ``is_safe_ish`` is the stricter
-safe-zone ground a hurt character walks first (``safe_explore_path``).
+``GatherState`` takes a gem pile only on ``open_ground``: known ground off
+hazards with no known hostile near. It cuts grass or a bush only on
+``gather_ground``: open ground outside any known safe zone. A ``Use`` on
+town grass has no effect, and the reference has gems drop from cuts outside
+town, so the open field is where Gather works; staying alive there is the
+reflexes' job (Retreat, Flee, Fight, Heal), not Gather's. ``is_safe_ish``
+is the stricter safe-zone ground a hurt character walks first
+(``safe_explore_path``).
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ from __future__ import annotations
 from ..config import Policy
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..world import NEIGHBOURS, Pos, WorldModel, chebyshev
-from ..zone_discovery import RESPAWN_PROBE_RADIUS, safe_tiles
+from ..zone_discovery import RESPAWN_PROBE_RADIUS, known_safe, safe_tiles
 
 
 # Gather keeps this far from any known hostile: the radius inside which the
@@ -26,17 +29,23 @@ def hostiles_near(w: WorldModel, pos: Pos, policy: Policy, radius: int | None = 
     return any(e.kind in policy.hostile and chebyshev(e.pos, pos) <= reach for e in w.entities)
 
 
-def gather_ground(w: WorldModel, pos: Pos, policy: Policy) -> bool:
-    """Known ground where cutting grass or a bush, or taking a gem pile, is allowed.
+def open_ground(w: WorldModel, pos: Pos, policy: Policy) -> bool:
+    """Known ground where taking a gem pile is allowed.
 
     The cell must be revealed, not on a hazard tile, and have no known
-    hostile within ``GATHER_HOSTILE_RADIUS``. Safe zones are not required.
+    hostile within ``GATHER_HOSTILE_RADIUS``.
     """
     if w.map_id is None or pos not in w.view.tiles:
         return False
     if w.view.tiles.get(pos) in policy.avoid_blocks:
         return False
     return not hostiles_near(w, pos, policy, GATHER_HOSTILE_RADIUS)
+
+
+def gather_ground(w: WorldModel, pos: Pos, policy: Policy) -> bool:
+    """Known ground where cutting grass or a bush is worth a ``Use``: open
+    ground outside every known safe zone, since town grass does not cut."""
+    return open_ground(w, pos, policy) and not known_safe(w, w.map_id, pos)
 
 
 def near_respawn_anchor(w: WorldModel, pos: Pos) -> bool:

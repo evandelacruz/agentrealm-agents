@@ -24,11 +24,10 @@ def _map_view(w: WorldModel, map_id: int):
 
 
 def recover_approach_target(w: WorldModel, map_id: int, chest_at: Pos) -> Pos | None:
-    """A standable cell from which the chest is in reach, known safe via get_zone (A7)."""
-    known = w.zones.get(map_id, {})
+    """A standable cell from which the chest is in reach, known safe via a zone or terrain read (A7)."""
     view = _map_view(w, map_id)
     safe = safe_tiles(w, map_id)
-    if chest_at in known and known[chest_at].safe and view.walkable(chest_at):
+    if chest_at in safe and view.walkable(chest_at):
         return chest_at
     options = [
         n

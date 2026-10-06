@@ -15,9 +15,16 @@ from agentrealm_agent.zone_discovery import (
     RESPAWN_PROBE_RADIUS,
     apply_town,
     apply_zone,
+    known_safe,
     next_zone_probe,
     safe_tiles,
 )
+
+
+def terrain_read(map_id: int, x0: int, y0: int, rows: list[str], safe_glyph: str = "S") -> dict:
+    """A terrain read: ``g`` is grass, ``safe_glyph`` is grass in a safe zone."""
+    legend = {"g": {"block_type": "grass"}, safe_glyph: {"block_type": "grass", "safe": True}}
+    return {"map_id": map_id, "x0": x0, "y0": y0, "width": len(rows[0]), "height": len(rows), "legend": legend, "rows": rows}
 
 
 def record_respawn_anchor(w: WorldModel, map_id: int, pos) -> None:
@@ -60,6 +67,25 @@ class ZoneDiscoveryTest(unittest.TestCase):
         w = filled_world(at=(20, 20))
         record_respawn_anchor(w, 7, (0, 0))  # its whole ring is unrevealed
         self.assertIsNone(next_zone_probe(w, Memory()))
+
+    def test_terrain_safe_cells_are_known_safe_and_never_probed(self):
+        """A63 run 2: 307 of 741 calls were zone reads of town cells a terrain read already marked safe."""
+        w = filled_world(at=(1, 1), perception=1)
+        w.apply_terrain(terrain_read(7, 0, 0, ["SSS", "SSS", "SSg"]))
+        record_respawn_anchor(w, 7, (1, 1))
+        self.assertEqual(safe_tiles(w, 7), {(x, y) for x in range(3) for y in range(3)} - {(2, 2)})
+        self.assertTrue(known_safe(w, 7, (0, 0)))
+        self.assertFalse(known_safe(w, 7, (2, 2)))
+        self.assertEqual(next_zone_probe(w, Memory()), (7, (2, 2)), "only the cell with no safe flag")
+        apply_zone(w, 7, 2, 2, {"safe": False, "brightness": 1})
+        self.assertIsNone(next_zone_probe(w, Memory()))
+
+    def test_a_later_full_read_without_the_flag_clears_it(self):
+        w = filled_world(at=(0, 0), perception=1)
+        w.apply_terrain(terrain_read(7, 0, 0, ["S"]))
+        self.assertTrue(known_safe(w, 7, (0, 0)))
+        w.apply_terrain(terrain_read(7, 0, 0, ["g"]))
+        self.assertFalse(known_safe(w, 7, (0, 0)))
 
     def test_failed_cell_is_not_probed_again(self):
         w = filled_world(at=(5, 5))

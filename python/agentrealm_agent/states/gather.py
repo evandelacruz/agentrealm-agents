@@ -1,9 +1,12 @@
 """Gather: carry out the plan's ``gather_gems`` op from grass, bushes and gem piles (A22).
 
-It works any known ground off hazards with no known hostile near
-(``gather_ground``), the open field included. Grass and bushes in a region
-our own cuts showed barren are left alone (A63), unless the op names that
-region with ``x, y``, and so are cells it cut too recently to have grown back."""
+It cuts known grass and bushes off hazards, outside safe zones and with no
+known hostile near (``gather_ground``): town grass does not cut. With no such
+cell in view while standing on safe ground, it walks out to the nearest known
+field ground, else the nearest frontier. Grass and bushes in a region our own
+cuts showed barren are left alone (A63), unless the op names that region with
+``x, y``, and so are cells it cut too recently to have grown back or whose
+last ``Use`` had no effect."""
 
 from __future__ import annotations
 
@@ -17,9 +20,10 @@ from ..navigation import cost_path, nearest_target
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
 from ..world import Entity, Pos, WorldModel, chebyshev
+from ..zone_discovery import known_safe
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets, safe_default
-from .gather_safe import gather_ground
+from .gather_safe import gather_ground, open_ground
 from .intents import set_position, take, use_block
 
 # Authored gem piles spawn as ground supplies (Obs, GAME_NOTES.md Gems).
@@ -30,11 +34,14 @@ GEM_PILE_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
 # pocket knife's range is 1 (GAME_NOTES.md Olympuff starting kit).
 BUSH_REACH = 1
 GOAL = "gather"
+OUT = "out"  # ``m.gather_target`` kind: walking off safe ground to field ground or the frontier
 # Known targets tried per replan, nearest first: bounds the searches when the
 # closest ones turn out unreachable (across water, say).
 GATHER_CANDIDATES = 16
 # Gather's last decision, for the planner's State (``Memory.gather_status``).
 CUTTING = "cutting"
+NO_EFFECT = "cuts have no effect here"
+HEADING_OUT = "heading out of safe ground"
 NONE_CUTTABLE = "no cuttable cell in view"
 REGION_BARREN = "region barren"
 
@@ -42,9 +49,10 @@ REGION_BARREN = "region barren"
 class GatherState(State):
     """Executor for ``gather_gems``: ``Use`` grass and bushes or ``Take`` gem
     piles until the gem counter reaches the op's count, walking to the
-    nearest known one when none is in reach. Grass and bushes in a barren
-    region are skipped unless the op names it. With no known target left it
-    explores (the safe default) to reveal more."""
+    nearest known one when none is in reach. Grass and bushes on safe ground
+    or in a barren region (unless the op names it) are skipped. On safe
+    ground with no target, it heads out to field ground or the frontier;
+    with nowhere to head, it explores (the safe default) to reveal more."""
 
     name = "Gather"
 
@@ -87,8 +95,11 @@ def gather_outcome(
 ) -> StateOutcome:
     """Gather's move this decision, or no intents with nothing to work.
 
-    Sets ``m.gather_status``: ``CUTTING`` with intents, else ``REGION_BARREN``
-    when standing in a skipped barren region, else ``NONE_CUTTABLE``.
+    Sets ``m.gather_status`` from results, not intents alone: with intents,
+    ``NO_EFFECT`` while no ``Use`` has taken effect since the last one that
+    did nothing, else ``HEADING_OUT`` when walking off safe ground, else
+    ``CUTTING``. With none, ``REGION_BARREN`` when standing in a skipped
+    barren region, else ``NONE_CUTTABLE``.
     """
     here = w.pos
     if here is None:
@@ -96,7 +107,12 @@ def gather_outcome(
     skip = _barren_to_skip(w, knowledge, op)
     out = _gather_step(w, m, policy, here, skip, exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts), knowledge, state)
     if out.intents is not None:
-        m.gather_status = CUTTING
+        if gem_cuts is not None and gem_cuts.no_effect_streak:
+            m.gather_status = NO_EFFECT
+        elif m.gather_target is not None and m.gather_target[0] == OUT:
+            m.gather_status = HEADING_OUT
+        else:
+            m.gather_status = CUTTING
     else:
         m.gather_status = REGION_BARREN if region_of(here) in skip else NONE_CUTTABLE
     return out
@@ -118,7 +134,7 @@ def _gather_step(
         return p not in exhausted and region_of(p) not in skip and gather_ground(w, p, policy)
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    piles = [e for e in w.entities if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and gather_ground(w, e.pos, policy)]
+    piles = [e for e in w.entities if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and open_ground(w, e.pos, policy)]
     if piles:
         s = min(piles, key=lambda e: (chebyshev(e.pos, here), e.id))
         return StateOutcome([take(s.id)], f"take {s.code or s.id}", state=state)
@@ -134,7 +150,7 @@ def _gather_step(
         return StateOutcome([use_block(p)], "cut bush", state=state)
 
     # Follow only a path Gather planned, toward a target that still qualifies.
-    if m.goal == GOAL and not _still_wanted(w, m.gather_target, policy, cuttable):
+    if m.goal == GOAL and not _still_wanted(w, m.gather_target, policy, cuttable, here):
         m.path, m.goal, m.gather_target = [], "", None
     step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is None:
@@ -154,13 +170,22 @@ def _barren_to_skip(w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp |
     return skip
 
 
-def _still_wanted(w: WorldModel, target: tuple[str, Pos] | None, policy: Policy, cuttable: Callable[[Pos], bool]) -> bool:
+def _still_wanted(
+    w: WorldModel, target: tuple[str, Pos] | None, policy: Policy, cuttable: Callable[[Pos], bool], here: Pos
+) -> bool:
     if target is None:
         return False
     kind, pos = target
     if kind == "pile":
-        return any(is_gem_pile(e) and e.pos == pos for e in w.entities) and gather_ground(w, pos, policy)
+        return any(is_gem_pile(e) and e.pos == pos for e in w.entities) and open_ground(w, pos, policy)
+    if kind == OUT:
+        # Off safe ground the field is in view: replan to cut it.
+        return _on_safe_ground(w, here)
     return w.view.tiles.get(pos) == kind and cuttable(pos)
+
+
+def _on_safe_ground(w: WorldModel, pos: Pos) -> bool:
+    return w.map_id is not None and known_safe(w, w.map_id, pos)
 
 
 def _replan_gather(
@@ -171,7 +196,8 @@ def _replan_gather(
     costly: set[Pos],
     cuttable: Callable[[Pos], bool],
 ) -> None:
-    """Plan to the nearest pile, then bush, then grass; leave ``m.path`` alone if none.
+    """Plan to the nearest pile, then bush, then grass, then (on safe ground)
+    out to field ground or the frontier; leave ``m.path`` alone if none.
 
     Bushes and grass are any known cell that is ``cuttable``, the nearest
     ``GATHER_CANDIDATES`` of each tried. A failed plan keeps another state's path.
@@ -182,7 +208,7 @@ def _replan_gather(
     here = w.pos
     assert here is not None
 
-    piles = [e for e in w.entities if is_gem_pile(e) and gather_ground(w, e.pos, policy)]
+    piles = [e for e in w.entities if is_gem_pile(e) and open_ground(w, e.pos, policy)]
     if piles:
         target = min(piles, key=lambda e: (chebyshev(e.pos, here), e.id)).pos
         path = cost_path(w, target, params)
@@ -208,6 +234,26 @@ def _replan_gather(
         found = nearest_target(w, _nearest(here, grass), params)
         if found and next_step(w, blocked, found[1]):
             m.path, m.goal, m.gather_target = found[1], GOAL, ("grass", found[0])
+            return
+
+    if _on_safe_ground(w, here):
+        _plan_out(w, m, policy, blocked, params)
+
+
+def _plan_out(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos], params) -> None:
+    """Head off safe ground: to the nearest known walkable field cell, else the nearest frontier."""
+    here = w.pos
+    assert here is not None
+    view = w.view
+    field = {p for p in view.tiles if view.walkable(p) and gather_ground(w, p, policy)}
+    frontier = {p for p in view.frontier() if p != here and open_ground(w, p, policy)}
+    for cells in (field, frontier):
+        if not cells:
+            continue
+        found = nearest_target(w, _nearest(here, cells), params)
+        if found and next_step(w, blocked, found[1]):
+            m.path, m.goal, m.gather_target = found[1], GOAL, (OUT, found[0])
+            return
 
 
 def _nearest(here: Pos, cells: Iterable[Pos]) -> set[Pos]:

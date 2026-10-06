@@ -23,6 +23,11 @@ Stored in the world knowledge base under ``kb.extra["gem_yield"]``::
 total. The planner's State shows :func:`summary`; Gather skips barren
 regions (:func:`barren_regions`) and cells it cut within ``REGROW_TICKS``,
 pending cuts included (:func:`exhausted_cells`), both read once per decision.
+
+A ``Use`` that comes back ``applied_no_effect`` cut nothing: there was no
+roll, so it is never filed (a false miss would push its region toward
+barren). The tracker only holds that cell out for ``REGROW_TICKS`` so Gather
+moves on, and counts it for the planner (:meth:`GemYieldTracker.run_counts`).
 """
 
 from __future__ import annotations
@@ -96,6 +101,12 @@ class GemYieldTracker:
     claimed: set[int] = field(default_factory=set)  # ground gems already credited to a cut
     on_ground: set[int] = field(default_factory=set)  # claimed gems not yet gone from view
     last_gems: int | None = None  # the gem counter at the last update
+    # Cells a Use left unchanged (``applied_no_effect``): (map_id, cell) -> tick.
+    no_effect: dict[tuple[int, Pos], int] = field(default_factory=dict)
+    cuts: int = 0  # Uses on grass or a bush that took effect, this run
+    no_effect_cuts: int = 0  # Uses on grass or a bush that did nothing, this run
+    no_effect_streak: int = 0  # no-effect cuts since the last one that took effect
+    gems_gained: int = 0  # rises of the gem counter this run, spending not taken off
 
     def note_cut(self, w: WorldModel, pos: Pos, block: str, tick: int, *, took: bool = False) -> None:
         """Our ``Use`` on ``pos`` applied while it showed ``block``. ``took``: a
@@ -103,14 +114,33 @@ class GemYieldTracker:
         does not show yet."""
         if w.map_id is None or not block:
             return
+        if block in GATHER_BLOCKS:
+            self.cuts += 1
+            self.no_effect_streak = 0
         self.pending.append(
             PendingCut(w.map_id, pos, block, tick, w.gems, {gid for gid, _ in _ground_gems(w)}, took=took)
         )
 
-    def pending_cells(self, map_id: int | None) -> set[Pos]:
-        """Cells of ``map_id`` cut and still waiting out their gem window:
-        exhausted already, though not filed yet (:func:`exhausted_cells`)."""
-        return {c.pos for c in self.pending if c.map_id == map_id}
+    def note_no_effect(self, w: WorldModel, pos: Pos, block: str, tick: int) -> None:
+        """Our ``Use`` on ``pos`` came back ``applied_no_effect`` while it showed
+        ``block``. Grass or a bush: held out of Gather, never filed as a cut."""
+        if w.map_id is None or block not in GATHER_BLOCKS:
+            return
+        self.no_effect[(w.map_id, pos)] = tick
+        self.no_effect_cuts += 1
+        self.no_effect_streak += 1
+
+    def pending_cells(self, map_id: int | None, tick: int | None = None) -> set[Pos]:
+        """Cells of ``map_id`` Gather should not cut now, though not filed:
+        cuts still waiting out their gem window, and cells a ``Use`` left
+        unchanged within ``REGROW_TICKS`` of ``tick`` (:func:`exhausted_cells`)."""
+        out = {c.pos for c in self.pending if c.map_id == map_id}
+        out |= {p for (mid, p), t in self.no_effect.items() if mid == map_id and (tick is None or tick - t < REGROW_TICKS)}
+        return out
+
+    def run_counts(self) -> dict[str, int]:
+        """This run's cuts, no-effect cuts and gems gained, for the planner's State."""
+        return {"cuts": self.cuts, "no_effect_cuts": self.no_effect_cuts, "gems_gained": self.gems_gained}
 
     def note_take(self) -> None:
         for cut in self.pending:
@@ -120,6 +150,7 @@ class GemYieldTracker:
         """After a round trip is applied: credit gems, file cuts whose window closed."""
         rise = 0 if self.last_gems is None or w.gems is None else w.gems - self.last_gems
         self.last_gems = w.gems
+        self.gems_gained += max(rise, 0)
         if not self.pending:
             return
         # Died, off the map, or on another map before the window ran: not a
@@ -231,9 +262,10 @@ def exhausted_cells(
     """Cells of one map our own cuts left bare less than ``REGROW_TICKS`` ago.
 
     A cell is exhausted from the moment of its cut: the ``tracker``'s cuts
-    still waiting out their gem window count too, before they are filed.
+    still waiting out their gem window count too, before they are filed, and
+    so do cells a ``Use`` left unchanged (:meth:`GemYieldTracker.note_no_effect`).
     """
-    pending = tracker.pending_cells(map_id) if tracker is not None else set()
+    pending = tracker.pending_cells(map_id, tick) if tracker is not None else set()
     if kb is None or map_id is None:
         return pending
     with kb.lock:

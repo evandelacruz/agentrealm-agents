@@ -16,6 +16,7 @@ from unittest import mock
 from agentrealm_agent import config
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import Directives, PARAM_DEFAULTS
+from agentrealm_agent.gem_yield import GemYieldTracker
 from agentrealm_agent.memory import Memory, queue_signal
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
@@ -91,6 +92,7 @@ def fake_runner(goals: list[str] | None = None) -> SimpleNamespace:
         server_tick=10,
         log=mock.MagicMock(),
         acceptance=None,
+        gem_cuts=GemYieldTracker(),
     )
 
 

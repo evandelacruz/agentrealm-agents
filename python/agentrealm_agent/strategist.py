@@ -167,7 +167,7 @@ The character's arc, in order. Judge the stage from State (health, gems, armed, 
 
 Gems by area (stage 2). Gem drops from grass and bushes vary by area, and some areas drop none. State gem_yield is measured from the character's own cuts: the region it stands in (here, once cut there), the best regions nearby with their yield (gems per cut) and the barren ones. Hunt gems where the yield is good, leave a region that shows no gems after a fair sample, and explore regions not yet sampled to sample them.
 
-How gather_gems works. Gather cuts any known grass or bush off hazards with no hostile near, in the field as in town, walking to the nearest one itself; the survival states keep the character alive while it does. It skips barren regions. A gather_gems x, y only lifts the barren mark on that block's region so Gather cuts there again; it does not move the character. To move it, use travel or explore_area. Leave x, y out unless you mean to re-sample a barren region, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (cutting, or walking to a cell to cut), "no cuttable cell in view" (it knows no grass or bush it may cut, so it explores for one), or "region barren" (the same, standing in a barren region)."""
+How gather_gems works. Gather cuts known grass and bushes off hazards with no hostile near, outside safe zones only: a cut on town grass has no effect, and gems drop from cuts outside town. It walks to the nearest one itself, and with none in view while on safe ground it heads out to field ground or the frontier; the survival states keep the character alive while it does. It skips barren regions. A gather_gems x, y only lifts the barren mark on that block's region so Gather cuts there again; it does not move the character. To move it, use travel or explore_area. Leave x, y out unless you mean to re-sample a barren region, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (cutting, or walking to a cell to cut), "cuts have no effect here" (its latest cuts changed nothing, so it moves on to other cells), "heading out of safe ground" (nothing to cut in view, walking out of the safe zone), "no cuttable cell in view" (it knows no grass or bush it may cut, so it explores for one), or "region barren" (the same, standing in a barren region). State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress."""
 
 
 def system_prompt(reference_sections: str = "") -> str:
@@ -483,6 +483,7 @@ def build_prompt(
     reference_sections: str = "",
     given_up_travel: Collection[tuple[int, tuple[int, int]]] = (),
     gather_status: str = "",
+    gather_run: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -494,6 +495,7 @@ def build_prompt(
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
         *_gather_line(plan, gather_status),
+        f"gather_run={json.dumps(gather_run or {}, sort_keys=True)}",
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
@@ -773,6 +775,7 @@ class Strategist:
             reference_sections=self.config.reference_sections,
             given_up_travel=runner.mem.nav_stuck.given_up_travel,
             gather_status=runner.mem.gather_status,
+            gather_run=runner.gem_cuts.run_counts(),
         )
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1

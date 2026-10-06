@@ -840,8 +840,12 @@ class Runner:
                     self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type, others))
                 self._note_break_use(intent, result, block, index)
                 tile = w.view.tiles.get(block) if block is not None else None
-                if result.get("outcome") == "applied" and intent["target"].get("kind") == "block" and tile in CUT_BLOCKS:
+                on_block = intent["target"].get("kind") == "block" and tile in CUT_BLOCKS
+                if on_block and result.get("outcome") == "applied":
                     self.gem_cuts.note_cut(w, block, tile, m.last_use_tick, took=any(map(take_raises_gems, self._applied_take_codes)))
+                elif on_block and result.get("outcome") == "applied_no_effect":
+                    # Nothing was cut, so nothing to file: Gather just moves on (A63).
+                    self.gem_cuts.note_no_effect(w, block, tile, m.last_use_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):

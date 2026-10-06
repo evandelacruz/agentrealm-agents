@@ -293,6 +293,15 @@ class NoPositionReadWhileDownedTest(unittest.TestCase):
         self.assertEqual(calls.count("self"), 1, calls)
         self.assertEqual(calls.index("self"), UNPLACED_SELF_REFRESH)
 
+    def test_a_wake_reads_position_at_once(self):
+        """Self said asleep and not placed; a round trip says awake, and nothing else (review on #107)."""
+        w, m, pol = world(), Memory(need_position=True, need_self=False), ctx().policy
+        w.pos = None
+        w.apply_self({"lives": 9, "alive": True, "asleep": True, "placed": False})
+        self.assertEqual(choose_call(w, m, pol), "tick")
+        w.apply_observation({"version": 2, "delta": {"asleep": False}})
+        self.assertEqual(choose_call(w, m, pol), "position")
+
     def test_respawned_reads_position_again(self):
         w, m, pol = world(), Memory(need_position=True, need_self=False), ctx().policy
         w.apply_events([{"tick": 5, "events": [{"kind": "Died", "cause": "killed"}]}])

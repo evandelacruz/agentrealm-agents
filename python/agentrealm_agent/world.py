@@ -405,6 +405,8 @@ class WorldModel:
         if "alive" in body:
             self.alive = bool(body["alive"])
         if "asleep" in body:
+            if self.asleep and not body["asleep"]:
+                self.placed = True  # woke on a block; the round trip does not carry placed (A5)
             self.asleep = bool(body["asleep"])
         if "position" in body:
             pos = body["position"]

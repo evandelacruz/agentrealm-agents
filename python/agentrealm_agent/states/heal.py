@@ -21,8 +21,9 @@ from ..healing import (
 )
 from ..memory import Memory
 from ..navigation import cost_path
+from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import grid_params, hostiles_in_range, nav_search, next_step
+from ..pathing import bounded_step, grid_params, hostiles_in_range, nav_search
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import arm, set_position, take, use_self
@@ -35,6 +36,8 @@ class HealState(State):
     """Above Explore. Every branch that sends nothing is bounded: no reachable
     safe tile yields at once, and a wait with no health back yields after
     ``HEAL_WAIT_TICKS``; Heal then stays out for ``HEAL_BACKOFF_TICKS``.
+    Every walk, to food or a safe tile, is bounded by stuck detection
+    (``bounded_step``): one that goes nowhere gives its target up.
 
     Heal also runs, even at full health or with a hostile in range, while the
     weapon a drink swapped out is still to be re-armed (A24). That is one
@@ -117,24 +120,26 @@ def _plan_blocked(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) ->
 
 
 def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *, goal: str) -> StateOutcome | None:
-    target = nearest_known_safe(w)
+    target = nearest_known_safe(w, skip=lambda p: nav_stuck.backed_off(m, goal, w.map_id, p, w.tick))
     if target is None:
         return None
     return _walk_toward(w, m, policy, ctx, target[1], goal=goal)
 
 
 def _walk_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at: Pos, *, goal: str) -> StateOutcome | None:
-    """One step along a cost path to ``at``, or None when no seen, open step leads there."""
+    """One step along a cost path to ``at``, or None when there is no step there now.
+
+    The walk is bounded like any other (``bounded_step``, A15): no path, or
+    no progress in its window, gives ``at`` up with a backoff, so Heal tries
+    the next food, a carried supply or a safe tile instead of pacing.
+    """
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)
-    if m.goal != goal or not m.path or m.path[-1] != at or not next_step(w, plan_avoid, m.path):
-        m.path, m.goal = [], ""
-        found = cost_path(w, at, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, goal, at))
-        if not next_step(w, plan_avoid, found):
-            return None
-        m.path, m.goal = found, goal
-    step = next_step(w, plan_avoid, m.path)
-    assert step is not None
-    return _out([set_position(step)], f"{goal} → {at}")
+
+    def plan() -> list[Pos] | None:
+        return cost_path(w, at, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, goal, at))
+
+    step = bounded_step(m, w, goal, at, plan_avoid, plan)
+    return _out([set_position(step)], f"{goal} → {at}") if step is not None else None
 
 
 def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> StateOutcome | None:

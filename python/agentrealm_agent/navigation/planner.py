@@ -371,8 +371,10 @@ def _fine_path(
     goal when the search reaches it; otherwise on the expanded cell with the
     least cost so far plus twice ``h``, which favours progress over an
     exactly cheapest prefix, so a blocked or unseen corridor point never
-    leaves us without a step. ``None`` only when no cell but the start was
-    reachable.
+    leaves us without a step. The start competes on the same score: ``None``
+    when no reachable cell beats where we stand, so a dead end next to a
+    goal that cannot be reached is "no path", never a step away and back
+    (A58 run 7, Heal pacing beside unreachable food).
     """
     w, goal = grid.w, grid.goal
     assert w.pos is not None
@@ -406,10 +408,8 @@ def _fine_path(
                 cost[n] = ng
                 came[n] = cur
                 heapq.heappush(frontier, (ng + h(n), ng, n))
-    if not reached:
-        return None
-    best = min(reached, key=lambda p: (cost[p] + 2 * h(p), h(p), p))
-    return _unwind(came, start, best)
+    best = min(reached | {start}, key=lambda p: (cost[p] + 2 * h(p), h(p), p != start, p))
+    return None if best == start else _unwind(came, start, best)
 
 
 def cost_flood(

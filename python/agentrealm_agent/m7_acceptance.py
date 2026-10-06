@@ -25,7 +25,8 @@ module checks for each clause:
   of those give-ups within ``OSCILLATION_ABORT_TICKS`` ends the run at once,
   so a live hour never burns its time walking back and forth. Guard events
   that gave nothing up (survival states such as Fight and Retreat doing the
-  moving) are counted and reported, never an abort.
+  moving) are counted and reported, never an abort. A Heal or Loot walk the
+  guard gives up counts like any other.
 
 Heal actions are reported but not gated: a character that is never hurt has
 nothing to heal.

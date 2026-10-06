@@ -121,9 +121,36 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Regen never measured.** The character was never hurt (`heal actions: 0`), so there was no hurt safe-zone window for `note_regen_sample`. Even a full hour may need the character to take damage before regen gets a verdict.
 - **Status:** Two open blockers. (1) Navigation pacing: fixed offline in PR #103, pending Evan's approval of the A16 proposal. (2) Regen: unmeasured on every run so far (1 and 3–8); in run 8 the character was never hurt, so even with the A16 fix, run 9 can fail the regen gate. **Next:** once #103 merges, rerun the full live hour (A58 run 9); the regen blocker still stands and can fail run 9 if the character is never hurt in a safe zone.
 
-## Run 9 — in progress
+## Run 9 — FAIL: death during post-goto explore (~211 s)
 
-Live full hour on `main` after #103 (reached policy goto stays satisfied). Character chosen at run time via `CHARACTER_ID` (not committed). Verdict and gate metrics will be filled when the run finishes.
+- **Character:** chosen at run time via `CHARACTER_ID` (not committed).
+- **Verdict:** exit 1 after **211.0 s** wall clock. **Did not pass** the A16 gate (first death ends the run; run stopped before the hour).
+- **Gate metrics:** deaths **1**; retreat misses 0; recover withdraws 0; loop false; **API errors 4** (`position 409 not_on_map`); heal actions 0; lives last seen 9; navigation target `(718, 490)` from `(568, 490)` **reached** (max Chebyshev from origin 190); give-ups on other goals 3; safe-zone regen **not measured**; oscillation events 0 (gave up a target: 0).
+- **Goto / #103:** the 150-block east walk completed and Explore took over with no post-reach goto ping-pong (contrast run 8). Example after the reach:
+
+  ```
+  t=3623092 @76:744,496 tick     queue 10×Step 28×Wait (explore_area → (597, 431))
+  t=3623100 @76:744,496 tick     queue 10×Step 28×Wait (explore_area → (597, 431))
+  … no goto → (718, 490) queue after the smoke target was satisfied …
+  t=3623245 @76:716,475 tick     queue 1×Step 1×Wait (flee npc 261) | Attacked, Damaged 2 by npc
+  ```
+
+- **Death window:** after reaching `(744, 496)` the agent explored east, spoke to npc 261, then **Flee** steps interleaved with `explore_area` and `look entrance` queues. Damage stacked (`Damaged 2`, then `4`) while fleeing toward `(758, 485)`–`(758, 485)`. At tick **3623744**–**3623750** `self` showed `alive=False placed=False` and four `position error HTTP 409 not_on_map` lines fired before respawn at `(617, 403)`:
+
+  ```
+  t=3623677 @76:753,482 tick     Step(down) (flee npc 261) | Attacked, Damaged 2 by npc
+  t=3623714 @76:755,485 tick     Step(right) (flee npc 261)
+  t=3623744 @76:758,485 position error HTTP 409 not_on_map
+  t=3623745 @76:758,485 self     lives=9 alive=False placed=False perception=25
+  … three more position 409 not_on_map …
+  t=3623803 @76:617,403 tick     — (downed) | Attacked, Damaged 4 by npc, Died, Respawned
+  ```
+
+- **Root cause (from the code; no agent change in this PR):**
+  1. **Survival (A9).** With `on_hostile = flee`, `FleeState` (`states/flee.py`, `flee_escape` / `flee_run`) kept sending greedy and committed escape steps but could not outrun a single pursuing npc 261 through the eastern frontier tiles; the run ended in **Died** before **Retreat** or **Heal** ran. Explore's `explore_area` and Investigate `look` queues still appeared between flee steps while hostiles were in range.
+  2. **Runner reads (A5).** After **Died**, `apply_events` sets `need_position` (`runner.py` ~1090). `choose_call` (`brain.py`) requests `position` whenever `need_position` holds and the character is not asleep, without checking `placed` from the last **self** read, so four doomed `GET position` calls logged `409 not_on_map` and counted as gate API errors before respawn landed.
+- **Regen:** the character took damage but died in **Flee** with `heal actions: 0`, so there was no hurt safe-zone window for `note_regen_sample`. Report other gate clauses above; **regen: unmeasured, never hurt in a safe tile long enough**.
+- **Status / Next:** #103 cleared run 8's navigation blocker; run 9 still fails A58 on death (A9) and respawn-window API errors (A5). Fix those, then rerun the full live hour; regen may still need a hurt safe-zone window or the separate regen probe.
 
 ## Done-when
 

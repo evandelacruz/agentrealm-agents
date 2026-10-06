@@ -17,7 +17,7 @@
 
   "A4": {"state": "done"},
 
-  "A5": {"state": "done"},
+  "A5": {"state": "partial", "remaining": "Open bug (A58 run 9): choose_call requests position while placed=false after Died, causing gate-counted 409 not_on_map API errors before respawn. See PLAN.md A5."},
 
   "A6": {"state": "done"},
 
@@ -25,7 +25,7 @@
 
   "A8": {"state": "done"},
 
-  "A9": {"state": "done"},
+  "A9": {"state": "partial", "remaining": "Open bug (A58 run 9): flee could not outrun npc 261 after post-goto explore; character died, failing M7 gate. See PLAN.md A9 and docs/observations/A58_live_play.md Run 9."},
 
   "A10": {"state": "done"},
 
@@ -41,7 +41,7 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 
-  "A58": {"state": "partial", "remaining": "Regen unmeasured on every run (1 and 3-8); in run 8 the character was never hurt, so run 9 can fail the regen gate. Run 8's post-reach goto/explore ping-pong is fixed offline (A16: a reached goto is satisfied); rerun the live hour. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "Waiting on A9 (run 9 death during flee after goto reached) and A5 (respawn-window position 409s). #103 cleared run 8 navigation; run 9 failed at ~211 s. Regen still unmeasured (hurt but died in Flee). Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 

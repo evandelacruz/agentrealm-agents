@@ -8,8 +8,8 @@ none. Nothing here knows where: every number comes from cuts this agent made.
    by a free ``gem`` supply that appears on or next to the cell within
    ``GEM_WINDOW_TICKS`` (one that was not in view at the cut and no earlier
    cut claimed), or by the gem counter rising in that window with no gem
-   ``Take`` applied since the cut (:func:`take_raises_gems`). Cuts still waiting at a death or a map change are
-   dropped, not filed.
+   ``Take`` applied since the cut (:func:`take_raises_gems`). Cuts still
+   waiting at a death or a map change are dropped, not filed.
 2. **Summarise.** Cells fall in ``REGION_SIZE`` square regions per map. Each
    region keeps its cuts, gems and last tick of grass and bush cuts. A region
    with ``BARREN_MIN_CUTS`` or more such cuts and no gem is barren.
@@ -151,7 +151,6 @@ class GemYieldTracker:
         if not keep:
             self.on_ground.clear()
             self.claimed.clear()  # every later cut sees these gems as already in view
-
 
     def _raise_baselines(self, credited: PendingCut | None) -> None:
         for cut in self.pending:

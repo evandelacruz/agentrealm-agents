@@ -1,4 +1,7 @@
-.PHONY: test conductor-test smoke-m6-olympuff smoke-m7-olympuff smoke-m8-olympuff smoke-m9-olympuff smoke-m10-olympuff smoke-m11-olympuff probe-regen
+.PHONY: setup test conductor-test smoke-m6-olympuff smoke-m7-olympuff smoke-m8-olympuff smoke-m9-olympuff smoke-m10-olympuff smoke-m11-olympuff probe-regen
+setup: ## Install the AI planner's provider SDKs (python/requirements.txt); live runs need them, `make test` does not
+	python3 -m pip install -r python/requirements.txt
+
 test: ## Run unit tests (no server)
 	cd python && python3 -m unittest discover -s tests
 

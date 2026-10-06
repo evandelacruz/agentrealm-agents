@@ -107,6 +107,7 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
             f"heal actions: {self.heal_actions}",
             f"loop detected: {self.loop_detected}",
             f"API errors: {len(self.api_errors)}",
+            self.planner_summary_line(),
         ]
 
 

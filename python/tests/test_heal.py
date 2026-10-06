@@ -219,10 +219,20 @@ class HealStateTest(unittest.TestCase):
         w.health = 10
         self.assertEqual(dispatch(w, ctx()).state, "Explore")
 
-    def assert_heals_moving(self, out):
-        """In a safe zone Heal never stands still: it moves via the safe default."""
+    def assert_heals_in_zone(self, out):
+        """In a one-cell safe zone every safe-default step leaves it, so Heal rests there."""
         self.assertEqual(out.state, "Heal")
-        self.assertIsNotNone(out.intents, out.reason)
+        self.assertEqual(verbs(out), ["Wait"], out.reason)
+        self.assertEqual(out.reason, "heal: rest in the safe zone")
+
+    def test_moves_inside_a_larger_safe_zone(self):
+        # Room in the zone: Heal keeps moving via the safe default, on zone cells only.
+        w = grid(at=(0, 0))
+        for x in range(5):
+            for y in range(5):
+                w.zones[7][(x, y)] = ZoneFact(safe=True)
+        out = dispatch(w, ctx(Memory(), KnowledgeBase.empty("sandbox")))
+        self.assertEqual(out.state, "Heal")
         self.assertEqual(verbs(out), ["SetPosition"])
         self.assertTrue(out.reason.startswith("heal in safe ground: "), out.reason)
 
@@ -230,11 +240,11 @@ class HealStateTest(unittest.TestCase):
         w = grid(at=(0, 0))
         m, kb = Memory(), KnowledgeBase.empty("sandbox")
         out = dispatch(w, ctx(m, kb))
-        self.assert_heals_moving(out)
+        self.assert_heals_in_zone(out)
         self.assertIsNotNone(m.heal_regen_sample)
         w.tick, w.health = 7, 6
         out = dispatch(w, ctx(m, kb))
-        self.assert_heals_moving(out)
+        self.assert_heals_in_zone(out)
         self.assertEqual(regen_known(kb, Memory()), "yes")
 
     def test_regen_absent_is_kept_for_this_run_only(self):
@@ -262,7 +272,7 @@ class HealStateTest(unittest.TestCase):
         self.assertIsNone(m.heal_regen_sample)
         w.pos, w.tick = (0, 0), REGEN_MEASURE_TICKS + 20
         out = dispatch(w, ctx(m))
-        self.assert_heals_moving(out)
+        self.assert_heals_in_zone(out)
         self.assertEqual(m.heal_regen_sample, (REGEN_MEASURE_TICKS + 20, 5, REGEN_MEASURE_TICKS + 20))
         self.assertFalse(m.heal_regen_absent)
 
@@ -280,8 +290,47 @@ class HealStateTest(unittest.TestCase):
         save_regen_yes(kb)
         m = Memory()
         out = dispatch(w, ctx(m, kb=kb))
-        self.assert_heals_moving(out)
+        self.assert_heals_in_zone(out)
         self.assertIsNone(m.heal_regen_sample)  # known: no sample taken
+
+    def test_no_regen_stops_the_measure_walk_flip_flop(self):
+        # Live: at 3/10, no food, no regen, Heal swapped between `heal_measure`
+        # and "heal in safe ground" while the safe default walked out of the
+        # zone and back. Now it rests in the zone until the verdict, then
+        # never samples or walks to safe ground again, and asks the planner
+        # once for food and potions.
+        w = grid(at=(0, 0))
+        w.health = 3
+        m, kb = Memory(), KnowledgeBase.empty("sandbox")
+        reasons = []
+        for t in range(0, REGEN_MEASURE_TICKS + 1, 10):
+            w.tick = t
+            out = dispatch(w, ctx(m, kb))
+            reasons.append(out.reason)
+            self.assertEqual(w.pos, (0, 0))
+        self.assertTrue(m.heal_regen_absent)
+        self.assertFalse(any("heal_measure" in r for r in reasons), reasons)
+        asks = [s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]
+        self.assertEqual(len(asks), 1)
+        self.assertEqual((asks[0]["health"], asks[0]["regen"]), (3, "no"))
+        # Off the zone afterwards: no walk back, no new sample, no second ask.
+        for t, at in ((REGEN_MEASURE_TICKS + 10, (2, 2)), (REGEN_MEASURE_TICKS + 20, (0, 0))):
+            w.tick, w.pos = t, at
+            out = dispatch(w, ctx(m, kb))
+            self.assertNotEqual(out.state, "Heal")
+            self.assertNotIn("heal_measure", out.reason)
+        self.assertIsNone(m.heal_regen_sample)
+        self.assertEqual(len([s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]), 1)
+
+    def test_heal_supplies_asked_again_after_a_full_heal(self):
+        w = grid(at=(2, 2))
+        m = Memory(heal_regen_absent=True)
+        dispatch(w, ctx(m))
+        w.health = 10
+        dispatch(w, ctx(m))
+        w.health = 4
+        dispatch(w, ctx(m))
+        self.assertEqual(len([s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]), 2)
 
     def test_regen_absent_does_not_pull_to_safe_ground(self):
         # Once this run has measured no regen, Heal sends nothing anywhere:

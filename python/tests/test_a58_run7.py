@@ -272,8 +272,8 @@ class HealWalkBoundedTest(unittest.TestCase):
         for x in range(-3, 1):
             w.view.tiles[(x, 0)] = "dirt"
             w.view.tiles[(x, 1)] = w.view.tiles[(x, -1)] = "stone"
-        for p in ((-4, 0), (1, 1), (1, -1)):
-            w.view.tiles[p] = "stone"
+        for p in ((-4, 0), (-4, 1), (-4, -1), (1, 1), (1, -1)):
+            w.view.tiles[p] = "stone"  # walled in: no frontier for the safe default to push to
         w.terrain_center, w.terrain_map = w.pos, 1
         w.entities = [Entity("supply", 7, (3, 0), "apple")]
         c = ctx(Policy(kind="scripted", goals=["goto", "explore"], goto=(5, 0), pickup=False))

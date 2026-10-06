@@ -27,7 +27,7 @@
 
   "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing."},
 
-  "A10": {"state": "done"},
+  "A10": {"state": "done", "note": "Live Walk run fix: Heal rests in the safe zone instead of walking out mid-sample; once regen is no it stops sampling and raises heal_supplies for the planner."},
 
   "A11": {"state": "done"},
 
@@ -39,7 +39,7 @@
 
   "A15": {"state": "done"},
 
-  "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
+  "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58. Under the planner the target is a pinned directives goal; planner errors or no accepted plan fail every smoke gate."},
 
   "A58": {"state": "partial", "remaining": "Waiting on A9 (run 9 death during flee after goto reached) and A5 (mid-flee interleaving; respawn-window position 409s). #103 (A16) merged and cleared run 8 navigation; run 9 (main 8b30a0b) failed at ~211 s. Regen still unmeasured (hurt but died in Flee); run the A60 regen probe (make probe-regen). Live tests are 5-minute runs (--seconds 300) until the basics pass. Notes in docs/observations/A58_live_play.md."},
 
@@ -93,7 +93,7 @@
 
   "A34": {"state": "done"},
 
-  "A35": {"state": "done", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack runs the A61 safe default, fail fast with no key. Planner prompt op table matches the executors (equip in, hunt out). Clearing Memory.walks on a stack change waits on #109."},
+  "A35": {"state": "done", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack runs the A61 safe default, fail fast with no key. Planner prompt op table matches the executors (equip in, hunt out). Clearing Memory.walks on a stack change waits on #109. Refused key (401/403) is fatal at startup; mid-run failures back off (2 s doubling, cap 120 s); directives ops stay above the planner's goals; SDKs in python/requirements.txt."},
 
   "A36": {"state": "done"},
 

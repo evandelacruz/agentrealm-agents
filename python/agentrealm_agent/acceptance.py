@@ -11,6 +11,7 @@ records failed requests (and optionally every call).
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 
 from .config import Policy
 from .client import ApiError
@@ -60,6 +61,15 @@ class AcceptanceHooks:
         own kwarg (``plan_op``, ``Plan.current()``).
         """
 
+    def on_planner(self, *, enabled: bool) -> None:
+        """The runner starts, with the AI planner on or off (``--no-planner``)."""
+
+    def on_strategist_reply(self) -> None:
+        """The planner answered with a usable plan (a JSON object), applied or kept."""
+
+    def on_strategist_error(self, error: str) -> None:
+        """A planner call failed (network, HTTP status, refusal) or its reply was not a plan."""
+
     def on_strategist_trigger(self, trigger: dict) -> None:
         """A trigger (``clue``, ``goal_done``, …) moved into the strategist's inbox (A36)."""
 
@@ -83,6 +93,41 @@ class AcceptanceHooks:
 
     def on_oscillation(self, event: dict) -> None:
         """The dispatch guard caught the character pacing between two cells (A15)."""
+
+
+@dataclass(kw_only=True)
+class PlannerHealth(AcceptanceHooks):
+    """Planner errors and accepted plans, for every live run with the planner on.
+
+    A run fails on any planner error, or when the planner was on and never
+    got one plan accepted: a planner that only fails is not playing.
+    """
+
+    planner_on: bool = False
+    planner_errors: int = 0
+    plans_accepted: int = 0
+
+    def on_planner(self, *, enabled: bool) -> None:
+        self.planner_on = enabled
+
+    def on_strategist_reply(self) -> None:
+        self.plans_accepted += 1
+
+    def on_strategist_error(self, error: str) -> None:
+        self.planner_errors += 1
+
+    def planner_failures(self) -> list[str]:
+        out: list[str] = []
+        if self.planner_errors:
+            out.append(f"{self.planner_errors} planner error(s)")
+        if self.planner_on and not self.plans_accepted:
+            out.append("planner on but no plan accepted")
+        return out
+
+    def planner_summary_line(self) -> str:
+        if not self.planner_on:
+            return "planner: off (--no-planner)"
+        return f"planner: {self.plans_accepted} plan(s) accepted, {self.planner_errors} error(s)"
 
 
 class CountingClient:

@@ -533,18 +533,22 @@ def safe_explore_path(
 
     Safe ground keeps off ``avoid_blocks`` hazards and Step rejections
     (``blocked``) and away from hostiles in ``hostile_range``. Hurt, it is
-    only safe-zone ground (``is_safe_ish``), so the agent heals while it
-    looks around. Frontiers backed off after a give-up are skipped (A15).
+    first only safe-zone ground (``is_safe_ish``), so the agent heals while
+    it looks around; once that is all explored (or out of reach), it pushes
+    the boundary: the nearest frontier outside, still away from hazards and
+    hostiles, with the survival reflexes (Retreat, Flee, Heal) above it as
+    always. So the safe default never loops "look around" while unexplored
+    ground is reachable. Frontiers backed off after a give-up are skipped (A15).
     """
     from .states.gather_safe import hostiles_near, is_safe_ish
 
     targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
     targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
+    targets = {p for p in targets if not hostiles_near(w, p, policy)}
+    params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+    found = None
     if hurt(w):
-        targets = {p for p in targets if is_safe_ish(w, p, policy)}
-    else:
-        targets = {p for p in targets if not hostiles_near(w, p, policy)}
-    found = nearest_explore_target(
-        w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge), knowledge
-    )
+        found = nearest_explore_target(w, {p for p in targets if is_safe_ish(w, p, policy)}, params, knowledge)
+    if not (found and found[1]):
+        found = nearest_explore_target(w, targets, params, knowledge)
     return (found[1], Leg(found[0])) if found and found[1] else (None, None)

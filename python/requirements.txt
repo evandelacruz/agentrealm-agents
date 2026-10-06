@@ -1,0 +1,5 @@
+# The AI planner's provider SDKs (A35). Only the planner imports them, and only
+# when it runs: `make test` and `--no-planner` stay standard library only.
+# Install with `make setup` (pip install -r python/requirements.txt).
+anthropic
+openai

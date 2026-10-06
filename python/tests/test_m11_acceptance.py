@@ -15,6 +15,7 @@ from agentrealm_agent import acceptance_smoke, config
 from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics
 from agentrealm_agent.acceptance_survival import OSCILLATION_ABORT_COUNT
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.strategist import Strategist
 from agentrealm_agent.world import Entity, WorldModel
 from tests.test_m7_acceptance import OVERWORLD, decide, gave_up, metrics as m7_metrics, open_world
 
@@ -234,7 +235,8 @@ class SmokeScriptTest(unittest.TestCase):
         with mock.patch.object(self.smoke, "Client") as Client, \
                 mock.patch.object(self.smoke, "resolve_character_id", return_value=9), \
                 mock.patch.object(self.smoke.time, "sleep"), \
-                mock.patch.object(self.smoke, "run_acceptance_smoke", side_effect=run_smoke):
+                mock.patch.object(self.smoke, "run_acceptance_smoke", side_effect=run_smoke), \
+                mock.patch.object(Strategist, "check"):
             client = Client.return_value
             client.world.return_value = {"town": {"map_id": OVERWORLD, "x": 0, "y": 0}}
             client.position.return_value = {"map_id": OVERWORLD, "x": 10, "y": 20}

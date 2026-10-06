@@ -137,10 +137,12 @@ class Runner:
         trace = cfg.trace_path(character_id)
         trace.parent.mkdir(parents=True, exist_ok=True)
         self.trace = open(trace, "a", buffering=1)
-        self.directives = DirectivesWatch(cfg.directives_path)
+        self.directives = DirectivesWatch(cfg.directives_path, pinned_goals=list(cfg.pinned_goals))
         self.directives.ensure_loaded()
         self.acceptance = acceptance
         self.strategist = strategist if strategist is not None else Strategist.off()
+        if acceptance is not None:
+            acceptance.on_planner(enabled=self.strategist.enabled)
         self.plan = self._build_plan()
         self._level_timer = LevelTimer()
 

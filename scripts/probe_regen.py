@@ -7,6 +7,9 @@ the cap passes (default 30 minutes), or the character dies (a failure). A
 "yes" is saved to the world knowledge base, where the M7 gate (A16) reads it.
 Prints the verdict and exits 0 only when regen answered. Never creates a
 character. Requires AGENTREALM_API_KEY.
+
+Plays with the AI planner (A35): set a planner key (README, The AI planner),
+or pass --no-planner for the test mode.
 """
 
 from __future__ import annotations
@@ -22,10 +25,11 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, planner_for, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.regen_probe import PROBE_SECONDS, RegenProbeMetrics  # noqa: E402
+from agentrealm_agent.strategist import PlannerConfigError  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "regen_probe.toml"
 
@@ -42,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--character-name", default=None)
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
+    ap.add_argument("--no-planner", action="store_true", help=NO_PLANNER_HELP)
     ap.add_argument(
         "--seconds",
         type=float,
@@ -52,6 +57,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.api_key:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
+        return 2
+    try:
+        planner = planner_for(args.no_planner)
+    except PlannerConfigError as e:
+        print(e, file=sys.stderr)
         return 2
     try:
         cfg = config.load(args.profile)
@@ -87,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     def out(line: str) -> None:
         print(line, flush=True)
 
-    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.seconds + 600.0, out=out)
+    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.seconds + 600.0, out=out, planner=planner)
     print(f"finished in {elapsed:.1f}s", flush=True)
     for line in metrics.summary_lines():
         print(line, flush=True)

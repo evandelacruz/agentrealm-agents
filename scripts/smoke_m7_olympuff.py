@@ -11,6 +11,9 @@ Sustained pacing aborts the run early with exit 1: more than
 ``OSCILLATION_ABORT_COUNT`` oscillation-guard give-ups within
 ``OSCILLATION_ABORT_TICKS`` stop the runner (m7_acceptance.py). Guard events
 that gave nothing up (survival states pacing) do not count.
+
+Plays with the AI planner (A35): set a planner key (README, The AI planner),
+or pass --no-planner for the test mode.
 """
 
 from __future__ import annotations
@@ -26,10 +29,11 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, navigation_start, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, navigation_start, planner_for, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
+from agentrealm_agent.strategist import PlannerConfigError  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m7.toml"
 
@@ -52,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--character-name", default=None)
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
+    ap.add_argument("--no-planner", action="store_true", help=NO_PLANNER_HELP)
     ap.add_argument(
         "--seconds",
         type=float,
@@ -73,6 +78,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.api_key:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
+        return 2
+    try:
+        planner = planner_for(args.no_planner)
+    except PlannerConfigError as e:
+        print(e, file=sys.stderr)
         return 2
     try:
         cfg = config.load(args.profile)
@@ -124,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     def out(line: str) -> None:
         print(line, flush=True)
 
-    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out)
+    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out, planner=planner)
     print(f"finished in {elapsed:.1f}s", flush=True)
     if metrics.oscillation_abort:
         print(f"ABORT: {metrics.oscillation_abort}; the agent paced instead of playing", file=sys.stderr)

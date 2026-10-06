@@ -2,8 +2,8 @@
 """A40: Live M11 acceptance on Olympuff (docs/PLAYABLE_AGENT_PLAN.md M11 done-when).
 
 Plays until the gate passes or the wall-clock limit is reached. Needs the
-strategist enabled (``AGENTREALM_STRATEGIST_MODEL`` plus an API key): it is the
-only thing that pushes ``fight_boss`` on this profile. The character
+AI planner (A35), so ``--no-planner`` exits 2: the planner is the only thing
+that pushes ``fight_boss`` on this profile. The character
 must start on the overworld (sleeping characters are woken with one ``Wait``,
 downed ones are waited out). Pass criteria are in
 ``agentrealm_agent/m11_acceptance.py`` and the README. Requires AGENTREALM_API_KEY.
@@ -23,11 +23,11 @@ sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
 from agentrealm_agent.acceptance_run import FULL_RUN_FRACTION  # noqa: E402
-from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, navigation_start, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, navigation_start, planner_for, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics  # noqa: E402
-from agentrealm_agent.strategist import StrategistConfig  # noqa: E402
+from agentrealm_agent.strategist import PlannerConfigError  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m11.toml"
 
@@ -44,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--character-name", default=None)
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
+    ap.add_argument("--no-planner", action="store_true", help=NO_PLANNER_HELP)
     ap.add_argument(
         "--seconds",
         type=float,
@@ -62,6 +63,11 @@ def main(argv: list[str] | None = None) -> int:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
         return 2
     try:
+        planner = planner_for(args.no_planner)
+    except PlannerConfigError as e:
+        print(e, file=sys.stderr)
+        return 2
+    try:
         cfg = config.load(args.profile)
     except (config.ConfigError, OSError) as e:
         print(e, file=sys.stderr)
@@ -69,14 +75,10 @@ def main(argv: list[str] | None = None) -> int:
     if cfg.world != "olympuff":
         print(f"expected world olympuff, got {cfg.world!r}", file=sys.stderr)
         return 2
-    # Only the strategist pushes ``fight_boss`` on this profile, and a level
+    # Only the planner pushes ``fight_boss`` on this profile, and a level
     # clears only by killing its boss (A38), so without it the gate cannot pass.
-    if not StrategistConfig.from_env().enabled:
-        print(
-            "M11 needs the strategist: set AGENTREALM_STRATEGIST_MODEL and "
-            "AGENTREALM_STRATEGIST_API_KEY (or OPENAI_API_KEY)",
-            file=sys.stderr,
-        )
+    if not planner.enabled:
+        print("M11 needs the AI planner: drop --no-planner", file=sys.stderr)
         return 2
 
     client = Client(args.base_url, args.api_key)
@@ -109,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     def out(line: str) -> None:
         print(line, flush=True)
 
-    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out)
+    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, out=out, planner=planner)
     print(f"finished in {elapsed:.1f}s", flush=True)
     for line in metrics.summary_lines():
         print(line, flush=True)

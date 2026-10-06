@@ -153,7 +153,7 @@ class RunWiringTest(unittest.TestCase):
         seen = self.seen
 
         class FakeRunner:
-            def __init__(self, cfg, client, cid, stop, out, knowledge=None):
+            def __init__(self, cfg, client, cid, stop, out, knowledge=None, strategist=None):
                 self.cfg, self.knowledge = cfg, knowledge
 
             def run(self) -> None:

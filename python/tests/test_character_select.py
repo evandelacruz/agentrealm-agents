@@ -130,7 +130,7 @@ class ProfileAndCliTest(unittest.TestCase):
             client = client_cls.return_value
             client.self_.side_effect = ApiError(404, "character_not_found")
             with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
-                rc = cli.main(["run", str(self.toml)])
+                rc = cli.main(["run", str(self.toml), "--no-planner"])
         self.assertEqual(rc, 2)
         self.assertIn("character_not_found", err.getvalue())
 
@@ -210,7 +210,7 @@ class ProfileAndCliTest(unittest.TestCase):
 
     def test_run_name_flag_beats_environment_id(self):
         # main() exports AGENTREALM_CHARACTER_ID=42; the flag picks character 5.
-        rc, _, err, client = self.main("run", str(self.toml), "--character-name", "Pat")
+        rc, _, err, client = self.main("run", str(self.toml), "--character-name", "Pat", "--no-planner")
         self.assertEqual(rc, 0, err)
         client.self_.assert_called_with(5)
 

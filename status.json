@@ -93,7 +93,7 @@
 
   "A34": {"state": "done"},
 
-  "A35": {"state": "done"},
+  "A35": {"state": "done", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack runs the A61 safe default, fail fast with no key. Planner prompt op table matches the executors (equip in, hunt out). Clearing Memory.walks on a stack change waits on #109."},
 
   "A36": {"state": "done"},
 

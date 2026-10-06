@@ -5,6 +5,9 @@ Walks until 200 Steps apply with no movement_cooldown rejections and
 POST tick goes out in under a quarter of calm windows. Requires network access,
 AGENTREALM_API_KEY, and AGENTREALM_BASE_URL (default https://api.agentrealm.gg).
 Pass --character-id or --character-name to pick the character to play (A59).
+
+Plays with the AI planner (A35): set a planner key (README, The AI planner),
+or pass --no-planner for the test mode.
 """
 
 from __future__ import annotations
@@ -25,7 +28,9 @@ from agentrealm_agent.character_select import CharacterSelectionError, resolve_c
 from agentrealm_agent.client import Client  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
 from agentrealm_agent.m6_acceptance import M6AcceptanceMetrics, TARGET_STEPS  # noqa: E402
+from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, planner_for  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
+from agentrealm_agent.strategist import PlannerConfigError, Strategist  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_walker.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"
@@ -38,6 +43,7 @@ def run_smoke(
     *,
     target_steps: int,
     timeout_s: float,
+    planner: Strategist | None = None,
 ) -> M6AcceptanceMetrics:
     stop = threading.Event()
     metrics = M6AcceptanceMetrics(target_steps=target_steps, stop=stop)
@@ -54,6 +60,7 @@ def run_smoke(
         out,
         knowledge=knowledge,
         acceptance=metrics,
+        strategist=planner,
     )
 
     def watchdog() -> None:
@@ -89,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--character-name", default=None)
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
+    ap.add_argument("--no-planner", action="store_true", help=NO_PLANNER_HELP)
     ap.add_argument("--steps", type=int, default=TARGET_STEPS, help="applied Step count to reach")
     ap.add_argument(
         "--timeout",
@@ -100,6 +108,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.api_key:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
+        return 2
+    try:
+        planner = planner_for(args.no_planner)
+    except PlannerConfigError as e:
+        print(e, file=sys.stderr)
         return 2
     try:
         cfg = config.load(args.profile)
@@ -128,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
     started = time.monotonic()
-    metrics = run_smoke(client, cfg, cid, target_steps=args.steps, timeout_s=args.timeout)
+    metrics = run_smoke(client, cfg, cid, target_steps=args.steps, timeout_s=args.timeout, planner=planner)
     elapsed = time.monotonic() - started
     print(f"finished in {elapsed:.1f}s", flush=True)
     for line in metrics.summary_lines():

@@ -98,9 +98,9 @@ from .memory import Memory
 from .gem_yield import summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
-from .survival import nearest_safe_goal
 from .travel.knowledge import town_from_kb
 from .world import Pos, WorldModel, chebyshev
+from .zone_discovery import known_safe, safe_tiles
 
 log = logging.getLogger(__name__)
 
@@ -546,8 +546,12 @@ def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     if w.pos is None or w.map_id is None:
         return []
     fact = w.zones.get(w.map_id, {}).get(w.pos)
-    here = "unknown (zone not read here)" if fact is None else "yes" if fact.safe else "no"
-    safe = nearest_safe_goal(w)
+    if known_safe(w, w.map_id, w.pos):
+        here = "yes"
+    else:
+        here = "unknown (zone not read here)" if fact is None else "no"
+    safes = safe_tiles(w, w.map_id)
+    safe = min(safes, key=lambda p: (chebyshev(p, w.pos), p)) if safes else None
     town = town_from_kb(knowledge) or (w.respawn_anchors[0] if w.respawn_anchors else None)
     return [
         f"safe_ground={here}",

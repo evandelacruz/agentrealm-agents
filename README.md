@@ -44,6 +44,14 @@ export AGENTREALM_PLANNER_PROVIDER=openai AGENTREALM_PLANNER_OPENAI_KEY=... AGEN
 
 Keys are read from `AGENTREALM_PLANNER_ANTHROPIC_KEY`, then `ANTHROPIC_API_KEY`, and from `AGENTREALM_PLANNER_OPENAI_KEY`, then `OPENAI_API_KEY`: the planner's own names come first because some hosts (Claude Code cloud sessions, for one) strip the standard ones. With no key, `run` stops at startup with one line saying which key to set. `AGENTREALM_PLANNER_MODEL` picks another model. `run --no-planner` plays without it, from the character file's `policy.goals`; that is a test mode, not how the agent is meant to play. The smoke scripts take the same `--no-planner`. Never commit a key. Moving from the old strategist settings: `AGENTREALM_STRATEGIST_MODEL` is now `AGENTREALM_PLANNER_MODEL`, `AGENTREALM_STRATEGIST_API_KEY` is gone (use the provider keys above), and the per-run limits (`AGENTREALM_STRATEGIST_MAX_CALLS`, `_MAX_TOKENS`, `_MIN_INTERVAL_S`) are replaced by `AGENTREALM_PLANNER_CALLS_PER_MIN` and `_TOKENS_PER_MIN`; `AGENTREALM_STRATEGIST_IDLE_MINUTES` is `AGENTREALM_PLANNER_IDLE_MINUTES`. Cadence, budget and triggers: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) **Strategist**. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
 
+The planner plays with the game's own documentation in its prompt (A62): the site's docs and guides, saved in [`python/agentrealm_agent/reference/agentrealm_reference.md`](python/agentrealm_agent/reference/agentrealm_reference.md), then the facts we measured in [`docs/GAME_NOTES.md`](docs/GAME_NOTES.md), then a short progression arc (survive and learn, gear up, beat levels, beat the world) that it judges the current stage against. That prefix is the same on every call, so it is cached (Anthropic `cache_control`, OpenAI `prompt_cache_key`) and replanning every 15 s stays cheap: cache reads do not count against `AGENTREALM_PLANNER_TOKENS_PER_MIN`, cache writes do, and the default budget fits one full write (PLAN.md A62 has the cost per minute). The trace's strategist `ask` record logs the cached prefix as its size and sha256 digest, not its text; the triggers, state and stack are logged in full. When the site changes, refresh the reference and commit it:
+
+```bash
+python3 scripts/refresh_planner_reference.py   # fetches agentrealm.gg/docs and /guides, writes the reference
+```
+
+The reference is about 72k tokens; core sections always go in and the rest fill about 60k. `AGENTREALM_PLANNER_REFERENCE_SECTIONS=all` sends everything, `core` only the core, and a comma list (`changelog,quick start`) adds those sections to the core.
+
 Copy and edit a file in `python/characters/` to try different behavior (`policy.kind` can be `idle`, `wander`, or `scripted`).
 
 ## How the agent thinks

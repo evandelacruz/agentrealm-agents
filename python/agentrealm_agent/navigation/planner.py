@@ -47,6 +47,9 @@ class CostGridParams:
     hostile_kinds: frozenset[str] = frozenset({"npc"})
     allow_goal_door: bool = False
     fog_cost: int = FOG  # A15 step 1 raises this to prefer known ground
+    # Danger peak per hostile (kind, id), in place of HOSTILE_DANGER: Retreat
+    # sets its pursuers' to 0, so it heads straight for safety (A9).
+    danger_peaks: dict[tuple[str, int], int] = field(default_factory=dict)
 
 
 @dataclass
@@ -91,13 +94,17 @@ def known_prefix(path: list[Pos], view: MapView) -> list[Pos]:
     return out
 
 
-def danger(p: Pos, hostiles: list[Entity]) -> int:
-    """The hostiles' share of the cost onto ``p``: more the nearer they stand."""
+def danger(p: Pos, hostiles: list[Entity], peaks: dict[tuple[str, int], int] | None = None) -> int:
+    """The hostiles' share of the cost onto ``p``: more the nearer they stand.
+
+    ``peaks`` overrides ``HOSTILE_DANGER`` for the hostiles it names.
+    """
     out = 0
     for h in hostiles:
         d = chebyshev(p, h.pos)
         if d < HOSTILE_DANGER_RADIUS:
-            out += max(0, HOSTILE_DANGER - d * 5)
+            peak = peaks.get((h.kind, h.id), HOSTILE_DANGER) if peaks else HOSTILE_DANGER
+            out += max(0, peak - d * 5)
     return out
 
 
@@ -156,7 +163,7 @@ class _Grid:
         return base + self.danger(p)
 
     def danger(self, p: Pos) -> int:
-        return danger(p, self.hostiles)
+        return danger(p, self.hostiles, self.params.danger_peaks)
 
 
 class _MacroCosts:
@@ -437,9 +444,9 @@ def path_cost(w: WorldModel, path: list[Pos], goal: Pos, params: CostGridParams 
 
 def hostile_cost(w: WorldModel, path: list[Pos], params: CostGridParams | None = None) -> int:
     """The hostiles' share of what walking ``path`` costs (``_Grid.danger``)."""
-    kinds = (params or CostGridParams()).hostile_kinds
-    hostiles = [e for e in w.entities if e.kind in kinds]
-    return sum(danger(p, hostiles) for p in path)
+    params = params or CostGridParams()
+    hostiles = [e for e in w.entities if e.kind in params.hostile_kinds]
+    return sum(danger(p, hostiles, params.danger_peaks) for p in path)
 
 
 def cost_flood(

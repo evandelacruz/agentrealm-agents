@@ -19,6 +19,7 @@ from agentrealm_agent import config
 from agentrealm_agent.brain import UNPLACED_SELF_REFRESH, choose_call
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
@@ -44,6 +45,13 @@ def world(at=(10, 10)) -> WorldModel:
 def ctx(on_hostile: str = "flee") -> PlayContext:
     policy = Policy(kind="scripted", goals=["explore"], on_hostile=on_hostile, hostile=["npc"], pickup=True)
     return PlayContext(Memory(), policy, random.Random(0), params=dict(PARAM_DEFAULTS))
+
+
+def weapon_hurt_pursuer(w: WorldModel, c: PlayContext) -> None:
+    """The armed weapon has landed a hit on the pursuer's type before (A18 ``weapon_damage``)."""
+    w.armed_code = "test_blade"
+    c.knowledge = KnowledgeBase("sandbox")
+    c.knowledge.items["test_blade"] = {"weapon_damage": {"pursuer": 1}}
 
 
 def hit(w: WorldModel, npc_id: int = 7, amount: int = 2) -> None:
@@ -114,6 +122,7 @@ class PursuerNotOutrunTest(unittest.TestCase):
         w, c = world(), ctx()
         w.health = w.max_health = 100
         c.params["risk"] = 1.0  # bold: the win estimate decides
+        weapon_hurt_pursuer(w, c)
         apply_zone(w, 1, -20, -20, {"safe": True})
         reasons = [o.reason for _, o in pursue(w, c, npc_every=STEP_TICKS)]
         given_up = [r for r in reasons if r.startswith("not outrunning")]
@@ -174,7 +183,9 @@ class PursuerNotOutrunTest(unittest.TestCase):
         m.nav_stuck.recent_moves = [("", "Flee")] * 5
         m.nav_stuck.last_move = ("", "Flee")
         w.tick += 5
-        out = dispatch(w, c)
+        # The search's partial path toward the walled-in tile is no way there: Retreat finds none.
+        with mock.patch("agentrealm_agent.states.retreat.cost_path", return_value=None):
+            out = dispatch(w, c)
         self.assertEqual(out.state, "Flee")
         self.assertTrue(out.reason.startswith("flee npc 7"), out.reason)
         self.assertEqual(m.flee_avoid, {back})
@@ -201,6 +212,7 @@ class PursuerNotOutrunTest(unittest.TestCase):
         w, c = world(), ctx()
         w.health = w.max_health = 100
         c.params["risk"] = 1.0
+        weapon_hurt_pursuer(w, c)
         start = w.tick
         outs = pursue(w, c, npc_every=STEP_TICKS, start_gap=2, swings=False)
         self.assertLessEqual(len(c.memory.flee_gaps), FLEE_PROBE_TICKS + 1, "kept to the probe window")

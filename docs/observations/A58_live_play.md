@@ -117,9 +117,41 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
   The `look` give-up at **3531805** paced `(568, 490)` ↔ `(578, 482)`; the explore give-ups at **3545075**, **3545761** and **3547112** paced `(568, 490)` ↔ `(569, 480)` for `explore_area → (581, 463)`.
 
 - **Root cause: a spec defect, not an implementation bug.** A16's goto-first rule says the deferral comes back when the agent steps off the target, and `goto_navigation_pending` in `pathing.py` does exactly that: once the agent leaves the reached target, the goto is owed again, so `replan` tries only the goto while Explore owns its frontier walk. The two queues ping-pong between the target and the frontier; the oscillation guard correctly gives up each explore target (`navigation/oscillation.py`), and the smoke abort fires after the fourth give-up in 6000 ticks. **Proposal (PLAN.md A16):** a reached policy goto is satisfied and not owed again on step-off.
-- **Fix:** PR #103 + `test_a58_run8.py` (the run 8 shape offline: goto reached, Explore walks away, no ping-pong), pending Evan's approval of the A16 proposal.
+- **Fix:** PR #103 + `test_a58_run8.py` (the run 8 shape offline: goto reached, Explore walks away, no ping-pong). Evan approved the A16 proposal; #103 merged (`8b30a0b`) and A16 is done.
 - **Regen never measured.** The character was never hurt (`heal actions: 0`), so there was no hurt safe-zone window for `note_regen_sample`. Even a full hour may need the character to take damage before regen gets a verdict.
-- **Status:** Two open blockers. (1) Navigation pacing: fixed offline in PR #103, pending Evan's approval of the A16 proposal. (2) Regen: unmeasured on every run so far (1 and 3–8); in run 8 the character was never hurt, so even with the A16 fix, run 9 can fail the regen gate. **Next:** before the hour, if the world knowledge base lacks a regen answer, run `make probe-regen` (A60) until it exits 0 with a verdict; a "yes" it saves passes the A16 regen clause on the hour. Then rerun the full live hour (A58 run 9).
+- **Status:** (1) Navigation pacing: fixed by #103 (merged, `8b30a0b`); run 9 confirmed no post-reach ping-pong. (2) Regen: unmeasured on every run (1 and 3–9); the A60 regen probe (`make probe-regen`, merged) answers it: run it until it exits 0 with a verdict, and a "yes" it saves passes the A16 regen clause. Run 9 is below.
+
+## Run 9 — FAIL: death during post-goto explore (~211 s)
+
+- **Character:** chosen at run time via `CHARACTER_ID` (not committed).
+- **Code:** `main` at `8b30a0b` (merge of #103).
+- **Verdict:** exit 1 after **211.0 s** wall clock. **Did not pass** the A16 gate (first death ends the run; run stopped before the hour).
+- **Gate metrics:** deaths **1**; retreat misses 0; recover withdraws 0; loop false; **API errors 4** (`position 409 not_on_map`); heal actions 0; lives last seen 9; navigation target `(718, 490)` from `(568, 490)` **reached** (max Chebyshev from origin 190); give-ups on other goals 3; safe-zone regen **not measured**; oscillation events 0 (gave up a target: 0).
+- **Goto / #103:** the 150-block east walk completed and Explore took over with no post-reach goto ping-pong (contrast run 8). Example after the reach:
+
+  ```
+  t=3623092 @76:744,496 tick     queue 10×Step 28×Wait (explore_area → (597, 431))
+  t=3623100 @76:744,496 tick     queue 10×Step 28×Wait (explore_area → (597, 431))
+  … no goto → (718, 490) queue after the smoke target was satisfied …
+  t=3623245 @76:716,475 tick     queue 1×Step 1×Wait (flee npc 261) | Attacked, Damaged 2 by npc
+  ```
+
+- **Death window:** the smoke target `(718, 490)` was already reached; Explore was at `(744, 496)` walking `explore_area → (597, 431)`, to the west, and had moved west to `(716, 475)` when npc 261 attacked (`Damaged 2`). **Flee** steps then interleaved with `explore_area` and `look entrance` queues while the hostile was in range. The flee went back east, through `(753, 482)` and `(755, 485)`, to `(758, 485)`, taking `Damaged 2` on the way and `Damaged 4` at death. At tick **3623744**–**3623750** `self` showed `alive=False placed=False` and four `position error HTTP 409 not_on_map` lines fired before respawn at `(617, 403)`:
+
+  ```
+  t=3623677 @76:753,482 tick     Step(down) (flee npc 261) | Attacked, Damaged 2 by npc
+  t=3623714 @76:755,485 tick     Step(right) (flee npc 261)
+  t=3623744 @76:758,485 position error HTTP 409 not_on_map
+  t=3623745 @76:758,485 self     lives=9 alive=False placed=False perception=25
+  … three more position 409 not_on_map …
+  t=3623803 @76:617,403 tick     — (downed) | Attacked, Damaged 4 by npc, Died, Respawned
+  ```
+
+- **Root cause (from the code; no agent change in this PR):**
+  1. **Survival (A9).** With `on_hostile = flee`, `FleeState` (`states/flee.py`, `flee_escape` / `flee_run`) kept sending greedy and committed escape steps but could not outrun a single pursuing npc 261; the run ended in **Died** before **Retreat** or **Heal** ran. Explore's `explore_area` and Investigate `look` queues were sent between flee steps while the hostile was in range, so the dispatcher handed rounds back to Explore/Investigate mid-flee (dispatch priority, A5/A44), not only an escape-path problem (`flee_escape`/`flee_run`).
+  2. **Runner reads (A5).** After **Died**, `apply_events` sets `need_position` (`runner.py` ~1090). `choose_call` (`brain.py`) requests `position` whenever `need_position` holds and the character is not asleep, without checking `placed` from the last **self** read, so four doomed `GET position` calls logged `409 not_on_map` and counted as gate API errors before respawn landed.
+- **Regen:** the character took damage but died in **Flee** with `heal actions: 0`, so there was no hurt safe-zone window for `note_regen_sample`. Report other gate clauses above; **regen: unmeasured, never hurt in a safe tile long enough**.
+- **Status / Next:** #103 cleared run 8's navigation blocker; run 9 fails A58 on death (A9, and the mid-flee interleaving under A5/A44) and respawn-window API errors (A5). Fix those, run `make probe-regen` (A60) for the regen clause, then rerun. Live testing now uses 5-minute runs (`--seconds 300`, survival only) until the basics pass; the full hour comes after.
 
 ## Done-when
 

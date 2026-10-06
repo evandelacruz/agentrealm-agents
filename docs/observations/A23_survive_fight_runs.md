@@ -99,6 +99,7 @@ Intents: 430 `Step`, 1,097 `Wait`, 2 `Use`. Call mix: 337 `zone`, 185 `tick`, 44
 - **Code:** `main` at `8966752` (after #123, #125 and #127). Server redeployed with B133 and sim changes just before the run. Planner: Anthropic, default model. **Fresh knowledge base** (new container: no terrain, zones or hunting cells carried over), unlike Run 1.
 - **Verdict:** exit 0 after **302 s**. Character (a different one from Run 1, chosen at run time) started at 10/10 health, 10 lives, 0 gems, pocket knife, no potions or food, at (370, 399), 27 cells west of the town cell (397, 401) and adjacent to gristlewick 240.
 - **Gate summary:** deaths **0**; API errors **0**; fights below the health floor **0**; heal food take and heal potion both **no**; weak hostile kills 0; gems earned no.
+- **Scenario not met:** nothing fought, so this run does not satisfy survive-a-fight. It covers the hunting-ground search and the survival reflexes only.
 - A second, 90 s run under `cProfile` followed on the same character to find where the main thread spent its time (defect 2). Its numbers are kept apart below and are not in the tables.
 
 ### Fights

@@ -273,6 +273,39 @@ class AnswerTest(unittest.TestCase):
         for op in ("explore_area", "travel", "gather_gems", "buy", "fight_boss", "compose", "use_block", "equip", "wait"):
             self.assertIn(f"- {op}: ", messages[0]["content"])
 
+    def test_prompt_state_marks_pinned_and_planner_ops(self):
+        # Second live Walk run: the planner could not see pins and spent 17 of
+        # 21 calls trying to drop the pinned target. State now marks each op.
+        pinned = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": 1}
+        mine = {"op": "explore_area", "x": 3, "y": 4, "radius": 5}
+        plan = Plan([pinned, mine], dict(PARAM_DEFAULTS), directive_end=1)
+        messages = build_prompt(
+            triggers=[],
+            w=WorldModel(character_id=1, map_id=1, pos=(2, 3), tick=5),
+            plan=plan,
+            directives=Directives(params=dict(PARAM_DEFAULTS)),
+            knowledge=None,
+            given_up_travel={(1, (8, 9)): 4},
+        )
+        state = messages[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn(f"stack (top first):\n  pinned {json.dumps(pinned, sort_keys=True)}\n  planner {json.dumps(mine, sort_keys=True)}", state)
+        self.assertIn('given_up_travel=["1:8,9"]', state)
+        system = messages[0]["content"]
+        self.assertIn("You cannot remove, reorder or replace them", system)
+        self.assertIn("Plan around them", system)
+        self.assertIn("only your own part of the stack", system)
+
+    def test_prompt_state_shows_an_empty_stack(self):
+        messages = build_prompt(
+            triggers=[],
+            w=WorldModel(character_id=1, map_id=1, pos=(2, 3), tick=5),
+            plan=Plan([], dict(PARAM_DEFAULTS)),
+            directives=Directives(params=dict(PARAM_DEFAULTS)),
+            knowledge=None,
+        )
+        self.assertIn("stack: (empty)", messages[1]["content"])
+        self.assertNotIn("given_up_travel", messages[1]["content"])
+
     def test_reply_in_a_code_fence_is_read(self):
         s, r = make(FakeLLM("```json\n" + json.dumps(WAIT_ANSWER) + "\n```")), fake_runner()
         round_trip(s, r)

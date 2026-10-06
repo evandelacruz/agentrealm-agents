@@ -37,6 +37,7 @@ from .equip import note_equip_result, sync_refusals
 from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
 from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, self_use_code
 from .shop import note_shop_result
+from .travel.ops import point_dest
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.strength import loadout_key
 from .executor import (
@@ -162,22 +163,27 @@ class Runner:
     def unpin_done_goals(self) -> None:
         """Pin once: a pinned directives goal whose op popped done or was
         dropped (its ``goal_done`` or ``goal_failed`` signal), or whose target
-        stuck detection gave up on (a ``stuck`` signal), is unpinned, so a
-        later reload never puts it back (A16). Read before the strategist
-        drains the signals this window."""
+        stuck detection gave up on, is unpinned, so a later reload never puts
+        it back (A16). Read before the strategist drains the signals this window."""
         ended = [s["op"] for s in self.mem.strategist_signals if s.get("trigger") in ("goal_done", "goal_failed")]
-        given_up = {  # the Travel walk's own give-ups only, not another walk's to the same cell
-            (s.get("map_id"), tuple(s.get("target") or ()))
-            for s in self.mem.nav_stuck.stuck_signals
-            if str(s.get("goal", "")).startswith("travel:")
-        }
+        given_up = self.mem.nav_stuck.given_up_travel
         for goal in list(self.directives.pinned_goals):
             op = parse_directives_goal(goal)
             if op is None:
                 continue
-            target = (op.get("map_id", self.world.map_id), (op["x"], op["y"])) if op["op"] == "travel" else None
-            if any(same_ops([op], [e]) for e in ended) or (target is not None and target in given_up):
+            if any(same_ops([op], [e]) for e in ended) or point_dest(op, self.world.map_id) in given_up:
                 self.directives.unpin(goal)
+
+    def drop_given_up_ops(self) -> None:
+        """A ``travel`` op to a point stuck detection gave up on leaves the
+        stack for good, wherever it sits, pinned or the planner's (A16).
+        Otherwise the backoff's end walks it again, and every planner reply
+        keeps a directives op on top. Its ``goal_failed`` signal unpins it."""
+        given_up = self.mem.nav_stuck.given_up_travel
+        if given_up:
+            self.plan.drop_ops(
+                lambda op: point_dest(op, self.world.map_id) in given_up, "stuck detection gave up on its target", self.mem
+            )
 
     def reload_directives(self, old_goals: list[str]) -> None:
         """Apply reloaded directives to the plan (A34).
@@ -265,6 +271,7 @@ class Runner:
                 if self.directives.maybe_reload():
                     self.reload_directives(old_goals)
                 self.strategist.on_window(self)
+                self.drop_given_up_ops()  # after the planner's reply, which may re-send one
                 call = choose_call(self.world, self.mem, self.cfg.policy)
                 urgent = self.acceptance is not None and is_urgent(self.world, self.mem, self.cfg.policy)
                 if call == "skip":

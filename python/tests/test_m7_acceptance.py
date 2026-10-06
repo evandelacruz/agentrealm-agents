@@ -59,7 +59,7 @@ def open_world(pos=(0, 0)) -> WorldModel:
 STEP = [{"verb": "Step", "direction": "right"}]
 
 
-def decide(m, w, mem=None, *, state="Explore", reason="explore", intents=STEP, knowledge=None, plan_op=None):
+def decide(m, w, mem=None, *, state="Explore", reason="explore", intents=STEP, knowledge=None, plan_op=None, acted_op=None):
     """One ``before_tick`` call; ``intents=None`` is a held queue, nothing new sent."""
     m.before_tick(
         w,
@@ -71,6 +71,7 @@ def decide(m, w, mem=None, *, state="Explore", reason="explore", intents=STEP, k
         params=dict(PARAM_DEFAULTS),
         knowledge=knowledge,
         plan_op=plan_op,
+        acted_op=acted_op,
     )
 
 
@@ -122,6 +123,37 @@ class NavigationGateTest(unittest.TestCase):
         decide(m, open_world(), mem)  # the same signals, read again before a drain
         self.assertFalse(m.navigation_ok())
         self.assertEqual(m.other_give_ups, 2)
+
+
+class GivenUpReturnGateTest(unittest.TestCase):
+    """A16: acting again on an op whose target stuck detection gave up on fails the run."""
+
+    OP = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": OVERWORLD}
+
+    def test_each_return_to_a_given_up_target_is_counted_and_fails(self):
+        m, mem, w = metrics(), Memory(), open_world()
+        decide(m, w, mem, state="Travel", acted_op=self.OP)  # walking it before any give-up
+        mem.nav_stuck.given_up_travel[(OVERWORLD, (5, 6))] = w.tick
+        decide(m, w, mem, state="Travel", acted_op=self.OP)  # the give-up's own decision
+        self.assertEqual(m.given_up_returns, 0)
+        for _ in range(2):  # two separate returns, each a run of decisions on it
+            w.tick += 1
+            decide(m, w, mem, state="Travel", acted_op=self.OP)
+            w.tick += 1
+            decide(m, w, mem, state="Travel", acted_op=self.OP)
+            w.tick += 1
+            decide(m, w, mem, state="Explore", acted_op=None)
+        self.assertEqual(m.given_up_returns, 2)
+        self.assertIn("returned 2 time(s) to a target stuck detection gave up on", m.failures(full_hour=False))
+        self.assertIn("returns to a given-up target: 2", m.summary_lines())
+
+    def test_another_target_is_not_a_return(self):
+        m, mem, w = metrics(), Memory(), open_world()
+        mem.nav_stuck.given_up_travel[(OVERWORLD, (5, 6))] = 0
+        w.tick = 10
+        decide(m, w, mem, state="Travel", acted_op={**self.OP, "x": 9})
+        self.assertEqual(m.given_up_returns, 0)
+        self.assertEqual(m.failures(full_hour=False), [])
 
 
 class SurvivalGateTest(unittest.TestCase):
@@ -563,7 +595,7 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertIsNone(r.plan.current(), "deleting the file does not bring the target back")
         self.assertIsInstance(r.plan, PlanCls)
 
-    def test_a_given_up_pinned_target_is_unpinned(self):
+    def _pinned_runner(self, *replies):
         from tests.test_strategist import FakeLLM, make
 
         tmp = tempfile.TemporaryDirectory()
@@ -571,14 +603,68 @@ class SmokeScriptTest(unittest.TestCase):
         with mock.patch.object(config, "STATE_DIR", Path(tmp.name)):
             cfg = config.CharacterConfig("t", "sandbox", Policy(kind="scripted", goals=["explore"]), Path(tmp.name) / "t.toml")
             acceptance_smoke.pin_goto(cfg, OVERWORLD, (5, 6), planner_on=True)
-            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=make(FakeLLM()))
+            planner = make(FakeLLM(*replies))
+            r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, strategist=planner)
         self.addCleanup(r.trace.close)
         r.world = WorldModel(character_id=1, map_id=OVERWORLD, pos=(0, 0), tick=10)
-        r.mem.nav_stuck.stuck_signals.append(
-            {"trigger": "stuck", "goal": "travel:point", "reason": "time", "target": [5, 6], "map_id": OVERWORLD}
-        )
+        return r, planner, Path(tmp.name) / "t.directives.toml"
+
+    @staticmethod
+    def _give_up_on_target(r):
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        att = nav_stuck.track(r.mem, r.world, "travel:point", (5, 6))
+        nav_stuck.give_up(r.mem, r.world, att, "moves")
+
+    def test_a_given_up_pinned_target_is_unpinned_and_leaves_the_stack(self):
+        r, _, _ = self._pinned_runner()
+        self._give_up_on_target(r)
         r.unpin_done_goals()
+        r.drop_given_up_ops()
         self.assertEqual(r.directives.pinned_goals, [])
+        self.assertEqual(r.directives.directives.goals, [])
+        self.assertIsNone(r.plan.current())
+        self.assertEqual(r.plan.directive_ops(), [])
+
+    def test_a_given_up_pinned_target_never_comes_back(self):
+        # Second live Walk run: stuck detection gave up on the pinned point, and
+        # Travel walked it again at every backoff end, since the op stayed in
+        # the stack's directives part, which every planner reply kept on top.
+        # Replay: give up, then 300 s of windows with planner replies that try
+        # to bring the target back, a directives reload, and the backoff long run out.
+        from agentrealm_agent.travel.ops import point_dest
+        from tests.test_strategist import round_trip
+
+        target_op = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": OVERWORLD}
+        wait = {"op": "wait", "seconds": 1, "why": "test"}
+        seconds, every = 300, 15
+        replies = [{"goals": [target_op, wait]} if i % 2 else {"goals": [wait]} for i in range(seconds // every + 1)]
+        r, planner, directives = self._pinned_runner(*replies)
+        gate = metrics(target=(5, 6))
+        self._give_up_on_target(r)
+        gave_up_at = r.world.tick
+        for second in range(seconds * r.tick_hz):
+            r.world.tick += 1
+            r.unpin_done_goals()
+            if second == 100 * r.tick_hz:
+                directives.write_text('goals = ["buy:torch"]\n')
+            old = r.directives.directives.goals
+            if r.directives.maybe_reload():
+                r.reload_directives(old)
+            if second % (every * r.tick_hz) == 0:
+                planner.clock.now += every
+                planner.inbox.append({"trigger": "timer", "tick": r.world.tick})
+                round_trip(planner, r)
+            else:
+                planner.on_window(r)
+            r.drop_given_up_ops()
+            left = [op for op in r.plan.goals[r.plan.index :] if point_dest(op, OVERWORLD) == (OVERWORLD, (5, 6))]
+            self.assertEqual(left, [], f"travel to the given-up target is back at {second} s")
+            decide(gate, r.world, r.mem, state="Travel", acted_op=r.plan.current())
+        self.assertGreater(r.world.tick, r.mem.nav_stuck.backoff_until[f"travel:point:{OVERWORLD}:5,6"])
+        self.assertGreater(r.world.tick - gave_up_at, seconds * r.tick_hz - 1)
+        self.assertEqual(r.directives.pinned_goals, [])
+        self.assertEqual(gate.given_up_returns, 0)
 
     def test_another_walks_give_up_on_the_same_cell_keeps_the_pin(self):
         from tests.test_strategist import FakeLLM, make

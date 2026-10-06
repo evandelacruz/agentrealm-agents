@@ -117,6 +117,9 @@ class NavStuckMemory:
     backoff_until: dict[str, int] = field(default_factory=dict)
     backoff_power: dict[str, int] = field(default_factory=dict)
     stuck_signals: list[dict] = field(default_factory=list)
+    # Travel destinations given up this run, (map_id, cell) -> tick: their ops
+    # leave the stack for good, pinned or not, and are never walked again (A16).
+    given_up_travel: dict[tuple[int, Pos], int] = field(default_factory=dict)
     # The oscillation guard (navigation/oscillation.py): cells stood on at
     # recent decisions, the (walk goal, state) of the move into each, the
     # last decision's move, its events waiting for the trace, and the cells
@@ -134,6 +137,13 @@ def goal_key(goal: str, map_id: int | None, target: Pos) -> str:
     kind = SHARED_KEYS.get(goal, goal)
     mid = map_id if map_id is not None else -1
     return f"{kind}:{mid}:{target[0]},{target[1]}"
+
+
+def key_dest(key: str) -> tuple[int, Pos]:
+    """The map and cell a :func:`goal_key` names."""
+    _, mid, cell = key.rsplit(":", 2)
+    x, y = cell.split(",")
+    return int(mid), (int(x), int(y))
 
 
 def is_backed_off(stuck: NavStuckMemory, key: str, tick: int) -> bool:
@@ -435,6 +445,8 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     power = stuck.backoff_power.get(backoff, 0)
     stuck.backoff_until[backoff] = w.tick + BACKOFF_BASE_TICKS * (2**power)
     stuck.backoff_power[backoff] = power + 1
+    if att.goal.startswith("travel:"):
+        stuck.given_up_travel.setdefault(key_dest(backoff), w.tick)
     stuck.stuck_signals.append(
         {
             "trigger": "stuck",

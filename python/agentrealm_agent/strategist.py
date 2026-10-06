@@ -89,7 +89,7 @@ import urllib.error
 import urllib.request
 from collections import Counter, deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 
 from .directives import Directives
 from .knowledge_base import KnowledgeBase
@@ -144,7 +144,7 @@ Reply with one JSON object only, no markdown, with these keys:
 Each goal is an object with "op" and that op's fields; every op may also carry "why". These are the only ops (anything else is dropped):
 {_op_table()}
 
-Ops the directives file set (the user's manual steering) stay on top of the stack whatever you send; your goals go below them.
+State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel to a point listed under given_up_travel: stuck detection gave up on it this run.
 
 "wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game.
 
@@ -475,6 +475,7 @@ def build_prompt(
     directives: Directives,
     knowledge: KnowledgeBase | None,
     reference_sections: str = "",
+    given_up_travel: Iterable[tuple[int | None, tuple[int, int]]] = (),
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -489,6 +490,11 @@ def build_prompt(
     ]
     if plan.notes:
         state_lines.append(f"plan_notes={plan.notes!r}")
+    lines = stack_lines(plan)
+    state_lines.append("stack (top first):" + "".join(f"\n  {line}" for line in lines) if lines else "stack: (empty)")
+    if given_up_travel:
+        cells = [f"{mid}:{x},{y}" for mid, (x, y) in sorted(given_up_travel, key=str)]
+        state_lines.append(f"given_up_travel={json.dumps(cells)} (never travel to these again this run)")
     clues: list[dict[str, Any]] = []
     if knowledge is not None:
         with knowledge.lock:
@@ -496,13 +502,21 @@ def build_prompt(
     user_parts = [
         "Triggers:\n" + json.dumps(triggers, sort_keys=True),
         "State:\n" + "\n".join(state_lines),
-        "Current plan (top first):\n" + json.dumps(plan.goals[plan.index :], sort_keys=True),
         "Clues (oldest first):\n" + json.dumps(clues, sort_keys=True),
         "Directives instructions:\n" + (directives.instructions or "(none)"),
     ]
     return [
         {"role": "system", "content": system_prompt(reference_sections), "cache": True},
         {"role": "user", "content": "\n\n".join(user_parts)},
+    ]
+
+
+def stack_lines(plan: Plan) -> list[str]:
+    """The ops left on the stack, top first, each marked ``pinned`` (a
+    directives op, which the planner cannot remove) or ``planner`` (A35)."""
+    return [
+        f"{'pinned' if i < plan.directive_end else 'planner'} {json.dumps(op, sort_keys=True)}"
+        for i, op in enumerate(plan.goals[plan.index :], plan.index)
     ]
 
 
@@ -725,6 +739,7 @@ class Strategist:
             directives=runner.directives.directives,
             knowledge=runner.knowledge,
             reference_sections=self.config.reference_sections,
+            given_up_travel=runner.mem.nav_stuck.given_up_travel,
         )
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1

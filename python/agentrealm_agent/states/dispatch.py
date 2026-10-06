@@ -174,11 +174,12 @@ def _note_op_progress(plan: Plan, world: WorldModel, m: Memory, op: dict, owner:
 
 # The ``Memory.goal`` labels each executor's walks carry, so dispatch can
 # tell Break working the top op's own stuck walk from any other stuck walk
-# (the safe default's ``explore`` is never the op's). Investigate's and
+# (the safe default's ``explore`` is never the op's). Travel's search for a
+# hunting ground walks under ``explore_area`` (A27). Investigate's and
 # Loot's walks are ``bounded_step`` walks, which give up rather than escalate
 # to Break, so they need no entry.
 OWNER_WALKS: dict[str, tuple[str, ...]] = {
-    "Travel": ("travel:",),
+    "Travel": ("travel:", "explore_area"),
     "Explore": ("explore_area",),
     "Level": ("level:",),
     "Boss": ("boss:",),

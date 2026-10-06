@@ -1194,3 +1194,94 @@ class ParseReplyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SafetyStateTest(unittest.TestCase):
+    """A23 survive-a-fight run 1: the planner waited "because hostiles cannot
+    hurt in town" 14 cells outside it. State now says where safe ground is."""
+
+    def state(self, w: WorldModel, knowledge=None) -> str:
+        messages = build_prompt(
+            triggers=[], w=w, plan=Plan([], dict(PARAM_DEFAULTS)),
+            directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=knowledge,
+        )
+        return messages[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
+
+    def test_off_safe_ground_with_distance_and_direction(self):
+        from agentrealm_agent.zone_discovery import apply_zone
+
+        w = WorldModel(character_id=1, map_id=7, pos=(405, 351), tick=5)
+        apply_zone(w, 7, 405, 351, {"safe": False})
+        apply_zone(w, 7, 399, 370, {"safe": True})
+        w.record_respawn_anchor(7, (381, 377))
+        state = self.state(w)
+        self.assertIn("safe_ground=no", state)
+        self.assertIn("nearest_safe=7:399,370 (19 cells south)", state)
+        self.assertIn("town=7:381,377 (26 cells south-west)", state)
+
+    def test_on_safe_ground(self):
+        from agentrealm_agent.zone_discovery import apply_zone
+
+        w = WorldModel(character_id=1, map_id=7, pos=(4, 4), tick=5)
+        apply_zone(w, 7, 4, 4, {"safe": True})
+        state = self.state(w)
+        self.assertIn("safe_ground=yes", state)
+        self.assertIn("nearest_safe=7:4,4 (here)", state)
+        self.assertIn("town=unknown", state)
+
+    def test_nothing_known(self):
+        w = WorldModel(character_id=1, map_id=7, pos=(4, 4), tick=5)
+        w.record_respawn_anchor(3, (1, 1))
+        state = self.state(w)
+        self.assertIn("safe_ground=unknown", state)
+        self.assertIn("nearest_safe=none known on this map", state)
+        self.assertIn("town=3:1,1 (another map)", state)
+
+    def test_compass(self):
+        from agentrealm_agent.strategist import compass
+
+        self.assertEqual(compass((0, 0), (0, -5)), "north")
+        self.assertEqual(compass((0, 0), (10, 3)), "east")
+        self.assertEqual(compass((0, 0), (-4, 4)), "south-west")
+        self.assertEqual(compass((0, 0), (5, -3)), "north-east")
+
+
+class RejectedFeedbackTest(unittest.TestCase):
+    def test_a_rejected_param_is_shown_once_in_the_next_state(self):
+        s = make(FakeLLM({"params": {"retreat_hits": 1}}, WAIT_ANSWER, WAIT_ANSWER))
+        r = fake_runner()
+        round_trip(s, r)
+        self.assertEqual(r.plan.params["retreat_hits"], PARAM_DEFAULTS["retreat_hits"])
+        s.clock.now += 60
+        round_trip(s, r)
+        state = s.client.messages[1][1]["content"]
+        self.assertIn("last_reply_rejected=", state)
+        self.assertIn("retreat_hits 1 below floor 2", state)
+        self.assertIn("Higher retreats sooner", state)
+        s.clock.now += 60
+        round_trip(s, r)
+        self.assertNotIn("last_reply_rejected", s.client.messages[2][1]["content"])
+
+    def test_a_town_travel_without_coordinates_is_applied(self):
+        s, r = make(FakeLLM({"goals": [{"op": "travel", "to": "town", "why": "hurt"}]})), fake_runner()
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["to"], "town")
+        self.assertEqual(s.rejected, [])
+
+    def test_prompt_explains_each_param_and_safe_ground(self):
+        system = system_prompt()
+        self.assertIn("- retreat_hits: ", system)
+        self.assertIn("Higher retreats sooner", system)
+        self.assertIn("safe_ground", system)
+        self.assertIn("last_reply_rejected", system)
+
+    def test_rejections_survive_a_failed_call(self):
+        """Review on #123: a call that fails must not lose the rejections it carried."""
+        s = make(FakeLLM({"params": {"retreat_hits": 1}}, RuntimeError("down"), WAIT_ANSWER))
+        r = fake_runner()
+        round_trip(s, r)
+        s.clock.now += 60
+        round_trip(s, r)  # fails
+        s.clock.now += 300
+        round_trip(s, r)
+        self.assertIn("retreat_hits 1 below floor 2", s.client.messages[2][1]["content"])

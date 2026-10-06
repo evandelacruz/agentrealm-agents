@@ -93,7 +93,7 @@ from typing import Any, Callable, Collection, Protocol
 
 from .directives import Directives
 from .travel.resolve import travel_dest, travel_given_up
-from .travel.strength import StrengthBracket, loadout_key
+from .travel.strength import StrengthBracket
 from .knowledge_base import KnowledgeBase, knowledge_items
 from .memory import Memory
 from .gem_yield import summary as gem_yield_summary
@@ -168,7 +168,7 @@ NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir
 
 A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows in the stack without them, with "goes_to": the cell it walks to now, which the agent works out itself. It is already on the stack: re-sending it changes nothing.
 
-State stall shows how long the character has neither moved, gained gems, nor changed its loadout or cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
+State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
 
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
@@ -727,22 +727,23 @@ def shop_price_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     ordered = dict(sorted(prices.items(), key=lambda t: (t[1], t[0])))
     gems = w.gems or 0
     affordable = [code for code, price in ordered.items() if price <= gems]
-    return f"shop_prices={json.dumps(ordered)} gems={w.gems} can_buy_now={json.dumps(affordable)}"
+    return f"shop_prices={json.dumps(ordered)} gems={gems} can_buy_now={json.dumps(affordable)}"
 
 
 
 @dataclass
 class StallClock:
-    """When the character last moved, gained or spent gems, changed its
-    loadout or cleared a level: progress the planner can see (free-play run 1
+    """When the character last moved, gained or spent gems, gained or lost
+    an item or cleared a level: progress the planner can see (free-play run 1
     stood still for six minutes with the stack unchanged)."""
 
     key: tuple | None = None
     since: int = 0
 
     def note(self, w: WorldModel) -> None:
-        held = tuple(sorted(s.code for s in w.held_supplies))
-        key = (w.map_id, w.pos, w.gems, loadout_key(w), held, tuple(w.levels_cleared or ()))
+        # What is owned, not what is armed: an arm flip-flop is no progress.
+        owned = sorted([s.code for s in w.held_supplies] + [w.armed_code or ""] + list(w.worn_codes.values()))
+        key = (w.map_id, w.pos, w.gems, tuple(c for c in owned if c), tuple(w.levels_cleared or ()))
         if key != self.key:
             self.key, self.since = key, w.tick
 

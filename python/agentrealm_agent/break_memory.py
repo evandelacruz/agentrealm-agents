@@ -152,7 +152,8 @@ def _capability_order(cap: str) -> tuple[int, str]:
 def pick_supply_for_capability(
     w: WorldModel, capability: str, kb: KnowledgeBase | None = None
 ) -> InventorySupply | None:
-    """Cheapest supply that provides ``capability`` (weapons first), held or armed.
+    """The held or armed supply to use for ``capability``: weapons first, the
+    armed one on a tie, then by code.
 
     The armed supply wins a tie, so a break arms its tool once and keeps it.
     An armed supply is not in ``held``: without the tie-break, two weapons

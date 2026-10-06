@@ -252,7 +252,7 @@ class Runner:
     def _decide(self, w, m, *, plan: Plan | None = None):
         if m.parking:
             plan = None  # the run is over: no op runs while parking (A66)
-        d = decide(
+        return decide(
             w,
             m,
             self.cfg.policy,
@@ -264,8 +264,6 @@ class Runner:
             plan=plan,
             gem_cuts=self.gem_cuts,
         )
-        m.last_decision = f"{d.state}: {d.reason}" if d.state else d.reason
-        return d
 
     def log(self, call: str, detail: str, record: dict) -> None:
         w = self.world
@@ -593,6 +591,7 @@ class Runner:
             d = self._decide(w, m, plan=self.plan)
             intents = self.intents_for(d)
             intents = self._apply_never_attack(intents)
+        m.last_decision = f"{d.state}: {d.reason}" if d.state else d.reason  # the planner's stall line
         self.trace_oscillations()
         if self.acceptance is not None:
             # Before the response is applied, so it judges the world this decision saw.

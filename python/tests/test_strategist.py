@@ -24,6 +24,7 @@ from agentrealm_agent import __main__ as cli
 from agentrealm_agent.pathing import path_owned_by, plan_op_goal
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
+from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.travel.knowledge import entrance_key, sync_town
 from agentrealm_agent.strategist import (
@@ -599,6 +600,7 @@ class PlannerViewTest(unittest.TestCase):
         )
 
     def test_stall_shows_after_nothing_changes(self):
+        self.w.held_supplies = [InventorySupply(6, "pocket_knife")]
         clock = StallClock()
         clock.note(self.w)
         self.w.tick += (STALL_SECONDS - 1) * 10
@@ -607,6 +609,10 @@ class PlannerViewTest(unittest.TestCase):
         self.w.tick += 20
         clock.note(self.w)
         self.assertEqual(json.loads(clock.line(self.w, 10, "Break: arm")), {"seconds": STALL_SECONDS + 1, "last_decision": "Break: arm"})
+        self.w.armed_code = "pocket_knife"  # arming what is already owned is not
+        self.w.held_supplies = []
+        clock.note(self.w)
+        self.assertNotEqual(clock.line(self.w, 10, "Break: arm"), "")
         self.w.gems = 22  # a gem is progress
         clock.note(self.w)
         self.assertEqual(clock.line(self.w, 10, "Gather: cutting"), "")

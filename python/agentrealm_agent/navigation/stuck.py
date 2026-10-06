@@ -13,7 +13,8 @@ progress window, so a level is left only when its own window fails:
   when a plan shorter than any seen before turns up (then REVEALED), or the
   budget runs out or no frontier is reachable (give up).
 - BREAK (2): step 2, ``Break`` a nominated obstacle on the blocked route (A28).
-  Arming is not progress: ``ARM_DECISION_LIMIT`` decisions that arm fail it.
+  Arming is not progress: ``ARM_DECISION_LIMIT`` decisions that arm with no
+  ``Use`` between them fail it (``arm_only``).
 - REVEALED (4): walk the plan reveal found; failing again tries step 4.
 - ALT_ROUTE (5): step 4, replan through the door graph when enclosed (A28).
 - A break that opens the way, or an alt route that finds one, walks again
@@ -109,7 +110,7 @@ class NavAttempt:
     break_x: int | None = None  # stuck step 2: block under break, if any
     break_y: int | None = None
     break_cap: str | None = None
-    arm_decisions: int = 0  # stuck step 2: Break decisions in this window that armed
+    arm_decisions: int = 0  # stuck step 2: Break decisions that armed since the last Use
     # A short walk (``pathing.bounded_step``): the decision it was last
     # pursued on, and the tick it began waiting with no step.
     seen_decision: int | None = None
@@ -376,8 +377,6 @@ def stuck_reason(att: NavAttempt, tick: int) -> str | None:
         return "time"
     if _oscillating(att.recent):
         return "oscillation"
-    if att.arm_decisions >= ARM_DECISION_LIMIT:
-        return "arm_only"
     return None
 
 

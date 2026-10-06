@@ -2,7 +2,7 @@
 
 A run that ends (its time limit, Ctrl-C, SIGTERM) leaves the character in
 the world. Standing on field ground, it can be killed while nobody plays it.
-So the runner first parks: it walks to the nearest known safe tile or the
+So the runner first parks: it walks to the nearest known safe tile a path reaches, else the
 town cell, with the survival reflexes still on (``states/park.py``), for at
 most ``park_seconds``. Then it clears the intent queue, so no stale queue
 keeps moving the character, and logs how the park ended.

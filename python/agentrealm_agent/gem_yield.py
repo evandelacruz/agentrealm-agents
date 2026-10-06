@@ -68,6 +68,18 @@ MAX_NO_EFFECT = 500  # no-effect cuts remembered, oldest dropped first
 # A no-effect cut is forgotten this long after it, so an uncuttable mark lapses
 # and the ground is tried again (it holds the cell out only REGROW_TICKS).
 NO_EFFECT_TTL = 10 * REGROW_TICKS
+# Gather leaves poor ground for a better known region (free-play run 2: 54
+# cuts for 1 gem in one region while the next one over gave 1 gem in 4).
+# A region with at least FAIR_SAMPLE_CUTS cuts and fewer than POOR_YIELD gems
+# a cut is poor: half the manual's lowest drop rate (10% a cut, GAME_NOTES.md Gems).
+FAIR_SAMPLE_CUTS = 20
+POOR_YIELD = 0.05
+# A region is better when it gave at least GOOD_YIELD gems a cut over at least
+# GOOD_MIN_CUTS cuts, and lies within BETTER_REGION_BLOCKS of us; the planner
+# can name a region at any distance with a ``gather_gems`` x, y.
+GOOD_YIELD = 0.10
+GOOD_MIN_CUTS = 4
+BETTER_REGION_BLOCKS = 64
 GEM_CODE = "gem"  # a ground gem (GAME_NOTES.md Gems)
 GEM_CACHE_PREFIX = "gem_cache"  # gem_cache_5/7/10 (GAME_NOTES.md Gems)
 
@@ -304,6 +316,44 @@ def regions(kb: KnowledgeBase | None, map_id: int | None) -> dict[str, dict[str,
 
 def barren(region: dict[str, Any]) -> bool:
     return int(region.get("cuts", 0)) >= BARREN_MIN_CUTS and int(region.get("gems", 0)) == 0
+
+
+def poor(region: dict[str, Any]) -> bool:
+    """A fair sample with a low yield (barren ones included)."""
+    cuts = int(region.get("cuts", 0))
+    return cuts >= FAIR_SAMPLE_CUTS and int(region.get("gems", 0)) < POOR_YIELD * cuts
+
+
+def good(region: dict[str, Any]) -> bool:
+    cuts = int(region.get("cuts", 0))
+    return cuts >= GOOD_MIN_CUTS and int(region.get("gems", 0)) >= GOOD_YIELD * cuts and not poor(region)
+
+
+def poor_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[int, int]]:
+    """The poor regions of one map, as ``(rx, ry)``."""
+    return {r for key, v in regions(kb, map_id).items() if poor(v) and (r := _parse(key)) is not None}
+
+
+def better_region(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> tuple[int, int] | None:
+    """The best good region within ``BETTER_REGION_BLOCKS`` of ``pos``, by
+    yield then distance, or None."""
+    best: tuple[float, int, tuple[int, int]] | None = None
+    for key, v in regions(kb, map_id).items():
+        r = _parse(key)
+        if r is None or not good(v):
+            continue
+        distance = blocks_to_region(pos, r)
+        if distance > BETTER_REGION_BLOCKS:
+            continue
+        rank = (-int(v.get("gems", 0)) / int(v.get("cuts", 1)), distance, r)
+        if best is None or rank < best:
+            best = rank
+    return best[2] if best is not None else None
+
+
+def region_corner(region: tuple[int, int]) -> Pos:
+    """The block a region is named by: its smallest x, y."""
+    return region[0] * REGION_SIZE, region[1] * REGION_SIZE
 
 
 def barren_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[int, int]]:

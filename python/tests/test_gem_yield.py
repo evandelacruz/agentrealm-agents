@@ -385,11 +385,12 @@ class RegionSummaryTest(unittest.TestCase):
         self.assertNotIn("gather_status", state(gather, ""))
         self.assertNotIn("gather_status", state([{"op": "buy", "code": "torch"}], "cutting"))
 
-    def test_prompt_says_x_y_does_not_move_the_character(self):
+    def test_prompt_says_x_y_names_a_region_gather_walks_to(self):
         system = build_prompt(
             triggers=[], w=world(), plan=Plan([], dict(PARAM_DEFAULTS)), directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=kb()
         )[0]["content"]
-        self.assertIn("it does not move the character", system)
+        self.assertIn("A gather_gems x, y names a target region", system)
+        self.assertIn("Gather walks there and cuts only there", system)
         self.assertIn("never re-send an otherwise unchanged gather_gems just to change x, y", system)
 
     def test_state_without_knowledge_has_empty_gem_yield(self):
@@ -419,7 +420,7 @@ class GatherSkipsBarrenTest(unittest.TestCase):
     def test_op_naming_the_region_cuts_it_anyway(self):
         op = {"op": "gather_gems", "count": 5, "x": 3, "y": 3}
         out = gather_outcome(field_world(), Memory(), Policy(on_hostile="ignore"), knowledge=self.k, op=op)
-        self.assertEqual(out.reason, "cut grass")
+        self.assertEqual(out.reason, "cut grass (region 0,0)", "works in the region it names")
 
     def test_a_cell_cut_before_it_grew_back_is_not_cut_again(self):
         k = kb()

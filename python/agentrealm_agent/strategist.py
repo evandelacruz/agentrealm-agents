@@ -96,6 +96,7 @@ from .travel.resolve import travel_dest, travel_given_up
 from .travel.strength import StrengthBracket
 from .knowledge_base import KnowledgeBase, knowledge_items
 from .memory import Memory
+from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
@@ -157,7 +158,7 @@ Reply with one JSON object only, no markdown, with these keys:
 Each goal is an object with "op" and that op's fields; every op may also carry "why". These are the only ops (anything else is dropped):
 {_op_table()}
 
-State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel, of any kind, whose destination is a cell listed under given_up_travel: stuck detection gave up on it this run.
+State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel, of any kind, whose destination is a cell listed under given_up_travel: stuck detection gave up on it. A town or shop cell there is also under given_up_hubs, with when that give-up lapses: at retry_at_tick, or once the character stands or_after_moving_cells cells from where it gave up (from); it then leaves both lists and may be travelled to again. Any other listed cell is given up for the rest of the run.
 
 The survival params ("params" under State, set by "params" or a set_param op). Survival params may only tighten past params_floor; a change that loosens one is ignored:
 {_param_table()}
@@ -191,7 +192,7 @@ The character's arc, in order. Judge the stage from State (health, gems, armed, 
 
 Gems by area (stage 2). Gem drops from grass and bushes vary by area, and some areas drop none. State gem_yield is measured from the character's own cuts: the region it stands in (here, once cut there), the best regions at any distance with their yield (gems per cut) and distance in blocks, and the barren ones nearby. A good region far behind is still worth a travel back. Hunt gems where the yield is good, leave a region that shows no gems after a fair sample, and explore regions not yet sampled to sample them.
 
-How gather_gems works. Gather cuts known grass and bushes off hazards with no hostile near (a hostile that has not hit us only bars cells within weapon reach plus a step; one that shadows for 15 s without attacking is fought when the profile fights and would win, else Gather walks well off from it), field cells before safe-zone ones (gems drop from cuts outside town, and a cut on town grass was seen to have no effect). It walks to the nearest one itself, learns ground where cuts have no effect and leaves it, and with nothing left to cut while on safe ground it heads out to field ground or the frontier; the survival states keep the character alive while it does. It skips barren regions. A gather_gems x, y only lifts the barren mark on that block's region so Gather cuts there again; it does not move the character. To move it, use travel or explore_area. Leave x, y out unless you mean to re-sample a barren region, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (a cut sent now), "taking a gem", "walking to grass", "walking to a bush" or "walking to a gem pile", "moving off from a hostile that shadows", "fighting a hostile that shadows", "blocked by hostile" (the only cuttable cells known have a hostile near), "heading out of safe ground" (nothing left to cut, walking out of the safe zone), "cuts have no effect here" (cuts here changed nothing, so it moves on to other cells), "no cuttable cell in view" (it knows no grass or bush it may cut, so it explores for one), or "region barren" (the same, standing in a barren region). Any of these but "cutting" ends in ", no cut for N s" once no cut has taken effect for 30 s: that is a stall, not progress. State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress."""
+How gather_gems works. Gather cuts known grass and bushes off hazards with no hostile near (a hostile that has not hit us only bars cells within weapon reach plus a step; one that shadows for 15 s without attacking is fought when the profile fights and would win, else Gather walks well off from it), field cells before safe-zone ones (gems drop from cuts outside town, and a cut on town grass was seen to have no effect). It walks to the nearest one itself, learns ground where cuts have no effect and leaves it, and with nothing left to cut while on safe ground it heads out to field ground or the frontier; the survival states keep the character alive while it does. It skips barren regions. Once its region shows a poor yield after a fair sample (20 cuts, under 1 gem in 20), it leaves poor regions alone and walks to the best region within 64 blocks that gave at least 1 gem in 10, and cuts there. A gather_gems x, y names a target region (any block of it, such as a gem_yield corner): Gather walks there and cuts only there while it knows a cell to cut there, and works as usual once it knows none; it also lifts that region's barren mark. Name one to send Gather to a good region it would not pick itself (a far one, say); leave x, y out to let it choose, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (a cut sent now), "taking a gem", "walking to grass", "walking to a bush" or "walking to a gem pile", "moving off from a hostile that shadows", "fighting a hostile that shadows", "blocked by hostile" (the only cuttable cells known have a hostile near), "heading out of safe ground" (nothing left to cut, walking out of the safe zone), "cuts have no effect here" (cuts here changed nothing, so it moves on to other cells), "no cuttable cell in view" (it knows no grass or bush it may cut, so it explores for one), or "region barren" (the same, standing in a barren region); "walking to a target region" while it heads for a named region it has not seen. While it works only in a target region, the status ends in " (region x,y)", that region's corner. Any of these but "cutting" ends in ", no cut for N s" once no cut has taken effect for 30 s: that is a stall, not progress. State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress."""
 
 
 def system_prompt(reference_sections: str = "") -> str:
@@ -497,6 +498,22 @@ def trace_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def hub_give_up_lines(stuck: NavStuckMemory) -> list[dict[str, Any]]:
+    """The planner's ``given_up_hubs``: each town or shop give-up and when it
+    lapses (``stuck.HUB_GIVE_UP_TICKS``, ``stuck.HUB_GIVE_UP_CELLS``)."""
+    out = []
+    for mid, (x, y) in sorted(stuck.given_up_hubs, key=str):
+        lapse = hub_give_up_lapses(stuck, (mid, (x, y)))
+        if lapse is None:
+            continue
+        tick, start = lapse
+        entry: dict[str, Any] = {"cell": f"{mid}:{x},{y}", "retry_at_tick": tick, "or_after_moving_cells": HUB_GIVE_UP_CELLS}
+        if start is not None:
+            entry["from"] = f"{start[0]},{start[1]}"
+        out.append(entry)
+    return out
+
+
 def build_prompt(
     *,
     triggers: list[dict[str, Any]],
@@ -506,6 +523,7 @@ def build_prompt(
     knowledge: KnowledgeBase | None,
     reference_sections: str = "",
     given_up_travel: Collection[tuple[int, tuple[int, int]]] = (),
+    given_up_hubs: Collection[dict[str, Any]] = (),
     gather_status: str = "",
     gather_run: dict[str, int] | None = None,
     rejected: Collection[str] = (),
@@ -538,7 +556,9 @@ def build_prompt(
     state_lines.append("stack (top first):" + "".join(f"\n  {line}" for line in lines) if lines else "stack: (empty)")
     if given_up_travel:
         cells = [f"{mid}:{x},{y}" for mid, (x, y) in sorted(given_up_travel, key=str)]
-        state_lines.append(f"given_up_travel={json.dumps(cells)} (cells stuck detection gave up on: never travel to them again this run)")
+        state_lines.append(f"given_up_travel={json.dumps(cells)} (cells stuck detection gave up on: never travel to them while listed)")
+    if given_up_hubs:
+        state_lines.append(f"given_up_hubs={json.dumps(list(given_up_hubs), sort_keys=True)} (town and shop give-ups: each lapses at retry_at_tick or after moving or_after_moving_cells from where it gave up)")
     if rejected:
         state_lines.append(f"last_reply_rejected={json.dumps(list(rejected))} (parts of your previous reply that were not applied, and why)")
     clues: list[dict[str, Any]] = []
@@ -981,6 +1001,7 @@ class Strategist:
             knowledge=runner.knowledge,
             reference_sections=self.config.reference_sections,
             given_up_travel=runner.mem.nav_stuck.given_up_travel,
+            given_up_hubs=hub_give_up_lines(runner.mem.nav_stuck),
             gather_status=runner.mem.gather_status,
             gather_run=runner.gem_cuts.run_counts(),
             rejected=self.rejected,  # replaced when this call's reply is read; kept if the call fails

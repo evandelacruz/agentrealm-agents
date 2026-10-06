@@ -9,7 +9,15 @@ frontier. Grass and bushes in a region our own cuts showed barren are left
 alone (A63), unless the op names that region with ``x, y``, and so are cells
 it cut too recently to have grown back, cells whose last ``Use`` had no
 effect, and regions or safe zones where cuts keep having none
-(``GemYieldTracker.uncuttable``)."""
+(``GemYieldTracker.uncuttable``).
+
+A target region is worked before anything else: the one the op names with
+``x, y``, else, while Gather stands in a poor region (a fair sample, low
+yield), the best better region known nearby (``gem_yield.better_region``).
+Gather walks to it and cuts only there while it has a cell to cut; poor
+regions are left alone while a better one is known. With nothing known to
+cut there, a named region it has not seen is walked toward, and otherwise
+Gather works as if there were no target (free-play run 2)."""
 
 from __future__ import annotations
 
@@ -18,7 +26,16 @@ from typing import Callable, Iterable
 from ..config import Policy
 from ..directives import attack_forbidden
 from ..executor import DEFAULT_TICK_RATE_HZ
-from ..gem_yield import GemYieldTracker, barren_regions, exhausted_cells, region_of
+from ..gem_yield import (
+    REGION_SIZE,
+    GemYieldTracker,
+    barren_regions,
+    better_region,
+    exhausted_cells,
+    poor_regions,
+    region_corner,
+    region_of,
+)
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
@@ -43,6 +60,7 @@ BUSH_REACH = 1
 GOAL = "gather"
 OUT = "out"  # ``m.gather_target`` kind: walking off safe ground to field ground or the frontier
 OFF = "off"  # ``m.gather_target`` kind: moving off from a hostile that shadows us
+REGION = "region"  # ``m.gather_target`` kind: walking toward a target region with no cuttable cell seen yet
 # Known targets tried per replan, nearest first: bounds the searches when the
 # closest ones turn out unreachable (across water, say).
 GATHER_CANDIDATES = 16
@@ -69,7 +87,8 @@ BLOCKED = "blocked by hostile"
 MOVING_OFF = "moving off from a hostile that shadows"
 FIGHTING = "fighting a hostile that shadows"
 STALLED = "{}, no cut for {} s"
-WALK_TARGETS = {"grass": "grass", "bush": "a bush", "pile": "a gem pile"}
+WALK_TARGETS = {"grass": "grass", "bush": "a bush", "pile": "a gem pile", REGION: "a target region"}
+IN_REGION = "{} (region {},{})"  # any status while Gather works only in a target region
 
 
 class GatherState(State):
@@ -200,11 +219,12 @@ def gather_outcome(
     here = w.pos
     if here is None:
         return StateOutcome(None, "position unknown", state=state)
-    skip = _barren_to_skip(w, knowledge, op)
+    skip, target = _regions(w, knowledge, op)
     safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
     dead_regions, dead_cells = gem_cuts.uncuttable(w, safe) if gem_cuts is not None else (set(), set())
     exhausted = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | dead_cells
-    out = _gather_step(w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state, shadow)
+    named = op is not None and "x" in op and "y" in op
+    out, worked = _gather_step(w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state, shadow, target, named)
     walk = m.gather_target[0] if m.gather_target is not None and m.goal == GOAL else None
     if out.intents is None:
         if _barred_by_hostile(w, policy, skip | dead_regions, exhausted):
@@ -230,6 +250,9 @@ def gather_outcome(
     idle = _seconds_without_cut(w, m, gem_cuts, tick_hz)
     if m.gather_status != CUTTING and idle >= STALL_SECONDS:
         m.gather_status = STALLED.format(m.gather_status, idle)
+    if worked is not None:
+        m.gather_status = IN_REGION.format(m.gather_status, *region_corner(worked))
+        out.reason = IN_REGION.format(out.reason, *region_corner(worked))
     return out
 
 
@@ -270,15 +293,44 @@ def _gather_step(
     knowledge: KnowledgeBase | None,
     state: str,
     shadow: Entity | None = None,
-) -> StateOutcome:
+    target: tuple[int, int] | None = None,
+    named: bool = False,
+) -> tuple[StateOutcome, tuple[int, int] | None]:
+    """Gather's move, and the target region it works only in (None when it
+    works anywhere)."""
     view = w.view
     cuttable = {
         p
         for p, block in view.tiles.items()
         if block in ("grass", "bush") and p not in exhausted and region_of(p) not in skip and gather_ground(w, p, policy)
     }
+    worked = None
+    if target is not None:
+        there = {p for p in cuttable if region_of(p) == target}
+        if there:
+            cuttable, worked = there, target
+        elif named and shadow is None and region_of(here) != target and not _seen_region(w, target):
+            out = _walk_to_region(w, m, policy, knowledge, target, state)
+            if out is not None:
+                return out, target
     # Field cells first; safe ones only when no field cell is left to cut.
     preferred = {p for p in cuttable if p not in safe} or cuttable
+    return _gather_cells(w, m, policy, here, preferred, safe, knowledge, state, shadow), worked
+
+
+def _gather_cells(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    here: Pos,
+    preferred: set[Pos],
+    safe: set[Pos],
+    knowledge: KnowledgeBase | None,
+    state: str,
+    shadow: Entity | None,
+) -> StateOutcome:
+    """Take, cut or walk to the nearest of ``preferred``."""
+    view = w.view
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
     if shadow is not None:
@@ -355,12 +407,51 @@ def _end_walk_out(m: Memory) -> None:
         m.path, m.goal, m.gather_target = [], "", None
 
 
-def _barren_to_skip(w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None) -> set[tuple[int, int]]:
-    """Barren regions of this map (A63), less the one the op names with ``x, y``."""
+def _regions(
+    w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None
+) -> tuple[set[tuple[int, int]], tuple[int, int] | None]:
+    """The regions Gather skips, and its target region, if any.
+
+    Skipped: barren regions of this map (A63), and poor ones while a better
+    region is known nearby. The target is the region the op names with
+    ``x, y``, never skipped; else, standing in a poor region, the better one.
+    """
     skip = barren_regions(knowledge, w.map_id)
-    if skip and op is not None and "x" in op and "y" in op:
-        skip.discard(region_of((op["x"], op["y"])))
-    return skip
+    if op is not None and "x" in op and "y" in op:
+        named = region_of((op["x"], op["y"]))
+        skip.discard(named)
+        return skip, named
+    assert w.pos is not None
+    better = better_region(knowledge, w.map_id, w.pos)
+    if better is None:
+        return skip, None
+    poor = poor_regions(knowledge, w.map_id)
+    return skip | poor, better if region_of(w.pos) in poor else None
+
+
+def _seen_region(w: WorldModel, region: tuple[int, int]) -> bool:
+    """Any cell of ``region`` known."""
+    x0, y0 = region_corner(region)
+    tiles = w.view.tiles
+    return any((x0 + dx, y0 + dy) in tiles for dx in range(REGION_SIZE) for dy in range(REGION_SIZE))
+
+
+def _walk_to_region(
+    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None, region: tuple[int, int], state: str
+) -> StateOutcome | None:
+    """A step toward the middle of a named region no cell of which is known yet."""
+    x0, y0 = region_corner(region)
+    middle = (x0 + REGION_SIZE // 2, y0 + REGION_SIZE // 2)
+    _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
+    if not (m.goal == GOAL and m.gather_target == (REGION, middle) and next_step(w, plan_avoid, m.path)):
+        if m.goal == GOAL:
+            m.path, m.goal, m.gather_target = [], "", None
+        path = cost_path(w, middle, grid_params(policy, plan_avoid, plan_costly))
+        if not next_step(w, plan_avoid, path):
+            return None
+        m.path, m.goal, m.gather_target = path, GOAL, (REGION, middle)
+    step = next_step(w, plan_avoid, m.path)
+    return StateOutcome([set_position(step)], f"gather → region {x0},{y0}", state=state) if step is not None else None
 
 
 def _still_wanted(
@@ -371,6 +462,8 @@ def _still_wanted(
     kind, pos = target
     if kind == "pile":
         return any(is_gem_pile(e) and e.pos == pos for e in w.entities) and gather_ground(w, pos, policy)
+    if kind == REGION:
+        return False  # replanned each decision by ``_walk_to_region`` while its region is unseen
     if kind == OUT:
         # Kept while on safe ground: it was planned because no cut was
         # reachable, so re-checking ``preferred`` each tick would only replan

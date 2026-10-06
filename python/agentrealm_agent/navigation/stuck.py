@@ -68,6 +68,16 @@ RESET_PROGRESS_CELLS = 5
 # Escalation step 5: exponential backoff before retrying the goal (§4.5).
 BACKOFF_BASE_TICKS = 300
 
+# A give-up on a hub Travel resolves symbolically (``travel:town``,
+# ``travel:shop``) is not for the whole run: it lapses after this long, or
+# once the agent stands this far (Chebyshev) from where it gave up, since a
+# route from elsewhere may well get there (free-play run 2: one pacing
+# give-up on town banned it for the run, so a potion buy was dropped and 17
+# gems went unspent).
+HUB_GIVE_UP_TICKS = 1200
+HUB_GIVE_UP_CELLS = 16
+HUB_GOALS = frozenset({"travel:town", "travel:shop"})
+
 WALK, CAUTIOUS, BREAK, REVEAL, REVEALED, ALT_ROUTE = 0, 1, 2, 3, 4, 5
 
 # Goals that share one key per cell, so a frontier or door dropped under one
@@ -141,6 +151,10 @@ class NavStuckMemory:
     # Travel destinations given up this run, (map_id, cell) -> tick: their ops
     # leave the stack for good, pinned or not, and are never walked again (A16).
     given_up_travel: dict[tuple[int, Pos], int] = field(default_factory=dict)
+    # The hub ones among them (``HUB_GOALS``), (map_id, cell) -> where the
+    # agent stood when it gave up (map_id, cell): they lapse
+    # (``expire_hub_give_ups``).
+    given_up_hubs: dict[tuple[int, Pos], tuple[int | None, Pos | None]] = field(default_factory=dict)
     # The oscillation guard (navigation/oscillation.py): cells stood on at
     # recent decisions, the (walk goal, state) of the move into each, the
     # last decision's move, its events waiting for the trace, and the cells
@@ -513,7 +527,10 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     stuck.backoff_until[backoff] = w.tick + BACKOFF_BASE_TICKS * (2**power)
     stuck.backoff_power[backoff] = power + 1
     if att.goal.startswith("travel:"):
-        stuck.given_up_travel.setdefault(key_dest(backoff), w.tick)
+        dest = key_dest(backoff)
+        stuck.given_up_travel.setdefault(dest, w.tick)
+        if att.goal in HUB_GOALS and stuck.given_up_travel[dest] == w.tick:
+            stuck.given_up_hubs[dest] = (w.map_id, w.pos)
     stuck.stuck_signals.append(
         {
             "trigger": "stuck",
@@ -538,6 +555,29 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
         m.goal_op = None
     else:
         m.corridors.pop(att.goal, None)
+
+
+def hub_give_up_lapses(stuck: NavStuckMemory, dest: tuple[int, Pos]) -> tuple[int, Pos | None] | None:
+    """When a hub give-up on ``dest`` lapses: (tick, the cell it gave up
+    from), or None for one that holds for the run."""
+    if dest not in stuck.given_up_hubs or dest not in stuck.given_up_travel:
+        return None
+    return stuck.given_up_travel[dest] + HUB_GIVE_UP_TICKS, stuck.given_up_hubs[dest][1]
+
+
+def expire_hub_give_ups(stuck: NavStuckMemory, w: WorldModel) -> list[tuple[int, Pos]]:
+    """Forget the hub give-ups that lapsed, and return them: ``HUB_GIVE_UP_TICKS``
+    passed, or the agent stands ``HUB_GIVE_UP_CELLS`` from where it gave up
+    (or on another map). Its ops may then be planned and walked again."""
+    lapsed = []
+    for dest, (mid, cell) in list(stuck.given_up_hubs.items()):
+        since = stuck.given_up_travel.get(dest)
+        moved = w.pos is not None and (mid != w.map_id or cell is None or chebyshev(cell, w.pos) >= HUB_GIVE_UP_CELLS)
+        if since is None or w.tick - since >= HUB_GIVE_UP_TICKS or moved:
+            del stuck.given_up_hubs[dest]
+            stuck.given_up_travel.pop(dest, None)
+            lapsed.append(dest)
+    return lapsed
 
 
 LEVEL_NAMES = {

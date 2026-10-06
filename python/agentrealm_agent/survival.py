@@ -173,24 +173,36 @@ def on_safe_tile(w: WorldModel) -> bool:
 
 
 def retreat_goal(w: WorldModel, knowledge: KnowledgeBase | None) -> Pos | None:
-    """Where Retreat heads: the nearest known safe cell on this map, with the
-    town cell the world read gave as one more candidate, or None (A9).
+    """Where Retreat heads with no path checked: the nearest known safe cell
+    on this map, with the town cell the world read gave as one more
+    candidate, or None (A9). The walk itself picks the nearest one a path
+    reaches (``safe_goals``, ``pathing.reachable_safe_goal``).
 
     So a character that has read no safe zone yet still runs for town
     instead of standing its ground (A16 Walk run 4).
     """
+    goals = safe_goals(w, knowledge)
+    return goals[0] if goals else None
+
+
+def safe_goals(w: WorldModel, knowledge: KnowledgeBase | None) -> list[Pos]:
+    """Every cell Retreat may head for, nearest first (ties to the smaller
+    cell): the known safe cells on this map, and the town cell when it is on
+    this map. The cell we stand on comes first when it is one."""
     if w.map_id is None or w.pos is None:
-        return None
+        return []
     goals = set(safe_tiles(w, w.map_id))
-    town = town_from_kb(knowledge)
-    if town is not None and town[0] == w.map_id:
-        goals.add(town[1])
-    if not goals:
-        return None
+    town = town_cell(w, knowledge)
+    if town is not None:
+        goals.add(town)
     here = w.pos
-    if here in goals:
-        return here
-    return min(goals, key=lambda p: (chebyshev(p, here), p))
+    return sorted(goals, key=lambda p: (chebyshev(p, here), p))
+
+
+def town_cell(w: WorldModel, knowledge: KnowledgeBase | None) -> Pos | None:
+    """The town cell the world read gave, when it is on this map."""
+    town = town_from_kb(knowledge)
+    return town[1] if town is not None and town[0] == w.map_id else None
 
 
 # The corridor search each retreat danger profile keeps (``pathing.nav_search``):

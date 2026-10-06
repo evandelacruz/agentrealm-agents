@@ -24,6 +24,7 @@ from .brain import (
 )
 from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
+from .navigation.stuck import expire_hub_give_ups
 from .navigation.stuck import on_break_opened, on_break_tried
 from .navigation.stuck import on_rejection as nav_on_rejection
 from .navigation.stuck import on_step as nav_on_step
@@ -207,6 +208,13 @@ class Runner:
             if any(same_ops([op], [e]) for e in ended) or self.travel_given_up(op):
                 self.directives.unpin(goal)
 
+    def expire_hub_give_ups(self) -> None:
+        """Forget the Travel give-ups on a hub (town, shop) that lapsed, by time
+        or by the agent moving well off, so the planner may send it there again
+        (``stuck.expire_hub_give_ups``; free-play run 2)."""
+        for mid, (x, y) in expire_hub_give_ups(self.mem.nav_stuck, self.world):
+            self.log("stuck", f"give-up on {mid}:{x},{y} lapsed", {"stuck": {"event": "lapsed", "map_id": mid, "target": [x, y]}})
+
     def drop_given_up_ops(self) -> None:
         """A ``travel`` op whose destination stuck detection gave up on, by
         the cell it resolves to whatever its ``to`` (a ``shop`` or
@@ -308,6 +316,7 @@ class Runner:
         try:
             while not self.stop.is_set():
                 self.next_window(not_before)
+                self.expire_hub_give_ups()
                 self.unpin_done_goals()
                 old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():

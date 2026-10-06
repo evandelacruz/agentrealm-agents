@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from .threat import ThreatTable, type_key_for_entity
 from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
-from .zone_discovery import safe_tiles
+from .zone_discovery import known_safe, safe_tiles
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -123,8 +123,7 @@ def retreat_by_health(health: int | None, retreat_hits: int, hit_damage: int) ->
 def on_safe_tile(w: WorldModel) -> bool:
     if w.map_id is None or w.pos is None:
         return False
-    fact = w.zones.get(w.map_id, {}).get(w.pos)
-    return fact is not None and fact.safe
+    return known_safe(w, w.map_id, w.pos)
 
 
 def retreat_goal(w: WorldModel, knowledge: KnowledgeBase | None) -> Pos | None:

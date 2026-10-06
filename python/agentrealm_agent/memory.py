@@ -72,8 +72,8 @@ class Memory:
     investigate_rejections: dict[str, int] = field(default_factory=dict)  # Read/Say key -> refused count (A30)
     greetings: dict[int, tuple[int, int]] = field(default_factory=dict)  # npc id -> (greetings sent, tick of the last), Greet (A64)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
-    gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass", cell) Gather is walking toward (A22)
-    gather_status: str = ""  # Gather's last decision: cutting, no cuttable cell in view, or region barren (planner State)
+    gather_target: tuple[str, Pos] | None = None  # ("pile" | "bush" | "grass" | "out", cell) Gather is walking toward (A22)
+    gather_status: str = ""  # Gather's last decision: cutting, cuts have no effect here, heading out of safe ground, no cuttable cell in view, or region barren (planner State)
     flee_path: list[Pos] = field(default_factory=list)  # Flee's committed escape, kept until it arrives, is blocked or Flee stops (A9, A58)
     # Cells the escape the oscillation guard forced keeps off: the ones it paced on (A15).
     # The planned flee_path already excludes them; this only keeps them shut for

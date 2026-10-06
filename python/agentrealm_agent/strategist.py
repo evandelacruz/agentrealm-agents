@@ -102,6 +102,7 @@ from .investigation import in_sight, spoken_npc_ids
 from .survival import known_hostile, retreat_goal
 from .travel.knowledge import town_from_kb
 from .world import Pos, WorldModel, chebyshev
+from .zone_discovery import known_safe
 
 log = logging.getLogger(__name__)
 
@@ -183,7 +184,7 @@ The character's arc, in order. Judge the stage from State (health, gems, armed, 
 
 Gems by area (stage 2). Gem drops from grass and bushes vary by area, and some areas drop none. State gem_yield is measured from the character's own cuts: the region it stands in (here, once cut there), the best regions nearby with their yield (gems per cut) and the barren ones. Hunt gems where the yield is good, leave a region that shows no gems after a fair sample, and explore regions not yet sampled to sample them.
 
-How gather_gems works. Gather cuts any known grass or bush off hazards with no hostile near, in the field as in town, walking to the nearest one itself; the survival states keep the character alive while it does. It skips barren regions. A gather_gems x, y only lifts the barren mark on that block's region so Gather cuts there again; it does not move the character. To move it, use travel or explore_area. Leave x, y out unless you mean to re-sample a barren region, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (cutting, or walking to a cell to cut), "no cuttable cell in view" (it knows no grass or bush it may cut, so it explores for one), or "region barren" (the same, standing in a barren region)."""
+How gather_gems works. Gather cuts known grass and bushes off hazards with no hostile near, field cells before safe-zone ones (gems drop from cuts outside town, and a cut on town grass was seen to have no effect). It walks to the nearest one itself, learns ground where cuts have no effect and leaves it, and with nothing left to cut while on safe ground it heads out to field ground or the frontier; the survival states keep the character alive while it does. It skips barren regions. A gather_gems x, y only lifts the barren mark on that block's region so Gather cuts there again; it does not move the character. To move it, use travel or explore_area. Leave x, y out unless you mean to re-sample a barren region, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (cutting, or walking to a cell to cut), "heading out of safe ground" (nothing left to cut, walking out of the safe zone), "cuts have no effect here" (cuts here changed nothing, so it moves on to other cells), "no cuttable cell in view" (it knows no grass or bush it may cut, so it explores for one), or "region barren" (the same, standing in a barren region). State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress."""
 
 
 def system_prompt(reference_sections: str = "") -> str:
@@ -499,6 +500,7 @@ def build_prompt(
     reference_sections: str = "",
     given_up_travel: Collection[tuple[int, tuple[int, int]]] = (),
     gather_status: str = "",
+    gather_run: dict[str, int] | None = None,
     rejected: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
@@ -513,6 +515,7 @@ def build_prompt(
         *npc_lines(w, knowledge),
         f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
         *_gather_line(plan, gather_status),
+        f"gather_run={json.dumps(gather_run or {}, sort_keys=True)}",
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
@@ -543,12 +546,16 @@ def build_prompt(
 
 def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     """Whether the character stands on safe ground, and how far and which
-    way the nearest known safe tile and the town are. ``unknown`` until a
-    zone read covers where it stands."""
+    way the nearest known safe tile and the town are. ``yes`` once a zone or
+    terrain read shows the cell safe; ``unknown`` until a zone read covers a
+    cell no terrain read marked safe."""
     if w.pos is None or w.map_id is None:
         return []
     fact = w.zones.get(w.map_id, {}).get(w.pos)
-    here = "unknown (zone not read here)" if fact is None else "yes" if fact.safe else "no"
+    if known_safe(w, w.map_id, w.pos):
+        here = "yes"
+    else:
+        here = "unknown (zone not read here)" if fact is None else "no"
     safe = retreat_goal(w, None)  # safe tiles only; the town line follows
     town = town_from_kb(knowledge) or (w.respawn_anchors[0] if w.respawn_anchors else None)
     return [
@@ -871,6 +878,7 @@ class Strategist:
             reference_sections=self.config.reference_sections,
             given_up_travel=runner.mem.nav_stuck.given_up_travel,
             gather_status=runner.mem.gather_status,
+            gather_run=runner.gem_cuts.run_counts(),
             rejected=self.rejected,  # replaced when this call's reply is read; kept if the call fails
         )
         # Charge the attempt now, so a call that fails still uses up the budget.

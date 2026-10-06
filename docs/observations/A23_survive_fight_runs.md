@@ -145,7 +145,7 @@ Each Retreat got clear (the hostile left `hostile_range`, so `should_retreat` we
 
 No clear change. Two things to watch:
 - Planner call 1 (0.7 s) saw `health=None/None`, although the `self` read at 0.3 s had already returned 10/10. The character was asleep at the start, and its health had not yet reached the State the planner reads. Later calls saw 10/10.
-- In the profiling run, Flee sent `Step(left)` from (397, 617) toward walkable `tile` (396, 617) about 30 times over 35 s. Position never changed and no rejection came back. The trace does not log `intent_results`, so this run cannot tell a silent no-op from a rejection the agent ignored.
+- In the profiling run, Flee sent `Step(left)` from (397, 617) toward walkable `tile` (396, 617) about 30 times over 35 s. Position never changed and no rejection came back. This may not be the server at all. Another client was playing this character around the profiling run (see **Lives between the runs**), and its `tick`s would replace our queue, so our `Step`s never ran and no result came back. The trace does not log `intent_results`, so this run cannot separate a second client, a silent no-op, and a rejection the agent ignored. A rerun with exclusive use of the character is needed before calling it a server behavior after B133.
 
 ### Planner
 

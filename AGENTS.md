@@ -40,6 +40,7 @@ Decided. Do not cross without flagging prominently.
 - Read the cited PLAN.md sections and this file before writing code.
 - Write for the newcomer who will copy this agent: plain names, a short docstring on each state, one obvious place to add a behavior. Reviews flag anything that makes the agent harder to read or extend, the same as a bug.
 - The agent is character-agnostic: it plays whatever character it is handed at run time (A59). No live character name or id anywhere (code, configs, scripts, README, docs, status.json notes, tests; fixtures use obviously fake names), and characters are created only by an explicit `create` command.
+- A live run needs exclusive use of its character. Another client's `tick` replaces the queue, so two clients on one character corrupt both runs' traces (A23 run 2). Do not start a run on a character that another session or agent is playing.
 - Keep PLAN.md and README.md matching the code. A behavior change that leaves them describing the old one is not done.
 - Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`. The `test` GitHub Actions workflow runs both on every PR.
 - Open PRs **ready for review, not draft**. If tooling defaults to draft, run `gh pr ready`.

@@ -586,9 +586,11 @@ def bounded_step(
     ladder: nothing in sight is worth a block broken or a reveal walk. No
     path, or a window with no progress (moves, time or pacing), gives ``at``
     up through step 5 with its backoff, and a target still backed off is
-    skipped. A route whose first step is taken or unseen waits out its
-    window, as in A15. The path for ``goal`` is kept while it still ends on
-    ``at`` with an open first step, else planned again with ``plan``.
+    skipped. A route whose first step is taken or unseen waits, as in A15,
+    and is given up once it has waited ``PROGRESS_TICK_LIMIT`` with no step
+    in between; a window left over from walking earlier is never judged
+    there. The path for ``goal`` is kept while it still ends on ``at`` with
+    an open first step, else planned again with ``plan``.
 
     None when there is no move now: the caller tries something else. Only a
     walk that moves makes its attempt active, so one with no move never
@@ -600,13 +602,19 @@ def bounded_step(
         found = plan()
         if not found or not next_step(w, avoid, found):
             att = nav_stuck.attempt(m, w, goal, at)
-            reason = "no_path" if not found else nav_stuck.stuck_reason(att, w.tick) if att else None
-            if att is not None and reason:
-                nav_stuck.give_up(m, w, att, reason)
+            if att is None:
+                return None
+            if att.waiting_since is None:
+                att.waiting_since = w.tick
+            if not found:
+                nav_stuck.give_up(m, w, att, "no_path")
+            elif w.tick - att.waiting_since >= nav_stuck.PROGRESS_TICK_LIMIT:
+                nav_stuck.give_up(m, w, att, "time")
             return None
         m.path, m.goal = found, goal
     att = nav_stuck.track(m, w, goal, at)
     if att is not None:
+        att.waiting_since = None
         nav_stuck.observe(att, w, m.path)
         if reason := nav_stuck.stuck_reason(att, w.tick):
             nav_stuck.give_up(m, w, att, reason)

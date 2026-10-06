@@ -6,6 +6,7 @@ from ..knowledge_base import knowledge_items
 from ..loot import worthwhile_pickups
 from ..memory import Memory
 from ..navigation import cost_path
+from ..navigation import stuck as nav_stuck
 from ..pathing import bounded_step, goto_navigation_pending, grid_params, nav_search
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -50,6 +51,7 @@ def loot_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | 
         return None
     near = pickup_outcome(w, ctx.knowledge, state=state)
     if near is not None:
+        nav_stuck.finish_in_reach(ctx.memory, w, "loot")
         return near
     if goto_navigation_pending(w, ctx.memory, ctx.policy):
         return None

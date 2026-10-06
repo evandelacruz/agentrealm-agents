@@ -147,6 +147,7 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
     assert here is not None
     for food in food_in_sight(w, m)[:FOOD_CANDIDATES]:
         if chebyshev(food.pos, here) <= 1:
+            nav_stuck.finish_in_reach(m, w, "heal_food")
             note_try(m, "take", food.id)
             return _out([take(food.id)], f"take food {food.code}")
         # Walking onto it also picks up food eaten on pickup (golden cap).

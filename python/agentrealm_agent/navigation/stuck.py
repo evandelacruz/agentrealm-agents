@@ -87,6 +87,7 @@ class NavAttempt:
     break_x: int | None = None  # stuck step 2: block under break, if any
     break_y: int | None = None
     break_cap: str | None = None
+    waiting_since: int | None = None  # a short walk with no step since this tick (``pathing.bounded_step``)
 
 
 class Leg(NamedTuple):
@@ -209,6 +210,16 @@ def finish(m: Memory, att: NavAttempt) -> None:
     stuck.backoff_power.pop(att.key, None)
     if stuck.active == att.key:
         stuck.active = None
+
+
+def finish_in_reach(m: Memory, w: WorldModel, goal: str) -> None:
+    """Forget ``goal``'s attempts on this map whose target is in reach: the walk
+    is over (a Heal or Loot ``Take``), so a later walk there starts fresh."""
+    if w.pos is None:
+        return
+    for att in list(m.nav_stuck.attempts.values()):
+        if att.goal == goal and att.map_id == w.map_id and chebyshev(att.target, w.pos) <= 1:
+            finish(m, att)
 
 
 def done(att: NavAttempt, w: WorldModel) -> bool:

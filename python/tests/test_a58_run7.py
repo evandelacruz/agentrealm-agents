@@ -131,6 +131,13 @@ def pond_world(health=5) -> WorldModel:
     return w
 
 
+def drain(w: WorldModel) -> None:
+    """The pond dried up: the food is reachable."""
+    for p, block in list(w.view.tiles.items()):
+        if block in ("water", "grass"):
+            w.view.tiles[p] = "dirt"
+
+
 def play(w: WorldModel, c: PlayContext, decisions: int) -> list:
     outs = []
     with mock.patch.object(planner, "FINE_NODE_BUDGET", SMALL_BUDGET):
@@ -267,6 +274,51 @@ class HealWalkBoundedTest(unittest.TestCase):
         goto = nav_stuck.active(c.memory, w)
         self.assertEqual(goto.goal, "goto")
         self.assertGreater(goto.level, nav_stuck.CAUTIOUS, "the goto's windows ran out twice")
+
+    def test_a_blocked_step_after_an_old_walk_is_not_judged_on_the_old_window(self):
+        # Review on #101: walk a step, come back much later, find the way taken.
+        w, m = pond_world(), Memory()
+        self.assertEqual(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)]), (403, 606))
+        w.tick += 1000
+        w.entities.append(Entity("npc", 3, (403, 606), "villager"))
+        self.assertIsNone(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)]))
+        self.assertEqual(m.nav_stuck.stuck_signals, [], "the wait has only just started")
+
+    def test_a_step_ends_the_wait(self):
+        w, m = pond_world(), Memory()
+        villager = Entity("npc", 3, (403, 606), "villager")
+        w.entities.append(villager)
+        bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)])
+        w.tick += nav_stuck.PROGRESS_TICK_LIMIT - 10
+        w.entities.remove(villager)
+        self.assertEqual(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)]), (403, 606))
+        w.entities.append(villager)
+        w.tick += 10
+        self.assertIsNone(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)]))
+        self.assertEqual(m.nav_stuck.stuck_signals, [], "waiting again from now")
+
+    def test_taking_the_food_ends_its_walk(self):
+        w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"], pickup=False))
+        drain(w)
+        w.pos = (403, 608)
+        food_key = nav_stuck.goal_key("heal_food", 1, FOOD)
+        self.assertEqual(dispatch(w, c).reason, f"heal_food → {FOOD}")
+        self.assertIn(food_key, c.memory.nav_stuck.attempts)
+        w.pos = (401, 610)
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Take", "supply_id": 7}])
+        self.assertNotIn(food_key, c.memory.nav_stuck.attempts, "a later walk there starts fresh")
+
+    def test_a_pickup_in_reach_ends_its_loot_walk(self):
+        w = pond_world(health=10)
+        c = ctx(Policy(kind="scripted", goals=["explore"]))
+        drain(w)
+        w.pos = (403, 608)
+        loot_key = nav_stuck.goal_key("loot", 1, FOOD)
+        self.assertTrue(dispatch(w, c).reason.startswith("loot"))
+        self.assertIn(loot_key, c.memory.nav_stuck.attempts)
+        w.pos = (401, 610)
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Take", "supply_id": 7}])
+        self.assertNotIn(loot_key, c.memory.nav_stuck.attempts)
 
     def test_heal_walks_to_the_next_safe_tile_once_one_is_given_up(self):
         w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"]))

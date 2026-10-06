@@ -88,7 +88,7 @@ def resolve_destination(w: WorldModel, ctx: PlayContext, op: GoalOp) -> Resolved
         if not path or w.map_id is None:
             return None
         return ResolvedDestination(w.map_id, path[-1], "entrance")
-    return resolve_travel(t, w, ctx.knowledge, ctx.memory.strength)
+    return resolve_travel(t, w, ctx.knowledge, ctx.memory.strength, ctx.memory.nav_stuck.given_up_travel)
 
 
 def _travel_step(

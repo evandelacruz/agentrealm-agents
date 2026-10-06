@@ -634,6 +634,29 @@ class SmokeScriptTest(unittest.TestCase):
         decide(gate, r.world, r.mem, state="Travel", acted_op=shop)
         self.assertEqual(gate.given_up_returns, 1, "a return to the given-up shop fails the gate")
 
+    def test_a_nearest_shop_op_walks_on_to_the_next_shop_and_leaves_when_none_is_left(self):
+        # Review on #115: a `shop` with no cell resolves to the nearest known
+        # shop; a give-up on it dropped the op though another shop was known.
+        from agentrealm_agent.knowledge_base import KnowledgeBase
+        from agentrealm_agent.plan import Plan as PlanCls
+        from agentrealm_agent.travel.knowledge import record_shop_cell
+        from agentrealm_agent.travel.resolve import travel_dest
+
+        r, _, _ = self._pinned_runner()
+        r.knowledge = KnowledgeBase.empty("sandbox")
+        record_shop_cell(r.knowledge, OVERWORLD, (2, 0))
+        record_shop_cell(r.knowledge, OVERWORLD, (8, 0))
+        shop = {"op": "travel", "to": "shop", "x": 0, "y": 0}
+        r.plan = PlanCls([shop], dict(PARAM_DEFAULTS))
+        self._give_up_on_target(r, "travel:shop", (2, 0))
+        r.drop_given_up_ops()
+        self.assertEqual(r.plan.current(), shop, "another shop is known: the op stays")
+        given_up = r.mem.nav_stuck.given_up_travel
+        self.assertEqual(travel_dest(shop, r.world, r.knowledge, r.mem.strength, given_up), (OVERWORLD, (8, 0)))
+        self._give_up_on_target(r, "travel:shop", (8, 0))
+        r.drop_given_up_ops()
+        self.assertIsNone(r.plan.current(), "no shop left: the op leaves")
+
     def test_a_travel_town_give_up_does_not_ban_an_unrelated_point(self):
         r, _, _ = self._pinned_runner()
         r.world.respawn_anchors = [(OVERWORLD, (9, 9))]
@@ -695,7 +718,7 @@ class SmokeScriptTest(unittest.TestCase):
             else:
                 planner.on_window(r)
             r.drop_given_up_ops()
-            left = [op for op in r.plan.goals[r.plan.index :] if r.travel_dest(op) == (OVERWORLD, (5, 6))]
+            left = [op for op in r.plan.goals[r.plan.index :] if r.travel_given_up(op)]
             self.assertEqual(left, [], f"travel to the given-up target is back at {second} s")
             decide(gate, r.world, r.mem, state="Travel", acted_op=r.plan.current())
         self.assertGreater(r.world.tick, r.mem.nav_stuck.backoff_until[f"travel:point:{OVERWORLD}:5,6"])

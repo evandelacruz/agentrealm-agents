@@ -167,7 +167,7 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
         """Count each return to a travel destination stuck detection gave up on
         at an earlier tick, whatever the op's ``to``: a run of decisions acting
         on its op counts once."""
-        dest = travel_dest(acted_op, w, knowledge, m.strength) if acted_op else None
+        dest = travel_dest(acted_op, w, knowledge, m.strength, m.nav_stuck.given_up_travel) if acted_op else None
         gave_up_at = m.nav_stuck.given_up_travel.get(dest) if dest is not None else None
         on_it = gave_up_at is not None and gave_up_at < w.tick
         if on_it and not self._on_given_up:

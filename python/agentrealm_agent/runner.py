@@ -38,7 +38,7 @@ from .equip import note_equip_result, sync_refusals
 from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
 from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, self_use_code
 from .shop import note_shop_result
-from .travel.resolve import travel_dest
+from .travel.resolve import travel_given_up
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.strength import loadout_key
 from .executor import (
@@ -168,37 +168,35 @@ class Runner:
         stuck detection gave up on, is unpinned, so a later reload never puts
         it back (A16). Read before the strategist drains the signals this window."""
         ended = [s["op"] for s in self.mem.strategist_signals if s.get("trigger") in ("goal_done", "goal_failed")]
-        given_up = self.mem.nav_stuck.given_up_travel
         for goal in list(self.directives.pinned_goals):
             op = parse_directives_goal(goal)
             if op is None:
                 continue
-            if any(same_ops([op], [e]) for e in ended) or self.travel_dest(op) in given_up:
+            if any(same_ops([op], [e]) for e in ended) or self.travel_given_up(op):
                 self.directives.unpin(goal)
 
     def drop_given_up_ops(self) -> None:
         """A ``travel`` op whose destination stuck detection gave up on, by
-        the cell it resolves to whatever its ``to``, leaves the stack for
+        the cell it resolves to whatever its ``to`` (a ``shop`` or
+        ``hunting_ground`` only once no candidate is left), leaves the stack for
         good, wherever it sits (A16): a directives op, or a planner
         op sent before the give-up. Otherwise the backoff's end walks it
         again, and every planner reply keeps a directives op on top. Its
         ``goal_failed`` signal unpins it. A planner reply that re-sends one
         never reaches the stack (``Strategist._settle`` filters it), so this
         fires once per op. A new head walks a path of its own."""
-        given_up = self.mem.nav_stuck.given_up_travel
-        if not given_up:
+        if not self.mem.nav_stuck.given_up_travel:
             return
         head = self.plan.current()
-        self.plan.drop_ops(
-            lambda op: self.travel_dest(op) in given_up, "stuck detection gave up on its target", self.mem
-        )
+        self.plan.drop_ops(self.travel_given_up, "stuck detection gave up on its target", self.mem)
         if self.plan.current() is not head:
             self.mem.path, self.mem.goal, self.mem.goal_op = [], "", None
             self.mem.walks.clear()
 
-    def travel_dest(self, op: dict) -> tuple[int, tuple[int, int]] | None:
-        """Where a ``travel`` op walks to now (``travel.resolve.travel_dest``)."""
-        return travel_dest(op, self.world, self.knowledge, self.mem.strength)
+    def travel_given_up(self, op: dict) -> bool:
+        """Whether stuck detection gave up on where a ``travel`` op goes
+        (``travel.resolve.travel_given_up``)."""
+        return travel_given_up(op, self.world, self.knowledge, self.mem.strength, self.mem.nav_stuck.given_up_travel)
 
     def reload_directives(self, old_goals: list[str]) -> None:
         """Apply reloaded directives to the plan (A34).

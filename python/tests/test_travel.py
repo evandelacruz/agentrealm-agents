@@ -123,6 +123,25 @@ class ResolveTravelTest(unittest.TestCase):
         dest = resolve_travel(TravelOp("shop"), w, kb, StrengthBracket())
         self.assertEqual(dest.pos, (4, 0))
 
+    def test_nearest_shop_skips_a_given_up_cell(self):
+        # Review on #115: a given-up nearest shop dropped the op while another shop was known.
+        kb = KnowledgeBase.empty("sandbox")
+        record_shop_cell(kb, 1, (2, 0))
+        record_shop_cell(kb, 1, (6, 0))
+        w = grid(["........"])
+        dest = resolve_travel(TravelOp("shop"), w, kb, StrengthBracket(), {(1, (2, 0)): 3})
+        self.assertEqual(dest.pos, (6, 0))
+        self.assertIsNone(resolve_travel(TravelOp("shop"), w, kb, StrengthBracket(), {(1, (2, 0)): 3, (1, (6, 0)): 4}))
+
+    def test_hunting_ground_skips_a_given_up_cell(self):
+        kb = KnowledgeBase.empty("sandbox")
+        record_hunting_zone(kb, 1, (5, 0), 10)
+        record_hunting_zone(kb, 1, (6, 0), 15)
+        w = grid(["........"], at=(0, 0))
+        b = StrengthBracket()
+        self.assertEqual(resolve_travel(TravelOp("hunting_ground"), w, kb, b, {(1, (6, 0)): 3}).pos, (5, 0))
+        self.assertIsNone(resolve_travel(TravelOp("hunting_ground"), w, kb, b, {(1, (5, 0)): 3, (1, (6, 0)): 4}))
+
 
 class TravelStateTest(unittest.TestCase):
     def test_travel_beats_explore(self):

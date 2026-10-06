@@ -50,6 +50,47 @@ def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
     return [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
 
 
+def goto_target(w: WorldModel, policy: Policy) -> tuple[int | None, Pos] | None:
+    """The ``goto`` in ``policy.goals`` as (map, cell), or None when there is none."""
+    if policy.goto is None or "goto" not in policy.goals:
+        return None
+    dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
+    return dest_map, tuple(policy.goto)
+
+
+def goto_key(policy: Policy) -> tuple[int | None, Pos] | None:
+    """The ``goto`` in ``policy.goals`` as configured, (``goto_map``, cell), or None.
+
+    Unlike ``goto_target`` it does not resolve an unset ``goto_map`` to the
+    current map, so a door round trip never makes it look like a new target.
+    """
+    if policy.goto is None or "goto" not in policy.goals:
+        return None
+    return policy.goto_map, tuple(policy.goto)
+
+
+def goto_satisfied(m: Memory, policy: Policy) -> bool:
+    """The policy goto was stood on and has not changed since (A16, A58 run 8)."""
+    key = goto_key(policy)
+    return key is not None and m.goto_reached == key
+
+
+def note_goto_reached(w: WorldModel, m: Memory, policy: Policy) -> None:
+    """Remember that the agent stood on the goto target (A16, A58 run 8).
+
+    Dispatch calls this once per decision, before any state runs. The record
+    is the goto as configured (``goto_key``), so it holds across map changes,
+    and only a new or changed ``policy.goto`` or ``policy.goto_map`` clears
+    it: that target is owed until it is reached in turn.
+    """
+    key = goto_key(policy)
+    if m.goto_reached is not None and m.goto_reached != key:
+        m.goto_reached = None
+    goto = goto_target(w, policy)
+    if goto is not None and w.map_id == goto[0] and w.pos == goto[1]:
+        m.goto_reached = key
+
+
 def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
     """True while the agent still owes the ``goto`` in ``policy.goals`` (M7 smoke, A58).
 
@@ -58,18 +99,17 @@ def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
     and the plan's moves and ``wait`` hold are skipped (``replan``, Explore).
     Heal is not deferred, so a hurt character still walks to safety.
 
-    The deferral lifts while the agent stands on the target, or while stuck
-    detection is backed off from it after a give-up; it comes back when the
-    agent steps off the target or the backoff ends, because ``goto`` stays
-    first in the goals.
+    The goto is owed until the agent stands on its target. Once reached it
+    is satisfied (``goto_satisfied``): stepping off or leaving the map does
+    not owe it again, and Explore and the other states run as normal (A16,
+    A58 run 8). A new or changed ``policy.goto`` or ``goto_map`` is owed again. An unreached goto that stuck detection gave
+    up on is not owed while backed off, and is owed again when the backoff ends.
     """
-    if policy.goto is None or "goto" not in policy.goals:
+    goto = goto_target(w, policy)
+    if goto is None or goto_satisfied(m, policy):
         return False
-    dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
-    if w.map_id != dest_map or w.pos is None:
-        return False
-    target = tuple(policy.goto)
-    if w.pos == target:
+    dest_map, target = goto
+    if w.map_id != dest_map or w.pos is None or w.pos == target:
         return False
     if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
         return False
@@ -676,8 +716,9 @@ def plan_goal(
         return ([rng.choice(sorted(options))] if options else None), None
     if goal == "goto":
         # config.load guarantees goto is set when the goal is listed.
-        dest_map = policy.goto_map if policy.goto_map is not None else w.map_id
-        target = tuple(policy.goto)
+        dest_map, target = goto_target(w, policy)
+        if goto_satisfied(m, policy):  # reached: never walked back to (A16)
+            return None, None
         if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
             return None, None
         params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)

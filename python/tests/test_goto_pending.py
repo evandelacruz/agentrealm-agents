@@ -20,7 +20,7 @@ from agentrealm_agent.healing import (
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import goto_navigation_pending
+from agentrealm_agent.pathing import goto_navigation_pending, note_goto_reached, plan_goal
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
@@ -63,12 +63,71 @@ class GotoPendingTest(unittest.TestCase):
         self.assertTrue(goto_navigation_pending(w, c.memory, c.policy))
         self.assertFalse(goto_navigation_pending(w, c.memory, ctx(goto=False).policy))
 
-    def test_lifts_on_the_target_and_comes_back_off_it(self):
+    def test_lifts_on_the_target_and_stays_lifted_off_it(self):
+        # A16, A58 run 8: a reached goto is satisfied, not owed again on step-off.
         w, c = world(), ctx(goto=True)
         w.pos = GOTO
+        note_goto_reached(w, c.memory, c.policy)
         self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), "standing on it")
         w.pos = (10, 0)
-        self.assertTrue(goto_navigation_pending(w, c.memory, c.policy), "goto stays first in the goals")
+        self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), "reached, so not owed again")
+        found, _ = plan_goal("goto", w, c.memory, c.policy, c.rng, set(), set(), c.knowledge)
+        self.assertIsNone(found, "the goals loop does not walk back to it either")
+
+    def test_passing_near_the_target_does_not_satisfy_it(self):
+        w, c = world(at=(10, 0)), ctx(goto=True)
+        note_goto_reached(w, c.memory, c.policy)
+        self.assertTrue(goto_navigation_pending(w, c.memory, c.policy))
+
+    def test_a_new_goto_target_is_owed_again(self):
+        w, c = world(), ctx(goto=True)
+        w.pos = GOTO
+        note_goto_reached(w, c.memory, c.policy)
+        w.pos = (5, 0)
+        self.assertFalse(goto_navigation_pending(w, c.memory, c.policy))
+        c.policy.goto = (1, 0)
+        note_goto_reached(w, c.memory, c.policy)  # each decision notes it (dispatch)
+        self.assertTrue(goto_navigation_pending(w, c.memory, c.policy), "new target")
+        c.policy.goto = GOTO
+        note_goto_reached(w, c.memory, c.policy)
+        self.assertTrue(goto_navigation_pending(w, c.memory, c.policy), "changed back: owed again")
+
+    def test_the_same_cell_on_another_map_is_owed(self):
+        w, c = world(), ctx(goto=True)
+        w.pos = GOTO
+        note_goto_reached(w, c.memory, c.policy)
+        w.pos = (5, 0)
+        c.policy.goto_map = 2
+        w.map_id = 2
+        self.assertTrue(goto_navigation_pending(w, c.memory, c.policy))
+
+    def _satisfied(self, w, c):
+        """Both checks agree on whether the goto is satisfied (A16): pending and the goals loop."""
+        found, _ = plan_goal("goto", w, c.memory, c.policy, c.rng, set(), set(), c.knowledge)
+        pending = goto_navigation_pending(w, c.memory, c.policy)
+        self.assertEqual(pending, found is not None, "pending and plan_goal agree")
+        return not pending
+
+    def test_a_map_round_trip_keeps_it_satisfied_without_goto_map(self):
+        # Reach on map 1, warp to map 2 and back: policy.goto never changed.
+        w, c = world(), ctx(goto=True)
+        w.pos = GOTO
+        note_goto_reached(w, c.memory, c.policy)
+        w.map_id, w.pos = 2, (3, 0)
+        note_goto_reached(w, c.memory, c.policy)
+        w.map_id, w.pos = 1, (5, 0)
+        note_goto_reached(w, c.memory, c.policy)
+        self.assertTrue(self._satisfied(w, c))
+
+    def test_a_goto_map_change_is_owed_by_both_checks(self):
+        w, c = world(), ctx(goto=True)
+        w.pos = GOTO
+        note_goto_reached(w, c.memory, c.policy)
+        w.pos = (5, 0)
+        self.assertTrue(self._satisfied(w, c))
+        c.policy.goto_map = 1  # same map, set explicitly: a changed policy goto
+        note_goto_reached(w, c.memory, c.policy)
+        self.assertFalse(self._satisfied(w, c))
 
     def test_lifts_during_the_backoff_and_comes_back_after_it(self):
         w, c = world(), ctx(goto=True)

@@ -19,6 +19,7 @@ from .navigation.stuck import on_step as nav_on_step
 from .client import ApiError, Client
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
+from .pathing import goto_satisfied
 from .plan import Plan
 from .item_table import (
     AppliedUse,
@@ -147,7 +148,8 @@ class Runner:
         d = self.directives.directives
         plan = Plan.from_directives(directive_goals=d.goals, directive_params=d.params)
         if plan is None:
-            plan = Plan.from_policy(self.cfg.policy, d.params)
+            policy = self.cfg.policy
+            plan = Plan.from_policy(policy, d.params, goto_satisfied=goto_satisfied(self.mem, policy))
         plan.tick_hz = self.tick_hz
         return plan
 

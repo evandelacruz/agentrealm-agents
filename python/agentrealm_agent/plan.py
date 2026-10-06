@@ -536,8 +536,11 @@ class Plan:
         return cls(list(ops), dict(floor), floor_params=floor)
 
     @classmethod
-    def from_policy(cls, policy: Policy, directive_params: dict[str, float | int]) -> Plan:
-        return cls(list(builtin_goals(policy)), dict(directive_params), floor_params=dict(directive_params))
+    def from_policy(
+        cls, policy: Policy, directive_params: dict[str, float | int], *, goto_satisfied: bool = False
+    ) -> Plan:
+        ops = builtin_goals(policy, goto_satisfied=goto_satisfied)
+        return cls(list(ops), dict(directive_params), floor_params=dict(directive_params))
 
 
 def directive_stack_ops(directive_goals: list[str]) -> list[GoalOp]:
@@ -548,11 +551,13 @@ def directive_stack_ops(directive_goals: list[str]) -> list[GoalOp]:
     return parse_directives_goals([g for g in directive_goals if not is_travel_goal(g)])
 
 
-def builtin_goals(policy: Policy) -> list[GoalOp]:
+def builtin_goals(policy: Policy, *, goto_satisfied: bool = False) -> list[GoalOp]:
     """``policy.goals`` as ops, one for one, when directives set no goals and there is no model.
 
     ``wander`` has no op; it is left to ``policy.goals``, which ``replan``
-    falls back to whenever the stack has no path (or is empty).
+    falls back to whenever the stack has no path (or is empty). A ``goto``
+    the agent already stood on (``goto_satisfied``) has no op either, so a
+    rebuilt plan never walks back to it (A16).
     """
     ops: list[GoalOp] = []
     for goal in policy.goals:
@@ -560,7 +565,7 @@ def builtin_goals(policy: Policy) -> list[GoalOp]:
             ops.append({"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE})
         elif goal == "doors":
             ops.append({"op": "travel", "to": "entrance", "x": 0, "y": 0})
-        elif goal == "goto" and policy.goto is not None:
+        elif goal == "goto" and policy.goto is not None and not goto_satisfied:
             x, y = policy.goto
             op: GoalOp = {"op": "travel", "to": "point", "x": x, "y": y}
             if policy.goto_map is not None:

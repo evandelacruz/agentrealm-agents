@@ -557,7 +557,7 @@ class Strategist:
             client = make_client(cfg)
         except ImportError:
             raise PlannerConfigError(
-                f"planner: provider {cfg.provider} needs `pip install {cfg.provider}`, or pass --no-planner"
+                f"planner: provider {cfg.provider} needs its SDK: run `make setup` (pip install -r python/requirements.txt), or pass --no-planner"
             ) from None
         return cls(config=cfg, client=client)
 
@@ -567,8 +567,10 @@ class Strategist:
 
     def check(self) -> None:
         """One call before play. Raises :class:`PlannerAuthError` when the
-        provider refuses the key (401 or 403). Any other failure is left to
-        the run, which counts it and backs off."""
+        provider refuses the key (401 or 403), and :class:`PlannerConfigError`
+        on any other 4xx but 429 (a typo'd model is a 404). Rate limits,
+        server errors and the network are left to the run, which counts them
+        and backs off."""
         if not self.enabled:
             return
         assert self.client is not None
@@ -580,6 +582,11 @@ class Strategist:
                 names = " or ".join(KEY_ENV[self.config.provider])
                 raise PlannerAuthError(
                     f"planner: {self.config.provider} refused the key (HTTP {status}); fix {names}, or pass --no-planner"
+                ) from None
+            if status is not None and 400 <= status < 500 and status != 429:
+                raise PlannerConfigError(
+                    f"planner: {self.config.provider} rejected model {self.config.model!r} (HTTP {status}); "
+                    "fix AGENTREALM_PLANNER_MODEL, or pass --no-planner"
                 ) from None
             log.warning("strategist: startup check failed: %s", e)
 

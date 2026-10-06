@@ -306,6 +306,14 @@ class AnswerTest(unittest.TestCase):
         round_trip(s, r)
         self.assertEqual(r.plan.goals, [{"op": "buy", "code": "torch"}])
 
+    def test_snapshot_and_restore_keep_the_directives_boundary(self):
+        r = fake_runner(goals=["gather_gems:5", "buy:torch"])
+        saved = r.plan.snapshot()
+        r.plan.goals, r.plan.directive_end, r.plan.index = [{"op": "wait", "seconds": 1, "why": "probe"}], 0, 0
+        r.plan.restore(saved)
+        self.assertEqual(r.plan.directive_end, 2)
+        self.assertEqual([g["op"] for g in r.plan.directive_ops()], ["gather_gems", "buy"])
+
     def test_a_reply_repeating_the_directives_op_does_not_stack_it_twice(self):
         travel = {"op": "travel", "to": "point", "x": 5, "y": 0, "map_id": 7}
         s, r = make(FakeLLM({"goals": [{**travel, "why": "the target"}, WAIT_ANSWER["goals"][0]]})), fake_runner(goals=["travel:point:7:5:0"])
@@ -652,7 +660,17 @@ class StartupCheckTest(unittest.TestCase):
         with self.assertRaises(PlannerAuthError):
             make(self.Refusing(err)).check()
 
+    def test_a_bad_model_is_fatal(self):
+        # A typo'd model is a 404; any 4xx but 429 stops the run before play.
+        for status in (400, 404, 422):
+            s = make(self.Refusing(ProviderHTTPError(f"openai http {status}: model not found", status)))
+            with self.assertRaises(PlannerConfigError) as cm:
+                s.check()
+            self.assertNotIsInstance(cm.exception, PlannerAuthError)
+            self.assertIn("AGENTREALM_PLANNER_MODEL", str(cm.exception))
+
     def test_other_failures_are_left_to_the_run(self):
+        make(self.Refusing(ProviderHTTPError("openai http 429: rate limited", 429))).check()
         make(self.Refusing(ProviderHTTPError("openai http 500", 500))).check()
         make(self.Refusing(RuntimeError("openai network: timeout"))).check()
         Strategist.off().check()  # test mode: nothing to check
@@ -981,7 +999,7 @@ class FailFastTest(unittest.TestCase):
         self.assertIn("AGENTREALM_PLANNER_PROVIDER", self.raises(AGENTREALM_PLANNER_PROVIDER="llama"))
 
     def test_anthropic_sdk_not_installed(self):
-        self.assertIn("pip install anthropic", self.raises(ANTHROPIC_API_KEY="a"))
+        self.assertIn("make setup", self.raises(ANTHROPIC_API_KEY="a"))
 
     def test_no_planner_env_is_the_test_mode(self):
         with mock.patch.dict(os.environ, no_planner_env(AGENTREALM_NO_PLANNER="1"), clear=True):

@@ -490,6 +490,7 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.block_before,
+            self.directive_end,
         )
 
     def restore(self, saved: tuple) -> None:
@@ -502,6 +503,7 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.block_before,
+            self.directive_end,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
 

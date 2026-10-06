@@ -44,7 +44,8 @@ The AI planner that owns the goal stack (A35, `strategist.py`). It is on in ever
 | Variable | Default | Meaning |
 |---|---|---|
 | `AGENTREALM_PLANNER_PROVIDER` | `anthropic` (`openai` when only `OPENAI_API_KEY` is set) | `anthropic` (official `anthropic` SDK) or `openai` (chat completions over stdlib `urllib`) |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | (none) | The provider's key, from the environment only |
+| `AGENTREALM_PLANNER_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY` | (none) | Anthropic key, from the environment only; the planner's own name first, since some hosts strip the standard one |
+| `AGENTREALM_PLANNER_OPENAI_KEY`, else `OPENAI_API_KEY` | (none) | OpenAI key, the same way |
 | `AGENTREALM_PLANNER_MODEL` | `claude-sonnet-5-5` for anthropic; required for openai | Model id |
 | `AGENTREALM_PLANNER_EFFORT` | `low` | Anthropic effort level |
 | `AGENTREALM_PLANNER_REPLAN_S` | 15 | With no event, replan this often |

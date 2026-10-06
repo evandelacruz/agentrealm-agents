@@ -24,7 +24,7 @@ smoke-m9-olympuff: ## Live M9 acceptance on Olympuff (A29; needs AGENTREALM_API_
 smoke-m10-olympuff: ## Live M10 acceptance on Olympuff (A33; needs AGENTREALM_API_KEY and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID)
 	python3 scripts/smoke_m10_olympuff.py $(CHARACTER_FLAGS)
 
-smoke-m11-olympuff: ## Live M11 acceptance on Olympuff (A40; needs AGENTREALM_API_KEY, the AI planner key (ANTHROPIC_API_KEY, or OPENAI_API_KEY with AGENTREALM_PLANNER_PROVIDER=openai and AGENTREALM_PLANNER_MODEL), and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID; left the level means back on the overworld map)
+smoke-m11-olympuff: ## Live M11 acceptance on Olympuff (A40; needs AGENTREALM_API_KEY, the AI planner key (AGENTREALM_PLANNER_ANTHROPIC_KEY or ANTHROPIC_API_KEY; or an OpenAI key with AGENTREALM_PLANNER_MODEL), and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID; left the level means back on the overworld map)
 	python3 scripts/smoke_m11_olympuff.py $(CHARACTER_FLAGS)
 
 probe-regen: ## Regen probe (A60): get hurt, then measure safe-zone regen for the A16 gate; run before the M7 hour if the knowledge base has no regen answer (needs AGENTREALM_API_KEY and CHARACTER_ID=, CHARACTER_NAME= or AGENTREALM_CHARACTER_ID)

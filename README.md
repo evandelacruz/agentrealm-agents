@@ -35,14 +35,14 @@ The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides 
 
 ```bash
 pip install anthropic                 # the planner's one dependency; the rest is standard library
-export ANTHROPIC_API_KEY=...          # default provider, model claude-sonnet-5-5
+export AGENTREALM_PLANNER_ANTHROPIC_KEY=...   # or ANTHROPIC_API_KEY; default provider, model claude-sonnet-5-5
 python3 -m agentrealm_agent run characters/wren.toml --character-id ID
 
 # or OpenAI (no extra package):
-export AGENTREALM_PLANNER_PROVIDER=openai OPENAI_API_KEY=... AGENTREALM_PLANNER_MODEL=...
+export AGENTREALM_PLANNER_PROVIDER=openai AGENTREALM_PLANNER_OPENAI_KEY=... AGENTREALM_PLANNER_MODEL=...
 ```
 
-With no key, `run` stops at startup with one line saying which key to set. `AGENTREALM_PLANNER_MODEL` picks another model. `run --no-planner` plays without it, from the character file's `policy.goals`; that is a test mode, not how the agent is meant to play. The smoke scripts take the same `--no-planner`. Never commit a key. Cadence, budget and triggers: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) **Strategist**. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
+Keys are read from `AGENTREALM_PLANNER_ANTHROPIC_KEY`, then `ANTHROPIC_API_KEY`, and from `AGENTREALM_PLANNER_OPENAI_KEY`, then `OPENAI_API_KEY`: the planner's own names come first because some hosts (Claude Code cloud sessions, for one) strip the standard ones. With no key, `run` stops at startup with one line saying which key to set. `AGENTREALM_PLANNER_MODEL` picks another model. `run --no-planner` plays without it, from the character file's `policy.goals`; that is a test mode, not how the agent is meant to play. The smoke scripts take the same `--no-planner`. Never commit a key. Cadence, budget and triggers: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) **Strategist**. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
 
 Copy and edit a file in `python/characters/` to try different behavior (`policy.kind` can be `idle`, `wander`, or `scripted`).
 

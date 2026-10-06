@@ -29,7 +29,10 @@ Settings (environment variables, defaults in brackets):
 - ``AGENTREALM_PLANNER_PROVIDER`` [anthropic, or openai when only
   ``OPENAI_API_KEY`` is set]: ``anthropic`` or ``openai``.
 - ``AGENTREALM_PLANNER_MODEL`` [claude-sonnet-5-5 for anthropic; required for openai].
-- ``ANTHROPIC_API_KEY`` / ``OPENAI_API_KEY``: the provider's key.
+- The provider's key: ``AGENTREALM_PLANNER_ANTHROPIC_KEY``, else
+  ``ANTHROPIC_API_KEY``; ``AGENTREALM_PLANNER_OPENAI_KEY``, else
+  ``OPENAI_API_KEY`` (:data:`KEY_ENV`). The planner's own names come first
+  because some hosts strip the standard ones from the environment.
 - ``AGENTREALM_PLANNER_EFFORT`` [low]: Anthropic effort level.
 - ``AGENTREALM_PLANNER_REPLAN_S`` [15]: with no event, replan this often.
 - ``AGENTREALM_PLANNER_CALLS_PER_MIN`` [6] and
@@ -79,6 +82,11 @@ DEFAULT_IDLE_MINUTES = 10
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5"
 DEFAULT_EFFORT = "low"
 PROVIDERS = ("anthropic", "openai")
+# Where each provider's key is read from, first set wins.
+KEY_ENV: dict[str, tuple[str, ...]] = {
+    "anthropic": ("AGENTREALM_PLANNER_ANTHROPIC_KEY", "ANTHROPIC_API_KEY"),
+    "openai": ("AGENTREALM_PLANNER_OPENAI_KEY", "OPENAI_API_KEY"),
+}
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 ANTHROPIC_MAX_TOKENS = 16_000
 # Models that take the server-side refusal fallback (beta header plus `fallbacks`).
@@ -115,6 +123,15 @@ class PlannerConfigError(ValueError):
     """The planner is on but cannot run (no key, no SDK). One line, for the CLI to print."""
 
 
+def provider_key(provider: str) -> str:
+    """The provider's key from the first variable in :data:`KEY_ENV` that is set."""
+    for name in KEY_ENV[provider]:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
 def planner_disabled_by_env() -> bool:
     return os.environ.get("AGENTREALM_NO_PLANNER", "").strip().lower() in ("1", "true", "yes")
 
@@ -138,19 +155,17 @@ class StrategistConfig:
     @classmethod
     def from_env(cls) -> StrategistConfig:
         """Read the planner settings. Raises :class:`PlannerConfigError` when one is missing."""
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
         provider = os.environ.get("AGENTREALM_PLANNER_PROVIDER", "").strip().lower()
         if not provider:
-            provider = "openai" if openai_key and not anthropic_key else "anthropic"
+            provider = "openai" if provider_key("openai") and not provider_key("anthropic") else "anthropic"
         if provider not in PROVIDERS:
             raise PlannerConfigError(
                 f"planner: AGENTREALM_PLANNER_PROVIDER={provider!r}; use one of {', '.join(PROVIDERS)}"
             )
-        key_name = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
-        api_key = anthropic_key if provider == "anthropic" else openai_key
+        api_key = provider_key(provider)
         if not api_key:
-            raise PlannerConfigError(f"planner: set {key_name} (provider {provider}), or pass --no-planner")
+            names = " or ".join(KEY_ENV[provider])
+            raise PlannerConfigError(f"planner: set {names} (provider {provider}), or pass --no-planner")
         model = os.environ.get("AGENTREALM_PLANNER_MODEL", "").strip()
         if not model and provider == "anthropic":
             model = DEFAULT_ANTHROPIC_MODEL

@@ -87,7 +87,7 @@ def make(client=None, **cfg) -> Strategist:
 
 def no_planner_env(**extra: str) -> dict[str, str]:
     """The environment without any planner setting or key, plus ``extra``."""
-    keys = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+    keys = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")  # the AGENTREALM_PLANNER_* names go with the prefix
     env = {k: v for k, v in os.environ.items() if not k.startswith("AGENTREALM_PLANNER") and k not in keys}
     env.pop("AGENTREALM_NO_PLANNER", None)
     return {**env, **extra}
@@ -544,6 +544,18 @@ class ProviderTest(unittest.TestCase):
         self.assertIsInstance(s.client, AnthropicClient)
         self.assertEqual(s.client.model, "m2")
 
+    def test_key_lookup_order(self):
+        both = {"AGENTREALM_PLANNER_ANTHROPIC_KEY": "own", "ANTHROPIC_API_KEY": "standard"}
+        self.assertEqual(self.from_env(FakeAnthropicSDK(), **both).config.api_key, "own")
+        self.assertEqual(self.from_env(FakeAnthropicSDK(), ANTHROPIC_API_KEY="standard").config.api_key, "standard")
+        self.assertEqual(self.from_env(FakeAnthropicSDK(), AGENTREALM_PLANNER_ANTHROPIC_KEY="own").config.api_key, "own")
+        model = {"AGENTREALM_PLANNER_MODEL": "m"}
+        both = {"AGENTREALM_PLANNER_OPENAI_KEY": "own", "OPENAI_API_KEY": "standard", **model}
+        self.assertEqual(self.from_env(**both).client.api_key, "own")
+        self.assertEqual(self.from_env(OPENAI_API_KEY="standard", **model).client.api_key, "standard")
+        # The planner's own OpenAI name alone also picks OpenAI as the provider.
+        self.assertIsInstance(self.from_env(AGENTREALM_PLANNER_OPENAI_KEY="own", **model).client, OpenAIChatClient)
+
     def test_env_budget_and_cadence(self):
         s = self.from_env(
             FakeAnthropicSDK(),
@@ -589,8 +601,8 @@ class FailFastTest(unittest.TestCase):
         return str(e.exception)
 
     def test_missing_key(self):
-        self.assertIn("ANTHROPIC_API_KEY", self.raises())
-        self.assertIn("OPENAI_API_KEY", self.raises(AGENTREALM_PLANNER_PROVIDER="openai"))
+        self.assertIn("AGENTREALM_PLANNER_ANTHROPIC_KEY or ANTHROPIC_API_KEY", self.raises())
+        self.assertIn("AGENTREALM_PLANNER_OPENAI_KEY or OPENAI_API_KEY", self.raises(AGENTREALM_PLANNER_PROVIDER="openai"))
 
     def test_openai_needs_a_model(self):
         self.assertIn("AGENTREALM_PLANNER_MODEL", self.raises(OPENAI_API_KEY="o"))

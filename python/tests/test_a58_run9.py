@@ -232,6 +232,27 @@ class FleeKeepsThePursuerTest(unittest.TestCase):
         self.assertNotEqual(out.state, "Flee", out.reason)
         self.assertFalse(any(r in out.reason for r in ("flee npc 9", "close on npc 9", "fight npc 9")), out.reason)
 
+    def test_an_unseen_hit_does_not_blame_an_old_attacker(self):
+        """npc 7 hits, then idles 6 cells away; 200 ticks later an unseen Attacked lands (review on #107)."""
+        w, c = world(), ctx()
+        w.entities = [Entity("npc", 7, (11, 10), code="pursuer")]
+        hit(w, npc_id=7)
+        w.entities[0].pos = (16, 10)
+        w.tick += 200
+        w.apply_events([{"tick": w.tick, "events": [{"kind": "Attacked"}]}])
+        out = dispatch(w, c)
+        self.assertNotIn("flee npc 7", out.reason)
+        self.assertNotIn("fight npc 7", out.reason)
+        self.assertIsNone(w.attacker)
+
+    def test_a_sourceless_attacked_in_the_same_tick_keeps_the_named_hitter(self):
+        w = world()
+        w.apply_events([{"tick": w.tick, "events": [
+            {"kind": "Damaged", "amount": 2, "source_kind": "npc", "source_id": 7},
+            {"kind": "Attacked"},
+        ]}])
+        self.assertEqual(w.attacker, ("npc", 7))
+
     def test_fight_policy_does_not_flee_a_beatable_attacker_past_range(self):
         """``on_hostile = "fight"`` keeps its rule: a beatable NPC 3 away that just hit us is no reason to run."""
         w, c = world(), ctx("fight")

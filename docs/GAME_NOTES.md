@@ -102,6 +102,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Hostiles stay near their spawn.** The pair stood just outside town for over 30 minutes, moving at most one block, and never followed into the safe zone (Obs).
 - **Lesson.** Several hostiles close together are one fight, not several. Never step next to a group with 10 health. Count every hostile within two blocks of the target before engaging (Obs).
 - **Combat events.** `NPCDamaged` shows damage dealt; a miss emits nothing. `NPCDied` marks a kill (M §8).
+- **Who hit us.** `Damaged` names its source in `source_kind` (`npc`, `character`, `trap`, `occupy`) and, except for `occupy`, `source_id` (API Events; `threat.py` keys the threat table on them). `Attacked` is not known to carry a source, so the agent treats it as naming no one: an `Attacked` on a later tick than the last named hit clears who is hitting us (A9).
 - **Bosses** are the only NPCs with `health`/`max_health` on entity reads: "A boss NPC also includes its current `health` and `max_health` … no character, hostile, or helper carries health" (M §9.3; API Reads). The agent identifies a boss by that field (A38).
 - **Healing.** Potions and food heal (M §16). A new character starts at 10 health. Regeneration out of combat has not been observed.
 - **Never wake or idle next to a hostile.** An unattended character keeps taking hits (Guide).

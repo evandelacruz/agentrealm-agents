@@ -77,7 +77,7 @@ def flee_from(w: WorldModel, policy: Policy) -> list[Entity]:
 
 
 def is_attacker(w: WorldModel, e: Entity) -> bool:
-    """``e`` is the hostile the last hostile ``Damaged`` named as its source."""
+    """``e`` is the hostile the last hostile hit named as its source."""
     return w.attacker == (e.kind, e.id)
 
 

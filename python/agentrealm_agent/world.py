@@ -137,7 +137,8 @@ class WorldModel:
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
     attacked_tick: int | None = None  # tick of the last hostile hit on us: Attacked, or Damaged from an NPC or character (A9)
-    attacker: tuple[str, int] | None = None  # (entity kind, id) a hostile Damaged named as its source, the last one (A9)
+    attacker: tuple[str, int] | None = None  # (entity kind, id) the last hostile hit named as its source (A9)
+    attacker_tick: int | None = None  # tick of that hit; a later hit naming no one clears both
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
@@ -484,8 +485,16 @@ class WorldModel:
                 flat.append(ev)
                 kind = ev.get("kind")
                 if hostile_hit(ev):
-                    self.attacked_tick = int(ev.get("tick", group["tick"]))
-                    self.attacker = hitter(ev) or self.attacker
+                    t = int(ev.get("tick", group["tick"]))
+                    self.attacked_tick = t
+                    source = hitter(ev)
+                    if source is not None:
+                        self.attacker, self.attacker_tick = source, t
+                    elif self.attacker_tick != t:
+                        # A hit naming no one (an Attacked, or a source we cannot
+                        # tell): we no longer know who is hitting us. One on the
+                        # same tick as a named Damaged is that same swing.
+                        self.attacker = self.attacker_tick = None
                 if kind == "Damaged":
                     amount = damage_amount(ev)
                     if amount is not None:
@@ -504,7 +513,8 @@ class WorldModel:
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
                 elif kind == "Respawned":
-                    self.placed, self.attacked_tick, self.attacker = True, None, None
+                    self.placed, self.attacked_tick = True, None
+                    self.attacker = self.attacker_tick = None
                     self.carry_capacity = DEFAULT_CARRY_CAPACITY  # a new, empty blue chest (10), Manual §11
                     try:
                         self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))

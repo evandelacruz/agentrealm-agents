@@ -91,12 +91,50 @@ class GatherGroundTest(unittest.TestCase):
     def test_a_hostile_that_has_not_hit_us_bars_only_weapon_reach_plus_a_step(self):
         """A63 run 3: one following at 4–6 blocks without attacking stopped all cutting."""
         w = grid(["g" * 12], at=(0, 0))
+        w.attack_range = 2
         bar = w.attack_range + GATHER_SHADOW_MARGIN
         w.hostile_types.add(("npc", "gnawer"))
+        pol = Policy(hostile=["npc"], hostile_range=1)
         w.entities = [Entity("npc", 1, (bar, 0), "gnawer")]
-        self.assertFalse(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
+        self.assertFalse(gather_ground(w, (0, 0), pol))
         w.entities = [Entity("npc", 1, (bar + 1, 0), "gnawer")]
-        self.assertTrue(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
+        self.assertTrue(gather_ground(w, (0, 0), pol))
+
+    def test_the_bar_is_a_step_past_hostile_range_when_that_is_further(self):
+        """A63 run 4: a 2-cell bar under a longer hostile_range paced Gather and Retreat for 34 s."""
+        w = grid(["g" * 12], at=(0, 0))
+        w.hostile_types.add(("npc", "gnawer"))
+        pol = Policy(hostile=["npc"], hostile_range=3)
+        w.entities = [Entity("npc", 1, (4, 0), "gnawer")]
+        self.assertFalse(gather_ground(w, (0, 0), pol))
+        w.entities = [Entity("npc", 1, (5, 0), "gnawer")]
+        self.assertTrue(gather_ground(w, (0, 0), pol))
+
+    def test_gather_never_picks_a_cell_where_retreat_would_fire(self):
+        """A63 run 4: after a death Gather and Retreat paced between the safe tile
+        and a grass cell 4 times in 34 s with no cut. Hurt to the health floor,
+        no cell Gather accepts has Retreat start there, nor after the hostile
+        steps once toward it."""
+        from agentrealm_agent.states.retreat import RetreatState
+
+        w = grid(["g" * 14] * 3, at=(0, 1))
+        safe(w, (0, 1))
+        w.health, w.max_health, w.lives = 1, 10, 3
+        w.hostile_types.add(("npc", "wartlurch"))
+        hostile = Entity("npc", 1, (9, 1), "wartlurch")
+        w.entities = [hostile]
+        for hostile_range in (1, 2, 3, 4):
+            c = ctx(w, ["gather_gems:3"], on_hostile="flee", hostile=["npc"], hostile_range=hostile_range)
+            w.pos = (hostile.pos[0] - hostile_range, 1)
+            self.assertTrue(RetreatState().guard(w, c), "Retreat fires within hostile_range")
+            picked = [p for p in w.view.tiles if gather_ground(w, p, c.policy)]
+            self.assertTrue(picked, hostile_range)
+            for cell in picked:
+                for step in (0, 1):
+                    toward = (hostile.pos[0] - step if cell[0] < hostile.pos[0] else hostile.pos[0] + step, 1)
+                    w.pos, w.entities = cell, [Entity("npc", 1, toward, "wartlurch")]
+                    self.assertFalse(RetreatState().guard(w, c), (hostile_range, cell, toward))
+                    w.entities = [hostile]
 
     def test_safe_zone_cells_qualify(self):
         """Breaking a block works in a safe zone: Gather prefers the field, it does not ban safe ground."""

@@ -289,3 +289,73 @@ class HuntProbeTest(unittest.TestCase):
         m = calm_mem()
         m.hunt_search = HuntSearch({"op": "travel", "to": "hunting_ground"}, since=90, last=100, probe_until=150)
         self.assertIsNone(next_zone_probe(w, m))
+
+
+class HuntSearchOutwardTest(unittest.TestCase):
+    """A23 survive-a-fight run 2: with an empty knowledge base, the respawn
+    ring around the town cell took all 211 zone reads of a five-minute
+    hunting-ground search. The search now ranges outward from the character."""
+
+    def searching(self, at=(40, 40), revealed=30, anchor=None):
+        from agentrealm_agent.memory import HuntSearch
+
+        w = WorldModel(character_id=1, map_id=7, pos=at, perception=5)
+        for dy in range(-revealed, revealed + 1):
+            for dx in range(-revealed, revealed + 1):
+                w.view.tiles[(at[0] + dx, at[1] + dy)] = "grass"
+        w.terrain_center, w.terrain_map = at, 7
+        w.tick = 100
+        if anchor is not None:
+            w.record_respawn_anchor(7, anchor)
+        m = calm_mem()
+        m.hunt_search = HuntSearch({"op": "travel", "to": "hunting_ground"}, since=90, last=100, probe_until=10**6)
+        return w, m
+
+    def read_all(self, w, m, n):
+        picks = []
+        for _ in range(n):
+            pick = next_zone_probe(w, m)
+            if pick is None:
+                break
+            picks.append(pick[1])
+            apply_zone(w, pick[0], pick[1][0], pick[1][1], {"safe": False})
+        return picks
+
+    def test_the_search_comes_before_the_respawn_ring(self):
+        w, m = self.searching(anchor=(30, 40))
+        _, pos = next_zone_probe(w, m)
+        self.assertGreater(chebyshev(pos, (30, 40)), 8, "not a respawn-ring cell")
+        self.assertLessEqual(chebyshev(pos, w.pos), 2, "the grid cell under us")
+
+    def test_rings_widen_outward_and_skip_cells_read(self):
+        from agentrealm_agent.zone_discovery import HUNT_PROBE_SPACING
+
+        w, m = self.searching()
+        picks = self.read_all(w, m, 60)
+        self.assertEqual(len(picks), len(set(picks)), "no cell read twice")
+        self.assertTrue(all(x % HUNT_PROBE_SPACING == 0 and y % HUNT_PROBE_SPACING == 0 for x, y in picks))
+        rings = [chebyshev(p, w.pos) // HUNT_PROBE_SPACING for p in picks]
+        self.assertEqual(rings, sorted(rings), "ring by ring, outward")
+        self.assertGreater(max(chebyshev(p, w.pos) for p in picks), w.perception, "past the view")
+
+    def test_unrevealed_cells_are_skipped(self):
+        w, m = self.searching(revealed=6)
+        picks = self.read_all(w, m, 100)
+        self.assertTrue(picks)
+        self.assertTrue(all(p in w.view.tiles for p in picks))
+
+    def test_stops_once_the_search_ends(self):
+        """Travel ends the search when a read finds a hunting cell (test_travel)."""
+        w, m = self.searching(anchor=(30, 40))
+        m.hunt_search = None
+        _, nxt = next_zone_probe(w, m)
+        self.assertLessEqual(chebyshev(nxt, (30, 40)), 8, "back to the respawn ring")
+
+    def test_stops_when_the_budget_is_spent(self):
+        from agentrealm_agent.zone_discovery import HUNT_PROBE_BUDGET
+
+        w, m = self.searching()
+        next_zone_probe(w, m)
+        self.assertEqual(m.hunt_search.probes, 1)
+        m.hunt_search.probes = HUNT_PROBE_BUDGET
+        self.assertIsNone(next_zone_probe(w, m))

@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .threat import ThreatTable, absorb_damaged, damage_amount, hitter, hostile_hit
+from .threat import ThreatTable, TypeKey, absorb_damaged, damage_amount, hitter, hostile_hit, hostile_type_from_event
 
 log = logging.getLogger(__name__)
 
@@ -237,6 +237,13 @@ class WorldModel:
     attacker_tick: int | None = None  # tick of that hit; a later hit naming no one clears both
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
+    # NPC types that have shown they are hostile this run: one swung at or hit
+    # us, or one died in view (``NPCDied`` names only hostiles). Townsfolk and
+    # helpers never land here, so Flee and Retreat never answer them (A9, A23).
+    hostile_types: set[TypeKey] = field(default_factory=set)
+    # Where each entity stood before its latest move, and the tick that move
+    # was seen: ``survival.approaching`` reads it (A9).
+    entity_moves: dict[tuple[str, int], tuple[Pos, int]] = field(default_factory=dict)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
     # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
     # leaves the world when its last supply is withdrawn (B116).
@@ -346,8 +353,9 @@ class WorldModel:
         self.terrain_map = self.map_id
 
     def apply_entities(self, e: dict) -> None:
-        self.entities = self._entities_from_payload(e)
-        self.entities_tick = self.entities_read_tick = int(e.get("tick", self.tick))
+        tick = int(e.get("tick", self.tick))
+        self._set_entities(self._entities_from_payload(e), tick)
+        self.entities_tick = self.entities_read_tick = tick
         self.entities_read_at = (self.map_id, self.pos)
         # A separate read replaced the state the next delta would apply to.
         self.snapshot_version = None
@@ -444,7 +452,20 @@ class WorldModel:
                 self.chest_contents[cid] = supplies_from_list(entry["contents"])
             for eid in part.get("removed") or []:
                 self.chest_contents.pop(int(eid), None)
-        self.entities = list(by_key.values())
+        self._set_entities(list(by_key.values()), self.tick)
+
+    def _set_entities(self, entities: list[Entity], tick: int) -> None:
+        """Replaces the entity list, noting in ``entity_moves`` each one that moved."""
+        before = {self._entity_key(e): e.pos for e in self.entities}
+        for e in entities:
+            key = self._entity_key(e)
+            old = before.get(key)
+            if old is not None and old != e.pos:
+                self.entity_moves[key] = (old, tick)
+        seen = {self._entity_key(e) for e in entities}
+        for key in [k for k in self.entity_moves if k not in seen]:
+            del self.entity_moves[key]
+        self.entities = entities
 
     def _apply_terrain_delta(self, patch: dict) -> None:
         """Updates known tiles from an observation terrain patch."""
@@ -560,7 +581,7 @@ class WorldModel:
             self._apply_inventory(snap.get("inventory"))
         if "entities" in snap:
             entities = snap["entities"] or {}
-            self.entities = self._entities_from_payload(entities)
+            self._set_entities(self._entities_from_payload(entities), self.tick)
             self.chest_contents = self._chest_contents_from_entities(entities)
             self.entities_tick = self.tick
         terrain = snap.get("terrain")
@@ -632,7 +653,9 @@ class WorldModel:
         return flat
 
     def learn_threat(self, events: list[dict], earlier: list[Entity]) -> None:
-        """Folds this round trip's Damaged events into the threat table (A6).
+        """Folds this round trip's Damaged events into the threat table (A6),
+        and the NPC types its Attacked, Damaged and NPCDied events show hostile
+        into ``hostile_types``.
 
         Call after apply_observation, so a source first listed in the same
         response resolves to its type. A source that left view in that
@@ -643,6 +666,9 @@ class WorldModel:
         for ev in events:
             if ev.get("kind") == "Damaged":
                 absorb_damaged(self.threat, ev, self.entities, earlier)
+            key = hostile_type_from_event(ev, self.entities, earlier)
+            if key is not None:
+                self.hostile_types.add(key)
 
     def apply_observation(self, obs: dict | None) -> None:
         """Folds a tick observation into the model (Manual §7.2).

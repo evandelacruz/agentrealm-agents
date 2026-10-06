@@ -30,6 +30,9 @@ def world(rows: list[str], at=(0, 0)) -> WorldModel:
         for x, g in enumerate(row):
             w.view.tiles[(x, y)] = glyph[g]
     w.terrain_center, w.terrain_map = at, 7
+    # The monster types these tests use have shown themselves hostile
+    # (``survival.is_hostile``): an NPC of an unproven type is not a threat.
+    w.hostile_types |= {("npc", "gnawer"), ("npc", "snotling")}
     return w
 
 
@@ -186,7 +189,7 @@ class EscapeTest(unittest.TestCase):
 class FleeTest(unittest.TestCase):
     def test_flee_steps_away(self):
         w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("npc", 5, (2, 1))]
+        w.entities = [Entity("npc", 5, (2, 1), "gnawer")]
         out = dispatch(w, ctx())
         self.assertEqual(out.state, "Flee")
         self.assertEqual(step(out)[0], 0)
@@ -213,7 +216,7 @@ class FleeTest(unittest.TestCase):
         cells = []
         for t in range(12):
             w.tick += 1
-            w.entities = [Entity("npc", 1, moves[t % 2][0]), Entity("npc", 2, moves[t % 2][1])]
+            w.entities = [Entity("npc", 1, moves[t % 2][0], "gnawer"), Entity("npc", 2, moves[t % 2][1], "gnawer")]
             out = dispatch(w, c)
             if out.state != "Flee":
                 break
@@ -227,7 +230,7 @@ class FleeTest(unittest.TestCase):
         """A15: Flee-only pacing makes the next Flee keep off the other cell."""
         here, back = (2, 2), (3, 3)
         w = world([".....", ".....", ".....", ".....", "....."], at=here)
-        w.entities = [Entity("npc", 5, (0, 2))]
+        w.entities = [Entity("npc", 5, (0, 2), "gnawer")]
         m = Memory()
         c = ctx(m=m, hostile_range=3)
         self.assertEqual(step(dispatch(w, c)), back, "flee_step's best step")
@@ -246,13 +249,13 @@ class FleeTest(unittest.TestCase):
     def test_never_steps_next_to_a_hostile_to_avoid_the_cell_behind(self):
         """Only the cell behind is open away from the hostile: Flee takes it."""
         w = world(["#####", ".....", "#####"], at=(2, 1))
-        w.entities = [Entity("npc", 5, (0, 1))]
+        w.entities = [Entity("npc", 5, (0, 1), "gnawer")]
         out = dispatch(w, ctx(hostile_range=3))
         self.assertEqual(step(out), (3, 1))
 
     def test_escape_routes_on_to_a_known_safe_tile(self):
         w = world([".........", ".........", "........."], at=(2, 1))
-        w.entities = [Entity("npc", 5, (0, 1))]
+        w.entities = [Entity("npc", 5, (0, 1), "gnawer")]
         safe_at(w, (7, 1))
         m = Memory()
         c = ctx(m=m, hostile_range=7)
@@ -270,7 +273,7 @@ class FleeTest(unittest.TestCase):
 
     def test_a_safe_tile_one_step_away_is_the_whole_escape(self):
         w = world([".......", ".......", ".......", "......."], at=(2, 1))
-        w.entities = [Entity("npc", 5, (2, 0))]
+        w.entities = [Entity("npc", 5, (2, 0), "gnawer")]
         safe_at(w, (3, 2))
         m = Memory()
         out = dispatch(w, ctx(m=m))
@@ -279,14 +282,14 @@ class FleeTest(unittest.TestCase):
 
     def test_ties_break_toward_the_safe_tile_even_against_the_cell_order(self):
         w = world([".....", ".....", "....."], at=(2, 1))
-        w.entities = [Entity("npc", 5, (2, 0))]
+        w.entities = [Entity("npc", 5, (2, 0), "gnawer")]
         safe_at(w, (0, 2))
         self.assertEqual(step(dispatch(w, ctx())), (1, 2))
 
     def test_a_forced_escape_routes_to_safety_around_the_paced_cell(self):
         here, back = (2, 1), (1, 2)
         w = world(["#######", "#.....#", "#.....#", "#.....#", "#######"], at=here)
-        w.entities = [Entity("npc", 1, (5, 1))]
+        w.entities = [Entity("npc", 1, (5, 1), "gnawer")]
         safe_at(w, (1, 3))
         m = Memory()
         m.state = "Flee"
@@ -302,18 +305,18 @@ class FleeTest(unittest.TestCase):
     def test_a_restart_after_another_state_plans_a_fresh_escape(self):
         """Flee's old escape is dropped once another state took a decision."""
         w = world(["........."] * 9, at=(4, 4))
-        w.entities = [Entity("npc", 1, (4, 1))]
+        w.entities = [Entity("npc", 1, (4, 1), "gnawer")]
         m = Memory()
         c = ctx(m=m, hostile_range=3)
         w.pos = w.terrain_center = step(dispatch(w, c))
         self.assertEqual((w.pos, m.flee_path[1]), ((5, 5), (4, 5)))
         m.state = "Investigate"  # another state had the last decision; the agent stayed put
-        w.entities = [Entity("npc", 2, (6, 4))]
+        w.entities = [Entity("npc", 2, (6, 4), "gnawer")]
         self.assertEqual(step(dispatch(w, c)), (6, 6))
 
     def test_a_shut_committed_cell_is_replanned(self):
         w = world([".....", ".....", "....."], at=(2, 1))
-        w.entities = [Entity("npc", 5, (0, 1))]
+        w.entities = [Entity("npc", 5, (0, 1), "gnawer")]
         w.view.tiles[(3, 1)] = "wall"
         m = Memory()
         m.state, m.flee_path = "Flee", [(3, 1), (4, 1)]
@@ -322,7 +325,7 @@ class FleeTest(unittest.TestCase):
 
     def test_a_committed_cell_worse_than_standing_still_is_dropped(self):
         w = world(["......."], at=(3, 0))
-        w.entities = [Entity("npc", 1, (0, 0)), Entity("npc", 2, (6, 0))]
+        w.entities = [Entity("npc", 1, (0, 0), "gnawer"), Entity("npc", 2, (6, 0), "gnawer")]
         m = Memory()
         m.state, m.flee_path = "Flee", [(4, 0), (5, 0)]
         out = dispatch(w, ctx(m=m, hostile_range=3))
@@ -331,7 +334,7 @@ class FleeTest(unittest.TestCase):
 
     def test_a_dead_end_corridor_waits_instead_of_stepping_closer(self):
         w = world(["###", "#.#", "#.#", "#.#", "#.#"], at=(1, 1))
-        w.entities = [Entity("npc", 5, (1, 4))]
+        w.entities = [Entity("npc", 5, (1, 4), "gnawer")]
         out = dispatch(w, ctx(hostile_range=3))
         self.assertEqual(out.state, "Flee")
         self.assertIsNone(out.intents)
@@ -339,7 +342,7 @@ class FleeTest(unittest.TestCase):
     def test_a_safe_tile_behind_a_hostile_is_not_fled_to(self):
         # The safe tile is west, past the NPC: the escape runs east instead.
         w = world([".........", ".........", "........."], at=(4, 1))
-        w.entities = [Entity("npc", 5, (2, 1))]
+        w.entities = [Entity("npc", 5, (2, 1), "gnawer")]
         safe_at(w, (0, 1))
         m = Memory()
         out = dispatch(w, ctx(m=m, hostile_range=3))
@@ -353,7 +356,7 @@ class FleeTest(unittest.TestCase):
         escape still takes its own next cell instead of pacing back."""
         here, back, nxt = (3, 2), (3, 3), (4, 3)
         w = world([".......", "..###..", "..#.#..", "..#..#.", "..###..", ".......", "......."], at=here)
-        w.entities = [Entity("npc", 1, (0, -1)), Entity("npc", 2, (7, 0))]
+        w.entities = [Entity("npc", 1, (0, -1), "gnawer"), Entity("npc", 2, (7, 0), "gnawer")]
         m = Memory()
         m.state, m.flee_path, m.flee_avoid = "Flee", [nxt, (5, 4)], {back}
         out = dispatch(w, ctx(m=m, hostile_range=4))
@@ -362,7 +365,7 @@ class FleeTest(unittest.TestCase):
 
     def test_ties_break_toward_a_known_safe_tile(self):
         w = world([".....", ".....", "....."], at=(2, 1))
-        w.entities = [Entity("npc", 5, (2, 0))]
+        w.entities = [Entity("npc", 5, (2, 0), "gnawer")]
         safe_at(w, (4, 2))
         out = dispatch(w, ctx())
         self.assertEqual(out.state, "Flee")
@@ -370,13 +373,13 @@ class FleeTest(unittest.TestCase):
 
     def test_stays_on_a_safe_tile(self):
         w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("npc", 5, (2, 1))]
+        w.entities = [Entity("npc", 5, (2, 1), "gnawer")]
         safe_at(w, (1, 1))
         self.assertEqual(dispatch(w, ctx()).state, "Explore")
 
     def test_nowhere_to_flee_sends_nothing(self):
         w = world(["###", "#.#", "###"], at=(1, 1))
-        w.entities = [Entity("npc", 5, (2, 1))]
+        w.entities = [Entity("npc", 5, (2, 1), "gnawer")]
         out = dispatch(w, ctx())
         self.assertEqual(out.state, "Flee")
         self.assertIsNone(out.intents)
@@ -385,7 +388,7 @@ class FleeTest(unittest.TestCase):
         from agentrealm_agent.plan import Plan
 
         w = world([".....", ".....", "....."], at=(0, 1))
-        w.entities = [Entity("npc", 5, (4, 1))]
+        w.entities = [Entity("npc", 5, (4, 1), "gnawer")]
         self.assertEqual(dispatch(w, ctx(hostile_range=2)).state, "Explore")
         # An NPC out of hostile range can be spoken to for a ``say`` op (A30).
         c = ctx(hostile_range=2)
@@ -398,29 +401,29 @@ class FleeRunTest(unittest.TestCase):
 
     def test_stops_at_flee_run_steps_past_the_first(self):
         w = world(["." * 12], at=(0, 0))
-        run = flee_run(w, [Entity("npc", 1, (-2, 0))], set(), (1, 0))
+        run = flee_run(w, [Entity("npc", 1, (-2, 0), "gnawer")], set(), (1, 0))
         self.assertEqual(len(run), FLEE_RUN_STEPS + 1)
         self.assertEqual(run, [(x, 0) for x in range(1, FLEE_RUN_STEPS + 2)])
 
     def test_keeps_off_blocked_cells(self):
         w = world(["." * 12], at=(0, 0))
-        run = flee_run(w, [Entity("npc", 1, (-2, 0))], {(4, 0)}, (1, 0))
+        run = flee_run(w, [Entity("npc", 1, (-2, 0), "gnawer")], {(4, 0)}, (1, 0))
         self.assertEqual(run, [(1, 0), (2, 0), (3, 0)])
 
     def test_never_steps_back_onto_the_agents_cell(self):
         # East of the agent is further from the NPC, but only through its own cell.
         w = world(["....."], at=(2, 0))
-        run = flee_run(w, [Entity("npc", 1, (-3, 0))], set(), (1, 0))
+        run = flee_run(w, [Entity("npc", 1, (-3, 0), "gnawer")], set(), (1, 0))
         self.assertEqual(run, [(1, 0)])
 
     def test_prefers_the_longer_run_on_ties(self):
         w = world(["......", "......", "......"], at=(0, 1))
-        run = flee_run(w, [Entity("npc", 1, (4, 0))], set(), (0, 2))
+        run = flee_run(w, [Entity("npc", 1, (4, 0), "gnawer")], set(), (0, 2))
         self.assertEqual(run, [(0, 2), (1, 1), (0, 0)])
 
     def test_outruns_counts_steps_from_the_agent(self):
-        npc = [Entity("npc", 1, (4, 0))]
-        self.assertTrue(outruns([(1, 0), (2, 0)], [Entity("npc", 1, (5, 0))]))
+        npc = [Entity("npc", 1, (4, 0), "gnawer")]
+        self.assertTrue(outruns([(1, 0), (2, 0)], [Entity("npc", 1, (5, 0), "gnawer")]))
         self.assertFalse(outruns([(1, 0), (2, 0)], npc), "(2, 0) is 2 steps out and 2 from the NPC")
         self.assertTrue(outruns([(3, 0)], npc), "the first step is flee_step's, not checked")
 
@@ -428,7 +431,7 @@ class FleeRunTest(unittest.TestCase):
         # The corridor east runs 7 cells but passes beside the NPC at (4, 0);
         # it would reach (3, 1)-(5, 1) no later than the agent does.
         w = world(["#########", ".........", "#.#####.#", "#.......#", "#########"], at=(1, 1))
-        hostiles = [Entity("npc", 1, (-3, 1)), Entity("npc", 2, (4, 0))]
+        hostiles = [Entity("npc", 1, (-3, 1), "gnawer"), Entity("npc", 2, (4, 0), "gnawer")]
         run = flee_run(w, hostiles, set(), (2, 1))
         self.assertNotIn((4, 1), run)
         self.assertTrue(all(w.view.walkable(cell) for cell in run), run)
@@ -462,7 +465,7 @@ class OnHostileTest(unittest.TestCase):
         self.assertEqual(d.intent["verb"], "SetPosition")
 
     def test_fight_flees_an_npc(self):
-        self.w.entities = [Entity("npc", 5, (2, 1))]
+        self.w.entities = [Entity("npc", 5, (2, 1), "gnawer")]
         out = dispatch(self.w, ctx(on_hostile="fight"))
         self.assertEqual(out.state, "Flee")
 
@@ -472,7 +475,7 @@ class OnHostileTest(unittest.TestCase):
         self.assertEqual(out.state, "Flee")
 
     def test_ignore_neither_flees_nor_fights(self):
-        self.w.entities = [Entity("npc", 5, (2, 1)), Entity("character", 6, (0, 1))]
+        self.w.entities = [Entity("npc", 5, (2, 1), "gnawer"), Entity("character", 6, (0, 1))]
         out = dispatch(self.w, ctx(on_hostile="ignore", hostile=["npc", "character"]))
         self.assertEqual(out.state, "Explore")
         self.assertFalse(out.reflex)
@@ -506,6 +509,136 @@ class WinEstimateTest(unittest.TestCase):
                 self.assertEqual(survival.win_ratio(10, w.entities, w.threat) <= 1.0,
                                  would_lose(w, Policy(hostile=["npc"]), params))
 
+
+
+class TownsfolkTest(unittest.TestCase):
+    """A23 survive-a-fight run 2: Flee and Retreat fired on a rumor teller, an
+    apothecary and a salvager. Only a hostile is a threat: a type that has
+    attacked or died in view, a boss, the one hitting us, or a character."""
+
+    def town(self, health=1):
+        w = world(["....."] * 3, at=(1, 1))
+        safe_at(w, (4, 1))
+        w.health, w.max_health, w.lives = health, 10, 6
+        w.entities = [Entity("npc", 135, (2, 1), "rumor_teller")]
+        return w
+
+    def test_a_townsperson_beside_us_is_not_a_threat(self):
+        w = self.town()
+        policy = Policy(hostile=["npc"], on_hostile="fight")
+        self.assertFalse(survival.is_hostile(w, policy, w.entities[0]))
+        self.assertEqual(survival.hostiles_in_range(w, policy), [])
+        self.assertFalse(should_retreat(w, policy, dict(PARAM_DEFAULTS)))
+        self.assertFalse(would_lose(w, policy, dict(PARAM_DEFAULTS)))
+
+    def test_no_flee_retreat_or_fight_on_a_townsperson(self):
+        for on_hostile in ("flee", "fight"):
+            out = dispatch(self.town(), ctx(on_hostile=on_hostile))
+            self.assertNotIn(out.state, ("Flee", "Retreat", "Fight"), on_hostile)
+
+    def test_a_townsperson_never_joins_a_combat_group(self):
+        w = self.town()
+        w.entities.append(Entity("npc", 9, (3, 1), "gnawer"))  # gnawer is hostile in these tests
+        policy = Policy(hostile=["npc"])
+        self.assertEqual([e.id for e in survival.combat_group(w, policy)], [9])
+
+    def test_a_type_that_swings_at_us_becomes_hostile(self):
+        w = self.town()
+        policy = Policy(hostile=["npc"])
+        events = [{"tick": w.tick, "kind": "Attacked", "actor_kind": "npc", "actor_id": 135}]
+        w.learn_threat(events, [])
+        self.assertIn(("npc", "rumor_teller"), w.hostile_types)
+        other = Entity("npc", 136, (0, 1), "rumor_teller")
+        self.assertTrue(survival.is_hostile(w, policy, other), "the whole type, not only that NPC")
+
+    def test_a_type_that_hits_us_becomes_hostile(self):
+        w = self.town()
+        events = [{"tick": w.tick, "kind": "Damaged", "amount": 0, "source_kind": "npc", "source_id": 135}]
+        w.learn_threat(events, [])
+        self.assertIn(("npc", "rumor_teller"), w.hostile_types, "a hit armour absorbed still shows the type")
+
+    def test_a_type_seen_dying_is_hostile(self):
+        w = self.town()
+        w.learn_threat([{"kind": "NPCDied", "npc_id": 40, "npc_type": "wartlurch", "map_id": 7, "x": 0, "y": 0}], [])
+        self.assertTrue(survival.is_hostile(w, Policy(hostile=["npc"]), Entity("npc", 41, (2, 1), "wartlurch")))
+
+    def test_the_npc_hitting_us_is_hostile_whatever_its_type(self):
+        w = self.town()
+        w.attacker, w.attacked_tick = ("npc", 135), w.tick
+        self.assertTrue(survival.is_hostile(w, Policy(hostile=["npc"]), w.entities[0]))
+
+    def test_a_boss_is_hostile(self):
+        w = self.town()
+        boss = Entity("npc", 50, (2, 1), "cellar_boss", health=40, max_health=40)
+        self.assertTrue(survival.is_hostile(w, Policy(hostile=["npc"]), boss))
+
+    def test_a_character_is_hostile_by_kind(self):
+        w = self.town()
+        peer = Entity("character", 6, (2, 1), "peer")
+        self.assertTrue(survival.is_hostile(w, Policy(hostile=["character"]), peer))
+        self.assertFalse(survival.is_hostile(w, Policy(hostile=["npc"]), peer))
+
+
+class RetreatThreatTest(unittest.TestCase):
+    """A23 survive-a-fight run 2: Retreat started three times at 10/10 from
+    ``would_lose`` alone. A fight we would lose sends us to safety only when
+    a hostile is coming for us; one that stands nearby is avoided."""
+
+    def standing(self, at=(3, 0)):
+        w = world(["......."], at=(1, 0))
+        safe_at(w, (6, 0))
+        w.health, w.max_health, w.lives = 10, 10, 6
+        w.tick = 100
+        w.entities = [Entity("npc", 240, at, "gnawer")]  # unmeasured: would_lose at the default risk
+        return w
+
+    def policy(self):
+        return Policy(hostile=["npc"], on_hostile="fight")
+
+    def params(self):
+        return {**PARAM_DEFAULTS, "fight_margin": 2.0}
+
+    def test_a_hostile_standing_two_cells_off_is_not_retreated_from(self):
+        w = self.standing()
+        self.assertTrue(would_lose(w, self.policy(), self.params()))
+        self.assertFalse(should_retreat(w, self.policy(), self.params()))
+        self.assertNotEqual(dispatch(w, ctx(params=self.params(), on_hostile="fight")).state, "Retreat")
+
+    def test_a_hostile_in_reach_is(self):
+        w = self.standing(at=(2, 0))
+        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+
+    def test_a_hostile_approaching_is(self):
+        w = self.standing(at=(4, 0))
+        w.apply_entities({"tick": 100, "npcs": [{"id": 240, "x": 4, "y": 0, "npc_type_code": "gnawer"}]})
+        w.tick = 104
+        w.apply_entities({"tick": 104, "npcs": [{"id": 240, "x": 3, "y": 0, "npc_type_code": "gnawer"}]})
+        self.assertTrue(survival.approaching(w, w.entities[0]))
+        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+
+    def test_an_old_approach_is_forgotten(self):
+        w = self.standing(at=(4, 0))
+        w.apply_entities({"tick": 100, "npcs": [{"id": 240, "x": 4, "y": 0, "npc_type_code": "gnawer"}]})
+        w.apply_entities({"tick": 101, "npcs": [{"id": 240, "x": 3, "y": 0, "npc_type_code": "gnawer"}]})
+        w.tick = 101 + survival.THREAT_MEMORY_TICKS + 1
+        self.assertFalse(should_retreat(w, self.policy(), self.params()))
+
+    def test_a_hostile_moving_away_is_not(self):
+        w = self.standing(at=(2, 0))
+        w.apply_entities({"tick": 100, "npcs": [{"id": 240, "x": 2, "y": 0, "npc_type_code": "gnawer"}]})
+        w.apply_entities({"tick": 101, "npcs": [{"id": 240, "x": 3, "y": 0, "npc_type_code": "gnawer"}]})
+        self.assertFalse(survival.approaching(w, w.entities[0]))
+        self.assertFalse(should_retreat(w, self.policy(), self.params()))
+
+    def test_the_hostile_hitting_us_is(self):
+        w = self.standing()
+        w.attacker, w.attacked_tick = ("npc", 240), w.tick
+        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+
+    def test_the_health_floor_still_retreats_from_a_standing_hostile(self):
+        w = self.standing()
+        w.health = 1
+        self.assertTrue(should_retreat(w, self.policy(), self.params()))
 
 if __name__ == "__main__":
     unittest.main()

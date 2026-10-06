@@ -7,9 +7,9 @@ maps through known door warps (A26), with stuck escalation on each map's leg
 Arriving finishes the op.
 
 A ``hunting_ground`` with none known searches for one: it explores the
-map's frontier while spare windows read zones around the character
-(``zone_discovery.hunt_probes``), until a read finds a hunting cell it may
-enter, the frontier runs out, or ``HUNT_SEARCH_SECONDS`` pass.
+map's frontier while spare windows read zones in widening rings around the
+character (``zone_discovery.hunt_probe``), until a read finds a hunting cell
+it may enter, the frontier runs out, or ``HUNT_SEARCH_SECONDS`` pass.
 """
 
 from __future__ import annotations
@@ -34,8 +34,10 @@ HUNT_SEARCH_SECONDS = 300
 # A search Travel has not worked on for this long starts over: the op was
 # off the top (a Retreat, a newer op) and is back.
 HUNT_SEARCH_RESUME_SECONDS = 60
-# Spare windows read zones for the search while Travel worked on it this recently.
-HUNT_PROBE_FRESH_SECONDS = 5
+# Spare windows read zones for the search while Travel worked on it this
+# recently. Decisions came 5–20 s apart in A23 survive-a-fight run 2, so a
+# shorter window left the probes off most of the search.
+HUNT_PROBE_FRESH_SECONDS = 30
 # What a hunting-ground search explores: the whole map's frontier.
 HUNT_SEARCH_AREA: GoalOp = {"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE}
 

@@ -110,9 +110,15 @@ def approaching(w: WorldModel, e: Entity) -> bool:
 def threatening(w: WorldModel, group: list[Entity]) -> bool:
     """A hostile in ``group`` is coming for us: it hit us recently, stands in
     reach (``HOSTILE_REACH``), or is approaching. A hostile that just stands
-    nearby is avoided, not run from (A9)."""
+    nearby is avoided, not run from (A9).
+
+    A boss always is: a boss fight is one Boss chose to start, so a fight we
+    would lose there means retreat out, not stepping in until it is in reach
+    (A38, review on #131)."""
     if w.pos is None:
         return False
+    if any(e.is_boss for e in group):
+        return True
     if recently_attacked(w) and any(is_attacker(w, e) for e in group):
         return True
     return any(chebyshev(e.pos, w.pos) <= HOSTILE_REACH or approaching(w, e) for e in group)

@@ -234,6 +234,15 @@ class RetreatCommitTest(unittest.TestCase):
         self.assertIn("retreat out", out.reason)
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 0))
 
+    def test_retreats_out_from_a_boss_it_would_lose_to_standing_off(self):
+        """Review on #131: a boss two cells off and not moving is still one to leave."""
+        w = grid(["D.....", "######"], at=(2, 0), map_id=9)
+        w.entities = [boss(pos=(4, 0))]
+        out = dispatch(w, ctx(w, Memory(), boss_plan(0, 0), on_hostile="fight"))
+        self.assertEqual(out.state, "Boss")
+        self.assertIn("retreat out", out.reason)
+        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 0))
+
     def test_commits_when_clock_nearly_gone(self):
         w, m, plan = self.hurt_in_fight()
         w.boss_fight_end_tick = w.tick + CLOCK_COMMIT_TICKS

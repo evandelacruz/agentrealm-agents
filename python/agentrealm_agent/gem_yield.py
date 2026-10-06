@@ -105,7 +105,8 @@ class GemYieldTracker:
     no_effect: dict[tuple[int, Pos], int] = field(default_factory=dict)
     cuts: int = 0  # Uses on grass or a bush that took effect, this run
     no_effect_cuts: int = 0  # Uses on grass or a bush that did nothing, this run
-    no_effect_streak: int = 0  # no-effect cuts since the last one that took effect
+    # The latest no-effect cut (map_id, cell, tick), cleared by a cut that takes effect.
+    last_no_effect: tuple[int, Pos, int] | None = None
     gems_gained: int = 0  # rises of the gem counter this run, spending not taken off
 
     def note_cut(self, w: WorldModel, pos: Pos, block: str, tick: int, *, took: bool = False) -> None:
@@ -116,7 +117,7 @@ class GemYieldTracker:
             return
         if block in GATHER_BLOCKS:
             self.cuts += 1
-            self.no_effect_streak = 0
+            self.last_no_effect = None
         self.pending.append(
             PendingCut(w.map_id, pos, block, tick, w.gems, {gid for gid, _ in _ground_gems(w)}, took=took)
         )
@@ -128,15 +129,28 @@ class GemYieldTracker:
             return
         self.no_effect[(w.map_id, pos)] = tick
         self.no_effect_cuts += 1
-        self.no_effect_streak += 1
+        self.last_no_effect = (w.map_id, pos, tick)
 
-    def pending_cells(self, map_id: int | None, tick: int | None = None) -> set[Pos]:
+    def pending_cells(self, map_id: int | None, tick: int) -> set[Pos]:
         """Cells of ``map_id`` Gather should not cut now, though not filed:
         cuts still waiting out their gem window, and cells a ``Use`` left
-        unchanged within ``REGROW_TICKS`` of ``tick`` (:func:`exhausted_cells`)."""
+        unchanged within ``REGROW_TICKS`` of ``tick`` (:func:`exhausted_cells`).
+        Holds that have lapsed are dropped."""
+        self._prune(tick)
         out = {c.pos for c in self.pending if c.map_id == map_id}
-        out |= {p for (mid, p), t in self.no_effect.items() if mid == map_id and (tick is None or tick - t < REGROW_TICKS)}
-        return out
+        return out | {p for mid, p in self.no_effect if mid == map_id}
+
+    def no_effect_near(self, map_id: int | None, pos: Pos, tick: int) -> bool:
+        """The latest cut had no effect, in ``pos``'s region, and its hold has
+        not lapsed: Gather's ``cuts have no effect here`` status."""
+        self._prune(tick)
+        last = self.last_no_effect
+        return last is not None and last[0] == map_id and region_of(last[1]) == region_of(pos)
+
+    def _prune(self, tick: int) -> None:
+        self.no_effect = {k: t for k, t in self.no_effect.items() if tick - t < REGROW_TICKS}
+        if self.last_no_effect is not None and tick - self.last_no_effect[2] >= REGROW_TICKS:
+            self.last_no_effect = None
 
     def run_counts(self) -> dict[str, int]:
         """This run's cuts, no-effect cuts and gems gained, for the planner's State."""

@@ -225,6 +225,19 @@ class NoEffectCutTest(unittest.TestCase):
         gather_outcome(w, m, Policy(on_hostile="ignore"), op=op, gem_cuts=t)
         self.assertEqual(m.gather_status, gather_mod.CUTTING)
 
+    def test_no_effect_status_is_local_and_lapses(self):
+        w, t, m = field_world(), GemYieldTracker(), Memory()
+        op = {"op": "gather_gems", "count": 5}
+        t.note_no_effect(w, (1, 1), "grass", w.tick)
+        w.view.tiles[(40, 1)] = "grass"
+        w.pos = (40, 1)  # another region
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op, gem_cuts=t)
+        self.assertEqual(m.gather_status, gather_mod.CUTTING)
+        w.pos, w.tick = (1, 2), w.tick + gem_yield.REGROW_TICKS
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op, gem_cuts=t)
+        self.assertEqual(m.gather_status, gather_mod.CUTTING)
+        self.assertEqual((t.no_effect, t.last_no_effect), ({}, None), "lapsed holds are dropped")
+
     def test_gems_gained_counts_rises_not_spending(self):
         w, t = world(gems=3), GemYieldTracker()
         t.update(w, None)

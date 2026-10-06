@@ -163,6 +163,8 @@ class WorldModel:
     zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
     # Town and Respawned locations used to seed safe-tile probes.
     respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
+    # The world read's town cell (map_id, cell): its safe zone is town (A22).
+    town: tuple[int, Pos] | None = None
     # Boss fight clock, read only when a round trip carries it; the published
     # docs name no such field (GAME_NOTES.md Levels and bosses, A38).
     boss_fight_end_tick: int | None = None

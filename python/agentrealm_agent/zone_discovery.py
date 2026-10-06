@@ -4,14 +4,17 @@ Probes cells around respawn anchors and along the current path when the
 scheduler would otherwise skip a calm window, so later survival states
 have known safe tiles without spending urgent budget on zone reads. A
 terrain read already marks safe-zone cells (``MapView.safe``), so those
-are known safe and never probed.
+are known safe and never probed. The tradeoff: an agent's terrain read
+leaves out ``brightness``, so such a cell's brightness stays unread and
+counts as 1 (``investigation.sight_range``), which overstates sight in a dim
+safe zone. ``town_cells`` is the safe zone around the world's town cell.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .world import Pos, ZoneFact, chebyshev
+from .world import NEIGHBOURS, Pos, ZoneFact, chebyshev
 
 if TYPE_CHECKING:
     from .memory import Memory
@@ -25,9 +28,11 @@ def apply_town(w: WorldModel, town: dict | None) -> None:
     if not town:
         return
     try:
-        w.record_respawn_anchor(int(town["map_id"]), (int(town["x"]), int(town["y"])))
+        map_id, pos = int(town["map_id"]), (int(town["x"]), int(town["y"]))
     except (KeyError, TypeError, ValueError):
         return
+    w.town = (map_id, pos)
+    w.record_respawn_anchor(map_id, pos)
 
 
 def zone_probed(w: WorldModel, map_id: int, pos: Pos) -> bool:
@@ -61,6 +66,28 @@ def safe_tiles(w: WorldModel, map_id: int) -> set[Pos]:
     view = w.maps.get(map_id)
     from_terrain = set(view.safe) if view is not None else set()
     return from_terrain | {pos for pos, fact in w.zones.get(map_id, {}).items() if fact.safe}
+
+
+def town_cells(w: WorldModel, map_id: int | None) -> set[Pos]:
+    """Known safe cells joined (8-way) to the world's town cell on ``map_id``.
+
+    Other safe zones, such as a respawn patch out in the field, are not town.
+    Empty until the town cell or a safe cell beside it is known.
+    """
+    if w.town is None or map_id is None or w.town[0] != map_id:
+        return set()
+    safe = safe_tiles(w, map_id)
+    anchor = w.town[1]
+    todo = [p for p in [anchor, *((anchor[0] + dx, anchor[1] + dy) for dx, dy in NEIGHBOURS)] if p in safe]
+    town = set(todo)
+    while todo:
+        x, y = todo.pop()
+        for dx, dy in NEIGHBOURS:
+            n = (x + dx, y + dy)
+            if n in safe and n not in town:
+                town.add(n)
+                todo.append(n)
+    return town
 
 
 def known_safe(w: WorldModel, map_id: int, pos: Pos) -> bool:

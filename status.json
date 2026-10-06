@@ -39,9 +39,9 @@
 
   "A15": {"state": "done"},
 
-  "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
+  "A16": {"state": "partial", "remaining": "Gate shipped; run 8 reached the goto target then aborted on sustained Explore/goto pacing after step-off (open bug in PLAN.md A16). Waiting on agent fix before the live PASS (A58)."},
 
-  "A58": {"state": "partial", "remaining": "Run 7 (full hour on main after #92/#93): exit 1 — goto (575,375) neither reached nor given up after stopping at corridor waypoint (556,369); safe-zone regen not measured after Heal paced heal_food between (404,607) and (404,608) for most of the hour. Both fixed offline (goto owed until given up, bounded Heal and Loot walks); rerun the live hour. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "Waiting on A16 fix for post-reach goto/explore ping-pong (run 8: exit 1 ABORT at ~1709 s after navigation reached (568,490); regen not measured). Run 7 fixes (#101) landed; notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 

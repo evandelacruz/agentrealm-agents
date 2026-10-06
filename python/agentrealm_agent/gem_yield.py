@@ -21,8 +21,8 @@ Stored in the world knowledge base under ``kb.extra["gem_yield"]``::
 
 ``cuts`` keeps the latest ``MAX_RECORDS`` per map; ``regions`` keeps every
 total. The planner's State shows :func:`summary`; Gather skips barren
-regions (:func:`barren_regions`) and cells it cut within ``REGROW_TICKS``
-(:func:`exhausted_cells`), both read once per decision.
+regions (:func:`barren_regions`) and cells it cut within ``REGROW_TICKS``,
+pending cuts included (:func:`exhausted_cells`), both read once per decision.
 """
 
 from __future__ import annotations
@@ -106,6 +106,11 @@ class GemYieldTracker:
         self.pending.append(
             PendingCut(w.map_id, pos, block, tick, w.gems, {gid for gid, _ in _ground_gems(w)}, took=took)
         )
+
+    def pending_cells(self, map_id: int | None) -> set[Pos]:
+        """Cells of ``map_id`` cut and still waiting out their gem window:
+        exhausted already, though not filed yet (:func:`exhausted_cells`)."""
+        return {c.pos for c in self.pending if c.map_id == map_id}
 
     def note_take(self) -> None:
         for cut in self.pending:
@@ -220,16 +225,23 @@ def barren_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[in
     return {r for r in map(_parse, keys) if r is not None}
 
 
-def exhausted_cells(kb: KnowledgeBase | None, map_id: int | None, tick: int) -> set[Pos]:
-    """Cells of one map our own cuts left bare less than ``REGROW_TICKS`` ago."""
+def exhausted_cells(
+    kb: KnowledgeBase | None, map_id: int | None, tick: int, tracker: GemYieldTracker | None = None
+) -> set[Pos]:
+    """Cells of one map our own cuts left bare less than ``REGROW_TICKS`` ago.
+
+    A cell is exhausted from the moment of its cut: the ``tracker``'s cuts
+    still waiting out their gem window count too, before they are filed.
+    """
+    pending = tracker.pending_cells(map_id) if tracker is not None else set()
     if kb is None or map_id is None:
-        return set()
+        return pending
     with kb.lock:
         root = kb.extra.get(KEY)
         row = root.get(str(map_id)) if isinstance(root, dict) else None
         cuts = row.get("cuts") if isinstance(row, dict) else None
         recent = [c for c in cuts if isinstance(c, dict) and tick - int(c.get("tick", 0)) < REGROW_TICKS] if isinstance(cuts, list) else []
-    return {(int(c["x"]), int(c["y"])) for c in recent if "x" in c and "y" in c}
+    return pending | {(int(c["x"]), int(c["y"])) for c in recent if "x" in c and "y" in c}
 
 
 def _parse(key: str) -> tuple[int, int] | None:

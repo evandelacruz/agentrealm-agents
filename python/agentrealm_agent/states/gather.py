@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Callable, Iterable
 
 from ..config import Policy
-from ..gem_yield import barren_regions, exhausted_cells, region_of
+from ..gem_yield import GemYieldTracker, barren_regions, exhausted_cells, region_of
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
@@ -58,12 +58,9 @@ class GatherState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         op = my_op(ctx, self.name)
-        out = gather_outcome(world, ctx.memory, ctx.policy, knowledge=ctx.knowledge, op=op)
+        out = gather_outcome(world, ctx.memory, ctx.policy, knowledge=ctx.knowledge, op=op, gem_cuts=ctx.gem_cuts)
         if out.intents is not None:
-            ctx.memory.gather_status = CUTTING
             return out
-        here_barren = world.pos is not None and region_of(world.pos) in _barren_to_skip(world, ctx.knowledge, op)
-        ctx.memory.gather_status = REGION_BARREN if here_barren else NONE_CUTTABLE
         out = safe_default(world, ctx)
         out.state, out.reason = self.name, f"look for gems: {out.reason}"
         return out
@@ -85,15 +82,37 @@ def gather_outcome(
     *,
     knowledge: KnowledgeBase | None = None,
     op: GoalOp | None = None,
+    gem_cuts: GemYieldTracker | None = None,
     state: str = "Gather",
 ) -> StateOutcome:
+    """Gather's move this decision, or no intents with nothing to work.
+
+    Sets ``m.gather_status``: ``CUTTING`` with intents, else ``REGION_BARREN``
+    when standing in a skipped barren region, else ``NONE_CUTTABLE``.
+    """
     here = w.pos
     if here is None:
         return StateOutcome(None, "position unknown", state=state)
-    view = w.view
-
     skip = _barren_to_skip(w, knowledge, op)
-    exhausted = exhausted_cells(knowledge, w.map_id, w.tick)
+    out = _gather_step(w, m, policy, here, skip, exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts), knowledge, state)
+    if out.intents is not None:
+        m.gather_status = CUTTING
+    else:
+        m.gather_status = REGION_BARREN if region_of(here) in skip else NONE_CUTTABLE
+    return out
+
+
+def _gather_step(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    here: Pos,
+    skip: set[tuple[int, int]],
+    exhausted: set[Pos],
+    knowledge: KnowledgeBase | None,
+    state: str,
+) -> StateOutcome:
+    view = w.view
 
     def cuttable(p: Pos) -> bool:
         return p not in exhausted and region_of(p) not in skip and gather_ground(w, p, policy)

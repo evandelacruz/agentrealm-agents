@@ -238,6 +238,7 @@ class Runner:
             knowledge=self.knowledge,
             directives=self.directives.directives,
             plan=plan,
+            gem_cuts=self.gem_cuts,
         )
 
     def log(self, call: str, detail: str, record: dict) -> None:

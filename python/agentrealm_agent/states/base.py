@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from ..client import Intent
 from ..config import Policy
 from ..directives import PARAM_DEFAULTS, Directives, default_directives
+from ..gem_yield import GemYieldTracker
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..plan import OP_STATE, GoalOp, Plan
@@ -27,6 +28,7 @@ class PlayContext:
     knowledge: KnowledgeBase | None = None  # per-world door graph, terrain, locked doors (A26, A14)
     plan: Plan | None = None  # validated goal stack (A34)
     directives: Directives = field(default_factory=default_directives)
+    gem_cuts: GemYieldTracker | None = None  # cuts waiting out their gem window: exhausted for Gather (A63)
 
 
 @dataclass

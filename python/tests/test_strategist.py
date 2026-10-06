@@ -408,6 +408,13 @@ class AnswerTest(unittest.TestCase):
         self.assertEqual(r.plan.goals, [{"op": "gather_gems", "count": 5}, more])
         self.assertEqual(logged_events(r), ["ask", "applied"])
 
+    def test_a_new_head_clears_the_old_gather_status(self):
+        s, r = make(FakeLLM({"goals": [{"op": "buy", "code": "torch"}]})), fake_runner()
+        r.plan = Plan([{"op": "gather_gems", "count": 9}], dict(PARAM_DEFAULTS))
+        r.mem.gather_status = "region barren"
+        round_trip(s, r)
+        self.assertEqual(r.mem.gather_status, "")
+
     def test_repeats_pinned_needs_the_same_op(self):
         pinned = [{"op": "travel", "to": "point", "x": 5, "y": 0}]
         self.assertTrue(repeats_pinned({**pinned[0], "why": "again"}, pinned))

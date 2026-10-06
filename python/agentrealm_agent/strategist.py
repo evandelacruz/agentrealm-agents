@@ -887,6 +887,7 @@ class Strategist:
         else:
             runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
             runner.mem.walks.clear()  # the new head walks a path of its own (A15)
+            runner.mem.gather_status = ""  # it was the old head's
         if not goals:
             runner.log("strategist", "no valid goals; stack cleared (dispatcher safe default)", {"strategist": {"event": "cleared", **record}})
             return

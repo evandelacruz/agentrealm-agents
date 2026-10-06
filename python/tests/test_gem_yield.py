@@ -308,6 +308,28 @@ class GatherSkipsBarrenTest(unittest.TestCase):
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
         self.assertNotEqual(m.gather_target[1], (1, 1))
 
+    def test_a_cut_still_in_its_gem_window_is_not_cut_again(self):
+        """Exhausted from the moment of the cut, not only once filed: a stale
+        read still showing grass must not file the same cell twice."""
+        w, k, tracker = safe_world(), kb(), GemYieldTracker()
+        op = {"op": "gather_gems", "count": 5}
+        out = gather_outcome(w, Memory(), Policy(on_hostile="ignore"), knowledge=k, op=op, gem_cuts=tracker)
+        self.assertEqual(out.reason, "cut grass")
+        tracker.note_cut(w, (1, 1), "grass", w.tick)
+        w.tick += 1
+        tracker.update(w, k)  # inside GEM_WINDOW_TICKS: pending, not filed
+        self.assertEqual(gem_yield.regions(k, MAP), {})
+        m = Memory()
+        out = gather_outcome(w, m, Policy(on_hostile="ignore"), knowledge=k, op=op, gem_cuts=tracker)
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertNotEqual(m.gather_target[1], (1, 1))
+
+    def test_pending_cells_are_of_this_map_only(self):
+        w, tracker = safe_world(), GemYieldTracker()
+        tracker.note_cut(w, (1, 1), "grass", w.tick)
+        self.assertEqual(gem_yield.exhausted_cells(None, MAP, w.tick, tracker), {(1, 1)})
+        self.assertEqual(gem_yield.exhausted_cells(None, MAP + 1, w.tick, tracker), set())
+
     def test_unsampled_region_is_still_cut(self):
         out = gather_outcome(safe_world(), Memory(), Policy(on_hostile="ignore"), knowledge=kb(), op={"op": "gather_gems", "count": 5})
         self.assertEqual(out.reason, "cut grass")

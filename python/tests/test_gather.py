@@ -286,6 +286,30 @@ class GatherFallbackTest(unittest.TestCase):
         self.assertEqual(c.memory.gather_status, gather_mod.REGION_BARREN)
 
 
+class GatherStatusStaleTest(unittest.TestCase):
+    """``gather_status`` speaks only for a decision Gather made."""
+
+    def test_cleared_when_a_reflex_preempts_gather(self):
+        from agentrealm_agent.brain import decide
+
+        w = grid(["ggggg"], at=(2, 0))
+        m = Memory(gather_status=gather_mod.CUTTING)
+        w.entities = [Entity("npc", 4, (3, 0))]
+        c = ctx(w, ["gather_gems:3"], m, on_hostile="flee", hostile=["npc"], hostile_range=2)
+        d = decide(w, m, c.policy, c.rng, directives=c.directives, plan=c.plan)
+        self.assertIn("flee", d.reason.lower())
+        self.assertEqual(m.gather_status, "")
+
+    def test_kept_when_gather_decides(self):
+        from agentrealm_agent.brain import decide
+
+        w = grid(["ggg"], at=(1, 0))
+        m = Memory()
+        c = ctx(w, ["gather_gems:3"], m)
+        decide(w, m, c.policy, c.rng, directives=c.directives, plan=c.plan)
+        self.assertEqual(m.gather_status, gather_mod.CUTTING)
+
+
 class GatherDispatchTest(unittest.TestCase):
     def test_gather_beats_explore_when_goal_active(self):
         w = grid(["ggg"], at=(1, 0))

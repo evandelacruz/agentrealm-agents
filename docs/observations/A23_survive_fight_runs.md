@@ -97,10 +97,11 @@ Intents: 430 `Step`, 1,097 `Wait`, 2 `Use`. Call mix: 337 `zone`, 185 `tick`, 44
 ## Run 2 — PASS (survival only): no deaths, no fights; the hunting-ground search never read a zone outside town, and decisions stalled the loop for half the run
 
 - **Code:** `main` at `8966752` (after #123, #125 and #127). Server redeployed with B133 and sim changes just before the run. Planner: Anthropic, default model. **Fresh knowledge base** (new container: no terrain, zones or hunting cells carried over), unlike Run 1.
-- **Verdict:** exit 0 after **302 s**. Character (a different one from Run 1, chosen at run time) started at 10/10 health, 10 lives, 0 gems, pocket knife, no potions or food, at (370, 399), 27 cells west of the town cell (397, 401) and adjacent to gristlewick 240.
+- **Verdict:** exit 0 after **302 s**. Character (an existing one, picked at run time; this was the character the coordinating session had named for these runs, and its notice arrived after the run) started at 10/10 health, 10 lives, 0 gems, pocket knife, no potions or food, at (370, 399), 27 cells west of the town cell (397, 401) and adjacent to gristlewick 240.
 - **Gate summary:** deaths **0**; API errors **0**; fights below the health floor **0**; heal food take and heal potion both **no**; weak hostile kills 0; gems earned no.
 - **Scenario not met:** nothing fought, so this run does not satisfy survive-a-fight. It covers the hunting-ground search and the survival reflexes only.
 - A second, 90 s run under `cProfile` followed on the same character to find where the main thread spent its time (defect 2). Its numbers are kept apart below and are not in the tables.
+- **Lives between the runs:** Run 2 ended at 13:54:44 UTC at (358, 519) with 10 lives. The profiling run started at 13:57:57 at (396, 610) with **9** lives and 10/10 health. So the character died and moved between the two runs, while this session was not playing it. That death is in neither run's trace, and the profiling run had no death (9 lives at its last `self` read, 13:59:08). By 14:05 the character was down to 8 lives, with its last damage at 14:05:04, after both runs had ended. Another client was playing it.
 
 ### Fights
 

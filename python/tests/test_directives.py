@@ -10,6 +10,7 @@ from pathlib import Path
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import (
+    PARAM_DEFAULTS,
     DirectivesWatch,
     attack_forbidden,
     default_directives,
@@ -33,6 +34,16 @@ class ParamTest(unittest.TestCase):
             self.assertEqual(d.params["fight_margin"], 1.5)
             self.assertEqual(d.params["risk"], 0.5)
             self.assertEqual(d.params["retreat_hits"], 2)
+
+    def test_non_finite_keeps_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "wren.directives.toml"
+            for raw in ("inf", "-inf", "nan"):
+                p.write_text(
+                    f"params = {{ fight_margin = {raw}, curiosity = {raw}, risk = {raw}, retreat_hits = {raw} }}\n"
+                )
+                d = load_directives(p)
+                self.assertEqual(d.params, PARAM_DEFAULTS, raw)
 
     def test_valid_overrides(self):
         with tempfile.TemporaryDirectory() as tmp:

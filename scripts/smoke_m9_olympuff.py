@@ -14,7 +14,7 @@ Requires AGENTREALM_API_KEY.
 from __future__ import annotations
 
 import argparse
-import json
+import math
 import os
 import sys
 import time
@@ -39,16 +39,47 @@ DEFAULT_BASE = "https://api.agentrealm.gg"
 TOWN_GOAL = "travel:town"
 
 
+def toml_value(v) -> str:
+    """``v`` as a TOML value: a string, bool, int, float, or list of those.
+
+    Control characters and DEL become ``\\uXXXX``; everything else, non-BMP
+    characters included, stays literal (JSON's surrogate pair escapes are not TOML).
+    """
+    if isinstance(v, str):
+        out = []
+        for ch in v:
+            if ch in '"\\':
+                out.append("\\" + ch)
+            elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+                out.append(f"\\u{ord(ch):04x}")
+            else:
+                out.append(ch)
+        return '"' + "".join(out) + '"'
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        if math.isnan(v):
+            return "nan"
+        if math.isinf(v):
+            return "inf" if v > 0 else "-inf"
+        return repr(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(toml_value(x) for x in v) + "]"
+    raise TypeError(f"no TOML encoding for {type(v).__name__}")
+
+
 def directives_toml(d: Directives) -> str:
-    """``d`` as a directives file. JSON strings and numbers are valid TOML values."""
+    """``d`` as a directives file."""
     lines = ["[params]"]
-    lines += [f"{k} = {json.dumps(v)}" for k, v in d.params.items()]
+    lines += [f"{k} = {toml_value(v)}" for k, v in d.params.items()]
     head = [
-        f"never_attack = {json.dumps(d.never_attack)}",
-        f"goals = {json.dumps(d.goals)}",
+        f"never_attack = {toml_value(d.never_attack)}",
+        f"goals = {toml_value(d.goals)}",
     ]
     if d.instructions:
-        head.append(f"instructions = {json.dumps(d.instructions)}")
+        head.append(f"instructions = {toml_value(d.instructions)}")
     return "\n".join(head + [""] + lines) + "\n"
 
 
@@ -64,7 +95,7 @@ def send_to_town(path: Path) -> None:
     except (OSError, tomllib.TOMLDecodeError):
         d = default_directives()
     d.goals = [g for g in d.goals if not g.strip().startswith("travel:")] + [TOWN_GOAL]
-    path.write_text(directives_toml(d))
+    path.write_text(directives_toml(d), encoding="utf-8")
 
 
 def restore_file(path: Path, original: bytes | None) -> None:

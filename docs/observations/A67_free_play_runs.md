@@ -4,10 +4,10 @@ Scenario: free play. `scripts/smoke_m8_olympuff.py --seconds 600` with the AI pl
 
 ## Free play
 
-### Run 1: an accidental sword, then 380 s frozen in a Break loop that swaps weapons
+### Run 1: an accidental sword, then 370 s frozen in a Break loop that swaps weapons
 
 - **Code:** `main` at `5ff4f0f` (after #133 A64 park and #134 A63 run 3 fixes).
-- **Verdict:** exit 0, `PASS` on the M8 survival gates after **600.9 s**. The park timed out after 60.3 s, still at (362, 377), and cleared the queue. The character started at 7/10 health, 7 lives and 21 gems, armed with the pocket knife, on the overworld 17 blocks north-east of the town cell.
+- **Verdict:** exit 0, `PASS` after **600.9 s**, on the **short-run gates only**. At 600 s the M8 full-run clauses are skipped (`full_run` needs at least 95% of 3,600 s, `smoke_m8_olympuff.py:116`). So the run passed while it stood frozen for 370 s, earned no gems and wore no armor. The park timed out after 60.3 s, still at (362, 377), and cleared the queue. The character started at 7/10 health, 7 lives and 21 gems, armed with the pocket knife, on the overworld 17 blocks north-east of the town cell.
 - **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; gems earned **no**; armor **no**; shop weapon **yes** (by accident, below); potion reserve, heal takes all **no**.
 
 #### Planner ops over time
@@ -36,7 +36,7 @@ Bought: one bronze_sword, by stepping onto it on a `travel:shop` walk, not by an
 
 #### Gems earned
 
-**0.** 6 cuts took effect (3 grass, 3 bush), 0 `applied_no_effect`, no gem drops; `gather_run={"cuts": 6, "gems_gained": 0}`. The 380 s freeze cost the rest of the hunt.
+**0.** 6 cuts took effect (3 grass, 3 bush), 0 `applied_no_effect`, no gem drops; `gather_run={"cuts": 6, "gems_gained": 0}`. The 370 s freeze cost the rest of the hunt.
 
 #### Deaths
 
@@ -84,7 +84,7 @@ Intents: 373 `Step`, 1,055 `Wait`, **289 `Arm`**, 21 `Say`, 6 `Use`, 0 `Take`. C
 
 #### Top 3 defects
 
-1. **Break flips Arm between two weapons forever and never steps.** At 231 s the walk to the planner's (370, 370) reached stuck step 2. From then on every Break decision sent one `Arm`: knife (2350), then sword (20272), then knife again, 288 times over 370 s, at the same cell. It never stepped, never used a block, and never escalated. The planner, Park (`safe tile unreachable`) and the M8 gates all missed it.
+1. **Break flips Arm between two weapons forever and never steps** (A68). At 231 s the walk to the planner's (370, 370) reached stuck step 2. From then on every Break decision sent one `Arm`: knife (2350), then sword (20272), then knife again, 288 times over 370 s, at the same cell. It never stepped, never used a block, and never escalated. The planner, Park (`safe tile unreachable`) and the M8 gates all missed it.
 
    ```
    t=4045761 @76:362,377 tick  Arm (break → (365, 380))    supply 2350
@@ -97,7 +97,7 @@ Intents: 373 `Step`, 1,055 `Wait`, **289 `Arm`**, 21 `Say`, 6 `Use`, 0 `Take`. C
 
    Suspects: `break_memory.py:157` picks a tool from `w.held_supplies` only, and that list leaves out the armed weapon. When two held weapons share the capability, the weapon not armed always wins, so each Arm makes the other weapon the choice. `held_supplies(w)` at `:112` already adds the armed one back. `states/break_state.py:89–123` returns `[Arm, SetPosition]` unpaced, and `brain.py:142` sends only the first intent, so the step never goes out. The stuck clock (`break_state.py:116`) escalates only when there is no step, and here there was one every time.
 
-2. **`travel to: shop` walks onto a shop item and buys it.** With no x, y, Travel resolves `shop` to the nearest shop cell (`travel/resolve.py:68`, cells from `travel/knowledge.py:129`), and that cell is the item for sale. The walk ended on (414, 398) and took the bronze_sword, 15 of 21 gems, while the planner's only `buy` ops named small_potion. That left 6 gems: no potions and no armor, and stage 2's readiness was out of reach for the rest of the run.
+2. **`travel to: shop` walks onto a shop item and buys it** (A69). With no x, y, Travel resolves `shop` to the nearest shop cell (`travel/resolve.py:68`, cells from `travel/knowledge.py:129`), and that cell is the item for sale. The walk ended on (414, 398) and took the bronze_sword, 15 of 21 gems, while the planner's only `buy` ops named small_potion. That left 6 gems: no potions and no armor, and stage 2's readiness was out of reach for the rest of the run.
 
    ```
    call 13  travel to=shop x=0 y=0, buy small_potion, buy small_potion   "Buy potions first"
@@ -107,7 +107,7 @@ Intents: 373 `Step`, 1,055 `Wait`, **289 `Arm`**, 21 `Say`, 6 `Use`, 0 `Take`. C
 
    Travel should stop next to a shop cell, never on one; buying is Shop's job. Earlier, Shop's own walk to (422, 398) never arrived: it started seven times between 69 s and 132 s, four of them from (406, 392), where oscillation gave up an explore target.
 
-3. **The planner cannot see a stall, and churns on the 0, 0 placeholder instead.** The State has no line saying the character has not moved, or that the top op's executor is stuck in a loop. For 370 s the planner saw `pos=76:362,377` with a `travel` (370, 370) on top and kept the stack ("Keep the retreat on top"). Its replies instead fixed something that was not broken. `plan.py:157` turns a symbolic `travel` with no x, y into 0, 0, and `strategist.py:656` prints that back in the stack. 22 replies said they had "dropped the placeholder 0,0" and re-sent the same op, which the plan filled with 0, 0 again. At 234 s the same doubt ("The travel target of town at x=0,y=0 looked odd") is why it swapped `travel` town for `travel` (370, 370), the walk that led into defect 1.
+3. **The planner cannot see a stall, and churns on the 0, 0 placeholder instead** (A70). The State has no line saying the character has not moved, or that the top op's executor is stuck in a loop. For 370 s the planner saw `pos=76:362,377` with a `travel` (370, 370) on top and kept the stack ("Keep the retreat on top"). Its replies instead fixed something that was not broken. `plan.py:157` turns a symbolic `travel` with no x, y into 0, 0, and `strategist.py:656` prints that back in the stack. 22 replies said they had "dropped the placeholder 0,0" and re-sent the same op, which the plan filled with 0, 0 again. At 234 s the same doubt ("The travel target of town at x=0,y=0 looked odd") is why it swapped `travel` town for `travel` (370, 370), the walk that led into defect 1.
 
    ```
    call 20  "The travel target of town at x=0,y=0 looked odd, so I replaced it with a nearby safe tile."

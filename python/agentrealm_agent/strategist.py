@@ -832,9 +832,8 @@ class Strategist:
             reference_sections=self.config.reference_sections,
             given_up_travel=runner.mem.nav_stuck.given_up_travel,
             gather_status=runner.mem.gather_status,
-            rejected=self.rejected,
+            rejected=self.rejected,  # replaced when this call's reply is read; kept if the call fails
         )
-        self.rejected = []  # told once
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1
         self.last_call_at = self.clock()

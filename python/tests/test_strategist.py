@@ -1274,3 +1274,14 @@ class RejectedFeedbackTest(unittest.TestCase):
         self.assertIn("Higher retreats sooner", system)
         self.assertIn("safe_ground", system)
         self.assertIn("last_reply_rejected", system)
+
+    def test_rejections_survive_a_failed_call(self):
+        """Review on #123: a call that fails must not lose the rejections it carried."""
+        s = make(FakeLLM({"params": {"retreat_hits": 1}}, RuntimeError("down"), WAIT_ANSWER))
+        r = fake_runner()
+        round_trip(s, r)
+        s.clock.now += 60
+        round_trip(s, r)  # fails
+        s.clock.now += 300
+        round_trip(s, r)
+        self.assertIn("retreat_hits 1 below floor 2", s.client.messages[2][1]["content"])

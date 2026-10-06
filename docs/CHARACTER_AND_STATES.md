@@ -14,6 +14,8 @@ Run one `run` process per world at a time; two would each save their own copy, a
 
 ## Make a character
 
+**Until the planner (step 2, #108) emits them, some behavior needs plan ops nothing produces yet** (A61): equipping gear (`equip`) and restocking potions (`buy`), which M8 checks; reading signs and greeting NPCs (`read`, `say`), which M10 checks; and walking to look at entrance marks (`travel`), which M9 checks. `buy:<code>` and `travel:*` can go in directives `goals` by hand; `equip`, `read` and `say` have no shorthand and wait for the strategist.
+
 Copy a file from `python/characters/` and edit it. Names must be unique in the world.
 
 | Key | Meaning |

@@ -72,7 +72,7 @@ def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
         intents = shop_take_intents(w, knowledge_items(ctx.knowledge), supply)
         if intents is None:
             return StateOutcome(None, f"no room for {label}", state=state)
-        # The buy signal is consumed only when this Take lands (runner, sync_shop).
+        # Settled when this Take lands or gems drop (runner, sync_shop).
         ctx.memory.shop_pending = (supply.id, supply.code, w.gems, supply.pos, w.map_id, w.tick)
         return StateOutcome(intents, f"buy {label}", state=state)
     step = _step_toward(w, ctx.memory, ctx, supply.pos)

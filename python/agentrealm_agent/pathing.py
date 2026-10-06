@@ -22,6 +22,7 @@ from .navigation import (
     route_first_leg,
 )
 from .navigation import stuck as nav_stuck
+from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
 from .plan import (
     BOSS_PLAN_OPS,
@@ -373,6 +374,9 @@ def plan_step(
                 plan.finish_current("at shop cell", memory=m)
                 continue
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
+        if found and found[2] is not None:
+            params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
+            found = (commit_walk(m, w, found[1], found[2].target, found[0], params), *found[1:])
         if found and next_step(w, blocked, found[0]):
             plan.note_progress()
             _store_path(m, w, found[1], found[0], found[2])
@@ -396,6 +400,9 @@ def replan(
 ) -> tuple[str, Leg, bool] | None:
     """Take the first goal whose path starts on a seen, open step.
 
+    A goal keeps the path it is walking while that stays the best way to its
+    target (``commit_walk``): so a kept path whose next cell is still fog
+    waits for it to be seen rather than turning round for another route.
     A path whose first step lies in fog is skipped like an unreachable goal,
     so a later goal (explore, say) gets the move while terrain reads catch up.
     An owed ``goto`` is the exception (below).
@@ -414,14 +421,43 @@ def replan(
     if plan is not None and not walking_goto and plan_step(plan, w, m, policy, blocked, costly, knowledge):
         return None
     missed: tuple[str, Leg, bool] | None = None
+    params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
     for goal in ["goto"] if walking_goto else policy.goals:
         found, leg = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
+        if leg is not None:
+            found = commit_walk(m, w, goal, leg.target, found, params)
         if next_step(w, blocked, found):
             _store_path(m, w, goal, found, leg)
             return None
         if missed is None and leg is not None and leg.target != w.pos:
             missed = (goal, leg, bool(found))
     return missed
+
+
+def commit_walk(
+    m: Memory,
+    w: WorldModel,
+    goal: str,
+    target: Pos,
+    found: list[Pos] | None,
+    params: CostGridParams | None = None,
+) -> list[Pos] | None:
+    """The path to walk toward ``target``: the one ``goal`` is already on, or ``found``.
+
+    The walker commits to its path (``navigation.walk``, A15): it is kept
+    until it is walked, a cell on it turns out blocked or a step on it is
+    rejected, the target changes, or ``found`` is cheaper by more than
+    ``walk.SWITCH_GAIN``; and never dropped for a path that steps straight
+    back to the cell just left while it is still open. ``params`` prices
+    both on today's cost grid.
+    """
+    path, m.walk = nav_walk.commit(m.walk, w, goal, target, found, params or CostGridParams())
+    return path
+
+
+def walk_params(avoid: set[Pos]) -> CostGridParams:
+    """The cost grid a walk with only ``avoid`` to hand prices its paths on."""
+    return CostGridParams(avoid=set(avoid), allow_goal_door=True)
 
 
 def nav_search(m: Memory, w: WorldModel, plan: str, goal: Pos) -> NavSearchState:
@@ -483,7 +519,9 @@ AttemptPlan = Callable[[NavAttempt], "list[Pos] | None"]
 
 
 def _walk(m: Memory, w: WorldModel, att: NavAttempt, avoid: set[Pos], path: list[Pos]) -> Pos | None:
+    """Walk an escalation level's plan: a new walk, since the old path is the one that got stuck."""
     m.path, m.goal = path, att.goal
+    m.walk = nav_walk.start(w, att.goal, att.target, path)
     nav_stuck.observe(att, w, path)
     return next_step(w, avoid, path)
 
@@ -601,9 +639,11 @@ def guided_step(
         if m.goal == goal and next_step(w, avoid, m.path):
             nav_stuck.observe(att, w, m.path)
             return next_step(w, avoid, m.path)
-        found = plan(att)
+        found = commit_walk(m, w, goal, leg.target, plan(att), walk_params(avoid))
         if next_step(w, avoid, found):
-            return _walk(m, w, att, avoid, found)
+            m.path, m.goal = found, goal
+            nav_stuck.observe(att, w, found)
+            return next_step(w, avoid, found)
         if found:
             return _wait(m, att, found)
         reason = "no_path"
@@ -645,7 +685,7 @@ def bounded_step(
         return None
     nav_stuck.resume(m, att, w.tick)
     if not (m.goal == goal and m.path and m.path[-1] == at and next_step(w, avoid, m.path)):
-        found = plan()
+        found = commit_walk(m, w, goal, at, plan(), walk_params(avoid))
         if not found or not next_step(w, avoid, found):
             if att.waiting_since is None:
                 att.waiting_since = w.tick

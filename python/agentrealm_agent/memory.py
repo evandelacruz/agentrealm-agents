@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from .navigation import NavSearchState
 from .navigation.rejection import NavMemory
 from .navigation.stuck import NavStuckMemory
+from .navigation.walk import Walk
 from .travel.ops import TravelOp
 from .travel.strength import StrengthBracket
 from .world import Pos
@@ -29,6 +30,7 @@ class Memory:
     path: list[Pos] = field(default_factory=list)
     goal: str = ""
     goal_op: dict | None = None  # the plan op m.path was set for, so a same-kind head swap replans (A34)
+    walk: Walk | None = None  # the path the walker committed to, kept while it stays the best way (A15)
     state: str = ""  # active state (A5): kept until its done() holds or a higher guard fires
     need_position: bool = True
     need_self: bool = True

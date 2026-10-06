@@ -103,7 +103,9 @@ def play(competitor: State, decisions: int = 20):
 class GotoReplanBack(State):
     """Like Explore in A58 run 5: the goto walk itself, replanned each
     decision, steps east from A and then back west from B. Named Explore,
-    so the guard files every move as the goto walk's."""
+    so the guard files every move as the goto walk's. The real walker no
+    longer does this (it commits to its path, ``test_a58_run5.py``); the
+    stand-in keeps the guard tested as the safety net."""
 
     name = "Explore"
 

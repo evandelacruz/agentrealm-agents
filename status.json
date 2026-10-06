@@ -37,7 +37,7 @@
 
   "A14": {"state": "done"},
 
-  "A15": {"state": "done"},
+  "A15": {"state": "done", "note": "The walker commits to its path (A58 run 5 flip, step 1b of the pacing redirect); the oscillation guard stays as a safety net."},
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
 

@@ -92,8 +92,12 @@ def learn_step_rejection(
     code: str | None,
     tick: int,
 ) -> None:
-    """Reflex 1 plus A14: drop the plan and teach the map from the code."""
-    m.path, m.goal = [], ""
+    """Reflex 1 plus A14: drop the plan and teach the map from the code.
+
+    A rejected step also ends the walk's commitment (``navigation.walk``), so
+    the next plan is taken as it comes.
+    """
+    m.path, m.goal, m.walk = [], "", None
     m.corridors.clear()  # the corridor searches priced the map before this lesson (A13)
     nav = m.nav
     cell = (w.map_id, landing)

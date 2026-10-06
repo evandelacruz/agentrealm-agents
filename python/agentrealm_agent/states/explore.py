@@ -21,13 +21,11 @@ from ..memory import Memory
 from ..navigation.rejection import navigation_avoid_costly
 from ..navigation import stuck as nav_stuck
 from ..pathing import (
-    SAFE_EXPLORE_GOAL,
     attempt_plan,
     clue_redirects,
     escalation_step,
     next_step,
     path_owned_by,
-    plan_op_goal,
     replan,
 )
 from ..plan import GoalOp
@@ -85,7 +83,7 @@ def explore_outcome(
     if w.pos is None:
         return StateOutcome(None, "position unknown", state=state)
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    clue_redirects(w, m, plan_op_goal(op) if op is not None else SAFE_EXPLORE_GOAL, knowledge)
+    clue_redirects(w, m, policy, plan_avoid, plan_costly, knowledge, op)
     owned = path_owned_by(op, m)
     target_plan = attempt_plan(m, w, policy, plan_avoid, plan_costly, knowledge)
     step = _escalated_step(w, m, plan_avoid, target_plan, knowledge) if owned else None

@@ -603,6 +603,7 @@ class Strategist:
             runner.plan.block_before = old.block_before
         else:
             runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
+            runner.mem.walks.clear()  # the new head walks a path of its own (A15)
         if not goals:
             runner.log("strategist", "no valid goals; stack cleared (dispatcher safe default)", {"strategist": {"event": "cleared", **record}})
             return

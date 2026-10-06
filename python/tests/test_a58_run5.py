@@ -27,7 +27,7 @@ from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation import walk as nav_walk
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import Plan
-from agentrealm_agent.pathing import bounded_step, commit_walk, guided_step
+from agentrealm_agent.pathing import bounded_step, clue_redirects, commit_walk, guided_step
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.world import WorldModel
@@ -416,6 +416,28 @@ class ExploreKeepsItsFrontierTest(unittest.TestCase):
                 self.assertEqual(xs[:4], [0, -1, -2, -3], cells)
                 self.assertEqual(xs[3:], list(range(-3, -3 + len(xs) - 3)), f"east from the sign on: {cells}")
 
+
+    def test_a_clue_toward_ground_outside_the_area_keeps_the_walk(self):
+        """An ``explore_area`` op west of the start, its radius short of the
+        east frontier. A sign saying east names ground the op cannot walk to,
+        so it never drops the walk: Explore keeps walking west, and the walk is
+        not dropped and remade each decision while the clue lasts."""
+        w, c = self.world(), self.ctx(plan=False)
+        op = {"op": "explore_area", "x": -6, "y": 0, "radius": 5}
+        c.plan = Plan([op], dict(PARAM_DEFAULTS))
+        record_clue(c.knowledge, c.memory, kind="sign", text="Go east.", map_id=1, x=0, y=0, tick=w.tick)
+        redirects = []
+
+        def watch(i, w, c):
+            walk = c.memory.walks.get("explore_area")
+            if walk is not None:
+                redirects.append(clue_redirects(w, c.memory, c.policy, set(), set(), c.knowledge, op))
+                c.memory.walks["explore_area"] = walk  # observe only
+
+        cells, _ = self.walk(w, c, decisions=3, before_decision=watch)  # by then the area is all seen
+        self.assertEqual([x for x, _ in cells], [0, -1, -2, -3], cells)
+        self.assertTrue(redirects, "the walk was there to keep")
+        self.assertEqual(set(redirects), {False}, "never dropped for the clue")
 
 if __name__ == "__main__":
     unittest.main()

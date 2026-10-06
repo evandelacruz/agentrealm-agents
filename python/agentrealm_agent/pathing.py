@@ -207,17 +207,25 @@ def path_for_plan_op(
     if op["op"] != "explore_area":
         return None
     label = plan_op_goal(op)
-    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, explore_targets(op, w), w.tick)
+    targets = explore_area_targets(op, w, m)
     center = (op["x"], op["y"])
-    if not targets and op["radius"] < EXPLORE_ANYWHERE and chebyshev(w.pos, center) > op["radius"]:
-        targets = {center}
-        if nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
-            return None
+    if targets == {center} and nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
+        return None
     params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
     found = nearest_explore_target(w, targets, params, knowledge)
     leg = Leg(found[0]) if found and found[1] else None
     path, leg = commit_explore(m, w, label, targets, leg, found[1] if leg else None, params, knowledge)
     return (path, label, leg) if path else None
+
+
+def explore_area_targets(op: GoalOp, w: WorldModel, m: Memory) -> set[Pos]:
+    """The cells an ``explore_area`` op may walk to: its frontier not backed off,
+    else its centre while we stand outside the area."""
+    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, explore_targets(op, w), w.tick)
+    center = (op["x"], op["y"])
+    if not targets and op["radius"] < EXPLORE_ANYWHERE and chebyshev(w.pos, center) > op["radius"]:
+        return {center}
+    return targets
 
 
 def replan(
@@ -287,23 +295,32 @@ def commit_walk(
 def clue_redirects(
     w: WorldModel,
     m: Memory,
-    goal: str,
+    policy: Policy,
+    blocked: set[Pos],
+    costly: set[Pos],
     knowledge: KnowledgeBase | None,
-    targets: Collection[Pos] | None = None,
+    op: GoalOp | None = None,
 ) -> bool:
-    """A direction clue (A32) names a side with frontier on it, and ``goal``'s explore walk heads elsewhere.
+    """A direction clue (A32) names a side the explore walk could go to, and the walk heads elsewhere.
 
-    Then the walk is dropped, with its path when it is the current one, so the
-    next plan takes the clue's side (``nearest_explore_target``): a clue is a
-    target change. Explore calls it each decision before it keeps a path.
-    ``targets`` are the frontier cells to weigh, the whole frontier when
-    None. True when it dropped the walk.
+    The walk is the ``explore_area`` ``op``'s, or with no op the safe
+    default's. Its targets are the planner's own (``explore_area_targets``,
+    ``safe_explore_targets``): only when one on the clue's side is reachable
+    is the walk dropped, with its path when it is the current one, so the
+    next plan takes that side (``nearest_explore_target``). A clue is a
+    target change. A side the planner could not pick never drops the walk,
+    so it is not remade every decision while the clue lasts. Explore calls
+    this each decision before it keeps a path. True when it dropped the walk.
     """
+    goal = plan_op_goal(op) if op is not None else SAFE_EXPLORE_GOAL
     hint = direction_hint(w, knowledge)
     walk = m.walks.get(goal)
     if hint is None or walk is None or on_hint_side(hint, walk.target):
         return False
-    if not any(on_hint_side(hint, t) for t in (w.view.frontier() if targets is None else targets)):
+    targets = explore_area_targets(op, w, m) if op is not None else safe_explore_targets(w, m, policy)
+    side = {t for t in targets if on_hint_side(hint, t)}
+    params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+    if not side or nearest_target(w, side, params) is None:
         return False
     nav_walk.drop(m, goal)
     if m.goal == goal:
@@ -645,6 +662,17 @@ def attempt_plan(
     return plan
 
 
+def safe_explore_targets(w: WorldModel, m: Memory, policy: Policy) -> set[Pos]:
+    """The frontier cells the safe default may walk to (``safe_explore_path``)."""
+    from .states.gather_safe import hostiles_near, is_safe_ish
+
+    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
+    targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
+    if hurt(w):
+        return {p for p in targets if is_safe_ish(w, p, policy)}
+    return {p for p in targets if not hostiles_near(w, p, policy)}
+
+
 def safe_explore_path(
     w: WorldModel,
     m: Memory,
@@ -661,14 +689,7 @@ def safe_explore_path(
     only safe-zone ground (``is_safe_ish``), so the agent heals while it
     looks around. Frontiers backed off after a give-up are skipped (A15).
     """
-    from .states.gather_safe import hostiles_near, is_safe_ish
-
-    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
-    targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
-    if hurt(w):
-        targets = {p for p in targets if is_safe_ish(w, p, policy)}
-    else:
-        targets = {p for p in targets if not hostiles_near(w, p, policy)}
+    targets = safe_explore_targets(w, m, policy)
     params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
     found = nearest_explore_target(w, targets, params, knowledge)
     leg = Leg(found[0]) if found and found[1] else None

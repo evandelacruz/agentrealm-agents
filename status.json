@@ -17,7 +17,7 @@
 
   "A4": {"state": "done"},
 
-  "A5": {"state": "done", "note": "A58 run 9: no position read while off the map; polls tick until Respawned. Keeping other queues out while hit by an unseen source moved to the dispatch restructuring (#106)."},
+  "A5": {"state": "done", "note": "A58 run 9: no position read while off the map; polls tick until Respawned. Keeping other queues out while hit by an unseen source moved to the redirect step 1 (AI plans, state machine executes)."},
 
   "A6": {"state": "done"},
 

@@ -273,6 +273,39 @@ class AnswerTest(unittest.TestCase):
         for op in ("explore_area", "travel", "gather_gems", "buy", "fight_boss", "compose", "use_block", "equip", "wait"):
             self.assertIn(f"- {op}: ", messages[0]["content"])
 
+    def test_prompt_state_marks_pinned_and_planner_ops(self):
+        # Second live Walk run: the planner could not see pins and spent 17 of
+        # 21 calls trying to drop the pinned target. State now marks each op.
+        pinned = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": 1}
+        mine = {"op": "explore_area", "x": 3, "y": 4, "radius": 5}
+        plan = Plan([pinned, mine], dict(PARAM_DEFAULTS), directive_end=1)
+        messages = build_prompt(
+            triggers=[],
+            w=WorldModel(character_id=1, map_id=1, pos=(2, 3), tick=5),
+            plan=plan,
+            directives=Directives(params=dict(PARAM_DEFAULTS)),
+            knowledge=None,
+            given_up_travel={(1, (8, 9)): 4},
+        )
+        state = messages[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn(f"stack (top first):\n  pinned {json.dumps(pinned, sort_keys=True)}\n  planner {json.dumps(mine, sort_keys=True)}", state)
+        self.assertIn('given_up_travel=["1:8,9"]', state)
+        system = messages[0]["content"]
+        self.assertIn("You cannot remove, reorder or replace them", system)
+        self.assertIn("Plan around them", system)
+        self.assertIn("only your own part of the stack", system)
+
+    def test_prompt_state_shows_an_empty_stack(self):
+        messages = build_prompt(
+            triggers=[],
+            w=WorldModel(character_id=1, map_id=1, pos=(2, 3), tick=5),
+            plan=Plan([], dict(PARAM_DEFAULTS)),
+            directives=Directives(params=dict(PARAM_DEFAULTS)),
+            knowledge=None,
+        )
+        self.assertIn("stack: (empty)", messages[1]["content"])
+        self.assertNotIn("given_up_travel", messages[1]["content"])
+
     def test_reply_in_a_code_fence_is_read(self):
         s, r = make(FakeLLM("```json\n" + json.dumps(WAIT_ANSWER) + "\n```")), fake_runner()
         round_trip(s, r)
@@ -283,6 +316,27 @@ class AnswerTest(unittest.TestCase):
         round_trip(s, r)
         self.assertEqual(r.plan.current()["op"], "explore_area")
         self.assertEqual(logged_events(r), ["ask", "kept"])
+
+    def test_a_resent_given_up_travel_never_reaches_the_stack_or_raises_a_trigger(self):
+        # Review on A16: a re-send dropped after it reached the stack queued
+        # goal_failed, which set off another call at once: a replan loop.
+        given_up = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": 7}
+        s = make(FakeLLM({"goals": [given_up, WAIT_ANSWER["goals"][0]]}, {"goals": [given_up]}))
+        r = fake_runner()
+        r.mem.nav_stuck.given_up_travel[(7, (5, 6))] = 1
+        round_trip(s, r)
+        self.assertEqual([g["op"] for g in r.plan.goals[r.plan.index :]], ["wait"])
+        self.assertEqual(r.mem.strategist_signals, [])
+        s.on_window(r)
+        self.assertEqual(s.inbox, [], "no new trigger, so no new call")
+        self.assertIsNone(s.in_flight)
+
+    def test_a_resent_given_up_shop_is_filtered_whatever_its_to(self):
+        shop = {"op": "travel", "to": "shop", "x": 5, "y": 6}
+        s, r = make(FakeLLM({"goals": [shop, WAIT_ANSWER["goals"][0]]})), fake_runner()
+        r.mem.nav_stuck.given_up_travel[(7, (5, 6))] = 1
+        round_trip(s, r)
+        self.assertEqual([g["op"] for g in r.plan.goals[r.plan.index :]], ["wait"])
 
     def test_directives_goals_override_the_planner(self):
         # Directives ops stay on top; the planner's goals go below them.

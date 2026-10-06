@@ -89,9 +89,10 @@ import urllib.error
 import urllib.request
 from collections import Counter, deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Collection, Protocol
 
 from .directives import Directives
+from .travel.resolve import travel_dest
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .planner_reference import game_notes_text, reference_text
@@ -144,7 +145,7 @@ Reply with one JSON object only, no markdown, with these keys:
 Each goal is an object with "op" and that op's fields; every op may also carry "why". These are the only ops (anything else is dropped):
 {_op_table()}
 
-Ops the directives file set (the user's manual steering) stay on top of the stack whatever you send; your goals go below them.
+State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel, of any kind, whose destination is a cell listed under given_up_travel: stuck detection gave up on it this run.
 
 "wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game.
 
@@ -159,7 +160,7 @@ PROGRESSION = """# Progression
 The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. Move on only when its readiness is met; drop back a stage when it no longer is (after a death, say). The thresholds are guidance for you to apply, not rules the code checks.
 
 1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known.
-2. Build up loot, gear and supplies. Gather gems, pick up items, buy potions and gear, equip the best (gather_gems, fetch_item, buy, equip). Ready when health is at least 80% of max, at least 3 potions are held, a weapon better than the starting weapon is armed, and armor is worn (State: health, held, armed, worn).
+2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass and bushes (a gem drops 10% of the time in ring 1, 15% farther out; field work makes about 3 gems a minute), fell trees, take gem piles and break gem caches. Pick up food along the way. Then buy potions and gear and equip the best (gather_gems, break_block, fetch_item, buy, equip). Ready when health is at least 80% of max, at least 3 potions are held, a weapon better than the starting weapon is armed, and armor is worn (State: health, held, armed, worn).
 3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar.
 4. Beat the world. Clear every level to transcend: done when levels_cleared holds level_count levels."""
 
@@ -475,6 +476,7 @@ def build_prompt(
     directives: Directives,
     knowledge: KnowledgeBase | None,
     reference_sections: str = "",
+    given_up_travel: Collection[tuple[int, tuple[int, int]]] = (),
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -489,6 +491,11 @@ def build_prompt(
     ]
     if plan.notes:
         state_lines.append(f"plan_notes={plan.notes!r}")
+    lines = stack_lines(plan)
+    state_lines.append("stack (top first):" + "".join(f"\n  {line}" for line in lines) if lines else "stack: (empty)")
+    if given_up_travel:
+        cells = [f"{mid}:{x},{y}" for mid, (x, y) in sorted(given_up_travel, key=str)]
+        state_lines.append(f"given_up_travel={json.dumps(cells)} (cells stuck detection gave up on: never travel to them again this run)")
     clues: list[dict[str, Any]] = []
     if knowledge is not None:
         with knowledge.lock:
@@ -496,13 +503,21 @@ def build_prompt(
     user_parts = [
         "Triggers:\n" + json.dumps(triggers, sort_keys=True),
         "State:\n" + "\n".join(state_lines),
-        "Current plan (top first):\n" + json.dumps(plan.goals[plan.index :], sort_keys=True),
         "Clues (oldest first):\n" + json.dumps(clues, sort_keys=True),
         "Directives instructions:\n" + (directives.instructions or "(none)"),
     ]
     return [
         {"role": "system", "content": system_prompt(reference_sections), "cache": True},
         {"role": "user", "content": "\n\n".join(user_parts)},
+    ]
+
+
+def stack_lines(plan: Plan) -> list[str]:
+    """The ops left on the stack, top first, each marked ``pinned`` (a
+    directives op, which the planner cannot remove) or ``planner`` (A35)."""
+    return [
+        f"{'pinned' if i < plan.directive_end else 'planner'} {json.dumps(op, sort_keys=True)}"
+        for i, op in enumerate(plan.goals[plan.index :], plan.index)
     ]
 
 
@@ -725,6 +740,7 @@ class Strategist:
             directives=runner.directives.directives,
             knowledge=runner.knowledge,
             reference_sections=self.config.reference_sections,
+            given_up_travel=runner.mem.nav_stuck.given_up_travel,
         )
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1
@@ -792,6 +808,18 @@ class Strategist:
         if isinstance(reply, dict) and "goals" not in reply:
             runner.log("strategist", "no goals in reply; stack kept", {"strategist": {"event": "kept", **record}})
             return
+        given_up = runner.mem.nav_stuck.given_up_travel
+        if given_up:
+            # A travel to a cell stuck detection gave up on never reaches the
+            # stack (A16): filtered here, so a re-send raises no goal_failed
+            # and cannot set off another call.
+            def dest(g):
+                return travel_dest(g, runner.world, runner.knowledge, runner.mem.strength)
+
+            kept = [g for g in goals if dest(g) not in given_up]
+            if len(kept) < len(goals):
+                record["given_up_filtered"] = [g for g in goals if g not in kept]
+                goals = kept
         old = runner.plan
         pinned = old.directive_ops()  # directives ops left: they stay on top
         # A reply that repeats a directives op does not stack it twice.

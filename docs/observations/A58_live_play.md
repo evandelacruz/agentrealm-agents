@@ -28,7 +28,7 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 
 ## Run 3 — aborted: pacing between two cells
 
-- **Character:** chosen at run time, as in run 1 (not committed).
+- **Character:** chosen at run time (not committed).
 - **Gate focus:** safe-zone regen must get a yes/no verdict during a hurt window in a safe tile; navigation already passed on run 1.
 - **Run 3a (stopped after ~5 min):** during the goto walk the character paced back and forth between two cells around x≈616–617 while the goto's stuck escalation was at step 2 (Break). Stopped by hand, so the gate never ran: no verdict, regen not measured.
 - **Run 3b (stopped after ~3 min):** the same pacing, now with an Equip `Wear` and Break walks taking turns with the goto walk. Stopped by hand, so the gate never ran: no verdict, regen not measured.
@@ -95,6 +95,10 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
   - Every Heal walk, and Loot's walk to a pickup, is a stuck attempt (`pathing.bounded_step`), given up on no path, on no progress in 20 moves or 300 ticks, or by the oscillation guard (A10, A15).
   - Regression tests in `python/tests/test_a58_run7.py`: `test_goto_stays_owed_until_stuck_detection_gives_it_up`, `test_explore_moves_only_while_the_goto_is_backed_off`, `test_heal_gives_the_food_up_instead_of_pacing`, `test_loot_gives_the_pickup_up_instead_of_pacing`, `test_the_planner_has_no_step_off_the_dead_end`, `test_heal_only_pacing_is_given_up_by_the_guard`, and the `bounded_step` window tests; plus `test_an_owed_goto_starting_in_fog_keeps_the_move` in `test_cost_grid.py`.
 - **Status:** **Next:** rerun the full live hour.
+
+## Run 8 — in progress
+
+Live hour on main after #101 (Run 7 fixes). Character chosen at run time (not committed). Results pending.
 
 ## Done-when
 

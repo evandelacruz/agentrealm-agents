@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import threading
 import unittest
 from pathlib import Path
@@ -61,10 +62,13 @@ class PromptTest(unittest.TestCase):
         system = prompt()[0]
         self.assertEqual((system["role"], system["cache"]), ("system", True))
 
-    def test_state_carries_what_stage_readiness_needs(self):
-        user = prompt()[1]["content"]
-        for field in ("worn=", "held=", "levels_cleared=", "level_count="):
-            self.assertIn(field, user)
+    def test_every_field_the_progression_names_is_in_state(self):
+        named = re.search(r"Judge the stage from State \(([^)]*)\)", PROGRESSION).group(1)
+        fields = [f.strip() for f in named.split(",")]
+        self.assertTrue({"health", "armed", "worn", "held", "levels_cleared", "level_count"} <= set(fields))
+        state = prompt()[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
+        for field in fields:
+            self.assertRegex(state, rf"\b{field}=", field)
 
     def test_world_reads_levels_cleared_from_a_snapshot(self):
         w = WorldModel(character_id=1)
@@ -103,6 +107,12 @@ class SectionTest(unittest.TestCase):
         picked = select_sections(self.sections, "", budget=60_000)
         self.assertTrue(all(s in picked for s in self.sections if is_core(s)))
         self.assertLessEqual(sum(s.tokens for s in picked), 60_000)
+
+    def test_setup_sections_match_by_key_not_substring(self):
+        picked = {s.key for s in select_sections(self.sections, "", budget=10**9)}
+        self.assertIn("/docs/api / accounts and access", picked)  # play rules, not the manual's setup section
+        self.assertNotIn("/docs/manual / 4. accounts and keys", picked)
+        self.assertFalse(any(k.startswith("/docs/changelog") for k in picked))
 
     def test_core_only_and_a_named_section(self):
         core = select_sections(self.sections, "core")

@@ -36,10 +36,12 @@ Settings (environment variables, defaults in brackets):
 - ``AGENTREALM_PLANNER_EFFORT`` [low]: Anthropic effort level.
 - ``AGENTREALM_PLANNER_REPLAN_S`` [15]: with no event, replan this often.
 - ``AGENTREALM_PLANNER_CALLS_PER_MIN`` [6] and
-  ``AGENTREALM_PLANNER_TOKENS_PER_MIN`` [40000]: the budget, over the last
-  60 seconds of play, every attempt counted. Prompt plus answer tokens as the
-  API reports them; a call that reports none is charged its prompt at 4
-  characters a token. A rolling minute, so a long session never runs dry.
+  ``AGENTREALM_PLANNER_TOKENS_PER_MIN`` [the larger of 40000 and 1.5 times
+  the cached prefix]: the budget, over the last 60 seconds of play, every
+  attempt counted. Uncached input (cache writes included) plus answer tokens
+  as the API reports them, cache reads left out (see below); a call that
+  reports none is charged its uncached prompt at 4 characters a token. A
+  rolling minute, so a long session never runs dry.
 - ``AGENTREALM_PLANNER_HURT_FRACTION`` [0.5]: dropping below this share of
   max health raises ``hurt``.
 - ``AGENTREALM_PLANNER_IDLE_MINUTES`` [10]: no applied Step for this long

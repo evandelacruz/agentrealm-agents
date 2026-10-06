@@ -46,8 +46,13 @@ CORE_SECTIONS = (
     "/docs/api / intents",
     "/docs/api / events",
 )
-# History and setup, not play: left out unless named or ``all``.
-LAST_SECTIONS = ("/docs/changelog", "accounts", "running the stack locally", "quick start")
+# History and setup, not play: left out unless named or ``all``. Key prefixes, like CORE_SECTIONS.
+LAST_SECTIONS = (
+    "/docs/changelog",
+    "/docs/manual / 2. quick start",
+    "/docs/manual / 4. accounts and keys",
+    "/docs/manual / 13. running the stack locally",
+)
 
 
 @dataclass(frozen=True)
@@ -86,8 +91,8 @@ def split_sections(reference: str) -> list[Section]:
 
 
 def missing_core(sections: list[Section]) -> list[str]:
-    """The :data:`CORE_SECTIONS` entries no section matches (a renamed site heading)."""
-    return [c for c in CORE_SECTIONS if not any(s.key.startswith(c) for s in sections)]
+    """The :data:`CORE_SECTIONS` and :data:`LAST_SECTIONS` entries no section matches (a renamed site heading)."""
+    return [c for c in CORE_SECTIONS + LAST_SECTIONS if not any(s.key.startswith(c) for s in sections)]
 
 
 def is_core(section: Section) -> bool:
@@ -109,7 +114,7 @@ def select_sections(
         keep |= {s.key for s in sections if any(w in s.key for w in wanted)}
     else:
         used = sum(s.tokens for s in sections if s.key in keep)
-        rest = [s for s in sections if s.key not in keep and not any(last in s.key for last in LAST_SECTIONS)]
+        rest = [s for s in sections if s.key not in keep and not s.key.startswith(LAST_SECTIONS)]
         for s in rest:
             if used + s.tokens <= budget:
                 keep.add(s.key)

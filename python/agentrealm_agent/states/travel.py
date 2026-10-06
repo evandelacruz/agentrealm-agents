@@ -14,6 +14,7 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import doors_goal_path, route_first_leg
 from ..navigation import stuck as nav_stuck
+from ..navigation import walk as nav_walk
 from ..pathing import grid_params, guided_step, nav_search, next_step
 from ..plan import GoalOp
 from ..travel.ops import travel_op_from_plan_goal
@@ -61,12 +62,18 @@ class TravelState(State):
         if out is not None:
             return out
         goal = f"travel:{dest.label}"
-        if m.goal == goal and m.path and m.path[0] in world.occupied() and not nav_stuck.awaiting_break(m, world, goal):
-            # The route's first step is taken by an occupant: hold while its
-            # window runs (A15), rather than let the safe default step away and
-            # back. A wait is not progress: the op's stall clock runs, so a
-            # permanent occupant cannot pin the stack.
-            return StateOutcome(None, f"{goal}: way taken, waiting", state=self.name, wait=True, progress=False)
+        first = m.path[0] if m.goal == goal and m.path else None
+        if first is not None and not nav_stuck.awaiting_break(m, world, goal):
+            # The route's first step is taken by an occupant, or still unseen on
+            # a path the walk is under way on (A15, A58 run 5): hold while its
+            # window runs, rather than let the safe default step away and back.
+            # A wait is not progress: the op's stall clock runs, so a permanent
+            # occupant cannot pin the stack, and the fog hold ends after
+            # ``walk.FOG_HOLD_TICKS``.
+            if first in world.occupied():
+                return StateOutcome(None, f"{goal}: way taken, waiting", state=self.name, wait=True, progress=False)
+            if first not in world.view.tiles and nav_walk.hold_for_fog(m.walks.get(goal), world):
+                return StateOutcome(None, f"{goal}: next cell unseen, waiting", state=self.name, wait=True, progress=False)
         # Stuck at step 2: Break, below, opens the way this decision.
         return StateOutcome(None, f"{goal} blocked", state=self.name)
 
@@ -131,7 +138,11 @@ def route_step(
         if m.goal == goal:
             m.path, m.goal = [], ""
         return None
-    return guided_step(m, w, goal, leg, plan_avoid, plan, knowledge)
+
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
+
+    return guided_step(m, w, goal, leg, plan_avoid, plan, knowledge, params=params)
 
 
 def _map_leg(

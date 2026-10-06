@@ -21,6 +21,7 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent import __main__ as cli
 from agentrealm_agent.pathing import path_owned_by, plan_op_goal
+from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.strategist import (
     DEFAULT_ANTHROPIC_MODEL,
@@ -282,6 +283,14 @@ class AnswerTest(unittest.TestCase):
 
 class ProgressTest(unittest.TestCase):
     """A timer reply that re-sends the stack must not restart the op on top."""
+
+    def test_a_new_head_drops_every_walk(self):
+        """The new head walks a path of its own: no walk the old stack committed to is kept (A15)."""
+        llm = FakeLLM({"goals": [{"op": "travel", "to": "town", "x": 0, "y": 0}]})
+        s, r = make(llm), fake_runner()
+        r.mem.walks["explore"] = Walk("explore", 1, (5, 0), [(0, 0), (1, 0)])
+        round_trip(s, r)
+        self.assertEqual(r.mem.walks, {})
 
     def test_identical_reply_keeps_the_plan_and_its_progress(self):
         stack = [{"op": "wait", "seconds": 20, "why": "boss spawns"}, {"op": "buy", "code": "torch"}]

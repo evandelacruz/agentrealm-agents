@@ -63,7 +63,10 @@ def _step_toward(w: WorldModel, ctx: PlayContext, goal: Pos) -> Pos | None:
     m, policy = ctx.memory, ctx.policy
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
 
-    def plan() -> list[Pos] | None:
-        return cost_path(w, goal, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, GOAL, goal))
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly)
 
-    return bounded_step(m, w, GOAL, goal, plan_avoid, plan)
+    def plan() -> list[Pos] | None:
+        return cost_path(w, goal, params(), nav=nav_search(m, w, GOAL, goal))
+
+    return bounded_step(m, w, GOAL, goal, plan_avoid, plan, params=params)

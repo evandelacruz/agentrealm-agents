@@ -27,7 +27,7 @@
 
   "A9": {"state": "done"},
 
-  "A10": {"state": "done"},
+  "A10": {"state": "partial", "remaining": "Open bug (A58 run 7): nothing bounds the walk to ground food. The heal_food walk sends a Step every decision and act() clears heal_wait whenever it sends intents, so the 600-tick yield never starts; run 7 paced (404,607) <-> (404,608) for ~30k ticks on one food item. Bound the food walk and state the bound in the PLAN.md A10 row."},
 
   "A11": {"state": "done"},
 
@@ -39,9 +39,9 @@
 
   "A15": {"state": "done"},
 
-  "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58."},
+  "A16": {"state": "partial", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58.", "remaining": "Open bug (A58 run 7): the goto can be dropped without a give-up. When the goto plan has no seen, open first step, replan falls through to explore, and the miss reaches stuck detection only when no goal gets a step, so the goto attempt never escalates or gives up. Run 7 stopped at (556,369), ~19 blocks short of (575,375), then explored the rest of the hour."},
 
-  "A58": {"state": "partial", "remaining": "No live PASS yet. Runs 4 and 6 were stopped by hand with Flee pacing between two cells against two hostiles; run 5 aborted on sustained goto oscillation. Flee now commits to a multi-step escape and the oscillation guard forces one on Flee/Retreat pacing (A9, A15), tested offline only. The next full live hour runs after that merges. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "note": "Waiting on A10, A16 fixes (A58 run 7 bugs); do not rerun the live hour before both merge.", "remaining": "Run 7 (full hour on main after #92/#93): exit 1 — goto (575,375) neither reached nor given up after stopping at corridor waypoint (556,369); safe-zone regen not measured after Heal paced heal_food between (404,607) and (404,608) for most of the hour. Filed as open bugs on A16 (goto dropped without a give-up) and A10 (unbounded food walk); rerun after both fixes merge. Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 

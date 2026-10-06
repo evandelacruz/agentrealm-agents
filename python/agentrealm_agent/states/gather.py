@@ -202,8 +202,10 @@ def _still_wanted(
     if kind == "pile":
         return any(is_gem_pile(e) and e.pos == pos for e in w.entities) and gather_ground(w, pos, policy)
     if kind == OUT:
-        # Off safe ground the field is in view: replan to cut it.
-        return on_safe and not preferred
+        # Kept while on safe ground: it was planned because no cut was
+        # reachable, so re-checking ``preferred`` each tick would only replan
+        # it (A15). Off safe ground the field is in view: replan to cut it.
+        return on_safe
     return w.view.tiles.get(pos) == kind and pos in preferred
 
 

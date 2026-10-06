@@ -325,6 +325,19 @@ class GatherHeadsOutTest(unittest.TestCase):
         self.assertEqual((m.goal, m.gather_target), ("", None))
         self.assertEqual(m.gather_status, gather_mod.CUTTING)
 
+    def test_out_walk_is_kept_while_the_grass_stays_unreachable(self):
+        """Review on #126: walled-off grass dropped the walk out every tick, replanning it (A15)."""
+        w = grid(["......###", "......#g#", "......###"], at=(0, 1))
+        safe(w, *[(x, y) for x in range(5) for y in range(3)])
+        m = Memory()
+        outcome(w, m)
+        self.assertEqual(m.gather_target[0], gather_mod.OUT)
+        path = list(m.path)
+        with mock.patch.object(gather_mod, "_replan_gather") as replan:
+            outcome(w, m)
+        replan.assert_not_called()
+        self.assertEqual(m.path, path)
+
     def test_off_safe_ground_the_out_walk_is_dropped_for_field_grass(self):
         w = grid([".....gg"], at=(0, 0))
         safe(w, *[(x, 0) for x in range(5)])

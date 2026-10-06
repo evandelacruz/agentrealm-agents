@@ -71,7 +71,7 @@ Copy and edit a file in `python/characters/` to try different behavior (`policy.
 - **Dispatcher** walks the states in a fixed priority order, reflexes first. Explore comes last and is the **safe default**: with no plan op it explores safe ground, and once that is all explored it pushes on to the nearest frontier outside (still off hazards and away from hostiles), so the agent is never idle. Exactly one state picks where the character moves.
 - **Plan** is the goal stack, owned by the **AI planner** (A35, a background thread): it replans on every event (op done or dropped, stuck, death, hurt, new clue, new map, Heal out of food with no regen) and every 15 s, within a per-minute call and token budget. Live directives `goals` override it (manual steering): their ops stay on top of the stack until each is done or dropped, and the planner's goals go below them. With no valid plan the planner layer emits nothing and the safe default runs. The planner speaks only in plan ops (`plan.OP_FIELDS`, exactly the ops the executors run): a new behavior is a new op, never a state that starts itself. With `--no-planner` (a test mode) the built-in planner turns the character file's `policy.goals` into ops. Paths are A* over known tiles, around fog and hazards.
 - **Hostiles** are learned too: the API never says which NPC types are monsters. An NPC counts as a threat once its type has swung at us, hit us or died in view this run, or when it is a boss or the one hitting us (`survival.is_hostile`). Flee, Retreat and Fight answer only those, so townsfolk and helpers are left alone; Retreat leaves a fight it would lose only while the group is coming for it (A9, A23).
-- **Gem yield** (A63) is learned, not written in: every block the agent cuts is filed with whether a gem came of it, summed per 16×16-block region of the map. The planner sees the best and the barren regions nearby; Gather cuts field cells before safe-zone ones, anywhere off hazards with no hostile near, holds out a cell whose cut had no effect, marks a region or safe zone uncuttable after 3 such cuts (town grass did not cut in run 2), heads out of safe ground when nothing is left to cut, and stops cutting in a region that shows no gem after 30 cuts (barren) unless the planner names it.
+- **Gem yield** (A63) is learned, not written in: every block the agent cuts is filed with whether a gem came of it, summed per 16×16-block region of the map. The planner sees the best regions at any distance, with how far each is, and the barren ones nearby; Gather cuts field cells before safe-zone ones, anywhere off hazards with no hostile near (the one that hit us within 6 blocks, any other within weapon reach plus a step; one that shadows for 15 s without attacking is fought when the profile fights and would win, else Gather walks well off from it in one go), holds out a cell whose cut had no effect, marks a region or safe zone uncuttable after 3 such cuts (town grass did not cut in run 2), heads out of safe ground when nothing is left to cut, and stops cutting in a region that shows no gem after 30 cuts (barren) unless the planner names it.
 
 Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md). Tables in [`PLAN.md`](PLAN.md): [Scheduler](PLAN.md#scheduler-which-call-this-window), [Reflexes](PLAN.md#reflexes-every-round-trip-no-model), [Plan](PLAN.md#plan-goal-and-path).
 
@@ -101,7 +101,7 @@ Live M6 smoke on olympuff: `make smoke-m6-olympuff CHARACTER_ID=…` (or `CHARAC
 
 Shared acceptance modules: [`acceptance.py`](python/agentrealm_agent/acceptance.py) (runner hooks, request-error counter), [`acceptance_smoke.py`](python/agentrealm_agent/acceptance_smoke.py) (wake, overworld start, the smoke run loop; M7, M8, M9, M10, M11), [`acceptance_run.py`](python/agentrealm_agent/acceptance_run.py) (`TimedRunHooks`: deaths, API errors, the wall-clock stop; `FULL_RUN_FRACTION`; M7, M8, M9, M10, M11) and [`acceptance_survival.py`](python/agentrealm_agent/acceptance_survival.py) (`SurvivalAcceptanceMetrics`: retreat-miss, Recover-withdraw and loop checks, per-gate survival states; `OscillationAbortTracker`; M7, M9, M11).
 
-Every smoke script (M6–M11) and the regen probe park after the run like `run` does (see **Stopping a run**), and take `--park-seconds` (default 60; 0 = off). The park phase is not judged: its windows, Steps and API errors count toward no gate, `finished in` leaves its seconds out, and a death while parking does not fail the end-of-run alive check. The script prints it on its own `park:` line after `finished in`.
+Every smoke script (M6–M11) and the regen probe park after the run like `run` does (see **Stopping a run**), and take `--park-seconds` (default 60; 0 = off). The park phase is not judged: its windows, Steps and API errors count toward no gate, `finished in` leaves its seconds out, and a death while parking does not fail the end-of-run alive check, even under `--stop-on-death`. The script prints it on its own `park:` line after `finished in`.
 
 Live M7 smoke: `make smoke-m7-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m7_olympuff.py`](scripts/smoke_m7_olympuff.py), using profile `python/characters/olympuff_m7.toml` and a character you choose at run time. Start with that character on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out): the script sends the agent to one target 150 blocks east of where it stands (`--target X,Y` overrides), then the planner plays.
 
@@ -111,7 +111,7 @@ Every walk commits to the path it chose and keeps it until it arrives, a step is
 
 Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_agent/m7_acceptance.py)):
 
-- no death (the first one ends the run), and alive at the end of the hour;
+- deaths are counted and reported and play goes on after the respawn; with `--stop-on-death`, no death (the first one fails and ends the run), and alive at the end of the hour;
 - no tick where `should_retreat` held, on the world the decision saw, while a non-survival state ran;
 - Recover withdraws only while standing on a known safe tile (the cell the queue puts it on when the `WithdrawFromChest` runs);
 - no loop: 24 Step-sending decisions in a row at one cell with one reason (waiting, such as Heal resting, is not a loop);
@@ -125,13 +125,13 @@ Give-up rule: navigation passes on a give-up only when stuck detection gave up o
 
 No live hour has passed yet (A58); runs that did not are in [`docs/observations/A16_live_play.md`](docs/observations/A16_live_play.md) and [`docs/observations/A58_live_play.md`](docs/observations/A58_live_play.md). CI covers the gate, the runner hooks and the navigation fixtures in `python/tests/test_m7_acceptance.py` without live keys.
 
-Regen probe (A60): when the world knowledge base has no regen answer yet, run `make probe-regen CHARACTER_ID=…` (same selection as the M7 smoke) before the hour. [`scripts/probe_regen.py`](scripts/probe_regen.py) plays the normal agent on `python/characters/regen_probe.toml`, which fights a hostile in reach to get hurt, retreats at `should_retreat`, and lets Heal measure safe-zone regen on a known safe tile. It stops when regen answers (a "yes" is saved for the M7 gate), after 30 minutes (`--seconds`), or on the first death, and exits 0 only when regen answered.
+Regen probe (A60): when the world knowledge base has no regen answer yet, run `make probe-regen CHARACTER_ID=…` (same selection as the M7 smoke) before the hour. [`scripts/probe_regen.py`](scripts/probe_regen.py) plays the normal agent on `python/characters/regen_probe.toml`, which fights a hostile in reach to get hurt, retreats at `should_retreat`, and lets Heal measure safe-zone regen on a known safe tile. It stops when regen answers (a "yes" is saved for the M7 gate), or after 30 minutes (`--seconds`), and exits 0 only when regen answered; a death is reported and the probe plays on, unless `--stop-on-death` makes the first one fail and end it.
 
 Live M8 smoke: `make smoke-m8-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m8_olympuff.py`](scripts/smoke_m8_olympuff.py), using profile `python/characters/olympuff_m8.toml` and a character you choose at run time. Start on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out).
 
 Pass criteria (PLAN.md A25, checked in [`m8_acceptance.py`](python/agentrealm_agent/m8_acceptance.py)):
 
-- no death (the first one ends the run), and alive at the end of the run;
+- deaths are counted and reported and play goes on after the respawn; with `--stop-on-death`, no death (the first one fails and ends the run), and alive at the end of the run;
 - no fight started below the health floor (`would_lose` at the first attack after entering **Fight**);
 - no API error;
 - on a run of at least 95% of an hour: gems earned at least once; armor worn; a shop weapon armed; potion reserve reached; **Heal** took ground food and drank a carried potion; at least one lone weak hostile kill (`NPCDied` for the NPC **Fight** attacked while it was the lone hostile, of a measured type hitting at most 2).
@@ -142,7 +142,7 @@ Live M9 smoke: `make smoke-m9-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…
 
 Pass criteria (PLAN.md A29, checked in [`m9_acceptance.py`](python/agentrealm_agent/m9_acceptance.py)):
 
-- no death, and alive at the end;
+- deaths are counted and reported and play goes on after the respawn; with `--stop-on-death`, no death (the first one fails and ends the run), and alive at the end;
 - no tick where `should_retreat` held while a non-survival state ran;
 - Recover withdraws only on a known safe tile;
 - no loop (24 Steps in a row at one cell with one reason);
@@ -155,7 +155,7 @@ Live M10 smoke: `make smoke-m10-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=�
 
 Pass criteria (PLAN.md A33, checked in [`m10_acceptance.py`](python/agentrealm_agent/m10_acceptance.py)):
 
-- no death, and alive at the end of the run;
+- deaths are counted and reported and play goes on after the respawn; with `--stop-on-death`, no death (the first one fails and ends the run), and alive at the end of the run;
 - no Break attempt on a (block, capability) pair already failed in the knowledge base (re-breaking a regrown block a pair opened is fine);
 - no API error;
 - on a run of at least 95% of the default hour, every readable sign that came into sight along the route has been read, and every NPC that came within 25 blocks has been spoken to;
@@ -176,7 +176,7 @@ Live M11 smoke: `make smoke-m11-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=�
 
 Pass criteria (PLAN.md A40, checked in [`m11_acceptance.py`](python/agentrealm_agent/m11_acceptance.py)):
 
-- no death (the first one ends the run), and alive at the end;
+- deaths are counted and reported and play goes on after the respawn; with `--stop-on-death`, no death (the first one fails and ends the run), and alive at the end;
 - no tick where `should_retreat` held outside a survival state (including Boss during a boss fight);
 - Recover withdraws only on a known safe tile;
 - no loop or sustained oscillation (same thresholds as M7);

@@ -13,6 +13,7 @@ from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.executor import step_landing
 from agentrealm_agent.runner import Runner
+from agentrealm_agent.states.intents import set_position, take
 from agentrealm_agent.threat import type_key_for_entity
 from agentrealm_agent.world import Entity, WorldModel
 
@@ -285,14 +286,15 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual([i["verb"] for i in r.intents_for(Decision(use, "test"))], ["Wait"] * 2 + ["Use"])
 
     def test_non_movement_intent_is_sent_alone(self):
-        # Movement, Use, and Say become paced queues; a Take goes as one intent.
+        # Movement, Use, and Say become paced queues; a Take goes as one
+        # intent, still held as a queue until it runs (A63 run 3).
         fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
         r = self.runner(fake, Policy(goals=[], pickup=True))
         r.world.entities = [Entity("supply", 5, (1, 0), "apple")]
         r.tick()
         self.assertEqual(fake.sent[0][0], [{"verb": "Take", "supply_id": 5}])
         self.assertEqual(r.mem.pending, {"verb": "Take", "supply_id": 5})
-        self.assertIsNone(r.mem.held_queue)
+        self.assertEqual(r.mem.held_queue, {"queue_id": "q1", "next_index": 0})
 
     def test_unmatched_results_do_not_hold_the_queue_forever(self):
         # Results that never name our queue must not stall the character.
@@ -726,6 +728,100 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(last["level_clear_ceremony"], ceremony)
         self.assertIn("level_duration_s", last)
         self.assertIn("level_duration_ticks", last)
+
+    # A63 run 3: a reflex replacing a held queue whose Step may already have run.
+
+    def flee_runner(self, ticks: list[dict], lava: list[tuple[int, int]]) -> tuple[Runner, FakeClient]:
+        fake = FakeClient(ticks)
+        r = self.runner(fake, Policy(goals=[], avoid_blocks=["lava"]))
+        r.world.pos = (0, 2)
+        for y in range(3):
+            for x in range(5):
+                r.world.view.tiles[(x, y)] = "dirt"
+        for cell in lava:
+            r.world.view.tiles[cell] = "lava"
+        return r, fake
+
+    def flee(self, r: Runner, cell: tuple[int, int]) -> None:
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(set_position(cell), "flee", reflex=True)):
+            r.tick()
+
+    def test_the_same_flee_step_keeps_the_held_queue(self):
+        # Flee queued a Step up_right to (1, 1); it ran, but its result is not
+        # back. Flee picks (1, 1) again: re-aimed from the stale (0, 2), the
+        # Step would go from (1, 1) to (2, 0), the lava.
+        r, fake = self.flee_runner([{"tick": 10, "window_remaining_ms": 0}] * 2, lava=[(2, 0)])
+        self.flee(r, (1, 1))
+        self.assertEqual(fake.sent[0][0], [{"verb": "Step", "direction": "up_right"}])
+        r.mem.path, r.mem.goal = [(2, 1)], "walk"  # the plan the held queue walks
+        rng = r.rng.getstate()
+
+        def flee_again(w, m, *a, **k):
+            m.path, m.goal = [], ""  # Flee drops the walk, as FleeState does
+            r.rng.random()
+            return Decision(set_position((1, 1)), "flee", reflex=True)
+
+        with mock.patch("agentrealm_agent.runner.decide", side_effect=flee_again):
+            r.tick()
+        self.assertIsNone(fake.sent[1][0], "the running queue already steps there")
+        self.assertEqual(r.mem.pending_queue, "q1")
+        self.assertEqual((r.mem.path, r.mem.goal), ([(2, 1)], "walk"), "memory keeps the held queue's plan")
+        self.assertEqual(r.rng.getstate(), rng)
+
+    def test_flee_goes_out_past_a_long_held_walk(self):
+        # Only the Steps elapsed ticks could have run count as possible starts:
+        # cells far along a long held walk cannot be where we stand.
+        r, fake = self.flee_runner([{"tick": 10, "window_remaining_ms": 0}] * 2, lava=[])
+        for x in range(3, 5):
+            del r.world.view.tiles[(x, 1)]  # fog above the far end of the walk
+        walk = [{"verb": "Step", "direction": "right"}] + [{"verb": "Wait"}] * 3
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(None, "walk", submit_queue=walk * 4)):
+            r.tick()
+        self.flee(r, (0, 1))
+        self.assertEqual(fake.sent[1][0], [{"verb": "Step", "direction": "up"}], "not a Wait")
+
+    def test_a_new_step_that_may_land_on_lava_is_not_sent(self):
+        # Flee now wants (1, 2). From (0, 2) that is `right`; if the held Step
+        # to (1, 1) already ran, `right` lands on (2, 1), the lava.
+        r, fake = self.flee_runner([{"tick": 10, "window_remaining_ms": 0}] * 2, lava=[(2, 1)])
+        self.flee(r, (1, 1))
+        self.flee(r, (1, 2))
+        self.assertEqual(fake.sent[1][0], [{"verb": "Wait"}], "stop, do not step blind")
+        self.assertTrue(r.mem.need_position, "re-read where we are before the next step")
+        self.assertIsNone(r.mem.pending_intents)
+
+    def test_a_new_step_clear_from_every_start_is_sent(self):
+        r, fake = self.flee_runner([{"tick": 10, "window_remaining_ms": 0}] * 2, lava=[])
+        self.flee(r, (1, 1))
+        self.flee(r, (1, 2))
+        self.assertEqual(fake.sent[1][0], [{"verb": "Step", "direction": "right"}])
+
+    def test_a_lone_take_is_held_until_it_runs(self):
+        # A63 run 3: 20 of 22 Takes were sent twice, the second before the
+        # first had reported. A lone intent waits for its result or
+        # finished_queue like any queue (B133).
+        applied = {"tick": 11, "queue_id": "q1", "index": 0, "outcome": "applied"}
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0},
+            {"tick": 11, "window_remaining_ms": 0},
+            {"tick": 12, "window_remaining_ms": 0, "intent_results": [applied],
+             "finished_queue": {"queue_id": "q1", "length": 1}},
+            {"tick": 13, "window_remaining_ms": 0},
+        ])
+        r = self.runner(fake, Policy(goals=[]))
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(take(9), "take gem")):
+            r.tick()
+            self.assertEqual(fake.sent[0][0], [take(9)])
+            self.assertIsNotNone(r.mem.held_queue, "the Take is held as a queue")
+            r.tick()
+            self.assertIsNone(fake.sent[1][0], "not sent again before it has run")
+            r.tick()
+            self.assertIsNone(fake.sent[2][0])
+            self.assertIsNone(r.mem.held_queue, "its result and finished_queue end the hold")
+            r.tick()
+            self.assertEqual(fake.sent[3][0], [take(9)], "decided again only after it ran")
+        self.assertFalse(r.mem.need_position, "a Take moved nothing")
+
 
 class NeverAttackRunnerTest(RunnerTest):
     """The executor drops a Use on a never_attack target, whatever decided it (A8)."""

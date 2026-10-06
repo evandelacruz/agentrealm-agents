@@ -171,11 +171,22 @@ class ProbeRunTest(unittest.TestCase):
                 hooks.on_death()
 
         FakeRunner.events = staticmethod(dies)
-        code, _, err = self.run_probe()
+        code, _, err = self.run_probe("--stop-on-death")
         self.assertEqual(code, 1)
         self.assertEqual(FakeRunner.windows, 3, "nothing more after the death")
         self.assertIn("1 death(s)", err)
         self.assertIsNone(self.saved_regen())
+
+    def test_by_default_a_death_is_reported_and_the_probe_plays_on(self):
+        def dies(w, hooks):
+            if w.tick == 30:
+                hooks.on_death()
+
+        FakeRunner.events = staticmethod(dies)
+        _, out, err = self.run_probe()
+        self.assertGreater(FakeRunner.windows, 3, "play goes on after the respawn")
+        self.assertIn("deaths: 1", out)
+        self.assertNotIn("death(s)", err)
 
     def test_a_yes_already_saved_answers_at_once(self):
         self.assertEqual(self.run_probe()[0], 0)  # "no": nothing saved

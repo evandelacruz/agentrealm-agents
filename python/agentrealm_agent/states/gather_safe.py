@@ -13,13 +13,25 @@ from __future__ import annotations
 
 from ..config import Policy
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
-from ..world import NEIGHBOURS, Pos, WorldModel, chebyshev
+from ..survival import is_attacker, is_hostile, recently_attacked
+from ..world import NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import RESPAWN_PROBE_RADIUS, safe_tiles
 
 
-# Gather keeps this far from any known hostile: the radius inside which the
-# path planner already prices a hostile's cells as dangerous.
+# Gather keeps this far from the hostile that hit us: the radius inside which
+# the path planner already prices a hostile's cells as dangerous.
 GATHER_HOSTILE_RADIUS = HOSTILE_DANGER_RADIUS
+# A hostile that has not hit us bars only cells within our weapon reach of it
+# plus this many steps: one that followed at 4–6 blocks without attacking
+# stopped all cutting for 45 s under the full radius (A63 run 3).
+GATHER_SHADOW_MARGIN = 1
+
+
+def gather_bar(w: WorldModel, e: Entity) -> int:
+    """How far from threat ``e`` (``is_hostile``) Gather keeps the cells it works."""
+    if recently_attacked(w) and is_attacker(w, e):
+        return GATHER_HOSTILE_RADIUS
+    return (w.attack_range or 1) + GATHER_SHADOW_MARGIN
 
 
 def hostiles_near(w: WorldModel, pos: Pos, policy: Policy, radius: int | None = None) -> bool:
@@ -32,13 +44,15 @@ def gather_ground(w: WorldModel, pos: Pos, policy: Policy) -> bool:
     """Known ground where cutting grass or a bush, or taking a gem pile, is allowed.
 
     The cell must be revealed, not on a hazard tile, and have no known
-    hostile within ``GATHER_HOSTILE_RADIUS``. Safe zones are not required.
+    hostile within its ``gather_bar``: ``GATHER_HOSTILE_RADIUS`` for the one
+    that hit us, our weapon reach plus a step for any other. Safe zones are
+    not required.
     """
     if w.map_id is None or pos not in w.view.tiles:
         return False
     if w.view.tiles.get(pos) in policy.avoid_blocks:
         return False
-    return not hostiles_near(w, pos, policy, GATHER_HOSTILE_RADIUS)
+    return not any(is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= gather_bar(w, e) for e in w.entities)
 
 
 def near_respawn_anchor(w: WorldModel, pos: Pos) -> bool:

@@ -18,6 +18,7 @@ from .strategist import Strategist
 
 DEFAULT_BASE = "https://api.agentrealm.gg"
 NO_PLANNER_HELP = "test mode: play without the AI planner (A35)"
+STOP_ON_DEATH_HELP = "fail the run and end it at the first death; by default deaths are counted and reported and play goes on after the respawn"
 
 
 def add_park_argument(ap: argparse.ArgumentParser) -> None:
@@ -25,19 +26,29 @@ def add_park_argument(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--park-seconds", type=float, default=DEFAULT_PARK_SECONDS, help=PARK_SECONDS_HELP)
 
 
-def alive_at_end_failures(client: Client, cid: int, metrics: ParkSplit) -> list[str]:
+def alive_at_end_failures(
+    client: Client, cid: int, metrics: ParkSplit, *, stop_on_death: bool, out: Callable[[str], None] = print
+) -> list[str]:
     """The end-of-run alive check, as gate failures.
 
-    A death in the park phase (A66) belongs to the park, which is reported on
-    its own line (``ParkSplit.park_summary_line``), not to the scenario.
+    Only the no-death gate (``--stop-on-death``) fails a run that ends dead;
+    otherwise a dead character is reported and left to respawn. A death in
+    the park phase (A66) belongs to the park, which is reported on its own
+    line (``ParkSplit.park_summary_line``), never to the scenario.
     """
     try:
         alive = client.self_(cid).get("alive", True)
     except ApiError as e:
         return [f"self read failed: {e.code}"]
-    if alive or (metrics.park is not None and metrics.park.outcome == PARK_DIED):
+    if alive:
         return []
-    return ["character not alive at end"]
+    if metrics.park is not None and metrics.park.outcome == PARK_DIED:
+        out("character not alive at end (died while parking; respawning)")
+        return []
+    if stop_on_death:
+        return ["character not alive at end"]
+    out("character not alive at end (respawning)")
+    return []
 
 
 def planner_for(no_planner: bool) -> Strategist:

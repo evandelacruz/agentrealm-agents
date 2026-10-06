@@ -216,7 +216,7 @@ class SurvivalGateTest(unittest.TestCase):
         self.assertEqual(m.failures(), [])
 
     def test_a_death_fails_the_run(self):
-        m = metrics()
+        m = metrics(stop_on_death=True)
         m.on_death()
         self.assertIn("1 death(s) during run", m.failures(full_hour=False))
 
@@ -355,7 +355,7 @@ class RunnerHookTest(RunnerCase):
 
     def test_died_event_reaches_on_death(self):
         stop = threading.Event()
-        m = metrics()
+        m = metrics(stop_on_death=True)
         server = TownServer(10, stop)
         r = self.make_runner(server, stop, m)
         m.stop = stop

@@ -131,7 +131,7 @@ class LevelGateTest(unittest.TestCase):
 
 class SharedSurvivalGateTest(unittest.TestCase):
     def test_death_and_loop_fail(self):
-        m = metrics()
+        m = metrics(stop_on_death=True)
         m.on_death()
         self.assertIn("death(s)", m.failures(full_run=False)[0])
         for _ in range(24):

@@ -23,6 +23,10 @@ class TimedRunHooks(PlannerHealth, ParkSplit):
     target_seconds: float | None = None  # wall-clock length of the run; None plays until stopped
     clock: Callable[[], float] = time.monotonic
     started_at: float | None = None
+    # Off (the default): deaths are counted and reported, and play goes on
+    # after the respawn, since a run that takes risks will die sometimes. On:
+    # the no-death gate, where the first death fails the run and ends it.
+    stop_on_death: bool = False
     deaths: int = 0
     api_errors: list[str] = field(default_factory=list)
 
@@ -42,14 +46,14 @@ class TimedRunHooks(PlannerHealth, ParkSplit):
             self.stop.set()
 
     def on_death(self) -> None:
-        """A death already fails the run, so end it rather than play on."""
+        """Count it. Under ``stop_on_death`` it already fails the run, so end it rather than play on."""
         self.deaths += 1
-        if self.stop is not None:
+        if self.stop_on_death and self.stop is not None:
             self.stop.set()
 
     def base_failures(self) -> list[str]:
         out: list[str] = []
-        if self.deaths:
+        if self.deaths and self.stop_on_death:
             out.append(f"{self.deaths} death(s) during run")
         if self.api_errors:
             out.append(f"{len(self.api_errors)} API error(s): {', '.join(sorted(set(self.api_errors)))}")

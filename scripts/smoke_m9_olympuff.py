@@ -30,7 +30,7 @@ sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
 from agentrealm_agent.acceptance_run import FULL_RUN_FRACTION  # noqa: E402
-from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, add_park_argument, alive_at_end_failures, navigation_start, planner_for, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, STOP_ON_DEATH_HELP, add_park_argument, alive_at_end_failures, navigation_start, planner_for, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.directives import Directives, default_directives, load_directives  # noqa: E402
@@ -158,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     ap.add_argument("--no-planner", action="store_true", help=NO_PLANNER_HELP)
+    ap.add_argument("--stop-on-death", action="store_true", help=STOP_ON_DEATH_HELP)
     add_park_argument(ap)
     ap.add_argument(
         "--seconds",
@@ -216,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         f"→ up to {args.seconds:.0f}s on overworld {overworld}, base {args.base_url}",
         flush=True,
     )
-    metrics = M9AcceptanceMetrics(target_seconds=args.seconds)
+    metrics = M9AcceptanceMetrics(stop_on_death=args.stop_on_death, target_seconds=args.seconds)
     metrics, elapsed = run_smoke(client, cfg, cid, metrics, timeout_s=args.timeout, planner=planner, park_seconds=args.park_seconds)
     print(f"finished in {elapsed:.1f}s", flush=True)
     print(metrics.park_summary_line(), flush=True)
@@ -227,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     failures = list(metrics.failures(full_run=full_run))
     if full_run and elapsed + 1.0 < args.seconds and not metrics.entrances_ok():
         failures.append(f"ran {elapsed:.0f}s < target {args.seconds:.0f}s without finishing entrances")
-    failures.extend(alive_at_end_failures(client, cid, metrics))
+    failures.extend(alive_at_end_failures(client, cid, metrics, stop_on_death=args.stop_on_death))
     if failures:
         print("FAIL:", "; ".join(failures), file=sys.stderr)
         return 1

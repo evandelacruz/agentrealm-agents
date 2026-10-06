@@ -297,11 +297,19 @@ class ParkSplitTest(unittest.TestCase):
     def test_a_death_while_parking_does_not_fail_the_alive_check(self):
         client = mock.Mock()
         client.self_.return_value = {"alive": False}
-        hooks = ParkSplit()
+        hooks, lines = ParkSplit(), []
+
+        def check():
+            return acceptance_smoke.alive_at_end_failures(client, 1, hooks, stop_on_death=True, out=lines.append)
+
         hooks.park = ParkReport(PARK_DIED, 3.0, MAP, (1, 0), False)
-        self.assertEqual(acceptance_smoke.alive_at_end_failures(client, 1, hooks), [])
+        self.assertEqual(check(), [], "the no-death gate judges the scenario, not the park")
+        self.assertIn("died while parking", lines[-1])
         hooks.park = ParkReport(PARKED_SAFE, 3.0, MAP, SAFE, True)
-        self.assertEqual(acceptance_smoke.alive_at_end_failures(client, 1, hooks), ["character not alive at end"])
+        self.assertEqual(check(), ["character not alive at end"])
+        self.assertEqual(
+            acceptance_smoke.alive_at_end_failures(client, 1, hooks, stop_on_death=False, out=lines.append), []
+        )
 
 
 class StopSignalsTest(unittest.TestCase):

@@ -17,6 +17,7 @@ that commits waits for its own route to be seen, then walks it.
 import random
 import unittest
 
+from agentrealm_agent.clues import record_clue
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_base import KnowledgeBase
@@ -115,6 +116,25 @@ class Run5FlipTest(unittest.TestCase):
         self.assertEqual(back_steps(cells), [], cells)
         self.assertEqual(cells[-1], GOTO, cells)
         self.assertTrue(set(NORTH) >= set(cells[1:]), "stays on the north route")
+
+    def test_the_fog_hold_ends(self):
+        """Travel holds the round while its walk waits on an unseen next cell,
+        as no progress, and only for ``FOG_HOLD_TICKS``: then the round falls
+        through, so a cell never seen cannot pin the walk."""
+        w, c = world(), ctx()
+        out = dispatch(w, c)
+        w.pos, c.memory.path = NORTH[0], c.memory.path[1:]
+        nav_stuck.on_step(c.memory, w)
+        reasons = []
+        for _ in range(8):
+            out = dispatch(w, c)
+            reasons.append((w.tick, out.reason, out.wait, out.progress))
+            w.tick += 10
+        held = [r for r in reasons if "next cell unseen" in r[1]]
+        self.assertTrue(held, reasons)
+        self.assertTrue(all(r[2] and r[3] is False for r in held), "a wait that is not progress")
+        self.assertLessEqual(held[-1][0] - held[0][0], nav_walk.FOG_HOLD_TICKS, reasons)
+        self.assertNotIn("next cell unseen", reasons[-1][1], "the hold ended")
 
     def test_a_route_that_turns_out_walled_is_dropped_for_the_other(self):
         """Newly seen terrain that blocks the route is a reason to switch,
@@ -312,22 +332,27 @@ class ExploreKeepsItsFrontierTest(unittest.TestCase):
     def floor(self, x: int) -> str:
         return "dirt" if self.WEST_END <= x <= self.EAST_END else "stone"
 
-    def test_a_reveal_ahead_never_turns_explore_round(self):
-        """Each move shows three more floor tiles ahead, so the frontier ahead
-        recedes faster than the agent walks and the one behind becomes the
-        nearest. Explore still walks west until it has seen the west end, and
-        turns east only then."""
-        w = self.world()
-        c = PlayContext(
+    def ctx(self, *, plan: bool) -> PlayContext:
+        """The safe default's explore, or with ``plan`` the built-in plan's ``explore_area`` op."""
+        policy = Policy(kind="scripted", goals=["explore"], pickup=False, hostile=[])
+        params = dict(PARAM_DEFAULTS)
+        return PlayContext(
             Memory(),
-            Policy(kind="scripted", goals=["explore"], pickup=False, hostile=[]),
+            policy,
             random.Random(0),
-            params=dict(PARAM_DEFAULTS),
+            params=params,
             knowledge=KnowledgeBase.empty("sandbox"),
+            plan=Plan.from_policy(policy, params) if plan else None,
         )
+
+    def walk(self, w, c, decisions=30, before_decision=None):
+        """Decide and land each move; each move shows three more floor tiles
+        ahead. Returns the cells, and the tiles seen when it first turned east."""
         cells = [w.pos]
         seen_when_turned = None
-        for _ in range(30):
+        for i in range(decisions):
+            if before_decision is not None:
+                before_decision(i, w, c)
             before = w.pos
             out = dispatch(w, c)
             w.tick += 10
@@ -346,12 +371,42 @@ class ExploreKeepsItsFrontierTest(unittest.TestCase):
             for x in range(edge + ahead, edge + 4 * ahead, ahead):
                 if self.WEST_END - 1 <= x <= self.EAST_END + 1:
                     w.view.tiles[(x, 0)] = self.floor(x)
-        xs = [x for x, _ in cells]
-        turn = xs.index(min(xs))
-        self.assertEqual(xs[: turn + 1], list(range(0, -turn - 1, -1)), f"straight west first: {cells}")
-        self.assertEqual(xs[turn:], list(range(xs[turn], xs[-1] + 1)), f"then straight east: {cells}")
-        self.assertIn((self.WEST_END - 1, 0), seen_when_turned, "turns only once the west end is seen")
-        self.assertEqual(c.memory.nav_stuck.oscillations, [], "the guard is never needed")
+        return cells, seen_when_turned
+
+    def test_a_reveal_ahead_never_turns_explore_round(self):
+        """Each move shows three more floor tiles ahead, so the frontier ahead
+        recedes faster than the agent walks and the one behind becomes the
+        nearest. Explore still walks west until it has seen the west end, and
+        turns east only then: the safe default and an ``explore_area`` op alike."""
+        for plan in (False, True):
+            with self.subTest(plan=plan):
+                w, c = self.world(), self.ctx(plan=plan)
+                cells, seen_when_turned = self.walk(w, c)
+                xs = [x for x, _ in cells]
+                turn = xs.index(min(xs))
+                self.assertEqual(xs[: turn + 1], list(range(0, -turn - 1, -1)), f"straight west first: {cells}")
+                self.assertEqual(xs[turn:], list(range(xs[turn], xs[-1] + 1)), f"then straight east: {cells}")
+                self.assertIn((self.WEST_END - 1, 0), seen_when_turned, "turns only once the west end is seen")
+                self.assertEqual(c.memory.nav_stuck.oscillations, [], "the guard is never needed")
+                if plan:
+                    self.assertIn("explore_area", c.memory.walks, "walked as the plan op")
+
+    def test_a_clue_mid_walk_turns_explore_to_its_side(self):
+        """A32: a direction clue is a target change. Read three moves into the
+        walk west, a sign saying east turns Explore round at once, and it keeps
+        walking east."""
+        for plan in (False, True):
+            with self.subTest(plan=plan):
+                w, c = self.world(), self.ctx(plan=plan)
+
+                def read_sign(i, w, c):
+                    if i == 3:
+                        record_clue(c.knowledge, c.memory, kind="sign", text="Go east.", map_id=1, x=w.pos[0], y=0, tick=w.tick)
+
+                cells, _ = self.walk(w, c, decisions=12, before_decision=read_sign)
+                xs = [x for x, _ in cells]
+                self.assertEqual(xs[:4], [0, -1, -2, -3], cells)
+                self.assertEqual(xs[3:], list(range(-3, -3 + len(xs) - 3)), f"east from the sign on: {cells}")
 
 
 if __name__ == "__main__":

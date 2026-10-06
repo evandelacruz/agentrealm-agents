@@ -68,10 +68,11 @@ class TravelState(State):
             # a path the walk is under way on (A15, A58 run 5): hold while its
             # window runs, rather than let the safe default step away and back.
             # A wait is not progress: the op's stall clock runs, so a permanent
-            # occupant or a cell never seen cannot pin the stack.
+            # occupant cannot pin the stack, and the fog hold ends after
+            # ``walk.FOG_HOLD_TICKS``.
             if first in world.occupied():
                 return StateOutcome(None, f"{goal}: way taken, waiting", state=self.name, wait=True, progress=False)
-            if first not in world.view.tiles and nav_walk.underway(m.walks.get(goal), world):
+            if first not in world.view.tiles and nav_walk.hold_for_fog(m.walks.get(goal), world):
                 return StateOutcome(None, f"{goal}: next cell unseen, waiting", state=self.name, wait=True, progress=False)
         # Stuck at step 2: Break, below, opens the way this decision.
         return StateOutcome(None, f"{goal} blocked", state=self.name)

@@ -53,6 +53,11 @@ if TYPE_CHECKING:
 # than this share of the rest of that path.
 SWITCH_GAIN = 0.2
 
+# How long a walk under way may hold the round on an unseen next cell before
+# the round falls through to the states below (5 s at 10 ticks/s: a few
+# terrain reads).
+FOG_HOLD_TICKS = 50
+
 
 @dataclass
 class Walk:
@@ -63,6 +68,7 @@ class Walk:
     target: Pos
     cells: list[Pos]  # the cell it was planned on, then each step
     came_from: Pos | None = None  # the cell before ``cells[0]``, when the walk went on from another
+    held: tuple[Pos, int] | None = None  # (cell, tick) it began holding on an unseen next cell
 
 
 def rest(
@@ -86,6 +92,19 @@ def rest(
 def underway(walk: Walk | None, w: WorldModel) -> bool:
     """We stand on ``walk`` past the cell it was planned on: it has been walked, not just chosen."""
     return walk is not None and walk.map_id == w.map_id and w.pos in walk.cells[1:]
+
+
+def hold_for_fog(walk: Walk | None, w: WorldModel) -> bool:
+    """A walk under way whose next cell is unseen may hold the round, for ``FOG_HOLD_TICKS`` at one cell.
+
+    After that the round falls through, so a cell that is never seen cannot
+    pin the walk.
+    """
+    if not underway(walk, w):
+        return False
+    if walk.held is None or walk.held[0] != w.pos:
+        walk.held = (w.pos, w.tick)
+    return w.tick - walk.held[1] < FOG_HOLD_TICKS
 
 
 def commit(

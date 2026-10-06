@@ -6,7 +6,7 @@ import dataclasses
 from typing import Callable, Collection
 
 from .break_memory import break_costs_for_planning, nominate_on_path
-from .clues import nearest_explore_target
+from .clues import direction_hint, nearest_explore_target, on_hint_side
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -216,7 +216,7 @@ def path_for_plan_op(
     params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
     found = nearest_explore_target(w, targets, params, knowledge)
     leg = Leg(found[0]) if found and found[1] else None
-    path, leg = commit_explore(m, w, label, targets, leg, found[1] if leg else None, params)
+    path, leg = commit_explore(m, w, label, targets, leg, found[1] if leg else None, params, knowledge)
     return (path, label, leg) if path else None
 
 
@@ -284,6 +284,33 @@ def commit_walk(
     return path
 
 
+def clue_redirects(
+    w: WorldModel,
+    m: Memory,
+    goal: str,
+    knowledge: KnowledgeBase | None,
+    targets: Collection[Pos] | None = None,
+) -> bool:
+    """A direction clue (A32) names a side with frontier on it, and ``goal``'s explore walk heads elsewhere.
+
+    Then the walk is dropped, with its path when it is the current one, so the
+    next plan takes the clue's side (``nearest_explore_target``): a clue is a
+    target change. Explore calls it each decision before it keeps a path.
+    ``targets`` are the frontier cells to weigh, the whole frontier when
+    None. True when it dropped the walk.
+    """
+    hint = direction_hint(w, knowledge)
+    walk = m.walks.get(goal)
+    if hint is None or walk is None or on_hint_side(hint, walk.target):
+        return False
+    if not any(on_hint_side(hint, t) for t in (w.view.frontier() if targets is None else targets)):
+        return False
+    nav_walk.drop(m, goal)
+    if m.goal == goal:
+        m.path, m.goal = [], ""
+    return True
+
+
 def commit_explore(
     m: Memory,
     w: WorldModel,
@@ -292,6 +319,7 @@ def commit_explore(
     leg: Leg | None,
     found: list[Pos] | None,
     params: CostGridParams,
+    knowledge: KnowledgeBase | None = None,
 ) -> tuple[list[Pos] | None, Leg | None]:
     """``commit_walk`` for an explore walk (``explore``, ``explore_area``), and the leg it walks.
 
@@ -301,10 +329,15 @@ def commit_explore(
     nearest never turns it round; only a route there cheaper by more than
     ``walk.SWITCH_GAIN`` does, or the kept one being blocked. ``leg`` and
     ``found`` are the planner's choice, None when it found no frontier.
-    """
 
+    A direction clue (A32) is a target change: Explore calls
+    ``clue_redirects`` first each decision, which drops a walk heading off
+    the clue's side; a re-aim prefers that side too (``nearest_explore_target``).
+    """
     def ahead(back: Pos | None) -> tuple[Pos, list[Pos]] | None:
-        found = nearest_target(w, targets, dataclasses.replace(params, avoid=params.avoid | {back} - {None}))
+        found = nearest_explore_target(
+            w, targets, dataclasses.replace(params, avoid=params.avoid | {back} - {None}), knowledge
+        )
         # Only a way on that starts on a seen, open step; one through fog is no way on yet.
         return found if found and next_step(w, params.avoid, found[1]) else None
 
@@ -639,5 +672,5 @@ def safe_explore_path(
     params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
     found = nearest_explore_target(w, targets, params, knowledge)
     leg = Leg(found[0]) if found and found[1] else None
-    path, leg = commit_explore(m, w, SAFE_EXPLORE_GOAL, targets, leg, found[1] if leg else None, params)
+    path, leg = commit_explore(m, w, SAFE_EXPLORE_GOAL, targets, leg, found[1] if leg else None, params, knowledge)
     return (path, leg) if path else (None, None)

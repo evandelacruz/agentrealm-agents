@@ -14,7 +14,7 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.planner_reference import (
     CORE_SECTIONS,
     REFERENCE_PATH,
-    missing_core,
+    missing_sections,
     is_core,
     reference_text,
     select_sections,
@@ -94,14 +94,14 @@ class SectionTest(unittest.TestCase):
         self.sections = split_sections(REFERENCE_PATH.read_text(encoding="utf-8"))
 
     def test_every_core_entry_matches_a_section(self):
-        self.assertEqual(missing_core(self.sections), [])
+        self.assertEqual(missing_sections(self.sections), [])
         keys = [s.key for s in self.sections]
         for core in CORE_SECTIONS:
             self.assertTrue(any(k.startswith(core) for k in keys), core)
 
-    def test_missing_core_names_a_renamed_heading(self):
+    def test_missing_sections_names_a_renamed_heading(self):
         text = REFERENCE_PATH.read_text(encoding="utf-8").replace("### 11. Game rules", "### 11. Rules of play")
-        self.assertEqual(missing_core(split_sections(text)), ["/docs/manual / 11. game rules"])
+        self.assertEqual(missing_sections(split_sections(text)), ["/docs/manual / 11. game rules"])
 
     def test_default_keeps_core_and_stays_under_the_budget(self):
         picked = select_sections(self.sections, "", budget=60_000)
@@ -125,8 +125,13 @@ class SectionTest(unittest.TestCase):
         self.assertTrue(any("changelog" in s.key for s in named))
         self.assertEqual(len(select_sections(self.sections, "all")), len(self.sections))
 
-    def test_left_out_sections_are_named(self):
-        self.assertIn("Sections left out for size:", reference_text("core"))
+    def test_left_out_sections_are_named_with_their_reason(self):
+        default = reference_text("")
+        self.assertRegex(default, r"Sections left out as setup and history: [^)]*/docs/changelog")
+        self.assertNotRegex(default, r"left out for size: [^)]*changelog")
+        core = reference_text("core")
+        self.assertIn("Sections left out as not asked for:", core)
+        self.assertNotIn("left out for size", core)
 
     def test_code_fence_hash_is_not_a_section(self):
         text = "# page: /docs/x — X\n\n### A\n\n```\n### not a heading\n```\n### B\nb\n"

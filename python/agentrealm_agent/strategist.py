@@ -98,9 +98,10 @@ from .memory import Memory
 from .gem_yield import summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
+from .survival import retreat_goal
 from .travel.knowledge import town_from_kb
 from .world import Pos, WorldModel, chebyshev
-from .zone_discovery import known_safe, safe_tiles
+from .zone_discovery import known_safe
 
 log = logging.getLogger(__name__)
 
@@ -551,8 +552,7 @@ def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
         here = "yes"
     else:
         here = "unknown (zone not read here)" if fact is None else "no"
-    safes = safe_tiles(w, w.map_id)
-    safe = min(safes, key=lambda p: (chebyshev(p, w.pos), p)) if safes else None
+    safe = retreat_goal(w, None)  # safe tiles only; the town line follows
     town = town_from_kb(knowledge) or (w.respawn_anchors[0] if w.respawn_anchors else None)
     return [
         f"safe_ground={here}",

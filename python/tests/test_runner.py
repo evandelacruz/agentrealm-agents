@@ -339,10 +339,12 @@ class RunnerTest(unittest.TestCase):
     def test_back_to_back_queues_keep_the_step_period(self):
         # The next queue opens with the Waits still owed after the last Step,
         # so its first Step never lands inside movement_cooldown.
-        applied = [{"tick": 11 + i, "queue_id": "q1", "index": i, "outcome": "applied"} for i in range(5)]
+        # The Waits ran too, but only the Steps report (B133).
+        applied = [{"tick": 11 + i, "queue_id": "q1", "index": i, "outcome": "applied"} for i in (0, 4)]
         fake = FakeClient([
             {"tick": 10, "window_remaining_ms": 0},
-            {"tick": 15, "window_remaining_ms": 0, "intent_results": applied},
+            {"tick": 15, "window_remaining_ms": 0, "intent_results": applied,
+             "finished_queue": {"queue_id": "q1", "length": 5}},
             {"tick": 16, "window_remaining_ms": 0},
         ])
         r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
@@ -354,6 +356,91 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(r.mem.last_step_tick, 15)
         r.tick()
         self.assertEqual([i["verb"] for i in fake.sent[2][0]], ["Wait", "Wait", "Wait", "Step"])
+
+    # B133: an applied Wait has no result; finished_queue alone says a queue ended.
+
+    def walk_runner(self, ticks: list[dict]) -> tuple[Runner, FakeClient]:
+        """A goto walk sent as q1: Step, Wait, Wait, Wait, Step."""
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}] + ticks)
+        r = self.runner(fake, Policy(goals=["goto"], goto=(4, 0), pickup=False))
+        r.queue_horizon_ticks = 5
+        r.tick()
+        self.assertEqual([i["verb"] for i in fake.sent[0][0]], ["Step", "Wait", "Wait", "Wait", "Step"])
+        return r, fake
+
+    def test_results_for_every_step_do_not_end_the_queue(self):
+        # Every non-Wait intent reported, but no finished_queue yet: still ours.
+        steps = [{"tick": 11 + i, "queue_id": "q1", "index": i, "outcome": "applied"} for i in (0, 4)]
+        r, fake = self.walk_runner([{"tick": 15, "window_remaining_ms": 0, "intent_results": steps}])
+        r.tick()
+        self.assertIsNotNone(r.mem.pending_intents)
+        self.assertEqual(r.mem.held_queue, {"queue_id": "q1", "next_index": 5})
+
+    def test_finished_queue_ends_the_queue(self):
+        r, fake = self.walk_runner([
+            {"tick": 12, "window_remaining_ms": 0, "queue": {"queue_id": "q1", "next_index": 2},
+             "intent_results": [{"tick": 11, "queue_id": "q1", "index": 0, "outcome": "applied"}]},
+            {"tick": 15, "window_remaining_ms": 0, "finished_queue": {"queue_id": "q1", "length": 5},
+             "intent_results": [{"tick": 15, "queue_id": "q1", "index": 4, "outcome": "applied"}]},
+            {"tick": 16, "window_remaining_ms": 0},
+        ])
+        r.tick()
+        self.assertEqual(r.mem.pending_next_index, 2, "queue.next_index counts the Wait that ran unreported")
+        self.assertEqual(r.mem.queued_ticks, 3)
+        r.tick()
+        self.assertIsNone(r.mem.pending_intents)
+        self.assertIsNone(r.mem.pending_queue)
+        self.assertIsNone(r.mem.held_queue)
+        self.assertEqual(r.world.pos, (2, 0))
+        self.assertFalse(r.mem.need_position)
+        self.assertIsNone(fake.sent[2][0], "nothing sent while the queue was held")
+        r.tick()
+        self.assertIsNotNone(fake.sent[3][0], "the next queue goes out")
+
+    def test_a_queue_of_waits_ends_on_finished_queue_alone(self):
+        # Waits that ran report nothing, so only finished_queue ends them.
+        fake = FakeClient([
+            {"tick": 10, "window_remaining_ms": 0, "queue": {"queue_id": "q1", "next_index": 0}},
+            {"tick": 12, "window_remaining_ms": 0, "finished_queue": {"queue_id": "q1", "length": 2}},
+        ])
+        r = self.runner(fake, Policy(goals=[]))
+        waits = [{"verb": "Wait"}, {"verb": "Wait"}]
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(None, "test", submit_queue=waits)):
+            r.tick()
+        self.assertEqual(r.mem.pending_intents, waits)
+        self.assertIsNotNone(r.mem.held_queue)
+        r.tick()
+        self.assertIsNone(r.mem.pending_intents)
+        self.assertIsNone(r.mem.held_queue)
+
+    def test_a_rejection_ends_the_queue_with_or_without_finished_queue(self):
+        # A rejection ends the queue early; the agent reads it from intent_results
+        # and replans, whether or not finished_queue names the queue on that tick.
+        for finished in (True, False):
+            with self.subTest(finished_queue=finished):
+                reject = {"tick": 11, "window_remaining_ms": 0,
+                          "intent_results": [rejected("q1", "block_occupied", "occupied", 11)]}
+                if finished:
+                    reject["finished_queue"] = {"queue_id": "q1", "length": 5}
+                r, fake = self.walk_runner([reject, {"tick": 13, "window_remaining_ms": 0}])
+                r.tick()
+                self.assertIsNone(r.mem.pending_intents)
+                self.assertIsNone(r.mem.held_queue)
+                self.assertTrue(r.mem.need_position)
+                r.world.apply_position({"map_id": 7, "x": 0, "y": 0})
+                r.mem.need_position = False
+                r.tick()
+                self.assertIsNotNone(fake.sent[2][0], "a new queue replaces the rejected one")
+
+    def test_a_stale_finished_queue_is_ignored(self):
+        # finished_queue for a queue we already replaced says nothing about ours.
+        r, fake = self.walk_runner([
+            {"tick": 11, "window_remaining_ms": 0, "finished_queue": {"queue_id": "q0", "length": 3}},
+        ])
+        r.tick()
+        self.assertEqual(r.mem.pending_queue, "q1")
+        self.assertIsNotNone(r.mem.pending_intents)
+        self.assertIsNotNone(r.mem.held_queue)
 
     def test_an_echoed_queue_does_not_restore_a_dropped_hold(self):
         # A rejection or a door drops our queue; a non-empty `queue` on that

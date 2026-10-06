@@ -17,7 +17,7 @@ from agentrealm_agent.planner_reference import (
     select_sections,
     split_sections,
 )
-from agentrealm_agent.strategist import SYSTEM_PROMPT, build_prompt, estimate_tokens
+from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, estimate_tokens
 from agentrealm_agent.world import WorldModel
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -44,6 +44,16 @@ class PromptTest(unittest.TestCase):
         self.assertIn("## Answers in one screen", system[notes:contract])  # GAME_NOTES.md itself
         self.assertIn(SYSTEM_PROMPT.strip(), system[contract:])
         self.assertIn("trust the measured facts", system[contract:])
+
+    def test_progression_sits_between_the_facts_and_the_contract(self):
+        system = prompt()[0]["content"]
+        stages = system.index(PROGRESSION)
+        self.assertLess(system.index("# Measured facts"), stages)
+        self.assertLess(stages, system.index("# Planner contract"))
+        for stage in ("1. Survive and learn", "2. Build up loot", "3. Beat levels", "4. Beat the world"):
+            self.assertIn(stage, PROGRESSION)
+        for op in ("explore_area", "gather_gems", "equip", "enter_level", "fight_boss"):
+            self.assertIn(op, PROGRESSION)
 
     def test_system_prefix_carries_the_cache_marker(self):
         system = prompt()[0]

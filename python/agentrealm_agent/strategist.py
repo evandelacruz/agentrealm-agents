@@ -50,7 +50,8 @@ Settings (environment variables, defaults in brackets):
   ``all``, ``core``, or a comma list (see :mod:`.planner_reference`).
 
 The system prompt is the game reference, then the measured facts in
-``docs/GAME_NOTES.md``, then the op contract below (:func:`system_prompt`).
+``docs/GAME_NOTES.md``, then the progression stages (:data:`PROGRESSION`),
+then the op contract below (:func:`system_prompt`).
 It is the same on every call, so it is cached: ``cache_control`` on
 Anthropic, a fixed ``prompt_cache_key`` on OpenAI (which caches long
 prefixes on its own). Only the user message (triggers, state, stack) changes.
@@ -130,6 +131,16 @@ Examples:
 """
 
 
+PROGRESSION = """# Progression
+
+The character's arc, in order. Judge the stage from State (health, gems, armed, lives, map_level), the plan and the clues, then pick ops that advance that stage. Move on only when its readiness is met; drop back a stage when it no longer is (after a death, say). The thresholds are guidance for you to apply, not rules the code checks.
+
+1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known.
+2. Build up loot, gear and supplies. Gather gems, pick up items, buy potions and gear, equip the best (gather_gems, fetch_item, buy, equip). Ready when health is at least 80% of max, at least 3 potions are carried, a weapon better than the starting pocket knife is armed, and armor is worn.
+3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar.
+4. Beat the world. Clear every level (level_count) to transcend."""
+
+
 def system_prompt(reference_sections: str = "") -> str:
     """The stable prefix: the game reference, the measured facts, then the op contract."""
     parts = []
@@ -142,6 +153,7 @@ def system_prompt(reference_sections: str = "") -> str:
             "# Measured facts (docs/GAME_NOTES.md)\n\n"
             "What we measured in play. Prefer these over the reference when they disagree.\n\n" + notes.strip()
         )
+    parts.append(PROGRESSION)
     parts.append("# Planner contract\n\n" + SYSTEM_PROMPT.strip())
     return "\n\n".join(parts) + "\n"
 

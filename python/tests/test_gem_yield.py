@@ -91,6 +91,30 @@ class AttributionTest(unittest.TestCase):
         self.assertEqual([c["gem"] for c in cuts(k)], [True, False])
         self.assertEqual(gem_yield.regions(k, MAP)["0,0"]["gems"], 1)
 
+    def test_ground_gem_credit_leaves_the_counter_to_other_cuts(self):
+        k, w, t = kb(), world(gems=4), GemYieldTracker()
+        t.note_cut(w, (1, 1), "grass", 100)
+        t.note_cut(w, (30, 30), "grass", 100)
+        w.tick, w.entities = 101, [Entity("supply", 50, (2, 1), "gem")]
+        t.update(w, k)
+        w.tick, w.gems = 102, 5
+        t.update(w, k)
+        w.tick = 110
+        t.update(w, k)
+        self.assertEqual([c["gem"] for c in cuts(k)], [True, True])
+
+    def test_ground_gem_picked_up_is_not_another_cuts_rise(self):
+        k, w, t = kb(), world(gems=4), GemYieldTracker()
+        t.note_cut(w, (1, 1), "grass", 100)
+        t.note_cut(w, (30, 30), "grass", 100)
+        w.tick, w.entities = 101, [Entity("supply", 50, (2, 1), "gem")]
+        t.update(w, k)
+        w.tick, w.gems, w.entities = 102, 5, []  # walked onto it: gone from view, counter up
+        t.update(w, k)
+        w.tick = 110
+        t.update(w, k)
+        self.assertEqual([c["gem"] for c in cuts(k)], [True, False])
+
     def test_take_earlier_in_the_response_is_not_the_cut(self):
         k, w, t = kb(), world(gems=4), GemYieldTracker()
         t.note_cut(w, (1, 1), "grass", 100, took=True)

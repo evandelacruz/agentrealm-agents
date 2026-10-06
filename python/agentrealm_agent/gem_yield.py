@@ -89,6 +89,7 @@ class GemYieldTracker:
 
     pending: list[PendingCut] = field(default_factory=list)
     claimed: set[int] = field(default_factory=set)  # ground gems already credited to a cut
+    on_ground: set[int] = field(default_factory=set)  # claimed gems not yet gone from view
 
     def note_cut(self, w: WorldModel, pos: Pos, block: str, tick: int, *, took: bool = False) -> None:
         """Our ``Use`` on ``pos`` applied while it showed ``block``. ``took``: a
@@ -113,8 +114,14 @@ class GemYieldTracker:
         self.pending = [c for c in self.pending if w.alive and c.map_id == w.map_id]
         if not self.pending:
             self.claimed.clear()
+            self.on_ground.clear()
             return
         gems = _ground_gems(w)
+        for gone in self.on_ground - {gid for gid, _ in gems}:
+            # A credited ground gem left view, most likely into our counter:
+            # that rise is not another cut's.
+            self.on_ground.discard(gone)
+            self._raise_baselines(None)
         for cut in self.pending:
             if cut.gem:
                 continue
@@ -122,14 +129,13 @@ class GemYieldTracker:
                 gid for gid, p in gems if gid not in cut.gems_in_view and gid not in self.claimed and chebyshev(p, cut.pos) <= 1
             ]
             if fresh:
+                # A ground gem is not in the counter yet: baselines move when it leaves view.
                 self.claimed.add(min(fresh))
-            elif cut.took or cut.gems_before is None or w.gems is None or w.gems <= cut.gems_before:
-                continue
-            cut.gem = True
-            for other in self.pending:
-                # One gem credits one cut: the other cuts' counter baseline moves past it.
-                if other is not cut and other.gems_before is not None:
-                    other.gems_before += 1
+                self.on_ground.add(min(fresh))
+                cut.gem = True
+            elif not cut.took and cut.gems_before is not None and w.gems is not None and w.gems > cut.gems_before:
+                cut.gem = True
+                self._raise_baselines(cut)  # one counter rise credits one cut
         keep: list[PendingCut] = []
         for cut in self.pending:
             if cut.gem or w.tick > cut.tick + GEM_WINDOW_TICKS:
@@ -138,7 +144,14 @@ class GemYieldTracker:
                 keep.append(cut)
         self.pending = keep
         if not keep:
+            self.on_ground.clear()
             self.claimed.clear()  # every later cut sees these gems as already in view
+
+
+    def _raise_baselines(self, credited: PendingCut | None) -> None:
+        for cut in self.pending:
+            if cut is not credited and cut.gems_before is not None:
+                cut.gems_before += 1
 
 
 def _map_row(kb: KnowledgeBase, map_id: int) -> dict[str, Any]:

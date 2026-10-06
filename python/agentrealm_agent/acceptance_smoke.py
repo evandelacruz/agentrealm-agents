@@ -12,7 +12,7 @@ from .acceptance import AcceptanceHooks, ParkSplit
 from .client import ApiError, Client
 from .executor.intents import wait
 from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
-from .park import DEFAULT_PARK_SECONDS, PARK_DIED, PARK_SECONDS_HELP, install_stop_signals
+from .park import ABORT_JOIN_SECONDS, DEFAULT_PARK_SECONDS, PARK_DIED, PARK_SECONDS_HELP, install_stop_signals
 from .runner import Runner
 from .strategist import Strategist
 
@@ -21,14 +21,14 @@ NO_PLANNER_HELP = "test mode: play without the AI planner (A35)"
 
 
 def add_park_argument(ap: argparse.ArgumentParser) -> None:
-    """``--park-seconds``: the park phase after the run (A64)."""
+    """``--park-seconds``: the park phase after the run (A65)."""
     ap.add_argument("--park-seconds", type=float, default=DEFAULT_PARK_SECONDS, help=PARK_SECONDS_HELP)
 
 
 def alive_at_end_failures(client: Client, cid: int, metrics: ParkSplit) -> list[str]:
     """The end-of-run alive check, as gate failures.
 
-    A death in the park phase (A64) belongs to the park, which is reported on
+    A death in the park phase (A65) belongs to the park, which is reported on
     its own line (``ParkSplit.park_summary_line``), not to the scenario.
     """
     try:
@@ -137,7 +137,7 @@ def run_acceptance_smoke(
     ``prepare``, when given, runs on the loaded knowledge base before the
     runner starts (M9 clears earlier runs' entrance looks with it).
     ``planner`` is the AI planner (A35), from :func:`planner_for`.
-    After the stop, the runner parks for up to ``park_seconds`` (A64);
+    After the stop, the runner parks for up to ``park_seconds`` (A65);
     SIGINT or SIGTERM stops the run, and a second one cuts the park short.
 
     Returns the seconds played, the park phase not counted, and the knowledge
@@ -182,8 +182,9 @@ def run_acceptance_smoke(
     try:
         thread.start()
         wd.start()
-        while thread.is_alive():
+        while thread.is_alive() and not abort.is_set():
             thread.join(0.5)  # a bare join() would hold off the signal handlers
+        thread.join(ABORT_JOIN_SECONDS)  # a second signal: give up on it after this
     finally:
         restore_signals()
     stop.set()

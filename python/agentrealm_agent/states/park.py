@@ -1,4 +1,4 @@
-"""Park: walk to safe ground before the run exits (A64).
+"""Park: walk to safe ground before the run exits (A65).
 
 Runs only in the runner's park phase (``Memory.parking``, ``park.py``), when
 the scenario is over. Dispatch then runs the survival reflexes and Park,

@@ -1,12 +1,17 @@
-"""A64: park on safe ground before the run exits, then clear the queue."""
+"""A65: park on safe ground before the run exits, then clear the queue."""
 
+import io
 import signal
 import tempfile
 import threading
+import time
 import unittest
+from contextlib import redirect_stdout
+from types import SimpleNamespace
 from pathlib import Path
 from unittest import mock
 
+from agentrealm_agent import __main__ as cli
 from agentrealm_agent import acceptance_smoke, config, runner
 from agentrealm_agent.acceptance import ParkSplit
 from agentrealm_agent.brain import Memory
@@ -16,6 +21,7 @@ from agentrealm_agent.executor.movement import step_landing
 from agentrealm_agent.park import (
     PARK_ABORTED,
     PARK_DIED,
+    PARK_DOWNED,
     PARK_NOWHERE,
     PARK_TIMED_OUT,
     PARKED_SAFE,
@@ -34,8 +40,9 @@ class WalkServer:
     """A server whose queues run at once: every Step lands, then the queue
     finishes. ``moves=False`` takes queues and never moves the character."""
 
-    def __init__(self, pos=(0, 0), *, moves=True, died_at_poll: int | None = None):
-        self.pos, self.moves, self.died_at_poll = pos, moves, died_at_poll
+    def __init__(self, pos=(0, 0), *, moves=True, died_at_poll: int | None = None, drop_died=False):
+        self.pos, self.moves, self.died_at_poll, self.drop_died = pos, moves, died_at_poll, drop_died
+        self.alive = True
         self.tick_now = 100
         self.sent: list[list[dict] | None] = []
         self.polls = 0
@@ -45,6 +52,9 @@ class WalkServer:
 
     def world(self, cid):
         return {"tick_rate_hz": 10}
+
+    def self_(self, cid):
+        return {"alive": self.alive, "placed": self.alive, "perception_range": 25}
 
     def position(self, cid):
         return {"map_id": MAP, "x": self.pos[0], "y": self.pos[1]}
@@ -60,7 +70,11 @@ class WalkServer:
         self.polls += 1
         r = {"tick": self.tick_now, "window_remaining_ms": 0}
         if self.died_at_poll == self.polls:
-            r["events_by_tick"] = [{"tick": self.tick_now, "events": [{"kind": "Died"}]}]
+            self.alive = False
+            if self.drop_died:
+                r["events_dropped"] = 1
+            else:
+                r["events_by_tick"] = [{"tick": self.tick_now, "events": [{"kind": "Died"}]}]
             return r
         if not intents:
             return r
@@ -198,6 +212,30 @@ class ParkTest(unittest.TestCase):
         self.assertEqual(report.outcome, PARK_DIED)
         self.assertEqual(s.sent[-1], [])
 
+    def test_a_death_whose_event_was_dropped_is_still_a_park_death(self):
+        # Only the next self read shows it: the Died event never arrived.
+        s = WalkServer(died_at_poll=1, drop_died=True)
+        r = self.make(s)
+        real_tick = r.tick
+
+        def tick():
+            out = real_tick()
+            if not s.alive:
+                r.mem.need_self = True  # the periodic self refresh, brought forward
+            return out
+
+        r.tick = tick
+        report = r.park()
+        self.assertEqual(report.outcome, PARK_DIED)
+
+    def test_downed_before_the_park_is_not_a_park_death(self):
+        s = WalkServer()
+        r = self.make(s)
+        r.world.alive = False
+        report = r.park()
+        self.assertEqual(report.outcome, PARK_DOWNED)
+        self.assertEqual(s.sent, [[]])
+
     def test_clear_queue_error_is_reported_not_raised(self):
         s = WalkServer(pos=SAFE)
         r = self.make(s, at=SAFE)
@@ -282,6 +320,42 @@ class StopSignalsTest(unittest.TestCase):
         finally:
             restore()
         self.assertIs(signal.getsignal(signal.SIGTERM), before)
+
+
+    def test_second_signal_exits_even_with_a_wedged_driver(self):
+        # The runner never returns (a hung HTTP call, say): the second signal
+        # must still end ``run`` after the bounded join, not wait on it.
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        class WedgedRunner:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def run(self):
+                release.wait(30)
+
+        def signal_twice():
+            handler = signal.getsignal(signal.SIGTERM)
+            handler(signal.SIGTERM, None)
+            handler(signal.SIGTERM, None)
+
+        client = mock.Mock()
+        cfg = SimpleNamespace(profile="T", world="sandbox")
+        with mock.patch.object(cli, "Runner", WedgedRunner), \
+                mock.patch.object(cli, "SHUTDOWN_JOIN_SECONDS", 0.1), \
+                mock.patch.object(cli, "load_knowledge"), \
+                mock.patch.object(cli, "save_knowledge"), \
+                redirect_stdout(io.StringIO()) as out:
+            timer = threading.Timer(0.2, signal_twice)
+            timer.start()
+            started = time.monotonic()
+            code = cli.run(client, cfg, 1, park_seconds=60.0)
+            elapsed = time.monotonic() - started
+        timer.join()
+        self.assertEqual(code, 0)
+        self.assertLess(elapsed, 3.0)
+        self.assertIn("SIGTERM again", out.getvalue())
 
 
 if __name__ == "__main__":

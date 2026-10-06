@@ -19,14 +19,15 @@ from .character_select import (
 )
 from .client import ApiError, Client
 from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
-from .park import DEFAULT_PARK_SECONDS, PARK_SECONDS_HELP, install_stop_signals
+from .park import ABORT_JOIN_SECONDS, DEFAULT_PARK_SECONDS, PARK_SECONDS_HELP, install_stop_signals
 from .run_metrics import RunMetrics, compare_run_metrics, load_metrics_source, metrics_from_trace
 from .runner import Runner
 from .strategist import PlannerConfigError, Strategist
 
-# How long `run` waits for the driver thread to stop before saving, on top
-# of the park phase (A64).
-SHUTDOWN_JOIN_SECONDS = 5.0
+# How long `run` waits for the driver thread to stop before saving, once it
+# has stopped waiting on the park phase (A65): the driver returned, or a
+# second signal set ``abort``.
+SHUTDOWN_JOIN_SECONDS = ABORT_JOIN_SECONDS
 
 # The reference runner's characters play the scripted model agent.
 DEFAULT_CREATE_MODEL = "agentrealm-reference/scripted"
@@ -206,7 +207,8 @@ def run(
     park_seconds: float = DEFAULT_PARK_SECONDS,
 ) -> int:
     """Play until SIGINT (Ctrl-C) or SIGTERM, then park for up to
-    ``park_seconds`` (A64); a second signal exits without parking."""
+    ``park_seconds`` (A65); a second signal stops the park and exits
+    within ``SHUTDOWN_JOIN_SECONDS``."""
     try:
         client.self_(cid)
     except ApiError as e:
@@ -230,7 +232,7 @@ def run(
     restore_signals = install_stop_signals(stop, abort, out, park_seconds)
     thread.start()
     try:
-        while thread.is_alive():
+        while thread.is_alive() and not abort.is_set():
             thread.join(0.5)  # the runner returns after its park phase
     finally:
         restore_signals()

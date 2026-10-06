@@ -29,7 +29,7 @@ from agentrealm_agent.client import Client  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
 from agentrealm_agent.m6_acceptance import M6AcceptanceMetrics, TARGET_STEPS  # noqa: E402
 from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, add_park_argument, planner_for  # noqa: E402
-from agentrealm_agent.park import install_stop_signals  # noqa: E402
+from agentrealm_agent.park import ABORT_JOIN_SECONDS, install_stop_signals  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
 from agentrealm_agent.strategist import PlannerConfigError, Strategist  # noqa: E402
 
@@ -48,7 +48,7 @@ def run_smoke(
     park_seconds: float,
 ) -> M6AcceptanceMetrics:
     """Play until ``target_steps`` Steps apply or ``timeout_s`` passes, then
-    park for up to ``park_seconds`` (A64), which the metrics do not count."""
+    park for up to ``park_seconds`` (A65), which the metrics do not count."""
     stop, abort = threading.Event(), threading.Event()
     metrics = M6AcceptanceMetrics(target_steps=target_steps, stop=stop)
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
@@ -83,8 +83,9 @@ def run_smoke(
     try:
         thread.start()
         wd.start()
-        while thread.is_alive():
+        while thread.is_alive() and not abort.is_set():
             thread.join(0.5)  # a bare join() would hold off the signal handlers
+        thread.join(ABORT_JOIN_SECONDS)  # a second signal: give up on it after this
     finally:
         restore_signals()
     stop.set()

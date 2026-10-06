@@ -121,7 +121,7 @@ class Runner:
         :meth:`Strategist.from_env`. None is the ``--no-planner`` test mode.
 
         Once ``stop`` is set, the runner parks for up to ``park_seconds``
-        before it returns (A64, :meth:`park`); 0 returns at once. ``abort``,
+        before it returns (A65, :meth:`park`); 0 returns at once. ``abort``,
         when set, cuts the park short."""
         self.cfg = cfg
         self.client = client
@@ -130,7 +130,6 @@ class Runner:
         self.park_seconds = park_seconds
         self.abort = abort if abort is not None else threading.Event()
         self.park_report: ParkReport | None = None
-        self.parked_died = False  # a Died event while parking
         self.clock = time.monotonic  # the park phase's cap runs on it
         self.out = out
         self.knowledge = knowledge
@@ -243,7 +242,7 @@ class Runner:
 
     def _decide(self, w, m, *, plan: Plan | None = None):
         if m.parking:
-            plan = None  # the run is over: no op runs while parking (A64)
+            plan = None  # the run is over: no op runs while parking (A65)
         return decide(
             w,
             m,
@@ -333,7 +332,7 @@ class Runner:
             return self.on_error(call, e)
 
     def park(self, not_before: float = 0.0) -> ParkReport:
-        """Walk to safe ground, then clear the intent queue, before exiting (A64).
+        """Walk to safe ground, then clear the intent queue, before exiting (A65).
 
         The world does not pause when the client stops, so a character left
         on field ground can die unattended. For up to ``park_seconds`` the
@@ -352,13 +351,12 @@ class Runner:
             hooks.on_park_start()
         started = self.clock()
         m.parking, m.state = True, ""
-        self.parked_died = False
+        # Read from self, not from a Died event: a response can drop events.
+        alive_at_start = w.alive
         try:
             while True:
-                if self.parked_died:
-                    outcome = PARK_DIED
-                elif not w.alive:
-                    outcome = PARK_DOWNED
+                if not w.alive:
+                    outcome = PARK_DIED if alive_at_start else PARK_DOWNED
                 elif parked(w, self.knowledge):
                     outcome = PARKED_SAFE
                 elif w.pos is not None and retreat_goal(w, self.knowledge) is None:
@@ -1249,8 +1247,6 @@ class Runner:
             if kind == "Died":
                 if self.acceptance is not None:
                     self.acceptance.on_death()
-                if m.parking:
-                    self.parked_died = True
                 queue_signal(
                     m,
                     {

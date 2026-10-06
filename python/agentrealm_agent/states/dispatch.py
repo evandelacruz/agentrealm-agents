@@ -93,7 +93,7 @@ EXECUTORS: tuple[State, ...] = (
 # The ``idle`` and ``wander`` policy kinds (M1); never guards for ``scripted``.
 STATES: tuple[State, ...] = REFLEXES + EXECUTORS + (IdleState(),)
 
-# The runner's park phase, after the run ends (A64): the survival reflexes,
+# The runner's park phase, after the run ends (A65): the survival reflexes,
 # then Park walking to safe ground. No plan op runs, and nothing else.
 SURVIVAL = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee")
 PARK_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name in SURVIVAL) + (ParkState(),)
@@ -202,7 +202,7 @@ def _breaking_for(owner: str | None, m: Memory, world: WorldModel) -> bool:
 
 def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> StateOutcome:
     """The first state, in ``STATES`` order, that runs and sends an intent or
-    waits; in the park phase, in ``PARK_STATES`` order (A64)."""
+    waits; in the park phase, in ``PARK_STATES`` order (A65)."""
     m = ctx.memory
     for state in PARK_STATES if m.parking else STATES:
         active = state.name == m.state and not state.done(world, ctx)

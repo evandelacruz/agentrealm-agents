@@ -55,7 +55,7 @@ class FakeRunner:
     events = staticmethod(lambda w, hooks: None)
     windows = 0
 
-    park_report = None  # the park phase (A64) is not faked
+    park_report = None  # the park phase (A65) is not faked
 
     def __init__(
         self, cfg, client, cid, stop, out=print, knowledge=None, acceptance=None, strategist=None, park_seconds=0.0, abort=None

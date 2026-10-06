@@ -1,4 +1,4 @@
-"""Park before exiting (A64): the world does not pause when the client stops.
+"""Park before exiting (A65): the world does not pause when the client stops.
 
 A run that ends (its time limit, Ctrl-C, SIGTERM) leaves the character in
 the world. Standing on field ground, it can be killed while nobody plays it.
@@ -24,6 +24,9 @@ from .world import Pos, WorldModel
 
 # Wall-clock cap on the park phase. 0 turns parking off.
 DEFAULT_PARK_SECONDS = 60.0
+# After a second stop signal, how long the process waits for the runner
+# (its queue clear included) before it exits anyway.
+ABORT_JOIN_SECONDS = 5.0
 
 PARK_SECONDS_HELP = (
     f"on stop, walk to safe ground for up to this many seconds before exiting (default {DEFAULT_PARK_SECONDS:.0f}; 0 = off)"
@@ -71,7 +74,10 @@ def parked(w: WorldModel, knowledge: KnowledgeBase | None) -> bool:
 def install_stop_signals(
     stop: threading.Event, abort: threading.Event, out: Callable[[str], None], park_seconds: float
 ) -> Callable[[], None]:
-    """SIGINT and SIGTERM stop the run; a second one exits without parking.
+    """SIGINT and SIGTERM stop the run; a second one sets ``abort``.
+
+    The caller then stops waiting on the runner after at most
+    ``ABORT_JOIN_SECONDS``, whatever the runner is doing.
 
     Returns a function that puts the previous handlers back. Outside the main
     thread (where Python allows no handlers) it installs nothing.
@@ -83,7 +89,10 @@ def install_stop_signals(
         name = signal.Signals(signum).name
         if stop.is_set():
             abort.set()
-            out(f"{name} again: exiting now, without parking")
+            out(
+                f"{name} again: exiting without parking, within {ABORT_JOIN_SECONDS:.0f}s; "
+                "the queue is cleared only if that call finishes first"
+            )
         elif park_seconds > 0:
             stop.set()
             out(f"{name}: stopping; parking on safe ground first (up to {park_seconds:.0f}s, {name} again to exit now)")

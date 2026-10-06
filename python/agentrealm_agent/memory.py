@@ -89,7 +89,7 @@ class Memory:
     retreat_walk: Pos | None = None
     retreat_to: Pos | None = None
     retreat_gaps: list[tuple[int, int]] = field(default_factory=list)
-    # The runner's park phase (A64): the run is over and only the survival
+    # The runner's park phase (A65): the run is over and only the survival
     # reflexes and Park run, walking to safe ground before the exit.
     parking: bool = False
     strength: StrengthBracket = field(default_factory=StrengthBracket)

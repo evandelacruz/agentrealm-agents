@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
 from ..world import NEIGHBOURS, WALKABLE, Pos, WorldModel, chebyshev
+from . import walk as nav_walk
 from .planner import CostGridParams
 
 if TYPE_CHECKING:
@@ -373,7 +374,9 @@ def _fresh_window(att: NavAttempt, tick: int) -> None:
 
 
 def _drop_path(m: Memory, att: NavAttempt) -> None:
+    """Drop the path and the walk's commitment (``navigation.walk``), so a dropped route never comes back."""
     m.path, m.goal = [], ""
+    nav_walk.drop(m, att.goal)
     m.corridors.pop(att.goal, None)
 
 
@@ -442,6 +445,7 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     stuck.attempts.pop(att.key, None)
     if stuck.active == att.key:
         stuck.active = None
+    nav_walk.drop(m, att.goal, att.target)  # never picked up again, whoever holds the path now
     if m.goal == att.goal:  # another walk's path, such as a waiting goto's, is not this attempt's to drop
         _drop_path(m, att)
         m.goal_op = None

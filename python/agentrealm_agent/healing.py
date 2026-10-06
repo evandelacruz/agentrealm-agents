@@ -164,6 +164,8 @@ def back_off(m: Memory, w: WorldModel) -> None:
     m.heal_backoff_until = w.tick + HEAL_BACKOFF_TICKS
     m.heal_wait = None
     m.heal_regen_sample = None
+    for goal in [g for g in m.walks if g.startswith("heal_")]:
+        del m.walks[goal]  # backed off: its walk is not picked up again (A15)
     if m.goal.startswith("heal_"):
         m.path, m.goal = [], ""
 

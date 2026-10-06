@@ -30,7 +30,7 @@ class Memory:
     path: list[Pos] = field(default_factory=list)
     goal: str = ""
     goal_op: dict | None = None  # the plan op m.path was set for, so a same-kind head swap replans (A34)
-    walk: Walk | None = None  # the path the walker committed to, kept while it stays the best way (A15)
+    walks: dict[str, Walk] = field(default_factory=dict)  # goal -> the path its walk committed to, kept while it stays the best way (A15)
     state: str = ""  # active state (A5): kept until its done() holds or a higher guard fires
     need_position: bool = True
     need_self: bool = True

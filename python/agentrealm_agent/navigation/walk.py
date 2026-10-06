@@ -14,6 +14,16 @@ A new path whose first step goes back to the cell the walk just came from
 is taken only when the old one is blocked, however much cheaper it looks.
 Equal paths therefore never alternate: the one already walked wins.
 
+Each goal keeps its own walk (``Memory.walks``), so a goal whose kept path
+waits on fog keeps it while a later goal takes the move. Wherever a goal's
+path is dropped for good (a give-up, a break that opened the way, a
+directives reload, a backoff) its walk goes too (``drop``), so a route
+given up on is never picked up again.
+
+The kept path and the new plan are priced on the same cost grid the planner
+searched (``params``); comparing them on any other grid would let a kept
+path through a hazard or a hostile's reach beat the detour the planner chose.
+
 ``pathing`` runs every walk through ``commit``: Explore's goals and plan
 ops (``replan``), Travel, Recover, Level, Investigate and Boss
 (``guided_step``), Heal and Loot (``bounded_step``). An escalation level
@@ -24,9 +34,13 @@ since the old path is the one that got stuck.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ..world import Pos, WorldModel
 from .planner import CostGridParams, path_cost
+
+if TYPE_CHECKING:
+    from ..memory import Memory
 
 # A new plan replaces the path being walked only when it is cheaper by more
 # than this share of the rest of that path.
@@ -65,7 +79,10 @@ def commit(
     found: list[Pos] | None,
     params: CostGridParams,
 ) -> tuple[list[Pos] | None, Walk | None]:
-    """The path to walk toward ``target`` (the kept one, or ``found``) and the walk to remember."""
+    """The path to walk toward ``target`` (the kept one, or ``found``) and ``goal``'s walk to remember.
+
+    ``params`` must be the grid ``found`` was searched on (module docstring).
+    """
     on = rest(walk, w, goal, target)
     came_from = None
     if on is not None:
@@ -77,8 +94,7 @@ def commit(
             if found_cost is None or back or found_cost >= (1 - SWITCH_GAIN) * kept_cost:
                 return kept, walk
     if not found:
-        # Another goal's walk is left alone; this goal's ends with no way on.
-        return found, None if on is not None else walk
+        return found, None
     return found, start(w, goal, target, found, came_from)
 
 
@@ -87,3 +103,11 @@ def start(w: WorldModel, goal: str, target: Pos, path: list[Pos], came_from: Pos
     if not path or w.pos is None:
         return None
     return Walk(goal, w.map_id, target, [w.pos, *path], came_from)
+
+
+def drop(m: Memory, goal: str | None = None, target: Pos | None = None) -> None:
+    """Forget ``goal``'s walk (only one toward ``target``, when given), or every walk when ``goal`` is None."""
+    if goal is None:
+        m.walks.clear()
+    elif goal in m.walks and target in (None, m.walks[goal].target):
+        del m.walks[goal]

@@ -70,7 +70,10 @@ def _step_toward(w: WorldModel, m: Memory, policy, plan_avoid: set[Pos], plan_co
     Bounded like any walk (``bounded_step``, A15): a pickup with no path, or
     no progress in its window, is given up with a backoff."""
 
-    def plan() -> list[Pos] | None:
-        return cost_path(w, goal, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, "loot", goal))
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly)
 
-    return bounded_step(m, w, "loot", goal, plan_avoid, plan)
+    def plan() -> list[Pos] | None:
+        return cost_path(w, goal, params(), nav=nav_search(m, w, "loot", goal))
+
+    return bounded_step(m, w, "loot", goal, plan_avoid, plan, params=params)

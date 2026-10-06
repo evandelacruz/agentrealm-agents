@@ -24,7 +24,8 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import CostGridParams, learn_step_rejection
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation import walk as nav_walk
-from agentrealm_agent.pathing import bounded_step, guided_step
+from agentrealm_agent.navigation.walk import Walk
+from agentrealm_agent.pathing import bounded_step, commit_walk, guided_step
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.world import WorldModel
@@ -125,6 +126,71 @@ class Run5FlipTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), START, "back for the south route")
 
+class WalkLifecycleTest(unittest.TestCase):
+    """Each goal keeps its own walk, and a dropped route is never picked up again."""
+
+    def setUp(self):
+        self.w = WorldModel(character_id=1, map_id=1, pos=(1, 0), perception=8)
+        for x in range(-5, 12):
+            for y in range(-5, 6):
+                self.w.view.tiles[(x, y)] = "dirt"
+        self.m = Memory()
+        self.target = (10, 0)
+        self.kept = [(x, 0) for x in range(1, 11)]
+        self.m.walks["explore"] = Walk("explore", 1, self.target, [(0, 0), *self.kept])
+        self.back = [(0, 0), (1, 1)] + [(x, 1) for x in range(2, 10)] + [self.target]
+
+    def test_another_goals_walk_leaves_this_ones_alone(self):
+        """Explore waits on its kept path while a later goal takes the move;
+        on the next decision Explore's walk is still there."""
+        commit_walk(self.m, self.w, "doors", (1, 5), [(1, 1), (1, 2), (1, 3), (1, 4), (1, 5)], CostGridParams())
+        path = commit_walk(self.m, self.w, "explore", self.target, self.back, CostGridParams())
+        self.assertEqual(path, self.kept[1:], "explore keeps its route")
+        self.assertEqual(set(self.m.walks), {"explore", "doors"})
+
+    def test_a_given_up_route_never_comes_back(self):
+        self.m.path, self.m.goal = self.kept[1:], "explore"
+        att = nav_stuck.track(self.m, self.w, "explore", self.target)
+        nav_stuck.give_up(self.m, self.w, att, "time")
+        self.assertNotIn("explore", self.m.walks)
+        other = [(2, 1)] + [(x, 1) for x in range(3, 10)] + [self.target]
+        path = commit_walk(self.m, self.w, "explore", self.target, other, CostGridParams())
+        self.assertEqual(path, other, "the new plan, not the given-up route")
+
+    def test_a_given_up_route_held_by_another_path_is_dropped_too(self):
+        self.m.path, self.m.goal = [(1, 1)], "doors"
+        att = nav_stuck.track(self.m, self.w, "explore", self.target)
+        nav_stuck.give_up(self.m, self.w, att, "pacing")
+        self.assertNotIn("explore", self.m.walks)
+
+    def test_an_opened_break_drops_the_walk_for_a_fresh_route(self):
+        self.m.path, self.m.goal = self.kept[1:], "explore"
+        att = nav_stuck.track(self.m, self.w, "explore", self.target)
+        nav_stuck.on_break_opened(self.m, self.w, att)
+        self.assertNotIn("explore", self.m.walks)
+
+    def test_a_backed_off_guided_target_drops_its_walk(self):
+        att = nav_stuck.track(self.m, self.w, "explore", self.target)
+        nav_stuck.give_up(self.m, self.w, att, "time")
+        self.m.walks["explore"] = Walk("explore", 1, self.target, [(0, 0), *self.kept])
+        self.assertIsNone(guided_step(self.m, self.w, "explore", self.target, set(), lambda att: None))
+        self.assertNotIn("explore", self.m.walks)
+
+    def test_the_walk_prices_on_the_grid_the_planner_searched(self):
+        """A cell the planner priced as costly (a hazard to escape over) on the
+        kept path lets the detour in; on a bare grid the kept path would win."""
+        self.m.walks["loot"] = Walk("loot", 1, self.target, [(0, 0), *self.kept])
+        self.m.path, self.m.goal = [], "loot"
+        detour = [(2, 1)] + [(x, 1) for x in range(3, 10)] + [self.target]
+        costly = CostGridParams(costly={(5, 0)})
+        step = bounded_step(self.m, self.w, "loot", self.target, set(), lambda: list(detour), params=lambda: costly)
+        self.assertEqual(step, (2, 1))
+        self.m.walks["loot"] = Walk("loot", 1, self.target, [(0, 0), *self.kept])
+        self.m.path = []
+        step = bounded_step(self.m, self.w, "loot", self.target, set(), lambda: list(detour))
+        self.assertEqual(step, (2, 0), "bare grid: the kept path")
+
+
 class EveryWalkCommitsTest(unittest.TestCase):
     """``guided_step`` (Travel, Recover, Level, Investigate, Boss) and
     ``bounded_step`` (Heal, Loot) keep their path the same way."""
@@ -137,7 +203,7 @@ class EveryWalkCommitsTest(unittest.TestCase):
             self.w.view.tiles[p] = "dirt"
 
     def walk_north_one_step(self, goal):
-        self.m.walk = nav_walk.start(self.w, goal, GOTO, NORTH)
+        self.m.walks[goal] = nav_walk.start(self.w, goal, GOTO, NORTH)
         self.m.path, self.m.goal = NORTH[1:], goal
         self.w.pos = NORTH[0]
 
@@ -151,7 +217,7 @@ class EveryWalkCommitsTest(unittest.TestCase):
         self.walk_north_one_step("loot")
         step = bounded_step(self.m, self.w, "loot", GOTO, set(), lambda: list(self.back))
         self.assertIsNone(step, "no step back")
-        self.assertEqual(self.m.walk.cells, [START, *NORTH])
+        self.assertEqual(self.m.walks["loot"].cells, [START, *NORTH])
 
 
 if __name__ == "__main__":
@@ -219,6 +285,6 @@ class CommitRulesTest(unittest.TestCase):
 
     def test_a_rejected_step_ends_the_walk(self):
         m = Memory()
-        m.walk, m.path, m.goal = self.walk, list(self.kept), "goto"
+        m.walks["goto"], m.path, m.goal = self.walk, list(self.kept), "goto"
         learn_step_rejection(m, self.w, None, (1, 0), "block_occupied", 0)
-        self.assertIsNone(m.walk)
+        self.assertEqual(m.walks, {})

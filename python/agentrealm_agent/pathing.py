@@ -375,7 +375,9 @@ def plan_step(
                 continue
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
         if found and found[2] is not None:
-            params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
+            # The grid path_for_plan_op searched on: only ``travel`` may end on a door.
+            door = op["op"] == "travel"
+            params = grid_params(policy, blocked, costly, allow_goal_door=door, m=m, w=w, knowledge=knowledge)
             found = (commit_walk(m, w, found[1], found[2].target, found[0], params), *found[1:])
         if found and next_step(w, blocked, found[0]):
             plan.note_progress()
@@ -421,10 +423,12 @@ def replan(
     if plan is not None and not walking_goto and plan_step(plan, w, m, policy, blocked, costly, knowledge):
         return None
     missed: tuple[str, Leg, bool] | None = None
-    params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
     for goal in ["goto"] if walking_goto else policy.goals:
         found, leg = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
         if leg is not None:
+            # The grid plan_goal searched on: only ``goto`` and ``doors`` may end on a door.
+            door = goal in ("goto", "doors")
+            params = grid_params(policy, blocked, costly, allow_goal_door=door, m=m, w=w, knowledge=knowledge)
             found = commit_walk(m, w, goal, leg.target, found, params)
         if next_step(w, blocked, found):
             _store_path(m, w, goal, found, leg)
@@ -440,7 +444,7 @@ def commit_walk(
     goal: str,
     target: Pos,
     found: list[Pos] | None,
-    params: CostGridParams | None = None,
+    params: CostGridParams,
 ) -> list[Pos] | None:
     """The path to walk toward ``target``: the one ``goal`` is already on, or ``found``.
 
@@ -448,16 +452,18 @@ def commit_walk(
     until it is walked, a cell on it turns out blocked or a step on it is
     rejected, the target changes, or ``found`` is cheaper by more than
     ``walk.SWITCH_GAIN``; and never dropped for a path that steps straight
-    back to the cell just left while it is still open. ``params`` prices
-    both on today's cost grid.
+    back to the cell just left while it is still open.
+
+    ``params`` must be the grid the planner searched ``found`` on: the kept
+    path and ``found`` are both priced on it, so the comparison sees the
+    same hazards, hostiles and fog price the search did.
     """
-    path, m.walk = nav_walk.commit(m.walk, w, goal, target, found, params or CostGridParams())
+    path, walk = nav_walk.commit(m.walks.get(goal), w, goal, target, found, params)
+    if walk is None:
+        nav_walk.drop(m, goal)
+    else:
+        m.walks[goal] = walk
     return path
-
-
-def walk_params(avoid: set[Pos]) -> CostGridParams:
-    """The cost grid a walk with only ``avoid`` to hand prices its paths on."""
-    return CostGridParams(avoid=set(avoid), allow_goal_door=True)
 
 
 def nav_search(m: Memory, w: WorldModel, plan: str, goal: Pos) -> NavSearchState:
@@ -514,6 +520,11 @@ def _store_path(m: Memory, w: WorldModel, goal: str, path: list[Pos], leg: Leg |
         nav_stuck.observe(att, w, path)
 
 
+def _walk_grid(params: Callable[[], CostGridParams] | None, avoid: set[Pos]) -> CostGridParams:
+    """The grid a walk's plan searched on: ``params()``, else the default grid with ``avoid``."""
+    return params() if params is not None else CostGridParams(avoid=set(avoid), allow_goal_door=True)
+
+
 # A plan for one attempt's target, under the attempt's escalation level.
 AttemptPlan = Callable[[NavAttempt], "list[Pos] | None"]
 
@@ -521,7 +532,11 @@ AttemptPlan = Callable[[NavAttempt], "list[Pos] | None"]
 def _walk(m: Memory, w: WorldModel, att: NavAttempt, avoid: set[Pos], path: list[Pos]) -> Pos | None:
     """Walk an escalation level's plan: a new walk, since the old path is the one that got stuck."""
     m.path, m.goal = path, att.goal
-    m.walk = nav_walk.start(w, att.goal, att.target, path)
+    walk = nav_walk.start(w, att.goal, att.target, path)
+    if walk is None:
+        nav_walk.drop(m, att.goal)
+    else:
+        m.walks[att.goal] = walk
     nav_stuck.observe(att, w, path)
     return next_step(w, avoid, path)
 
@@ -613,6 +628,8 @@ def guided_step(
     avoid: set[Pos],
     plan: AttemptPlan,
     knowledge: KnowledgeBase | None = None,
+    *,
+    params: Callable[[], CostGridParams] | None = None,
 ) -> Pos | None:
     """One move toward ``target`` on this map, with stuck detection and escalation (A15).
 
@@ -621,12 +638,17 @@ def guided_step(
     or was just given up on, so the caller yields the round.
 
     A cross-map ``Leg`` is backed off, and given up, by its ultimate destination.
+
+    ``params`` builds the grid ``plan`` searches on, so the walk prices its
+    kept path on the same one (``commit_walk``); None for a plan on the
+    default grid with ``avoid`` (tests).
     """
     leg = target if isinstance(target, Leg) else Leg(target)
     backoff = leg.backoff_key or nav_stuck.goal_key(goal, w.map_id, leg.target)
     if nav_stuck.is_backed_off(m.nav_stuck, backoff, w.tick):
         if m.goal == goal:
             m.path, m.goal = [], ""
+        nav_walk.drop(m, goal, leg.target)
         return None
     att = nav_stuck.track(m, w, goal, leg)
     if att is None:
@@ -639,7 +661,7 @@ def guided_step(
         if m.goal == goal and next_step(w, avoid, m.path):
             nav_stuck.observe(att, w, m.path)
             return next_step(w, avoid, m.path)
-        found = commit_walk(m, w, goal, leg.target, plan(att), walk_params(avoid))
+        found = commit_walk(m, w, goal, leg.target, plan(att), _walk_grid(params, avoid))
         if next_step(w, avoid, found):
             m.path, m.goal = found, goal
             nav_stuck.observe(att, w, found)
@@ -657,6 +679,8 @@ def bounded_step(
     at: Pos,
     avoid: set[Pos],
     plan: Callable[[], "list[Pos] | None"],
+    *,
+    params: Callable[[], CostGridParams] | None = None,
 ) -> Pos | None:
     """One move toward ``at`` on a walk that gives up instead of escalating (A15).
 
@@ -676,7 +700,8 @@ def bounded_step(
     walk that moves makes its attempt active, so one with no move never
     restarts the window of the walk that does (``nav_stuck.track``). The
     window and the wait hold only while the walk is pursued on consecutive
-    decisions (``nav_stuck.resume``).
+    decisions (``nav_stuck.resume``). ``params`` is the grid ``plan``
+    searches on, as in ``guided_step``.
     """
     if nav_stuck.backed_off(m, goal, w.map_id, at, w.tick):
         return None
@@ -685,7 +710,7 @@ def bounded_step(
         return None
     nav_stuck.resume(m, att, w.tick)
     if not (m.goal == goal and m.path and m.path[-1] == at and next_step(w, avoid, m.path)):
-        found = commit_walk(m, w, goal, at, plan(), walk_params(avoid))
+        found = commit_walk(m, w, goal, at, plan(), _walk_grid(params, avoid))
         if not found or not next_step(w, avoid, found):
             if att.waiting_since is None:
                 att.waiting_since = w.tick

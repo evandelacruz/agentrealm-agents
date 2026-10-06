@@ -54,11 +54,13 @@ def level_outcome(
     if choice is not None:
         goal, target = choice
 
-        def plan(att):
-            params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
-            return cost_path(w, target, params, nav=nav_search(m, w, goal, target))
+        def params():
+            return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
 
-        step = guided_step(m, w, goal, target, plan_avoid, plan)
+        def plan(att):
+            return cost_path(w, target, params(), nav=nav_search(m, w, goal, target))
+
+        step = guided_step(m, w, goal, target, plan_avoid, plan, params=params)
         if step is not None:
             note = nav_stuck.level_note(nav_stuck.active(m, w))
             return StateOutcome([set_position(step)], f"level → {target}{note}", state=state)

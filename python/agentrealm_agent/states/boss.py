@@ -247,11 +247,13 @@ def _walk_to_door(
     plan_costly: set[Pos],
     label: str,
 ) -> StateOutcome:
-    def plan_fn(_att):
-        params = grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
-        return cost_path(w, door, params, nav=nav_search(m, w, DOOR_GOAL, door))
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
 
-    step = guided_step(m, w, DOOR_GOAL, door, plan_avoid, plan_fn)
+    def plan_fn(_att):
+        return cost_path(w, door, params(), nav=nav_search(m, w, DOOR_GOAL, door))
+
+    step = guided_step(m, w, DOOR_GOAL, door, plan_avoid, plan_fn, params=params)
     if step is None:
         return StateOutcome(None, f"{label}: no path", state=BossState.name)
     return StateOutcome([set_position(step)], f"boss {label} → {door}", state=BossState.name)

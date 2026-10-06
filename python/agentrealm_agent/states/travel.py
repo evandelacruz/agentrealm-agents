@@ -136,7 +136,11 @@ def route_step(
         if m.goal == goal:
             m.path, m.goal = [], ""
         return None
-    return guided_step(m, w, goal, leg, plan_avoid, plan, knowledge)
+
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
+
+    return guided_step(m, w, goal, leg, plan_avoid, plan, knowledge, params=params)
 
 
 def _map_leg(

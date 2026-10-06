@@ -84,11 +84,13 @@ def _look_on_map(
     if stand is not None:
         _, plan_avoid, plan_costly = plan_sets(w, ctx.memory, ctx.policy, kb)
 
-        def plan(att):
-            params = grid_params(ctx.policy, plan_avoid, plan_costly, allow_goal_door=False, m=ctx.memory)
-            return cost_path(w, stand, params, nav=nav_search(ctx.memory, w, goal, stand))
+        def params():
+            return grid_params(ctx.policy, plan_avoid, plan_costly, allow_goal_door=False, m=ctx.memory)
 
-        step = guided_step(ctx.memory, w, goal, stand, plan_avoid, plan, kb)
+        def plan(att):
+            return cost_path(w, stand, params(), nav=nav_search(ctx.memory, w, goal, stand))
+
+        step = guided_step(ctx.memory, w, goal, stand, plan_avoid, plan, kb, params=params)
     if step is not None:
         return StateOutcome([set_position(step)], reason, state=InvestigateState.name)
     if nav_stuck.awaiting_break(ctx.memory, w, goal):

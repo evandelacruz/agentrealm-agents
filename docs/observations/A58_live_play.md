@@ -121,6 +121,10 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Regen never measured.** The character was never hurt (`heal actions: 0`), so there was no hurt safe-zone window for `note_regen_sample`. Even a full hour may need the character to take damage before regen gets a verdict.
 - **Status:** Two open blockers. (1) Navigation pacing: fixed offline in PR #103, pending Evan's approval of the A16 proposal. (2) Regen: unmeasured on every run so far (1 and 3–8); in run 8 the character was never hurt, so even with the A16 fix, run 9 can fail the regen gate. **Next:** once #103 merges, rerun the full live hour (A58 run 9); the regen blocker still stands and can fail run 9 if the character is never hurt in a safe zone.
 
+## Run 9 — in progress
+
+Live full hour on `main` after #103 (reached policy goto stays satisfied). Character chosen at run time via `CHARACTER_ID` (not committed). Verdict and gate metrics will be filled when the run finishes.
+
 ## Done-when
 
 A58 stays open until a live hour exits 0 on the A16 gate and a redacted PASS transcript is committed under `docs/acceptance/m7_olympuff_PASS.transcript`.

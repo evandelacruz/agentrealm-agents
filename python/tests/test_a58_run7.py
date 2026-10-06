@@ -231,6 +231,43 @@ class HealWalkBoundedTest(unittest.TestCase):
         self.assertIsNone(bounded_step(m, w, "heal_food", FOOD, set(), lambda: [(403, 606)]))
         self.assertEqual(m.nav_stuck.stuck_signals[-1]["reason"], "time")
 
+    def test_a_walk_with_no_move_leaves_the_active_walk_and_its_window_alone(self):
+        # Loot's guard runs every decision; a pickup it cannot step toward must
+        # not restart the window of the walk that is moving (review on #101).
+        w, m = pond_world(), Memory()
+        walking = nav_stuck.track(m, w, "explore", (420, 600))
+        w.tick += nav_stuck.PROGRESS_TICK_LIMIT
+        w.entities.append(Entity("npc", 3, (403, 606), "villager"))
+        self.assertIsNone(bounded_step(m, w, "loot", FOOD, set(), lambda: [(403, 606)]))
+        self.assertIs(nav_stuck.active(m, w), walking)
+        self.assertEqual(nav_stuck.stuck_reason(walking, w.tick), "time")
+
+    def test_food_and_an_owed_goto_both_behind_fog_are_not_held_forever(self):
+        """Review on #101: the food's first step and the goto's are both unseen.
+
+        Heal tries the food, has no step and yields; Explore holds the goto.
+        Neither may restart the other's window, so the food is given up and
+        the goto escalates once ``PROGRESS_TICK_LIMIT`` has passed.
+        """
+        # A dead-end pocket whose only way out, east, is an unseen cell.
+        w = WorldModel(character_id=1, map_id=1, pos=(0, 0), perception=5, health=5, max_health=10)
+        for x in range(-3, 1):
+            w.view.tiles[(x, 0)] = "dirt"
+            w.view.tiles[(x, 1)] = w.view.tiles[(x, -1)] = "stone"
+        for p in ((-4, 0), (1, 1), (1, -1)):
+            w.view.tiles[p] = "stone"
+        w.terrain_center, w.terrain_map = w.pos, 1
+        w.entities = [Entity("supply", 7, (3, 0), "apple")]
+        c = ctx(Policy(kind="scripted", goals=["goto", "explore"], goto=(5, 0), pickup=False))
+        for _ in range(2 * nav_stuck.PROGRESS_TICK_LIMIT // 10 + 1):
+            dispatch(w, c)
+            w.tick += 10
+        signals = c.memory.nav_stuck.stuck_signals
+        self.assertEqual([(s["goal"], s["reason"]) for s in signals], [("heal_food", "time")])
+        goto = nav_stuck.active(c.memory, w)
+        self.assertEqual(goto.goal, "goto")
+        self.assertGreater(goto.level, nav_stuck.CAUTIOUS, "the goto's windows ran out twice")
+
     def test_heal_walks_to_the_next_safe_tile_once_one_is_given_up(self):
         w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"]))
         w.entities = []

@@ -142,7 +142,22 @@ def track(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt 
 
     An attempt keeps its level when a replan flips to another target and back,
     so alternating between two targets cannot reset either one's escalation.
+    Switching to an attempt restarts its time window: only time spent
+    pursuing it counts. So a walk with no move this decision uses
+    ``attempt`` instead, which leaves the active one and both windows alone.
     """
+    att = attempt(m, w, goal, target)
+    if att is None:
+        return None
+    if m.nav_stuck.active != att.key:
+        att.goal = goal
+        att.window_tick = w.tick  # only time spent pursuing it counts
+    m.nav_stuck.active = att.key
+    return att
+
+
+def attempt(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt | None:
+    """The attempt for ``goal`` at ``target`` on this map, made if new, not made active."""
     if w.map_id is None or w.pos is None:
         return None
     target, backoff_key = target if isinstance(target, Leg) else Leg(target)
@@ -153,11 +168,7 @@ def track(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt 
         att = stuck.attempts[key] = NavAttempt(key=key, goal=goal, target=target, map_id=w.map_id, window_tick=w.tick)
         while len(stuck.attempts) > ATTEMPTS_KEPT:
             stuck.attempts.pop(next(iter(stuck.attempts)))
-    elif stuck.active != key:
-        att.goal = goal
-        att.window_tick = w.tick  # only time spent pursuing it counts
     att.backoff_key = backoff_key
-    stuck.active = key
     return att
 
 
@@ -401,8 +412,11 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     stuck.attempts.pop(att.key, None)
     if stuck.active == att.key:
         stuck.active = None
-    _drop_path(m, att)
-    m.goal_op = None
+    if m.goal == att.goal:  # another walk's path, such as a waiting goto's, is not this attempt's to drop
+        _drop_path(m, att)
+        m.goal_op = None
+    else:
+        m.corridors.pop(att.goal, None)
 
 
 LEVEL_NAMES = {

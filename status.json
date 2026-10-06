@@ -91,7 +91,7 @@
 
   "A34": {"state": "done"},
 
-  "A35": {"state": "done", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack with no valid plan, fail fast with no key."},
+  "A35": {"state": "partial", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack with no valid plan, fail fast with no key.", "remaining": "Docs and the planner prompt say an empty stack runs the dispatcher's safe default (exploring in safe ground); until the step 1 dispatch rework removes the policy.goals fallback in pathing.replan, an empty stack still walks policy.goals. Recheck PLAN A35, README, CHARACTER_AND_STATES and the prompt when step 1 lands."},
 
   "A36": {"state": "done"},
 

@@ -315,6 +315,38 @@ class ProgressTest(unittest.TestCase):
         self.assertEqual(r.mem.path, [(1, 0)])
         self.assertEqual(logged_events(r), ["ask", "applied"])
 
+    def test_empty_stack_and_empty_reply_keep_the_fallback_walk(self):
+        for reply in ({"goals": []}, {"goals": [{"op": "nonsense"}]}, "not json"):
+            s, r = make(FakeLLM(reply)), fake_runner()
+            r.plan = Plan([], dict(PARAM_DEFAULTS))
+            r.mem.path, r.mem.goal = [(1, 1), (2, 2)], "explore"
+            before = r.plan
+            round_trip(s, r)
+            self.assertIs(r.plan, before, reply)
+            self.assertEqual((r.mem.path, r.mem.goal), ([(1, 1), (2, 2)], "explore"), reply)
+            self.assertEqual(logged_events(r), ["ask", "unchanged"], reply)
+
+    def test_reworded_why_does_not_restart_a_wait(self):
+        s, r = make(FakeLLM({"goals": [{"op": "wait", "seconds": 20, "why": "boss is about to spawn"}, {"op": "buy", "code": "rope"}]})), fake_runner()
+        r.plan = Plan([{"op": "wait", "seconds": 20, "why": "boss spawns"}], dict(PARAM_DEFAULTS), tick_hz=10)
+        r.plan.wait_started_tick = 5
+        round_trip(s, r)
+        self.assertEqual(r.plan.wait_started_tick, 5)  # same head, new tail
+        self.assertEqual(r.plan.goals[1]["code"], "rope")
+        s2, r2 = make(FakeLLM({"goals": [{"op": "wait", "seconds": 20, "why": "reworded"}]})), fake_runner()
+        r2.plan = Plan([{"op": "wait", "seconds": 20, "why": "boss spawns"}], dict(PARAM_DEFAULTS), tick_hz=10)
+        r2.plan.wait_started_tick = 5
+        before = r2.plan
+        round_trip(s2, r2)
+        self.assertIs(r2.plan, before)  # same stack but for the reason
+
+    def test_a_longer_wait_is_a_new_wait(self):
+        s, r = make(FakeLLM({"goals": [{"op": "wait", "seconds": 25, "why": "boss spawns"}]})), fake_runner()
+        r.plan = Plan([{"op": "wait", "seconds": 20, "why": "boss spawns"}], dict(PARAM_DEFAULTS), tick_hz=10)
+        r.plan.wait_started_tick = 5
+        round_trip(s, r)
+        self.assertIsNone(r.plan.wait_started_tick)
+
     def test_a_stalled_head_still_times_out_under_timer_replans(self):
         op = {"op": "explore_area", "x": 0, "y": 0, "radius": 9999}
         s, r = make(FakeLLM(*[{"goals": [op]}] * 5), replan_s=15), fake_runner()

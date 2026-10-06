@@ -308,6 +308,16 @@ def parse_reply(raw: str) -> Any:
         return json.loads(raw[first : last + 1])
 
 
+def same_ops(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> bool:
+    """Whether two stacks are the same plan: equal ops, ignoring each op's
+    free-text ``why``, so a reworded reason does not restart a ``wait``."""
+
+    def key(op: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in op.items() if k != "why"}
+
+    return len(a) == len(b) and all(key(x) == key(y) for x, y in zip(a, b))
+
+
 def estimate_tokens(messages: list[dict[str, str]]) -> int:
     return sum(len(msg["content"]) for msg in messages) // CHARS_PER_TOKEN + 1
 
@@ -568,9 +578,10 @@ class Strategist:
             runner.log("strategist", "no goals in reply; stack kept", {"strategist": {"event": "kept", **record}})
             return
         old = runner.plan
-        if goals and goals == old.goals[old.index :]:
-            # A timer reply that re-sends the stack: keep its progress (stall
-            # clock, wait start, block snapshot) and the path being walked.
+        if same_ops(goals, old.goals[old.index :]):
+            # A timer reply that re-sends the stack (or leaves an empty one
+            # empty): keep its progress (stall clock, wait start, block
+            # snapshot) and the path being walked.
             old.notes = notes or old.notes
             runner.log("strategist", "same stack; progress kept", {"strategist": {"event": "unchanged", **record}})
             return
@@ -581,7 +592,8 @@ class Strategist:
             floor_params=dict(d.params),
             tick_hz=runner.tick_hz,
         )
-        if goals and goals[0] == old.current():
+        head = old.current()
+        if goals and head is not None and same_ops(goals[:1], [head]):
             # Same op on top: it carries on where it was; only the ops below it changed.
             runner.plan.wait_started_tick = old.wait_started_tick
             runner.plan.stalled_since_tick = old.stalled_since_tick

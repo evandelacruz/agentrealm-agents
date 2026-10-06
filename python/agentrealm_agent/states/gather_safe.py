@@ -2,9 +2,11 @@
 
 ``GatherState`` targets a gem pile, grass or bush only where ``gather_ground``
 holds: known ground off hazards with no known hostile near. That includes the
-open field, where the gems are; staying alive there is the reflexes' job
-(Retreat, Flee, Fight, Heal), not Gather's. ``is_safe_ish`` is the stricter
-safe-zone ground a hurt character walks first (``safe_explore_path``).
+open field, where the gems are, and safe zones, where breaking a block is
+allowed; Gather prefers field cells and learns which ground does not cut
+(``gem_yield``). Staying alive in the field is the reflexes' job (Retreat,
+Flee, Fight, Heal), not Gather's. ``is_safe_ish`` is the stricter safe-zone
+ground a hurt character walks first (``safe_explore_path``).
 """
 
 from __future__ import annotations

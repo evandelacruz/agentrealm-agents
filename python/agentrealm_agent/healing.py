@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Callable
 
 from .item_table import InventorySupply, merge_heal
 from .world import Entity, Pos, WorldModel, chebyshev
-from .zone_discovery import safe_tiles
+from .zone_discovery import known_safe, safe_tiles
 
 if TYPE_CHECKING:
     from .knowledge_base import KnowledgeBase
@@ -85,8 +85,7 @@ def standing_in_safe_zone(w: WorldModel, pos: Pos | None = None) -> bool:
     at = w.pos if pos is None else pos
     if w.map_id is None or at is None:
         return False
-    fact = w.zones.get(w.map_id, {}).get(at)
-    return fact is not None and fact.safe is True
+    return known_safe(w, w.map_id, at)
 
 
 def note_heal_window(m: Memory, w: WorldModel) -> None:

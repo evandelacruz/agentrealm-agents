@@ -81,6 +81,10 @@ class MapView:
     readable: dict[Pos, bool] = field(default_factory=dict)
     # Doors may carry ``locked: true`` on terrain reads (Manual §9.2).
     locked: dict[Pos, bool] = field(default_factory=dict)
+    # Cells a terrain read marked ``safe: true``: ground in any safe zone, town
+    # or a respawn patch alike (Manual §9.2 legend, B127). A full read leaves
+    # the flag off elsewhere.
+    safe: set[Pos] = field(default_factory=set)
 
     def walkable(self, p: Pos) -> bool:
         return self.tiles.get(p) in WALKABLE
@@ -158,7 +162,7 @@ class WorldModel:
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[InventorySupply]] = field(default_factory=dict)
     # Zone facts from get_zone (A7): map_id -> cell -> fact. Safe tiles derive
-    # from these (zone_discovery.safe_tiles).
+    # from these and from terrain reads' ``MapView.safe`` (zone_discovery.safe_tiles).
     zones: dict[int, dict[Pos, ZoneFact]] = field(default_factory=dict)
     # Cells whose get_zone read failed, never probed again (A7).
     zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
@@ -254,6 +258,7 @@ class WorldModel:
             # A full read: a cell whose legend entry lacks the flag is not readable.
             _set_readable(view, p, cell, full=True)
             _set_locked(view, p, cell, full=True)
+            _set_safe(view, p, cell, full=True)
         self.terrain_center = self.pos
         self.terrain_map = self.map_id
 
@@ -368,6 +373,7 @@ class WorldModel:
             _set_damage(v, p, cell)
             _set_readable(v, p, cell)
             _set_locked(v, p, cell)
+            _set_safe(v, p, cell)
         for cell in patch.get("removed") or []:
             map_id = int(cell["map_id"])
             p = (int(cell["x"]), int(cell["y"]))
@@ -376,6 +382,7 @@ class WorldModel:
             v.damage.pop(p, None)
             v.readable.pop(p, None)
             v.locked.pop(p, None)
+            v.safe.discard(p)
 
     def _apply_snapshot_terrain(self, terrain: dict) -> None:
         for cell in terrain.get("cells") or []:
@@ -386,6 +393,7 @@ class WorldModel:
             _set_damage(v, p, cell)
             _set_readable(v, p, cell)
             _set_locked(v, p, cell)
+            _set_safe(v, p, cell)
 
     def _chest_contents_from_entities(self, entities: dict) -> dict[int, list[InventorySupply]]:
         return {
@@ -631,6 +639,13 @@ def _set_locked(view: MapView, p: Pos, cell: dict, *, full: bool = False) -> Non
         view.locked[p] = True
     elif full or "locked" in cell:
         view.locked.pop(p, None)
+
+
+def _set_safe(view: MapView, p: Pos, cell: dict, *, full: bool = False) -> None:
+    if cell.get("safe"):
+        view.safe.add(p)
+    elif full or "safe" in cell:
+        view.safe.discard(p)
 
 
 def _opt_int(v) -> int | None:

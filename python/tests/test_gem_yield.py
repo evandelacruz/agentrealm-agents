@@ -14,9 +14,9 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import gather_outcome
+from agentrealm_agent.states import gather as gather_mod
 from agentrealm_agent.strategist import build_prompt
 from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
 
 MAP = 7
 
@@ -181,6 +181,122 @@ class AttributionTest(unittest.TestCase):
         self.assertTrue(cuts(r.knowledge)[0]["gem"])
 
 
+class NoEffectCutTest(unittest.TestCase):
+    """A63 run 2: 168 ``applied_no_effect`` cuts of one cell, none learned."""
+
+    def runner(self) -> Runner:
+        r = Runner.__new__(Runner)
+        r.world, r.mem, r.knowledge, r.acceptance = world(), Memory(), kb(), None
+        r.gem_cuts, r._applied_uses, r._applied_take_codes, r._loadout_verbs = GemYieldTracker(), [], [], []
+        return r
+
+    def test_runner_holds_the_cell_out_without_filing_a_cut(self):
+        r = self.runner()
+        r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}
+        r.on_result({"outcome": "applied_no_effect", "tick": 100}, 0)
+        self.assertEqual(r.gem_cuts.pending, [])
+        self.assertEqual(gem_yield.exhausted_cells(r.knowledge, MAP, 101, r.gem_cuts), {(1, 1)})
+        r.world.tick = 100 + GEM_WINDOW_TICKS + 1
+        r.gem_cuts.update(r.world, r.knowledge)
+        self.assertNotIn("gem_yield", r.knowledge.extra, "never filed: no false miss toward barren")
+        self.assertEqual(r.gem_cuts.run_counts(), {"cuts": 0, "no_effect_cuts": 1, "gems_gained": 0})
+
+    def test_a_break_probe_that_misses_is_not_a_no_effect_cut(self):
+        """Review on #126: Break's capability misses (A28) are not ground that does not cut."""
+        r = self.runner()
+        r.mem.break_pending = (MAP, (1, 1), "smash")
+        r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}
+        r.on_result({"outcome": "applied_no_effect", "tick": 100}, 0)
+        self.assertEqual((r.gem_cuts.no_effect, r.gem_cuts.no_effect_cuts), ([], 0))
+
+    def test_the_hold_lapses_after_regrow_ticks(self):
+        w, t = world(), GemYieldTracker()
+        t.note_no_effect(w, (1, 1), "grass", 100)
+        self.assertEqual(t.pending_cells(MAP, 100 + gem_yield.REGROW_TICKS - 1), {(1, 1)})
+        self.assertEqual(t.pending_cells(MAP, 100 + gem_yield.REGROW_TICKS), set())
+        self.assertEqual(t.pending_cells(MAP + 1, 100), set())
+
+    def test_only_grass_and_bushes_are_held(self):
+        w, t = world(), GemYieldTracker()
+        t.note_no_effect(w, (1, 1), "rock", 100)  # break memory owns other blocks (A28)
+        self.assertEqual((t.no_effect, t.no_effect_cuts), ([], 0))
+
+    def test_gather_moves_on_and_says_cuts_have_no_effect(self):
+        w, t, m = field_world(), GemYieldTracker(), Memory()
+        op = {"op": "gather_gems", "count": 5}
+        t.note_no_effect(w, (1, 1), "grass", w.tick)
+        out = gather_outcome(w, m, Policy(on_hostile="ignore"), op=op, gem_cuts=t)
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertNotEqual(m.gather_target[1], (1, 1))
+        self.assertEqual(m.gather_status, gather_mod.NO_EFFECT)
+        t.note_cut(w, m.gather_target[1], "grass", w.tick)  # a cut that took effect
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op, gem_cuts=t)
+        self.assertEqual(m.gather_status, gather_mod.CUTTING)
+
+    def test_no_effect_status_is_local_and_lapses(self):
+        w, t, m = field_world(), GemYieldTracker(), Memory()
+        op = {"op": "gather_gems", "count": 5}
+        t.note_no_effect(w, (1, 1), "grass", w.tick)
+        w.view.tiles[(40, 1)] = "grass"
+        w.pos = (40, 1)  # another region
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op, gem_cuts=t)
+        self.assertEqual(m.gather_status, gather_mod.CUTTING)
+        w.pos, w.tick = (1, 2), w.tick + gem_yield.REGROW_TICKS
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op, gem_cuts=t)
+        self.assertEqual(m.gather_status, gather_mod.CUTTING)
+        w.tick += gem_yield.NO_EFFECT_TTL
+        self.assertEqual(t.uncuttable(w), (set(), set()))
+        self.assertEqual(t.no_effect, [], "forgotten after NO_EFFECT_TTL")
+
+    def test_the_store_is_capped_oldest_first(self):
+        w, t = world(), GemYieldTracker()
+        for i in range(gem_yield.MAX_NO_EFFECT + 5):
+            t.note_no_effect(w, (i, 0), "grass", w.tick)
+        self.assertEqual(len(t.no_effect), gem_yield.MAX_NO_EFFECT)
+        self.assertNotIn((MAP, (0, 0), w.tick), t.no_effect)
+
+    def test_repeat_cuts_on_one_safe_cell_mark_its_zone(self):
+        """Review on #126: three no-effect cuts count, even on one cell (run 2 cut one cell 168 times)."""
+        w, t = world(), GemYieldTracker()
+        w.view.safe |= {(1, 1), (2, 1)}
+        for i in range(gem_yield.NO_EFFECT_ZONE_CUTS):
+            t.note_no_effect(w, (1, 1), "grass", w.tick + i * gem_yield.REGROW_TICKS)
+        w.tick += (gem_yield.NO_EFFECT_ZONE_CUTS - 1) * gem_yield.REGROW_TICKS
+        self.assertEqual(t.uncuttable(w), (set(), {(1, 1), (2, 1)}))
+
+    def test_no_effect_cuts_in_one_field_region_mark_it_uncuttable(self):
+        w, t = world(), GemYieldTracker()
+        for x in range(gem_yield.NO_EFFECT_ZONE_CUTS - 1):
+            t.note_no_effect(w, (x, 0), "grass", w.tick)
+        self.assertEqual(t.uncuttable(w), (set(), set()))
+        t.note_no_effect(w, (4, 4), "bush", w.tick)
+        self.assertEqual(t.uncuttable(w), ({(0, 0)}, set()), "a region, not barren: nothing is filed")
+        self.assertEqual(gem_yield.barren_regions(kb(), MAP), set())
+
+    def test_gems_gained_counts_rises_not_spending(self):
+        w, t = world(gems=3), GemYieldTracker()
+        t.update(w, None)
+        w.gems = 5
+        t.update(w, None)
+        w.gems = 1  # bought something
+        t.update(w, None)
+        w.gems = 2
+        t.update(w, None)
+        self.assertEqual(t.gems_gained, 3)
+
+    def test_state_shows_this_runs_cuts_and_gems(self):
+        t = GemYieldTracker(cuts=4, no_effect_cuts=2, gems_gained=1)
+        messages = build_prompt(
+            triggers=[],
+            w=world(),
+            plan=Plan([{"op": "gather_gems", "count": 5}], dict(PARAM_DEFAULTS)),
+            directives=Directives(params=dict(PARAM_DEFAULTS)),
+            knowledge=kb(),
+            gather_run=t.run_counts(),
+        )
+        self.assertIn('gather_run={"cuts": 4, "gems_gained": 1, "no_effect_cuts": 2}', messages[1]["content"])
+
+
 class RegionSummaryTest(unittest.TestCase):
     def test_regions_count_cuts_gems_and_last_tick(self):
         k = kb()
@@ -278,10 +394,9 @@ class RegionSummaryTest(unittest.TestCase):
         self.assertIn('"best": []', messages[1]["content"])
 
 
-def safe_world() -> WorldModel:
-    w = world(at=(1, 1))
-    apply_zone(w, MAP, 1, 1, {"safe": True, "brightness": 1})
-    return w
+def field_world() -> WorldModel:
+    """Standing on grass outside any known safe zone."""
+    return world(at=(1, 1))
 
 
 class GatherSkipsBarrenTest(unittest.TestCase):
@@ -292,26 +407,26 @@ class GatherSkipsBarrenTest(unittest.TestCase):
             record_cut(self.k, MAP, (5, 5), "grass", -gem_yield.REGROW_TICKS - i, False)
 
     def test_barren_grass_is_not_cut(self):
-        out = gather_outcome(safe_world(), Memory(), Policy(on_hostile="ignore"), knowledge=self.k, op={"op": "gather_gems", "count": 5})
+        out = gather_outcome(field_world(), Memory(), Policy(on_hostile="ignore"), knowledge=self.k, op={"op": "gather_gems", "count": 5})
         self.assertNotEqual(out.reason, "cut grass")
 
     def test_op_naming_the_region_cuts_it_anyway(self):
         op = {"op": "gather_gems", "count": 5, "x": 3, "y": 3}
-        out = gather_outcome(safe_world(), Memory(), Policy(on_hostile="ignore"), knowledge=self.k, op=op)
+        out = gather_outcome(field_world(), Memory(), Policy(on_hostile="ignore"), knowledge=self.k, op=op)
         self.assertEqual(out.reason, "cut grass")
 
     def test_a_cell_cut_before_it_grew_back_is_not_cut_again(self):
         k = kb()
         record_cut(k, MAP, (1, 1), "grass", 90, False)
         m = Memory()
-        out = gather_outcome(safe_world(), m, Policy(on_hostile="ignore"), knowledge=k, op={"op": "gather_gems", "count": 5})
+        out = gather_outcome(field_world(), m, Policy(on_hostile="ignore"), knowledge=k, op={"op": "gather_gems", "count": 5})
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
         self.assertNotEqual(m.gather_target[1], (1, 1))
 
     def test_a_cut_still_in_its_gem_window_is_not_cut_again(self):
         """Exhausted from the moment of the cut, not only once filed: a stale
         read still showing grass must not file the same cell twice."""
-        w, k, tracker = safe_world(), kb(), GemYieldTracker()
+        w, k, tracker = field_world(), kb(), GemYieldTracker()
         op = {"op": "gather_gems", "count": 5}
         out = gather_outcome(w, Memory(), Policy(on_hostile="ignore"), knowledge=k, op=op, gem_cuts=tracker)
         self.assertEqual(out.reason, "cut grass")
@@ -325,13 +440,13 @@ class GatherSkipsBarrenTest(unittest.TestCase):
         self.assertNotEqual(m.gather_target[1], (1, 1))
 
     def test_pending_cells_are_of_this_map_only(self):
-        w, tracker = safe_world(), GemYieldTracker()
+        w, tracker = field_world(), GemYieldTracker()
         tracker.note_cut(w, (1, 1), "grass", w.tick)
         self.assertEqual(gem_yield.exhausted_cells(None, MAP, w.tick, tracker), {(1, 1)})
         self.assertEqual(gem_yield.exhausted_cells(None, MAP + 1, w.tick, tracker), set())
 
     def test_unsampled_region_is_still_cut(self):
-        out = gather_outcome(safe_world(), Memory(), Policy(on_hostile="ignore"), knowledge=kb(), op={"op": "gather_gems", "count": 5})
+        out = gather_outcome(field_world(), Memory(), Policy(on_hostile="ignore"), knowledge=kb(), op={"op": "gather_gems", "count": 5})
         self.assertEqual(out.reason, "cut grass")
 
     def test_op_validates_region_coordinates(self):

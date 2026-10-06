@@ -45,6 +45,8 @@
 
   "A59": {"state": "done"},
 
+  "A60": {"state": "done", "note": "Probe, profile and offline tests shipped; not run live. A58 runs it before the hour when the knowledge base has no regen answer."},
+
   "A17": {"state": "done"},
 
   "A18": {"state": "done"},

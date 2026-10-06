@@ -158,3 +158,103 @@ Intents: 16 `Step`, 603 `Wait`, 168 `Use`, 0 `Take`. Call mix: 364 `tick`, 307 `
    Suspect: `states/gather.py:98–99`. The status should reflect results (e.g. "cuts have no effect here" after a no-effect `Use`), and the State could carry cuts and gems this run so the planner can tell work from a stall.
 
 **Minor:** call 1's `travel` `to: "shop"` was dropped for missing `x` (`plan.py:111` requires x, y for every `to`; the op schema at `plan.py:58` lists them, but a shop the character has not found yet has no cell). Zone reads took 307 of 741 calls, 306 of them `safe=True` town cells, while the character stood still.
+
+## Run 3 — 11 gems in 168 s, then a flee step into known lava: a stale position aims the Step
+
+- **Code:** `main` at `e993602` (after #125 survival fixes, #126 Gather cuts field cells first and learns no-effect cuts, #127 B133 `finished_queue`), against the server redeployed with B133 and sim changes.
+- **Setup:** as Run 2: `gather_gems:20` directive, planner on, `--seconds 300`, empty local knowledge base.
+- **Verdict:** exit 1, `FAIL` after **168 s**: one death, and the smoke ends a run at its first death (`acceptance_run.py:42`). Character started at 10/10 health, 9 lives, 0 gems, on the overworld 216 blocks south of the town cell, 8 blocks from a known safe zone (395, 609) and its shop supplies.
+- **Gate summary:** deaths **1**; API errors **1** (`position` 409 `not_on_map`, read one tick after the death); fights below the health floor 0; gems earned **yes**; armor, shop weapon, potion reserve, heal takes all **no**.
+
+### Gems and gem yield
+
+| | |
+|---|---|
+| Gems | **0 → 11** (6 by 71 s, flat to 149 s, 5 more by 163 s) |
+| Cuts (`Use` on grass) | **28 sent, 28 took effect, 0 `applied_no_effect`**; no bush cuts |
+| `Take` | 22 sent for 12 supplies, 11 taken: 6 gems our cuts dropped, 3 from an authored pile cluster at (386–388, 535–536), 2 apples. The Take of pile gem 458 got no result. Two more gems (459 in the cluster, 524 at (400, 529)) were picked up by walking onto them. **10 of the 11 took a second, wasted Take** (below) |
+| `gem_yield` records | 28 cuts filed. Region (400, 592): **22 cuts, 6 gems, yield 0.27**. Region (400, 576): **6 cuts, 0 gems**. Barren marks **none** (30 cuts needed); uncuttable marks **none** |
+
+All cuts were field grass (the one zone read near the cuts, (406, 600), was `safe=False`). Run 2's defects 1 and 2 are fixed: no town cut, no no-effect cut.
+
+### Planner
+
+| | |
+|---|---|
+| Calls | 11 (1 `applied`, 6 `kept`, 4 `unchanged`) |
+| Plans accepted / errors | **5 / 0** (script summary) |
+| Tokens | input 6,444, output 1,560, cache write 99,234 (call 1), cache read 992,340 |
+| Tokens per minute (budgeted) | **~99.8–101.9k in minute 1** (the one cache write), then **~2.9–3.1k/min** |
+
+**Churn: none.** No call touched the pinned `gather_gems`. Call 10 put a shopping chain under the pin (`travel` to shop, `buy` small_potion, bronze_sword, bronze_mail, `equip`); call 11 re-sent it. Run 2's dropped `travel to: "shop"` is fixed (a symbolic `to` without x, y now becomes 0, 0, `plan.py:156`). The State's `gather_run` counts worked: calls 3–7 read the rising cuts and gems correctly ("18 cuts gave 6 gems, a yield of 0.33 per cut"). From call 9 on, `gem_yield.best` and `here` were empty: the character had walked more than 3 regions from (400, 592) (`SUMMARY_RADIUS`, `gem_yield.py:61`).
+
+### Decision mix (112 decisions that sent intents; 109 more ticks held a queue)
+
+| Op / state | Decisions |
+|---|---|
+| gather_gems (pinned): `gather → …` (walk to a cell or pile) | 60 |
+| gather_gems (pinned): `cut grass` | 28 |
+| gather_gems (pinned): `take gem` | 19 |
+| take apple (Loot) | 3 |
+| flee | 2 |
+| explore fallback, heal, fight | **0** |
+
+Intents: 130 `Step`, 211 `Wait`, 28 `Use`, 22 `Take`. Call mix: 221 `tick`, 58 `entities`, 28 `position`, 22 `strategist`, 15 `self`, 7 `terrain`, **3 `zone`** (Run 2: 307), 1 `world`.
+
+### Outcomes
+
+- **Left town for field ground:** yes. It never stood in town; from its start beside a southern safe zone it walked straight to field grass at (406, 600) and cut there from 11 s.
+- **Left low-yield regions on its own:** **not by yield.** It cut 22 times in (400, 592) for 6 gems, then 6 times in (400, 576) for none, then stopped cutting and walked 55 blocks north. That walk was a hostile shadowing it (defect 2), not a yield decision; no region reached a barren mark.
+- **Deaths:** **1** (lives 9 → 8) at 163 s, at (401, 528): 12 `occupy` damage from **lava**, after a 2 from npc 264 (gristlewick). Health was 10 on every self read before.
+- **Stalls > 10 s at one cell:** none (longest 6.4 s, taking a pile at (386, 536)). But **cutting stalled for 45 s** (104 s → 149 s): 0 cuts, gems flat at 6.
+
+### B133 and the new server
+
+- `finished_queue` held walk and cut queues as intended: 109 ticks held a queue, no lost-queue resets, no position re-reads from a lost handoff.
+- **A lone `Take` is not tracked as a queue, so it is decided again before it has run.** Each `Take` was answered with no result, the next decision (3 ticks later) sent the same `Take`, and its response carried the first one's `SupplyTaken`:
+
+  ```
+  t=4004401 @76:406,595 tick  Take(62583) (take gem)
+  t=4004404 @76:406,595 tick  Take(62583) (take gem) | SupplyTaken 62583 @ tick 4004401
+  ```
+
+  20 of the 22 Takes were such pairs, one wasted call per supply. Suspect: `runner.py:690–693`, where a non-walk, non-`Use` intent sets `pending_intents = None`, so the response's `queue` is not held and `apply_finished_queue` (`:797`) never waits on it.
+- No other new-server behavior seen: `Damaged` events carry `source_kind` (`npc`, `occupy`) as documented, and lava reads `occupy_damage: 12`, fire 2.
+
+### Top 3 defects
+
+1. **Flee re-sent a Step from a stale position and walked into known lava.** At 4005715 Flee queued `Wait×3, Step up_right` from (399, 530) to (400, 529) (dirt). The step ran at about 4005718. The next decision still held (399, 530) as the position, so its `Step up_right` toward (400, 529) went from (400, 529) to (401, 528), lava, in the knowledge base since the terrain read at 4005526. Health 8, lava 12.
+
+   ```
+   t=4005715 @76:399,530 tick      queue 1×Step 3×Wait (flee npc 264)
+   t=4005716 @76:399,530 position  (399, 530)
+   t=4005721 @76:400,529 tick      Step(up_right) (flee npc 264) | Attacked, Damaged 2 by npc, SupplyTaken
+   t=4005723             self      lives=8 alive=False health=0
+   t=4005761             tick      Damaged 12 by occupy, Died   (event tick 4005721)
+   terrain (397..403, 528): g g f d l l f   ← (401, 528) lava, occupy_damage 12
+   ```
+
+   Suspects: `runner.py:704` builds directional Steps from `w.pos`, so a target cell becomes a wrong direction once the running queue's own step has moved the character. Flee's hazard filter (`states/explore.py:179`, `blocked` includes `avoid_blocks`) cannot catch it: it checked (400, 529), not where the Step lands. Re-read position before replacing a queue whose Step may have run, or skip the replacement when the queued first step equals the new target.
+
+2. **A hostile that shadows at 5 blocks stops all cutting.** From 104 s npc 269 (wartlurch) followed at Chebyshev 4–6 for 40 s without attacking. `gather_ground` rules out any cell within `GATHER_HOSTILE_RADIUS` (6) of a hostile, so the grass around the character was never cuttable. Gather neither cut nor shook it off: it replanned 1–5 steps at a time to the nearest grass outside the radius, which the follower then covered again, and walked 55 blocks north into a hostile cluster (npcs 262, 263, 264) and a lava field. Gems stayed at 6 from 71 s to 149 s; 0 cuts after 104 s.
+
+   ```
+   t=4005135 @76:404,586 tick  gather → (403, 585)     npc 269 at 5
+   t=4005295 @76:394,571 tick  gather → (393, 570)     npc 269 at 5
+   t=4005442 @76:384,557 tick  gather → (383, 556)     npc 269 at 5
+   gather_run: cuts 28 at 107 s, 28 at 152 s
+   ```
+
+   Suspects: `states/gather_safe.py:41` with `:22` (the path planner's danger radius used as a hard bar), and `states/gather.py:255–259` (grass replan picks the nearest qualifying cell, so it inches away step by step). A hostile that has not hit us could be fought (the M8 profile has `on_hostile = "fight"`), or the bar could be weapon reach plus a step, not 6.
+
+3. **The planner calls the stall "working".** During the 45 s with no cut, `gather_status` stayed `"cutting"` (a walk to a grass cell counts as cutting, `states/gather.py:121–128`), and three planner calls read it as progress while `gather_run` showed cuts flat at 28:
+
+   ```
+   call 8   "A gather_gems pin to 20 gems is on top and working: 6 gems from 28 cuts"
+   call 9   "Pinned gather_gems to 20 is working: 6 gems from 28 cuts in the best region"
+   call 10  "Pinned gather_gems to 20 stays on top; gems are 6 and the yield is about 0.27 per cut."
+   ```
+
+   Suspects: `states/gather.py:128` (`CUTTING` for any walk) and the State, which has no reason for a walk (e.g. "keeping 6 from npc 269") and no time since the last cut. With `gem_yield.best` empty past 3 regions (`gem_yield.py:61`), the planner also lost the one productive region it could have sent the character back to.
+
+**Minor:** the authored pile cluster at (386–388, 535–536) and the lone gem at (400, 529) sat among hostiles and lava; Gather walks to any pile in view first (`states/gather.py:234`), checked against hostiles only at plan time, so the queue to (400, 529) ran on while npc 264 closed to 5 blocks.

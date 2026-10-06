@@ -70,11 +70,92 @@ class Entity:
         return self.kind == "npc" and self.health is not None
 
 
+class Tiles(dict):
+    """A map's tiles: a plain dict that keeps its own frontier up to date.
+
+    A big map's frontier is a pass over every known tile, and one decision
+    asks for it several times, so it is kept, and only the cells round a
+    changed one are looked at again (A23 Run 2).
+    """
+
+    # The frontier as last found, and the cells changed since. Either None:
+    # find it afresh.
+    _frontier: set[Pos] | None = None
+    _changes: set[Pos] | None = None
+    MAX_CHANGES = 4096  # more than this and a fresh pass is as quick
+
+    def frontier(self) -> set[Pos]:
+        """Known walkable tiles that touch an unknown one."""
+        found, changes = self._frontier, self._changes
+        if found is None or changes is None:
+            found = {p for p in self if self._on_frontier(p)}
+        else:
+            for c in changes:
+                for p in [c] + [(c[0] + dx, c[1] + dy) for dx, dy in NEIGHBOURS]:
+                    if self._on_frontier(p):
+                        found.add(p)
+                    else:
+                        found.discard(p)
+        self._frontier, self._changes = found, set()
+        return set(found)
+
+    def _on_frontier(self, p: Pos) -> bool:
+        if self.get(p) not in WALKABLE:
+            return False
+        x, y = p
+        for dx, dy in NEIGHBOURS:
+            if (x + dx, y + dy) not in self:
+                return True
+        return False
+
+    def _changed(self, keys) -> None:
+        changes = self._changes
+        if changes is None:
+            return
+        changes.update(keys)
+        if len(changes) > self.MAX_CHANGES:
+            self._changes = None
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, value)
+        self._changed((key,))
+
+    def __delitem__(self, key) -> None:
+        super().__delitem__(key)
+        self._changed((key,))
+
+    def __ior__(self, other):
+        self._changed(dict(other))
+        return super().__ior__(other)
+
+    def update(self, *args, **kwargs) -> None:
+        new = dict(*args, **kwargs)
+        super().update(new)
+        self._changed(new)
+
+    def setdefault(self, key, default=None):
+        self._changed((key,))
+        return super().setdefault(key, default)
+
+    def pop(self, key, *default):
+        self._changed((key,))
+        return super().pop(key, *default)
+
+    def popitem(self):
+        key, value = super().popitem()
+        self._changed((key,))
+        return key, value
+
+    def clear(self) -> None:
+        super().clear()
+        self._changes = None
+
+
 @dataclass
 class MapView:
     """What this character has seen of one map. Missing tiles are unknown."""
 
-    tiles: dict[Pos, str] = field(default_factory=dict)
+    tiles: dict[Pos, str] = field(default_factory=Tiles)
     # occupy_damage named by terrain reads (Manual §9.2 legend), 0 included.
     damage: dict[Pos, int] = field(default_factory=dict)
     # Signs and statues (Manual §9.2): readable wall cells from terrain reads.
@@ -86,6 +167,10 @@ class MapView:
     # the flag off elsewhere.
     safe: set[Pos] = field(default_factory=set)
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.tiles, Tiles):
+            self.tiles = Tiles(self.tiles)
+
     def walkable(self, p: Pos) -> bool:
         return self.tiles.get(p) in WALKABLE
 
@@ -94,16 +179,10 @@ class MapView:
         return self.damage.get(p)
 
     def frontier(self) -> set[Pos]:
-        """Known walkable tiles that touch an unknown one."""
-        out = set()
-        for p, block in self.tiles.items():
-            if block not in WALKABLE:
-                continue
-            for dx, dy in NEIGHBOURS:
-                if (p[0] + dx, p[1] + dy) not in self.tiles:
-                    out.add(p)
-                    break
-        return out
+        """Known walkable tiles that touch an unknown one (``Tiles.frontier``)."""
+        if not isinstance(self.tiles, Tiles):  # a plain dict assigned after construction
+            self.tiles = Tiles(self.tiles)
+        return self.tiles.frontier()
 
 
 @dataclass

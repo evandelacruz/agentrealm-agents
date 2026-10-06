@@ -8,13 +8,13 @@ from ..directives import attack_forbidden
 from ..memory import Memory
 from ..navigation import cost_path, oscillation
 from ..pathing import flee_run, flee_step, grid_params, outruns, step_open
-from ..survival import flee_from, hostiles_in_range, on_safe_tile, would_lose
+from ..survival import flee_from, hostiles_in_range, is_attacker, on_safe_tile, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .explore import plan_sets
-from .fight import can_engage, engage, fight_target
+from .fight import can_engage, engage, fight_target, in_weapon_reach
 from .intents import set_position
 from .retreat import retreat_step
 
@@ -88,8 +88,9 @@ def instead_of_fleeing(
 
     In order: fight back when the win estimate says we win or there is no
     step away (cornered); walk to the nearest known safe tile, Retreat's
-    way; fight back anyway when it keeps hitting us, since running and
-    retreating both failed. A target ``never_attack`` forbids is never fought.
+    way; swing back anyway when ``target`` is the one hitting us and in
+    weapon reach, since running and retreating both failed. A target
+    ``never_attack`` forbids is never fought.
     """
     may_hit = not attack_forbidden(target, ctx.never_attack)
     cornered = flee_step(w, hostiles, blocked) is None
@@ -98,7 +99,8 @@ def instead_of_fleeing(
     if may_hit and (cornered or wins):
         options.append(lambda: engage(w, ctx, target, FleeState.name))
     options.append(lambda: retreat_step(w, ctx, FleeState.name))
-    if may_hit and hit_while_fleeing(w, ctx.memory):
+    hitter_in_reach = is_attacker(w, target) and in_weapon_reach(w, target, ctx.knowledge)
+    if may_hit and hit_while_fleeing(w, ctx.memory) and hitter_in_reach:
         options.append(lambda: engage(w, ctx, target, FleeState.name))
     for option in options:
         out = option()

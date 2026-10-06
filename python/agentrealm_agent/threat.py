@@ -87,6 +87,13 @@ def hostile_hit(ev: dict) -> bool:
     return kind == "Damaged" and ev.get("source_kind") in HOSTILE_KINDS
 
 
+def hitter(ev: dict) -> tuple[str, Any] | None:
+    """(entity kind, id) of the hostile a ``Damaged`` names as its source, or None."""
+    kind = HOSTILE_KINDS.get(ev.get("source_kind"))
+    sid = ev.get("source_id")
+    return (kind, sid) if kind is not None and sid is not None else None
+
+
 def type_key_for_entity(e: Any) -> TypeKey | None:
     """Type key for a perceived hostile entity; None when it has no type code."""
     if e.kind in HOSTILE_KINDS.values() and e.code:

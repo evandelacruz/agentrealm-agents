@@ -64,16 +64,21 @@ def recently_attacked(w: WorldModel) -> bool:
 
 def flee_from(w: WorldModel, policy: Policy) -> list[Entity]:
     """The hostiles Flee runs from: those in range, or, with ``on_hostile = "flee"``,
-    every one in view while a hostile hit us recently.
+    the one that hit us recently when it is in view (``attacker``).
 
     A pursuer that steps just past ``hostile_range`` between its hits is
-    still chasing us (A58 run 9). ``fight`` keeps its own rule: it flees only
-    a target in range it cannot beat or reach.
+    still chasing us (A58 run 9); a bystander in view is not. ``fight`` keeps
+    its own rule: it flees only a target in range it cannot beat or reach.
     """
     in_range = hostiles_in_range(w, policy)
     if in_range or policy.on_hostile != "flee" or not recently_attacked(w):
         return in_range
-    return [e for e in w.entities if e.kind in policy.hostile]
+    return [e for e in w.entities if e.kind in policy.hostile and is_attacker(w, e)]
+
+
+def is_attacker(w: WorldModel, e: Entity) -> bool:
+    """``e`` is the hostile the last hostile ``Damaged`` named as its source."""
+    return w.attacker == (e.kind, e.id)
 
 
 def combat_group(w: WorldModel, policy: Policy) -> list[Entity]:

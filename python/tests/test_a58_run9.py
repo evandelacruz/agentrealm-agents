@@ -121,6 +121,38 @@ class PursuerNotOutrunTest(unittest.TestCase):
         self.assertEqual(given_up[0], "not outrunning npc 7: fight npc 7")
         self.assertFalse(any("retreat" in r for r in reasons), reasons)
 
+    def test_a_hitter_out_of_weapon_reach_is_not_walked_back_to(self):
+        """Running failed, we would lose, no safe tile: swing back only at the hitter in reach, never close in (review on #107)."""
+        w, c = world(), ctx()
+        w.health = w.max_health = 100
+        c.params["risk"] = 0.0
+        w.entities = [Entity("npc", 7, (12, 10), code="pursuer")]  # in range, two cells: out of weapon reach
+        m = c.memory
+        m.state, m.flee_since, m.flee_failed, m.flee_gaps = "Flee", w.tick, True, [(w.tick, 2)]
+        w.tick += 5
+        hit(w, npc_id=7)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Flee")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
+        self.assertNotIn("close on", out.reason)
+        w.entities[0].pos = (11, 10)  # now in reach
+        w.tick += 1
+        hit(w, npc_id=7)
+        self.assertEqual(dispatch(w, c).reason, "not outrunning npc 7: fight npc 7")
+
+    def test_a_hostile_in_reach_that_is_not_the_hitter_is_not_fought(self):
+        w, c = world(), ctx()
+        w.health = w.max_health = 100
+        c.params["risk"] = 0.0
+        w.entities = [Entity("npc", 9, (11, 10), code="bystander")]  # adjacent; npc 7 hits from out of view
+        m = c.memory
+        m.state, m.flee_since, m.flee_failed, m.flee_gaps = "Flee", w.tick, True, [(w.tick, 1)]
+        w.tick += 5
+        hit(w, npc_id=7)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Flee")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
+
     def test_a_pursuer_keeping_pace_without_hitting_is_fought_once_the_gap_stalls(self):
         w, c = world(), ctx()
         w.health = w.max_health = 100
@@ -187,6 +219,18 @@ class FleeKeepsThePursuerTest(unittest.TestCase):
         hit(w)
         w.tick += 100  # long past the last hit, out of range
         self.assertNotEqual(dispatch(w, c).state, "Flee")
+
+    def test_a_bystander_in_view_is_not_the_pursuer(self):
+        """Hit by npc 7, out of view; npc 9 stands seven cells away: Flee does not run from npc 9 (review on #107)."""
+        w, c = world(), ctx()
+        w.entities = [Entity("npc", 9, (17, 10))]
+        hit(w, npc_id=7)
+        self.assertNotEqual(dispatch(w, c).state, "Flee")
+        w.tick += SWING_TICKS
+        hit(w, npc_id=7)  # a second hit from the unseen npc 7
+        out = dispatch(w, c)
+        self.assertNotEqual(out.state, "Flee", out.reason)
+        self.assertFalse(any(r in out.reason for r in ("flee npc 9", "close on npc 9", "fight npc 9")), out.reason)
 
     def test_fight_policy_does_not_flee_a_beatable_attacker_past_range(self):
         """``on_hostile = "fight"`` keeps its rule: a beatable NPC 3 away that just hit us is no reason to run."""

@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .threat import ThreatTable, absorb_damaged, damage_amount, hostile_hit
+from .threat import ThreatTable, absorb_damaged, damage_amount, hitter, hostile_hit
 
 log = logging.getLogger(__name__)
 
@@ -137,6 +137,7 @@ class WorldModel:
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
     recent_damage: list[tuple[int, int]] = field(default_factory=list)  # (tick, amount)
     attacked_tick: int | None = None  # tick of the last hostile hit on us: Attacked, or Damaged from an NPC or character (A9)
+    attacker: tuple[str, int] | None = None  # (entity kind, id) a hostile Damaged named as its source, the last one (A9)
     changed_blocks: list[tuple[int, Pos]] = field(default_factory=list)  # BlockChanged cells of the last apply_events
     threat: ThreatTable = field(default_factory=ThreatTable)
     # The chest our last death dropped: (map_id, position, chest_id), from Died
@@ -484,6 +485,7 @@ class WorldModel:
                 kind = ev.get("kind")
                 if hostile_hit(ev):
                     self.attacked_tick = int(ev.get("tick", group["tick"]))
+                    self.attacker = hitter(ev) or self.attacker
                 if kind == "Damaged":
                     amount = damage_amount(ev)
                     if amount is not None:
@@ -502,7 +504,7 @@ class WorldModel:
                     if ev.get("chest_id"):
                         self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
                 elif kind == "Respawned":
-                    self.placed, self.attacked_tick = True, None
+                    self.placed, self.attacked_tick, self.attacker = True, None, None
                     self.carry_capacity = DEFAULT_CARRY_CAPACITY  # a new, empty blue chest (10), Manual §11
                     try:
                         self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))

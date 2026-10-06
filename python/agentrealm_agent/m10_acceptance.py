@@ -6,7 +6,7 @@ module checks:
 - Readable cells: every cell that was ``readable`` and in sight along the route
   has an applied ``Read`` recorded in the knowledge base (``read_cells``).
 - NPCs: every NPC that came within 25 blocks (Chebyshev) has an applied ``Say``
-  recorded (``spoken_npcs``).
+  recorded: a ``say`` op's (``spoken_npcs``) or Greet's hello (``greeted_npcs``, A65).
 - Odd block: on the navigation fixture map ``ODD_BUSH`` (``grids.py``), the
   agent finds and opens the lone bush; CI runs that offline, not the live smoke.
 - Break memory: the agent never sends a Break ``Use`` on a (block, capability)
@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from .acceptance_run import FULL_RUN_FRACTION, TimedRunHooks  # FULL_RUN_FRACTION: re-exported for the smoke script
 from .break_memory import attempt_failed, attempt_open
 from .config import Policy
-from .investigation import SPEECH_RANGE, cell_was_read, in_sight, spoken_npc_ids
+from .investigation import SPEECH_RANGE, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
 from .item_table import use_target_block
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -95,7 +95,7 @@ class M10AcceptanceMetrics(TimedRunHooks):
         )
 
     def missed_npcs(self, knowledge: KnowledgeBase | None) -> list[int]:
-        spoken = spoken_npc_ids(knowledge)
+        spoken = spoken_npc_ids(knowledge) | greeted_npc_ids(knowledge)
         return sorted(npc_id for npc_id in self._seen_npcs if npc_id not in spoken)
 
     def failures(self, *, full_run: bool = True, knowledge: KnowledgeBase | None = None) -> list[str]:

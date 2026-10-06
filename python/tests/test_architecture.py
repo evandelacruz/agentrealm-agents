@@ -20,7 +20,7 @@ from agentrealm_agent.states import PlayContext, StateOutcome, dispatch
 from agentrealm_agent.world import Entity, WorldModel
 
 # Spelled out here, not imported, so the test reads the spec rather than the code.
-REFLEXES = {"Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee", "Pickup", "Recover"}
+REFLEXES = {"Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee", "Pickup", "Recover", "Greet"}
 SAFE_DEFAULT = "Explore"
 
 
@@ -87,10 +87,11 @@ class NoPlanTest(unittest.TestCase):
         acting = {o.state for o in outs if o.intents}
         self.assertTrue(acting, "something must act")
         self.assertLessEqual(acting, REFLEXES | {SAFE_DEFAULT}, acting)
-        # Nothing was read or greeted on the agent's own initiative.
+        # Nothing was read on the agent's own initiative, and the only Say is
+        # Greet's one-tick hello to an NPC in sight (A65): no walk to talk.
         verbs = {i["verb"] for o in outs for i in o.intents or []}
         self.assertNotIn("Read", verbs)
-        self.assertNotIn("Say", verbs)
+        self.assertTrue(all(o.state == "Greet" for o in outs for i in o.intents or [] if i["verb"] == "Say"))
 
     def test_nothing_to_do_is_never_idle(self):
         # Walled in, fully known: no frontier, no plan, nothing in sight.

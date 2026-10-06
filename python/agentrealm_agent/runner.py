@@ -108,7 +108,10 @@ class Runner:
         out=print,
         knowledge: KnowledgeBase | None = None,
         acceptance: AcceptanceHooks | None = None,
+        strategist: Strategist | None = None,
     ):
+        """``strategist`` is the AI planner (A35); live runs pass
+        :meth:`Strategist.from_env`. None is the ``--no-planner`` test mode."""
         self.cfg = cfg
         self.client = client
         self.cid = character_id
@@ -137,13 +140,17 @@ class Runner:
         self.directives = DirectivesWatch(cfg.directives_path)
         self.directives.ensure_loaded()
         self.acceptance = acceptance
+        self.strategist = strategist if strategist is not None else Strategist.off()
         self.plan = self._build_plan()
         self._level_timer = LevelTimer()
-        self.strategist: Strategist | None = None
 
     def _build_plan(self) -> Plan:
+        """Directives ``goals`` when set; else an empty stack for the planner
+        to fill, or, in the ``--no-planner`` test mode, the built-in plan."""
         d = self.directives.directives
         plan = Plan.from_directives(directive_goals=d.goals, directive_params=d.params)
+        if plan is None and self.strategist.enabled:
+            plan = Plan([], dict(d.params), floor_params=dict(d.params))
         if plan is None:
             policy = self.cfg.policy
             plan = Plan.from_policy(policy, d.params, goto_satisfied=goto_satisfied(self.mem, policy))
@@ -161,6 +168,7 @@ class Runner:
         if d.goals != old_goals:
             self.plan = self._build_plan()
             self.mem.path, self.mem.goal, self.mem.goal_op = [], "", None
+            queue_signal(self.mem, {"trigger": "directives", "goals": list(d.goals), "tick": self.world.tick})
         else:
             self.plan.floor_params, self.plan.params = dict(d.params), dict(d.params)
         self.log(
@@ -214,7 +222,6 @@ class Runner:
         if self.knowledge is not None:
             sync_town(self.knowledge, world.get("town"))
             self._sync_minimap()
-        self.strategist = Strategist.from_env(tick_hz=hz)
         self.strategist.start()
         self.mem.strategist_progress_tick = self.world.tick
         self.log("world", f"{world.get('code')} {world.get('status')} {hz}Hz", {"world": world})
@@ -244,8 +251,7 @@ class Runner:
                 if self.acceptance is not None:
                     self.acceptance.on_window(urgent=urgent, alive=self.world.alive)
         finally:
-            if self.strategist is not None:
-                self.strategist.stop()
+            self.strategist.stop()
             if self.knowledge is not None:
                 # Tiles learned from tick deltas, which terrain reads did not merge.
                 sync_world_maps(self.knowledge, self.world)

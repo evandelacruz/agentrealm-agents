@@ -267,7 +267,7 @@ class SmokeScriptTest(unittest.TestCase):
     def main(self, argv, env=None):
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict("os.environ", env or {}, clear=True), redirect_stdout(out), redirect_stderr(err):
-            code = self.smoke.main(argv)
+            code = self.smoke.main(["--no-planner", *argv])  # offline: the planner test mode
         return code, out.getvalue(), err.getvalue()
 
     def test_no_api_key_exits_2(self):
@@ -276,7 +276,7 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertIn("AGENTREALM_API_KEY", err)
 
     def run_main(self, seconds: float, played):
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, planner=None):
             played(metrics)
             return metrics, seconds
 
@@ -315,7 +315,7 @@ class SmokeScriptTest(unittest.TestCase):
         seen = []
 
         class FakeRunner:
-            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance):
+            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance, strategist=None):
                 self.stop, self.metrics = stop, acceptance
 
             def run(self):

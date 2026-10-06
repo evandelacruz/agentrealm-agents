@@ -54,7 +54,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 ## Architecture
 
 ```
-            ┌────────────── strategist (LLM, optional, async) ──────────────┐
+            ┌──────────────── strategist (AI planner, async) ───────────────┐
  directives │ triggers: clue read, NPC spoke, new level, stuck, goal done, │
  (hot file) ┤ death. In: state summary + knowledge. Out: plan operations. │
             └──────────────────────────────┬────────────────────────────────┘
@@ -287,10 +287,10 @@ A JSON file per world, `python/.state/worlds/<world_code>.json`, gitignored, sha
 
 This is what makes a second run better than the first, and it is what the strategist reads. None of it is committed.
 
-### Strategist (LLM, optional)
+### Strategist (the AI planner)
 
-- **Runs** in its own thread. The state machine keeps the old plan until a new one lands.
-- **Triggers:** a new clue, an NPC reply, entering a level, no progress for N minutes, a goal finished or failed, a death. Calls are rate-limited and capped by a token budget (`AGENTREALM_STRATEGIST_MAX_TOKENS`, PLAN.md A35): tokens times the model's price is the cost, so the cap holds whatever the model costs.
+- **Runs** in its own thread, on in every live run (`--no-planner` is a test mode). It owns the goal stack. The state machine keeps the old plan until a new one lands; with no valid plan the stack is empty and the dispatcher's safe default runs (exploring in safe ground).
+- **Triggers:** a new clue, an NPC reply, a new map or level, getting hurt, no progress for N minutes, a goal finished or dropped, a death, and a 15 s timer. Calls are budgeted per minute of play, in calls and tokens (PLAN.md A35): tokens times the model's price is the cost per minute, whatever the model costs, and a long session never runs dry.
 - **Input:** a compact state summary, relevant knowledge-base entries, all clue text, the current plan, and the operator's directives.
 - **Its main job** is interpretation: turn clue text (riddles and directions) into concrete goals, such as which entrance mark matches a clue, what tool an entrance needs, or which odd block to try.
 - **Output:** JSON checked against a schema. The example uses an invented world:
@@ -327,9 +327,9 @@ This is what makes a second run better than the first, and it is what the strate
   | `enter_level` | `x`, `y` of the entrance | `Level` |
   | `fight_boss` | `x`, `y` of the boss door | `Boss` |
   | `avoid` | one of `npc_type`, `block_type`, or `x`, `y`, `radius` | Cost grid |
-  | `wait` | `seconds` | `Idle` |
+  | `wait` | `seconds` (at most 30), `why` (required) | `Idle` |
   | `set_param` | `name`, `value` | none |
-- **Packaging:** an optional extra, so the core stays standard library only. With no model configured, the plan comes from the character file and simple built-in rules: read everything, gear up, hunt, explore entrance marks.
+- **Packaging:** the provider SDK (`anthropic`) is the planner's one dependency, imported only when the planner runs, so the core and `make test` stay standard library only. With `--no-planner` (a test mode), the plan comes from the character file and simple built-in rules.
 
 ### Runtime directives
 

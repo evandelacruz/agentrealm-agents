@@ -49,6 +49,29 @@ OP_STATE: dict[str, str | None] = {
     "set_param": None,
 }
 
+# The op table: the contract with the planner (A35), shown to the model as is.
+# It lists exactly the ops a state executes (OP_STATE), plus ``set_param``,
+# which ``Plan.advance`` applies; a test keeps the two in step. A behavior the
+# planner needs and the states lack becomes a new op here (with its validator
+# and the state that runs it), never a state that starts itself.
+OP_FIELDS: dict[str, str] = {
+    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id',
+    "explore_area": "x, y, radius",
+    "read": "x, y, or supply_id",
+    "say": "text, and npc_id or npc_type",
+    "buy": "code (a potion, a tool, gear)",
+    "break_block": 'x, y, capability ("cut"|"chop"|"smash"|"burn"|"blast")',
+    "use_block": "x, y, code (the supply to use on it)",
+    "compose": "composes_into (the whole item to make)",
+    "fetch_item": "code, optional x, y",
+    "gather_gems": "count",
+    "equip": "optional code (else the best held gear is armed and worn)",
+    "enter_level": "x, y (the level door)",
+    "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
+    "wait": "seconds, why",
+    "set_param": "name, value",
+}
+
 # Ops done once their target block changes from what it was when the op reached the top.
 BLOCK_CHANGE_OPS = frozenset({"use_block", "break_block"})
 SOLVE_OPS = frozenset({"compose", "use_block"})
@@ -568,7 +591,10 @@ def directive_stack_ops(directive_goals: list[str]) -> list[GoalOp]:
 
 
 def builtin_goals(policy: Policy, *, goto_satisfied: bool = False) -> list[GoalOp]:
-    """``policy.goals`` as ops, one for one, when directives set no goals and there is no model.
+    """``policy.goals`` as ops, one for one, when directives set no goals and the planner is off.
+
+    That is the ``--no-planner`` test mode only: with the planner on, the
+    stack starts empty and only the planner or directives fill it (A35).
 
     This is the built-in planner; states never read ``policy.goals`` (PLAN.md
     **Architecture**). A ``goto`` the agent already stood on

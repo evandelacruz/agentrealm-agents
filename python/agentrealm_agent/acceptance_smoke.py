@@ -12,8 +12,19 @@ from .client import Client
 from .executor.intents import wait
 from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
 from .runner import Runner
+from .strategist import Strategist
 
 DEFAULT_BASE = "https://api.agentrealm.gg"
+NO_PLANNER_HELP = "test mode: play without the AI planner (A35)"
+
+
+def planner_for(no_planner: bool) -> Strategist:
+    """The AI planner for a live run, or the ``--no-planner`` test mode.
+
+    Raises ``PlannerConfigError`` (one line) when it is on and has no key:
+    call it before touching the character, so the run fails fast.
+    """
+    return Strategist.off() if no_planner else Strategist.from_env()
 
 # Self reads before giving up on a character that stays asleep or downed, one
 # a second: well inside the call budget, and longer than the 5 s respawn delay.
@@ -76,11 +87,13 @@ def run_acceptance_smoke(
     timeout_s: float,
     out: Callable[[str], None] | None = None,
     prepare: Callable[[KnowledgeBase], None] | None = None,
+    planner: Strategist | None = None,
 ) -> tuple[float, KnowledgeBase]:
     """Run the runner with ``metrics`` until it stops or ``timeout_s`` elapses.
 
     ``prepare``, when given, runs on the loaded knowledge base before the
     runner starts (M9 clears earlier runs' entrance looks with it).
+    ``planner`` is the AI planner (A35), from :func:`planner_for`.
 
     Returns the seconds played and the knowledge base the runner wrote to; judge
     the run on that one, not a reload, which misses the run if the save failed.
@@ -104,6 +117,7 @@ def run_acceptance_smoke(
         emit,
         knowledge=knowledge,
         acceptance=metrics,
+        strategist=planner,
     )
 
     def watchdog() -> None:

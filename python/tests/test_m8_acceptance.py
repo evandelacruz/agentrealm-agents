@@ -224,7 +224,7 @@ class SmokeScriptTest(unittest.TestCase):
     def main(self, argv):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
-            code = self.smoke.main(argv)
+            code = self.smoke.main(["--no-planner", *argv])  # offline: the planner test mode
         return code, out.getvalue(), err.getvalue()
 
     def test_no_api_key_exits_2(self):

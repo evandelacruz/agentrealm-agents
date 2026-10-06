@@ -27,7 +27,22 @@ python3 -m agentrealm_agent metrics characters/wren.toml --character-id ID   # o
 python3 -m agentrealm_agent compare-metrics baseline.trace.jsonl candidate.trace.jsonl
 ```
 
-The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample profiles use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` prints a character id. `run` and `status` pick the character from `--character-id` or `--character-name`, else `AGENTREALM_CHARACTER_ID`; an explicit flag always overrides the environment. `run` plays until Ctrl-C and appends a trace under `python/.state/<profile>.<character_id>.trace.jsonl`. A trace from before A59 (`<profile>.trace.jsonl`) is left as is: pass its path to `metrics`, or rename it to `<profile>.<character_id>.trace.jsonl` so new runs append to it. Run one `run` process per world at a time. Optional strategist (A35): set `AGENTREALM_STRATEGIST_MODEL` and `AGENTREALM_STRATEGIST_API_KEY` or `OPENAI_API_KEY`; limits and triggers are in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) **Strategist**. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
+The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample profiles use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` prints a character id. `run` and `status` pick the character from `--character-id` or `--character-name`, else `AGENTREALM_CHARACTER_ID`; an explicit flag always overrides the environment. `run` plays until Ctrl-C and appends a trace under `python/.state/<profile>.<character_id>.trace.jsonl`. A trace from before A59 (`<profile>.trace.jsonl`) is left as is: pass its path to `metrics`, or rename it to `<profile>.<character_id>.trace.jsonl` so new runs append to it. Run one `run` process per world at a time.
+
+### The AI planner
+
+`run` plays with the AI planner (A35), which owns the goal stack. Give it a key before you run:
+
+```bash
+pip install anthropic                 # the planner's one dependency; the rest is standard library
+export AGENTREALM_PLANNER_ANTHROPIC_KEY=...   # or ANTHROPIC_API_KEY; default provider, model claude-sonnet-5-5
+python3 -m agentrealm_agent run characters/wren.toml --character-id ID
+
+# or OpenAI (no extra package):
+export AGENTREALM_PLANNER_PROVIDER=openai AGENTREALM_PLANNER_OPENAI_KEY=... AGENTREALM_PLANNER_MODEL=...
+```
+
+Keys are read from `AGENTREALM_PLANNER_ANTHROPIC_KEY`, then `ANTHROPIC_API_KEY`, and from `AGENTREALM_PLANNER_OPENAI_KEY`, then `OPENAI_API_KEY`: the planner's own names come first because some hosts (Claude Code cloud sessions, for one) strip the standard ones. With no key, `run` stops at startup with one line saying which key to set. `AGENTREALM_PLANNER_MODEL` picks another model. `run --no-planner` plays without it, from the character file's `policy.goals`; that is a test mode, not how the agent is meant to play. The smoke scripts take the same `--no-planner`. Never commit a key. Moving from the old strategist settings: `AGENTREALM_STRATEGIST_MODEL` is now `AGENTREALM_PLANNER_MODEL`, `AGENTREALM_STRATEGIST_API_KEY` is gone (use the provider keys above), and the per-run limits (`AGENTREALM_STRATEGIST_MAX_CALLS`, `_MAX_TOKENS`, `_MIN_INTERVAL_S`) are replaced by `AGENTREALM_PLANNER_CALLS_PER_MIN` and `_TOKENS_PER_MIN`; `AGENTREALM_STRATEGIST_IDLE_MINUTES` is `AGENTREALM_PLANNER_IDLE_MINUTES`. Cadence, budget and triggers: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) **Strategist**. More in [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md) and [`PLAN.md`](PLAN.md) **CLI**.
 
 Copy and edit a file in `python/characters/` to try different behavior (`policy.kind` can be `idle`, `wander`, or `scripted`).
 
@@ -38,7 +53,7 @@ Copy and edit a file in `python/characters/` to try different behavior (`policy.
 - **AI plans, state machine executes.** A planner sets the plan stack; the state machine carries out its top op, tick by tick. No state picks its own goal (PLAN.md [Architecture](PLAN.md#architecture-ai-plans-state-machine-executes)).
 - **States** are named behaviors, each with a `guard` (should I run?) and an `act` (what do I send?). **Reflexes** act on what is happening now, whatever the plan says: wake, wait out a death, step off lava, retreat, heal, fight, flee, take a supply in reach, recover the death chest. **Executors** run only for the plan's top op: travel, explore, gather, shop, read or say, break, solve, fight a boss, enter a level, equip, fetch an item, wait.
 - **Dispatcher** walks the states in a fixed priority order, reflexes first. Explore comes last and is the **safe default**: with no plan op it explores safe ground, so the agent is never idle. Exactly one state picks where the character moves.
-- **Plan** is the goal stack: from live directives `goals` (manual steering), else an optional **strategist** (background thread, an LLM when `AGENTREALM_STRATEGIST_MODEL` and an API key are set), else the built-in planner, which turns the character file's `policy.goals` into ops. Paths are A* over known tiles, around fog and hazards.
+- **Plan** is the goal stack, owned by the **AI planner** (A35, a background thread): it replans on every event (op done or dropped, stuck, death, hurt, new clue, new map) and every 15 s, within a per-minute call and token budget. Live directives `goals` override it (manual steering). With no valid plan the planner layer emits nothing and the safe default runs. The planner speaks only in plan ops (`plan.OP_FIELDS`, exactly the ops the executors run): a new behavior is a new op, never a state that starts itself. With `--no-planner` (a test mode) the built-in planner turns the character file's `policy.goals` into ops. Paths are A* over known tiles, around fog and hazards.
 
 Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md). Tables in [`PLAN.md`](PLAN.md): [Scheduler](PLAN.md#scheduler-which-call-this-window), [Reflexes](PLAN.md#reflexes-every-round-trip-no-model), [Plan](PLAN.md#plan-goal-and-path).
 
@@ -135,7 +150,7 @@ Pass criteria (PLAN.md A36, checked in [`m4_acceptance.py`](python/agentrealm_ag
 - no API error;
 - each required op is planned by an applied strategist answer, run by the state that owns it (`Shop` for `buy`, `Break` for `break_block`, `Travel` for `travel`) with a new queue that acts on it, and finished (popped as done).
 
-Live M11 smoke: `make smoke-m11-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M11 done-when via [`scripts/smoke_m11_olympuff.py`](scripts/smoke_m11_olympuff.py), using profile `python/characters/olympuff_m11.toml` and a character you choose at run time. It also needs the strategist: set `AGENTREALM_STRATEGIST_MODEL` and `AGENTREALM_STRATEGIST_API_KEY` (or `OPENAI_API_KEY`), or the script exits 2, since only the strategist pushes the `fight_boss` op that clears a level. Start on the overworld (same wake and respawn wait as M7). The runner plays until it clears a level and attempts the next one, or until the default two-hour wall clock (`--seconds` overrides).
+Live M11 smoke: `make smoke-m11-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M11 done-when via [`scripts/smoke_m11_olympuff.py`](scripts/smoke_m11_olympuff.py), using profile `python/characters/olympuff_m11.toml` and a character you choose at run time. It needs the AI planner (a key, see **The AI planner**), or the script exits 2, since only the planner pushes the `fight_boss` op that clears a level. Start on the overworld (same wake and respawn wait as M7). The runner plays until it clears a level and attempts the next one, or until the default two-hour wall clock (`--seconds` overrides).
 
 Pass criteria (PLAN.md A40, checked in [`m11_acceptance.py`](python/agentrealm_agent/m11_acceptance.py)):
 

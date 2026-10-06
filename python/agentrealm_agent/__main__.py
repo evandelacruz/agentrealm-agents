@@ -22,6 +22,7 @@ from .client import ApiError, Client
 from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
 from .run_metrics import RunMetrics, compare_run_metrics, load_metrics_source, metrics_from_trace
 from .runner import Runner
+from .strategist import PlannerConfigError, Strategist
 
 # How long `run` waits for the driver thread to stop before saving.
 SHUTDOWN_JOIN_SECONDS = 5.0
@@ -60,7 +61,12 @@ def main(argv: list[str] | None = None) -> int:
     create_p.add_argument("--avatar", default=DEFAULT_CREATE_AVATAR, help="outfit code")
     create_p.add_argument("--model-agent", default=DEFAULT_CREATE_MODEL, help="model agent code")
 
-    sub.add_parser("run", parents=[_profile_parser()], help="drive one character until interrupted")
+    run_p = sub.add_parser("run", parents=[_profile_parser()], help="drive one character until interrupted")
+    run_p.add_argument(
+        "--no-planner",
+        action="store_true",
+        help="test mode: play without the AI planner (the built-in plan from policy.goals)",
+    )
     sub.add_parser("status", parents=[_profile_parser()], help="print the character's self and position")
 
     # Offline: needs no key, so no --character-name. The operand is a trace, or
@@ -97,6 +103,13 @@ def main(argv: list[str] | None = None) -> int:
     if not args.api_key:
         print("set AGENTREALM_API_KEY or pass --api-key", file=sys.stderr)
         return 2
+    planner: Strategist | None = None
+    if args.cmd == "run":
+        try:
+            planner = Strategist.off() if args.no_planner else Strategist.from_env()
+        except PlannerConfigError as e:
+            print(e, file=sys.stderr)
+            return 2
     client = Client(args.base_url, args.api_key)
     if args.cmd == "create":
         return create(client, cfg, name=args.name.strip(), avatar=args.avatar.strip(), model_agent=args.model_agent.strip())
@@ -110,7 +123,9 @@ def main(argv: list[str] | None = None) -> int:
     except CharacterSelectionError as e:
         print(e, file=sys.stderr)
         return 2
-    return {"run": run, "status": status}[args.cmd](client, cfg, cid)
+    if args.cmd == "status":
+        return status(client, cfg, cid)
+    return run(client, cfg, cid, planner)
 
 
 def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
@@ -177,7 +192,7 @@ def metrics(source: str, *, character_id: int | None) -> int:
     return 0
 
 
-def run(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
+def run(client: Client, cfg: config.CharacterConfig, cid: int, planner: Strategist | None = None) -> int:
     try:
         client.self_(cid)
     except ApiError as e:
@@ -195,7 +210,7 @@ def run(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
 
     thread = threading.Thread(
         target=_drive,
-        args=(cfg, client, cid, stop, out, world_knowledge),
+        args=(cfg, client, cid, stop, out, world_knowledge, planner),
         daemon=True,
     )
     thread.start()
@@ -223,9 +238,10 @@ def _drive(
     stop: threading.Event,
     out,
     knowledge: KnowledgeBase,
+    planner: Strategist | None,
 ) -> None:
     try:
-        Runner(cfg, client, cid, stop, out, knowledge=knowledge).run()
+        Runner(cfg, client, cid, stop, out, knowledge=knowledge, strategist=planner).run()
     except ApiError as e:
         out(f"[{cfg.profile}] stopped: {e}")
     except Exception as e:

@@ -81,8 +81,9 @@ class MapView:
     readable: dict[Pos, bool] = field(default_factory=dict)
     # Doors may carry ``locked: true`` on terrain reads (Manual §9.2).
     locked: dict[Pos, bool] = field(default_factory=dict)
-    # Cells a terrain read marked ``safe: true``: ground in a safe zone such as
-    # town (Manual §9.2 legend, B127). A full read leaves the flag off elsewhere.
+    # Cells a terrain read marked ``safe: true``: ground in any safe zone, town
+    # or a respawn patch alike (Manual §9.2 legend, B127). A full read leaves
+    # the flag off elsewhere.
     safe: set[Pos] = field(default_factory=set)
 
     def walkable(self, p: Pos) -> bool:
@@ -157,14 +158,12 @@ class WorldModel:
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[InventorySupply]] = field(default_factory=dict)
     # Zone facts from get_zone (A7): map_id -> cell -> fact. Safe tiles derive
-    # from these (zone_discovery.safe_tiles).
+    # from these and from terrain reads' ``MapView.safe`` (zone_discovery.safe_tiles).
     zones: dict[int, dict[Pos, ZoneFact]] = field(default_factory=dict)
     # Cells whose get_zone read failed, never probed again (A7).
     zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
     # Town and Respawned locations used to seed safe-tile probes.
     respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
-    # The world read's town cell (map_id, cell): its safe zone is town (A22).
-    town: tuple[int, Pos] | None = None
     # Boss fight clock, read only when a round trip carries it; the published
     # docs name no such field (GAME_NOTES.md Levels and bosses, A38).
     boss_fight_end_tick: int | None = None

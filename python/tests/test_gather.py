@@ -12,7 +12,8 @@ from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
 from agentrealm_agent.states import gather as gather_mod
 from agentrealm_agent.states.gather_safe import GATHER_HOSTILE_RADIUS, gather_ground, is_safe_ish
 from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_town, apply_zone, town_cells
+from agentrealm_agent.gem_yield import NO_EFFECT_ZONE_CUTS, GemYieldTracker
+from agentrealm_agent.zone_discovery import apply_zone
 
 
 def grid(rows: list[str], at=(1, 1)) -> WorldModel:
@@ -30,12 +31,6 @@ def grid(rows: list[str], at=(1, 1)) -> WorldModel:
 def safe(w: WorldModel, *cells) -> None:
     for x, y in cells:
         apply_zone(w, 7, x, y, {"safe": True, "brightness": 1})
-
-
-def town(w: WorldModel, at, *cells) -> None:
-    """The world read's town cell ``at``, and ``cells`` (with it) known safe."""
-    apply_town(w, {"map_id": 7, "x": at[0], "y": at[1]})
-    safe(w, *cells)
 
 
 def ctx(w: WorldModel, goals: list[str], m: Memory | None = None, **policy_kw) -> PlayContext:
@@ -83,34 +78,25 @@ class GatherGroundTest(unittest.TestCase):
     def test_field_grass_with_no_hostile_near_qualifies(self):
         """A63 run 1: every zone read was unsafe and Gather never cut."""
         w = grid(["ggg"], at=(1, 0))
-        self.assertTrue(gather_ground(w, (1, 0), Policy(), ()))
+        self.assertTrue(gather_ground(w, (1, 0), Policy()))
 
     def test_hostile_within_the_radius_disqualifies(self):
         w = grid(["g" * 12], at=(0, 0))
         w.entities = [Entity("npc", 1, (GATHER_HOSTILE_RADIUS, 0))]
-        self.assertFalse(gather_ground(w, (0, 0), Policy(hostile=["npc"]), ()))
+        self.assertFalse(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
         w.entities = [Entity("npc", 1, (GATHER_HOSTILE_RADIUS + 1, 0))]
-        self.assertTrue(gather_ground(w, (0, 0), Policy(hostile=["npc"]), ()))
+        self.assertTrue(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
 
-    def test_town_cells_disqualify(self):
-        """A cut on town grass had no effect (A63 run 2)."""
+    def test_safe_zone_cells_qualify(self):
+        """Breaking a block works in a safe zone: Gather prefers the field, it does not ban safe ground."""
         w = grid(["ggg"], at=(1, 0))
-        self.assertFalse(gather_ground(w, (0, 0), Policy(), {(0, 0)}))
-        self.assertTrue(gather_ground(w, (1, 0), Policy(), {(0, 0)}))
-
-    def test_town_is_the_safe_zone_joined_to_the_town_cell(self):
-        """A safe patch apart from town (a respawn zone, say) is not town: breaking works in safe zones."""
-        w = grid(["gggggg"], at=(5, 0))
-        town(w, (0, 0))
-        safe(w, (0, 0), (1, 0))
-        w.view.safe.add((4, 0))  # a terrain read's ``safe: true``, not joined to town
-        self.assertEqual(town_cells(w, 7), {(0, 0), (1, 0)})
-        self.assertEqual(town_cells(w, 8), set())
+        safe(w, (0, 0))
+        self.assertTrue(gather_ground(w, (0, 0), Policy()))
 
     def test_hazard_and_unknown_cells_disqualify(self):
         w = grid(["gl"], at=(0, 0))
-        self.assertFalse(gather_ground(w, (1, 0), Policy(avoid_blocks=["lava"]), ()))
-        self.assertFalse(gather_ground(w, (5, 5), Policy(), ()))
+        self.assertFalse(gather_ground(w, (1, 0), Policy(avoid_blocks=["lava"])))
+        self.assertFalse(gather_ground(w, (5, 5), Policy()))
 
 
 class SafeIshTest(unittest.TestCase):
@@ -135,10 +121,10 @@ class SafeIshTest(unittest.TestCase):
 
 
 class GatherActTest(unittest.TestCase):
-    def test_does_not_cut_grass_in_town(self):
+    def test_field_grass_before_safe_grass(self):
         """A63 run 2: 168 cuts of one town grass cell, every one applied_no_effect."""
         w = grid(["ggg"], at=(1, 0))
-        town(w, (1, 0), (1, 0))
+        safe(w, (1, 0))
         m = Memory()
         out = outcome(w, m)
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
@@ -170,7 +156,7 @@ class GatherActTest(unittest.TestCase):
         self.assertIsNone(outcome(w, pickup=False).intents)
 
     def test_takes_gem_pile_on_safe_ground(self):
-        """Piles are not cuts: free ones in town are still taken."""
+        """Piles are not cuts: free ones on safe ground are taken at once."""
         w = grid(["g.g"], at=(1, 0))
         safe(w, (1, 0), (2, 0))
         w.entities = [Entity("supply", 9, (2, 0), "gem")]
@@ -284,16 +270,16 @@ class GatherReflexTest(unittest.TestCase):
 
 
 class GatherHeadsOutTest(unittest.TestCase):
-    """In town with nothing to cut in view: walk out of town (A63 run 2)."""
+    """On safe ground with nothing to cut: walk out to the field (A63 run 2)."""
 
-    def test_cuts_grass_in_a_safe_zone_that_is_not_town(self):
+    def test_cuts_safe_grass_when_no_field_cell_is_known(self):
         w = grid(["ggg"], at=(1, 0))
         safe(w, (0, 0), (1, 0), (2, 0))
         self.assertEqual(outcome(w).reason, "cut grass")
 
     def test_heads_to_the_nearest_field_cell(self):
-        w = grid(["ggggg..."], at=(0, 0))
-        town(w, (0, 0), *[(x, 0) for x in range(5)])
+        w = grid(["........"], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(5)])
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
         self.assertEqual(out.state, "Gather")
@@ -302,30 +288,35 @@ class GatherHeadsOutTest(unittest.TestCase):
         self.assertEqual(c.memory.gather_status, gather_mod.HEADING_OUT)
 
     def test_heads_to_the_frontier_when_no_field_cell_is_known(self):
-        w = grid(["gggg"], at=(0, 0))
-        town(w, (0, 0), *[(x, 0) for x in range(4)])
+        w = grid(["...."], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(4)])
         m = Memory()
         out = outcome(w, m)
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
         self.assertEqual(m.gather_target[0], gather_mod.OUT)
 
-    def test_heading_out_after_a_no_effect_cut_says_heading_out(self):
-        from agentrealm_agent.gem_yield import GemYieldTracker
-
+    def test_no_effect_cuts_mark_the_safe_zone_uncuttable_and_it_heads_out(self):
         w = grid(["ggggg..."], at=(0, 0))
-        town(w, (0, 0), *[(x, 0) for x in range(5)])
+        safe(w, *[(x, 0) for x in range(5)])
         tracker, m = GemYieldTracker(), Memory()
-        tracker.note_no_effect(w, (0, 0), "grass", w.tick)
+        for x in range(NO_EFFECT_ZONE_CUTS - 1):
+            tracker.note_no_effect(w, (x, 0), "grass", w.tick)
+        out = gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
+        self.assertEqual(m.gather_target, ("grass", (NO_EFFECT_ZONE_CUTS - 1, 0)), "below the bar: the rest stay cuttable")
+        self.assertEqual(m.gather_status, gather_mod.NO_EFFECT)
+        tracker.note_no_effect(w, (NO_EFFECT_ZONE_CUTS - 1, 0), "grass", w.tick)
+        m = Memory()
         gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
-        self.assertEqual(m.gather_target, (gather_mod.OUT, (5, 0)))
-        self.assertEqual(m.gather_status, gather_mod.HEADING_OUT)
+        self.assertEqual(m.gather_target, (gather_mod.OUT, (5, 0)), "the whole zone is uncuttable")
+        self.assertEqual(m.gather_status, gather_mod.HEADING_OUT, "heading out outranks a no-effect status")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
 
-    def test_out_of_town_the_out_walk_is_dropped_for_field_grass(self):
-        w = grid(["ggggggg"], at=(0, 0))
-        town(w, (0, 0), *[(x, 0) for x in range(5)])
+    def test_off_safe_ground_the_out_walk_is_dropped_for_field_grass(self):
+        w = grid([".....gg"], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(5)])
         m = Memory()
         outcome(w, m)
-        self.assertEqual(m.gather_target, ("grass", (5, 0)), "field grass outranks heading out")
+        self.assertEqual(m.gather_target, ("grass", (5, 0)))
         w.view.tiles[(5, 0)] = w.view.tiles[(6, 0)] = "dirt"
         m.path, m.goal, m.gather_target = [], "", None
         outcome(w, m)

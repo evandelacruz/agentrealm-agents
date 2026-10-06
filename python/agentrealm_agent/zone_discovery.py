@@ -7,7 +7,7 @@ terrain read already marks safe-zone cells (``MapView.safe``), so those
 are known safe and never probed. The tradeoff: an agent's terrain read
 leaves out ``brightness``, so such a cell's brightness stays unread and
 counts as 1 (``investigation.sight_range``), which overstates sight in a dim
-safe zone. ``town_cells`` is the safe zone around the world's town cell.
+safe zone. ``safe_zone_of`` is the safe zone a cell lies in.
 """
 
 from __future__ import annotations
@@ -28,11 +28,9 @@ def apply_town(w: WorldModel, town: dict | None) -> None:
     if not town:
         return
     try:
-        map_id, pos = int(town["map_id"]), (int(town["x"]), int(town["y"]))
+        w.record_respawn_anchor(int(town["map_id"]), (int(town["x"]), int(town["y"])))
     except (KeyError, TypeError, ValueError):
         return
-    w.town = (map_id, pos)
-    w.record_respawn_anchor(map_id, pos)
 
 
 def zone_probed(w: WorldModel, map_id: int, pos: Pos) -> bool:
@@ -68,26 +66,22 @@ def safe_tiles(w: WorldModel, map_id: int) -> set[Pos]:
     return from_terrain | {pos for pos, fact in w.zones.get(map_id, {}).items() if fact.safe}
 
 
-def town_cells(w: WorldModel, map_id: int | None) -> set[Pos]:
-    """Known safe cells joined (8-way) to the world's town cell on ``map_id``.
-
-    Other safe zones, such as a respawn patch out in the field, are not town.
-    Empty until the town cell or a safe cell beside it is known.
-    """
-    if w.town is None or map_id is None or w.town[0] != map_id:
+def safe_zone_of(w: WorldModel, map_id: int, pos: Pos, safe: set[Pos] | None = None) -> set[Pos]:
+    """The known safe cells joined (8-way) to ``pos``: one safe zone as far as
+    it is known. Empty when ``pos`` is not known safe. ``safe`` is
+    ``safe_tiles`` when the caller already has it."""
+    safe = safe_tiles(w, map_id) if safe is None else safe
+    if pos not in safe:
         return set()
-    safe = safe_tiles(w, map_id)
-    anchor = w.town[1]
-    todo = [p for p in [anchor, *((anchor[0] + dx, anchor[1] + dy) for dx, dy in NEIGHBOURS)] if p in safe]
-    town = set(todo)
+    zone, todo = {pos}, [pos]
     while todo:
         x, y = todo.pop()
         for dx, dy in NEIGHBOURS:
             n = (x + dx, y + dy)
-            if n in safe and n not in town:
-                town.add(n)
+            if n in safe and n not in zone:
+                zone.add(n)
                 todo.append(n)
-    return town
+    return zone
 
 
 def known_safe(w: WorldModel, map_id: int, pos: Pos) -> bool:

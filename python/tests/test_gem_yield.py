@@ -236,7 +236,25 @@ class NoEffectCutTest(unittest.TestCase):
         w.pos, w.tick = (1, 2), w.tick + gem_yield.REGROW_TICKS
         gather_outcome(w, m, Policy(on_hostile="ignore"), op=op, gem_cuts=t)
         self.assertEqual(m.gather_status, gather_mod.CUTTING)
-        self.assertEqual((t.no_effect, t.last_no_effect), ({}, None), "lapsed holds are dropped")
+        w.tick += gem_yield.NO_EFFECT_TTL
+        self.assertEqual(t.uncuttable(w), (set(), set()))
+        self.assertEqual(t.no_effect, {}, "forgotten after NO_EFFECT_TTL")
+
+    def test_the_store_is_capped_oldest_first(self):
+        w, t = world(), GemYieldTracker()
+        for i in range(gem_yield.MAX_NO_EFFECT + 5):
+            t.note_no_effect(w, (i, 0), "grass", w.tick)
+        self.assertEqual(len(t.no_effect), gem_yield.MAX_NO_EFFECT)
+        self.assertNotIn((MAP, (0, 0)), t.no_effect)
+
+    def test_no_effect_cuts_in_one_field_region_mark_it_uncuttable(self):
+        w, t = world(), GemYieldTracker()
+        for x in range(gem_yield.NO_EFFECT_ZONE_CUTS - 1):
+            t.note_no_effect(w, (x, 0), "grass", w.tick)
+        self.assertEqual(t.uncuttable(w), (set(), set()))
+        t.note_no_effect(w, (4, 4), "bush", w.tick)
+        self.assertEqual(t.uncuttable(w), ({(0, 0)}, set()), "a region, not barren: nothing is filed")
+        self.assertEqual(gem_yield.barren_regions(kb(), MAP), set())
 
     def test_gems_gained_counts_rises_not_spending(self):
         w, t = world(gems=3), GemYieldTracker()

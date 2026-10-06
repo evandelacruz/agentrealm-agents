@@ -104,7 +104,7 @@ States are checked in priority order once per round trip: after each `POST tick`
 | 4 | `Investigate` | The interest list has an item within the curiosity budget (see Curiosity) | `Read`, `Say`, `get_zone`, walk to look; stores text as a clue |
 | 4 | `Break` | The plan names a block to open, or the odd-block detector scores a nearby block high enough | Arms a capability not yet tried on that block, `Use` on the block, records the result per (block, capability) |
 | 4 | `Solve` | The plan holds an action to try (compose, a key at a door, a tool at a block) | Carries out the plan operation and checks the result |
-| 5 | `Gather` | The plan needs gems | Cuts grass and bushes on known ground outside town, off hazards with no hostile near, and visits gem piles; heads out of town when nothing in view is cuttable |
+| 5 | `Gather` | The plan needs gems | Cuts grass and bushes on known ground off hazards with no hostile near, field cells before safe ones, learning ground where cuts have no effect, and visits gem piles; heads out of safe ground when nothing is left to cut |
 | 5 | `Level` | Inside a level | Walks the rooms toward the unexplored doors, using `Fight`/`Break`/`Investigate` as they apply |
 | 5 | `Boss` | At a boss door with the plan's preconditions met | Enters, fights within the clock; retreats out only if possible, else commits |
 | 5 | `Travel` | The plan names a destination (entrance, town, hunting ground, shop) | Cost-grid planner through fog, door graph across maps, stuck detection and escalation (see Navigation) |

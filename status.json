@@ -129,5 +129,5 @@
 
   "A53": {"state": "done"},
 
-  "A63": {"state": "done", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield, gather_status and gather_run; Gather skips barren regions unless the op names one. Run 1 made no cut (Gather bar was safe zones only); run 2 cut one town cell 168 times with no effect. Both fixed (field only, no-effect cells held out); rerun pending."}
+  "A63": {"state": "done", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield, gather_status and gather_run; Gather skips barren regions unless the op names one. Run 1 made no cut (Gather bar was safe zones only); run 2 cut one town cell 168 times with no effect. Both fixed (field cells first, no-effect cells held out, 3 no-effect cuts mark a region or safe zone uncuttable); rerun pending."}
 }

@@ -136,7 +136,11 @@ class WorldModel:
     tick: int = 0
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
-    entities_tick: int = -10**9  # tick of the last entity read
+    entities_tick: int = -10**9  # tick of the last entity read, or of a tick delta that carried entities
+    # Tick and (map, cell) of the last real entity read. A delta carries only
+    # what changed near us, so a walk into new ground needs real reads (A16 Walk run 4).
+    entities_read_tick: int = -10**9
+    entities_read_at: tuple[int | None, Pos | None] | None = None
     terrain_center: Pos | None = None  # where we stood at the last terrain read
     terrain_map: int | None = None
     snapshot_version: int | None = None  # last applied observation version (Manual §7.1)
@@ -255,7 +259,8 @@ class WorldModel:
 
     def apply_entities(self, e: dict) -> None:
         self.entities = self._entities_from_payload(e)
-        self.entities_tick = int(e.get("tick", self.tick))
+        self.entities_tick = self.entities_read_tick = int(e.get("tick", self.tick))
+        self.entities_read_at = (self.map_id, self.pos)
         # A separate read replaced the state the next delta would apply to.
         self.snapshot_version = None
 
@@ -581,6 +586,17 @@ class WorldModel:
 
     def occupied(self) -> set[Pos]:
         return {e.pos for e in self.entities if e.kind in ("character", "npc")}
+
+    def entity_read_due(self, refresh: int) -> bool:
+        """We moved since the last real entity read, and it is ``refresh`` ticks old.
+
+        Tick deltas keep ``entities_tick`` fresh, but a walk into new ground
+        still needs a real read on this fixed cadence (A16 Walk run 4).
+        """
+        if self.entities_read_at is None:
+            return False  # no read yet: entities_tick still brings the first one
+        moved = self.entities_read_at != (self.map_id, self.pos)
+        return moved and self.tick - self.entities_read_tick >= refresh
 
     def damage_since(self, tick: int) -> int:
         return sum(a for t, a in self.recent_damage if t >= tick)

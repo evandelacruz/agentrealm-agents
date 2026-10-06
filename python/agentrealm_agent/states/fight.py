@@ -9,7 +9,7 @@ from ..executor.movement import direction_between
 from ..knowledge_base import KnowledgeBase
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
-from ..survival import nearest_safe_goal, on_safe_tile, would_lose
+from ..survival import on_safe_tile, retreat_goal, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
@@ -63,6 +63,21 @@ def in_weapon_reach(w: WorldModel, target: Entity, knowledge: KnowledgeBase | No
     return chebyshev(w.pos, target.pos) <= weapon_reach(w, knowledge)
 
 
+def weapon_has_hurt(w: WorldModel, target: Entity, knowledge: KnowledgeBase | None) -> bool:
+    """The armed weapon has landed a hit on ``target``'s NPC type (``weapon_damage``, A18).
+
+    A weapon that has never damaged that type gives no evidence we can win:
+    Flee never counts such a fight as won (A23 survive-a-fight run 1).
+    """
+    code = w.armed_code
+    if target.kind != "npc" or not target.code or not code or knowledge is None:
+        return False
+    with knowledge.lock:
+        row = knowledge.items.get(code)
+        per_type = row.get("weapon_damage") if isinstance(row, dict) else None
+        return isinstance(per_type, dict) and bool(per_type.get(target.code))
+
+
 def _ticks_since_use(w: WorldModel, last_use_tick: int | None) -> int | None:
     if last_use_tick is None:
         return None
@@ -77,8 +92,8 @@ def retreat_tail(
     *,
     limit: int,
 ) -> list[dict]:
-    """``Step`` intents toward the nearest safe tile, up to ``limit``."""
-    goal = nearest_safe_goal(w)
+    """``Step`` intents toward ``retreat_goal``, up to ``limit``."""
+    goal = retreat_goal(w, ctx.knowledge)
     if goal is None or w.pos is None or w.pos == goal:
         return []
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)

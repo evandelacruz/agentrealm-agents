@@ -8,13 +8,21 @@ from ..directives import attack_forbidden
 from ..memory import Memory
 from ..navigation import cost_path, oscillation
 from ..pathing import flee_run, flee_step, grid_params, outruns, step_open
-from ..survival import flee_from, hostiles_in_range, is_attacker, on_safe_tile, would_lose
+from ..survival import (
+    at_health_floor,
+    combat_group,
+    flee_from,
+    hostiles_in_range,
+    is_attacker,
+    on_safe_tile,
+    would_lose,
+)
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .explore import plan_sets
-from .fight import can_engage, engage, fight_target, in_weapon_reach
+from .fight import can_engage, engage, fight_target, in_weapon_reach, weapon_has_hurt
 from .intents import set_position
 from .retreat import retreat_step
 
@@ -86,26 +94,36 @@ def instead_of_fleeing(
 ) -> StateOutcome | None:
     """Fight back or retreat once running away has failed (A9), or None to keep running.
 
-    In order: fight back when the win estimate says we win or there is no
-    step away (cornered); walk to the nearest known safe tile, Retreat's
-    way; swing back anyway when ``target`` is the one hitting us and in
-    weapon reach, since running and retreating both failed. A target
-    ``never_attack`` forbids is never fought. ``paced`` is the oscillation
-    guard's escape, already taken this decision (A15).
+    In order: fight back when we win, or when there is no step away
+    (cornered) and health is above the floor; walk toward safety, Retreat's
+    way; swing back anyway when ``target`` is the one hitting us, in weapon
+    reach, and health is above the floor, since running and retreating both
+    failed. We win only against a type our weapon has hurt
+    (``weapon_has_hurt``) when the win estimate clears. At or below the
+    health floor (``at_health_floor``), a fight we do not win is never
+    picked (A16 Walk run 4). A target ``never_attack`` forbids is never
+    fought. ``paced`` is the oscillation guard's escape, already taken this
+    decision (A15).
     """
+    policy = ctx.policy
     may_hit = not attack_forbidden(target, ctx.never_attack)
     cornered = flee_step(w, hostiles, blocked) is None
-    wins = bool(hostiles_in_range(w, ctx.policy)) and not would_lose(w, ctx.policy, ctx.params)
+    wins = (
+        bool(hostiles_in_range(w, policy))
+        and weapon_has_hurt(w, target, ctx.knowledge)
+        and not would_lose(w, policy, ctx.params)
+    )
+    above_floor = not at_health_floor(w, ctx.params, combat_group(w, policy) or hostiles)
     options = []
-    if may_hit and (cornered or wins):
+    if may_hit and (wins or (cornered and above_floor)):
         options.append(lambda: engage(w, ctx, target, FleeState.name))
     options.append(lambda: retreat_step(w, ctx, FleeState.name, paced))
     hitter_in_reach = is_attacker(w, target) and in_weapon_reach(w, target, ctx.knowledge)
-    if may_hit and hit_while_fleeing(w, ctx.memory) and hitter_in_reach:
+    if may_hit and above_floor and hit_while_fleeing(w, ctx.memory) and hitter_in_reach:
         options.append(lambda: engage(w, ctx, target, FleeState.name))
     for option in options:
         out = option()
-        if out.intents:
+        if out.intents or out.wait:
             out.reason = f"not outrunning {target.kind} {target.id}: {out.reason}"
             return out
     return None
@@ -194,5 +212,5 @@ class FleeState(State):
             away = m.flee_path[0] if m.flee_path else None
         if away is None:
             return StateOutcome(None, "nowhere to flee", state=self.name, wait=True)
-        m.path = []
+        m.path, m.retreat_walk = [], None  # the queue sent now is Flee's own, not a retreat walk
         return StateOutcome([set_position(away)], f"flee {target.kind} {target.id}", reflex=True, state=self.name)

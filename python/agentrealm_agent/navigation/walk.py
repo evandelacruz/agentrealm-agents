@@ -7,7 +7,13 @@ the walker turns round. So a walk keeps the path it chose until one of:
 - it arrives (the path runs out);
 - a step on it is rejected, or newly seen terrain blocks it (a cell on it
   is no longer passable on the cost grid: rejections land in ``avoid``);
-- its target changes (another goal, map or cell);
+- its target changes (another goal, map or cell). An explore walk's
+  target is a frontier cell, and fog reveals move the frontier nearly every
+  decision, so ``follow_frontier`` keeps it heading for the ground it was
+  exploring instead: while its target is still a frontier cell (or unseen)
+  the walk stands, and once a reveal takes that cell away the walk re-aims
+  at the nearest frontier it can reach without stepping back. A reveal on
+  its own never turns it round;
 - a new plan is cheaper by more than ``SWITCH_GAIN`` of the rest of it.
 
 A new path whose first step goes back to the cell the walk just came from
@@ -33,6 +39,7 @@ since the old path is the one that got stuck.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -58,12 +65,17 @@ class Walk:
     came_from: Pos | None = None  # the cell before ``cells[0]``, when the walk went on from another
 
 
-def rest(walk: Walk | None, w: WorldModel, goal: str, target: Pos) -> tuple[list[Pos], Pos | None] | None:
+def rest(
+    walk: Walk | None, w: WorldModel, goal: str, target: Pos | None
+) -> tuple[list[Pos], Pos | None] | None:
     """What is left of ``walk`` from where we stand, and the cell we came from.
 
-    None when ``walk`` is for another goal, map or target, or we are off it.
+    None when ``walk`` is for another goal, map or target (any target when
+    ``target`` is None), or we are off it.
     """
-    if walk is None or (walk.goal, walk.map_id, walk.target) != (goal, w.map_id, target):
+    if walk is None or (walk.goal, walk.map_id) != (goal, w.map_id):
+        return None
+    if target is not None and walk.target != target:
         return None
     if w.pos not in walk.cells:
         return None
@@ -78,16 +90,20 @@ def commit(
     target: Pos,
     found: list[Pos] | None,
     params: CostGridParams,
+    *,
+    any_target: bool = False,
 ) -> tuple[list[Pos] | None, Walk | None]:
-    """The path to walk toward ``target`` (the kept one, or ``found``) and ``goal``'s walk to remember.
+    """The path to walk (the kept one, or ``found`` toward ``target``) and ``goal``'s walk to remember.
 
     ``params`` must be the grid ``found`` was searched on (module docstring).
+    With ``any_target`` (an explore walk, kept by ``follow_frontier``) the
+    kept walk counts whatever cell ``found`` aims at.
     """
-    on = rest(walk, w, goal, target)
+    on = rest(walk, w, goal, None if any_target else target)
     came_from = None
     if on is not None:
         kept, came_from = on
-        kept_cost = path_cost(w, kept, target, params) if kept else None
+        kept_cost = path_cost(w, kept, walk.target, params) if kept else None
         if kept_cost is not None:
             found_cost = path_cost(w, found, target, params) if found else None
             back = bool(found) and found[0] == came_from
@@ -96,6 +112,31 @@ def commit(
     if not found:
         return found, None
     return found, start(w, goal, target, found, came_from)
+
+
+def follow_frontier(
+    walk: Walk | None,
+    w: WorldModel,
+    goal: str,
+    targets: Collection[Pos],
+    ahead: Callable[[Pos | None], tuple[Pos, list[Pos]] | None],
+) -> Walk | None:
+    """``goal``'s explore walk, kept heading for the ground it was exploring.
+
+    ``targets`` are the frontier cells the goal may walk to. While the walk's
+    target is one of them, or still unseen, the walk stands as it is. Once a
+    reveal has taken that cell off the frontier, the walk re-aims at the
+    nearest frontier ``ahead`` finds without stepping back to the cell the
+    walk came from. None when we are off the walk or nothing lies ahead, so
+    the next plan is taken as it comes.
+    """
+    on = rest(walk, w, goal, None)
+    if on is None:
+        return None
+    if walk.target in targets or walk.target not in w.view.tiles:
+        return walk
+    found = ahead(on[1])
+    return start(w, goal, found[0], found[1], on[1]) if found and found[1] else None
 
 
 def start(w: WorldModel, goal: str, target: Pos, path: list[Pos], came_from: Pos | None = None) -> Walk | None:

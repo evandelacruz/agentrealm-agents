@@ -271,10 +271,11 @@ def path_for_plan_op(
             targets = {center}
             if nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
                 return None
-        found = nearest_explore_target(
-            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge), knowledge
-        )
-        return (found[1], label, Leg(found[0])) if found and found[1] else None
+        params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+        found = nearest_explore_target(w, targets, params, knowledge)
+        leg = Leg(found[0]) if found and found[1] else None
+        path, leg = commit_explore(m, w, label, targets, leg, found[1] if leg else None, params)
+        return (path, label, leg) if path else None
     if op["op"] != "travel":
         return None
     params = grid_params(
@@ -374,7 +375,8 @@ def plan_step(
                 plan.finish_current("at shop cell", memory=m)
                 continue
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
-        if found and found[2] is not None:
+        if found and found[2] is not None and op["op"] != "explore_area":
+            # explore_area is committed where its frontier is chosen (commit_explore).
             # The grid path_for_plan_op searched on: only ``travel`` may end on a door.
             door = op["op"] == "travel"
             params = grid_params(policy, blocked, costly, allow_goal_door=door, m=m, w=w, knowledge=knowledge)
@@ -425,7 +427,8 @@ def replan(
     missed: tuple[str, Leg, bool] | None = None
     for goal in ["goto"] if walking_goto else policy.goals:
         found, leg = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
-        if leg is not None:
+        if leg is not None and goal != "explore":
+            # explore is committed where its frontier is chosen (commit_explore).
             # The grid plan_goal searched on: only ``goto`` and ``doors`` may end on a door.
             door = goal in ("goto", "doors")
             params = grid_params(policy, blocked, costly, allow_goal_door=door, m=m, w=w, knowledge=knowledge)
@@ -445,6 +448,8 @@ def commit_walk(
     target: Pos,
     found: list[Pos] | None,
     params: CostGridParams,
+    *,
+    any_target: bool = False,
 ) -> list[Pos] | None:
     """The path to walk toward ``target``: the one ``goal`` is already on, or ``found``.
 
@@ -458,12 +463,44 @@ def commit_walk(
     path and ``found`` are both priced on it, so the comparison sees the
     same hazards, hostiles and fog price the search did.
     """
-    path, walk = nav_walk.commit(m.walks.get(goal), w, goal, target, found, params)
+    path, walk = nav_walk.commit(m.walks.get(goal), w, goal, target, found, params, any_target=any_target)
     if walk is None:
         nav_walk.drop(m, goal)
     else:
         m.walks[goal] = walk
     return path
+
+
+def commit_explore(
+    m: Memory,
+    w: WorldModel,
+    goal: str,
+    targets: set[Pos],
+    leg: Leg | None,
+    found: list[Pos] | None,
+    params: CostGridParams,
+) -> tuple[list[Pos] | None, Leg | None]:
+    """``commit_walk`` for an explore walk (``explore``, ``explore_area``), and the leg it walks.
+
+    ``targets`` are the frontier cells the planner chose ``leg`` from. The
+    walk keeps heading for the frontier it was exploring
+    (``walk.follow_frontier``), so a reveal that makes another frontier the
+    nearest never turns it round; only a route there cheaper by more than
+    ``walk.SWITCH_GAIN`` does, or the kept one being blocked. ``leg`` and
+    ``found`` are the planner's choice, None when it found no frontier.
+    """
+
+    def ahead(back: Pos | None) -> tuple[Pos, list[Pos]] | None:
+        return nearest_target(w, targets, dataclasses.replace(params, avoid=params.avoid | {back} - {None}))
+
+    walk = nav_walk.follow_frontier(m.walks.get(goal), w, goal, targets, ahead)
+    if walk is None:
+        nav_walk.drop(m, goal)
+    else:
+        m.walks[goal] = walk
+    path = commit_walk(m, w, goal, leg.target if leg else w.pos, found, params, any_target=True)
+    kept = m.walks.get(goal)
+    return path, (Leg(kept.target) if kept is not None else leg)
 
 
 def nav_search(m: Memory, w: WorldModel, plan: str, goal: Pos) -> NavSearchState:
@@ -801,8 +838,9 @@ def plan_goal(
         return path, Leg(path[-1])
     if goal == "explore":
         targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, view.frontier() - {w.pos}, w.tick)
-        found = nearest_explore_target(
-            w, targets, grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge), knowledge
-        )
-        return (found[1], Leg(found[0])) if found and found[1] else (None, None)
+        params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+        found = nearest_explore_target(w, targets, params, knowledge)
+        leg = Leg(found[0]) if found and found[1] else None
+        path, leg = commit_explore(m, w, "explore", targets, leg, found[1] if leg else None, params)
+        return (path, leg) if path else (None, None)
     return None, None

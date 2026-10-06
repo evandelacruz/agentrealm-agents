@@ -220,10 +220,6 @@ class EveryWalkCommitsTest(unittest.TestCase):
         self.assertEqual(self.m.walks["loot"].cells, [START, *NORTH])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CommitRulesTest(unittest.TestCase):
     """``navigation.walk.commit``, one rule at a time, on an open known map."""
 
@@ -288,3 +284,69 @@ class CommitRulesTest(unittest.TestCase):
         m.walks["goto"], m.path, m.goal = self.walk, list(self.kept), "goto"
         learn_step_rejection(m, self.w, None, (1, 0), "block_occupied", 0)
         self.assertEqual(m.walks, {})
+
+
+class ExploreKeepsItsFrontierTest(unittest.TestCase):
+    """The run 5 trigger on the most-used walk: a reveal makes the other
+    side's frontier the nearest one. Explore keeps heading for the ground it
+    was exploring and turns round only once that side has none left."""
+
+    WEST_END, EAST_END = -10, 10
+
+    def world(self) -> WorldModel:
+        """A dirt corridor along y=0, its walls seen end to end, only x in -2..2
+        of the floor seen: two frontiers, (-2, 0) and (2, 0)."""
+        w = WorldModel(character_id=1, map_id=1, pos=(0, 0), perception=8, health=10, max_health=10)
+        for x in range(self.WEST_END - 2, self.EAST_END + 3):
+            w.view.tiles[(x, -1)] = w.view.tiles[(x, 1)] = "stone"
+        for x in range(-2, 3):
+            w.view.tiles[(x, 0)] = "dirt"
+        w.terrain_center, w.terrain_map = w.pos, 1
+        return w
+
+    def floor(self, x: int) -> str:
+        return "dirt" if self.WEST_END <= x <= self.EAST_END else "stone"
+
+    def test_a_reveal_ahead_never_turns_explore_round(self):
+        """Each move shows three more floor tiles ahead, so the frontier ahead
+        recedes faster than the agent walks and the one behind becomes the
+        nearest. Explore still walks west until it has seen the west end, and
+        turns east only then."""
+        w = self.world()
+        c = PlayContext(
+            Memory(),
+            Policy(kind="scripted", goals=["explore"], pickup=False, hostile=[]),
+            random.Random(0),
+            params=dict(PARAM_DEFAULTS),
+            knowledge=KnowledgeBase.empty("sandbox"),
+        )
+        cells = [w.pos]
+        seen_when_turned = None
+        for _ in range(30):
+            before = w.pos
+            out = dispatch(w, c)
+            w.tick += 10
+            if not (out.intents and out.intents[0]["verb"] == "SetPosition"):
+                break
+            w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+            if c.memory.path[:1] == [w.pos]:
+                c.memory.path = c.memory.path[1:]
+            nav_stuck.on_step(c.memory, w)
+            cells.append(w.pos)
+            if w.pos[0] > before[0] and seen_when_turned is None:
+                seen_when_turned = set(w.view.tiles)
+            ahead = -1 if w.pos[0] < before[0] else 1
+            seen = [x for (x, y) in w.view.tiles if y == 0]
+            edge = min(seen) if ahead < 0 else max(seen)
+            for x in range(edge + ahead, edge + 4 * ahead, ahead):
+                w.view.tiles[(x, 0)] = self.floor(x)
+        xs = [x for x, _ in cells]
+        turn = xs.index(min(xs))
+        self.assertEqual(xs[: turn + 1], list(range(0, -turn - 1, -1)), f"straight west first: {cells}")
+        self.assertEqual(xs[turn:], list(range(xs[turn], xs[-1] + 1)), f"then straight east: {cells}")
+        self.assertIn((self.WEST_END - 1, 0), seen_when_turned, "turns only once the west end is seen")
+        self.assertEqual(c.memory.nav_stuck.oscillations, [], "the guard is never needed")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -21,7 +21,6 @@ setup), which go in only by name or with ``all``. ``reference_sections`` picks d
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -84,6 +83,11 @@ def split_sections(reference: str) -> list[Section]:
         lines.append(line)
     flush()
     return sections
+
+
+def missing_core(sections: list[Section]) -> list[str]:
+    """The :data:`CORE_SECTIONS` entries no section matches (a renamed site heading)."""
+    return [c for c in CORE_SECTIONS if not any(s.key.startswith(c) for s in sections)]
 
 
 def is_core(section: Section) -> bool:

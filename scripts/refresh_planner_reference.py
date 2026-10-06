@@ -247,12 +247,26 @@ def render(pages: list[tuple[str, str, str]], fetched: dt.date) -> str:
     return "\n".join(head) + "\n" + "\n".join(body)
 
 
+def check_core(text: str) -> None:
+    """Stop before writing when a core section the planner always sends is gone (a renamed heading)."""
+    sys.path.insert(0, str(OUT.parents[2]))
+    from agentrealm_agent.planner_reference import CORE_SECTIONS, missing_core, split_sections
+
+    missing = missing_core(split_sections(text))
+    if missing:
+        raise SystemExit(
+            "refresh: core section(s) not found: " + "; ".join(missing)
+            + f". Update CORE_SECTIONS in planner_reference.py ({len(CORE_SECTIONS)} entries) to the new headings."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", type=Path, default=OUT)
     args = ap.parse_args(argv)
     pages = crawl()
     text = render(pages, dt.date.today())
+    check_core(text)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(text, encoding="utf-8")
     print(f"wrote {args.out} ({len(pages)} pages, {len(text)} chars, ~{len(text) // 4} tokens)")

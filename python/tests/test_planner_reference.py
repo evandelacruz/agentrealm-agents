@@ -11,7 +11,9 @@ from types import SimpleNamespace
 from agentrealm_agent.directives import Directives, PARAM_DEFAULTS
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.planner_reference import (
+    CORE_SECTIONS,
     REFERENCE_PATH,
+    missing_core,
     is_core,
     reference_text,
     select_sections,
@@ -59,6 +61,16 @@ class PromptTest(unittest.TestCase):
         system = prompt()[0]
         self.assertEqual((system["role"], system["cache"]), ("system", True))
 
+    def test_state_carries_what_stage_readiness_needs(self):
+        user = prompt()[1]["content"]
+        for field in ("worn=", "held=", "levels_cleared=", "level_count="):
+            self.assertIn(field, user)
+
+    def test_world_reads_levels_cleared_from_a_snapshot(self):
+        w = WorldModel(character_id=1)
+        w._apply_body_scalars({"levels_cleared": [2, 1, 2]})
+        self.assertEqual(w.levels_cleared, [1, 2])
+
     def test_dynamic_part_comes_after_the_cached_prefix(self):
         messages = prompt()
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
@@ -77,10 +89,15 @@ class SectionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.sections = split_sections(REFERENCE_PATH.read_text(encoding="utf-8"))
 
-    def test_core_sections_are_present(self):
-        keys = [s.key for s in self.sections if is_core(s)]
-        for want in ("6. intent reference", "11. game rules", "16. playing the world", "/docs/api / intents"):
-            self.assertTrue(any(want in k for k in keys), want)
+    def test_every_core_entry_matches_a_section(self):
+        self.assertEqual(missing_core(self.sections), [])
+        keys = [s.key for s in self.sections]
+        for core in CORE_SECTIONS:
+            self.assertTrue(any(k.startswith(core) for k in keys), core)
+
+    def test_missing_core_names_a_renamed_heading(self):
+        text = REFERENCE_PATH.read_text(encoding="utf-8").replace("### 11. Game rules", "### 11. Rules of play")
+        self.assertEqual(missing_core(split_sections(text)), ["/docs/manual / 11. game rules"])
 
     def test_default_keeps_core_and_stays_under_the_budget(self):
         picked = select_sections(self.sections, "", budget=60_000)
@@ -122,6 +139,12 @@ class RefreshScriptTest(unittest.TestCase):
         self.assertNotIn("Footer text", md)
         self.assertNotIn("console.log", md)
         self.assertEqual(links, {"/docs", "/docs/api", "/guides/state-machine"})
+
+    def test_refresh_fails_when_a_core_section_is_missing(self):
+        pages = [("/docs/manual", "Manual", "## Manual\n\n### 1. Contract on one screen\n\nx\n")]
+        with self.assertRaises(SystemExit) as e:
+            self.mod.check_core(self.mod.render(pages, __import__("datetime").date(2026, 1, 2)))
+        self.assertIn("11. game rules", str(e.exception))
 
     def test_render_puts_source_and_date_on_top(self):
         import datetime as dt

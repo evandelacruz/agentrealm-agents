@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from ..knowledge_maps import iter_doors, record_hunting_zone, record_locked_door
 from ..world import DOORS, Pos
+from . import walk as nav_walk
 
 if TYPE_CHECKING:
     from ..knowledge_base import KnowledgeBase
@@ -92,8 +93,16 @@ def learn_step_rejection(
     code: str | None,
     tick: int,
 ) -> None:
-    """Reflex 1 plus A14: drop the plan and teach the map from the code."""
+    """Reflex 1 plus A14: drop the plan and teach the map from the code.
+
+    A rejected step also ends the commitment of the walk it was on
+    (``navigation.walk``), so that goal's next plan is taken as it comes;
+    other goals keep theirs.
+    """
+    goal = m.goal
     m.path, m.goal = [], ""
+    if goal:
+        nav_walk.drop(m, goal)
     m.corridors.clear()  # the corridor searches priced the map before this lesson (A13)
     nav = m.nav
     cell = (w.map_id, landing)

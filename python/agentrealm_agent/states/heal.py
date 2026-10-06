@@ -130,10 +130,13 @@ def _walk_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at:
     """
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)
 
-    def plan() -> list[Pos] | None:
-        return cost_path(w, at, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, goal, at))
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly)
 
-    step = bounded_step(m, w, goal, at, plan_avoid, plan)
+    def plan() -> list[Pos] | None:
+        return cost_path(w, at, params(), nav=nav_search(m, w, goal, at))
+
+    step = bounded_step(m, w, goal, at, plan_avoid, plan, params=params)
     return _out([set_position(step)], f"{goal} → {at}") if step is not None else None
 
 

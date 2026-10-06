@@ -55,7 +55,12 @@ then the op contract below (:func:`system_prompt`).
 It is the same on every call, so it is cached: ``cache_control`` on
 Anthropic, a fixed ``prompt_cache_key`` on OpenAI (which caches long
 prefixes on its own). Only the user message (triggers, state, stack) changes.
-Cached prefix tokens do not count against ``tokens_per_min``.
+``tokens_per_min`` counts uncached input (cache writes included: Anthropic
+``cache_creation_input_tokens``, OpenAI prompt tokens not reported cached)
+plus output. Cache reads are not counted: they cost a tenth of input and
+``calls_per_min`` bounds them. Unset, the budget is the larger of 40000 and
+1.5 times the prefix, so the first call and a cache miss never silence the
+planner (:func:`default_tokens_per_min`).
 
 Another provider is a class with the same ``complete(messages)`` method
 (``LLMClient``), picked in :func:`make_client`.
@@ -66,13 +71,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import queue
 import threading
 import time
 import urllib.error
 import urllib.request
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
@@ -90,7 +96,8 @@ CHARS_PER_TOKEN = 4  # estimate for a call that reports no usage
 BUDGET_WINDOW_S = 60.0  # the budget counts calls and tokens over this much play
 DEFAULT_REPLAN_S = 15.0
 DEFAULT_CALLS_PER_MIN = 6
-DEFAULT_TOKENS_PER_MIN = 40_000
+DEFAULT_TOKENS_PER_MIN = 40_000  # floor; the default also fits one prefix write (default_tokens_per_min)
+PREFIX_BUDGET_FACTOR = 1.5
 DEFAULT_HURT_FRACTION = 0.5
 DEFAULT_IDLE_MINUTES = 10
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5"
@@ -133,12 +140,12 @@ Examples:
 
 PROGRESSION = """# Progression
 
-The character's arc, in order. Judge the stage from State (health, gems, armed, lives, map_level), the plan and the clues, then pick ops that advance that stage. Move on only when its readiness is met; drop back a stage when it no longer is (after a death, say). The thresholds are guidance for you to apply, not rules the code checks.
+The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. Move on only when its readiness is met; drop back a stage when it no longer is (after a death, say). The thresholds are guidance for you to apply, not rules the code checks.
 
 1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known.
-2. Build up loot, gear and supplies. Gather gems, pick up items, buy potions and gear, equip the best (gather_gems, fetch_item, buy, equip). Ready when health is at least 80% of max, at least 3 potions are carried, a weapon better than the starting pocket knife is armed, and armor is worn.
+2. Build up loot, gear and supplies. Gather gems, pick up items, buy potions and gear, equip the best (gather_gems, fetch_item, buy, equip). Ready when health is at least 80% of max, at least 3 potions are held, a weapon better than the starting weapon is armed, and armor is worn (State: health, held, armed, worn).
 3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar.
-4. Beat the world. Clear every level (level_count) to transcend."""
+4. Beat the world. Clear every level to transcend: done when levels_cleared holds level_count levels."""
 
 
 def system_prompt(reference_sections: str = "") -> str:
@@ -187,7 +194,7 @@ class StrategistConfig:
     effort: str = DEFAULT_EFFORT
     replan_s: float = DEFAULT_REPLAN_S
     calls_per_min: int = DEFAULT_CALLS_PER_MIN
-    tokens_per_min: int = DEFAULT_TOKENS_PER_MIN
+    tokens_per_min: int = 0  # 0: default_tokens_per_min(reference_sections)
     hurt_fraction: float = DEFAULT_HURT_FRACTION
     idle_minutes: float = DEFAULT_IDLE_MINUTES
     reference_sections: str = ""  # "" core then the rest under budget, "all", "core", or a comma list
@@ -232,11 +239,17 @@ class StrategistConfig:
             effort=os.environ.get("AGENTREALM_PLANNER_EFFORT", "").strip() or DEFAULT_EFFORT,
             replan_s=number("AGENTREALM_PLANNER_REPLAN_S", DEFAULT_REPLAN_S),
             calls_per_min=int(number("AGENTREALM_PLANNER_CALLS_PER_MIN", DEFAULT_CALLS_PER_MIN)),
-            tokens_per_min=int(number("AGENTREALM_PLANNER_TOKENS_PER_MIN", DEFAULT_TOKENS_PER_MIN)),
+            tokens_per_min=int(number("AGENTREALM_PLANNER_TOKENS_PER_MIN", 0)),
             hurt_fraction=number("AGENTREALM_PLANNER_HURT_FRACTION", DEFAULT_HURT_FRACTION),
             idle_minutes=number("AGENTREALM_PLANNER_IDLE_MINUTES", DEFAULT_IDLE_MINUTES),
             reference_sections=os.environ.get("AGENTREALM_PLANNER_REFERENCE_SECTIONS", "").strip(),
         )
+
+
+def default_tokens_per_min(reference_sections: str = "") -> int:
+    """The per-minute token budget when none is set: room for one full prefix write."""
+    prefix = estimate_tokens([{"role": "system", "content": system_prompt(reference_sections)}])
+    return max(DEFAULT_TOKENS_PER_MIN, math.ceil(PREFIX_BUDGET_FACTOR * prefix))
 
 
 def drain_triggers(m: Memory) -> list[dict[str, Any]]:
@@ -348,15 +361,16 @@ def make_client(cfg: StrategistConfig) -> LLMClient:
 
 
 def tokens_used(usage: dict[str, Any]) -> int | None:
-    """Uncached prompt plus answer tokens the API reported, or None when it reported none.
+    """Uncached prompt (cache writes included) plus answer tokens the API reported,
+    or None when it reported none. Cache reads are not counted.
 
-    OpenAI names them ``prompt_tokens``/``completion_tokens``, Anthropic
-    ``input_tokens``/``output_tokens``. Cache reads and writes are not counted.
+    OpenAI names them ``prompt_tokens``/``completion_tokens`` (the client takes
+    cached reads out of ``prompt_tokens``), Anthropic ``input_tokens``/
+    ``output_tokens`` with writes apart in ``cache_creation_input_tokens``.
     """
+    keys = ("prompt_tokens", "completion_tokens", "input_tokens", "output_tokens", "cache_creation_input_tokens")
     try:
-        total = sum(
-            int(usage.get(k, 0)) for k in ("prompt_tokens", "completion_tokens", "input_tokens", "output_tokens")
-        )
+        total = sum(int(usage.get(k, 0) or 0) for k in keys)
     except (TypeError, ValueError):
         return None
     return total or None
@@ -414,6 +428,8 @@ def build_prompt(
     state_lines = [
         f"tick={w.tick} pos={pos} alive={w.alive} health={w.health}/{w.max_health} gems={w.gems}",
         f"map_level={w.map_level} armed={w.armed_code} lives={w.lives}",
+        f"worn={json.dumps(w.worn_codes, sort_keys=True)} held={json.dumps(dict(sorted(Counter(s.code for s in w.held_supplies).items())))}",
+        f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
@@ -459,6 +475,7 @@ class Strategist:
     spent: deque = field(default_factory=deque)  # [sent_at, tokens] per call in the budget window
     _last_map: tuple[int, int | None] | None = None  # (map_id, level) at the last window
     _hurt: bool = False
+    _token_budget: int = 0  # resolved tokens_per_min (token_budget)
     _idle_sent_for_tick: int = -1
     _requests: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=1), repr=False)
     _answers: queue.Queue = field(default_factory=queue.Queue, repr=False)
@@ -556,6 +573,12 @@ class Strategist:
         if self.inbox and not self.limit_reached():
             self._send(runner)
 
+    def token_budget(self) -> int:
+        """``tokens_per_min``, or :func:`default_tokens_per_min` when it is unset."""
+        if not self._token_budget:
+            self._token_budget = self.config.tokens_per_min or default_tokens_per_min(self.config.reference_sections)
+        return self._token_budget
+
     def limit_reached(self) -> str:
         """Which per-minute budget stops a call now, or "" when one may start."""
         now = self.clock()
@@ -563,7 +586,7 @@ class Strategist:
             self.spent.popleft()
         if len(self.spent) >= self.config.calls_per_min:
             return "calls_per_min"
-        if sum(tokens for _, tokens in self.spent) >= self.config.tokens_per_min:
+        if sum(tokens for _, tokens in self.spent) >= self.token_budget():
             return "tokens_per_min"
         return ""
 
@@ -682,6 +705,7 @@ class Strategist:
             runner.plan.block_before = old.block_before
         else:
             runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
+            runner.mem.walks.clear()  # the new head walks a path of its own (A15)
         if not goals:
             runner.log("strategist", "no valid goals; stack cleared (dispatcher safe default)", {"strategist": {"event": "cleared", **record}})
             return

@@ -108,10 +108,13 @@ def _walk(w: WorldModel, ctx: PlayContext, goal: Pos, reason: str) -> StateOutco
     m, policy = ctx.memory, ctx.policy
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
 
-    def plan() -> list[Pos] | None:
-        return cost_path(w, goal, grid_params(policy, plan_avoid, plan_costly), nav=nav_search(m, w, GOAL, goal))
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly)
 
-    step = bounded_step(m, w, GOAL, goal, plan_avoid, plan)
+    def plan() -> list[Pos] | None:
+        return cost_path(w, goal, params(), nav=nav_search(m, w, GOAL, goal))
+
+    step = bounded_step(m, w, GOAL, goal, plan_avoid, plan, params=params)
     return _out([set_position(step)], f"{reason} → {goal}") if step is not None else _out(None, f"{reason}: no path")
 
 

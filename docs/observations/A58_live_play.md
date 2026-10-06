@@ -51,6 +51,7 @@ A second full-hour attempt failed immediately: `start: HTTP 409 not_on_map`. The
 - **Trace:** 24 oscillation events (4 with `goal: goto`); one Loot-only pacing event (`385,371`↔`385,373`, nothing given up). No Flee ping-pong after the Run 4 fix.
 - **Cause:** Explore replanned the goto path each tick and kept stepping back to the cell just left (393↔394, then 425↔426), tripping the oscillation guard repeatedly after each backoff ended.
 - **Fix:** none beyond the A15 guard, which did its job here: each pacing spot was given up and the smoke run stopped instead of burning the hour. A back-step block on the goto walk was tried and withdrawn: it also blocked a legitimate single step back toward a target behind the agent. Why the goto replan flipped at those two spots is not known from this trace.
+- **Follow-up fix (A15, the walker commits):** the walker re-picked its route every decision, so a route that newly seen fog made a step cheaper won over the one it was on, a step back included. It now keeps its path until arrival, a rejected step, a target change, or terrain that blocks it or makes another path more than 20% cheaper, and takes a step back only when the kept path is blocked. `python/tests/test_a58_run5.py` rebuilds the flip (two equal routes round a wall, fog showing the other one a tile per decision); it fails on `main` before the fix.
 
 ## Run 6 — stopped (~12 min): Flee still pinned (live run budget exhausted)
 

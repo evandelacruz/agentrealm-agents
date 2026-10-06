@@ -92,9 +92,10 @@ class GatherGroundTest(unittest.TestCase):
         """A63 run 3: one following at 4–6 blocks without attacking stopped all cutting."""
         w = grid(["g" * 12], at=(0, 0))
         bar = w.attack_range + GATHER_SHADOW_MARGIN
-        w.entities = [Entity("npc", 1, (bar, 0))]
+        w.hostile_types.add(("npc", "gnawer"))
+        w.entities = [Entity("npc", 1, (bar, 0), "gnawer")]
         self.assertFalse(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
-        w.entities = [Entity("npc", 1, (bar + 1, 0))]
+        w.entities = [Entity("npc", 1, (bar + 1, 0), "gnawer")]
         self.assertTrue(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
 
     def test_safe_zone_cells_qualify(self):
@@ -185,7 +186,8 @@ class GatherActTest(unittest.TestCase):
 
     def test_skips_grass_with_a_hostile_near(self):
         w = grid(["ggg"], at=(1, 0))
-        w.entities = [Entity("npc", 4, (2, 0))]
+        w.entities = [Entity("npc", 4, (2, 0), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         self.assertIsNone(outcome(w, hostile=["npc"]).intents)
 
 
@@ -487,13 +489,38 @@ class GatherShadowTest(unittest.TestCase):
     def shadowed(self, on_hostile: str, at=(10, 0)) -> tuple[WorldModel, PlayContext]:
         w = grid(["g" * 40], at=at)
         w.entities = [Entity("npc", 9, (at[0] + 4, 0), "wartlurch")]
+        w.hostile_types.add(("npc", "wartlurch"))  # a type seen attacking (survival.is_hostile)
         c = ctx(w, ["gather_gems:3"], on_hostile=on_hostile, hostile=["npc"], hostile_range=2)
         return w, c
 
     def follow(self, w: WorldModel, c: PlayContext, seconds: int) -> None:
-        """Gather decides once, then again ``seconds`` later with the hostile still near."""
+        """Gather decides every second for ``seconds`` with the hostile still near."""
         dispatch(w, c)
-        w.tick += seconds * c.plan.tick_hz
+        for _ in range(seconds):
+            w.tick += c.plan.tick_hz
+            gather_mod.shadowing_hostile(w, c.memory, c.policy, c.plan.tick_hz)
+
+    def test_a_hit_from_the_shadow_restarts_its_clock(self):
+        w, c = self.shadowed("flee")
+        self.follow(w, c, gather_mod.SHADOW_SECONDS - 5)
+        w.attacker, w.attacked_tick = ("npc", 9), w.tick  # it hits us
+        self.follow(w, c, 10)
+        w.attacker = None  # the hit has lapsed from threat memory
+        self.assertIsNone(gather_mod.shadowing_hostile(w, c.memory, c.policy, c.plan.tick_hz),
+                          "only 10 s without hitting us since the hit")
+
+    def test_a_gap_restarts_its_clock(self):
+        w, c = self.shadowed("flee")
+        self.follow(w, c, gather_mod.SHADOW_SECONDS - 1)
+        w.tick += gather_mod.SHADOW_GAP_SECONDS * c.plan.tick_hz  # another state ran meanwhile
+        self.assertIsNone(gather_mod.shadowing_hostile(w, c.memory, c.policy, c.plan.tick_hz))
+        self.assertEqual(c.memory.gather_shadow, (9, w.tick, w.tick))
+
+    def test_an_npc_of_a_type_never_seen_attacking_is_no_shadow(self):
+        w, c = self.shadowed("fight")
+        w.hostile_types.clear()  # townsfolk standing near (survival.is_hostile)
+        self.follow(w, c, gather_mod.SHADOW_SECONDS)
+        self.assertEqual(dispatch(w, c).intents[0]["verb"], "Use")
 
     def test_cuts_beside_a_hostile_that_has_not_attacked(self):
         w, c = self.shadowed("flee")
@@ -545,7 +572,8 @@ class GatherStatusTest(unittest.TestCase):
 
     def test_blocked_by_hostile_when_only_a_hostile_bars_the_grass(self):
         w = grid(["..g"], at=(0, 0))
-        w.entities = [Entity("npc", 9, (2, 0))]
+        w.entities = [Entity("npc", 9, (2, 0), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))
         m = Memory()
         out = outcome(w, m, hostile=["npc"])
         self.assertIsNone(out.intents)

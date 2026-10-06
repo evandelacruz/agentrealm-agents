@@ -753,9 +753,32 @@ class RunnerTest(unittest.TestCase):
         r, fake = self.flee_runner([{"tick": 10, "window_remaining_ms": 0}] * 2, lava=[(2, 0)])
         self.flee(r, (1, 1))
         self.assertEqual(fake.sent[0][0], [{"verb": "Step", "direction": "up_right"}])
-        self.flee(r, (1, 1))
+        r.mem.path, r.mem.goal = [(2, 1)], "walk"  # the plan the held queue walks
+        rng = r.rng.getstate()
+
+        def flee_again(w, m, *a, **k):
+            m.path, m.goal = [], ""  # Flee drops the walk, as FleeState does
+            r.rng.random()
+            return Decision(set_position((1, 1)), "flee", reflex=True)
+
+        with mock.patch("agentrealm_agent.runner.decide", side_effect=flee_again):
+            r.tick()
         self.assertIsNone(fake.sent[1][0], "the running queue already steps there")
         self.assertEqual(r.mem.pending_queue, "q1")
+        self.assertEqual((r.mem.path, r.mem.goal), ([(2, 1)], "walk"), "memory keeps the held queue's plan")
+        self.assertEqual(r.rng.getstate(), rng)
+
+    def test_flee_goes_out_past_a_long_held_walk(self):
+        # Only the Steps elapsed ticks could have run count as possible starts:
+        # cells far along a long held walk cannot be where we stand.
+        r, fake = self.flee_runner([{"tick": 10, "window_remaining_ms": 0}] * 2, lava=[])
+        for x in range(3, 5):
+            del r.world.view.tiles[(x, 1)]  # fog above the far end of the walk
+        walk = [{"verb": "Step", "direction": "right"}] + [{"verb": "Wait"}] * 3
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(None, "walk", submit_queue=walk * 4)):
+            r.tick()
+        self.flee(r, (0, 1))
+        self.assertEqual(fake.sent[1][0], [{"verb": "Step", "direction": "up"}], "not a Wait")
 
     def test_a_new_step_that_may_land_on_lava_is_not_sent(self):
         # Flee now wants (1, 2). From (0, 2) that is `right`; if the held Step

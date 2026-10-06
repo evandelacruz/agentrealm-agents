@@ -132,7 +132,7 @@ Live M9 smoke: `make smoke-m9-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…
 
 Pass criteria (PLAN.md A29, checked in [`m9_acceptance.py`](python/agentrealm_agent/m9_acceptance.py)):
 
-- no death, and alive at the end;
+- deaths are counted and reported and play goes on after the respawn; with `--stop-on-death`, no death (the first one fails and ends the run), and alive at the end;
 - no tick where `should_retreat` held while a non-survival state ran;
 - Recover withdraws only on a known safe tile;
 - no loop (24 Steps in a row at one cell with one reason);
@@ -145,7 +145,7 @@ Live M10 smoke: `make smoke-m10-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=�
 
 Pass criteria (PLAN.md A33, checked in [`m10_acceptance.py`](python/agentrealm_agent/m10_acceptance.py)):
 
-- no death, and alive at the end of the run;
+- deaths are counted and reported and play goes on after the respawn; with `--stop-on-death`, no death (the first one fails and ends the run), and alive at the end of the run;
 - no Break attempt on a (block, capability) pair already failed in the knowledge base (re-breaking a regrown block a pair opened is fine);
 - no API error;
 - on a run of at least 95% of the default hour, every readable sign that came into sight along the route has been read, and every NPC that came within 25 blocks has been spoken to;

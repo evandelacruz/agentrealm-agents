@@ -14,7 +14,9 @@ stop the run on the first of:
 - ``regen_known`` answers, "yes" (saved for every later run, so the M7 gate
   passes its regen clause) or "no" (this run only);
 - the cap, ``target_seconds`` (default 30 minutes);
-- a death: the first one ends the probe as a failure.
+- with ``stop_on_death`` (``--stop-on-death``), a death: the first one ends
+  the probe as a failure. Otherwise a death is counted and reported and the
+  probe plays on after the respawn.
 """
 
 from __future__ import annotations

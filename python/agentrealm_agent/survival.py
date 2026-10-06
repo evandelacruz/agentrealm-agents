@@ -129,9 +129,11 @@ def is_attacker(w: WorldModel, e: Entity) -> bool:
     return w.attacker == (e.kind, e.id)
 
 
-def combat_group(w: WorldModel, policy: Policy) -> list[Entity]:
-    """Hostiles in range plus any within ``GROUP_JOIN_RADIUS`` of the nearest."""
+def combat_group(w: WorldModel, policy: Policy, also: Entity | None = None) -> list[Entity]:
+    """Hostiles in range, and ``also`` when given, plus any within ``GROUP_JOIN_RADIUS`` of the nearest."""
     in_range = hostiles_in_range(w, policy)
+    if also is not None and also not in in_range:
+        in_range.append(also)
     if not in_range or w.pos is None:
         return []
     focus = min(in_range, key=lambda e: (chebyshev(e.pos, w.pos), e.id))
@@ -236,13 +238,16 @@ def has_unmeasured_type(w: WorldModel, group: list[Entity]) -> bool:
     return False
 
 
-def would_lose(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:
+def would_lose(
+    w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity | None = None
+) -> bool:
     """True when the win estimate is below the effective fight margin.
 
     **Fight** (A23) and **Flee** gate on this; **Retreat** also fires when
-    the group outclasses us.
+    the group outclasses us. ``also`` counts one more hostile as in range,
+    for a fight Gather would start on one further off (A63 run 3).
     """
-    group = combat_group(w, policy)
+    group = combat_group(w, policy, also)
     if not group:
         return False
     eff_risk = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))

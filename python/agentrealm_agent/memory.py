@@ -77,8 +77,9 @@ class Memory:
     gather_status: str = ""  # Gather's last decision, e.g. cutting, walking to grass, blocked by hostile (planner State)
     # Gather's stall clock: (tick this spell of Gather began, tick of its latest decision) (A63 run 3).
     gather_spell: tuple[int, int] | None = None
-    # A hostile near Gather that has not hit us: (its id, tick it came within GATHER_HOSTILE_RADIUS) (A63 run 3).
-    gather_shadow: tuple[int, int] | None = None
+    # A hostile near Gather that has not hit us: (its id, tick its shadow clock
+    # started, tick Gather last saw it near) (A63 run 3).
+    gather_shadow: tuple[int, int, int] | None = None
     flee_path: list[Pos] = field(default_factory=list)  # Flee's committed escape, kept until it arrives, is blocked or Flee stops (A9, A58)
     # Cells the escape the oscillation guard forced keeps off: the ones it paced on (A15).
     # The planned flee_path already excludes them; this only keeps them shut for

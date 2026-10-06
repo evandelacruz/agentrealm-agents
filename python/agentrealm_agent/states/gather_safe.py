@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from ..config import Policy
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
-from ..survival import is_attacker, recently_attacked
+from ..survival import is_attacker, is_hostile, recently_attacked
 from ..world import NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import RESPAWN_PROBE_RADIUS, safe_tiles
 
@@ -28,7 +28,7 @@ GATHER_SHADOW_MARGIN = 1
 
 
 def gather_bar(w: WorldModel, e: Entity) -> int:
-    """How far from hostile ``e`` Gather keeps the cells it works."""
+    """How far from threat ``e`` (``is_hostile``) Gather keeps the cells it works."""
     if recently_attacked(w) and is_attacker(w, e):
         return GATHER_HOSTILE_RADIUS
     return (w.attack_range or 1) + GATHER_SHADOW_MARGIN
@@ -52,7 +52,7 @@ def gather_ground(w: WorldModel, pos: Pos, policy: Policy) -> bool:
         return False
     if w.view.tiles.get(pos) in policy.avoid_blocks:
         return False
-    return not any(e.kind in policy.hostile and chebyshev(e.pos, pos) <= gather_bar(w, e) for e in w.entities)
+    return not any(is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= gather_bar(w, e) for e in w.entities)
 
 
 def near_respawn_anchor(w: WorldModel, pos: Pos) -> bool:

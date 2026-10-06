@@ -460,11 +460,7 @@ class Runner:
             # fresh walk queue; anything else leaves the queue running.
             d = self.reflex_while_held()
             self.plan.acted = None  # the probe's decision is not this round's
-            if d is not None and self.held_step_matches(d):
-                # The held queue already steps there; a fresh Step aimed from a
-                # position that Step may have changed would misaim (A63 run 3).
-                d, intents = Decision(None, f"queue held: {d.reason} already queued"), None
-            elif d is not None:
+            if d is not None:
                 starts = self.possible_positions()
                 self.drop_held_queue()
                 # Something must replace the held queue, or it keeps running.
@@ -641,8 +637,10 @@ class Runner:
             m.boss = saved[5]  # boss memory belongs to the stack (A38)
         m.nav = saved[2]
         m.nav_stuck = saved_stuck
-        if d.reflex:
+        if d.reflex and not self.held_step_matches(d):
             return d
+        # No reflex, or one that walks where the held queue already steps:
+        # the held queue keeps running, so memory keeps its plan (A63 run 3).
         m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
         self.rng.setstate(saved[3])
         return None
@@ -664,15 +662,29 @@ class Runner:
         cell the held queue's Steps with no result yet would have taken it to.
 
         A Step can run before its result reaches us, so until then any of
-        these may be where the next queue starts (A63 run 3).
+        these may be where the next queue starts (A63 run 3). The server runs
+        one intent a tick from the tick the queue was sent, so only the Steps
+        that elapsed ticks could have reached count.
         """
-        w = self.world
+        w, m = self.world, self.mem
         if w.pos is None:
             return []
-        return [w.pos] + remaining_walk_cells(w, self.mem)
+        out, pos = [w.pos], w.pos
+        if m.pending_intents is None:
+            return out
+        ran_by = min(len(m.pending_intents), max(0, w.tick - m.queue_sent_tick) + 1)
+        for intent in m.pending_intents[m.pending_next_index : ran_by]:
+            if intent.get("verb") == "Step":
+                pos = step_landing(pos, intent["direction"])
+                out.append(pos)
+        return out
 
     def held_step_matches(self, d: Decision) -> bool:
-        """``d`` walks to the cell the held queue's next Step already enters."""
+        """``d`` walks to the cell the held queue's next Step already enters.
+
+        That queue may already have run the Step without its result reaching
+        us; re-aimed from the tracked position, a fresh Step would misaim, so
+        the held queue keeps running instead (A63 run 3)."""
         if d.submit_queue is not None or d.intent is None or d.intent.get("verb") != "SetPosition":
             return False
         ahead = remaining_walk_cells(self.world, self.mem)

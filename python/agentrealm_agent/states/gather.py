@@ -13,7 +13,6 @@ effect, and regions or safe zones where cuts keep having none
 
 from __future__ import annotations
 
-import dataclasses
 from typing import Callable, Iterable
 
 from ..config import Policy
@@ -25,7 +24,7 @@ from ..memory import Memory
 from ..navigation import cost_path, nearest_target
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
-from ..survival import is_attacker, recently_attacked, would_lose
+from ..survival import is_attacker, is_hostile, recently_attacked, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
@@ -48,8 +47,12 @@ OFF = "off"  # ``m.gather_target`` kind: moving off from a hostile that shadows 
 # closest ones turn out unreachable (across water, say).
 GATHER_CANDIDATES = 16
 # A hostile within GATHER_HOSTILE_RADIUS this long without hitting us is
-# shadowing us: Gather fights it or moves well off (A63 run 3, 40 s of it).
+# shadowing us: Gather fights it or moves well off (A63 run 3: one followed
+# at 4–6 blocks and cutting stalled for 45 s).
 SHADOW_SECONDS = 15
+# Gather not seeing the shadow near for this long (another state ran, or it
+# left) restarts its clock.
+SHADOW_GAP_SECONDS = 5
 # Moving off goes to cells at least this far from the shadowing hostile, in one walk.
 MOVE_OFF_DISTANCE = 2 * GATHER_HOSTILE_RADIUS
 # No cut that took effect for this long is a stall, said in ``gather_status``.
@@ -116,21 +119,29 @@ def shadowing_hostile(w: WorldModel, m: Memory, policy: Policy, tick_hz: int) ->
     """The hostile that has stayed within ``GATHER_HOSTILE_RADIUS`` of us for
     ``SHADOW_SECONDS`` without hitting us, else None (A63 run 3).
 
-    Tracks one hostile at a time in ``m.gather_shadow``: the nearest, until it
-    leaves the radius. One that hit us is the survival states' to handle.
+    Tracks one threat (``is_hostile``) at a time in ``m.gather_shadow``: the
+    nearest, until it leaves the radius. Its clock starts again when it hits
+    us (the survival states handle that), or when Gather has not seen it near
+    for ``SHADOW_GAP_SECONDS``.
     """
     here = w.pos
     if here is None:
         return None
-    near = {e.id: e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= GATHER_HOSTILE_RADIUS}
-    if m.gather_shadow is None or m.gather_shadow[0] not in near:
+    near = {
+        e.id: e for e in w.entities if is_hostile(w, policy, e) and chebyshev(e.pos, here) <= GATHER_HOSTILE_RADIUS
+    }
+    tracked = m.gather_shadow
+    if tracked is None or tracked[0] not in near or w.tick - tracked[2] >= SHADOW_GAP_SECONDS * tick_hz:
         nearest = min(near.values(), key=lambda e: (chebyshev(e.pos, here), e.id), default=None)
-        m.gather_shadow = (nearest.id, w.tick) if nearest is not None else None
+        m.gather_shadow = (nearest.id, w.tick, w.tick) if nearest is not None else None
         return None
-    e = near[m.gather_shadow[0]]
+    e, since = near[tracked[0]], tracked[1]
+    if is_attacker(w, e) and w.attacked_tick is not None and w.attacked_tick >= since:
+        since = w.attacked_tick  # it hit us: "without hitting us" starts over
+    m.gather_shadow = (e.id, since, w.tick)
     if recently_attacked(w) and is_attacker(w, e):
         return None
-    return e if w.tick - m.gather_shadow[1] >= SHADOW_SECONDS * tick_hz else None
+    return e if w.tick - since >= SHADOW_SECONDS * tick_hz else None
 
 
 def fight_shadow(w: WorldModel, ctx: PlayContext, e: Entity) -> StateOutcome | None:
@@ -140,8 +151,7 @@ def fight_shadow(w: WorldModel, ctx: PlayContext, e: Entity) -> StateOutcome | N
     policy = ctx.policy
     if policy.on_hostile != "fight" or attack_forbidden(e, ctx.never_attack) or w.pos is None:
         return None
-    in_range = dataclasses.replace(policy, hostile_range=max(policy.hostile_range, chebyshev(w.pos, e.pos)))
-    if would_lose(w, in_range, ctx.params):
+    if would_lose(w, policy, ctx.params, also=e):
         return None
     out = engage(w, ctx, e, GatherState.name)
     if not out.intents:

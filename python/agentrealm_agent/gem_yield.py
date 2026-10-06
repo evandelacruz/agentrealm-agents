@@ -90,6 +90,7 @@ class GemYieldTracker:
     pending: list[PendingCut] = field(default_factory=list)
     claimed: set[int] = field(default_factory=set)  # ground gems already credited to a cut
     on_ground: set[int] = field(default_factory=set)  # claimed gems not yet gone from view
+    last_gems: int | None = None  # the gem counter at the last update
 
     def note_cut(self, w: WorldModel, pos: Pos, block: str, tick: int, *, took: bool = False) -> None:
         """Our ``Use`` on ``pos`` applied while it showed ``block``. ``took``: a
@@ -107,6 +108,8 @@ class GemYieldTracker:
 
     def update(self, w: WorldModel, kb: KnowledgeBase | None) -> None:
         """After a round trip is applied: credit gems, file cuts whose window closed."""
+        rise = 0 if self.last_gems is None or w.gems is None else w.gems - self.last_gems
+        self.last_gems = w.gems
         if not self.pending:
             return
         # Died, off the map, or on another map before the window ran: not a
@@ -117,11 +120,13 @@ class GemYieldTracker:
             self.on_ground.clear()
             return
         gems = _ground_gems(w)
-        for gone in self.on_ground - {gid for gid, _ in gems}:
-            # A credited ground gem left view, most likely into our counter:
-            # that rise is not another cut's.
+        for gone in sorted(self.on_ground - {gid for gid, _ in gems}):
+            # A credited ground gem left view. Only when the counter rose with it
+            # did it go into our counter: that rise is not another cut's.
             self.on_ground.discard(gone)
-            self._raise_baselines(None)
+            if rise > 0:
+                rise -= 1
+                self._raise_baselines(None)
         for cut in self.pending:
             if cut.gem:
                 continue

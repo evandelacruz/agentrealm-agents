@@ -115,6 +115,19 @@ class AttributionTest(unittest.TestCase):
         t.update(w, k)
         self.assertEqual([c["gem"] for c in cuts(k)], [True, False])
 
+    def test_ground_gem_gone_without_a_counter_rise_moves_no_baseline(self):
+        k, w, t = kb(), world(gems=4), GemYieldTracker()
+        t.update(w, k)  # the counter as of the last round trip
+        t.note_cut(w, (1, 1), "grass", 100)
+        t.note_cut(w, (30, 30), "grass", 100)
+        w.tick, w.entities = 101, [Entity("supply", 50, (2, 1), "gem")]
+        t.update(w, k)
+        w.tick, w.entities = 102, []  # someone else took it: no rise for us
+        t.update(w, k)
+        w.tick, w.gems = 103, 5  # then our own gem from the second cut
+        t.update(w, k)
+        self.assertEqual([c["gem"] for c in cuts(k)], [True, True])
+
     def test_take_earlier_in_the_response_is_not_the_cut(self):
         k, w, t = kb(), world(gems=4), GemYieldTracker()
         t.note_cut(w, (1, 1), "grass", 100, took=True)

@@ -5,15 +5,13 @@ import unittest
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.healing import (
-    HEAL_BACKOFF_TICKS,
     HEAL_MAX_TRIES,
-    HEAL_WAIT_TICKS,
     REGEN_KEY,
     REGEN_MEASURE_TICKS,
     SURVIVAL_KEY,
     absorb_heal_pending,
-    note_heal_pending,
     hurt,
+    note_heal_pending,
     regen_known,
     save_regen_yes,
 )
@@ -196,24 +194,19 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(out.state, "Heal")
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 1}])
 
-    def test_no_safe_tile_yields_to_explore(self):
+    def test_no_safe_tile_yields_to_the_safe_default(self):
         w = grid(at=(2, 2))
         w.zones[7] = {}
         m = Memory()
         out = dispatch(w, ctx(m))
         self.assertEqual(out.state, "Explore")
         self.assertIsNotNone(out.intents)
-        self.assertEqual(out.yielded, ["Heal: no reachable safe tile, yield to Explore"])
-        self.assertEqual(m.heal_backoff_until, w.tick + HEAL_BACKOFF_TICKS)
+        self.assertIn("Heal: no reachable safe tile", out.yielded)
+        # No backoff: Heal looks again next window, and still yields.
         w.tick += 7
         out = dispatch(w, ctx(m))
-        self.assertEqual((out.state, out.yielded), ("Explore", []))
-        # Backoff over: Heal claims the round again, still finds nothing, backs off again.
-        w.tick = m.heal_backoff_until
-        out = dispatch(w, ctx(m))
         self.assertEqual(out.state, "Explore")
-        self.assertEqual(out.yielded, ["Heal: no reachable safe tile, yield to Explore"])
-        self.assertEqual(m.heal_backoff_until, w.tick + HEAL_BACKOFF_TICKS)
+        self.assertIn("Heal: no reachable safe tile", out.yielded)
 
     def test_hostile_in_range_keeps_heal_out(self):
         # Retreat or Flee (A9) answers the hostile; Heal waits until none is in range.
@@ -226,15 +219,22 @@ class HealStateTest(unittest.TestCase):
         w.health = 10
         self.assertEqual(dispatch(w, ctx()).state, "Explore")
 
+    def assert_heals_moving(self, out):
+        """In a safe zone Heal never stands still: it moves via the safe default."""
+        self.assertEqual(out.state, "Heal")
+        self.assertIsNotNone(out.intents, out.reason)
+        self.assertEqual(verbs(out), ["SetPosition"])
+        self.assertTrue(out.reason.startswith("heal in safe ground: "), out.reason)
+
     def test_measures_regen_then_saves_yes(self):
         w = grid(at=(0, 0))
         m, kb = Memory(), KnowledgeBase.empty("sandbox")
         out = dispatch(w, ctx(m, kb))
-        self.assertIsNone(out.intents)
-        self.assertEqual(out.reason, "measure safe-zone regen")
+        self.assert_heals_moving(out)
+        self.assertIsNotNone(m.heal_regen_sample)
         w.tick, w.health = 7, 6
         out = dispatch(w, ctx(m, kb))
-        self.assertEqual(out.reason, "rest in safe zone")
+        self.assert_heals_moving(out)
         self.assertEqual(regen_known(kb, Memory()), "yes")
 
     def test_regen_absent_is_kept_for_this_run_only(self):
@@ -243,10 +243,14 @@ class HealStateTest(unittest.TestCase):
         for t in range(0, REGEN_MEASURE_TICKS + 1, 10):
             w.tick = t
             out = dispatch(w, ctx(m, kb))
-        self.assertEqual(out.reason, "wait in town, buy potion")
         self.assertTrue(m.heal_regen_absent)
         self.assertIsNone(regen_known(kb, Memory()))
         self.assertNotIn(SURVIVAL_KEY, kb.extra)
+        # Regen known "no": Heal sends nothing and the safe default moves.
+        w.tick += 10
+        out = dispatch(w, ctx(m, kb))
+        self.assertEqual(out.state, "Explore")
+        self.assertIn("Heal: no safe-zone regen this run", out.yielded)
 
     def test_sample_restarts_after_leaving_zone(self):
         w = grid(at=(0, 0))
@@ -258,7 +262,8 @@ class HealStateTest(unittest.TestCase):
         self.assertIsNone(m.heal_regen_sample)
         w.pos, w.tick = (0, 0), REGEN_MEASURE_TICKS + 20
         out = dispatch(w, ctx(m))
-        self.assertEqual(out.reason, "measure safe-zone regen")
+        self.assert_heals_moving(out)
+        self.assertEqual(m.heal_regen_sample, (REGEN_MEASURE_TICKS + 20, 5, REGEN_MEASURE_TICKS + 20))
         self.assertFalse(m.heal_regen_absent)
 
     def test_sample_restarts_when_health_falls(self):
@@ -273,32 +278,22 @@ class HealStateTest(unittest.TestCase):
         w = grid(at=(0, 0))
         kb = KnowledgeBase.empty("sandbox")
         save_regen_yes(kb)
-        out = dispatch(w, ctx(kb=kb))
-        self.assertEqual((out.state, out.intents, out.reason), ("Heal", None, "rest in safe zone"))
+        m = Memory()
+        out = dispatch(w, ctx(m, kb=kb))
+        self.assert_heals_moving(out)
+        self.assertIsNone(m.heal_regen_sample)  # known: no sample taken
 
-    def test_waits_in_town_sends_nothing_and_raises_buy(self):
-        w = grid(at=(0, 0))
+    def test_regen_absent_does_not_pull_to_safe_ground(self):
+        # Once this run has measured no regen, Heal sends nothing anywhere:
+        # the plan's executor (or the safe default) moves instead.
+        w = grid(at=(2, 2))
         m = Memory(heal_regen_absent=True)
         out = dispatch(w, ctx(m))
-        self.assertEqual(out.state, "Heal")
-        self.assertIsNone(out.intents)
-        self.assertEqual(m.buy_signals, [{"op": "buy", "code": "small_potion", "why": "hurt in town, no food or potion"}])
-        dispatch(w, ctx(m))
-        self.assertEqual(len(m.buy_signals), 1)
-
-    def test_wait_without_health_back_is_bounded(self):
-        w = grid(at=(0, 0))
-        m = Memory(heal_regen_absent=True)
-        dispatch(w, ctx(m))
-        w.tick = HEAL_WAIT_TICKS
+        self.assertNotEqual(out.state, "Heal")
+        self.assertIn("Heal: no safe-zone regen this run", out.yielded)
+        w.pos = (0, 0)
         out = dispatch(w, ctx(m))
-        # Heal gives up and the same window goes to Explore (A44).
-        self.assertEqual(out.state, "Explore")
-        self.assertIsNotNone(out.intents)
-        self.assertEqual(out.yielded, ["Heal: no health back, yield to Explore"])
-        self.assertEqual(m.heal_backoff_until, w.tick + HEAL_BACKOFF_TICKS)
-        w.tick += 7
-        self.assertEqual(dispatch(w, ctx(m)).state, "Explore")
+        self.assertNotEqual(out.state, "Heal")
 
 
 if __name__ == "__main__":

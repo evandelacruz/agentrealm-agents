@@ -5,9 +5,9 @@ import unittest
 from unittest import mock
 
 from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import Directives
+from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.memory import Memory
-from agentrealm_agent.plan_goals import GatherGemsGoal, gather_gems_goal
+from agentrealm_agent.plan import Plan, parse_directives_goal
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
 from agentrealm_agent.states import gather as gather_mod
 from agentrealm_agent.states.gather_safe import is_safe_ish
@@ -33,28 +33,30 @@ def safe(w: WorldModel, *cells) -> None:
 
 
 def ctx(w: WorldModel, goals: list[str], m: Memory | None = None, **policy_kw) -> PlayContext:
+    """Directives ``goals`` become the plan stack (``gather_gems:N`` → a ``gather_gems`` op)."""
     kw = {"pickup": False, "on_hostile": "ignore", "goals": ["explore"], **policy_kw}
-    return PlayContext(m or Memory(), Policy(kind="scripted", **kw), random.Random(0), directives=Directives(goals=goals))
+    plan = Plan.from_directives(directive_goals=goals, directive_params=dict(PARAM_DEFAULTS))
+    return PlayContext(
+        m or Memory(),
+        Policy(kind="scripted", **kw),
+        random.Random(0),
+        directives=Directives(goals=goals),
+        plan=plan,
+    )
 
 
 def outcome(w: WorldModel, m: Memory | None = None, **policy_kw):
     kw = {"on_hostile": "ignore", **policy_kw}
-    return gather_outcome(w, m or Memory(), Policy(**kw), never_attack=[])
+    return gather_outcome(w, m or Memory(), Policy(**kw))
 
 
-class PlanGoalsTest(unittest.TestCase):
-    def test_bare_op_means_one_gem(self):
-        self.assertEqual(gather_gems_goal(Directives(goals=["gather_gems"])), GatherGemsGoal(1))
-
+class GatherShorthandTest(unittest.TestCase):
     def test_count_is_parsed(self):
-        self.assertEqual(gather_gems_goal(Directives(goals=["gather_gems:20"])), GatherGemsGoal(20))
+        self.assertEqual(parse_directives_goal("gather_gems:20"), {"op": "gather_gems", "count": 20})
 
-    def test_bad_and_zero_counts_are_skipped_for_the_next_op(self):
-        d = Directives(goals=["gather_gems:x", "gather_gems:0", "gather_gems:-3", "gather_gems:4"])
-        self.assertEqual(gather_gems_goal(d), GatherGemsGoal(4))
-
-    def test_other_ops_are_not_gather(self):
-        self.assertIsNone(gather_gems_goal(Directives(goals=["explore", "gather_gemsx"])))
+    def test_bad_counts_are_dropped(self):
+        for text in ("gather_gems:x", "gather_gems:-3"):
+            self.assertIsNone(parse_directives_goal(text), text)
 
 
 class WorldGemsTest(unittest.TestCase):
@@ -238,59 +240,59 @@ class GatherDispatchTest(unittest.TestCase):
         out = dispatch(w, ctx(w, ["gather_gems:3"]))
         self.assertEqual(out.state, "Gather")
 
-    def test_gather_yields_when_gem_count_met(self):
+    def test_gather_op_done_when_gem_count_met(self):
         w = grid(["ggg"], at=(1, 0))
         w.gems = 5
         safe(w, (1, 0))
-        out = dispatch(w, ctx(w, ["gather_gems:3"]))
+        c = ctx(w, ["gather_gems:3"])
+        out = dispatch(w, c)
         self.assertEqual(out.state, "Explore")
+        self.assertIsNone(c.plan.current())
 
-    def test_gather_waits_for_a_gem_count(self):
+    def test_unknown_gem_count_is_not_done(self):
         w = grid(["ggg"], at=(1, 0))
         w.gems = None
         safe(w, (1, 0))
         out = dispatch(w, ctx(w, ["gather_gems:3"]))
+        self.assertEqual(out.state, "Gather")
+
+    def test_no_gather_op_no_gather(self):
+        w = grid(["ggg"], at=(1, 0))
+        safe(w, (1, 0))
+        out = dispatch(w, ctx(w, []))
         self.assertEqual(out.state, "Explore")
 
-    def test_no_target_in_sight_yields_to_explore(self):
+    def test_no_target_in_sight_explores_safe_ground_itself(self):
         w = grid(["....", "....", "...."], at=(1, 1))
+        safe(w, (0, 0), (1, 1))
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
-        self.assertEqual(out.state, "Explore")
-        self.assertIsNotNone(out.intents, "Explore moves instead of the character standing still")
-        self.assertEqual(c.memory.state, "Explore")
+        self.assertEqual(out.state, "Gather")
+        self.assertIsNotNone(out.intents, "Gather moves instead of the character standing still")
+        self.assertTrue(out.reason.startswith("look for gems: "), out.reason)
+        self.assertEqual(c.memory.state, "Gather")
 
-    def test_gather_takes_back_over_once_a_target_appears(self):
+    def test_gather_cuts_once_a_target_appears(self):
         w = grid(["....", "....", "...."], at=(1, 1))
         c = ctx(w, ["gather_gems:3"])
         dispatch(w, c)
+        w.pos = (1, 1)
         w.view.tiles[(1, 1)] = "grass"
         safe(w, (1, 1))
         out = dispatch(w, c)
         self.assertEqual(out.state, "Gather")
         self.assertEqual(out.reason, "cut grass")
 
-    def test_unreachable_target_backs_off_to_explore(self):
-        # Grass walled off: Gather finds no path, backs off, and dispatch
-        # falls through to Explore in the same window (A44).
+    def test_unreachable_target_explores_instead(self):
+        # Grass walled off: no path to it, so Gather explores safe ground itself.
         w = grid(["....###", "....#g#", "....###"], at=(1, 1))
         safe(w, (5, 1))
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
-        self.assertEqual(out.state, "Explore")
+        self.assertEqual(out.state, "Gather")
         self.assertIsNotNone(out.intents)
-        self.assertEqual([y.split(":")[0] for y in out.yielded], ["Gather"])
-        backoff = c.memory.gather_backoff_until
-        self.assertGreater(backoff, w.tick)
-        # Backing off: Gather does not claim the round at all.
-        out = dispatch(w, c)
-        self.assertEqual((out.state, out.yielded), ("Explore", []))
-        # Backoff over: Gather claims the round again, fails again, backs off again.
-        w.tick = backoff
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Explore")
-        self.assertEqual([y.split(":")[0] for y in out.yielded], ["Gather"])
-        self.assertGreater(c.memory.gather_backoff_until, backoff)
+        self.assertTrue(out.reason.startswith("look for gems: "), out.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

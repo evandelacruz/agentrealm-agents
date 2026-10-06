@@ -1,4 +1,4 @@
-"""Travel plan operations (A27). Full plan schema is A34; this slice parses travel ops only."""
+"""Travel destinations (A27): ``travel:*`` directives shorthand and plan ``travel`` ops."""
 
 from __future__ import annotations
 
@@ -42,47 +42,18 @@ def parse_travel_string(goal: str) -> TravelOp | None:
     return None
 
 
-def parse_travel_goals(goals: list[str]) -> list[TravelOp]:
-    out: list[TravelOp] = []
-    for g in goals:
-        op = parse_travel_string(g)
-        if op is not None:
-            out.append(op)
-    return out
-
-
-def refresh_travel_stack(memory, goals: list[str]) -> None:
-    """Replace the travel queue when directives goals change."""
-    parsed = parse_travel_goals(goals)
-    if parsed != memory.travel_ops:
-        memory.travel_ops = parsed
-        memory.travel_index = 0
-
-
-def current_travel_op(memory) -> TravelOp | None:
-    if memory.travel_index >= len(memory.travel_ops):
-        return None
-    return memory.travel_ops[memory.travel_index]
-
-
-def set_travel_index(memory, index: int) -> None:
-    """Move the stack to ``index``; ops before it are dropped (arrived or unresolved)."""
-    if index != memory.travel_index:
-        memory.travel_index = index
-        memory.path, memory.goal = [], ""
-
-
 def travel_op_from_plan_goal(op: dict[str, Any]) -> TravelOp:
     """Build a ``TravelOp`` from a validated plan ``travel`` goal (A34).
 
-    For ``shop``, ``x=0`` and ``y=0`` mean any known shop cell (like
-    ``travel:shop`` in directives), not the map origin.
+    For ``shop`` and ``entrance``, ``x=0`` and ``y=0`` mean the nearest known
+    one (like ``travel:shop`` in directives), not the map origin. ``town`` and
+    ``hunting_ground`` take no coordinates.
     """
     to = op["to"]
     x, y = op["x"], op["y"]
     map_id = op.get("map_id")
-    if to == "shop" and x == 0 and y == 0:
-        return TravelOp(to="shop", map_id=map_id if isinstance(map_id, int) else None)
+    if to in ("town", "hunting_ground") or (to in ("shop", "entrance") and x == 0 and y == 0):
+        return TravelOp(to=to, map_id=map_id if isinstance(map_id, int) else None)
     return TravelOp(
         to=to,
         x=x,

@@ -3,7 +3,8 @@
 Live run 3 of A58 paced between two cells for minutes while the goto walk and
 another state took turns. The dispatch tests below rebuild that through the
 real dispatcher: a stand-in for the competing state sits above the real
-Explore goto walk and steps the character back each time it arrives.
+Travel walk of the plan's goto (a ``travel`` point op) and steps the
+character back each time it arrives.
 """
 
 import importlib
@@ -17,10 +18,11 @@ from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import oscillation
 from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import goto_navigation_pending
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.states.base import PlayContext, State, StateOutcome
 from agentrealm_agent.states.explore import ExploreState
 from agentrealm_agent.states.intents import set_position
+from agentrealm_agent.states.travel import TravelState
 from agentrealm_agent.world import WorldModel
 
 # The module, not the ``dispatch`` function the package re-exports.
@@ -28,6 +30,7 @@ dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")
 
 GOTO = (11, 0)
 A, B = (2, 0), (3, 0)
+WALK = "travel:point"  # the goal label of the goto's travel op walk
 
 
 def world(at=A) -> WorldModel:
@@ -43,14 +46,24 @@ def world(at=A) -> WorldModel:
     return w
 
 
-def ctx() -> PlayContext:
+def ctx(goto: tuple[int, int] = GOTO) -> PlayContext:
+    policy = Policy(kind="scripted", goals=["goto", "explore"], goto=goto)
     return PlayContext(
         Memory(),
-        Policy(kind="scripted", goals=["goto", "explore"], goto=GOTO),
+        policy,
         random.Random(0),
         params=dict(PARAM_DEFAULTS),
         knowledge=KnowledgeBase.empty("sandbox"),
+        plan=Plan.from_policy(policy, dict(PARAM_DEFAULTS)),
     )
+
+
+def goto_pending(world: WorldModel, ctx: PlayContext) -> bool:
+    """The plan's top op is the goto's travel, and its walk is not backed off."""
+    op = ctx.plan.current() if ctx.plan is not None else None
+    if op is None or op["op"] != "travel":
+        return False
+    return not nav_stuck.backed_off(ctx.memory, WALK, world.map_id, (op["x"], op["y"]), world.tick)
 
 
 class BreakWalkBack(State):
@@ -60,7 +73,7 @@ class BreakWalkBack(State):
     name = "BreakWalkBack"
 
     def guard(self, world, ctx):
-        return world.pos == B and goto_navigation_pending(world, ctx.memory, ctx.policy)
+        return world.pos == B and goto_pending(world, ctx)
 
     def done(self, world, ctx):
         return not self.guard(world, ctx)
@@ -89,11 +102,11 @@ def land(w: WorldModel, c: PlayContext, out: StateOutcome) -> None:
 
 
 def play(competitor: State, decisions: int = 20):
-    """Run the real dispatcher with ``competitor`` above Explore. Returns the
-    world, the context and the cell after each decision."""
+    """Run the real dispatcher with ``competitor`` above Travel and Explore.
+    Returns the world, the context and the cell after each decision."""
     w, c = world(), ctx()
     cells = []
-    with mock.patch.object(dispatch_module, "STATES", (competitor, ExploreState())):
+    with mock.patch.object(dispatch_module, "STATES", (competitor, TravelState(), ExploreState())):
         for _ in range(decisions):
             land(w, c, dispatch_module.dispatch(w, c))
             cells.append(w.pos)
@@ -102,24 +115,22 @@ def play(competitor: State, decisions: int = 20):
 
 class GotoReplanBack(State):
     """Like Explore in A58 run 5: the goto walk itself, replanned each
-    decision, steps east from A and then back west from B. Named Explore,
-    so the guard files every move as the goto walk's. The real walker no
-    longer does this (it commits to its path, ``test_a58_run5.py``); the
-    stand-in keeps the guard tested as the safety net."""
+    decision, steps east from A and then back west from B. Named Travel,
+    so the guard files every move as the goto walk's."""
 
-    name = "Explore"
+    name = "Travel"
 
     def guard(self, world, ctx):
-        return world.pos in (A, B) and goto_navigation_pending(world, ctx.memory, ctx.policy)
+        return world.pos in (A, B) and goto_pending(world, ctx)
 
     def done(self, world, ctx):
         return not self.guard(world, ctx)
 
     def act(self, world, ctx):
         m = ctx.memory
-        nav_stuck.track(m, world, "goto", GOTO)
+        nav_stuck.track(m, world, WALK, GOTO)
         nxt = B if world.pos == A else A
-        m.path, m.goal = [nxt, GOTO], "goto"
+        m.path, m.goal = [nxt, GOTO], WALK
         return StateOutcome([set_position(nxt)], "goto replan", state=self.name)
 
 
@@ -144,17 +155,20 @@ class RetreatPace(State):
 
 class PacingDispatchTest(unittest.TestCase):
     def _assert_guard_stopped_it(self, competitor):
-        w, c, cells = play(competitor)
+        # Twelve decisions: past the dead end at (0, 0) the never-idle safe
+        # default looks around (never-revealed fog here), which is its own walk.
+        w, c, cells = play(competitor, decisions=12)
         events = c.memory.nav_stuck.oscillations
         self.assertEqual(len(events), 1, cells)
-        self.assertEqual(events[0]["goal"], "goto")
+        self.assertEqual(events[0]["goal"], WALK)
         self.assertEqual(events[0]["cells"], [list(A), list(B)])
         signals = c.memory.nav_stuck.stuck_signals
-        self.assertEqual([(s["goal"], s["reason"]) for s in signals], [("goto", "pacing")])
-        self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), "goto backed off")
-        # Explore takes the next goal and walks west to the fog, never back.
+        self.assertEqual([(s["goal"], s["reason"]) for s in signals], [(WALK, "pacing")])
+        self.assertFalse(goto_pending(w, c), "goto backed off")
+        # The safe default walks west to the fog, never back.
         after = cells[oscillation.OSCILLATION_STEPS - 1 :]
-        self.assertEqual(after[:4], [(2, 0), (1, 0), (0, 0), (0, 0)], cells)
+        self.assertEqual(after[:3], [(2, 0), (1, 0), (0, 0)], cells)
+        self.assertNotIn(B, after, cells)
 
     def test_break_walk_against_the_goto_walk(self):
         self._assert_guard_stopped_it(BreakWalkBack())
@@ -164,10 +178,10 @@ class PacingDispatchTest(unittest.TestCase):
 
     def test_survival_pacing_does_not_back_off_the_goto(self):
         w, c = world(at=(1, 0)), ctx()
-        with mock.patch.object(dispatch_module, "STATES", (ExploreState(),)):
+        with mock.patch.object(dispatch_module, "STATES", (TravelState(),)):
             land(w, c, dispatch_module.dispatch(w, c))  # the goto walk reaches A
-        self.assertEqual(nav_stuck.active(c.memory, w).goal, "goto")
-        with mock.patch.object(dispatch_module, "STATES", (RetreatPace(), ExploreState())):
+        self.assertEqual(nav_stuck.active(c.memory, w).goal, WALK)
+        with mock.patch.object(dispatch_module, "STATES", (RetreatPace(), TravelState())):
             for _ in range(14):
                 land(w, c, dispatch_module.dispatch(w, c))
         events = c.memory.nav_stuck.oscillations
@@ -176,36 +190,36 @@ class PacingDispatchTest(unittest.TestCase):
             self.assertNotIn("goal", event, "nothing given up")
             self.assertEqual(event["states"], ["RetreatPace"])
         self.assertEqual(c.memory.nav_stuck.stuck_signals, [])
-        self.assertTrue(goto_navigation_pending(w, c.memory, c.policy), "goto not backed off")
+        self.assertTrue(goto_pending(w, c), "goto not backed off")
 
     def test_the_goto_walk_pacing_on_its_own_is_given_up(self):
         """A58 run 5: the goto walk's own replans stepped it back and forth.
 
-        The guard alone ends it: one give-up, then Explore walks off west and
-        never returns to the two cells while the goto is backed off. No
+        The guard alone ends it: one give-up, then the safe default walks off
+        west and never returns to the two cells while the goto is backed off. No
         back-step block in the walk is needed for that.
         """
-        w, c, cells = play(GotoReplanBack(), decisions=14)
+        w, c, cells = play(GotoReplanBack(), decisions=12)
         events = c.memory.nav_stuck.oscillations
-        self.assertEqual([(e["goal"], e["states"]) for e in events], [("goto", ["Explore"])], cells)
-        self.assertFalse(goto_navigation_pending(w, c.memory, c.policy), "goto backed off")
+        self.assertEqual([(e["goal"], e["states"]) for e in events], [(WALK, ["Travel"])], cells)
+        self.assertFalse(goto_pending(w, c), "goto backed off")
         after = cells[oscillation.OSCILLATION_STEPS :]
-        self.assertEqual(after[:3], [(1, 0), (0, 0), (0, 0)], cells)
+        self.assertEqual(after[:2], [(1, 0), (0, 0)], cells)
+        self.assertNotIn(B, after, cells)
 
     def test_a_goto_behind_the_agent_takes_the_step_back(self):
         """One step back toward a goto behind it is a route, not pacing."""
-        w, c = world(at=B), ctx()
-        c.policy = Policy(kind="scripted", goals=["goto", "explore"], goto=(0, 0))
+        w, c = world(at=B), ctx(goto=(0, 0))
         c.memory.nav_stuck.cells_map = w.map_id
         c.memory.nav_stuck.recent_cells = [A, B]
-        c.memory.nav_stuck.recent_moves = [("goto", "Explore")] * 2
-        with mock.patch.object(dispatch_module, "STATES", (ExploreState(),)):
+        c.memory.nav_stuck.recent_moves = [(WALK, "Travel")] * 2
+        with mock.patch.object(dispatch_module, "STATES", (TravelState(),)):
             out = dispatch_module.dispatch(w, c)
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), A)
 
     def test_a_straight_walk_never_fires(self):
         w, c = world(), ctx()
-        with mock.patch.object(dispatch_module, "STATES", (ExploreState(),)):
+        with mock.patch.object(dispatch_module, "STATES", (TravelState(),)):
             for _ in range(8):
                 land(w, c, dispatch_module.dispatch(w, c))
         self.assertEqual(w.pos, (10, 0))

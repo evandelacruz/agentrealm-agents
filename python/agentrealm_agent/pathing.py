@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import random
 from typing import Callable, Collection
 
 from .break_memory import break_costs_for_planning, nominate_on_path
@@ -16,30 +15,14 @@ from .navigation import (
     NavSearchState,
     alt_route_path,
     cost_path,
-    doors_goal_path,
     known_prefix,
     nearest_target,
-    route_first_leg,
 )
 from .navigation import stuck as nav_stuck
 from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
-from .plan import (
-    BOSS_PLAN_OPS,
-    BREAK_PLAN_OPS,
-    EXPLORE_ANYWHERE,
-    EXPLORE_PATH_OPS,
-    OP_STATE,
-    PLAN_STALL_SECONDS,
-    SHOP_PLAN_OPS,
-    TRAVEL_PATHED,
-    GoalOp,
-    Plan,
-    SOLVE_OPS,
-    explore_targets,
-)
-from .travel.ops import travel_op_from_plan_goal
-from .travel.resolve import at_destination, resolve_travel
+from .healing import hurt
+from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -90,31 +73,6 @@ def note_goto_reached(w: WorldModel, m: Memory, policy: Policy) -> None:
     goto = goto_target(w, policy)
     if goto is not None and w.map_id == goto[0] and w.pos == goto[1]:
         m.goto_reached = key
-
-
-def goto_navigation_pending(w: WorldModel, m: Memory, policy: Policy) -> bool:
-    """True while the agent still owes the ``goto`` in ``policy.goals`` (M7 smoke, A58).
-
-    While it is, the walk comes first: Loot, Shop, Investigate, Travel and
-    OddBreak stay out, Break runs only for the goto's own stuck escalation,
-    and the plan's moves and ``wait`` hold are skipped (``replan``, Explore).
-    Heal is not deferred, so a hurt character still walks to safety.
-
-    The goto is owed until the agent stands on its target. Once reached it
-    is satisfied (``goto_satisfied``): stepping off or leaving the map does
-    not owe it again, and Explore and the other states run as normal (A16,
-    A58 run 8). A new or changed ``policy.goto`` or ``goto_map`` is owed again. An unreached goto that stuck detection gave
-    up on is not owed while backed off, and is owed again when the backoff ends.
-    """
-    goto = goto_target(w, policy)
-    if goto is None or goto_satisfied(m, policy):
-        return False
-    dest_map, target = goto
-    if w.map_id != dest_map or w.pos is None or w.pos == target:
-        return False
-    if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
-        return False
-    return True
 
 
 # How far a committed flee run reaches past its first step when no safe tile
@@ -213,38 +171,24 @@ def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos |
     return None
 
 
+# ``Memory.goal`` of the safe default's walk (no plan op, PLAN.md Architecture).
+SAFE_EXPLORE_GOAL = "explore"
+
+
 def plan_op_goal(op: GoalOp) -> str:
     """The ``Memory.goal`` label a path for ``op`` carries, or "" when no path serves it (A34)."""
-    if op["op"] == "explore_area":
-        return "explore_area"
-    if op["op"] == "travel" and op["to"] in ("point", "entrance", "town", "shop"):
-        return {
-            "point": "plan_travel",
-            "entrance": "plan_entrance",
-            "town": "plan_town",
-            "shop": "plan_shop",
-        }[op["to"]]
-    return ""
+    return "explore_area" if op["op"] == "explore_area" else ""
 
 
-def path_owned_by_plan(plan: Plan | None, m: Memory, policy_goals: list[str] | tuple[str, ...] = ()) -> bool:
-    """False when ``m.path`` was set for something other than the plan's head op.
+def path_owned_by(op: GoalOp | None, m: Memory) -> bool:
+    """True when ``m.path`` was set for ``op`` (None: the safe default's walk).
 
-    A path left by a ``policy.goals`` round, from before a ``goals`` reload, or
-    for an earlier op of the same kind with another target must not keep
-    driving movement once the stack's head is a different op (A34).
-
-    While the head is stalled (no path yet), ``policy.goals`` have the move,
-    so a path ``replan`` set from one of them is kept until it goes stale
-    rather than re-rolled every window.
+    A path from before a ``goals`` reload, for another state, or for an
+    earlier op of the same kind with another target must not keep driving
+    movement once the stack's head is a different op (A34).
     """
-    op = plan.current() if plan is not None else None
     if op is None:
-        return True
-    if m.goal == "":
-        return False
-    if plan.stalled_since_tick is not None and m.goal_op is None and m.goal in policy_goals:
-        return True
+        return m.goal == SAFE_EXPLORE_GOAL
     return m.goal == plan_op_goal(op) and m.goal_op == op
 
 
@@ -257,188 +201,57 @@ def path_for_plan_op(
     costly: set[Pos],
     knowledge: KnowledgeBase | None,
 ) -> tuple[list[Pos], str, Leg | None] | None:
-    """A cost-grid path for an ``explore_area`` or ``travel`` op, its goal label,
-    and what stuck detection tracks on this map (the goal, or the door at the
-    end of a cross-map first leg, A15).
-
-    Targets given up on and still backed off are skipped (A15).
-    """
-    label = plan_op_goal(op)
-    if op["op"] == "explore_area":
-        targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, explore_targets(op, w), w.tick)
-        center = (op["x"], op["y"])
-        if not targets and op["radius"] < EXPLORE_ANYWHERE and chebyshev(w.pos, center) > op["radius"]:
-            targets = {center}
-            if nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
-                return None
-        params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
-        found = nearest_explore_target(w, targets, params, knowledge)
-        leg = Leg(found[0]) if found and found[1] else None
-        path, leg = commit_explore(m, w, label, targets, leg, found[1] if leg else None, params)
-        return (path, label, leg) if path else None
-    if op["op"] != "travel":
+    """A cost-grid path for an ``explore_area`` op, its goal label, and what
+    stuck detection tracks (A15). Frontiers given up on and still backed off
+    are skipped. **Travel** walks ``travel`` ops itself (A27)."""
+    if op["op"] != "explore_area":
         return None
-    params = grid_params(
-        policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge
-    )
-    if op["to"] == "point":
-        target = (op["x"], op["y"])
-        dest_map = op.get("map_id", w.map_id)
-        if nav_stuck.backed_off(m, label, dest_map, target, w.tick):
+    label = plan_op_goal(op)
+    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, explore_targets(op, w), w.tick)
+    center = (op["x"], op["y"])
+    if not targets and op["radius"] < EXPLORE_ANYWHERE and chebyshev(w.pos, center) > op["radius"]:
+        targets = {center}
+        if nav_stuck.backed_off(m, label, w.map_id, center, w.tick):
             return None
-        nav = nav_search(m, w, label, target) if dest_map == w.map_id else None
-        path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
-        return (path, label, nav_stuck.leg_toward(m, w, label, dest_map, target, path)) if path else None
-    if op["to"] == "entrance":
-        path = doors_goal_path(w, knowledge, params)
-        if not path or nav_stuck.backed_off(m, label, w.map_id, path[-1], w.tick):
-            return None
-        return path, label, Leg(path[-1])
-    if op["to"] == "town":
-        for map_id, pos in w.respawn_anchors:
-            if map_id == w.map_id:
-                if nav_stuck.backed_off(m, label, map_id, pos, w.tick):
-                    continue
-                path = route_first_leg(w, knowledge, map_id, pos, params, nav=nav_search(m, w, label, pos))
-                if path:
-                    return path, label, Leg(pos)
-    if op["to"] == "shop":
-        dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
-        if dest is None:
-            return None
-        target, dest_map = dest.pos, dest.map_id
-        if nav_stuck.backed_off(m, label, dest_map, target, w.tick):
-            return None
-        nav = nav_search(m, w, label, target) if dest_map == w.map_id else None
-        path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav)
-        if path:
-            return path, label, nav_stuck.leg_toward(m, w, label, dest_map, target, path)
-    return None
-
-
-def plan_step(
-    plan: Plan,
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    blocked: set[Pos],
-    costly: set[Pos],
-    knowledge: KnowledgeBase | None,
-) -> bool:
-    """Set ``m.path`` from the plan's current op. True when the plan decided the round.
-
-    Ops no shipped state can run, and ``travel`` to a destination with no
-    path yet, are dropped and logged. An op that finds no path for
-    ``PLAN_STALL_SECONDS`` is dropped too, so the stack never stalls; until
-    then ``policy.goals`` get the move. A ``wait`` decides the round with no move.
-    A ``buy`` belongs to **Shop**, which clears the stall when it steps or takes,
-    and a ``break_block`` to **Break**, which clears it when it acts on the op.
-    ``compose`` and ``use_block`` belong to **Solve**, which drops them itself
-    when they stall (A39), so they are left on the stack here.
-    """
-    while True:
-        plan.advance(w, m)
-        op = plan.current()
-        if op is None:
-            return False
-        if op["op"] in SOLVE_OPS:
-            return False
-        if op["op"] not in EXPLORE_PATH_OPS:
-            if op["op"] in BOSS_PLAN_OPS:
-                return False
-            if op["op"] in SHOP_PLAN_OPS:
-                # Shop runs `buy`; while it has nothing in sight to take, the
-                # op stalls here and is dropped like any other (A21).
-                if plan.note_stalled(w.tick):
-                    plan.drop_current(f"nothing to buy for {PLAN_STALL_SECONDS}s", memory=m)
-                    continue
-                return False
-            if op["op"] in BREAK_PLAN_OPS:
-                # Break runs `break_block`; while it has no tool or no way to
-                # the block, the op stalls here the same way (A28, A36).
-                if plan.note_stalled(w.tick):
-                    plan.drop_current(f"nothing to break for {PLAN_STALL_SECONDS}s", memory=m)
-                    continue
-                return False
-            plan.drop_current(f"no {OP_STATE.get(op['op']) or 'executor'} state yet", memory=m)
-            continue
-        if op["op"] == "wait":
-            return True
-        if op["op"] == "travel" and op["to"] not in TRAVEL_PATHED:
-            plan.drop_current(f"no path to a {op['to']} yet", memory=m)
-            continue
-        if op["op"] == "travel" and op["to"] == "shop":
-            # A known shop cell stays listed when bought out (A27), so standing
-            # on the resolved cell is arrival even with nothing priced in sight.
-            dest = resolve_travel(travel_op_from_plan_goal(op), w, knowledge, m.strength)
-            if dest is not None and at_destination(w, dest):
-                plan.finish_current("at shop cell", memory=m)
-                continue
-        found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
-        if found and found[2] is not None and op["op"] != "explore_area":
-            # explore_area is committed where its frontier is chosen (commit_explore).
-            # The grid path_for_plan_op searched on: only ``travel`` may end on a door.
-            door = op["op"] == "travel"
-            params = grid_params(policy, blocked, costly, allow_goal_door=door, m=m, w=w, knowledge=knowledge)
-            found = (commit_walk(m, w, found[1], found[2].target, found[0], params), *found[1:])
-        if found and next_step(w, blocked, found[0]):
-            plan.note_progress()
-            _store_path(m, w, found[1], found[0], found[2])
-            m.goal_op = dict(op)
-            return True
-        if plan.note_stalled(w.tick):
-            plan.drop_current(f"no path for {PLAN_STALL_SECONDS}s", memory=m)
-            continue
-        return False
+    params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+    found = nearest_explore_target(w, targets, params, knowledge)
+    leg = Leg(found[0]) if found and found[1] else None
+    path, leg = commit_explore(m, w, label, targets, leg, found[1] if leg else None, params)
+    return (path, label, leg) if path else None
 
 
 def replan(
     w: WorldModel,
     m: Memory,
     policy: Policy,
-    rng: random.Random,
     blocked: set[Pos],
     costly: set[Pos],
     knowledge: KnowledgeBase | None = None,
-    plan: Plan | None = None,
+    op: GoalOp | None = None,
 ) -> tuple[str, Leg, bool] | None:
-    """Take the first goal whose path starts on a seen, open step.
+    """Set ``m.path`` for the ``explore_area`` ``op``, or with no op for the
+    safe default: the nearest safe frontier (``safe_explore_path``).
 
-    A goal keeps the path it is walking while that stays the best way to its
-    target (``commit_walk``): so a kept path whose next cell is still fog
-    waits for it to be seen rather than turning round for another route.
-    A path whose first step lies in fog is skipped like an unreachable goal,
-    so a later goal (explore, say) gets the move while terrain reads catch up.
-    An owed ``goto`` is the exception (below).
-    When a plan is active, its current op is tried before ``policy.goals``.
-    When no goal gets a step, returns the first goal with a target on this map,
-    its leg, and whether a route was found (its first step was not open),
-    for the caller's stuck detection (A15).
-
-    While the ``goto`` is owed (A16 goto first), it is the only goal tried:
-    a goto with no open step is returned as missed, so stuck detection
-    escalates it and gives it up, rather than a later goal taking the move
-    and leaving the goto neither reached nor given up (A58 run 7).
+    Either walk keeps the frontier it is heading for (``commit_explore``),
+    so a reveal never turns it round. A path whose first step lies in fog
+    does not count. When there is no
+    step, returns the goal, its leg on this map, and whether a route was
+    found (its first step was not open), for the caller's stuck detection (A15).
     """
     m.path, m.goal, m.goal_op = [], "", None
-    walking_goto = goto_navigation_pending(w, m, policy)
-    if plan is not None and not walking_goto and plan_step(plan, w, m, policy, blocked, costly, knowledge):
+    if op is not None:
+        found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
+        path, goal, leg = found if found else (None, plan_op_goal(op), None)
+    else:
+        path, leg = safe_explore_path(w, m, policy, blocked, costly, knowledge)
+        goal = SAFE_EXPLORE_GOAL
+    if next_step(w, blocked, path):
+        _store_path(m, w, goal, path, leg)
+        m.goal_op = dict(op) if op is not None else None
         return None
-    missed: tuple[str, Leg, bool] | None = None
-    for goal in ["goto"] if walking_goto else policy.goals:
-        found, leg = plan_goal(goal, w, m, policy, rng, blocked, costly, knowledge)
-        if leg is not None and goal != "explore":
-            # explore is committed where its frontier is chosen (commit_explore).
-            # The grid plan_goal searched on: only ``goto`` and ``doors`` may end on a door.
-            door = goal in ("goto", "doors")
-            params = grid_params(policy, blocked, costly, allow_goal_door=door, m=m, w=w, knowledge=knowledge)
-            found = commit_walk(m, w, goal, leg.target, found, params)
-        if next_step(w, blocked, found):
-            _store_path(m, w, goal, found, leg)
-            return None
-        if missed is None and leg is not None and leg.target != w.pos:
-            missed = (goal, leg, bool(found))
-    return missed
+    if leg is not None and leg.target != w.pos:
+        return goal, leg, bool(path)
+    return None
 
 
 def commit_walk(
@@ -491,7 +304,9 @@ def commit_explore(
     """
 
     def ahead(back: Pos | None) -> tuple[Pos, list[Pos]] | None:
-        return nearest_target(w, targets, dataclasses.replace(params, avoid=params.avoid | {back} - {None}))
+        found = nearest_target(w, targets, dataclasses.replace(params, avoid=params.avoid | {back} - {None}))
+        # Only a way on that starts on a seen, open step; one through fog is no way on yet.
+        return found if found and next_step(w, params.avoid, found[1]) else None
 
     walk = nav_walk.follow_frontier(m.walks.get(goal), w, goal, targets, ahead)
     if walk is None:
@@ -797,50 +612,32 @@ def attempt_plan(
     return plan
 
 
-def plan_goal(
-    goal: str,
+def safe_explore_path(
     w: WorldModel,
     m: Memory,
     policy: Policy,
-    rng: random.Random,
     blocked: set[Pos],
     costly: set[Pos],
     knowledge: KnowledgeBase | None = None,
 ) -> tuple[list[Pos] | None, Leg | None]:
-    """A path for one ``policy.goals`` entry, and what stuck detection tracks
-    on this map (None when it has nothing). Targets backed off after a give-up
-    are skipped (A15)."""
-    view = w.view
-    if goal == "hold":
-        return None, None
-    if goal == "wander":
-        options = w.open_neighbours(w.pos, blocked)
-        return ([rng.choice(sorted(options))] if options else None), None
-    if goal == "goto":
-        # config.load guarantees goto is set when the goal is listed.
-        dest_map, target = goto_target(w, policy)
-        if goto_satisfied(m, policy):  # reached: never walked back to (A16)
-            return None, None
-        if nav_stuck.backed_off(m, "goto", dest_map, target, w.tick):
-            return None, None
-        params = grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
-        nav = nav_search(m, w, "goto", target) if dest_map == w.map_id else None
-        path = route_first_leg(w, knowledge, dest_map, target, params, nav=nav) or None
-        return path, nav_stuck.leg_toward(m, w, "goto", dest_map, target, path)
-    if goal == "doors":
-        path = doors_goal_path(
-            w,
-            knowledge,
-            grid_params(policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge),
-        )
-        if not path or nav_stuck.backed_off(m, "doors", w.map_id, path[-1], w.tick):
-            return None, None
-        return path, Leg(path[-1])
-    if goal == "explore":
-        targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, view.frontier() - {w.pos}, w.tick)
-        params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
-        found = nearest_explore_target(w, targets, params, knowledge)
-        leg = Leg(found[0]) if found and found[1] else None
-        path, leg = commit_explore(m, w, "explore", targets, leg, found[1] if leg else None, params)
-        return (path, leg) if path else (None, None)
-    return None, None
+    """The safe default's walk: a path to the nearest frontier in safe ground,
+    and what stuck detection tracks (None when there is none).
+
+    Safe ground keeps off ``avoid_blocks`` hazards and Step rejections
+    (``blocked``) and away from hostiles in ``hostile_range``. Hurt, it is
+    only safe-zone ground (``is_safe_ish``), so the agent heals while it
+    looks around. Frontiers backed off after a give-up are skipped (A15).
+    """
+    from .states.gather_safe import hostiles_near, is_safe_ish
+
+    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
+    targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
+    if hurt(w):
+        targets = {p for p in targets if is_safe_ish(w, p, policy)}
+    else:
+        targets = {p for p in targets if not hostiles_near(w, p, policy)}
+    params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
+    found = nearest_explore_target(w, targets, params, knowledge)
+    leg = Leg(found[0]) if found and found[1] else None
+    path, leg = commit_explore(m, w, SAFE_EXPLORE_GOAL, targets, leg, found[1] if leg else None, params)
+    return (path, leg) if path else (None, None)

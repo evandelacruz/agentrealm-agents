@@ -1,4 +1,5 @@
-"""Interest list and Investigate state (A30)."""
+"""Investigate: the executor for plan ``read`` and ``say`` ops, and the
+investigation memory it reads from the knowledge base (A30)."""
 
 import random
 import tempfile
@@ -7,38 +8,45 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config, runner as runner_mod
+from agentrealm_agent import config
 from agentrealm_agent.brain import choose_call, decide
 from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.door_look import apply_door_look, infer_needs, look_key, ready_to_look
-from agentrealm_agent.interest_list import MAX_REJECTIONS, list_interest, pick_interest_tick, read_supply_key, sight_range
-from agentrealm_agent.investigation import cell_was_read, mark_cell_read, mark_npc_spoken, spoken_npc_ids
+from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_agent.investigation import (
+    MAX_REJECTIONS,
+    SPEECH_RANGE,
+    cell_was_read,
+    in_sight,
+    mark_cell_read,
+    mark_npc_spoken,
+    read_key,
+    read_supply_key,
+    say_key,
+    sight_range,
+    spoken_npc_ids,
+)
 from agentrealm_agent.item_table import InventorySupply
+from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.memory import Memory
+from agentrealm_agent.plan import Plan
+from agentrealm_agent.runner import Runner
 from agentrealm_agent.scroll_investigation import (
-    code_was_probed,
+    probed_supply_codes,
     log_supply_codes_seen,
     mark_code_probed,
     mark_scroll_subtype,
     mark_supply_read,
+    probed_supply_codes,
     scroll_subtype_codes,
+    seen_supply_codes,
     supply_was_read,
 )
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import (
-    is_level_interior,
-    iter_doors,
-    record_map_level,
-    record_warp,
-    sync_map_from_view,
-    sync_tiles,
-)
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.intents import read_block, read_supply
+from agentrealm_agent.states.investigate import InvestigateState
 from agentrealm_agent.travel.knowledge import entrance_from_kb, sync_entrances
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact, chebyshev
+from agentrealm_agent.world import Entity, WorldModel, ZoneFact
 
 
 def world(rows: list[str], at=(1, 1), perception=3) -> WorldModel:
@@ -53,193 +61,191 @@ def world(rows: list[str], at=(1, 1), perception=3) -> WorldModel:
     return w
 
 
-class InterestListTest(unittest.TestCase):
-    def test_readable_in_sight_is_nominated(self):
-        w = world(["...", ".S.", "..."], at=(1, 1))
-        items = list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), Memory())
-        self.assertEqual([(it.kind, it.pos) for it in items], [("read_block", (1, 1))])
+def plan(*ops: dict) -> Plan:
+    return Plan(list(ops), dict(PARAM_DEFAULTS))
 
-    def test_unprobed_supply_code_is_nominated_for_probe(self):
-        w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("supply", 5, (1, 2), "mystery_scroll")]
+
+def ctx(p: Plan | None, kb: KnowledgeBase | None = None, m: Memory | None = None) -> PlayContext:
+    return PlayContext(
+        m or Memory(),
+        Policy(kind="scripted", goals=["explore"], hostile=[]),
+        random.Random(0),
+        knowledge=kb if kb is not None else KnowledgeBase.empty("sandbox"),
+        plan=p,
+    )
+
+
+class InvestigationMemoryTest(unittest.TestCase):
+    def test_keys(self):
+        self.assertEqual(read_key(7, (1, 2)), "read:7:1,2")
+        self.assertEqual(say_key(9), "say:9")
+        self.assertEqual(read_supply_key(12), "read_supply:12")
+
+    def test_read_cells_are_per_map(self):
         kb = KnowledgeBase.empty("sandbox")
-        log_supply_codes_seen(kb, ["mystery_scroll"])
-        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
-        self.assertEqual([(it.kind, it.supply_id) for it in items], [("read_supply", 5)])
-
-    def test_unlogged_supply_code_is_not_probed_yet(self):
-        w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("supply", 5, (1, 2), "potion")]
-        self.assertEqual(list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), Memory()), [])
-
-    def test_known_scroll_subtype_is_nominated(self):
-        w = world(["...", "...", "..."], at=(1, 1))
-        w.held_supplies = [InventorySupply(9, "clue_scroll")]
-        kb = KnowledgeBase.empty("sandbox")
-        mark_scroll_subtype(kb, "clue_scroll")
-        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
-        self.assertEqual([(it.kind, it.supply_id) for it in items], [("read_supply", 9)])
-
-    def test_probed_non_scroll_code_is_not_reprobed(self):
-        w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("supply", 5, (1, 2), "apple")]
-        kb = KnowledgeBase.empty("sandbox")
-        log_supply_codes_seen(kb, ["apple"])
-        mark_code_probed(kb, "apple")
-        self.assertTrue(code_was_probed(kb, "apple"))
-        self.assertNotIn("apple", scroll_subtype_codes(kb))
-        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
-
-    def test_read_supply_sorts_before_say(self):
-        w = world(["...", ".S.", "..."], at=(1, 1))
-        w.entities = [
-            Entity("supply", 5, (1, 2), "clue_scroll"),
-            Entity("npc", 9, (1, 4), "guard"),
-        ]
-        kb = KnowledgeBase.empty("sandbox")
-        mark_scroll_subtype(kb, "clue_scroll")
-        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
-        self.assertEqual([it.kind for it in items], ["read_block", "read_supply", "say"])
-
-    def test_sign_and_supply_reads_at_same_distance_sort_without_error(self):
-        # Standing on a sign while holding a scroll and an unprobed supply: all three are
-        # at distance 0, so their sort keys must never compare a cell with a supply id.
-        w = world(["...", ".S.", "..."], at=(1, 1))
-        w.held_supplies = [InventorySupply(9, "clue_scroll"), InventorySupply(4, "mystery")]
-        kb = KnowledgeBase.empty("sandbox")
-        mark_scroll_subtype(kb, "clue_scroll")
-        log_supply_codes_seen(kb, ["mystery"])
-        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
-        self.assertEqual([(it.kind, it.supply_id) for it in items],
-                         [("read_block", None), ("read_supply", 4), ("read_supply", 9)])
-
-    def test_chest_supplies_are_not_read(self):
-        w = world(["...", "...", "..."], at=(1, 1))
-        w.chest_supplies = [InventorySupply(9, "clue_scroll")]
-        kb = KnowledgeBase.empty("sandbox")
-        mark_scroll_subtype(kb, "clue_scroll")
-        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
-
-    def test_readable_out_of_sight_waits(self):
-        w = world(["S....."], at=(5, 0), perception=3)
-        self.assertEqual(list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), Memory()), [])
-
-    def test_read_cells_are_not_repeated(self):
-        w = world(["...", ".S.", "..."], at=(1, 1))
-        kb = KnowledgeBase.empty("sandbox")
+        self.assertFalse(cell_was_read(kb, 7, (1, 1)))
+        mark_cell_read(kb, 7, (1, 1))
         mark_cell_read(kb, 7, (1, 1))
         self.assertTrue(cell_was_read(kb, 7, (1, 1)))
         self.assertFalse(cell_was_read(kb, 8, (1, 1)), "reads are per map")
-        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
+        self.assertEqual(kb.extra["read_cells"], {"7": ["1,1"]})
 
-    def test_npc_say_within_25_blocks(self):
-        w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("npc", 9, (1, 4), "guard"), Entity("npc", 10, (1, 30), "guard")]
+    def test_spoken_npcs(self):
         kb = KnowledgeBase.empty("sandbox")
-        pol = Policy(kind="scripted", hostile=[])
-        items = list_interest(w, kb, pol, Memory())
-        self.assertEqual([(it.kind, it.npc.id) for it in items], [("say", 9)])
         mark_npc_spoken(kb, 9)
-        self.assertIn(9, spoken_npc_ids(kb))
-        self.assertEqual(list_interest(w, kb, pol, Memory()), [])
+        mark_npc_spoken(kb, 9)
+        self.assertEqual(spoken_npc_ids(kb), {9})
+        kb.extra["spoken_npcs"] = [9, "10", "x", None]
+        self.assertEqual(spoken_npc_ids(kb), {9, 10}, "bad rows are skipped")
 
-    def test_hostiles_pause_curiosity(self):
-        w = world(["...", ".S.", "..."], at=(1, 1))
-        w.entities = [Entity("npc", 3, (2, 1), "wolf")]
-        pol = Policy(kind="scripted", hostile=["npc"], hostile_range=2)
-        self.assertEqual(list_interest(w, KnowledgeBase.empty("sandbox"), pol, Memory()), [])
+    def test_no_knowledge_base_records_nothing(self):
+        mark_cell_read(None, 7, (1, 1))
+        mark_npc_spoken(None, 9)
+        self.assertFalse(cell_was_read(None, 7, (1, 1)))
+        self.assertEqual(spoken_npc_ids(None), set())
 
-    def test_no_zone_items(self):
-        # Unknown zones are A7's spare-window probes, not a second list here.
-        w = world(["...", "...", "..."], at=(1, 1))
-        m = Memory(path=[(2, 1), (2, 2)])
-        self.assertEqual(list_interest(w, KnowledgeBase.empty("sandbox"), Policy(kind="scripted"), m), [])
-
-    def test_unlooked_entrance_is_nominated(self):
-        w = world(["...", "...", "..."], at=(0, 0))
+    def test_supply_codes_seen_probed_and_scrolls(self):
         kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
-        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
-        self.assertEqual([it.kind for it in items], ["look_door"])
-        self.assertEqual(items[0].pos, (2, 1))
+        log_supply_codes_seen(kb, ["apple", "clue_scroll", "apple"])
+        self.assertEqual(seen_supply_codes(kb), {"apple", "clue_scroll"})
+        mark_code_probed(kb, "apple")
+        self.assertIn("apple", probed_supply_codes(kb))
+        self.assertEqual(probed_supply_codes(kb), {"apple"})
+        self.assertNotIn("apple", scroll_subtype_codes(kb))
+        mark_scroll_subtype(kb, "clue_scroll")
+        self.assertEqual(scroll_subtype_codes(kb), {"clue_scroll"})
 
-    def test_looked_entrance_is_skipped(self):
-        w = world(["...", "...", "..."], at=(0, 0))
+    def test_supply_reads(self):
         kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1, "looked": True}
-        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [])
+        self.assertFalse(supply_was_read(kb, 12))
+        mark_supply_read(kb, 12)
+        self.assertTrue(supply_was_read(kb, 12))
 
-    def test_other_map_entrance_is_nominated(self):
-        w = world(["...", "...", "..."], at=(0, 0))
+
+class InvestigateStateTest(unittest.TestCase):
+    def test_guard_needs_a_read_or_say_op(self):
+        w = world(["...", ".S.", "..."], at=(0, 1))
+        state = InvestigateState()
+        self.assertFalse(state.guard(w, ctx(None)), "no plan: no curiosity of its own")
+        self.assertFalse(state.guard(w, ctx(plan({"op": "explore_area", "x": 1, "y": 1, "radius": 1}))))
+        self.assertTrue(state.guard(w, ctx(plan({"op": "read", "x": 1, "y": 1}))))
+        self.assertTrue(state.guard(w, ctx(plan({"op": "say", "npc_type": "helper", "text": "hi"}))))
+
+    def test_unread_sign_without_a_read_op_is_left_alone(self):
+        w = world(["...", ".S.", "..."], at=(0, 1))
+        out = dispatch(w, ctx(None))
+        self.assertNotEqual(out.state, "Investigate")
+        self.assertNotIn("Read", [i["verb"] for i in out.intents or []])
+
+    def test_reads_a_sign_in_sight(self):
+        w = world(["...", ".S.", "..."], at=(0, 1))
+        p = plan({"op": "read", "x": 1, "y": 1})
+        out = dispatch(w, ctx(p))
+        self.assertEqual(out.state, "Investigate")
+        # Exactly {kind, x, y}: a map_id is a field Read does not take (API rules § Read).
+        self.assertEqual(out.intents, [{"verb": "Read", "target": {"kind": "block", "x": 1, "y": 1}}])
+        self.assertEqual(p.current(), {"op": "read", "x": 1, "y": 1}, "finished only once recorded")
+
+    def test_walks_toward_a_readable_out_of_sight(self):
+        w = world(["......."], at=(6, 0), perception=3)
+        w.view.readable[(0, 0)] = True  # a readable on walkable ground
+        self.assertFalse(in_sight(w, 7, (6, 0), (0, 0)))
+        out = dispatch(w, ctx(plan({"op": "read", "x": 0, "y": 0})))
+        self.assertEqual(out.state, "Investigate")
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 5, "y": 0}])
+
+    def test_walks_toward_a_wall_sign_out_of_sight(self):
+        # Suspected source bug: Investigate paths to the sign cell itself, and a
+        # sign on a wall block has no path, so the op only stalls (states/investigate.py _walk).
+        w = world(["S......"], at=(6, 0), perception=3)
+        out = dispatch(w, ctx(plan({"op": "read", "x": 0, "y": 0})))
+        self.assertEqual(out.state, "Investigate")
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 5, "y": 0}])
+
+    def test_recorded_read_finishes_the_op(self):
+        w = world(["...", ".S.", "..."], at=(0, 1))
         kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["9:1,1"] = {"map_id": 9, "x": 1, "y": 1}
-        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
-        self.assertEqual([(it.kind, it.map_id, it.pos) for it in items], [("look_door", 9, (1, 1))])
+        mark_cell_read(kb, 7, (1, 1))
+        explore = {"op": "explore_area", "x": 2, "y": 2, "radius": 1}
+        p = plan({"op": "read", "x": 1, "y": 1}, explore)
+        out = dispatch(w, ctx(p, kb))
+        self.assertNotEqual(out.state, "Investigate")
+        self.assertEqual(p.current(), explore)
 
-    def test_same_map_look_sorts_before_other_map_look(self):
-        w = world(["...", "...", "..."], at=(0, 0))
+    def test_refused_read_finishes_the_op_after_max_rejections(self):
+        w = world(["...", ".S.", "..."], at=(0, 1))
+        m = Memory()
+        p = plan({"op": "read", "x": 1, "y": 1})
+        m.investigate_rejections[read_key(7, (1, 1))] = MAX_REJECTIONS - 1
+        self.assertEqual(dispatch(w, ctx(p, m=m)).state, "Investigate")
+        m.investigate_rejections[read_key(7, (1, 1))] = MAX_REJECTIONS
+        out = dispatch(w, ctx(p, m=m))
+        self.assertNotEqual(out.state, "Investigate")
+        self.assertIsNone(p.current())
+
+    def test_reads_a_supply(self):
+        w = world(["..."], at=(1, 0))
+        w.held_supplies = [InventorySupply(12, "clue_scroll")]
         kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["3:0,1"] = {"map_id": 3, "x": 0, "y": 1}
-        kb.entrances["7:2,2"] = {"map_id": 7, "x": 2, "y": 2}
-        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
-        self.assertEqual([(it.map_id, it.pos) for it in items], [(7, (2, 2)), (3, (0, 1))])
+        p = plan({"op": "read", "supply_id": 12})
+        out = dispatch(w, ctx(p, kb))
+        self.assertEqual(out.state, "Investigate")
+        self.assertEqual(out.intents, [read_supply(12)])
+        mark_supply_read(kb, 12)
+        dispatch(w, ctx(p, kb))
+        self.assertIsNone(p.current())
 
-    def test_level_interior_map_looks_are_not_nominated(self):
-        w = world(["...", "...", "..."], at=(0, 0))
-        kb = KnowledgeBase.empty("sandbox")
-        inside = WorldModel(1, map_id=9, pos=(0, 0))
-        inside.map_level = 2
-        record_map_level(kb, inside)
-        self.assertTrue(is_level_interior(kb, 9))
-        sync_tiles(kb, 9, {(1, 1): "framed_door"})
-        kb.entrances["9:2,2"] = {"map_id": 9, "x": 2, "y": 2}
-        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), Memory()), [], "Level owns them (A37)")
-        overworld = WorldModel(1, map_id=9, pos=(0, 0))
-        overworld.map_level = 0
-        record_map_level(kb, overworld)
-        self.assertFalse(is_level_interior(kb, 9))
-        self.assertEqual(len(list_interest(w, kb, Policy(kind="scripted"), Memory())), 2)
+    def test_says_the_ops_text_to_an_npc_by_id(self):
+        w = world(["...", "...", "..."], at=(0, 1))
+        w.entities = [Entity("npc", 4, (2, 2), "helper")]
+        p = plan({"op": "say", "npc_id": 4, "text": "any news?"})
+        d = decide(w, Memory(), Policy(kind="scripted", hostile=[]), random.Random(0),
+                   knowledge=KnowledgeBase.empty("sandbox"), plan=p)
+        self.assertEqual(d.intent, {"verb": "Say", "npc_id": 4, "text": "any news?"})
 
-    def test_unlooked_door_is_nominated_and_visited_door_is_not(self):
+    def test_say_by_type_picks_the_nearest(self):
         w = world(["....", "....", "...."], at=(0, 0))
-        kb = KnowledgeBase.empty("sandbox")
-        sync_tiles(kb, 7, {(3, 0): "framed_door", (3, 2): "framed_door"})
-        for d in iter_doors(kb, 7):
-            if (d["x"], d["y"]) == (3, 2):
-                d.update({"to_map_id": 8, "to_x": 1, "to_y": 1})
-        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
-        self.assertEqual([(it.kind, it.pos) for it in items], [("look_door", (3, 0))])
+        w.entities = [Entity("npc", 8, (3, 2), "helper"), Entity("npc", 5, (1, 1), "helper"),
+                      Entity("npc", 2, (1, 0), "guard")]
+        out = dispatch(w, ctx(plan({"op": "say", "npc_type": "helper", "text": "hello"})))
+        self.assertEqual(out.intents, [{"verb": "Say", "npc_id": 5, "text": "hello"}])
 
-    def test_entrance_mark_with_door_tile_is_nominated(self):
-        w = world(["...", ".D.", "..."], at=(0, 1))
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:1,1"] = {"map_id": 7, "x": 1, "y": 1}
-        items = list_interest(w, kb, Policy(kind="scripted"), Memory())
-        self.assertEqual([it.kind for it in items], ["look_door"])
+    def test_walks_toward_an_npc_beyond_speech_range(self):
+        far = SPEECH_RANGE + 2
+        w = world(["." * (far + 1)], at=(0, 0), perception=far + 1)
+        w.entities = [Entity("npc", 4, (far, 0), "helper")]
+        out = dispatch(w, ctx(plan({"op": "say", "npc_id": 4, "text": "hello"})))
+        self.assertEqual(out.state, "Investigate")
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
 
-    def test_look_given_up_after_max_rejections(self):
-        w = world(["...", "...", "..."], at=(0, 0))
+    def test_no_such_npc_in_sight_yields(self):
+        w = world(["...", "...", "..."], at=(0, 1))
+        p = plan({"op": "say", "npc_type": "helper", "text": "hello"})
+        out = dispatch(w, ctx(p))
+        self.assertNotEqual(out.state, "Investigate")
+        self.assertIn("Investigate: no such NPC in sight", out.yielded)
+        self.assertEqual(p.current()["op"], "say", "kept until its stall clock runs out")
+
+    def test_spoken_npc_finishes_the_op(self):
+        w = world(["...", "...", "..."], at=(0, 1))
+        w.entities = [Entity("npc", 4, (2, 2), "helper")]
         kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
-        m = Memory(investigate_rejections={look_key(7, (2, 1)): MAX_REJECTIONS})
-        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), m), [])
+        mark_npc_spoken(kb, 4)
+        p = plan({"op": "say", "npc_id": 4, "text": "hello"})
+        dispatch(w, ctx(p, kb))
+        self.assertIsNone(p.current())
+
+    def test_act_has_no_side_effects_for_read(self):
+        w = world(["...", ".S.", "..."], at=(0, 1))
+        kb = KnowledgeBase.empty("sandbox")
+        c = ctx(plan({"op": "read", "x": 1, "y": 1}), kb)
+        before = kb.to_dict()
+        dispatch(w, c)
+        dispatch(w, c)
+        self.assertEqual(before, kb.to_dict(), "only an applied result marks the knowledge base")
 
 
 class EntranceKeyTest(unittest.TestCase):
-    def test_same_cell_on_two_maps_stays_apart(self):
-        kb = KnowledgeBase.empty("sandbox")
-        sync_entrances(kb, {"maps": [
-            {"map_id": 7, "entrances": [{"x": 2, "y": 1}]},
-            {"map_id": 9, "entrances": [{"x": 2, "y": 1}]},
-        ]})
-        self.assertEqual(set(kb.entrances), {"7:2,1", "9:2,1"})
-        w = WorldModel(1, map_id=9, pos=(1, 1), perception=5)
-        w.view.tiles[(2, 1)] = "framed_door"
-        w.view.locked[(2, 1)] = True
-        self.assertTrue(apply_door_look(kb, w, 9, (2, 1)))
-        self.assertEqual(kb.entrances["9:2,1"]["needs"], "key")
-        self.assertNotIn("looked", kb.entrances["7:2,1"])
-
     def test_cell_only_rows_migrate_at_load(self):
         kb = KnowledgeBase.from_dict("sandbox", {"entrances": {
             "2,1": {"map_id": 7, "x": 2, "y": 1, "needs": "key"},
@@ -257,185 +263,6 @@ class EntranceKeyTest(unittest.TestCase):
         self.assertEqual(entrance_from_kb(kb, None, 5, 5), (7, (5, 5)))
         self.assertIsNone(entrance_from_kb(kb, None, 2, 1))
         self.assertEqual(entrance_from_kb(kb, 9, 2, 1), (9, (2, 1)))
-
-
-class DoorLookTest(unittest.TestCase):
-    def test_locked_door_records_key_need(self):
-        w = WorldModel(1, map_id=7, pos=(1, 1), perception=5)
-        w.view.tiles[(2, 1)] = "framed_door"
-        w.view.locked[(2, 1)] = True
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
-        self.assertTrue(ready_to_look(w, 7, (2, 1)))
-        self.assertTrue(apply_door_look(kb, w, 7, (2, 1)))
-        self.assertEqual(kb.entrances["7:2,1"]["needs"], "key")
-        self.assertTrue(kb.entrances["7:2,1"]["locked"])
-        door = [d for d in iter_doors(kb, 7) if (d["x"], d["y"]) == (2, 1)][0]
-        self.assertTrue(door["locked"] and door["looked"])
-
-    def test_infer_needs_is_key_only(self):
-        self.assertEqual(infer_needs("framed_door", locked=True), "key")
-        self.assertIsNone(infer_needs("framed_door", locked=False))
-        # Unsourced: a block never says whether it breaks (break), water is the
-        # route not the cell (cross_water), and a catch-all would guess (blocked).
-        for block in ("bush", "tree", "rock", "wall", "water", "dirt"):
-            self.assertIsNone(infer_needs(block, locked=False), block)
-        self.assertIsNone(infer_needs(None, locked=True))
-
-    def test_non_door_entrance_records_block_without_needs(self):
-        w = WorldModel(1, map_id=7, pos=(1, 1), perception=5)
-        w.view.tiles[(2, 1)] = "water"
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
-        self.assertTrue(ready_to_look(w, 7, (2, 1)))
-        self.assertTrue(apply_door_look(kb, w, 7, (2, 1)))
-        row = kb.entrances["7:2,1"]
-        self.assertEqual((row["looked"], row["block_type"]), (True, "water"))
-        self.assertNotIn("needs", row)
-        self.assertEqual(iter_doors(kb, 7), [], "a non-door cell is not added to the door list")
-
-
-class InvestigateStateTest(unittest.TestCase):
-    def test_investigate_beats_explore_for_unread_sign(self):
-        w = world(["...", ".S.", "..."], at=(0, 1))
-        ctx = PlayContext(Memory(), Policy(kind="scripted", goals=["explore"]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
-        out = dispatch(w, ctx)
-        self.assertEqual(out.state, "Investigate")
-        # Exactly {kind, x, y}: a map_id is a field Read does not take (API rules § Read).
-        self.assertEqual(out.intents, [{"verb": "Read", "target": {"kind": "block", "x": 1, "y": 1}}])
-
-    def test_decide_says_to_npc(self):
-        w = world(["...", "...", "..."], at=(0, 1))
-        w.entities = [Entity("npc", 4, (2, 2), "helper")]
-        d = decide(w, Memory(), Policy(kind="scripted", hostile=[]), random.Random(0), knowledge=KnowledgeBase.empty("sandbox"))
-        self.assertEqual(d.intent["verb"], "Say")
-        self.assertEqual(d.intent, {"verb": "Say", "npc_id": 4, "text": "hello"})
-
-    def test_act_has_no_side_effects_for_read(self):
-        w = world(["...", ".S.", "..."], at=(0, 1))
-        kb = KnowledgeBase.empty("sandbox")
-        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
-        before = kb.to_dict()
-        dispatch(w, ctx)
-        dispatch(w, ctx)
-        after = kb.to_dict()
-        self.assertEqual(before, after, "only an applied result marks the knowledge base")
-
-    def test_investigate_routes_to_other_map_entrance(self):
-        w = WorldModel(1, map_id=1, pos=(0, 0), perception=8)
-        for y in range(4):
-            for x in range(4):
-                w.view.tiles[(x, y)] = "dirt"
-        w.view.tiles[(2, 0)] = "framed_door"
-        w.maps[1] = w.view
-        kb = KnowledgeBase.empty("sandbox")
-        sync_map_from_view(kb, 1, w.view)
-        record_warp(kb, 1, (2, 0), "framed_door", 2, (0, 0))
-        other = WorldModel(1, map_id=2, pos=(0, 0), perception=8)
-        for y in range(4):
-            for x in range(4):
-                other.view.tiles[(x, y)] = "dirt"
-        sync_map_from_view(kb, 2, other.view)
-        kb.entrances["2:3,3"] = {"map_id": 2, "x": 3, "y": 3}
-        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
-        out = dispatch(w, ctx)
-        self.assertEqual(out.state, "Investigate")
-        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}], "toward the warp door")
-        self.assertEqual(ctx.memory.goal, look_key(2, (3, 3)))
-        return w, kb, ctx
-
-    def test_arrival_on_other_map_hands_off_to_on_map_look(self):
-        _, kb, ctx = self.test_investigate_routes_to_other_map_entrance()
-        w = WorldModel(1, map_id=2, pos=(0, 3), perception=8)
-        for y in range(4):
-            for x in range(4):
-                w.view.tiles[(x, y)] = "dirt"
-        w.maps[2] = w.view
-        out = dispatch(w, ctx)
-        self.assertEqual(out.state, "Investigate")
-        step = (out.intents[0]["x"], out.intents[0]["y"])
-        self.assertEqual(chebyshev((0, 3), step), 1)
-        self.assertLess(chebyshev(step, (3, 3)), chebyshev((0, 3), (3, 3)), "straight at the mark now")
-        self.assertEqual(chebyshev(ctx.memory.path[-1], (3, 3)), 1, "the on-map look stands beside the mark")
-        self.assertEqual(ctx.memory.goal, look_key(2, (3, 3)))
-
-    def test_unreachable_other_map_look_is_dropped_after_refusals(self):
-        w = world(["...", "...", "..."], at=(0, 0))
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["9:1,1"] = {"map_id": 9, "x": 1, "y": 1}  # no warp to map 9 known
-        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
-        lk = look_key(9, (1, 1))
-        for i in range(MAX_REJECTIONS):
-            out = dispatch(w, ctx)
-            self.assertEqual(ctx.memory.investigate_rejections.get(lk), i + 1, out.reason)
-        self.assertIsNone(pick_interest_tick(w, kb, Policy(kind="scripted"), ctx.memory, params=ctx.params))
-        self.assertNotEqual(dispatch(w, ctx).state, "Investigate")
-
-    def test_curiosity_cap_blocks_other_map_walk(self):
-        w, kb, _ = self.test_investigate_routes_to_other_map_entrance()
-        w.tick = 600
-        m = Memory(curiosity_spans=[(500, 60)])  # 60 charged ticks in the window
-        ctx = PlayContext(m, Policy(kind="scripted"), random.Random(0), knowledge=kb)
-        ctx.params["curiosity"] = 0.05  # cap 30, spent
-        self.assertIsNone(pick_interest_tick(w, kb, Policy(kind="scripted"), m, params=ctx.params))
-        self.assertNotEqual(dispatch(w, ctx).state, "Investigate")
-        ctx.params["curiosity"] = 0.2  # cap 120 leaves room
-        self.assertEqual(dispatch(w, ctx).state, "Investigate")
-
-    def test_investigate_walks_to_entrance_mark(self):
-        rows = ["." * 8 for _ in range(8)]
-        w = world(rows, at=(0, 0), perception=8)
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
-        w.view.tiles[(5, 5)] = "framed_door"
-        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
-        out = dispatch(w, ctx)
-        self.assertEqual(out.state, "Investigate")
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
-
-    def test_investigate_walks_beside_a_water_entrance(self):
-        rows = ["." * 8 for _ in range(8)]
-        w = world(rows, at=(0, 0), perception=8)
-        w.view.tiles[(5, 5)] = "water"
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
-        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
-        out = dispatch(w, ctx)
-        self.assertEqual(out.state, "Investigate")
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
-        self.assertEqual(ctx.memory.investigate_rejections, {})
-
-    def test_investigate_records_entrance_when_already_adjacent(self):
-        w = world(["...", ".D.", "..."], at=(0, 0))
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:1,1"] = {"map_id": 7, "x": 1, "y": 1}
-        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
-        out = dispatch(w, ctx)
-        self.assertTrue(kb.entrances["7:1,1"]["looked"])
-        self.assertIn("Investigate: looked", out.yielded[0])
-
-    def test_unreachable_mark_counts_a_rejection(self):
-        # Every cell beside the mark is known wall: there is nowhere to look from.
-        w = world([".....", ".###.", ".#D#.", ".###.", "....."], at=(0, 0), perception=8)
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:2,2"] = {"map_id": 7, "x": 2, "y": 2}
-        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
-        for n in range(1, MAX_REJECTIONS + 1):
-            dispatch(w, ctx)
-            self.assertEqual(ctx.memory.investigate_rejections.get(look_key(7, (2, 2))), n)
-        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), ctx.memory), [])
-
-    def test_unrevealed_look_counts_a_rejection(self):
-        # Adjacent, but the look cannot finish: capped like an unreachable mark.
-        w = world(["...", ".D.", "..."], at=(0, 0))
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:1,1"] = {"map_id": 7, "x": 1, "y": 1}
-        ctx = PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb)
-        with mock.patch("agentrealm_agent.states.investigate.apply_door_look", return_value=False):
-            for n in range(1, MAX_REJECTIONS + 1):
-                dispatch(w, ctx)
-                self.assertEqual(ctx.memory.investigate_rejections.get(look_key(7, (1, 1))), n)
-        self.assertEqual(list_interest(w, kb, Policy(kind="scripted"), ctx.memory), [])
 
 
 class SightRangeTest(unittest.TestCase):
@@ -480,13 +307,6 @@ class LockedParsingTest(unittest.TestCase):
         self.assertEqual(w.view.locked, {(0, 1): True}, "an explicit false unlocks")
         w.apply_observation({"version": "4", "delta": {"terrain": {"removed": [{"map_id": 7, "x": 0, "y": 1}]}}})
         self.assertEqual(w.view.locked, {})
-        # The parsed flag reaches the look: a locked door records a key need.
-        w.apply_observation({"version": "5", "delta": {"terrain": {
-            "changed": [{"map_id": 7, "x": 2, "y": 1, "block_type": "framed_door", "locked": True}]}}})
-        kb = KnowledgeBase.empty("sandbox")
-        kb.entrances["7:2,1"] = {"map_id": 7, "x": 2, "y": 1}
-        self.assertTrue(apply_door_look(kb, w, 7, (2, 1)))
-        self.assertEqual(kb.entrances["7:2,1"]["needs"], "key")
 
 
 class ZoneProbeOrderTest(unittest.TestCase):
@@ -502,22 +322,6 @@ class ZoneProbeOrderTest(unittest.TestCase):
                    path=[(6, 5), (7, 5)])
         self.assertEqual(choose_call(w, m, Policy()), "zone")
         self.assertEqual(m.zone_probe, (7, (10, 10)), "A7 safety probe first")
-
-    def test_directive_curiosity_sets_the_cap_through_the_state(self):
-        def outcome(curiosity: float):
-            w = world(["." * 8 for _ in range(8)], at=(0, 0), perception=8)
-            w.view.tiles[(5, 5)] = "framed_door"
-            w.tick = 600
-            kb = KnowledgeBase.empty("sandbox")
-            kb.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
-            # 60 charged ticks already in the window.
-            m = Memory(curiosity_spans=[(500, 60)])
-            ctx = PlayContext(m, Policy(kind="scripted"), random.Random(0), knowledge=kb)
-            ctx.params["curiosity"] = curiosity
-            return dispatch(w, ctx)
-
-        self.assertEqual(outcome(0.2).state, "Investigate", "cap 120 leaves room")
-        self.assertNotEqual(outcome(0.05).state, "Investigate", "cap 30 is spent")
 
 
 class RunnerInvestigationTest(unittest.TestCase):
@@ -548,14 +352,23 @@ class RunnerInvestigationTest(unittest.TestCase):
     def test_rejected_read_is_capped(self):
         r = self.runner([])
         intent = read_block((1, 1))
-        for _ in range(MAX_REJECTIONS):
-            self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=r.directives.directives.params).kind, "read_block")
+        p = plan({"op": "read", "x": 1, "y": 1})
+        for i in range(MAX_REJECTIONS):
+            self.assertEqual(dispatch(r.world, ctx(p, r.knowledge, r.mem)).intents, [intent])
             r.mem.pending = intent
             self.assertTrue(r.on_result({"outcome": "rejected", "tick": 5,
                                          "rejection": {"category": "target", "code": "nothing_to_read"}}, 0))
+            self.assertEqual(r.mem.investigate_rejections[read_key(7, (1, 1))], i + 1)
         self.assertFalse(cell_was_read(r.knowledge, 7, (1, 1)))
-        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=r.directives.directives.params),
-                          "a refused read stops holding Investigate above Explore")
+        out = dispatch(r.world, ctx(p, r.knowledge, r.mem))
+        self.assertNotEqual(out.state, "Investigate", "a refused read ends its op")
+        self.assertIsNone(p.current())
+
+    def test_applied_say_is_remembered(self):
+        r = self.runner([])
+        r.mem.pending = {"verb": "Say", "npc_id": 4, "text": "hello"}
+        self.assertFalse(r.on_result({"outcome": "applied", "tick": 5}, 0))
+        self.assertEqual(spoken_npc_ids(r.knowledge), {4})
 
     def test_supply_probe_nothing_to_read_marks_code_probed(self):
         r = self.runner([])
@@ -564,7 +377,7 @@ class RunnerInvestigationTest(unittest.TestCase):
         r.mem.pending = intent
         r.on_result({"outcome": "rejected", "tick": 5,
                      "rejection": {"category": "target", "code": "nothing_to_read"}}, 0)
-        self.assertTrue(code_was_probed(r.knowledge, "apple"))
+        self.assertIn("apple", probed_supply_codes(r.knowledge))
         self.assertFalse(supply_was_read(r.knowledge, 12))
 
     def test_applied_supply_read_remembers_scroll_code(self):
@@ -591,30 +404,25 @@ class RunnerInvestigationTest(unittest.TestCase):
         r = self.runner([])
         r.world.held_supplies = [InventorySupply(12, "clue_scroll")]
         mark_scroll_subtype(r.knowledge, "clue_scroll")
-        mark_cell_read(r.knowledge, 7, (1, 1))
-        params = r.directives.directives.params
-        self.assertEqual(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=params).supply_id, 12)
+        p = plan({"op": "read", "supply_id": 12})
+        self.assertEqual(dispatch(r.world, ctx(p, r.knowledge, r.mem)).intents, [read_supply(12)])
         r.mem.pending = read_supply(12)
         r.on_result({"outcome": "rejected", "tick": 5,
                      "rejection": {"category": "target", "code": "nothing_to_read"}}, 0)
         self.assertTrue(supply_was_read(r.knowledge, 12))
         self.assertIn("clue_scroll", scroll_subtype_codes(r.knowledge), "one blank scroll keeps its code")
-        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=params))
+        dispatch(r.world, ctx(p, r.knowledge, r.mem))
+        self.assertIsNone(p.current(), "a blank scroll counts as read: its op ends")
 
 
-    def test_sent_look_walk_is_charged_and_then_refused(self):
+    def test_runner_plan_read_op_sends_the_read(self):
         r = self.runner([{"tick": 100}])
-        r.world = world(["." * 8 for _ in range(8)], at=(0, 0), perception=8)
-        r.world.view.tiles[(5, 5)] = "framed_door"
-        r.knowledge.entrances["7:5,5"] = {"map_id": 7, "x": 5, "y": 5}
-        params = r.directives.directives.params
-        params["curiosity"] = 1 / 600  # cap of one tick
+        r.plan = plan({"op": "read", "x": 1, "y": 1})
         r.tick()
         self.assertEqual(r.mem.state, "Investigate")
-        self.assertTrue(r.mem.curiosity_spans)
-        self.assertEqual(r.mem.curiosity_spans[0][0], 100)
-        self.assertIsNone(pick_interest_tick(r.world, r.knowledge, r.cfg.policy, r.mem, params=params),
-                          "the spent budget refuses the look")
+        sent = r.client.tick.call_args.args[1]
+        self.assertEqual(sent[0], read_block((1, 1)))
+
 
 if __name__ == "__main__":
     unittest.main()

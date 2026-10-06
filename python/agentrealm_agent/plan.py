@@ -14,7 +14,7 @@ from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .memory import Memory, note_goal_done, note_goal_failed
-from .travel.ops import travel_op_from_plan_goal
+from .travel.ops import parse_travel_string, travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
 
 log = logging.getLogger(__name__)
@@ -25,7 +25,10 @@ TRAVEL_TO = frozenset({"entrance", "town", "hunting_ground", "shop", "point"})
 CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
 ALL_PARAMS = frozenset(PARAM_DEFAULTS)
 
-# Op name -> owning state (docs/PLAYABLE_AGENT_PLAN.md Operations table).
+# Op name -> the executor state that carries it out (PLAN.md **Architecture:
+# AI plans, state machine executes**). An executor runs only while its op is
+# on top of the stack. ``None``: no executor; ``set_param`` is applied by
+# ``Plan.advance``; ``hunt`` and ``avoid`` are dropped when they reach the top.
 OP_STATE: dict[str, str | None] = {
     "travel": "Travel",
     "explore_area": "Explore",
@@ -37,31 +40,24 @@ OP_STATE: dict[str, str | None] = {
     "compose": "Solve",
     "fetch_item": "Loot",
     "gather_gems": "Gather",
-    "hunt": "Fight",
+    "equip": "Equip",
+    "hunt": None,
     "enter_level": "Level",
     "fight_boss": "Boss",
     "avoid": None,
-    "wait": "Idle",
+    "wait": "Wait",
     "set_param": None,
 }
 
-# Ops the shipped Explore pathing can drive today. Every other op is dropped
-# with a log line when it reaches the top of the stack (A34 slice).
-EXPLORE_PATH_OPS = frozenset({"explore_area", "travel", "wait"})
-BOSS_PLAN_OPS = frozenset({"fight_boss"})
-SHOP_PLAN_OPS = frozenset({"buy"})
-BREAK_PLAN_OPS = frozenset({"break_block"})
 # Ops done once their target block changes from what it was when the op reached the top.
 BLOCK_CHANGE_OPS = frozenset({"use_block", "break_block"})
 SOLVE_OPS = frozenset({"compose", "use_block"})
-# `travel` destinations with a path today; `hunting_ground` waits on knowledge.
-TRAVEL_PATHED = frozenset({"entrance", "town", "point", "shop"})
 
 # Built-in `explore` explores the whole map: no center, no radius bound.
 EXPLORE_ANYWHERE = 1 << 30
-# Built-in `hold`: one hour, re-entered from policy.goals when it ends.
-HOLD_SECONDS = 3600
-# An op that finds no path for this long is dropped and logged.
+# A planner `wait` is short and says why: the agent never idles on a long hold.
+MAX_WAIT_SECONDS = 30
+# An op whose executor makes no progress for this long is dropped and logged.
 PLAN_STALL_SECONDS = 30
 
 # Shorthand in directives `goals = ["gather_gems:20", "buy:torch"]`.
@@ -238,7 +234,22 @@ def _validate_avoid(op: dict[str, Any]) -> bool:
 
 
 def _validate_wait(op: dict[str, Any]) -> bool:
-    return _require_fields(op, ("seconds",)) and _is_int(op["seconds"]) and op["seconds"] >= 0
+    if not _require_fields(op, ("seconds", "why")):
+        return False
+    if not _is_str(op["why"]):
+        _drop("wait needs a reason", op)
+        return False
+    if not _is_int(op["seconds"]) or not 0 <= op["seconds"] <= MAX_WAIT_SECONDS:
+        _drop(f"wait seconds must be 0..{MAX_WAIT_SECONDS}", op)
+        return False
+    return True
+
+
+def _validate_equip(op: dict[str, Any]) -> bool:
+    if "code" in op and not _is_str(op["code"]):
+        _drop("bad equip code", op)
+        return False
+    return True
 
 
 def _validate_set_param(op: dict[str, Any]) -> bool:
@@ -272,6 +283,7 @@ _VALIDATORS: dict[str, Any] = {
     "fight_boss": _validate_fight_boss,
     "avoid": _validate_avoid,
     "wait": _validate_wait,
+    "equip": _validate_equip,
     "set_param": _validate_set_param,
 }
 
@@ -297,21 +309,25 @@ def validate_goal_op(raw: object) -> GoalOp | None:
     return op
 
 
-def is_travel_goal(text: str) -> bool:
-    """``travel:*`` entries belong to **Travel** (A27), which keeps its own
-    queue from directives ``goals``; the stack leaves them out so the two
-    never walk the same destination with different progress."""
-    return text.strip().startswith("travel:")
-
-
 def parse_directives_goal(text: str) -> GoalOp | None:
     """Turn one directives shorthand string into a validated op.
 
-    ``travel:*`` entries return None without a log line: Travel reads them.
+    ``travel:<to>[:map_id]:x:y`` (A27), ``gather_gems:N`` and ``buy:code``.
+    A ``travel`` with no coordinates (``travel:town``, ``travel:shop``) gets
+    ``x = y = 0``: the nearest one the knowledge base knows.
     """
     text = text.strip()
-    if not text or is_travel_goal(text):
+    if not text:
         return None
+    if text.startswith("travel:"):
+        t = parse_travel_string(text)
+        if t is None:
+            _drop("bad travel shorthand", text)
+            return None
+        op: GoalOp = {"op": "travel", "to": t.to, "x": t.x or 0, "y": t.y or 0}
+        if t.map_id is not None:
+            op["map_id"] = t.map_id
+        return validate_goal_op(op)
     m = _SHORTHAND.match(text)
     if not m:
         _drop("bad shorthand", text)
@@ -526,7 +542,7 @@ class Plan:
         directive_goals: list[str],
         directive_params: dict[str, float | int],
     ) -> Plan | None:
-        if not any(not is_travel_goal(g) for g in directive_goals):
+        if not directive_goals:
             return None
         ops = directive_stack_ops(directive_goals)
         if not ops:
@@ -544,20 +560,19 @@ class Plan:
 
 
 def directive_stack_ops(directive_goals: list[str]) -> list[GoalOp]:
-    """The stack ops directives ``goals`` set; ``travel:*`` entries belong to Travel (A27).
+    """The stack ops directives ``goals`` set: manual steering, which outranks the planner.
 
     Non-empty means the directives file owns the goal stack, so the strategist leaves it alone (A35).
     """
-    return parse_directives_goals([g for g in directive_goals if not is_travel_goal(g)])
+    return parse_directives_goals(directive_goals)
 
 
 def builtin_goals(policy: Policy, *, goto_satisfied: bool = False) -> list[GoalOp]:
     """``policy.goals`` as ops, one for one, when directives set no goals and there is no model.
 
-    ``wander`` has no op; it is left to ``policy.goals``, which ``replan``
-    falls back to whenever the stack has no path (or is empty). A ``goto``
-    the agent already stood on (``goto_satisfied``) has no op either, so a
-    rebuilt plan never walks back to it (A16).
+    This is the built-in planner; states never read ``policy.goals`` (PLAN.md
+    **Architecture**). A ``goto`` the agent already stood on
+    (``goto_satisfied``) has no op, so a rebuilt plan never walks back to it (A16).
     """
     ops: list[GoalOp] = []
     for goal in policy.goals:
@@ -571,8 +586,6 @@ def builtin_goals(policy: Policy, *, goto_satisfied: bool = False) -> list[GoalO
             if policy.goto_map is not None:
                 op["map_id"] = policy.goto_map
             ops.append(op)
-        elif goal == "hold":
-            ops.append({"op": "wait", "seconds": HOLD_SECONDS})
     return ops
 
 
@@ -619,7 +632,7 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
                 dest_map = t.map_id if t.map_id is not None else world.map_id
                 return dest_map == world.map_id and here == (t.x, t.y)
             # Any shop: a priced supply underfoot is one. A bought-out known
-            # cell is arrival too; `plan_step` pops that one, it needs the KB.
+            # cell is arrival too; Travel pops that one, it needs the KB.
             return any(
                 e.kind == "supply"
                 and isinstance(e.gem_price, int)
@@ -639,7 +652,13 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         return plan.block_before is not None and tile is not None and tile != plan.block_before
     if name == "buy":
         return any(supply_matches(op["code"], s.code) for s in world.held_supplies + world.chest_supplies)
-    # `fight_boss` finishes in Boss, which sees the defeat (A38).
+    if name == "fetch_item":
+        return any(supply_matches(op["code"], s.code) for s in world.held_supplies)
+    if name == "gather_gems":
+        return world.gems is not None and world.gems >= op["count"]
+    # Their executors finish the rest: Travel on arrival (A27), Boss on the
+    # defeat (A38), Investigate once read or greeted (A30), Equip and Level
+    # when nothing is left to do.
     return False
 
 

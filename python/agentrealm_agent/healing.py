@@ -1,4 +1,4 @@
-"""Heal-state helpers: food, potions, safe-zone regen, waits, buy signals (A10)."""
+"""Heal-state helpers: food, potions, safe-zone regen (A10)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 FOOD_CODES = frozenset({"apple", "berry", "golden_cap"})
 # GAME_NOTES.md Items: small potion +10, large +30 (M §16).
 POTION_CODES = frozenset({"small_potion", "large_potion"})
-DEFAULT_BUY_POTION = "small_potion"
 
 
 def potion_count(w: WorldModel) -> int:
@@ -40,10 +39,6 @@ def supply_matches(want: str, code: str) -> bool:
 REGEN_MEASURE_TICKS = 200
 # A longer gap between Heal windows than this restarts the regen sample.
 REGEN_SAMPLE_GAP_TICKS = 50
-# Ticks Heal may send nothing with no health back before it yields to
-# Explore, and how long it then stays out (~60 s and ~30 s).
-HEAL_WAIT_TICKS = 600
-HEAL_BACKOFF_TICKS = 300
 # Times one Take or Use of the same supply is sent before Heal gives up on it.
 HEAL_MAX_TRIES = 3
 
@@ -113,7 +108,7 @@ def save_regen_yes(knowledge: KnowledgeBase | None) -> None:
 
 
 def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
-    """One window standing hurt in a safe zone: ``yes``, ``no``, or still measuring.
+    """One window hurt in a safe zone: ``yes``, ``no``, or still measuring.
 
     The sample restarts when health falls or the last window seen is too far
     back (the character left the zone, or another state ran meanwhile).
@@ -143,31 +138,6 @@ def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
         return "no"
     m.heal_regen_sample = (start_tick, start_health, w.tick)
     return None
-
-
-def wait_exhausted(m: Memory, w: WorldModel) -> bool:
-    """Count a window Heal sends nothing. True, and back off, once it has
-    waited ``HEAL_WAIT_TICKS`` with no health back."""
-    health = w.health if w.health is not None else 0
-    if m.heal_wait is None or health > m.heal_wait[1]:
-        m.heal_wait = (w.tick, health)
-        return False
-    start, low = m.heal_wait
-    m.heal_wait = (start, min(low, health))
-    if w.tick - start < HEAL_WAIT_TICKS:
-        return False
-    back_off(m, w)
-    return True
-
-
-def back_off(m: Memory, w: WorldModel) -> None:
-    m.heal_backoff_until = w.tick + HEAL_BACKOFF_TICKS
-    m.heal_wait = None
-    m.heal_regen_sample = None
-    for goal in [g for g in m.walks if g.startswith("heal_")]:
-        del m.walks[goal]  # backed off: its walk is not picked up again (A15)
-    if m.goal.startswith("heal_"):
-        m.path, m.goal = [], ""
 
 
 def nearest_known_safe(w: WorldModel, skip: Callable[[Pos], bool] | None = None) -> tuple[int, Pos] | None:
@@ -257,13 +227,3 @@ def rearm_after_drink(w: WorldModel, m: Memory) -> list[dict] | None:
         if h.code == code:
             return [{"verb": "Arm", "supply_id": h.id}]
     return None
-
-
-def raise_buy_potion(m: Memory, *, why: str, code: str = DEFAULT_BUY_POTION) -> None:
-    """Queue a strategist ``buy`` op once per (code, why). Nothing reads
-    ``buy_signals`` until Shop (A21)."""
-    sig = (code, why)
-    if sig in m.buy_signals_seen:
-        return
-    m.buy_signals_seen.add(sig)
-    m.buy_signals.append({"op": "buy", "code": code, "why": why})

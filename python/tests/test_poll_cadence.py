@@ -124,7 +124,9 @@ class RunnerCadenceTest(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def run_windows(self, pol: Policy, windows: int, events_at=None) -> FakeServer:
+    def run_windows(self, pol: Policy, windows: int, events_at=None, *, boxed_in=False) -> FakeServer:
+        """``boxed_in``: walls all round (0, 0), so even the safe default,
+        which never idles on open ground, has nothing to do."""
         stop = threading.Event()
         server = FakeServer(windows, stop, events_at)
         cfg = CharacterConfig("T", "sandbox", pol, Path("t.toml"))
@@ -132,7 +134,7 @@ class RunnerCadenceTest(unittest.TestCase):
         w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=25, tick=100)
         for y in range(-3, 4):
             for x in range(-3, 40):
-                w.view.tiles[(x, y)] = "dirt"
+                w.view.tiles[(x, y)] = "wall" if boxed_in and (x, y) != (0, 0) else "dirt"
         w.terrain_center, w.terrain_map, w.entities_tick = (0, 0), 7, 100
         r.world, r.mem = w, Memory(need_self=False, need_position=False)
         with mock.patch.object(runner.Pacer, "wait_next_window", lambda _self, nb=0.0: server.wait(nb)):
@@ -142,14 +144,14 @@ class RunnerCadenceTest(unittest.TestCase):
     def test_calm_with_nothing_to_do_keeps_polling(self):
         # The deadlock: a skip sends nothing, so only the local window count
         # can bring the next calm poll due.
-        s = self.run_windows(Policy(goals=["hold"], entity_refresh=1000), 40)
+        s = self.run_windows(Policy(goals=[], entity_refresh=1000), 40, boxed_in=True)
         polls = [t for t, call in s.calls if call == "tick"]
         self.assertGreaterEqual(len(polls), 4)
         gaps = [b - a for a, b in zip(polls, polls[1:])]
         self.assertTrue(all(4 <= g <= 10 for g in gaps), gaps)
 
     def test_spare_windows_refresh_entities(self):
-        s = self.run_windows(Policy(goals=["hold"], entity_refresh=3), 30)
+        s = self.run_windows(Policy(goals=[], entity_refresh=3), 30, boxed_in=True)
         self.assertTrue(any(call == "entities" for _, call in s.calls))
         self.assertTrue(all(b[0] > a[0] for a, b in zip(s.calls, s.calls[1:])), "one call per window")
 
@@ -173,7 +175,9 @@ class RunnerCadenceTest(unittest.TestCase):
 
     def test_damage_switches_to_every_tick(self):
         hit = [{"tick": 0, "kind": "Damaged", "source_kind": "npc", "amount": 1}]
-        s = self.run_windows(Policy(goals=["hold"], entity_refresh=1000), 20, events_at={101: hit, 103: hit})
+        s = self.run_windows(
+            Policy(goals=[], entity_refresh=1000), 20, events_at={101: hit, 103: hit}, boxed_in=True
+        )
         self.assertEqual(s.calls[:5], [(101, "tick"), (102, "entities"), (103, "tick"), (104, "entities"), (105, "tick")])
         self.assertNotEqual(s.calls[5][0], 106, "calm again after a poll with no damage")
 

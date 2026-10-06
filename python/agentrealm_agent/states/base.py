@@ -11,7 +11,7 @@ from ..config import Policy
 from ..directives import PARAM_DEFAULTS, Directives, default_directives
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
-from ..plan import Plan
+from ..plan import OP_STATE, GoalOp, Plan
 from ..world import WorldModel
 
 
@@ -45,6 +45,10 @@ class StateOutcome:
     # "State: reason" of each higher state that claimed the round, sent no
     # intent and fell through (A44 diagnostics).
     yielded: list[str] = field(default_factory=list)
+    # False when the intents are a try at the op that does not move toward it
+    # (a Compose or Use that has not finished it yet): the op's stall clock
+    # keeps running, so a refused try cannot pin the stack (A34, A39).
+    progress: bool = True
 
 
 class State(ABC):
@@ -64,3 +68,24 @@ class State(ABC):
 
     @abstractmethod
     def done(self, world: WorldModel, ctx: PlayContext) -> bool: ...
+
+
+def top_op(ctx: PlayContext) -> GoalOp | None:
+    """The plan's current op, or None with no plan or an empty stack."""
+    return ctx.plan.current() if ctx.plan is not None else None
+
+
+def top_executor(ctx: PlayContext) -> str | None:
+    """The name of the state that carries out the top op, or None with no plan op."""
+    op = top_op(ctx)
+    return OP_STATE.get(op["op"]) if op is not None else None
+
+
+def my_op(ctx: PlayContext, state: str) -> GoalOp | None:
+    """The top op when ``state`` is its executor, else None.
+
+    Every executor's guard asks this: it runs only to carry out the
+    planner's current top op (PLAN.md **Architecture**).
+    """
+    op = top_op(ctx)
+    return op if op is not None and OP_STATE.get(op["op"]) == state else None

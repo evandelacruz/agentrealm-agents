@@ -83,6 +83,11 @@ def rest(
     return walk.cells[i + 1 :], walk.cells[i - 1] if i else walk.came_from
 
 
+def underway(walk: Walk | None, w: WorldModel) -> bool:
+    """We stand on ``walk`` past the cell it was planned on: it has been walked, not just chosen."""
+    return walk is not None and walk.map_id == w.map_id and w.pos in walk.cells[1:]
+
+
 def commit(
     walk: Walk | None,
     w: WorldModel,

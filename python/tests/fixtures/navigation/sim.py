@@ -14,8 +14,7 @@ from dataclasses import dataclass, field
 
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import Policy
-from agentrealm_agent.door_look import iter_unlooked, look_key
-from agentrealm_agent.interest_list import MAX_REJECTIONS, say_key
+from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import view_from_kb
 from agentrealm_agent.navigation import learn_step_rejection
@@ -24,6 +23,7 @@ from agentrealm_agent.navigation.stuck import active as nav_active
 from agentrealm_agent.navigation.stuck import on_break_opened
 from agentrealm_agent.break_memory import capabilities_for_code, record_attempt
 from agentrealm_agent.item_table import use_target_block
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.world import DOORS, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
 
 from .grids import GLYPHS, Scenario
@@ -188,16 +188,6 @@ def apply(
     return False
 
 
-def quiet_investigate(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None) -> None:
-    """Keep Investigate out of a navigation run: parked NPCs already greeted,
-    unlooked doors already given up on, so they are only obstacles here."""
-    for e in w.entities:
-        m.investigate_rejections[say_key(e.id)] = MAX_REJECTIONS
-    for map_id in (1, 2):
-        for pos in iter_unlooked(knowledge, map_id):
-            m.investigate_rejections[look_key(map_id, pos)] = MAX_REJECTIONS
-
-
 def run(
     sc: Scenario,
     policy: Policy,
@@ -219,7 +209,7 @@ def run(
     done_map = 2 if cross is not None else 1
     done_pos = cross.goal if cross is not None else sc.goal
     knowledge = cross.kb if cross is not None else None
-    quiet_investigate(w, m, knowledge)
+    plan = Plan.from_policy(policy, dict(PARAM_DEFAULTS))  # the built-in planner (A34)
     rng = random.Random(seed)
     trace: list[dict] = []
     moves = 0
@@ -229,7 +219,7 @@ def run(
             return Run("reached", moves, w, m, trace)
         if stop_on_signal and m.nav_stuck.stuck_signals:
             return Run("abandoned", moves, w, m, trace)
-        d = decide(w, m, policy, rng, knowledge=knowledge)
+        d = decide(w, m, policy, rng, knowledge=knowledge, plan=plan)
         row = {"tick": w.tick, "pos": list(w.pos), "map_id": w.map_id, "intent": d.intent, "reason": d.reason}
         trace.append(row)
         if d.intent is not None and d.intent.get("verb") == "SetPosition":

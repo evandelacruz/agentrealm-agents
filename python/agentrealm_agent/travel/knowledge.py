@@ -67,16 +67,6 @@ def iter_entrances(kb: KnowledgeBase | None) -> list[tuple[int, Pos, dict[str, A
     return out
 
 
-def merge_entrance(kb: KnowledgeBase, map_id: int, p: Pos, patch: dict[str, Any]) -> bool:
-    """Merge ``patch`` into the entrance row at ``map_id:p``. False when there is none."""
-    with kb.lock:
-        row = kb.entrances.get(entrance_key(map_id, p))
-        if not isinstance(row, dict):
-            return False
-        row.update(patch)
-        return True
-
-
 def sync_entrances(kb: KnowledgeBase, minimap: dict) -> None:
     """Merge minimap entrance marks into ``kb.entrances`` (Manual minimap)."""
     with kb.lock:

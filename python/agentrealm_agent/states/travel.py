@@ -1,91 +1,93 @@
-"""Travel: walk to plan travel destinations (A27)."""
+"""Travel: carry out the plan's ``travel`` op (A27).
+
+Resolves the destination (``travel/resolve.py``: a point, the town, the
+nearest known shop or hunting ground, an entrance), then walks there across
+maps through known door warps (A26), with stuck escalation on each map's leg
+(A15). ``entrance`` at ``0, 0`` walks to the nearest unexplored door.
+Arriving finishes the op.
+"""
 
 from __future__ import annotations
 
 from ..config import Policy
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
-from ..navigation import route_first_leg
+from ..navigation import doors_goal_path, route_first_leg
 from ..navigation import stuck as nav_stuck
-from ..pathing import goto_navigation_pending, grid_params, guided_step, nav_search, next_step
-from ..travel.ops import current_travel_op, set_travel_index
+from ..navigation import walk as nav_walk
+from ..pathing import grid_params, guided_step, nav_search, next_step
+from ..plan import GoalOp
+from ..travel.ops import travel_op_from_plan_goal
 from ..travel.resolve import ResolvedDestination, at_destination, resolve_travel
 from ..world import Pos, WorldModel
-from .base import PlayContext, State, StateOutcome
-from .explore import plan_sets, reflex_outcome, scripted_outcome
+from .base import PlayContext, State, StateOutcome, my_op
+from .explore import plan_sets
 from .intents import set_position
 
 
-def next_travel_target(world: WorldModel, ctx: PlayContext) -> tuple[int, ResolvedDestination] | None:
-    """The first op from the stack's current index that resolves and is not
-    already reached, with its index. Read-only: ``act`` moves the stack."""
-    m = ctx.memory
-    for i in range(m.travel_index, len(m.travel_ops)):
-        dest = resolve_travel(m.travel_ops[i], world, ctx.knowledge, m.strength)
-        if dest is not None and not at_destination(world, dest):
-            return i, dest
-    return None
-
-
-def _arrived(world: WorldModel, ctx: PlayContext) -> bool:
-    op = current_travel_op(ctx.memory)
-    if op is None:
-        return False
-    dest = resolve_travel(op, world, ctx.knowledge, ctx.memory.strength)
-    return dest is not None and at_destination(world, dest)
-
-
 class TravelState(State):
-    """Priority 5, above Explore. Stack semantics (PLAN.md A27): an op that
-    does not resolve yet (``travel:shop`` before any priced supply is seen)
-    is skipped; it is dropped once Travel acts on a later op, and kept while
-    no later op resolves, so Explore runs until the knowledge base can
-    resolve it. Arriving drops the op."""
+    """Executor for ``travel``. With no destination the knowledge base can
+    resolve yet (``travel:shop`` before any priced supply is seen) it sends
+    nothing: the op stalls and is dropped (A34)."""
 
     name = "Travel"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        if goto_navigation_pending(world, ctx.memory, ctx.policy):
-            return False
-        return _arrived(world, ctx) or next_travel_target(world, ctx) is not None
+        return my_op(ctx, self.name) is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         m, policy = ctx.memory, ctx.policy
-        target = next_travel_target(world, ctx)
-        if target is None:
-            # Arrived at the last resolvable op: drop it and give the window to Explore.
-            set_travel_index(m, m.travel_index + 1)
-            return _fallback(world, ctx, "travel: arrived")
-        index, dest = target
-        set_travel_index(m, index)
+        op = my_op(ctx, self.name)
+        assert op is not None and ctx.plan is not None
+        dest = resolve_destination(world, ctx, op)
+        if dest is None:
+            return StateOutcome(None, f"travel:{op['to']} not resolved yet", state=self.name)
+        if at_destination(world, dest):
+            ctx.plan.finish_current(f"at {dest.label}", memory=m)
+            if m.goal == f"travel:{dest.label}":
+                m.path, m.goal = [], ""
+            return StateOutcome(None, f"travel:{dest.label} arrived", state=self.name)
+        if m.goal_op != op:
+            # Another travel op's path carries the same label: never walk it for this one.
+            if m.goal.startswith("travel:"):
+                m.path, m.goal = [], ""
+            m.goal_op = dict(op)
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
-        reflex = reflex_outcome(world, policy, never_attack=ctx.never_attack, state=self.name)
-        if reflex is not None:
-            return reflex
         out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly)
         if out is not None:
             return out
-        return _fallback(world, ctx, f"travel:{dest.label} blocked")
+        goal = f"travel:{dest.label}"
+        first = m.path[0] if m.goal == goal and m.path else None
+        if first is not None and not nav_stuck.awaiting_break(m, world, goal):
+            # The route's first step is taken by an occupant, or still unseen on
+            # a path the walk is under way on (A15, A58 run 5): hold while its
+            # window runs, rather than let the safe default step away and back.
+            # A wait is not progress: the op's stall clock runs, so a permanent
+            # occupant or a cell never seen cannot pin the stack.
+            if first in world.occupied():
+                return StateOutcome(None, f"{goal}: way taken, waiting", state=self.name, wait=True, progress=False)
+            if first not in world.view.tiles and nav_walk.underway(m.walks.get(goal), world):
+                return StateOutcome(None, f"{goal}: next cell unseen, waiting", state=self.name, wait=True, progress=False)
+        # Stuck at step 2: Break, below, opens the way this decision.
+        return StateOutcome(None, f"{goal} blocked", state=self.name)
 
 
-def _fallback(world: WorldModel, ctx: PlayContext, why: str) -> StateOutcome:
-    out = scripted_outcome(
-        world,
-        ctx.memory,
-        ctx.policy,
-        ctx.rng,
-        never_attack=ctx.never_attack,
-        knowledge=ctx.knowledge,
-        plan=ctx.plan,
-        state=TravelState.name,
-    )
-    out.reason = f"{why}; {out.reason}"
-    return out
+def resolve_destination(w: WorldModel, ctx: PlayContext, op: GoalOp) -> ResolvedDestination | None:
+    """Where the ``travel`` op goes, or None when the knowledge base cannot say yet."""
+    t = travel_op_from_plan_goal(op)
+    if t.to == "entrance" and t.x is None:
+        _, blocked, costly = plan_sets(w, ctx.memory, ctx.policy, ctx.knowledge)
+        params = grid_params(ctx.policy, blocked, costly, allow_goal_door=True, m=ctx.memory, w=w, knowledge=ctx.knowledge)
+        path = doors_goal_path(w, ctx.knowledge, params)
+        if not path or w.map_id is None:
+            return None
+        return ResolvedDestination(w.map_id, path[-1], "entrance")
+    return resolve_travel(t, w, ctx.knowledge, ctx.memory.strength)
 
 
 def _travel_step(
@@ -127,8 +129,7 @@ def route_step(
     known door warps (A26), with stuck escalation on this map's leg (A15).
 
     None when no step can be planned. With no known route to another map the
-    goal's path is cleared and nothing backs off. Travel and Investigate's
-    cross-map looks (A30) both walk with this.
+    goal's path is cleared and nothing backs off.
     """
     plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest_map, dest, goal)
     leg = _map_leg(m, w, goal, dest_map, dest, plan_avoid, plan)

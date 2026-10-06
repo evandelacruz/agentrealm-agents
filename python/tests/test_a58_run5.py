@@ -25,6 +25,7 @@ from agentrealm_agent.navigation import CostGridParams, learn_step_rejection
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation import walk as nav_walk
 from agentrealm_agent.navigation.walk import Walk
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.pathing import bounded_step, commit_walk, guided_step
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
@@ -52,12 +53,16 @@ def world() -> WorldModel:
 
 
 def ctx() -> PlayContext:
+    """The goto as the built-in plan's one op, so Travel walks it (A61)."""
+    policy = Policy(kind="scripted", goals=["goto"], goto=GOTO, pickup=False, hostile=[])
+    params = dict(PARAM_DEFAULTS)
     return PlayContext(
         Memory(),
-        Policy(kind="scripted", goals=["goto"], goto=GOTO, pickup=False, hostile=[]),
+        policy,
         random.Random(0),
-        params=dict(PARAM_DEFAULTS),
+        params=params,
         knowledge=KnowledgeBase.empty("sandbox"),
+        plan=Plan.from_policy(policy, params),
     )
 
 
@@ -326,8 +331,8 @@ class ExploreKeepsItsFrontierTest(unittest.TestCase):
             before = w.pos
             out = dispatch(w, c)
             w.tick += 10
-            if not (out.intents and out.intents[0]["verb"] == "SetPosition"):
-                break
+            if not (out.intents and out.intents[0]["verb"] == "SetPosition") or not out.reason.startswith("explore"):
+                break  # nothing left to explore
             w.pos = (out.intents[0]["x"], out.intents[0]["y"])
             if c.memory.path[:1] == [w.pos]:
                 c.memory.path = c.memory.path[1:]
@@ -339,7 +344,8 @@ class ExploreKeepsItsFrontierTest(unittest.TestCase):
             seen = [x for (x, y) in w.view.tiles if y == 0]
             edge = min(seen) if ahead < 0 else max(seen)
             for x in range(edge + ahead, edge + 4 * ahead, ahead):
-                w.view.tiles[(x, 0)] = self.floor(x)
+                if self.WEST_END - 1 <= x <= self.EAST_END + 1:
+                    w.view.tiles[(x, 0)] = self.floor(x)
         xs = [x for x, _ in cells]
         turn = xs.index(min(xs))
         self.assertEqual(xs[: turn + 1], list(range(0, -turn - 1, -1)), f"straight west first: {cells}")

@@ -1,4 +1,9 @@
-"""Level: walk rooms toward unexplored doors inside a level (A37)."""
+"""Level: carry out the plan's ``enter_level`` op (A37).
+
+Walks to the level's entrance at the op's cell and through it, then walks
+the level's rooms toward unexplored doors, then frontier tiles. The op is
+finished once inside the level there is no door or frontier step left.
+"""
 
 from __future__ import annotations
 
@@ -9,11 +14,11 @@ from ..navigation import cost_path, doors_goal_path, nearest_target
 from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, guided_step, nav_search, next_step
 from ..world import Pos, WorldModel
-from .base import PlayContext, State, StateOutcome
-from .explore import plan_sets, reflex_outcome
+from .base import PlayContext, State, StateOutcome, my_op
+from .explore import plan_sets
 from .intents import set_position
 
-DOOR_GOAL, FRONTIER_GOAL = "level:door", "level:frontier"
+DOOR_GOAL, FRONTIER_GOAL, ENTRANCE_GOAL = "level:door", "level:frontier", "level:entrance"
 GOALS = (DOOR_GOAL, FRONTIER_GOAL)
 
 
@@ -32,11 +37,10 @@ def level_outcome(
     m: Memory,
     policy: Policy,
     *,
-    never_attack: list[str],
     knowledge: KnowledgeBase | None = None,
     state: str = "Level",
 ) -> StateOutcome:
-    """Doors first, then frontier tiles, with fight and pickup reflexes (PLAN.md).
+    """Doors first, then frontier tiles (PLAN.md).
 
     Stuck detection and escalation drive the walk; a door or frontier given
     up on is backed off for Level and Explore alike (A15).
@@ -44,12 +48,6 @@ def level_outcome(
     if w.pos is None:
         return StateOutcome(None, "position unknown", state=state)
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    reflex = reflex_outcome(w, policy, never_attack=never_attack, state=state)
-    if reflex is not None:
-        if m.goal in GOALS:
-            m.path, m.goal = [], ""
-        return reflex
-
     choice = _level_target(w, m, policy, plan_avoid, plan_costly, knowledge)
     if choice is not None:
         goal, target = choice
@@ -100,31 +98,41 @@ def _level_target(
 
 
 class LevelState(State):
-    """Priority 5, below Travel and above Explore. Active on level interior maps.
-
-    A ``travel:*`` directive that resolves outranks it (PLAN.md A37); with
-    no door or frontier step it sends nothing and dispatch falls through (A44).
-    """
+    """Executor for ``enter_level``."""
 
     name = "Level"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
-        return (
-            ctx.policy.kind == "scripted"
-            and world.alive
-            and world.pos is not None
-            and inside_level(world)
-        )
+        if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
+            return False
+        return my_op(ctx, self.name) is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        return level_outcome(
-            world,
-            ctx.memory,
-            ctx.policy,
-            never_attack=ctx.never_attack,
-            knowledge=ctx.knowledge,
-            state=self.name,
-        )
+        m, policy = ctx.memory, ctx.policy
+        op = my_op(ctx, self.name)
+        assert op is not None and ctx.plan is not None
+        if not inside_level(world):
+            return _walk_to_entrance(world, ctx, (op["x"], op["y"]))
+        out = level_outcome(world, m, policy, knowledge=ctx.knowledge, state=self.name)
+        if out.intents is None:
+            ctx.plan.finish_current("level walked", memory=m)
+        return out
+
+
+def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcome:
+    m, policy = ctx.memory, ctx.policy
+    _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
+
+    def plan(att):
+        return cost_path(w, door, params(), nav=nav_search(m, w, ENTRANCE_GOAL, door))
+
+    step = guided_step(m, w, ENTRANCE_GOAL, door, plan_avoid, plan, params=params)
+    if step is None:
+        return StateOutcome(None, f"no path to level entrance {door}", state=LevelState.name)
+    return StateOutcome([set_position(step)], f"level entrance → {door}", state=LevelState.name)

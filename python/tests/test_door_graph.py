@@ -11,8 +11,10 @@ from agentrealm_agent import config
 from agentrealm_agent import knowledge_base as kb_mod
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_agent.config import CharacterConfig, Policy
+from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view, view_from_kb
 from agentrealm_agent.navigation import CostGridParams, doors_goal_path, route_first_leg
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.world import MapView, WorldModel
 
@@ -123,12 +125,14 @@ class DoorGraphRoutingTest(KbTestCase):
         w = _grid(["..D", "..."], map_id=1)
         record_warp(self.kb, 1, (2, 0), "framed_door", 2, (0, 0))
         _store_map(self.kb, 2, ["...."])
+        policy = Policy(goals=["goto"], goto=(3, 0), goto_map=2, pickup=False)
         d = decide(
             w,
             Memory(),
-            Policy(goals=["goto"], goto=(3, 0), goto_map=2, pickup=False),
+            policy,
             random.Random(0),
             knowledge=self.kb,
+            plan=Plan.from_policy(policy, dict(PARAM_DEFAULTS)),
         )
         self.assertEqual((d.intent["x"], d.intent["y"]), (1, 0))
 

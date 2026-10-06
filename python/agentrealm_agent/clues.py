@@ -2,12 +2,9 @@
 
 Every sign or scroll read and helper line heard is stored in the knowledge base with
 where and when it was found, and a ``clue`` signal is queued for the
-strategist (A35). Without an LLM, two simple rules use the text:
-
-- a recent clue on this map that names a direction steers ``Explore`` toward
-  frontiers on that side of where the clue was found;
-- a clue that names a capability raises it on odd blocks near the clue, and
-  lets a consumable tool with that capability be spent there.
+strategist (A35). Without an LLM, one simple rule uses the text: a recent
+clue on this map that names a direction steers ``Explore`` toward frontiers
+on that side of where the clue was found.
 
 A row in ``kb.clues`` is ``{kind, text, map_id, x, y, tick}``, plus
 ``speaker_id`` for a helper line or ``supply_id`` for a scroll. ``kind`` is
@@ -23,20 +20,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .break_memory import WEAPONS
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation.planner import CostGridParams, nearest_target
-from .world import Pos, WorldModel, chebyshev
+from .world import Pos, WorldModel
 
 SIGNALS_KEPT = 16  # newest kept until the strategist drains them (A35)
 
 # A direction clue steers Explore for this many game ticks after it was found
 # (5 minutes at 10 Hz), and only on the map it was found on.
 DIRECTION_TICKS = 3000
-
-# A capability clue covers odd blocks within this many cells of where it was found.
-CAPABILITY_RADIUS = 12
 
 # Clue words for a step direction (API: up is decreasing y). Text is split
 # into words, so "north-west" counts as north plus west.
@@ -53,15 +46,6 @@ _DIRECTIONS: dict[str, tuple[int, int]] = {
     "down": (0, 1),
     "left": (-1, 0),
     "right": (1, 0),
-}
-
-# Words helpers and signs use for a capability (GAME_NOTES Supplies; manual §11).
-_CAPABILITY_WORDS: dict[str, tuple[str, ...]] = {
-    "burn": ("burn", "matches", "torch"),
-    "blast": ("blast", "bomb"),
-    "smash": ("smash", "mallet"),
-    "cut": ("cut", "knife", "sword"),
-    "chop": ("chop",),
 }
 
 _WORD = re.compile(r"[a-z]+")
@@ -196,10 +180,6 @@ def _clue_cell(row: dict[str, Any]) -> Pos | None:
         return None
 
 
-def _words(row: dict[str, Any]) -> list[str]:
-    return _WORD.findall((row.get("text") or "").lower())
-
-
 # --- Rule 1: a direction clue steers Explore ---------------------------------
 
 
@@ -246,27 +226,3 @@ def nearest_explore_target(
             return found
     rest = targets - ahead
     return nearest_target(w, rest, params) if rest else None
-
-
-# --- Rule 2: a capability clue raises it on nearby odd blocks ----------------
-
-
-def capabilities_in_text(text: str) -> set[str]:
-    words = set(_WORD.findall(text.lower()))
-    return {cap for cap, names in _CAPABILITY_WORDS.items() if words & set(names)}
-
-
-def capabilities_named_near(kb: KnowledgeBase | None, map_id: int, pos: Pos) -> set[str]:
-    """Capabilities named by clues on this map found within ``CAPABILITY_RADIUS`` of ``pos``."""
-    out: set[str] = set()
-    for row in clues_on_map(kb, map_id):
-        cell = _clue_cell(row)
-        if cell is not None and chebyshev(cell, pos) <= CAPABILITY_RADIUS:
-            out |= capabilities_in_text(row.get("text") or "")
-    return out
-
-
-def tool_allowed(code: str, capability: str, block_named: bool, named_near: set[str]) -> bool:
-    """May a break spend this supply? A weapon always; a consumable tool only when a
-    clue names the block's type, or a clue near the block names this capability."""
-    return code in WEAPONS or block_named or capability in named_near

@@ -116,7 +116,7 @@ def gather_outcome(
     out = _gather_step(w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state)
     if out.intents is None:
         m.gather_status = REGION_BARREN if region_of(here) in skip else NONE_CUTTABLE
-    elif m.goal == GOAL and m.gather_target is not None and m.gather_target[0] == OUT:
+    elif out.intents[0].get("verb") == "SetPosition" and m.gather_target is not None and m.gather_target[0] == OUT:
         m.gather_status = HEADING_OUT
     elif out.intents[0].get("verb") == "Take" or (m.gather_target is not None and m.gather_target[0] == "pile"):
         m.gather_status = CUTTING
@@ -152,14 +152,17 @@ def _gather_step(
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
     piles = [e for e in w.entities if is_gem_pile(e) and chebyshev(e.pos, here) <= 1 and gather_ground(w, e.pos, policy)]
     if piles:
+        _end_walk_out(m)
         s = min(piles, key=lambda e: (chebyshev(e.pos, here), e.id))
         return StateOutcome([take(s.id)], f"take {s.code or s.id}", state=state)
 
     if view.tiles.get(here) == "grass" and here in preferred:
+        _end_walk_out(m)
         return StateOutcome([use_block(here)], "cut grass", state=state)
 
     bushes = [p for p in preferred if view.tiles[p] == "bush" and chebyshev(p, here) <= BUSH_REACH]
     if bushes:
+        _end_walk_out(m)
         p = min(bushes, key=lambda pos: (chebyshev(pos, here), pos))
         return StateOutcome([use_block(p)], "cut bush", state=state)
 
@@ -174,6 +177,12 @@ def _gather_step(
         return StateOutcome([set_position(step)], f"gather → {m.path[-1]}", state=state)
 
     return StateOutcome(None, "no gather target", state=state)
+
+
+def _end_walk_out(m: Memory) -> None:
+    """Something to cut or take turned up: a walk out of safe ground is over."""
+    if m.goal == GOAL and m.gather_target is not None and m.gather_target[0] == OUT:
+        m.path, m.goal, m.gather_target = [], "", None
 
 
 def _barren_to_skip(w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None) -> set[tuple[int, int]]:

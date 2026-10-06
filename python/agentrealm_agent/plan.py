@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import re
@@ -22,6 +23,9 @@ log = logging.getLogger(__name__)
 GoalOp = dict[str, Any]
 
 TRAVEL_TO = frozenset({"entrance", "town", "hunting_ground", "shop", "point"})
+# Destinations the agent finds itself: they take no x, y (``shop`` and
+# ``entrance`` may name one by x, y; without, the nearest known one).
+TRAVEL_SYMBOLIC = frozenset({"entrance", "town", "hunting_ground", "shop"})
 CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
 ALL_PARAMS = frozenset(PARAM_DEFAULTS)
 
@@ -55,7 +59,7 @@ OP_STATE: dict[str, str | None] = {
 # planner needs and the states lack becomes a new op here (with its validator
 # and the state that runs it), never a state that starts itself.
 OP_FIELDS: dict[str, str] = {
-    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id',
+    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" and "entrance" take x, y for a given one, else the nearest known',
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
     "say": "text, and npc_id or npc_type",
@@ -83,6 +87,17 @@ MAX_WAIT_SECONDS = 30
 # An op whose executor makes no progress for this long is dropped and logged.
 PLAN_STALL_SECONDS = 30
 
+# What each survival param means to the planner, and which way tightens it
+# (A35). The prompt shows these, and a rejected change repeats its line.
+PARAM_MEANINGS: dict[str, str] = {
+    "retreat_hits": "how many hits of health Retreat keeps in reserve: it leaves for a safe tile once health is at or below retreat_hits times the hit size of what is attacking. Higher retreats sooner, at more health; lower stays in the fight longer. You may only raise it",
+    "fight_margin": "how much the win estimate must favour us before Fight engages. Higher fights fewer, safer fights. You may only raise it",
+    "risk": "0..1, how much risk the character takes; it falls toward 0 as lives near lives_floor. Lower is more careful. You may only lower it",
+    "lives_floor": "lives at which risk reaches 0. Higher is more careful. You may only raise it",
+    "potion_reserve": "potions to keep; buy more below it. You may only raise it",
+    "curiosity": "0..1, how far to stray to look at new things. Any value in range",
+}
+
 # Shorthand in directives `goals = ["gather_gems:20", "buy:torch"]`.
 _SHORTHAND = re.compile(r"^([a-z_]+):(.+)$")
 
@@ -95,8 +110,31 @@ def _is_str(value: object) -> bool:
     return isinstance(value, str) and value != ""
 
 
+# While :func:`collect_rejections` runs, every dropped op and ignored param
+# is also appended here, so the strategist can tell the planner (A35).
+_rejections: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar("plan_rejections", default=None)
+
+
+def _reject(message: str) -> None:
+    log.warning("plan: %s", message)
+    sink = _rejections.get()
+    if sink is not None:
+        sink.append(message)
+
+
 def _drop(reason: str, op: object) -> None:
-    log.warning("plan: dropped op %r: %s", op, reason)
+    _reject(f"dropped op {op!r}: {reason}")
+
+
+def collect_rejections(parse: Callable[[], Any]) -> tuple[Any, list[str]]:
+    """Run ``parse`` and return its result with every reason an op or a param
+    was dropped meanwhile, for the planner's next State."""
+    sink: list[str] = []
+    token = _rejections.set(sink)
+    try:
+        return parse(), sink
+    finally:
+        _rejections.reset(token)
 
 
 def _require_fields(op: dict[str, Any], fields: tuple[str, ...]) -> bool:
@@ -108,10 +146,16 @@ def _require_fields(op: dict[str, Any], fields: tuple[str, ...]) -> bool:
 
 
 def _validate_travel(op: dict[str, Any]) -> bool:
-    if not _require_fields(op, ("to", "x", "y")):
+    """A ``point`` needs x, y. A symbolic ``to`` may leave them out: they
+    become ``0, 0``, which every reader takes as "the agent finds it"."""
+    if not _require_fields(op, ("to",)):
         return False
     if not _is_str(op["to"]) or op["to"] not in TRAVEL_TO:
         _drop("bad `to`", op)
+        return False
+    if op["to"] in TRAVEL_SYMBOLIC and "x" not in op and "y" not in op:
+        op["x"] = op["y"] = 0
+    if not _require_fields(op, ("x", "y")):
         return False
     if not _is_int(op["x"]) or not _is_int(op["y"]):
         _drop("bad coordinates", op)
@@ -398,29 +442,34 @@ def parse_plan_payload(
     """
     current = dict(floor_params if current_params is None else current_params)
     if not isinstance(raw, dict):
-        log.warning("plan: payload is not an object")
+        _reject("payload is not an object")
         return [], current, ""
     extra = set(raw) - {"goals", "params", "notes"}
     if extra:
-        log.warning("plan: dropped unknown top-level keys %s", sorted(extra))
+        _reject(f"dropped unknown top-level keys {sorted(extra)}")
     goals_raw = raw.get("goals", [])
     if not isinstance(goals_raw, list):
-        log.warning("plan: `goals` must be a list")
+        _reject("`goals` must be a list")
         goals_raw = []
     goals: list[GoalOp] = []
     for item in goals_raw:
         op = validate_goal_op(item)
+        if op is not None and op["op"] == "set_param":
+            loosens = loosening(floor_params, op["name"], _valid_param(op["name"], op["value"]))
+            if loosens:
+                _drop(loosens, op)
+                continue
         if op is not None:
             goals.append(op)
     notes = raw.get("notes", "")
     if not isinstance(notes, str):
-        log.warning("plan: `notes` must be a string")
+        _reject("`notes` must be a string")
         notes = ""
     params = current
     incoming = raw.get("params")
     if incoming is not None:
         if not isinstance(incoming, dict):
-            log.warning("plan: `params` must be an object")
+            _reject("`params` must be an object")
         else:
             params = apply_strategist_params(floor_params, params, incoming)
     return goals, params, notes
@@ -435,28 +484,36 @@ def apply_strategist_params(
     out = dict(current)
     for name, value in incoming.items():
         if name not in ALL_PARAMS:
-            log.warning("plan: unknown param `%s` ignored", name)
+            _reject(f"unknown param `{name}` ignored")
             continue
         ok = _valid_param(name, value)
         if ok is None:
-            log.warning("plan: param `%s`=%r out of range; ignored", name, value)
+            _reject(f"param `{name}`={value!r} out of range; ignored")
             continue
-        if name == "curiosity":
-            out[name] = ok
-            continue
-        floor_val = floor.get(name, PARAM_DEFAULTS[name])
-        if name == "risk":
-            if ok > floor_val:
-                log.warning("plan: risk %s above floor %s; ignored", ok, floor_val)
-                continue
-            out[name] = ok
-            continue
-        # fight_margin, retreat_hits, lives_floor, potion_reserve: may only rise.
-        if ok < floor_val:
-            log.warning("plan: %s %s below floor %s; ignored", name, ok, floor_val)
+        loosens = loosening(floor, name, ok)
+        if loosens:
+            _reject(loosens)
             continue
         out[name] = ok
     return out
+
+
+def loosening(floor: dict[str, float | int], name: str, value: float | int) -> str:
+    """Why a valid ``value`` for survival param ``name`` loosens it past
+    ``floor``, or "" when it does not (``curiosity`` never does)."""
+    if name == "curiosity":
+        return ""
+    floor_val = floor.get(name, PARAM_DEFAULTS[name])
+    if name == "risk":
+        # risk may only fall; the others may only rise.
+        if value <= floor_val:
+            return ""
+        side = "above"
+    elif value >= floor_val:
+        return ""
+    else:
+        side = "below"
+    return f"{name} {value} {side} floor {floor_val}, ignored. {name} is {PARAM_MEANINGS[name]}"
 
 
 def apply_set_param(

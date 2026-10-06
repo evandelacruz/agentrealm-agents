@@ -311,6 +311,20 @@ class GatherHeadsOutTest(unittest.TestCase):
         self.assertEqual(m.gather_status, gather_mod.HEADING_OUT, "heading out outranks a no-effect status")
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
 
+    def test_grass_found_on_arrival_ends_the_walk_out(self):
+        """Review on #126: a cut returned early left the OUT target and HEADING_OUT status behind."""
+        w = grid(["........"], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(5)])
+        m = Memory()
+        outcome(w, m)
+        self.assertEqual(m.gather_status, gather_mod.HEADING_OUT)
+        w.pos = (5, 0)
+        w.view.tiles[(5, 0)] = "grass"
+        out = outcome(w, m)
+        self.assertEqual(out.reason, "cut grass")
+        self.assertEqual((m.goal, m.gather_target), ("", None))
+        self.assertEqual(m.gather_status, gather_mod.CUTTING)
+
     def test_off_safe_ground_the_out_walk_is_dropped_for_field_grass(self):
         w = grid([".....gg"], at=(0, 0))
         safe(w, *[(x, 0) for x in range(5)])

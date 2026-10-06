@@ -127,7 +127,7 @@ class RunnerTest(unittest.TestCase):
         # docs/API.md Intent Queue: a request without intents leaves the held
         # queue; an empty list would clear it.
         fake = FakeClient([{"tick": 12, "window_remaining_ms": 0}])
-        r = self.runner(fake, Policy(goals=["hold"]))
+        r = self.runner(fake, Policy(goals=[]))
         # Walled in: even the safe default, which never idles on open ground,
         # has nothing to send.
         for x in range(-1, 6):
@@ -143,7 +143,7 @@ class RunnerTest(unittest.TestCase):
         fake = FakeClient([{"tick": 12, "window_remaining_ms": 0, "events_by_tick": [
             {"tick": 11, "events": [{"tick": 11, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 3},
                                     {"tick": 11, "kind": "Died", "cause": "npc"}]}]}])
-        r = self.runner(fake, Policy(goals=["hold"]))
+        r = self.runner(fake, Policy(goals=[]))
         r.tick()
         self.assertTrue(r.mem.alarm)
         self.assertTrue(r.mem.need_self and r.mem.need_position)
@@ -159,7 +159,7 @@ class RunnerTest(unittest.TestCase):
             {"tick": 11, "events": [{"tick": 11, "kind": "Damaged", "source_kind": "npc", "source_id": 4, "amount": 3}]}],
             "observation": {"version": 2, "delta": {"entities": {"npcs": {"added": [
                 {"id": 4, "x": 1, "y": 0, "npc_type_code": "gristlewick"}]}}}}}])
-        r = self.runner(fake, Policy(goals=["hold"]))
+        r = self.runner(fake, Policy(goals=[]))
         r.tick()
         npc = next(e for e in r.world.entities if e.kind == "npc" and e.id == 4)
         self.assertEqual(type_key_for_entity(npc), ("npc", "gristlewick"))
@@ -180,7 +180,7 @@ class RunnerTest(unittest.TestCase):
 
     def test_back_to_back_use_queues_honor_weapon_cooldown(self):
         # A1: the next Use queue opens with Waits still owed after the last one.
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
         self.assertEqual(r.intents_for(Decision(use, "test")), [use])
         r.mem.last_use_tick = 10
@@ -189,7 +189,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual([i["verb"] for i in second], ["Wait"] * 9 + ["Use"])
 
     def test_say_carries_speech_cooldown(self):
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         say = {"verb": "Say", "text": "hi", "target": {"kind": "character", "character_id": 3}}
         self.assertEqual(r.intents_for(Decision(say, "test")), [say])
         r.mem.last_speech_tick = 20
@@ -204,7 +204,7 @@ class RunnerTest(unittest.TestCase):
         from agentrealm_agent.knowledge_base import KnowledgeBase
         from agentrealm_agent.states.intents import say_to
 
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         r.knowledge = KnowledgeBase.empty("sandbox")
         say = say_to(Entity("npc", 4, (1, 1), "helper"))
         self.assertEqual(say, {"verb": "Say", "npc_id": 4, "text": "hello"})
@@ -217,7 +217,7 @@ class RunnerTest(unittest.TestCase):
 
     def test_applied_use_and_say_start_their_cooldowns(self):
         # A1: an applied result records its tick; a rejected one leaves the clock alone.
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
         r.mem.last_use_tick, r.world.tick = 10, 11
         queue = r.intents_for(Decision(use, "test"))
@@ -233,7 +233,7 @@ class RunnerTest(unittest.TestCase):
         # A45: an NPC that left sight, died or moved out of reach answers the
         # queued npc-target swing target_out_of_range; the rest is dropped and
         # the next poll re-plans from a fresh position.
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         swing = {"verb": "Use", "target": {"kind": "npc", "npc_id": 5}}
         r.mem.pending_intents = [swing, {"verb": "Wait"}, swing, {"verb": "Step", "direction": "left"}]
         r.mem.pending_queue, r.mem.pending_next_index = "q1", 0
@@ -250,7 +250,7 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(r.mem.need_position)
 
     def test_rejected_use_does_not_start_the_cooldown(self):
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
         r.intents_for(Decision(use, "test"))
         rejection = {"category": "state", "code": "target_out_of_range", "retryability": "transient"}
@@ -262,7 +262,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(r.mem.last_speech_tick)
 
     def test_death_clears_use_and_speech_cooldowns(self):
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         r.mem.last_use_tick, r.mem.last_speech_tick = 10, 12
         r.on_events([{"tick": 13, "kind": "Died", "cause": "npc"}])
         self.assertIsNone(r.mem.last_use_tick)
@@ -270,7 +270,7 @@ class RunnerTest(unittest.TestCase):
 
     def test_cooldown_past_the_horizon_sends_nothing_and_traces_it(self):
         # The Use cannot land inside the horizon: hold it this round trip, say why.
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         r.queue_horizon_ticks = 3
         use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
         r.mem.last_use_tick, r.world.tick = 10, 11
@@ -287,7 +287,7 @@ class RunnerTest(unittest.TestCase):
     def test_non_movement_intent_is_sent_alone(self):
         # Movement, Use, and Say become paced queues; a Take goes as one intent.
         fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
-        r = self.runner(fake, Policy(goals=["hold"], pickup=True))
+        r = self.runner(fake, Policy(goals=[], pickup=True))
         r.world.entities = [Entity("supply", 5, (1, 0), "apple")]
         r.tick()
         self.assertEqual(fake.sent[0][0], [{"verb": "Take", "supply_id": 5}])
@@ -386,7 +386,7 @@ class RunnerTest(unittest.TestCase):
 
     def test_single_step_fallback_keeps_the_path(self):
         # A target off the path's head is one Step; the path is not trimmed.
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         r.mem.path = [(3, 0), (4, 0)]
         intents = r.intents_for(Decision({"verb": "SetPosition", "x": 1, "y": 0}, "test"))
         self.assertEqual(intents, [{"verb": "Step", "direction": "right"}])
@@ -395,7 +395,7 @@ class RunnerTest(unittest.TestCase):
     def test_walk_queue_stops_before_an_occupied_cell(self):
         # A12: the cost grid prices an NPC at 50 so the plan may run through
         # it; the queue must not Step onto it. The rest of the plan stays.
-        r = self.runner(FakeClient([]), Policy(goals=["hold"]))
+        r = self.runner(FakeClient([]), Policy(goals=[]))
         r.world.entities = [Entity("npc", 9, (3, 0))]
         r.mem.path = [(1, 0), (2, 0), (3, 0), (4, 0)]
         intents = r.intents_for(Decision({"verb": "SetPosition", "x": 1, "y": 0}, "test"))
@@ -598,7 +598,7 @@ class RunnerTest(unittest.TestCase):
             {"tick": 10, "window_remaining_ms": 0, "observation": {"version": 7, "unchanged": True}},
             {"tick": 11, "window_remaining_ms": 0},
         ])
-        r = self.runner(fake, Policy(goals=["hold"]))
+        r = self.runner(fake, Policy(goals=[]))
         r.world.snapshot_version = 5
         r.tick()
         self.assertEqual(fake.sent[0][1], 5)
@@ -626,7 +626,7 @@ class RunnerTest(unittest.TestCase):
             {"tick": 10, "window_remaining_ms": 0},
             {"tick": 20, "window_remaining_ms": 0, "level_clear_ceremony": ceremony},
         ])
-        r = self.runner(fake, Policy(goals=["wander"], pickup=False, on_hostile="ignore"))
+        r = self.runner(fake, Policy(goals=[], pickup=False, on_hostile="ignore"))
         r._level_timer.overworld = 1
         r._level_timer.note_map(1, 0, 0.0)
         r.world.gems = 6
@@ -648,11 +648,11 @@ class NeverAttackRunnerTest(RunnerTest):
         path = Path(tmp.name) / "T.directives.toml"
         if text is not None:
             path.write_text(text)
-        cfg = CharacterConfig("T", "sandbox", Policy(goals=["hold"]),
+        cfg = CharacterConfig("T", "sandbox", Policy(goals=[]),
                               Path(tmp.name) / "T.toml")
         r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None)
         self.addCleanup(r.trace.close)
-        base = self.runner(client, Policy(goals=["hold"]))
+        base = self.runner(client, Policy(goals=[]))
         r.world, r.mem = base.world, base.mem
         r.world.entities = [Entity("character", 5, (1, 0))]
         return r

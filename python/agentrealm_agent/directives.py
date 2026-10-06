@@ -20,7 +20,7 @@ PARAM_DEFAULTS: dict[str, float | int] = {
     "curiosity": 0.2,
     "lives_floor": 3,
     "risk": 0.5,
-    "potion_reserve": 2,
+    "potion_reserve": 2,  # planner-only (A61): no state reads it; the planner buys below it
 }
 
 

@@ -45,7 +45,7 @@
 
   "A59": {"state": "done"},
 
-  "A61": {"state": "done", "note": "Step 1 of the AI-plans redirect: dispatch and states. Walker internals (step 1b) and strategist wiring (step 2) are separate sessions; until step 2, M9's look clause and M10's read and say clause need a planner that emits those ops."},
+  "A61": {"state": "partial", "remaining": "Step 1b: walker and pathing internals (pathing.py, navigation/*). Step 2: strategist and planner wiring (#108): prompt op table matching the validators (no hunt, wait with why and <= 30 s, equip), and emitting equip, potion buy, read, say and entrance travel ops, which M8, M9's look clause and M10's read-and-say clause need. potion_reserve is planner-only."},
 
   "A60": {"state": "done", "note": "Probe, profile and offline tests shipped; not run live. A58 runs it before the hour when the knowledge base has no regen answer."},
 

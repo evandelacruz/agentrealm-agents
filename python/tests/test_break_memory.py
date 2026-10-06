@@ -112,12 +112,12 @@ class NominateOnPathTest(unittest.TestCase):
 class EscapeNeverBreaksTest(unittest.TestCase):
     def test_boxed_in_by_bushes_is_not_escape(self):
         w = _sword_world(["bbb", "b.b", "bbb"], at=(1, 1))
-        c = PlayContext(Memory(), Policy(kind="scripted", goals=["hold"], pickup=False), random.Random(0))
+        c = PlayContext(Memory(), Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
         self.assertFalse(EscapeState().guard(w, c))
 
     def test_hazard_boxed_in_by_bushes_sends_no_use(self):
         w = _sword_world(["bbb", "b~b", "bbb"], at=(1, 1))
-        c = PlayContext(Memory(), Policy(kind="scripted", goals=["hold"], pickup=False), random.Random(0))
+        c = PlayContext(Memory(), Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
         self.assertTrue(EscapeState().guard(w, c))
         out = EscapeState().act(w, c)
         self.assertFalse(any(i.get("verb") in ("Use", "Arm") for i in out.intents or []), out)
@@ -130,7 +130,7 @@ class RunnerBreakResultTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        cfg = CharacterConfig("T", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(goals=[]), Path("t.toml"))
         self.kb = KnowledgeBase.empty("sandbox")
         r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=self.kb)
         self.addCleanup(r.trace.close)
@@ -235,7 +235,7 @@ class BreakFromGuidedWalkTest(unittest.TestCase):
         att = nav_stuck.track(m, w, "chest", (1, 0))
         att.level = nav_stuck.BREAK
         att.break_x, att.break_y, att.break_cap = 4, 0, "cut"
-        c = PlayContext(m, Policy(kind="scripted", goals=["hold"], pickup=True), random.Random(0))
+        c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=True), random.Random(0))
         out = dispatch(w, c)
         self.assertIs(nav_stuck.active(m, w), att)
         self.assertIn("Recover: chest walk stuck: break", out.yielded)
@@ -252,7 +252,7 @@ class BreakFromGuidedWalkTest(unittest.TestCase):
         att.break_x, att.break_y, att.break_cap = 4, 0, "cut"
         for cap in ("cut", "chop"):
             record_attempt(kb, map_id=7, pos=(4, 0), capability=cap, result="failed")
-        c = PlayContext(m, Policy(kind="scripted", goals=["hold"], pickup=False), random.Random(0), knowledge=kb)
+        c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0), knowledge=kb)
         out = BreakState().act(w, c)
         self.assertIsNone(out.intents, "no Use on a pair already refused")
         self.assertEqual(att.level, nav_stuck.REVEAL, "step 2 has nothing left: on to step 3")
@@ -305,7 +305,7 @@ class BreakRearmTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        cfg = CharacterConfig("T", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(goals=[]), Path("t.toml"))
         self.kb = KnowledgeBase.empty("sandbox")
         r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=self.kb)
         self.addCleanup(r.trace.close)
@@ -315,7 +315,7 @@ class BreakRearmTest(unittest.TestCase):
         r.world, r.mem = w, Memory(need_self=False, need_position=False)
         self.r = r
         self.ctx = PlayContext(
-            r.mem, Policy(kind="scripted", goals=["hold"], pickup=False), random.Random(0), knowledge=self.kb
+            r.mem, Policy(kind="scripted", goals=[], pickup=False), random.Random(0), knowledge=self.kb
         )
         self.att = nav_stuck.track(r.mem, w, "goto", (4, 0))
         self.att.level = nav_stuck.BREAK
@@ -364,7 +364,25 @@ class BreakRearmTest(unittest.TestCase):
         self.assertEqual(out.state, "Break")
         self.assertEqual(out.intents, [arm(5), use_block((2, 0))])
         self.assertIs(plan.current(), op, "the travel op survives the break")
-        self.assertIsNone(plan.stalled_since_tick)
+        self.assertEqual(plan.stalled_since_tick, 0, "a Use try leaves the clock alone")
+
+    def test_break_for_another_walk_does_not_save_a_stalled_op(self):
+        # The safe default's own stuck walk reaches step 2 while the top op's
+        # executor (Shop, nothing priced in sight) cannot act: Break works that
+        # walk, and the buy op still stalls and is dropped.
+        w, m = self.r.world, self.r.mem
+        m.nav_stuck.attempts.clear()
+        att = nav_stuck.track(m, w, "explore", (4, 0))
+        att.level = nav_stuck.BREAK
+        att.break_x, att.break_y, att.break_cap = 2, 0, "smash"
+        plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
+        plan.stalled_since_tick = 0
+        self.ctx.plan = plan
+        w.tick = PLAN_STALL_SECONDS * plan.tick_hz * 2
+        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+            out = dispatch(w, self.ctx)
+        self.assertEqual(out.state, "Break")
+        self.assertIsNone(plan.current(), "the stalled buy op is dropped")
 
     def stalled_plan(self) -> Plan:
         plan = Plan([{"op": "break_block", "x": 2, "y": 0, "capability": "smash"}], dict(PARAM_DEFAULTS))
@@ -403,7 +421,7 @@ class BreakRearmTest(unittest.TestCase):
         self.att.level = nav_stuck.WALK
         w = self.r.world
         w.entities = [Entity("supply", 77, (0, 0), "bronze_sword")]
-        self.ctx.policy = Policy(kind="scripted", goals=["hold"], pickup=True)
+        self.ctx.policy = Policy(kind="scripted", goals=[], pickup=True)
         plan = self.stalled_plan()
         out = dispatch(w, self.ctx)
         self.assertEqual(out.state, "Pickup", "the pickup reflex took the round")

@@ -35,7 +35,7 @@ def equip_plan(**op) -> Plan:
 def ctx(kb: KnowledgeBase | None = None, m: Memory | None = None, plan: Plan | None = None) -> PlayContext:
     return PlayContext(
         m or Memory(),
-        Policy(kind="scripted", goals=["hold"]),
+        Policy(kind="scripted", goals=[]),
         random.Random(0),
         directives=default_directives(),
         knowledge=kb or KnowledgeBase.empty("sandbox"),
@@ -247,7 +247,7 @@ class RunnerEquipResultTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        cfg = CharacterConfig("T", "sandbox", Policy(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", Policy(goals=[]), Path("t.toml"))
         r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
         self.addCleanup(r.trace.close)
         w = world()

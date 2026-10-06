@@ -255,7 +255,7 @@ class TestWorldCase(unittest.TestCase):
         server = TestWorldServer(stop, windows)
         model = ClueModel(reply)
         strategist = InlineStrategist(config=StrategistConfig(model="m", api_key="k", min_interval_s=0), client=model)
-        cfg = CharacterConfig("T", "testworld", Policy(goals=["hold"], pickup=False, entity_refresh=20), Path("t.toml"))
+        cfg = CharacterConfig("T", "testworld", Policy(goals=[], pickup=False, entity_refresh=20), Path("t.toml"))
         r = runner.Runner(cfg, metrics.wrap(server), 1, stop, out=lambda _: None,
                           knowledge=KnowledgeBase.empty("testworld"), acceptance=metrics)
         self.addCleanup(r.trace.close)
@@ -303,7 +303,7 @@ class RunnerActedOpTest(TestWorldCase):
 
         stop = threading.Event()
         server = TestWorldServer(stop, 10)
-        cfg = CharacterConfig("T", "testworld", Policy(goals=["hold"], pickup=False), Path("t.toml"))
+        cfg = CharacterConfig("T", "testworld", Policy(goals=[], pickup=False), Path("t.toml"))
         r = runner.Runner(cfg, server, 1, stop, out=lambda _: None, acceptance=Hooks())
         self.addCleanup(r.trace.close)
         r.world = WorldModel(character_id=1, map_id=MAP, pos=START, perception=25, tick=100)

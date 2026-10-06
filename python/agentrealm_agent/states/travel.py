@@ -63,8 +63,10 @@ class TravelState(State):
         goal = f"travel:{dest.label}"
         if m.goal == goal and m.path and m.path[0] in world.occupied() and not nav_stuck.awaiting_break(m, world, goal):
             # The route's first step is taken by an occupant: hold while its
-            # window runs (A15), rather than let the safe default step away and back.
-            return StateOutcome(None, f"{goal}: way taken, waiting", state=self.name, wait=True)
+            # window runs (A15), rather than let the safe default step away and
+            # back. A wait is not progress: the op's stall clock runs, so a
+            # permanent occupant cannot pin the stack.
+            return StateOutcome(None, f"{goal}: way taken, waiting", state=self.name, wait=True, progress=False)
         # Stuck at step 2: Break, below, opens the way this decision.
         return StateOutcome(None, f"{goal} blocked", state=self.name)
 

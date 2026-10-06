@@ -20,6 +20,7 @@ each class in this package and in ``docs/CHARACTER_AND_STATES.md``.
 from __future__ import annotations
 
 from ..navigation import oscillation
+from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import end_decision
 from ..pathing import note_goto_reached
 from ..plan import OP_STATE, PLAN_STALL_SECONDS, Plan
@@ -158,13 +159,36 @@ def _note_op_progress(plan: Plan, world: WorldModel, m: Memory, op: dict, owner:
         return
     if out.state != owner and any(out.state == s.name for s in REFLEXES):
         return
-    if out.state == BreakState.name != owner and out.intents:
-        # Break opening the block the owner's stuck walk nominated (A15) is
-        # that walk's progress: the op is not dropped mid-break.
-        plan.stalled_since_tick = None
+    if out.state == BreakState.name != owner and out.intents and _breaking_for(owner, m, world):
+        # Break opening the block the owner's own stuck walk nominated (A15):
+        # a step toward it is the walk's progress, and a Use try leaves the
+        # clock alone, so the op is not dropped mid-break.
+        if out.progress:
+            plan.stalled_since_tick = None
         return
     if plan.note_stalled(world.tick):
         plan.drop_current(f"{owner}: no progress for {PLAN_STALL_SECONDS}s", memory=m)
+
+
+# The ``Memory.goal`` labels each executor's walks carry, so dispatch can
+# tell Break working the top op's own stuck walk from any other stuck walk
+# (the safe default's ``explore`` is never the op's).
+OWNER_WALKS: dict[str, tuple[str, ...]] = {
+    "Travel": ("travel:",),
+    "Explore": ("explore_area",),
+    "Level": ("level:",),
+    "Investigate": ("investigate",),
+    "Loot": ("loot",),
+    "Boss": ("boss:",),
+}
+
+
+def _breaking_for(owner: str | None, m: Memory, world: WorldModel) -> bool:
+    """Break is at stuck step 2 of a walk that belongs to ``owner``'s op."""
+    att = nav_stuck.active(m, world)
+    if owner is None or att is None or att.level != nav_stuck.BREAK:
+        return False
+    return att.goal.startswith(OWNER_WALKS.get(owner, ()))
 
 
 def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> StateOutcome:

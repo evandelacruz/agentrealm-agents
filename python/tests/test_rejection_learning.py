@@ -96,7 +96,7 @@ class RejectionLearningTest(unittest.TestCase):
         self.assertEqual(navigation_avoid_costly(m.nav, None, 1, until)[1], set(), "expired")
         self.assertIn((1, (1, 0)), m.nav.occupant_until, "reading does not prune")
         w.tick = until
-        decide(w, m, scripted(goals=["hold"]), random.Random(0))
+        decide(w, m, scripted(goals=[]), random.Random(0))
         self.assertEqual(m.nav.occupant_until, {}, "a decision prunes expired costs")
 
     def test_conflict_lost_does_not_block_the_tile(self):

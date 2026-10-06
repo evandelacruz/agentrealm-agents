@@ -125,10 +125,10 @@ class ReflexTest(unittest.TestCase):
                 self.assertTrue(check(d.intent), d.intent)
 
     def test_no_plan_op_runs_the_safe_default(self):
-        # ``hold`` makes no op: with an empty stack the safe default explores
+        # No goals make no op: with an empty stack the safe default explores
         # safe ground, so a decision is never idle.
         w = world(["..."])
-        d = planned(w, Memory(), scripted(goals=["hold"]), random.Random(0))
+        d = planned(w, Memory(), scripted(goals=[]), random.Random(0))
         self.assertEqual(d.intent["verb"], "SetPosition", d.reason)
 
     def test_replanning_keeps_off_a_rejected_tile(self):
@@ -137,7 +137,7 @@ class ReflexTest(unittest.TestCase):
         cases = [
             ("goto", scripted(goals=["goto"], goto=(2, 0), pickup=False)),
             ("explore", scripted(goals=["explore"], pickup=False)),
-            ("wander", scripted(goals=["wander"], pickup=False)),
+            ("safe default", scripted(goals=[], pickup=False)),
         ]
         for name, pol in cases:
             with self.subTest(name):
@@ -187,16 +187,16 @@ class DeathChestTest(unittest.TestCase):
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
 
         m = Memory()
-        d = decide(w, m, scripted(goals=["hold"]), random.Random(0))
+        d = decide(w, m, scripted(goals=[]), random.Random(0))
         self.assertEqual((d.intent["verb"], d.intent["x"]), ("SetPosition", 3))
 
         # Next to it, the contents are not known until a snapshot lists them.
         w.pos = (1, 0)
-        self.assertIsNone(decide(w, Memory(), scripted(goals=["hold"]), random.Random(0)).intent)
+        self.assertIsNone(decide(w, Memory(), scripted(goals=[]), random.Random(0)).intent)
         w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": [
             {"id": 80, "x": 0, "y": 0, "contents": [{"id": 1321, "supply_subtype_code": "bronze_sword"}]},
         ]}}})
-        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
+        d = decide(w, Memory(), scripted(goals=[]), random.Random(0))
         self.assertEqual(d.intent, {"verb": "WithdrawFromChest", "chest_id": 80})
 
         # Emptied, a dropped chest leaves the world (B116): gone from the

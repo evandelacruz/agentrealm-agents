@@ -28,7 +28,7 @@ Every state implements three methods on the `State` base class (`python/agentrea
 ### `StateOutcome`
 
 ```python
-StateOutcome(intents, reason, state="MyState", wait=False, reflex=False, paced=False)
+StateOutcome(intents, reason, state="MyState", wait=False, reflex=False, paced=False, progress=True)
 ```
 
 - **`intents`** — list of intent dicts for this window's `POST tick` (see `states/intents.py`). `None` means send nothing.
@@ -36,6 +36,7 @@ StateOutcome(intents, reason, state="MyState", wait=False, reflex=False, paced=F
 - **`wait=True`** — intentional hold: no intent, but the round is **not** passed down (see fall-through below).
 - **`reflex=True`** — this intent preempts a movement queue (same as reflex rules in PLAN.md).
 - **`paced=True`** — intents are already a full paced queue (Fight); the runner sends them as-is.
+- **`progress`** (executors) — whether this outcome moves the plan's top op forward. Dispatch resets the op's stall clock only on progress; an op with none for 30 s is dropped (A34). Set `progress=False` on a try that has not done the job yet (a `Use` or `Compose` that may be refused). An executor that returns `wait=True` must also set `progress=False`, unless the wait itself is the job (the plan's `wait` op, Boss standing on its door): otherwise a wait that never ends pins the stack.
 
 ### Fall-through (A44)
 

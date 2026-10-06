@@ -130,7 +130,7 @@ class LootPriorityTest(unittest.TestCase):
     def test_priced_shop_gem_is_ignored(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 5, (1, 2), "gem", gem_price=3)]
-        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
+        d = decide(w, Memory(), scripted(goals=[]), random.Random(0))
         self.assertTrue(no_loot_intent([d.intent] if d.intent else None), d.reason)
 
     def test_full_pack_takes_gem_before_dropping_for_gear(self):
@@ -143,13 +143,13 @@ class LootPriorityTest(unittest.TestCase):
     def test_priced_supply_is_shop_not_loot(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 5, (1, 2), "potion", gem_price=2)]
-        d = decide(w, Memory(), scripted(goals=["hold"]), random.Random(0))
+        d = decide(w, Memory(), scripted(goals=[]), random.Random(0))
         self.assertTrue(no_loot_intent([d.intent] if d.intent else None), d.reason)
 
     def test_pickup_off_leaves_supplies(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 8, (1, 2), "apple")]
-        out = dispatch(w, ctx(scripted(pickup=False, goals=["hold"])))
+        out = dispatch(w, ctx(scripted(pickup=False, goals=[])))
         self.assertNotEqual(out.state, "Pickup")
         self.assertNotIn({"verb": "Take", "supply_id": 8}, out.intents or [])
 
@@ -179,7 +179,7 @@ class FullPackTest(unittest.TestCase):
         full_inventory(w, junk="pocket_knife")
         self.assertIsNone(worst_droppable(w, {}))
         w.entities = [Entity("supply", 99, (1, 2), "bronze_sword")]
-        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
+        out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
         self.assertNotEqual(out.state, "Pickup")
         self.assertTrue(no_loot_intent(out.intents), out.intents)
 
@@ -212,7 +212,7 @@ class StallTest(unittest.TestCase):
     def test_chest_with_unread_contents_is_not_a_target(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("chest", 50, (2, 1))]
-        out = dispatch(w, ctx(scripted(goals=["hold"])))
+        out = dispatch(w, ctx(scripted(goals=[])))
         self.assertNotEqual(out.state, "Pickup")
         self.assertTrue(no_loot_intent(out.intents), out.intents)
 
@@ -257,7 +257,7 @@ class ChestTest(unittest.TestCase):
         full_inventory(w)
         w.entities = [Entity("chest", 50, (2, 1))]
         w.chest_contents[50] = [InventorySupply(71, "torch")]
-        out = dispatch(w, ctx(scripted(goals=["hold"])))
+        out = dispatch(w, ctx(scripted(goals=[])))
         self.assertNotEqual(out.state, "Pickup")
         self.assertTrue(no_loot_intent(out.intents), out.intents)
 
@@ -265,7 +265,7 @@ class ChestTest(unittest.TestCase):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("chest", 50, (2, 1))]
         w.chest_contents[50] = []
-        out = dispatch(w, ctx(scripted(goals=["hold"])))
+        out = dispatch(w, ctx(scripted(goals=[])))
         self.assertNotEqual(out.state, "Pickup")
 
     def test_death_chest_is_left_to_recover(self):
@@ -274,7 +274,7 @@ class ChestTest(unittest.TestCase):
         w.death_chest = (7, (2, 1), 50)
         w.entities = [Entity("chest", 50, (2, 1))]
         w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
-        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
+        out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
         self.assertNotIn(out.state, ("Pickup", "Recover"))
         self.assertTrue(no_loot_intent(out.intents), out.intents)
 
@@ -284,7 +284,7 @@ class ChestTest(unittest.TestCase):
         w.entities = [Entity("chest", 50, (2, 1)), Entity("chest", 51, (0, 1))]
         w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
         w.chest_contents[51] = [InventorySupply(72, "apple")]
-        out = dispatch(w, ctx(scripted(goals=["hold"]), kb=priced(bronze_sword=15)))
+        out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
         self.assertEqual(out.state, "Pickup")
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 51, "supply_ids": [72]}])
 
@@ -421,7 +421,7 @@ class RunnerRejectionTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        cfg = CharacterConfig("T", "sandbox", scripted(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", scripted(goals=[]), Path("t.toml"))
         self.r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
         self.addCleanup(self.r.trace.close)
         self.r.world = world(["..."], at=(1, 0))
@@ -472,7 +472,7 @@ class RunnerLootLearningTest(unittest.TestCase):
             "events_by_tick": events or [],
             "observation": {"version": 2, "delta": {"lives": lives_after}},
         }
-        cfg = CharacterConfig("T", "sandbox", scripted(goals=["hold"]), Path("t.toml"))
+        cfg = CharacterConfig("T", "sandbox", scripted(goals=[]), Path("t.toml"))
         r = Runner(cfg, FakeClient([response]), 1, threading.Event(), out=lambda _: None, knowledge=self.kb)
         self.addCleanup(r.trace.close)
         r.world = world(["....."], at=(1, 0))

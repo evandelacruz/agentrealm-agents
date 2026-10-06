@@ -145,7 +145,7 @@ class LevelStateTest(unittest.TestCase):
         w.apply_position({"map_id": 8, "x": 1, "y": 1, "level": 1})
         plan = level_plan()
         ctx = PlayContext(
-            Memory(), Policy(kind="scripted", goals=["hold"]), random.Random(0),
+            Memory(), Policy(kind="scripted", goals=[]), random.Random(0),
             knowledge=KnowledgeBase.empty("sandbox"), plan=plan,
         )
         out = dispatch(w, ctx)
@@ -164,7 +164,7 @@ class LevelStateTest(unittest.TestCase):
         for p in w.view.frontier():
             m.nav_stuck.backoff_until[nav_stuck.goal_key("explore", 8, p)] = until
         ctx = PlayContext(
-            m, Policy(kind="scripted", goals=["hold"]), random.Random(0),
+            m, Policy(kind="scripted", goals=[]), random.Random(0),
             knowledge=KnowledgeBase.empty("sandbox"), plan=level_plan(),
         )
         out = dispatch(w, ctx)

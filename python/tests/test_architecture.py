@@ -15,7 +15,7 @@ from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.plan import Plan
+from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
 from agentrealm_agent.states import PlayContext, StateOutcome, dispatch
 from agentrealm_agent.world import Entity, WorldModel
 
@@ -151,6 +151,21 @@ class PlanOpTest(unittest.TestCase):
             self.assertTrue(o.intents, f"idle decision: {o.state}: {o.reason}")
             self.assertEqual(o.state, SAFE_DEFAULT)
         self.assertIsNone(plan.current())
+
+    def test_a_permanent_occupant_drops_the_travel_op_by_the_stall_bound(self):
+        # Travel holds while an NPC stands on its route's first step, but the
+        # hold is not progress: the op is dropped once it has stalled for
+        # PLAN_STALL_SECONDS, then the safe default has the move.
+        w = field_world(width=9, height=3, at=(1, 1), fog=False)
+        w.entities = [Entity("npc", 61, (2, 1), "villager")]
+        plan = travel(6, 1)
+        plan.tick_hz = 1
+        outs = play(w, plan, decisions=12, hostile=["character"])
+        self.assertTrue(outs[0].wait and outs[0].state == "Travel", outs[0].reason)
+        held = [o for o in outs if o.state == "Travel"]
+        self.assertTrue(all(o.wait and not o.intents for o in held))
+        self.assertIsNone(plan.current(), "dropped")
+        self.assertLessEqual((len(held) - 1) * 4, PLAN_STALL_SECONDS + 4)  # 4 ticks a decision
 
     def test_wait_says_why_and_holds_the_round(self):
         w = field_world()

@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import random
 import unittest
+
+from agentrealm_agent.executor.constants import DEFAULT_TICK_RATE_HZ
+from agentrealm_agent.plan import PLAN_STALL_SECONDS
 from unittest import mock
 
 from agentrealm_agent.brain import Memory, decide
@@ -249,7 +252,6 @@ class NavigationFixtureTest(unittest.TestCase):
         (grids.FOG_DEAD_END, "reached", None, 35),
         (grids.HEDGE_LINE, "abandoned", "no_path", 20),
         (grids.WATER_ENCLOSURE, "abandoned", "no_path", nav_stuck.REVEAL_MOVE_BUDGET),
-        (grids.NPC_CORRIDOR, "abandoned", "time", 800),
         (grids.FOG_DEAD_END_CLOSED, "abandoned", "no_path", 12),
     ]
 
@@ -285,13 +287,20 @@ class NavigationFixtureTest(unittest.TestCase):
         self.assertEqual(r.outcome, "reached", sc.name)
         self.assertLessEqual(r.moves, 80, sc.name)
 
-    def test_npc_corridor_waits_before_giving_up(self):
+    def test_npc_corridor_drops_the_op_after_the_stall_bound(self):
+        # An NPC standing in the corridor for good: Travel holds instead of
+        # pacing, but the hold is not progress, so the op is dropped (and
+        # reported) once it has stalled PLAN_STALL_SECONDS (A34, A61).
         sc = grids.NPC_CORRIDOR
-        r = sim.run(sc, sim.scripted(goals=["goto"], goto=sc.goal))
-        self.assertGreaterEqual(r.world.tick, 2 * nav_stuck.PROGRESS_TICK_LIMIT, "one window per level")
-        self.assertIn("no_frontier", r.signal["escalation"])
-        self.assertEqual(r.signal["escalation"][-1], "no_path", "alt route after reveal")
-        self.assertIn("time", r.signal["escalation"])
+        r = sim.run(sc, sim.scripted(goals=["goto"], goto=sc.goal), max_decisions=120, stop_on_signal=False)
+        failed = [s for s in r.memory.strategist_signals if s["trigger"] == "goal_failed"]
+        self.assertEqual(len(failed), 1, r.memory.strategist_signals)
+        self.assertIn("no progress", failed[0]["reason"])
+        held = [row for row in r.trace if row["reason"].startswith(f"{WALK}: way taken")]
+        self.assertTrue(held, "Travel held the round while the way was taken")
+        self.assertLessEqual(held[-1]["tick"] - held[0]["tick"], PLAN_STALL_SECONDS * DEFAULT_TICK_RATE_HZ)
+        during = [row for row in r.trace if held[0]["tick"] <= row["tick"] <= held[-1]["tick"]]
+        self.assertTrue(all(row["intent"] is None for row in during), "no pacing while the way was taken")
 
 
 class TravelBackoffTest(unittest.TestCase):
@@ -316,7 +325,7 @@ class RecoverStuckTest(unittest.TestCase):
         w = world(["######", "#.#..#", "######"], at=(3, 1))
         died_at(w, 1, 1)
         apply_zone(w, 7, 1, 1, {"safe": True, "brightness": 1})
-        c = ctx(sim.scripted(goals=["hold"], pickup=True))
+        c = ctx(sim.scripted(goals=[], pickup=True))
         out = dispatch(w, c)
         self.assertEqual(out.yielded, ["Recover: chest not reachable"], "Recover yields")
         self.assertEqual(out.state, "Explore", "the safe default moves instead")
@@ -329,7 +338,7 @@ class RecoverStuckTest(unittest.TestCase):
 class LevelStuckTest(unittest.TestCase):
     def test_walled_door_escalates_then_backs_off(self):
         sc = grids.LEVEL_WALLED_DOOR
-        policy = sim.scripted(goals=["hold"])
+        policy = sim.scripted(goals=[])
         plan = Plan([{"op": "enter_level", "x": sc.goal[0], "y": sc.goal[1]}], dict(PARAM_DEFAULTS))
         r = run_plan(sc, policy, plan)
         self.assertEqual(r.outcome, "abandoned")

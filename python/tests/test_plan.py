@@ -265,7 +265,7 @@ class BuiltinPlanTest(unittest.TestCase):
     def test_mirrors_policy_goals_without_an_extra_entrance(self):
         self.assertEqual([o["op"] for o in builtin_goals(Policy(kind="scripted", goals=["explore"]))],
                          ["explore_area"])
-        self.assertEqual(builtin_goals(Policy(kind="scripted", goals=["wander"])), [])
+        self.assertEqual(builtin_goals(Policy(kind="scripted", goals=[])), [])
         doors = builtin_goals(Policy(kind="scripted", goals=["doors"]))
         self.assertEqual([(o["op"], o["to"]) for o in doors], [("travel", "entrance")])
 

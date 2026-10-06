@@ -127,7 +127,7 @@ class TriggerTest(unittest.TestCase):
 
     def test_died_event_queues_death(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "STATE_DIR", Path(tmp)):
-            cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=["hold"]), Path("t.toml"))
+            cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[]), Path("t.toml"))
             runner = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
             self.addCleanup(runner.trace.close)
             runner.on_events([{"kind": "Died", "cause": "lava", "chest_id": 4}])
@@ -239,7 +239,7 @@ class RunnerParamsTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
         patch.start()
         self.addCleanup(patch.stop)
-        policy = Policy(kind="scripted", goals=["hold"], on_hostile="flee", hostile=["npc"], hostile_range=2)
+        policy = Policy(kind="scripted", goals=[], on_hostile="flee", hostile=["npc"], hostile_range=2)
         cfg = CharacterConfig("T", "sandbox", policy, Path("t.toml"))
         r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None)
         self.addCleanup(r.trace.close)

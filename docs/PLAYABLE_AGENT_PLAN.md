@@ -355,7 +355,7 @@ Hard constraints are never free text. `never_attack` lists what may not be attac
 | `curiosity` | 0.2 | 0 to 1 | set | Share of ticks `Investigate` and `Break` may use (see Curiosity) |
 | `lives_floor` | 3 | ≥ 1, integer | raise | At or below this many lives, fight only measured weak hostiles and stay inside explored ground |
 | `risk` | 0.5 | 0 to 1 | lower | 0 cautious to 1 bold; scales the fight margin, retreat threshold, untested types and level entry (see Health and lives) |
-| `potion_reserve` | 2 | ≥ 0, integer | raise | Potions to keep; `Shop` restocks below it before leaving town |
+| `potion_reserve` | 2 | ≥ 0, integer | raise | Potions to keep. Planner-only since A61: the planner adds a `buy` below it; no state restocks on its own |
 
 A directives value out of range is ignored and logged, and the default stays.
 

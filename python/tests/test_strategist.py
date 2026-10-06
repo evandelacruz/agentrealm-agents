@@ -24,6 +24,7 @@ from agentrealm_agent.pathing import path_owned_by, plan_op_goal
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.strategist import (
+    repeats_pinned,
     BACKOFF_BASE_S,
     BACKOFF_CAP_S,
     DEFAULT_ANTHROPIC_MODEL,
@@ -389,6 +390,29 @@ class AnswerTest(unittest.TestCase):
         s, r = make(FakeLLM({"goals": [{**travel, "why": "the target"}, WAIT_ANSWER["goals"][0]]})), fake_runner(goals=["travel:point:7:5:0"])
         round_trip(s, r)
         self.assertEqual([g["op"] for g in r.plan.goals], ["travel", "wait"])
+
+    def test_a_gather_under_the_pinned_one_that_only_moves_x_y_is_unchanged(self):
+        """A63 run 1: the planner re-sent its own gather_gems with a new x, y each call."""
+        for count in (5, 3):
+            reply = {"goals": [{"op": "gather_gems", "count": count, "x": 32, "y": 48, "why": "sample here"}]}
+            s, r = make(FakeLLM(reply)), fake_runner(goals=["gather_gems:5"])
+            before = r.plan
+            round_trip(s, r)
+            self.assertIs(r.plan, before, count)
+            self.assertEqual(logged_events(r), ["ask", "unchanged"], count)
+
+    def test_a_gather_with_a_higher_count_than_the_pinned_one_is_kept(self):
+        more = {"op": "gather_gems", "count": 9, "x": 32, "y": 48}
+        s, r = make(FakeLLM({"goals": [more]})), fake_runner(goals=["gather_gems:5"])
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals, [{"op": "gather_gems", "count": 5}, more])
+        self.assertEqual(logged_events(r), ["ask", "applied"])
+
+    def test_repeats_pinned_needs_the_same_op(self):
+        pinned = [{"op": "travel", "to": "point", "x": 5, "y": 0}]
+        self.assertTrue(repeats_pinned({**pinned[0], "why": "again"}, pinned))
+        self.assertFalse(repeats_pinned({"op": "travel", "to": "point", "x": 6, "y": 0}, pinned))
+        self.assertFalse(repeats_pinned({"op": "gather_gems", "count": 1}, pinned))
 
 
 class ProgressTest(unittest.TestCase):

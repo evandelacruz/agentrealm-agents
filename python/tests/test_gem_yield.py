@@ -212,9 +212,25 @@ class RegionSummaryTest(unittest.TestCase):
         record_cut(k, MAP, (33, 1), "bush", 1, True)
         record_cut(k, MAP, (200, 200), "bush", 1, True)  # too far to be nearby
         s = gem_yield.summary(world(at=(2, 2)), k)
-        self.assertEqual(s["here"], {"x": 0, "y": 0})
+        self.assertEqual(s["here"], {"x": 0, "y": 0, "cuts": BARREN_MIN_CUTS, "gems": 0})
         self.assertEqual([(b["x"], b["yield"]) for b in s["best"]], [(32, 1.0), (16, 0.25)])
         self.assertEqual(s["barren"], [{"x": 0, "y": 0, "cuts": BARREN_MIN_CUTS}])
+
+    def test_summary_names_here_only_once_cut_there(self):
+        """A63 run 1: an unsampled ``here`` invited the planner to name it on every call."""
+        k = kb()
+        record_cut(k, MAP, (17, 1), "grass", 1, True)
+        self.assertNotIn("here", gem_yield.summary(world(at=(2, 2)), k))
+        record_cut(k, MAP, (2, 2), "grass", 2, False)
+        self.assertEqual(gem_yield.summary(world(at=(2, 2)), k)["here"], {"x": 0, "y": 0, "cuts": 1, "gems": 0})
+
+    def test_exhausted_cells_are_the_ones_cut_before_regrowth(self):
+        k = kb()
+        record_cut(k, MAP, (1, 1), "grass", 100, False)
+        record_cut(k, MAP, (2, 2), "bush", 100 + gem_yield.REGROW_TICKS, True)
+        self.assertEqual(gem_yield.exhausted_cells(k, MAP, 100 + gem_yield.REGROW_TICKS), {(2, 2)})
+        self.assertEqual(gem_yield.exhausted_cells(k, MAP, 101), {(1, 1), (2, 2)})
+        self.assertEqual(gem_yield.exhausted_cells(None, MAP, 101), set())
 
     def test_state_includes_gem_yield(self):
         k = kb()
@@ -229,6 +245,30 @@ class RegionSummaryTest(unittest.TestCase):
         state = messages[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
         self.assertIn('gem_yield={"barren": [], "best": [{"cuts": 1, "gems": 1, "x": 0, "y": 0, "yield": 1.0}]', state)
         self.assertIn("gem_yield", messages[0]["content"])
+
+    def test_state_shows_gather_status_while_gather_gems_is_on_top(self):
+        def state(goals, status):
+            messages = build_prompt(
+                triggers=[],
+                w=world(),
+                plan=Plan(goals, dict(PARAM_DEFAULTS)),
+                directives=Directives(params=dict(PARAM_DEFAULTS)),
+                knowledge=kb(),
+                gather_status=status,
+            )
+            return messages[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
+
+        gather = [{"op": "gather_gems", "count": 5}]
+        self.assertIn('gather_status="no cuttable cell in view"', state(gather, "no cuttable cell in view"))
+        self.assertNotIn("gather_status", state(gather, ""))
+        self.assertNotIn("gather_status", state([{"op": "buy", "code": "torch"}], "cutting"))
+
+    def test_prompt_says_x_y_does_not_move_the_character(self):
+        system = build_prompt(
+            triggers=[], w=world(), plan=Plan([], dict(PARAM_DEFAULTS)), directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=kb()
+        )[0]["content"]
+        self.assertIn("it does not move the character", system)
+        self.assertIn("never re-send an otherwise unchanged gather_gems just to change x, y", system)
 
     def test_state_without_knowledge_has_empty_gem_yield(self):
         kb_fake = SimpleNamespace(lock=threading.Lock(), clues=[], extra={})
@@ -248,7 +288,8 @@ class GatherSkipsBarrenTest(unittest.TestCase):
     def setUp(self):
         self.k = kb()
         for i in range(BARREN_MIN_CUTS):
-            record_cut(self.k, MAP, (1, 1), "grass", i, False)
+            # Long ago, so the cells have grown back: only the barren mark keeps them.
+            record_cut(self.k, MAP, (5, 5), "grass", -gem_yield.REGROW_TICKS - i, False)
 
     def test_barren_grass_is_not_cut(self):
         out = gather_outcome(safe_world(), Memory(), Policy(on_hostile="ignore"), knowledge=self.k, op={"op": "gather_gems", "count": 5})
@@ -258,6 +299,14 @@ class GatherSkipsBarrenTest(unittest.TestCase):
         op = {"op": "gather_gems", "count": 5, "x": 3, "y": 3}
         out = gather_outcome(safe_world(), Memory(), Policy(on_hostile="ignore"), knowledge=self.k, op=op)
         self.assertEqual(out.reason, "cut grass")
+
+    def test_a_cell_cut_before_it_grew_back_is_not_cut_again(self):
+        k = kb()
+        record_cut(k, MAP, (1, 1), "grass", 90, False)
+        m = Memory()
+        out = gather_outcome(safe_world(), m, Policy(on_hostile="ignore"), knowledge=k, op={"op": "gather_gems", "count": 5})
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertNotEqual(m.gather_target[1], (1, 1))
 
     def test_unsampled_region_is_still_cut(self):
         out = gather_outcome(safe_world(), Memory(), Policy(on_hostile="ignore"), knowledge=kb(), op={"op": "gather_gems", "count": 5})

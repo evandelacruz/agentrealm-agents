@@ -21,7 +21,8 @@ Stored in the world knowledge base under ``kb.extra["gem_yield"]``::
 
 ``cuts`` keeps the latest ``MAX_RECORDS`` per map; ``regions`` keeps every
 total. The planner's State shows :func:`summary`; Gather skips barren
-regions (:func:`barren_regions`, read once per decision).
+regions (:func:`barren_regions`) and cells it cut within ``REGROW_TICKS``
+(:func:`exhausted_cells`), both read once per decision.
 """
 
 from __future__ import annotations
@@ -41,6 +42,10 @@ REGION_SIZE = 16  # blocks per region side
 BARREN_MIN_CUTS = 30
 GEM_WINDOW_TICKS = 5  # a gem that shows up later than this is not the cut's
 MAX_RECORDS = 500  # cut records kept per map; region totals are kept in full
+# A cut block shows its destroyed type until it grows back; a cut bush took
+# 600 ticks (GAME_NOTES.md Movement and blocks). A cell cut more recently than this
+# is exhausted, whatever a stale terrain read still says.
+REGROW_TICKS = 600
 CUT_BLOCKS = BREAKABLE | {"grass"}  # blocks a cut or break is recorded on
 GATHER_BLOCKS = frozenset({"grass", "bush"})  # the cuts the region yield counts
 SUMMARY_RADIUS = 3  # regions this far (Chebyshev, in regions) from ours are "nearby"
@@ -215,6 +220,18 @@ def barren_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[in
     return {r for r in map(_parse, keys) if r is not None}
 
 
+def exhausted_cells(kb: KnowledgeBase | None, map_id: int | None, tick: int) -> set[Pos]:
+    """Cells of one map our own cuts left bare less than ``REGROW_TICKS`` ago."""
+    if kb is None or map_id is None:
+        return set()
+    with kb.lock:
+        root = kb.extra.get(KEY)
+        row = root.get(str(map_id)) if isinstance(root, dict) else None
+        cuts = row.get("cuts") if isinstance(row, dict) else None
+        recent = [c for c in cuts if isinstance(c, dict) and tick - int(c.get("tick", 0)) < REGROW_TICKS] if isinstance(cuts, list) else []
+    return {(int(c["x"]), int(c["y"])) for c in recent if "x" in c and "y" in c}
+
+
 def _parse(key: str) -> tuple[int, int] | None:
     try:
         rx, ry = (int(p) for p in key.split(",", 1))
@@ -227,28 +244,33 @@ def summary(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, Any]:
     """The planner's ``gem_yield``: the best sampled regions near us and the barren ones.
 
     A region is named by its corner block ``x, y`` (``REGION_SIZE`` on a side),
-    so a ``gather_gems`` op can name it back.
+    so a ``gather_gems`` op can name it back. ``here`` is the region we stand
+    in, shown only once our cuts sampled it: an unsampled region has nothing
+    to name.
     """
     if w.pos is None or w.map_id is None:
         return {}
     here = region_of(w.pos)
     best: list[tuple[float, int, dict[str, Any]]] = []
     dry: list[dict[str, int]] = []
+    sampled_here: dict[str, int] | None = None
     for key, region in regions(kb, w.map_id).items():
         r = _parse(key)
         if r is None or chebyshev(r, here) > SUMMARY_RADIUS:
             continue
         cuts, gems = int(region.get("cuts", 0)), int(region.get("gems", 0))
         corner = {"x": r[0] * REGION_SIZE, "y": r[1] * REGION_SIZE}
+        if r == here and cuts:
+            sampled_here = {**corner, "cuts": cuts, "gems": gems}
         if barren(region):
             dry.append({**corner, "cuts": cuts})
         elif cuts and gems:
             entry = {**corner, "cuts": cuts, "gems": gems, "yield": round(gems / cuts, 2)}
             best.append((gems / cuts, -chebyshev(r, here), entry))
     best.sort(key=lambda t: (t[0], t[1]), reverse=True)
-    return {
-        "region_size": REGION_SIZE,
-        "here": {"x": here[0] * REGION_SIZE, "y": here[1] * REGION_SIZE},
-        "best": [e for _, _, e in best[:SUMMARY_BEST]],
-        "barren": sorted(dry, key=lambda d: (d["x"], d["y"])),
-    }
+    out: dict[str, Any] = {"region_size": REGION_SIZE}
+    if sampled_here is not None:
+        out["here"] = sampled_here
+    out["best"] = [e for _, _, e in best[:SUMMARY_BEST]]
+    out["barren"] = sorted(dry, key=lambda d: (d["x"], d["y"]))
+    return out

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import tempfile
 import threading
+import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -370,6 +372,14 @@ class TownHandoffTest(unittest.TestCase):
         d = load_directives(self.path)
         self.assertEqual(d.goals, ["gather \U0001F48E", "travel:town"])
         self.assertEqual(d.instructions, "stay safe \U0001F6E1")
+
+    def test_send_to_town_escapes_control_characters(self):
+        text = "a\x7fb\x00c\x1fd\te\nf\\g\"h"
+        self.path.write_text(f'goals = ["x"]\ninstructions = {json.dumps(text)}\n', encoding="utf-8")
+        self.smoke.send_to_town(self.path)
+        self.assertEqual(load_directives(self.path).instructions, text)
+        for ch in [chr(c) for c in range(0x20)] + ["\x7f"]:
+            self.assertEqual(tomllib.loads("x = " + self.smoke.toml_value(ch))["x"], ch)
 
     def test_send_to_town_with_no_file_writes_defaults(self):
         self.smoke.send_to_town(self.path)

@@ -39,20 +39,37 @@ DEFAULT_BASE = "https://api.agentrealm.gg"
 TOWN_GOAL = "travel:town"
 
 
-def directives_toml(d: Directives) -> str:
-    """``d`` as a directives file. JSON strings and numbers are valid TOML values.
+def toml_value(v) -> str:
+    """``v`` as a TOML value: strings and string lists escaped by hand, numbers and bools as JSON.
 
-    ``ensure_ascii=False`` keeps non-BMP characters literal; their JSON surrogate
-    pair escapes are not valid TOML.
+    Control characters and DEL become ``\\uXXXX``; everything else, non-BMP
+    characters included, stays literal (JSON's surrogate pair escapes are not TOML).
     """
+    if isinstance(v, str):
+        out = []
+        for ch in v:
+            if ch in '"\\':
+                out.append("\\" + ch)
+            elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+                out.append(f"\\u{ord(ch):04x}")
+            else:
+                out.append(ch)
+        return '"' + "".join(out) + '"'
+    if isinstance(v, list):
+        return "[" + ", ".join(toml_value(x) for x in v) + "]"
+    return json.dumps(v)
+
+
+def directives_toml(d: Directives) -> str:
+    """``d`` as a directives file."""
     lines = ["[params]"]
-    lines += [f"{k} = {json.dumps(v, ensure_ascii=False)}" for k, v in d.params.items()]
+    lines += [f"{k} = {toml_value(v)}" for k, v in d.params.items()]
     head = [
-        f"never_attack = {json.dumps(d.never_attack, ensure_ascii=False)}",
-        f"goals = {json.dumps(d.goals, ensure_ascii=False)}",
+        f"never_attack = {toml_value(d.never_attack)}",
+        f"goals = {toml_value(d.goals)}",
     ]
     if d.instructions:
-        head.append(f"instructions = {json.dumps(d.instructions, ensure_ascii=False)}")
+        head.append(f"instructions = {toml_value(d.instructions)}")
     return "\n".join(head + [""] + lines) + "\n"
 
 

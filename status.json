@@ -25,7 +25,7 @@
 
   "A8": {"state": "done"},
 
-  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing."},
+  "A9": {"state": "partial", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing.", "remaining": "A23 run 2: with hostile = [\"npc\"], Retreat and Flee fire on townsfolk (rumor_teller, apothecary, salvager): combat_group takes every NPC in hostile_range, and would_lose counts each as an unmeasured threat."},
 
   "A10": {"state": "done", "note": "Live Walk run fix: Heal rests in the safe zone instead of walking out mid-sample; once regen is no it stops sampling and raises heal_supplies for the planner."},
 
@@ -75,7 +75,7 @@
 
   "A26": {"state": "done"},
 
-  "A27": {"state": "done"},
+  "A27": {"state": "partial", "remaining": "A23 run 2 (at 8966752): ring zone reads starved hunt_probes; #126 now skips terrain-safe cells, so what stays open is the ring cells no terrain read has covered yet still outranking hunt_probes, and probe_until (5 s) lapsing between slow decisions (A64). Confirm with a rerun."},
 
   "A28": {"state": "done"},
 
@@ -129,5 +129,7 @@
 
   "A53": {"state": "done"},
 
-  "A63": {"state": "done", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield, gather_status and gather_run; Gather skips barren regions unless the op names one. Run 1 made no cut (Gather bar was safe zones only); run 2 cut one town cell 168 times with no effect. Both fixed (field cells first, no-effect cells held out, 3 no-effect cuts mark a region or safe zone uncuttable); rerun pending."}
+  "A63": {"state": "done", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield, gather_status and gather_run; Gather skips barren regions unless the op names one. Run 1 made no cut (Gather bar was safe zones only); run 2 cut one town cell 168 times with no effect. Both fixed (field cells first, no-effect cells held out, 3 no-effect cuts mark a region or safe zone uncuttable); rerun pending."},
+
+  "A64": {"state": "open", "note": "A23 run 2: decisions blocked the loop 5-17 s (nearest_target A* per target, danger() per hostile, full _decide in reflex_while_held)."}
 }

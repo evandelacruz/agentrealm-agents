@@ -10,7 +10,6 @@ from __future__ import annotations
 from ..navigation import oscillation
 from ..navigation.rejection import end_decision
 from ..pathing import note_goto_reached
-from ..survival import threatened
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
 from .downed import DownedState
@@ -21,7 +20,7 @@ from .flee import FleeState
 from .gather import GatherState
 from .heal import HealState
 from .idle import IdleState
-from .boss import BossState, boss_fight_on, sync_boss
+from .boss import BossState, sync_boss
 from .level import LevelState
 from .break_state import BreakState, OddBreakState
 from .investigate import InvestigateState
@@ -43,10 +42,7 @@ from .travel import TravelState
 # (A38) and Level (A37) at 5. M8 economy states slot above Explore. Break for
 # a plan op or stuck step 2 (A28) sits with Investigate; OddBreak, Break on an odd block
 # (A31) sits below Level so curiosity never preempts Solve, Travel, Boss or Level.
-#
-# The survival states come first. While a hostile threatens us (``threatened``:
-# in range, or it hit us recently) only they may take the decision (A9).
-SURVIVAL_STATES: tuple[State, ...] = (
+STATES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
     EscapeState(),
@@ -54,8 +50,6 @@ SURVIVAL_STATES: tuple[State, ...] = (
     HealState(),
     FightState(),
     FleeState(),
-)
-STATES: tuple[State, ...] = SURVIVAL_STATES + (
     RecoverState(),
     EquipState(),
     LootState(),
@@ -107,16 +101,9 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
 
 
 def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> StateOutcome:
-    """The first state, in ``STATES`` order, that runs and sends an intent or waits.
-
-    Threatened, only ``SURVIVAL_STATES`` may run. When none of them acts the
-    round is held as a reflex with no intent, so the runner replaces any
-    queue still running (an Explore walk, an Investigate look) with a Wait
-    rather than let it walk us back into the hostile (A9, A58 run 9).
-    """
+    """The first state, in ``STATES`` order, that runs and sends an intent or waits."""
     m = ctx.memory
-    threat = threatened(world, ctx.policy) and not boss_fight_on(world, m)
-    for state in SURVIVAL_STATES if threat else STATES:
+    for state in STATES:
         active = state.name == m.state and not state.done(world, ctx)
         if not (active or state.guard(world, ctx)):
             continue
@@ -127,7 +114,5 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
             return outcome
         yielded.append(f"{state.name}: {outcome.reason}")
     m.state = ""
-    if threat:
-        return StateOutcome(None, "threatened: hold", reflex=True, wait=True, yielded=yielded)
     reason = f"no state ({'; '.join(yielded)})" if yielded else "no state"
     return StateOutcome(None, reason, yielded=yielded)

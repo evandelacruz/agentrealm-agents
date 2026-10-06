@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import config
-from agentrealm_agent.brain import choose_call, decide
+from agentrealm_agent.brain import choose_call
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
@@ -27,8 +27,7 @@ from agentrealm_agent.states.flee import FLEE_PROBE_STEPS
 from agentrealm_agent.world import Entity, WorldModel, chebyshev
 from agentrealm_agent.zone_discovery import apply_zone
 
-# dispatch.SURVIVAL_STATES, spelled out so a state moving in or out is a decision.
-SURVIVAL = {"Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee"}
+SURVIVAL = {"Escape", "Retreat", "Heal", "Fight", "Flee"}
 
 
 def world(at=(10, 10)) -> WorldModel:
@@ -141,26 +140,17 @@ class PursuerNotOutrunTest(unittest.TestCase):
             land(w, out)
 
 
-class NothingElseWhileThreatenedTest(unittest.TestCase):
-    """While a hostile threatens us only survival states decide; other queues are dropped."""
+class FleeKeepsThePursuerTest(unittest.TestCase):
+    """A pursuer that hit us is fled even just past ``hostile_range``, so no other
+    state's queue runs between flee steps; Flee's reflex replaces any held queue."""
 
-    def test_pursuer_just_out_of_range_after_a_hit_does_not_hand_back_to_explore(self):
+    def test_pursuer_just_out_of_range_after_a_hit_is_still_fled(self):
         w, c = world(), ctx()
         w.entities = [Entity("npc", 7, (13, 10))]  # 3 away: past hostile_range 2
         hit(w)
         out = dispatch(w, c)
         self.assertEqual(out.state, "Flee", out.reason)
         self.assertTrue(out.reflex, "replaces any held Explore or Investigate queue")
-
-    def test_threat_holds_when_no_survival_state_acts(self):
-        """Hit by something not in view: hold, and drop the queue still running."""
-        w, c = world(), ctx()
-        w.tick = 100
-        hit(w)
-        w.tick += 5
-        d = decide(w, c.memory, c.policy, c.rng, params=c.params)
-        self.assertEqual((c.memory.state, d.intent, d.reason), ("", None, "threatened: hold"))
-        self.assertTrue(d.reflex, "the runner replaces a held queue with a Wait")
 
     def test_alternating_range_never_lets_explore_or_investigate_in(self):
         w, c = world(), ctx()
@@ -172,15 +162,16 @@ class NothingElseWhileThreatenedTest(unittest.TestCase):
             if i % 2:
                 hit(w)  # it keeps landing hits between its steps out of range
             out = dispatch(w, c)
-            self.assertIn(out.state, SURVIVAL | {""}, out.reason)
+            self.assertEqual(out.state, "Flee", out.reason)
             land(w, out)
 
-    def test_explore_comes_back_once_the_threat_is_over(self):
+    def test_flee_ends_once_the_pursuer_is_shaken(self):
         w, c = world(), ctx()
+        w.entities = [Entity("npc", 7, (14, 10))]
         w.tick = 100
         hit(w)
-        w.tick += 100  # long past the last hit, nothing in view
-        self.assertEqual(dispatch(w, c).state, "Explore")
+        w.tick += 100  # long past the last hit, out of range
+        self.assertNotEqual(dispatch(w, c).state, "Flee")
 
 
 class NoPositionReadWhileDownedTest(unittest.TestCase):

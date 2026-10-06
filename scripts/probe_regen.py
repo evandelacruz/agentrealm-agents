@@ -25,7 +25,7 @@ PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
 from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, planner_for, run_acceptance_smoke, wake  # noqa: E402
+from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, add_park_argument, planner_for, run_acceptance_smoke, wake  # noqa: E402
 from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
 from agentrealm_agent.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.regen_probe import PROBE_SECONDS, RegenProbeMetrics  # noqa: E402
@@ -47,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     ap.add_argument("--no-planner", action="store_true", help=NO_PLANNER_HELP)
+    add_park_argument(ap)
     ap.add_argument(
         "--seconds",
         type=float,
@@ -97,8 +98,9 @@ def main(argv: list[str] | None = None) -> int:
     def out(line: str) -> None:
         print(line, flush=True)
 
-    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.seconds + 600.0, out=out, planner=planner)
+    elapsed, _ = run_acceptance_smoke(client, cfg, cid, metrics, timeout_s=args.seconds + 600.0, out=out, planner=planner, park_seconds=args.park_seconds)
     print(f"finished in {elapsed:.1f}s", flush=True)
+    print(metrics.park_summary_line(), flush=True)
     for line in metrics.summary_lines():
         print(line, flush=True)
     failures = metrics.failures()

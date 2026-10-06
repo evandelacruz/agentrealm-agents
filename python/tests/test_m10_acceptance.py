@@ -153,7 +153,9 @@ class RunAcceptanceSmokeTest(unittest.TestCase):
         seen = {}
 
         class FakeRunner:
-            def __init__(self, cfg, client, cid, stop, emit, *, knowledge, acceptance, strategist=None):
+            park_report = None
+
+            def __init__(self, cfg, client, cid, stop, emit, *, knowledge, acceptance, strategist=None, park_seconds, abort):
                 seen["kb"], seen["stop"], seen["metrics"] = knowledge, stop, acceptance
 
             def run(self):
@@ -222,7 +224,7 @@ class SmokeScriptTest(unittest.TestCase):
     def run_main(self, seconds: float, played):
         """``played(metrics, kb)`` stands in for the run; ``kb`` is the runner's in-memory one."""
 
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None, planner=None):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None, planner=None, park_seconds=None):
             kb = KnowledgeBase("olympuff")
             played(metrics, kb)
             return seconds, kb

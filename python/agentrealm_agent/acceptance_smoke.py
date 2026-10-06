@@ -2,20 +2,42 @@
 
 from __future__ import annotations
 
+import argparse
 import threading
 import time
 from typing import Callable
 
 from . import config
-from .acceptance import AcceptanceHooks
-from .client import Client
+from .acceptance import AcceptanceHooks, ParkSplit
+from .client import ApiError, Client
 from .executor.intents import wait
 from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
+from .park import DEFAULT_PARK_SECONDS, PARK_DIED, PARK_SECONDS_HELP, install_stop_signals
 from .runner import Runner
 from .strategist import Strategist
 
 DEFAULT_BASE = "https://api.agentrealm.gg"
 NO_PLANNER_HELP = "test mode: play without the AI planner (A35)"
+
+
+def add_park_argument(ap: argparse.ArgumentParser) -> None:
+    """``--park-seconds``: the park phase after the run (A64)."""
+    ap.add_argument("--park-seconds", type=float, default=DEFAULT_PARK_SECONDS, help=PARK_SECONDS_HELP)
+
+
+def alive_at_end_failures(client: Client, cid: int, metrics: ParkSplit) -> list[str]:
+    """The end-of-run alive check, as gate failures.
+
+    A death in the park phase (A64) belongs to the park, which is reported on
+    its own line (``ParkSplit.park_summary_line``), not to the scenario.
+    """
+    try:
+        alive = client.self_(cid).get("alive", True)
+    except ApiError as e:
+        return [f"self read failed: {e.code}"]
+    if alive or (metrics.park is not None and metrics.park.outcome == PARK_DIED):
+        return []
+    return ["character not alive at end"]
 
 
 def planner_for(no_planner: bool) -> Strategist:
@@ -108,17 +130,21 @@ def run_acceptance_smoke(
     out: Callable[[str], None] | None = None,
     prepare: Callable[[KnowledgeBase], None] | None = None,
     planner: Strategist | None = None,
+    park_seconds: float = DEFAULT_PARK_SECONDS,
 ) -> tuple[float, KnowledgeBase]:
     """Run the runner with ``metrics`` until it stops or ``timeout_s`` elapses.
 
     ``prepare``, when given, runs on the loaded knowledge base before the
     runner starts (M9 clears earlier runs' entrance looks with it).
     ``planner`` is the AI planner (A35), from :func:`planner_for`.
+    After the stop, the runner parks for up to ``park_seconds`` (A64);
+    SIGINT or SIGTERM stops the run, and a second one cuts the park short.
 
-    Returns the seconds played and the knowledge base the runner wrote to; judge
-    the run on that one, not a reload, which misses the run if the save failed.
+    Returns the seconds played, the park phase not counted, and the knowledge
+    base the runner wrote to; judge the run on that one, not a reload, which
+    misses the run if the save failed.
     """
-    stop = threading.Event()
+    stop, abort = threading.Event(), threading.Event()
     metrics.stop = stop
     started = time.monotonic()
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
@@ -138,6 +164,8 @@ def run_acceptance_smoke(
         knowledge=knowledge,
         acceptance=metrics,
         strategist=planner,
+        park_seconds=park_seconds,
+        abort=abort,
     )
 
     def watchdog() -> None:
@@ -150,11 +178,18 @@ def run_acceptance_smoke(
 
     thread = threading.Thread(target=runner.run, daemon=True)
     wd = threading.Thread(target=watchdog, daemon=True)
-    thread.start()
-    wd.start()
-    thread.join()
+    restore_signals = install_stop_signals(stop, abort, emit, park_seconds)
+    try:
+        thread.start()
+        wd.start()
+        while thread.is_alive():
+            thread.join(0.5)  # a bare join() would hold off the signal handlers
+    finally:
+        restore_signals()
     stop.set()
     elapsed = time.monotonic() - started
+    if runner.park_report is not None:
+        elapsed -= runner.park_report.seconds
     try:
         save_knowledge(knowledge)
     except OSError as e:

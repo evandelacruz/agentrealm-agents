@@ -439,7 +439,7 @@ class SmokeScriptTest(unittest.TestCase):
     def run_main(self, seconds: float, played):
         """``main`` against a fake client; ``played(metrics)`` stands in for the hour."""
 
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None, planner=None):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None, planner=None, park_seconds=None):
             played(metrics)
             return seconds, None
 

@@ -191,7 +191,9 @@ class SharedRunSmokeTest(unittest.TestCase):
         seen = {}
 
         class FakeRunner:
-            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance, strategist=None):
+            park_report = None
+
+            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance, strategist=None, park_seconds, abort):
                 seen["stop"] = stop
                 self.acceptance = acceptance
 
@@ -228,7 +230,7 @@ class SmokeScriptTest(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def run_main(self, seconds: float, played):
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None, planner=None):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, out=None, planner=None, park_seconds=None):
             played(metrics)
             return seconds, None
 

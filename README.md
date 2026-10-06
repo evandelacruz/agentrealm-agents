@@ -27,7 +27,15 @@ python3 -m agentrealm_agent metrics characters/wren.toml --character-id ID   # o
 python3 -m agentrealm_agent compare-metrics baseline.trace.jsonl candidate.trace.jsonl
 ```
 
-The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample profiles use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` prints a character id. `run` and `status` pick the character from `--character-id` or `--character-name`, else `AGENTREALM_CHARACTER_ID`; an explicit flag always overrides the environment. `run` plays until Ctrl-C and appends a trace under `python/.state/<profile>.<character_id>.trace.jsonl`. A trace from before A59 (`<profile>.trace.jsonl`) is left as is: pass its path to `metrics`, or rename it to `<profile>.<character_id>.trace.jsonl` so new runs append to it. Run one `run` process per world at a time.
+The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample profiles use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` prints a character id. `run` and `status` pick the character from `--character-id` or `--character-name`, else `AGENTREALM_CHARACTER_ID`; an explicit flag always overrides the environment. `run` plays until Ctrl-C (or SIGTERM) and appends a trace under `python/.state/<profile>.<character_id>.trace.jsonl`. A trace from before A59 (`<profile>.trace.jsonl`) is left as is: pass its path to `metrics`, or rename it to `<profile>.<character_id>.trace.jsonl` so new runs append to it. Run one `run` process per world at a time.
+
+### Stopping a run
+
+The world does not pause when your process stops: a character left standing on field ground can be killed, and lose a life, while nobody plays it. So when a run stops (Ctrl-C, SIGTERM, or a smoke script's `--seconds` limit), the agent first **parks** (A64): it walks to the nearest known safe tile or the town cell, with its survival reflexes still on, for at most `--park-seconds` (default 60), then clears its intent queue so no leftover queue keeps it moving. It logs how that ended, for example `park: parked safe at 7:12,40 after 8.2s, queue cleared` or `park: park timed out at …`. Press Ctrl-C (or send SIGTERM) a second time to exit at once without parking; pass `--park-seconds 0` to turn parking off.
+
+```sh
+python3 -m agentrealm_agent run characters/wren.toml --character-id ID --park-seconds 90
+```
 
 ### The AI planner
 
@@ -91,6 +99,8 @@ make test
 Live M6 smoke on olympuff: `make smoke-m6-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set runs the M6 done-when ([`docs/PLAYABLE_AGENT_PLAN.md`](docs/PLAYABLE_AGENT_PLAN.md)) via [`scripts/smoke_m6_olympuff.py`](scripts/smoke_m6_olympuff.py). The variables are passed to the script as `--character-id` / `--character-name`; the profile is `python/characters/olympuff_walker.toml`. Lives on live worlds are permanent. The accepted live run (A4) is in [`docs/acceptance/m6_olympuff_PASS.transcript`](docs/acceptance/m6_olympuff_PASS.transcript) (names and ids redacted).
 
 Shared acceptance modules: [`acceptance.py`](python/agentrealm_agent/acceptance.py) (runner hooks, request-error counter), [`acceptance_smoke.py`](python/agentrealm_agent/acceptance_smoke.py) (wake, overworld start, the smoke run loop; M7, M8, M9, M10, M11), [`acceptance_run.py`](python/agentrealm_agent/acceptance_run.py) (`TimedRunHooks`: deaths, API errors, the wall-clock stop; `FULL_RUN_FRACTION`; M7, M8, M9, M10, M11) and [`acceptance_survival.py`](python/agentrealm_agent/acceptance_survival.py) (`SurvivalAcceptanceMetrics`: retreat-miss, Recover-withdraw and loop checks, per-gate survival states; `OscillationAbortTracker`; M7, M9, M11).
+
+Every smoke script (M6–M11) and the regen probe park after the run like `run` does (see **Stopping a run**), and take `--park-seconds` (default 60; 0 = off). The park phase is not judged: its windows, Steps and API errors count toward no gate, `finished in` leaves its seconds out, and a death while parking does not fail the end-of-run alive check. The script prints it on its own `park:` line after `finished in`.
 
 Live M7 smoke: `make smoke-m7-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…`, or `AGENTREALM_CHARACTER_ID` exported) with `AGENTREALM_API_KEY` set plays one hour on the olympuff overworld via [`scripts/smoke_m7_olympuff.py`](scripts/smoke_m7_olympuff.py), using profile `python/characters/olympuff_m7.toml` and a character you choose at run time. Start with that character on the overworld (a sleeping character is woken with one `Wait` first, and a downed one is waited out): the script sends the agent to one target 150 blocks east of where it stands (`--target X,Y` overrides), then the planner plays.
 

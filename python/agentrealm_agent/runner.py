@@ -70,6 +70,8 @@ from .scroll_investigation import (
     supply_code_on_world,
 )
 from .zone_discovery import apply_town, apply_zone, zone_failed
+from .park import PARK_ABORTED, PARK_DIED, PARK_DOWNED, PARK_NOWHERE, PARK_TIMED_OUT, PARKED_SAFE, ParkReport, parked
+from .survival import retreat_goal
 from .memory import queue_signal
 from .strategist import Strategist, same_ops
 
@@ -111,13 +113,25 @@ class Runner:
         knowledge: KnowledgeBase | None = None,
         acceptance: AcceptanceHooks | None = None,
         strategist: Strategist | None = None,
+        *,
+        park_seconds: float = 0.0,
+        abort: threading.Event | None = None,
     ):
         """``strategist`` is the AI planner (A35); live runs pass
-        :meth:`Strategist.from_env`. None is the ``--no-planner`` test mode."""
+        :meth:`Strategist.from_env`. None is the ``--no-planner`` test mode.
+
+        Once ``stop`` is set, the runner parks for up to ``park_seconds``
+        before it returns (A64, :meth:`park`); 0 returns at once. ``abort``,
+        when set, cuts the park short."""
         self.cfg = cfg
         self.client = client
         self.cid = character_id
         self.stop = stop
+        self.park_seconds = park_seconds
+        self.abort = abort if abort is not None else threading.Event()
+        self.park_report: ParkReport | None = None
+        self.parked_died = False  # a Died event while parking
+        self.clock = time.monotonic  # the park phase's cap runs on it
         self.out = out
         self.knowledge = knowledge
         self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
@@ -228,6 +242,8 @@ class Runner:
         )
 
     def _decide(self, w, m, *, plan: Plan | None = None):
+        if m.parking:
+            plan = None  # the run is over: no op runs while parking (A64)
         return decide(
             w,
             m,
@@ -273,36 +289,115 @@ class Runner:
         not_before = 0.0
         try:
             while not self.stop.is_set():
-                self.pacer.wait_next_window(not_before)
-                not_before = 0.0
-                # A window is one sim tick. Count it here: a skipped window
-                # sends nothing, so no response would move the clock, and the
-                # calm gap and entity_refresh would never come due. Responses
-                # carry the server's tick and correct it.
-                self.world.tick += 1
+                self.next_window(not_before)
                 self.unpin_done_goals()
                 old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():
                     self.reload_directives(old_goals)
                 self.drop_given_up_ops()
                 self.strategist.on_window(self)
-                call = choose_call(self.world, self.mem, self.cfg.policy)
                 urgent = self.acceptance is not None and is_urgent(self.world, self.mem, self.cfg.policy)
-                if call == "skip":
-                    self.mem.windows_since_self += 1
-                else:
-                    try:
-                        not_before = self.step(call)
-                    except ApiError as e:
-                        not_before = self.on_error(call, e)
+                not_before = self.spend_call()
                 if self.acceptance is not None:
                     self.acceptance.on_window(urgent=urgent, alive=self.world.alive)
+            if self.park_seconds > 0:
+                self.park(not_before)
         finally:
             self.strategist.stop()
             if self.knowledge is not None:
                 # Tiles learned from tick deltas, which terrain reads did not merge.
                 sync_world_maps(self.knowledge, self.world)
             self.trace.close()
+
+    def next_window(self, not_before: float) -> None:
+        """Wait for the next sim window and count it.
+
+        A window is one sim tick. Count it here: a skipped window sends
+        nothing, so no response would move the clock, and the calm gap and
+        entity_refresh would never come due. Responses carry the server's
+        tick and correct it.
+        """
+        self.pacer.wait_next_window(not_before)
+        self.world.tick += 1
+
+    def spend_call(self) -> float:
+        """This window's one call (``choose_call``), or none. Returns the
+        earliest time for the next one."""
+        call = choose_call(self.world, self.mem, self.cfg.policy)
+        if call == "skip":
+            self.mem.windows_since_self += 1
+            return 0.0
+        try:
+            return self.step(call)
+        except ApiError as e:
+            return self.on_error(call, e)
+
+    def park(self, not_before: float = 0.0) -> ParkReport:
+        """Walk to safe ground, then clear the intent queue, before exiting (A64).
+
+        The world does not pause when the client stops, so a character left
+        on field ground can die unattended. For up to ``park_seconds`` the
+        runner keeps playing windows with only the survival reflexes and Park
+        (``states/park.py``): Park walks Retreat's path to the nearest known
+        safe tile or the town cell. It ends at once when the character
+        already stands there, is downed, or knows nowhere safe, and early on
+        ``abort``. Then one empty tick replaces whatever queue is left.
+
+        Acceptance hooks are off meanwhile: the park phase is not the
+        scenario. They hear ``on_park_start`` and ``on_park_end`` only.
+        """
+        w, m = self.world, self.mem
+        hooks, self.acceptance = self.acceptance, None
+        if hooks is not None:
+            hooks.on_park_start()
+        started = self.clock()
+        m.parking, m.state = True, ""
+        self.parked_died = False
+        try:
+            while True:
+                if self.parked_died:
+                    outcome = PARK_DIED
+                elif not w.alive:
+                    outcome = PARK_DOWNED
+                elif parked(w, self.knowledge):
+                    outcome = PARKED_SAFE
+                elif w.pos is not None and retreat_goal(w, self.knowledge) is None:
+                    outcome = PARK_NOWHERE
+                elif self.abort.is_set():
+                    outcome = PARK_ABORTED
+                elif self.clock() - started >= self.park_seconds:
+                    outcome = PARK_TIMED_OUT
+                else:
+                    self.next_window(not_before)
+                    not_before = self.spend_call()
+                    continue
+                break
+            cleared = self.clear_queue(not_before)
+        finally:
+            m.parking = False
+            self.acceptance = hooks
+        report = ParkReport(outcome, self.clock() - started, w.map_id, w.pos, cleared)
+        self.park_report = report
+        self.log("park", report.line(), {"park": report.to_dict()})
+        if hooks is not None:
+            hooks.on_park_end(report)
+        return report
+
+    def clear_queue(self, not_before: float = 0.0) -> bool:
+        """Replace the server's intent queue with nothing (an empty tick).
+        True when the server took it."""
+        w, m = self.world, self.mem
+        self.next_window(not_before)
+        try:
+            r = self.client.tick(self.cid, [], snapshot_version=w.snapshot_version)
+        except ApiError as e:
+            self.log("tick", f"clear queue: error {e}", {"intents": [], "error": {"status": e.status, "code": e.code}})
+            return False
+        w.tick = int(r.get("tick", w.tick))
+        self.clear_held_tracking()
+        m.queued_ticks = 0
+        self.log("tick", "[] (clear queue on exit)", {"intents": [], "reason": "clear queue on exit"})
+        return True
 
     def note_warp_landing(self) -> None:
         """After a door step, record where the position read says it landed (A26).
@@ -1154,6 +1249,8 @@ class Runner:
             if kind == "Died":
                 if self.acceptance is not None:
                     self.acceptance.on_death()
+                if m.parking:
+                    self.parked_died = True
                 queue_signal(
                     m,
                     {

@@ -28,7 +28,8 @@ from agentrealm_agent.character_select import CharacterSelectionError, resolve_c
 from agentrealm_agent.client import Client  # noqa: E402
 from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
 from agentrealm_agent.m6_acceptance import M6AcceptanceMetrics, TARGET_STEPS  # noqa: E402
-from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, planner_for  # noqa: E402
+from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, add_park_argument, planner_for  # noqa: E402
+from agentrealm_agent.park import install_stop_signals  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
 from agentrealm_agent.strategist import PlannerConfigError, Strategist  # noqa: E402
 
@@ -44,8 +45,11 @@ def run_smoke(
     target_steps: int,
     timeout_s: float,
     planner: Strategist | None = None,
+    park_seconds: float,
 ) -> M6AcceptanceMetrics:
-    stop = threading.Event()
+    """Play until ``target_steps`` Steps apply or ``timeout_s`` passes, then
+    park for up to ``park_seconds`` (A64), which the metrics do not count."""
+    stop, abort = threading.Event(), threading.Event()
     metrics = M6AcceptanceMetrics(target_steps=target_steps, stop=stop)
     knowledge: KnowledgeBase = load_knowledge(cfg.world)
 
@@ -61,6 +65,8 @@ def run_smoke(
         knowledge=knowledge,
         acceptance=metrics,
         strategist=planner,
+        park_seconds=park_seconds,
+        abort=abort,
     )
 
     def watchdog() -> None:
@@ -73,9 +79,14 @@ def run_smoke(
 
     thread = threading.Thread(target=runner.run, daemon=True)
     wd = threading.Thread(target=watchdog, daemon=True)
-    thread.start()
-    wd.start()
-    thread.join()
+    restore_signals = install_stop_signals(stop, abort, out, park_seconds)
+    try:
+        thread.start()
+        wd.start()
+        while thread.is_alive():
+            thread.join(0.5)  # a bare join() would hold off the signal handlers
+    finally:
+        restore_signals()
     stop.set()
     try:
         save_knowledge(knowledge)
@@ -97,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", DEFAULT_BASE))
     ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
     ap.add_argument("--no-planner", action="store_true", help=NO_PLANNER_HELP)
+    add_park_argument(ap)
     ap.add_argument("--steps", type=int, default=TARGET_STEPS, help="applied Step count to reach")
     ap.add_argument(
         "--timeout",
@@ -141,9 +153,12 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
     started = time.monotonic()
-    metrics = run_smoke(client, cfg, cid, target_steps=args.steps, timeout_s=args.timeout, planner=planner)
-    elapsed = time.monotonic() - started
+    metrics = run_smoke(
+        client, cfg, cid, target_steps=args.steps, timeout_s=args.timeout, planner=planner, park_seconds=args.park_seconds
+    )
+    elapsed = time.monotonic() - started - (metrics.park.seconds if metrics.park is not None else 0.0)
     print(f"finished in {elapsed:.1f}s", flush=True)
+    print(metrics.park_summary_line(), flush=True)
     for line in metrics.summary_lines():
         print(line, flush=True)
     failures = metrics.failures()

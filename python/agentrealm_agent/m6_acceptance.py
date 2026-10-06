@@ -5,19 +5,20 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 
-from .acceptance import CountingClient, PlannerHealth
+from .acceptance import CountingClient, ParkSplit, PlannerHealth
 
 TARGET_STEPS = 200
 CALM_BUDGET_FRACTION = 0.25
 
 
 @dataclass(kw_only=True)
-class M6AcceptanceMetrics(PlannerHealth):
+class M6AcceptanceMetrics(PlannerHealth, ParkSplit):
     """Counts windows, API calls and steps while the runner drives a character.
 
     Calls are counted on the client itself (``wrap``), so every request a
     window makes is seen, not just the one the scheduler chose. ``stop`` is
-    set once ``target_steps`` Steps have applied.
+    set once ``target_steps`` Steps have applied. The park phase after it
+    (A64) counts toward nothing here (``ParkSplit``).
     """
 
     target_steps: int = TARGET_STEPS

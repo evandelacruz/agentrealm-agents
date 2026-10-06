@@ -276,7 +276,7 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertIn("AGENTREALM_API_KEY", err)
 
     def run_main(self, seconds: float, played):
-        def run_smoke(client, cfg, cid, metrics, *, timeout_s, planner=None):
+        def run_smoke(client, cfg, cid, metrics, *, timeout_s, planner=None, park_seconds=None):
             played(metrics)
             return metrics, seconds
 
@@ -315,7 +315,9 @@ class SmokeScriptTest(unittest.TestCase):
         seen = []
 
         class FakeRunner:
-            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance, strategist=None):
+            park_report = None
+
+            def __init__(self, cfg, client, cid, stop, out, *, knowledge, acceptance, strategist=None, park_seconds, abort):
                 self.stop, self.metrics = stop, acceptance
 
             def run(self):

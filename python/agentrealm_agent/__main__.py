@@ -7,7 +7,6 @@ import json
 import os
 import sys
 import threading
-import time
 from pathlib import Path
 
 from . import config
@@ -20,11 +19,13 @@ from .character_select import (
 )
 from .client import ApiError, Client
 from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
+from .park import DEFAULT_PARK_SECONDS, PARK_SECONDS_HELP, install_stop_signals
 from .run_metrics import RunMetrics, compare_run_metrics, load_metrics_source, metrics_from_trace
 from .runner import Runner
 from .strategist import PlannerConfigError, Strategist
 
-# How long `run` waits for the driver thread to stop before saving.
+# How long `run` waits for the driver thread to stop before saving, on top
+# of the park phase (A64).
 SHUTDOWN_JOIN_SECONDS = 5.0
 
 # The reference runner's characters play the scripted model agent.
@@ -61,7 +62,10 @@ def main(argv: list[str] | None = None) -> int:
     create_p.add_argument("--avatar", default=DEFAULT_CREATE_AVATAR, help="outfit code")
     create_p.add_argument("--model-agent", default=DEFAULT_CREATE_MODEL, help="model agent code")
 
-    run_p = sub.add_parser("run", parents=[_profile_parser()], help="drive one character until interrupted")
+    run_p = sub.add_parser(
+        "run", parents=[_profile_parser()], help="drive one character until interrupted, then park it on safe ground"
+    )
+    run_p.add_argument("--park-seconds", type=float, default=DEFAULT_PARK_SECONDS, help=PARK_SECONDS_HELP)
     run_p.add_argument(
         "--no-planner",
         action="store_true",
@@ -126,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.cmd == "status":
         return status(client, cfg, cid)
-    return run(client, cfg, cid, planner)
+    return run(client, cfg, cid, planner, park_seconds=args.park_seconds)
 
 
 def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
@@ -193,7 +197,16 @@ def metrics(source: str, *, character_id: int | None) -> int:
     return 0
 
 
-def run(client: Client, cfg: config.CharacterConfig, cid: int, planner: Strategist | None = None) -> int:
+def run(
+    client: Client,
+    cfg: config.CharacterConfig,
+    cid: int,
+    planner: Strategist | None = None,
+    *,
+    park_seconds: float = DEFAULT_PARK_SECONDS,
+) -> int:
+    """Play until SIGINT (Ctrl-C) or SIGTERM, then park for up to
+    ``park_seconds`` (A64); a second signal exits without parking."""
     try:
         client.self_(cid)
     except ApiError as e:
@@ -204,27 +217,25 @@ def run(client: Client, cfg: config.CharacterConfig, cid: int, planner: Strategi
     except (KnowledgeBaseError, OSError) as e:
         print(f"knowledge base: {e}", file=sys.stderr)
         return 2
-    stop = threading.Event()
+    stop, abort = threading.Event(), threading.Event()
 
     def out(line: str) -> None:
         print(line, flush=True)
 
     thread = threading.Thread(
         target=_drive,
-        args=(cfg, client, cid, stop, out, world_knowledge, planner),
+        args=(cfg, client, cid, stop, abort, out, world_knowledge, planner, park_seconds),
         daemon=True,
     )
+    restore_signals = install_stop_signals(stop, abort, out, park_seconds)
     thread.start()
     try:
         while thread.is_alive():
-            thread.join(0.5)
-    except KeyboardInterrupt:
-        stop.set()
-        out("stopping; the character stays in the world where it stands")
+            thread.join(0.5)  # the runner returns after its park phase
     finally:
+        restore_signals()
         stop.set()
-        deadline = time.monotonic() + SHUTDOWN_JOIN_SECONDS
-        thread.join(max(0.0, deadline - time.monotonic()))
+        thread.join(SHUTDOWN_JOIN_SECONDS)
         try:
             save_knowledge(world_knowledge)
         except OSError as e:
@@ -237,12 +248,16 @@ def _drive(
     client: Client,
     cid: int,
     stop: threading.Event,
+    abort: threading.Event,
     out,
     knowledge: KnowledgeBase,
     planner: Strategist | None,
+    park_seconds: float,
 ) -> None:
     try:
-        Runner(cfg, client, cid, stop, out, knowledge=knowledge, strategist=planner).run()
+        Runner(
+            cfg, client, cid, stop, out, knowledge=knowledge, strategist=planner, park_seconds=park_seconds, abort=abort
+        ).run()
     except ApiError as e:
         out(f"[{cfg.profile}] stopped: {e}")
     except Exception as e:

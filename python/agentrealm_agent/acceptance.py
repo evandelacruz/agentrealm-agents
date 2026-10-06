@@ -3,7 +3,9 @@
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
 measures; M8 also reads tick events (``NPCDied``) through ``on_events``, and
-M11 level clears through ``on_level_clear``. A new hook is declared here and
+M11 level clears through ``on_level_clear``. The park phase after a run
+(A64) is not the scenario: no hook fires during it but ``on_park_start`` and
+``on_park_end``, and ``ParkSplit`` keeps its API errors apart. A new hook is declared here and
 called unconditionally, never looked up with ``hasattr``. ``CountingClient``
 records failed requests (and optionally every call).
 """
@@ -11,12 +13,13 @@ records failed requests (and optionally every call).
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import Policy
 from .client import ApiError
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
+from .park import ParkReport
 from .world import WorldModel
 
 
@@ -96,6 +99,44 @@ class AcceptanceHooks:
 
     def on_oscillation(self, event: dict) -> None:
         """The dispatch guard caught the character pacing between two cells (A15)."""
+
+    def on_park_start(self) -> None:
+        """The run is over and the runner parks (A64). No other hook fires after this."""
+
+    def on_park_end(self, report: ParkReport) -> None:
+        """The park phase ended: how, where, and after how long (A64)."""
+
+
+@dataclass(kw_only=True)
+class ParkSplit(AcceptanceHooks):
+    """Keeps the park phase (A64) out of a run's API errors, and keeps its report.
+
+    ``api_errors`` is the list ``wrap`` hands ``CountingClient``. What it
+    records while the runner parks moves to ``park_api_errors``, so a gate
+    judges the scenario alone and the park is reported on its own line.
+    """
+
+    api_errors: list[str] = field(default_factory=list)
+    park: ParkReport | None = None
+    park_api_errors: list[str] = field(default_factory=list)
+    park_errors_from: int = 0  # len(api_errors) when the park began
+
+    def on_park_start(self) -> None:
+        self.park_errors_from = len(self.api_errors)
+
+    def on_park_end(self, report: ParkReport) -> None:
+        self.park = report
+        self.park_api_errors = self.api_errors[self.park_errors_from :]
+        del self.api_errors[self.park_errors_from :]
+
+    def park_summary_line(self) -> str:
+        """One line on the park phase, for the run's summary; not judged."""
+        if self.park is None:
+            return "park: did not run"
+        line = self.park.line()
+        if self.park_api_errors:
+            line += f", {len(self.park_api_errors)} API error(s) while parking: {', '.join(sorted(set(self.park_api_errors)))}"
+        return line
 
 
 # Planner failures in a row (no accepted plan between) that fail a run. Fewer

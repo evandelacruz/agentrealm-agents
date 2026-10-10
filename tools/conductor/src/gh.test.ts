@@ -179,7 +179,7 @@ test("headVerdict compares logins with or without the [bot] suffix", () => {
   assert.equal(headVerdict(reviews, HEAD, PAIR), "APPROVED");
 });
 
-test("headVerdict: any reviewer's rejection on the head wins, a person's included", () => {
+test("headVerdict: any trusted reviewer's rejection on the head wins, a person's included", () => {
   const both = [review(OPUS, "APPROVED", HEAD), review("cursor", "APPROVED", HEAD)];
   assert.equal(headVerdict([...both, review("evandelacruz", "CHANGES_REQUESTED", HEAD)], HEAD, PAIR), "CHANGES_REQUESTED");
   assert.equal(headVerdict([...both, review("sonnet-review-agent", "CHANGES_REQUESTED", HEAD)], HEAD, PAIR), "CHANGES_REQUESTED");

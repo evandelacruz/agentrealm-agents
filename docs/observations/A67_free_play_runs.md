@@ -204,3 +204,93 @@ Intents outside held queues: 39 `Use` (cuts), 17 greetings, 6 `Take` (5 gems, 1 
 3. **Park and Retreat keep picking a safe tile they cannot walk to.** `pathing.reachable_safe_goal` counts a search cut short by its budget as a way (`pathing.py:407`), so (371, 371) passed. Retreat then found no step to it, but marks a tile unreachable only when `no_way` proves it (`states/retreat.py:131`). So the same tile was picked on every decision, and Park stood 2 cells from it for 60 s. A failed `cost_path` to a tile `reachable_safe_goal` just accepted should mark it in `safe_unreachable` too, or fall through to town.
 
 **Minor:** the planner sent `read` at a town statue cell three times, and each read looped until it was dropped. Explore took the character 60 cells south of town into a hostile field while it had no potion.
+
+### Run 4: committed targets and detours work, but the detour misses gems beside the queued walk
+
+- **Code:** `main` at `a227906`, after #154 (A71: commit to the target, the Detour reflex, discovery wakes, new heads deferred to an action boundary) and the run 3 fixes (#146, #147, #149, #151, #152).
+- **Verdict:** exit 0, `PASS` after **601.5 s**, on the short-run gates only. The park found safe ground at once (0.4 s, at (421, 381)). The character started with 10/10 health, 7 lives and **17 gems**, on the overworld 32 cells north-west of the town cell. It held the bronze_sword and the pocket knife, and **small_potion was still armed** from run 3. This was the first run on an empty local state directory, so call 1 wrote the cache.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; gems earned **yes** (from piles only); armor **no**; shop weapon **yes** (the sword it started with); potion reserve **yes**; Heal took ground food **yes**, Heal drank a potion **no**: the gate read yes, but it counts a `Use` sent with a potion armed (`m8_acceptance.py:140–142`), and that `Use` at 228 s consumed nothing (potions 2 → 2, below).
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–60 s | `travel` town, `explore_area` town r25; from 16 s `equip` bronze_sword on top | The first decision, before any plan, sent a 10-step Explore walk north-west. It passed 2–4 cells from three adjacent gems at (359–361, 360), and Detour did not take them (defect 1). Travel then walked to the town cell and Greet said hello on the way. |
+| 60–147 s | `equip` bronze_sword, `buy` small_potion, `say` statue_carver, `explore_area` (410, 400) r15 | Each `equip` finished at once (defect 2). With no priced supply in sight, Shop sent nothing, so the Explore safe default walked **~100 cells south-west**, to (299, 390) (defect 3). |
+| 147–210 s | `travel` town, `buy` small_potion, `say`, `explore_area` | Break armed the sword at 147 s. A chugbug pack hit it 10 → 6; Flee and Retreat got clear, and Heal walked back through safe ground and ate an apple. |
+| 210–270 s | `say` rumor tellers, `buy` small_potion, `gather_gems`, then `equip` bronze_sword ×3 | Heal **re-armed the potion** at 213 s. Shop bought a potion at 226 s (**gems 17 → 7**). Gather re-armed the sword before cutting at 267 s (#152). |
+| 270–600 s | `gather_gems` (4 regions named in 50 s), `travel` town / point, `buy` bronze_mail, `buy` small_potion | 64 cuts, none with no effect, and no gem from a cut. The gems came from 3 piles. Travel paced twice, and a snotling pack was retreated from at 485 s and 556 s. |
+
+Planner calls: **53**, 53 plans accepted, 0 errors. 19 replies with a new head were **deferred** to an action boundary, none for long.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **17** | **14** (−10 for one small_potion, +7 from gem piles) |
+| Armed | small_potion (left from run 3) | bronze_sword (from 267 s) |
+| Worn | `{}` | `{}` |
+| Held | bronze_sword, pocket_knife | pocket_knife, small_potion ×2 |
+| Potions | 1 (armed) | 2 |
+
+Bought: one small_potion, by the planner's `buy` op. Equipped: the sword three times, by Break (147 s) and Gather (267 s) but never by an `equip` op. Drank: Heal sent `Use` on the potion at 228 s at 8/10, but the count went from 2 potions to 2, so nothing was drunk. Armor: none, since bronze_mail costs 20.
+
+#### Gems earned
+
+**7**, all from three gem piles: (413, 414) +3, (361, 440) +3 and (446, 376) +1. Detour walked to each of them. `gather_run={"cuts": 64, "gems_gained": 7, "no_effect_cuts": 0}`, so #152's cutter fix holds: no cut was wasted, though none dropped a gem. Each pile was a triple of adjacent gems. The (359–361, 440) triple was passed at 96–98 s and taken only 250 s later (defect 1). Two triples were never taken: (359–361, 360), passed at 2–6 s (defect 1), and (377–379, 377), which no walk came within Detour's 3 cells of.
+
+#### Deaths
+
+**0** (lives 7 → 7). Hits: chugbugs at ~150 s (10 → 6), and snotlings at 485 s (→ 7) and ~560 s (→ 5). Flee, Retreat and Heal handled each one.
+
+#### Commitment, detours and planner wakes (#154)
+
+- **Targets held.** Gather kept its target until it was cut or taken: the (446, 376) pile was kept from 526 s until it was taken at 539 s. Explore's targets moved on steadily, never back and forth.
+- **Flip-flops left.** (a) 15 `equip` ops (calls 3–15 and 23–25) each finished "nothing to equip" at once, and the planner re-sent them (defect 2). (b) Travel to town paced (370, 430) ↔ (369, 429) five times, and the oscillation guard gave town up at 391 s. It paced again at (430, 370) ↔ (429, 369) at 550 s. The leg target flips each decision to the cell it is not on (`states/travel.py:242–245`, `_map_leg`/`nav_stuck.leg_toward`). (c) The planner named four `gather_gems` regions in 50 s (calls 41–46).
+- **Detours: 5.** Gems at (413, 414), (361, 440), (446, 376) and (428, 366) (cut off by the end of the run), and an apple at (391, 385) while at 5/10. Each then went back to the walk it left. All four gem detours aimed at piles 10–16 cells off, which Gather or the walk was already heading for.
+- **Wakes: 18 of 53 calls were discovery wakes** (new NPCs, hostile packs, affordable small_potion and torch). 6 reordered the stack: calls 3–4 put `equip` first and raised `retreat_hits` for the gristlewick and chugbugs, call 19 put talking to the rumor tellers first, and calls 34, 44 and 48–49 retreated from packs. The rest were rightly left unchanged (packs 20+ cells away, affordable items it already planned to buy).
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 144,469, output 17,457, cache write 100,743, cache read 7,454,982 |
+
+#### Decision mix
+
+Decisions outside held queues: 61 cuts (44 bush, 17 grass), 42 Gather walks, 25 Travel, 21 Explore, 22 greetings and 2 says, 9 Detour, 11 Heal walks, 7 Retreat, 2 Flee, 5 `take gem`, 4 Break. Intents: 752 `Step`, 2,185 `Wait`, 67 `Use`, 24 `Say`, 10 `Take`, 3 `Arm`. Call mix: 660 `tick`, 210 `entities`, 201 `zone`, 128 `strategist`, 54 `self`, 47 `terrain`, 15 `position`.
+
+#### Top 3 defects
+
+1. **Detour misses gem piles a few cells off the walk, so they are taken on a later pass or never** (A73). Two triples show it.
+
+   **(359–361, 440), taken 255 s after it was first seen.** First seen at 87–89 s. At 96–98 s the Explore safe default (defect 3) walked past it, 5 cells off, from (376, 446) to (361, 433). Nothing went for it. The nearest path cell was past `DETOUR_REACH` = 3 (`states/detour.py:39`), and going by it added about 7 steps, over `DETOUR_EXTRA_STEPS` = 4 (`:41`). The walk under way was Explore's, not Gather's, so no other state took gem piles. It went back at 331 s only because Gather, working a `gather_gems` op from 199 s, picked the pile as its target ("gather → (361, 440)"). Detour took the last stretch at 336 s, and the three gems were taken at 342–349 s. The planner never named the pile. To take a triple on the first pass, Detour should judge a gem pile in view by the steps it adds, with a larger allowance for a pile, not by a fixed 3-cell reach.
+
+   ```
+   87 s   @383,448  (359..361, 440) first in view
+   97 s   @366,437  explore → (361, 433)               5 cells off, no detour
+   331 s  @385,434  gather → (361, 440)                 Gather picks the pile
+   336 s  @375,433  detour → gem at (361, 440), then back to gather
+   342–349 s  take gem ×3                               gems 10 → 13
+   ```
+
+   **(359–361, 360), never taken: the queued walk is cut off the path Detour prices against.** (Fixed in #158: Detour now checks the held queue's remaining Steps, then `m.path`, `pathing.route_ahead`.) When a walk queue goes out, `runner.py:944` drops the queued cells from `m.path` (`m.path = m.path[queued:]`). While that queue runs, the held-queue probe runs Detour, and `detour_find` (`states/detour.py:114`, `:121`) measures each find from where the character stands against a path that starts up to 10 steps ahead. Cells beside the queued stretch are not on it at all, and later cells are counted as nearer than they are. At 2–6 s the first Explore walk, (369, 369) toward (344, 356), queued 10 steps through (363, 365) and (359, 364), 2–4 cells from three adjacent gems at (359–361, 360). From (363, 365), `extra_steps` on the cut path gives 5, 6 and 7 extra steps, over `DETOUR_EXTRA_STEPS` = 4. On the rest of the walk it gives 1, 2 and 3. The gems were in view, and no state suppressed Detour; it never fired. When the queue ended at 6 s, Travel took over toward town, away from them. Detour should price against the held queue's remaining cells plus `m.path`.
+
+   ```
+   t=2 s  @369,369  queue 10×Step 27×Wait (explore → (344, 356))     m.path = cells 11+
+   t=4 s  @363,365  queue held   gems (359..361, 360) in view   extra_steps 5/6/7 (cut) vs 1/2/3 (rest of the walk)
+   t=6 s  @359,364  travel:town → (369, 385)                        gems 4 cells north, left behind
+   ```
+
+2. **Equip never takes a non-weapon out of the armed slot** (A74). `best_equip_upgrade` considers a weapon only while the armed slot holds a weapon or nothing (`equip.py:175`: `not armed_owned and (armed is None or is_weapon(armed))`). A potion that no state owns, here left armed from run 3, blocks the sword for good. Every `equip` op then finishes at once (`states/equip.py:31–32`): 15 ops over 250 s, each re-sent by the planner ("the armed slot still holds a small_potion"). The sword was armed only incidentally, by Break's cut at 147 s and Gather's re-arm at 267 s. Heal makes it worse: `use_carried_heal` records whatever is armed as the weapon to restore (`states/heal.py:308–309`), a potion included, and at 213 s it **re-armed small_potion** over the sword. Equip should treat an unowned armed non-weapon as an empty slot, and Heal should record only a weapon.
+
+3. **A `buy` with no shop item in sight sends nothing, and the Explore safe default walks away from town** (A75). `shop_outcome` returns "nothing to buy" when no priced supply is in view (`states/shop.py:66–67`), and nothing inserts a `travel` shop stop first, the prerequisite rule #154 added for entrances. From 60 s to 133 s, with `buy` small_potion on top, Explore walked from the town cell to (299, 390), about 100 cells south-west, into a chugbug pack that hit it 10 → 6. The shop was 25 cells east of the town cell. Shop should insert a `travel` to the nearest known shop cell as a stop, or Travel should resolve one, before falling through.
+
+   ```
+   64 s   applied  equip, buy small_potion, explore_area (410, 400) r15
+   65–133 s  explore → (395, 436) … (291, 385)    17 gems, no shop item in view
+   152 s  flee chugbug ×2, health 10 → 6
+   223 s  shop small_potion → (422, 398)          first sight of the shop
+   ```
+
+**Minor:** Travel paced between two cells twice (above, `states/travel.py:242–245`). #158 fixed it: the window search now ranks cells by the corridor tree. The Use at 228 s on a just-bought potion at 8/10 consumed nothing, yet the M8 potion gate counted it (A76). The planner retargeted `gather_gems` four times in 50 s on 4–17-cut samples, though Gather already relocates itself after 20 cuts.

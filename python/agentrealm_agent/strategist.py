@@ -18,8 +18,11 @@ One window, on the tick thread:
    dropped, idle (from ``Memory``), and map change, hurt, discovery
    (:mod:`.discovery`: a new NPC, entrance, affordable item, hostile pack or
    unread sign, A71, A72) and timer (raised here).
-2. If an answer came back, apply it (see :meth:`Strategist._settle`). A new
-   head waits for the next action boundary: it is applied once no queue is
+2. If an answer came back, reconcile it with what changed since its prompt
+   (:class:`Asked`): an op that finished or was dropped while the call was
+   out is not put back, and a ``buy`` counts what was held when it was
+   asked for (free-play run 7). Then apply it (see
+   :meth:`Strategist._settle`). A new head waits for the next action boundary: it is applied once no queue is
    held, so it never cuts a walk short (A71); the survival reflexes act on
    the world, not the plan, so they still win at once.
 3. If nothing is in flight, the inbox has triggers and the budget allows it,
@@ -105,6 +108,7 @@ from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
+from .healing import supply_matches
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
@@ -815,6 +819,66 @@ class StallClock:
 
 
 @dataclass
+class Asked:
+    """What the prompt of the call in flight showed, and what has changed
+    since, so its reply is applied to the stack as it is now (free-play run
+    7: a reply asked before ``buy matches`` finished put it back, and a
+    second pair took the last gems).
+
+    ``stack`` is the ops left on the stack when the prompt was built,
+    ``held`` the supply codes held or stowed then; ``done`` and ``failed``
+    the ops that finished or were dropped since (their ``goal_done`` and
+    ``goal_failed`` triggers).
+    """
+
+    stack: list[dict[str, Any]]
+    held: list[str]
+    done: list[dict[str, Any]] = field(default_factory=list)
+    failed: list[dict[str, Any]] = field(default_factory=list)
+
+    def note(self, trigger: dict[str, Any]) -> None:
+        """Keep the op of a ``goal_done`` or ``goal_failed`` trigger raised while the call is out."""
+        op = trigger.get("op")
+        if not isinstance(op, dict):
+            return
+        if trigger.get("trigger") == "goal_done":
+            self.done.append(op)
+        elif trigger.get("trigger") == "goal_failed":
+            self.failed.append(op)
+
+    def drop_ended(self, goals: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """``goals`` less one copy of each op that ended since the prompt,
+        and the copies taken out.
+
+        An op the prompt showed on the stack is carried over by a reply
+        that sends it again, so the reply's first copy of it is the one
+        that has ended. A further copy is the planner asking for another
+        (two ``buy`` ops buy two), and stays. An op the prompt never showed
+        is the planner's own and stays.
+        """
+        goals, shown, dropped = list(goals), list(self.stack), []
+        for op in self.done + self.failed:
+            if (i := _index_of(shown, op)) is None:
+                continue
+            del shown[i]
+            if (j := _index_of(goals, op)) is not None:
+                dropped.append(goals.pop(j))
+        return goals, dropped
+
+    def held_before(self, code: str) -> int:
+        """The fewest of ``code`` a ``buy`` adds one to: what was held when
+        the planner asked for it, plus one for each buy of it that has
+        finished since, which the planner counted on."""
+        bought = sum(1 for op in self.done if op.get("op") == "buy" and op.get("code") == code)
+        return sum(1 for c in self.held if supply_matches(code, c)) + bought
+
+
+def _index_of(ops: list[dict[str, Any]], op: dict[str, Any]) -> int | None:
+    """Where ``op`` first stands in ``ops`` (``same_ops``: its ``why`` ignored), or None."""
+    return next((i for i, o in enumerate(ops) if same_ops([o], [op])), None)
+
+
+@dataclass
 class Answer:
     """What the background thread hands back for one call."""
 
@@ -846,6 +910,7 @@ class Strategist:
     stall: StallClock = field(default_factory=StallClock)
     discoveries: Discoveries = field(default_factory=Discoveries)  # what this run has seen, for discovery triggers (A71)
     deferred: tuple[Plan, dict[str, Any], int, float, dict | None] | None = None  # (plan, record, pinned, since, head it replaces) waiting for an action boundary (A71)
+    asked: Asked | None = None  # what the call in flight was asked from, and what changed since
     _requests: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=1), repr=False)
     _answers: queue.Queue = field(default_factory=queue.Queue, repr=False)
     _stop: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -1037,6 +1102,9 @@ class Strategist:
                 pending["finds"].extend(finds)
                 del pending["finds"][:-FINDS_KEPT]  # a crowded view or a new map never floods the prompt
         drained = drain_triggers(m)
+        if self.asked is not None:
+            for trigger in drained:
+                self.asked.note(trigger)
         if runner.acceptance is not None:
             for trigger in drained:
                 runner.acceptance.on_strategist_trigger(trigger)
@@ -1081,6 +1149,11 @@ class Strategist:
         self.last_call_at = self.clock()
         self.spent.append([self.last_call_at, estimate_tokens(messages)])
         self.in_flight, self.inbox = self.inbox, []
+        w, plan = runner.world, runner.plan
+        self.asked = Asked(
+            stack=[dict(op) for op in plan.goals[plan.index :]],
+            held=[supply.code for supply in w.held_supplies + w.chest_supplies],
+        )
         runner.log(
             "strategist",
             f"ask (call {self.calls}, {len(self.in_flight)} trigger(s))",
@@ -1094,7 +1167,11 @@ class Strategist:
         A failed call (network, HTTP, refusal) keeps the stack and puts its
         triggers back for the next call. Otherwise ``params`` merge onto the
         current ones at once, bounded by the directives floor as it is now,
-        and ``goals``, when the reply has the key, become the stack. A stack
+        and ``goals``, when the reply has the key, become the stack, first
+        reconciled with what changed since the prompt (:class:`Asked`): an op
+        that finished or was dropped while the call was out is taken out
+        once, and a new ``buy`` head counts from what was held when the
+        planner asked. A stack
         equal to the one left keeps its progress, and the same op on top
         keeps its own (stall clock, wait start, block snapshot, path). No
         valid goal (or a reply that is not a JSON object) clears it: the
@@ -1104,6 +1181,7 @@ class Strategist:
         that only repeats one (:func:`repeats_pinned`).
         """
         triggers, self.in_flight = self.in_flight or [], None
+        asked, self.asked = self.asked, None
         reported = tokens_used(answer.usage)
         if reported is not None and self.spent:
             self.spent[-1][1] = reported
@@ -1145,6 +1223,12 @@ class Strategist:
         if isinstance(reply, dict) and "goals" not in reply:
             runner.log("strategist", "no goals in reply; stack kept", {"strategist": {"event": "kept", **record}})
             return
+        if asked is not None:
+            # Asked before these ended: the reply carries them over from the
+            # stack it was shown, so they are not put back (free-play run 7).
+            goals, stale = asked.drop_ended(goals)
+            if stale:
+                record["ended_since_ask"] = stale
         given_up = runner.mem.nav_stuck.given_up_travel
         if given_up:
             # A travel to a cell stuck detection gave up on never reaches the
@@ -1201,6 +1285,10 @@ class Strategist:
             directive_end=len(pinned),
         )
         new_head = not (goals and head is not None and same_ops(goals[:1], [head]))
+        if new_head and asked is not None and goals and goals[0]["op"] == "buy":
+            # One more than the planner saw held when it asked (``Plan.advance``
+            # lowers it further on a drink or a drop).
+            new.held_before = asked.held_before(goals[0]["code"])
         if new_head and head is not None and runner.mem.held_queue is not None:
             # Mid-action: the new head waits for the queue to end (A71).
             self.deferred = (new, record, len(pinned), self.clock(), head)

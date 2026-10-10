@@ -19,6 +19,7 @@ from ..healing import (
     save_regen_yes,
     standing_in_safe_zone,
 )
+from ..hostile_ground import ground_by_hostile, reach_cells
 from ..memory import Memory, queue_signal
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
@@ -33,7 +34,7 @@ from ..pathing import (
     nav_search,
     reachable_safe_goal,
 )
-from ..survival import hostile_reach, hostiles_in_range, hostiles_reaching, reach_by_hostile, town_cell
+from ..survival import hostiles_in_range, hostiles_reaching, town_cell
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .break_state import break_toward
@@ -180,24 +181,26 @@ def _plan_blocked(
     w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, reach: set[Pos] | None = None
 ) -> tuple[set[Pos], set[Pos]]:
     """Heal's (avoid, costly): hazards are both; cells in a known hostile's
-    reach (``reach``, computed here when not given) are costly, so a walk to
-    food or safe ground goes round a pack instead of through it (A63 run 4)."""
+    reach, in view or remembered (``reach``, ``hostile_ground.reach_cells``
+    when not given), are costly, so a walk to food or safe ground goes round
+    a pack instead of through it (A63 run 4)."""
     nav_avoid, nav_costly = navigation_avoid_costly(m.nav, ctx.knowledge, w.map_id, w.tick)
     hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
     if reach is None:
-        reach = hostile_reach(w, policy)
+        reach = reach_cells(w, policy)
     return nav_avoid | hazards, nav_costly | hazards | reach
 
 
 def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *, goal: str) -> StateOutcome | None:
     """A step toward the first known safe cell a path reaches (near town
     first, then nearest), skipping those a walk gave up on and those in a
-    known hostile's reach, else toward the town cell
+    known hostile's ground, in view or remembered
+    (``hostile_ground.ground_by_hostile``), else toward the town cell
     (``pathing.reachable_safe_goal``; free-play run 2, A63 run 4). The cell is
     committed (``pathing.HEAL_TARGET``, A71): kept while it stays valid, even
     when another safe cell comes nearer; a walk that gives it up this
     decision picks the next one at once."""
-    reach = reach_by_hostile(w, policy)
+    reach = ground_by_hostile(w, policy)
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx, set().union(*reach.values()))
     params = grid_params(policy, plan_avoid, plan_costly)
     for _ in range(2):  # a kept cell the walk gives up on this decision is replaced at once

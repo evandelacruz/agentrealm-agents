@@ -7,7 +7,7 @@ the runner loads them from the world's knowledge base at start
 (:func:`load_hostiles`) and writes them back at exit (:func:`save_hostiles`).
 Loaded, they feed the same tests as anything learned this run: Flee and
 Retreat (``survival.is_hostile``), and the ground Gather and Detour keep off
-(``gather_safe.known_reach``, ``route_clear``).
+(``hostile_ground.known_reach``, ``gather_safe.route_clear``).
 
 Stored in the knowledge base as::
 

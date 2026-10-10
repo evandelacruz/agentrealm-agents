@@ -25,9 +25,9 @@
 
   "A8": {"state": "done"},
 
-  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats. Free-play run 3: a Retreat, Park or Heal walk that gets no nearer a safe tile in a stuck window rules it out for a bounded time and moves on to the next candidate, else town (retreat.no_progress; Heal through bounded_step). A losing Retreat's drink or swing pauses the safe walk's stuck window. Free-play run 6: a safe cell no_way proves walled in is ruled out at once, the town cell too, and one with no step found for a stuck window is ruled out then (retreat_step); a path whose first cell is taken only waits."},
+  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats. Free-play run 3: a Retreat, Park or Heal walk that gets no nearer a safe tile in a stuck window rules it out for a bounded time and moves on to the next candidate, else town (retreat.no_progress; Heal through bounded_step). A losing Retreat's drink or swing pauses the safe walk's stuck window. Free-play run 6: a safe cell no_way proves walled in is ruled out at once, the town cell too, and one with no step found for a stuck window is ruled out then (retreat_step); a path whose first cell is taken only waits. Free-play run 7: a safe cell in any known hostile's ground (in view or remembered; a pursuer's only where it gets before we do) is no refuge for Retreat, Park or Heal; with none, Retreat sends nothing and Flee's escape runs, and Flee runs toward the refuge Retreat picks (hostile_ground.ground_by_hostile, pathing.retreat_safe_goal)."},
 
-  "A10": {"state": "done"},
+  "A10": {"state": "done", "note": "Free-play run 7: Heal's safe pick and walks read the same hostile ground as Retreat, remembered hostiles included; the town cell is skipped too when a hostile holds it."},
 
   "A11": {"state": "done"},
 
@@ -65,7 +65,7 @@
 
   "A21": {"state": "done"},
 
-  "A22": {"state": "done", "note": "Free-play run 5: Gather and Detour keep off ground remembered hostiles hold (posts, last-seen cells, reach learned from hits) and take no target whose route crosses a known hostile's reach, unless the gather_gems op sets fight; while Gather works only in a target region it walks to piles only there. Free-play run 6: hostile NPC types and their sightings are kept in the world knowledge base across runs (hostile_memory), and Gather picks the nearest bush or grass by walk, not any bush before any grass."},
+  "A22": {"state": "done", "note": "Free-play run 5: Gather and Detour keep off ground remembered hostiles hold (posts, last-seen cells, reach learned from hits) and take no target whose route crosses a known hostile's reach, unless the gather_gems op sets fight; while Gather works only in a target region it walks to piles only there. Free-play run 6: hostile NPC types and their sightings are kept in the world knowledge base across runs (hostile_memory), and Gather picks the nearest bush or grass by walk, not any bush before any grass. Free-play run 7: the walk to an unseen named region and the move-off from a shadowing hostile keep clear of known hostile ground too."},
 
   "A23": {"state": "done"},
 
@@ -93,7 +93,7 @@
 
   "A34": {"state": "done"},
 
-  "A35": {"state": "done", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack runs the A61 safe default, fail fast with no key. Planner prompt op table matches the executors (equip in, hunt out). A stack change also drops every committed walk (Memory.walks, A15). Refused key (401/403) is fatal at startup; mid-run failures back off (2 s doubling, cap 120 s); directives ops stay above the planner's goals; the prompt State marks each stack op pinned or planner and the model is told to plan around pinned ops; SDK in python/requirements.txt."},
+  "A35": {"state": "done", "note": "AI planner on by default (--no-planner is a test mode): Anthropic or OpenAI provider, event and 15 s timer replans, per-minute call and token budget, empty stack runs the A61 safe default, fail fast with no key. Planner prompt op table matches the executors (equip in, hunt out). A stack change also drops every committed walk (Memory.walks, A15). Refused key (401/403) is fatal at startup; mid-run failures back off (2 s doubling, cap 120 s); directives ops stay above the planner's goals; the prompt State marks each stack op pinned or planner and the model is told to plan around pinned ops; SDK in python/requirements.txt. Free-play run 7: a reply is reconciled with what changed while the call was out (strategist.Asked): an op that finished or was dropped since is not put back unless the reply adds another copy, and a new buy head counts from what was held when asked."},
 
   "A62": {"state": "done", "note": "Planner prompt: game reference (site docs and guides, refreshed by scripts/refresh_planner_reference.py), GAME_NOTES.md, progression section (survive and learn, gear up, beat levels, beat the world; readiness bars on State fields worn, held, armed, levels_cleared, level_count), op contract; cached prefix (Anthropic cache_control, OpenAI prompt_cache_key). Token budget counts cache writes, not reads; default fits one prefix write. Not yet run live."},
 

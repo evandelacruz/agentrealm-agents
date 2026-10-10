@@ -2,7 +2,8 @@
 
 Priority 1. Runs with a hostile in range, somewhere safe to head for
 (``retreat_goal``: a known safe tile, or the town cell; it walks to the
-nearest one a path reaches, ``pathing.retreat_safe_goal``), and
+nearest one a path reaches outside every known hostile's ground, the refuge
+Flee also runs toward, ``pathing.retreat_safe_goal``), and
 ``should_retreat`` from health and the threat table; never on a safe tile or
 during a boss fight (A38).
 """
@@ -12,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 
 from ..directives import attack_forbidden
+from ..hostile_ground import ground_by_hostile
 from ..memory import Memory
 from ..navigation import cost_path, no_way, oscillation
 from ..navigation import stuck as nav_stuck
@@ -19,7 +21,6 @@ from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
 from ..survival import (
     LOSING_NAV,
     RETREAT_NAV,
-    hostile_reach,
     hostiles_reaching,
     is_attacker,
     on_safe_tile,
@@ -50,11 +51,13 @@ class RetreatState(State):
     It sends the whole path as one queue, as a walk does, and lets that
     queue run: a reflex replacing it every round trip got one step out of
     each queue (A16 Walk run 4). Its path weighs no danger from the hostiles
-    it runs from (``survival.pursuer_peaks``) and goes round the reach of any
-    other known hostile (``survival.hostile_reach``). When it is losing ground, it drinks or
+    it runs from (``survival.pursuer_peaks``) and goes round the ground of any
+    other known hostile, in view or remembered (``hostile_ground.ground_by_hostile``).
+    When it is losing ground, it drinks or
     eats what it carries, fights back a hitter its weapon has hurt and the
     win estimate says it beats, or else replans weighing no hostile at all
-    (``retreat_step``)."""
+    (``retreat_step``). With no refuge outside every known hostile's ground
+    it sends nothing, and Flee's escape runs."""
 
     name = "Retreat"
 
@@ -79,8 +82,10 @@ class RetreatState(State):
 
 
 def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | None = None) -> StateOutcome:
-    """A walk queue along a path to the nearest safe cell a path reaches, else
-    the town cell (``pathing.retreat_safe_goal``), or no intent when there is none.
+    """A walk queue along a path to the refuge: the nearest safe cell a path
+    reaches outside every known hostile's ground, else the town cell
+    (``pathing.retreat_safe_goal``), or no intent when there is none: then
+    Flee, next in the dispatch order, runs its own escape.
 
     While the queue it sent is still running, it holds the round (``wait``,
     not a reflex), so the runner lets the queue walk. Losing ground
@@ -127,7 +132,10 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     lasting = grid_params(policy, set(plan_avoid), set(plan_costly))  # without this decision's escape: what no_way proves
     plan_avoid |= escape
     if goal is None:
-        return StateOutcome(None, "safe tile unreachable", state=state)
+        # No refuge: send nothing, so Flee's committed escape (and its
+        # fight-back) runs next (A44). Never a safe cell a pursuer gets to
+        # first: walking back toward it is the pacing run 7 died of.
+        return StateOutcome(None, "no refuge outside hostile ground", state=state)
     losing = losing_ground(w, ctx, goal)
     if losing:
         if out := _turn_on_losing(w, ctx, state):
@@ -137,10 +145,10 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     elif not escape and m.held_queue is not None and m.state == state and m.retreat_walk == goal:
         return StateOutcome(None, f"retreat → safe {goal}: queue under way", state=state, wait=True)
     pursuers = pursuer_peaks(w, policy, everyone=losing)
-    # Cells in reach of a hostile it is not running from cost a detour, and a
-    # kept path that now crosses the reach of one it did not cross when
-    # planned is planned again (A63 run 4).
-    plan_costly |= hostile_reach(w, policy, skip=pursuers)
+    # Ground a hostile it is not running from holds, in view or remembered,
+    # costs a detour, and a kept path that now crosses the reach of one it
+    # did not cross when planned is planned again (A63 run 4).
+    plan_costly |= set().union(*(cells for key, cells in ground_by_hostile(w, policy).items() if key not in pursuers))
     params = dataclasses.replace(grid_params(policy, plan_avoid, plan_costly), danger_peaks=pursuers)
     # Each danger profile keeps its own corridor (``RETREAT_NAV``, ``LOSING_NAV``).
     nav_key = LOSING_NAV if losing else RETREAT_NAV

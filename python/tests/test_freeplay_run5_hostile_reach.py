@@ -10,7 +10,7 @@ planner named.
    seen, the post a guard keeps, and how far from that post it has hit us
    (``WorldModel.sightings``).
 2. Ground a remembered hostile holds is not gathered, and no walk to a
-   target crosses a known hostile's reach (``gather_safe.known_reach``,
+   target crosses a known hostile's reach (``hostile_ground.known_reach``,
    ``route_clear``), unless the op chose to fight for it (``fight``).
 3. A hit on the way to a pile re-prices that pile.
 4. Gather's piles honour the named region.
@@ -28,7 +28,8 @@ from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.detour import DetourState, detour_find
 from agentrealm_agent.states.gather import gather_outcome
-from agentrealm_agent.states.gather_safe import danger, gather_ground, known_reach, route_clear
+from agentrealm_agent.hostile_ground import danger, known_reach
+from agentrealm_agent.states.gather_safe import gather_ground, route_clear
 from agentrealm_agent.zone_discovery import apply_zone
 from agentrealm_agent.world import POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
 

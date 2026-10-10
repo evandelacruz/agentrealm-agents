@@ -36,6 +36,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 
 from ..healing import FOOD_CODES, hurt
+from ..hostile_ground import Danger, danger, reach_cells
 from ..knowledge_base import knowledge_items
 from ..memory import Memory
 from ..loot import GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_room
@@ -44,7 +45,7 @@ from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
 from ..world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
-from .gather_safe import Danger, danger, gather_ground, reach_cells, route_clear
+from .gather_safe import gather_ground, route_clear
 from .intents import set_position
 
 GOAL = "detour"

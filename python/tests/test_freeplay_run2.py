@@ -309,15 +309,6 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         self.assertEqual(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, (-20, 10), pack), (-20, 10))
         self.assertIsNone(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None, pack))
 
-    def test_a_mark_by_a_skipped_hostile_rules_out_nothing(self):
-        # Review on #147: a hostile Retreat runs from rules out no tile, even
-        # one it was marked beside earlier (by Heal, before it hit us).
-        w, m = world(), Memory()
-        params = grid_params(Policy(kind="scripted"), set(), set())
-        reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None, {("npc", 30): {self.PACKED}})
-        self.assertEqual(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None, skip={("npc", 30)}), self.PACKED)
-        self.assertEqual(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None), OPEN)
-
     def test_heal_skips_the_safe_tile_beside_a_pack(self):
         w, c = world(health=4), ctx()
         safe(w, self.PACKED, OPEN)
@@ -350,7 +341,9 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         c.memory.held_queue = None
         self.assertEqual(dispatch(w, c).reason, f"retreat → safe {OPEN}")
 
-    def test_retreat_heads_for_a_tile_heal_marked_beside_its_chaser(self):
+    def test_retreat_skips_a_tile_heal_marked_beside_its_chaser(self):
+        # Free-play run 7: the chaser's reach rules a tile out too, so Heal's
+        # mark from before it hit us still holds once Retreat runs from it.
         w, c = world(health=4), ctx(on_hostile="fight")
         safe(w, (12, 10), OPEN)
         w.hostile_types.add(("npc", "chaser"))
@@ -359,7 +352,7 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
         hit(w)
         out = dispatch(w, c)
-        self.assertEqual((out.state, out.reason), ("Retreat", "retreat → safe (12, 10)"))
+        self.assertEqual((out.state, out.reason), ("Retreat", f"retreat → safe {OPEN}"))
 
     def test_heal_falls_back_to_town_when_every_safe_tile_is_beside_a_pack(self):
         kb = KnowledgeBase("sandbox")
@@ -379,14 +372,15 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual((out.state, out.reason), ("Retreat", f"retreat → safe {OPEN}"))
 
-    def test_retreat_still_heads_for_a_safe_tile_beside_its_chaser(self):
-        # The chaser follows anyway: its reach rules no safe tile out.
+    def test_retreat_skips_a_safe_tile_beside_its_chaser(self):
+        # Free-play run 7: a safe tile 2 cells from the hostile Retreat ran
+        # from drew it back into 6 hits. The chaser's reach rules it out too.
         w, c = world(health=4), ctx(on_hostile="fight")
         w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
         hit(w)
         safe(w, (12, 10), OPEN)
         out = dispatch(w, c)
-        self.assertEqual((out.state, out.reason), ("Retreat", "retreat → safe (12, 10)"))
+        self.assertEqual((out.state, out.reason), ("Retreat", f"retreat → safe {OPEN}"))
 
     def test_fight_retreat_tail_skips_it_too(self):
         w, c = world(health=4), ctx(on_hostile="fight")

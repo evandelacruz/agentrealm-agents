@@ -31,7 +31,8 @@ from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.detour import detour_find
 from agentrealm_agent.states.gather import gather_outcome
-from agentrealm_agent.states.gather_safe import gather_ground, known_reach
+from agentrealm_agent.hostile_ground import known_reach
+from agentrealm_agent.states.gather_safe import gather_ground
 from agentrealm_agent.survival import hostiles_in_range, known_hostile
 from agentrealm_agent.world import POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
 

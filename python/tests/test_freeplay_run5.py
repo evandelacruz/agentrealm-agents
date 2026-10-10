@@ -133,6 +133,24 @@ class DrinkTriesCountRejectionsTest(unittest.TestCase):
         self.assertEqual(r.mem.heal_tries[("use", 5)], HEAL_MAX_TRIES)
         self.assertIsNone(carried_heal(r.world, r.mem))
 
+    def test_a_queue_that_replaces_the_drink_forgets_it(self):
+        # The drink's queue was replaced (a reflex, a death's resync): a later
+        # refused self-Use must not count against that potion.
+        r = make_runner(self)
+        self.sent(r, DRINK)
+        r._forget_replaced_drink([{"verb": "Step", "direction": "north"}])
+        self.assertIsNone(r.mem.heal_drink)
+        self.sent(r, DRINK, drink=None)
+        r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 1)
+        self.assertEqual(r.mem.heal_tries, {})
+
+    def test_the_drink_survives_a_round_that_sends_nothing_or_drinks(self):
+        r = make_runner(self)
+        self.sent(r, DRINK)
+        r._forget_replaced_drink(None)  # nothing sent: the drink's queue runs on
+        r._forget_replaced_drink(DRINK)  # the drink itself was sent
+        self.assertEqual(r.mem.heal_drink, 4)
+
     def test_a_rejected_weapon_arm_is_no_drink(self):
         r = make_runner(self)
         self.sent(r, [{"verb": "Arm", "supply_id": 1}])
@@ -169,6 +187,21 @@ class BuyOneMoreTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(9, "small_potion")]
         plan.advance(w)
         self.assertIsNone(plan.current(), "one bought after the death is the buy")
+
+    def test_one_picked_up_for_free_finishes_the_buy(self):
+        # One more held is what the buy is for: a free one saves the gems.
+        w, plan = hurt_world(), buy_plan()
+        plan.advance(w)
+        w.held_supplies.append(InventorySupply(8, "small_potion"))  # Pickup took one off the ground
+        plan.advance(w)
+        self.assertIsNone(plan.current())
+
+    def test_another_item_picked_up_does_not_finish_it(self):
+        w, plan = hurt_world(), buy_plan("torch")
+        plan.advance(w)
+        w.held_supplies.append(InventorySupply(8, "small_potion"))
+        plan.advance(w)
+        self.assertEqual(plan.current(), {"op": "buy", "code": "torch"})
 
     def test_a_buy_not_yet_on_top_is_not_done(self):
         w, plan = hurt_world(), buy_plan()

@@ -643,6 +643,7 @@ class Runner:
                 m.pending_queue = qid
         lives_before = w.lives
         rejected = self.apply_intent_results(r.get("intent_results") or [])
+        self._forget_replaced_drink(intents)
         earlier = w.entities
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
@@ -1175,6 +1176,14 @@ class Runner:
         code = code_in_hand(self.world, self._held_intents(), index)
         if code in FOOD_CODES | POTION_CODES:
             note_heal_pending(m, w, code, "use")
+
+    def _forget_replaced_drink(self, intents: list[dict] | None) -> None:
+        """A sent queue with no self-``Use`` replaced the drink's queue, if any:
+        its results are no longer read, so ``heal_drink`` has nothing left to
+        count (A24). Called after the response's results, which may still
+        carry the drink's own."""
+        if intents is not None and not any(is_self_use(i) for i in intents):
+            self.mem.heal_drink = None
 
     def _note_heal_refused(self, index: int) -> None:
         """Count a try against the food or potion a rejected intent was for (A24).

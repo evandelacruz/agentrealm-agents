@@ -59,7 +59,7 @@ from .wait import WaitState
 # Act on what is happening now (PLAYABLE_AGENT_PLAN.md State machine). Sync
 # and Downed only wait, the forced waits. Escape, Retreat and Heal (A10)
 # are survival; Fight (A23) slots in before Flee; then Pickup in reach (A20),
-# Recover (A11), Detour (A71) to a valuable a few steps off the walk, and
+# Recover (A11), Detour (A71, A73) to a valuable in view worth the steps it adds, and
 # Greet (A65), a one-tick hello to an NPC in sight.
 REFLEXES: tuple[State, ...] = (
     SyncState(),

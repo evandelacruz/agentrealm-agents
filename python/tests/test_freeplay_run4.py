@@ -31,7 +31,7 @@ from agentrealm_agent.navigation.planner import CostGridParams, NavSearchState, 
 from agentrealm_agent.plan import Plan, parse_directives_goals
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.pathing import route_ahead
-from agentrealm_agent.states.detour import DETOUR_EXTRA_STEPS, detour_find, extra_steps
+from agentrealm_agent.states.detour import detour_find, extra_steps
 from agentrealm_agent.states.retreat import no_progress
 from agentrealm_agent.travel import sync_town
 from agentrealm_agent.world import Entity, WorldModel
@@ -79,11 +79,11 @@ class DetourPricedFromHereTest(unittest.TestCase):
         self.assertEqual(find.id, 70)
 
     def test_a_find_beside_the_route_always_fits(self):
-        route = [(x, 10) for x in range(3, 30)]
+        w, route = open_field(), [(x, 10) for x in range(3, 30)]
         for x in range(3, 30):
             for dy in (-1, 1):
-                self.assertLessEqual(extra_steps((2, 10), (x, 10 + dy), route), 2)
-        self.assertLessEqual(extra_steps((2, 10), (8, 12), route), DETOUR_EXTRA_STEPS)
+                self.assertLessEqual(extra_steps(w, (2, 10), (x, 10 + dy), route, 2), 2)
+        self.assertLessEqual(extra_steps(w, (2, 10), (8, 12), route, 2), 2)
 
     def test_the_route_ahead_starts_with_the_queued_steps(self):
         w, m = open_field(), Memory()

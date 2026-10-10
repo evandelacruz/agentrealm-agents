@@ -137,7 +137,7 @@
 
   "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Free-play run 2 timed out on a walled-off safe tile; Park now picks the nearest one a path reaches, else town."},
 
-  "A67": {"state": "partial", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 filed (#138): accidental sword buy, 0 gems, 370 s Break Arm loop; short-run gates only. A69 fixed in #139.", "remaining": "Rerun after A68 and A70 and record it in docs/observations/A67_free_play_runs.md. Free-play run 2, whose fixes shipped in #140, has no notes there yet."},
+  "A67": {"state": "partial", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 (#138): accidental sword buy, 0 gems, 370 s Break Arm loop; its defects A68, A69 and A70 are fixed (#139, #146). Run 3 (#150, 600 s at bd5aeff): no deaths, gems from piles only, no armor or potions; short-run gates only.", "remaining": "Run 3's top defects (docs/observations/A67_free_play_runs.md) have no backlog item yet: Heal's [Arm potion, Use self] sends only the Arm and the stale re-arm then blocks Equip; Gather cuts with a non-cutting item armed and marks the ground uncuttable; Park and Retreat pick a safe tile whose path search was only cut short by its budget. File and fix them, then rerun. Run 2 (fixes in #140) has no notes in the doc."},
 
   "A68": {"state": "done", "note": "Armed supply is a candidate and wins a tie (#139); Break steps toward its block and arms only once in reach, so the step is never dropped behind an Arm."},
 

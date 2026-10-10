@@ -104,7 +104,7 @@ from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
-from .gem_yield import summary as gem_yield_summary
+from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, greeted_npc_ids, in_sight, spoken_npc_ids
@@ -1129,6 +1129,25 @@ class Strategist:
         if repeats:
             record["pinned_repeats"] = repeats
         goals = pinned + [g for g in goals if g not in repeats]
+        head = old.current()
+        if goals and head is not None:
+            kept = keep_gather_region(
+                head, goals[0], runner.world, runner.mem.gather_in_region, runner.knowledge,
+                runner.gem_cuts, triggers, runner.tick_hz,
+            )
+            if kept is not None:
+                # The region is the head's committed target (A71). Another cell
+                # of it is the same target; a move with no reason is refused,
+                # and said through last_reply_rejected on purpose: that is how
+                # the planner learns a part of its reply was not applied, and why.
+                goals = [kept[0], *goals[1:]]
+                if kept[1]:
+                    record["region_kept"] = goals[0]
+                    self.rejected = [
+                        *self.rejected,
+                        f"gather_gems kept its region at {head['x']}, {head['y']}: it is not exhausted, "
+                        "not yet shown impossible, and nothing changed",
+                    ]
         if same_ops(goals, old.goals[old.index :]):
             # A timer reply that re-sends the stack (or leaves an empty one
             # empty): keep its progress (stall clock, wait start, block
@@ -1144,7 +1163,6 @@ class Strategist:
             tick_hz=runner.tick_hz,
             directive_end=len(pinned),
         )
-        head = old.current()
         new_head = not (goals and head is not None and same_ops(goals[:1], [head]))
         if new_head and head is not None and runner.mem.held_queue is not None:
             # Mid-action: the new head waits for the queue to end (A71).

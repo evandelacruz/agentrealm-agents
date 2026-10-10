@@ -92,6 +92,11 @@ class Memory:
     gather_status: str = ""  # Gather's last decision, e.g. cutting, walking to grass, blocked by hostile (planner State)
     # Gather's stall clock: (tick this spell of Gather began, tick of its latest decision) (A63 run 3).
     gather_spell: tuple[int, int] | None = None
+    # Gather's progress toward its target region: (region, nearest it has
+    # been in blocks, 0 inside; tick that nearest was reached; tick Gather was
+    # last there). A planner reply may move the region once Gather has gone
+    # 30 s with no nearer approach and no cut there (A71, ``keep_gather_region``).
+    gather_in_region: tuple[tuple[int, int], int, int, int] | None = None
     # A hostile near Gather that has not hit us: (its id, tick its shadow clock
     # started, tick Gather last saw it near) (A63 run 3).
     gather_shadow: tuple[int, int, int] | None = None
@@ -114,6 +119,9 @@ class Memory:
     retreat_walk: Pos | None = None
     retreat_to: Pos | None = None
     retreat_gaps: list[tuple[int, int]] = field(default_factory=list)
+    # (safe goal, tick) a losing Retreat last drank or fought back instead of
+    # walking: the walk's stuck window does not count the time since (A9).
+    retreat_paused: tuple[Pos, int] | None = None
     # The runner's park phase (A66): the run is over and only the survival
     # reflexes and Park run, walking to safe ground before the exit.
     parking: bool = False

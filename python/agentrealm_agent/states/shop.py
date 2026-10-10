@@ -12,7 +12,7 @@ from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, nav_search, next_step
 from ..healing import supply_matches
-from ..plan import GoalOp
+from ..plan import GoalOp, explore_targets
 from ..shop import (
     GOAL,
     can_afford,
@@ -200,8 +200,9 @@ def _find_shop(w: WorldModel, ctx: PlayContext, op: GoalOp, code: str, state: st
         # Stuck step 2: Break, below, opens the way this decision.
         return StateOutcome(None, f"buy {code}: {att.goal} blocked", state=state)
     area: GoalOp = {"op": "explore_area", "x": town.pos[0], "y": town.pos[1], "radius": SHOP_SEARCH_RADIUS}
-    out = explore_outcome(w, m, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=area, state=state)
-    if out.intents:
+    if explore_targets(area, w):
+        out = explore_outcome(w, m, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=area, state=state)
+        # No step this decision (a taken cell, a wait) is not the search running out: its stall clock runs.
         out.reason = f"buy {code}: no shop known, exploring town: {out.reason}"
         return out
     plan.drop_current(f"no shop found within {SHOP_SEARCH_RADIUS} of town", memory=m)

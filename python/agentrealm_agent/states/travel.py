@@ -187,7 +187,7 @@ def _travel_step(
     knowledge: KnowledgeBase | None,
     plan_avoid: set[Pos],
     plan_costly: set[Pos],
-    state: str = "Travel",
+    state: str,
 ) -> StateOutcome | None:
     """One step along the route to ``dest``, across maps through known doors (A26).
     None when no step can be planned.

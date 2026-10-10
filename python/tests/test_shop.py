@@ -23,7 +23,7 @@ from agentrealm_agent.shop import (
     sync_shop,
 )
 from agentrealm_agent.states import dispatch
-from agentrealm_agent.states.base import PlayContext
+from agentrealm_agent.states.base import PlayContext, StateOutcome
 from agentrealm_agent.brain import walkable_prefix
 from agentrealm_agent.plan import parse_directives_goals
 from agentrealm_agent.travel import record_shop_cell
@@ -306,6 +306,31 @@ class ShopOutOfSightTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual(out.state, "Shop", out.reason)
         self.assertIn("exploring town", out.reason)
+
+
+    def test_dropped_when_the_search_around_town_runs_out(self):
+        w = big_world(at=(25, 25), size=60, perception=3)  # every cell within 20 of town seen: no frontier there
+        plan = self.plan()
+        c = ctx(w, plan=plan)
+        c.knowledge.extra["town"] = {"map_id": 1, "x": 25, "y": 25}
+        with self.assertLogs("agentrealm_agent.plan", "WARNING") as logs:
+            dispatch(w, c)
+        self.assertIsNone(plan.current())
+        self.assertIn("no shop found", "".join(logs.output))
+
+    def test_no_step_this_decision_keeps_the_town_search(self):
+        w = WorldModel(character_id=1, map_id=1, pos=(20, 20), perception=3, gems=10)
+        for x in range(17, 24):
+            for y in range(17, 24):
+                w.view.tiles[(x, y)] = "dirt"
+        w.terrain_center, w.terrain_map = (20, 20), 1
+        plan = self.plan()
+        c = ctx(w, plan=plan)
+        c.knowledge.extra["town"] = {"map_id": 1, "x": 20, "y": 20}
+        with mock.patch("agentrealm_agent.states.shop.explore_outcome",
+                        return_value=StateOutcome(None, "first cell taken", state="Shop")):
+            dispatch(w, c)
+        self.assertEqual(plan.current(), {"op": "buy", "code": "small_potion"}, "frontier left: not dropped")
 
 
 class ShopTilesAreNotWalkedTest(unittest.TestCase):

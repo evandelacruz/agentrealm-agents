@@ -221,13 +221,10 @@ def _is_armor(code: str, w: WorldModel) -> bool:
 
 
 def _is_attack_use(intent: dict, w: WorldModel) -> bool:
+    """A ``Use`` at a character, an NPC or a block; a self ``Use`` is a drink."""
     if intent.get("verb") != "Use":
         return False
-    target = intent.get("target") or {}
-    kind = target.get("kind")
-    if kind == "character":
-        return target.get("character_id") != w.character_id
-    return kind in ("npc", "block")
+    return (intent.get("target") or {}).get("kind") in ("character", "npc", "block")
 
 
 def _lone_weak_group(w: WorldModel, group: list, npc_id: int) -> bool:

@@ -887,7 +887,7 @@ class Runner:
         blocked = self.directives.directives.never_attack
         if not blocked:
             return intents
-        if not any(use_blocked_by_never_attack(i, self.world.entities, blocked, self.world.character_id) for i in intents):
+        if not any(use_blocked_by_never_attack(i, self.world.entities, blocked) for i in intents):
             return intents
         m = self.mem
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0

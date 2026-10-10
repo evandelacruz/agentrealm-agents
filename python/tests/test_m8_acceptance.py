@@ -198,10 +198,29 @@ class PotionDrinkTest(unittest.TestCase):
     def test_a_queue_that_replaces_the_drink_drops_it(self):
         m, w = self.drink_sent()
         decide(m, w, state="Explore", intents=WAIT)
+        m.on_events([])  # that response carried nothing of the drink
         m.on_intent_result(DRINK, APPLIED)
         w.held_supplies = w.held_supplies[:1]
         decide(m, w, state="Explore", intents=HELD)
         self.assertFalse(m.heal_potion)
+
+    def test_the_replacing_responses_own_drink_result_still_counts(self):
+        # Sent queues replace the drink, but that response may still carry
+        # its result (an empty stop keeps the same queue id), as the runner's
+        # _forget_replaced_drink allows.
+        m, w = self.drink_sent()
+        decide(m, w, state="Explore", intents=[])
+        m.on_intent_result(DRINK, APPLIED)
+        m.on_events([])
+        w.held_supplies = w.held_supplies[:1]
+        decide(m, w, state="Explore", intents=HELD)
+        self.assertTrue(m.heal_potion)
+
+    def test_the_replacing_responses_supply_used_still_counts(self):
+        m, w = self.drink_sent()
+        decide(m, w, state="Explore", intents=[])
+        m.on_events([{"kind": "SupplyUsed", "actor_id": 1, "supply_code": "small_potion"}])
+        self.assertTrue(m.heal_potion)
 
     def test_a_death_drops_the_drink(self):
         m, w = self.drink_sent()

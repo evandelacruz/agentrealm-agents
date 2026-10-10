@@ -78,6 +78,10 @@ class M8AcceptanceMetrics(TimedRunHooks):
     # used nothing up, when a queue without it replaces it, or on a death.
     _drink_potions: int | None = field(default=None, repr=False)
     _drink_applied: bool = field(default=False, repr=False)
+    # A queue without the drink was sent: forget it once that response's
+    # results and events are read, which may still carry the drink's own
+    # (as ``Runner._forget_replaced_drink``).
+    _drink_replaced: bool = field(default=False, repr=False)
 
     def before_tick(
         self,
@@ -125,6 +129,9 @@ class M8AcceptanceMetrics(TimedRunHooks):
             if self._weak_lone_fight:
                 self.weak_hostile_kills += 1
             self._end_fight()
+        if self._drink_replaced and not self._drink_applied:
+            self._drink_potions = None
+        self._drink_replaced = False
 
     def on_death(self) -> None:
         super().on_death()
@@ -182,13 +189,15 @@ class M8AcceptanceMetrics(TimedRunHooks):
         """Heal's food ``Take``, and the potion drink whose result decides ``heal_potion``.
 
         A sent queue replaces the one before it, so a drink still out is
-        forgotten unless this queue carries a new one."""
+        forgotten (after this response, ``on_events``) unless this queue
+        carries a new one."""
         drink = state == "Heal" and any(
             is_self_use(intent) and code_in_hand(w, intents, i) in POTION_CODES
             for i, intent in enumerate(intents)
         )
-        self._drink_potions = potion_count(w) if drink else None
-        self._drink_applied = False
+        if drink:
+            self._drink_potions, self._drink_applied = potion_count(w), False
+        self._drink_replaced = not drink
         if state != "Heal":
             return
         for intent in intents:

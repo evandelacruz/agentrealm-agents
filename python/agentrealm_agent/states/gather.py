@@ -532,6 +532,9 @@ def _still_wanted(
 
 # Target kinds ``_replan_gather`` walks back to once another state took the path.
 KEPT_KINDS = ("pile", "bush", "grass", OUT)
+# Gather waits this long for a taken first step toward its target (an
+# occupant), then gives the target up (5 s at 10 ticks/s, as a walk's fog hold).
+HOLD_TICKS = 50
 
 
 def _replan_gather(
@@ -548,9 +551,10 @@ def _replan_gather(
     cells before safe ones), then, on safe ground, out to field ground or the
     frontier; leave ``m.path`` alone if none.
 
-    A kept target is given up only when no path reaches it at all; one whose
-    path starts on a taken cell is held, and True says so: the caller waits
-    instead of letting the safe default walk away and back (A71). The
+    A kept target is given up only when no path reaches it at all, or its
+    path has started on a taken cell for ``HOLD_TICKS``; until then it is
+    held, and True says so: the caller waits instead of letting the safe
+    default walk away and back (A71). The
     nearest ``GATHER_CANDIDATES`` of each kind are tried. A failed plan
     keeps another state's path.
     """
@@ -565,10 +569,15 @@ def _replan_gather(
         path = _path_to(w, kept, params)
         if path and next_step(w, blocked, path):
             m.path, m.goal, m.gather_target = path, GOAL, kept
+            m.gather_hold = None
             return False
         if path:
-            m.gather_target = kept
-            return True
+            if m.gather_hold is None or m.gather_hold[0] != kept:
+                m.gather_hold = (kept, w.tick)
+            if w.tick - m.gather_hold[1] < HOLD_TICKS:
+                m.gather_target = kept
+                return True
+        m.gather_hold = None  # no way there, or the way stayed taken: pick again
 
     piles = [e for e in w.entities if is_gem_pile(e) and gather_ground(w, e.pos, policy)]
     if piles:

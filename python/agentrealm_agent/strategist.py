@@ -117,6 +117,7 @@ from .zone_discovery import known_safe
 log = logging.getLogger(__name__)
 
 INBOX_KEPT = 48  # newest triggers kept while waiting for a call
+FINDS_KEPT = 16  # newest finds one discovery trigger carries (A71)
 DEFER_MAX_S = 10.0  # a new head waits at most this long for an action boundary (A71)
 CHARS_PER_TOKEN = 4  # estimate for a call that reports no usage
 BUDGET_WINDOW_S = 60.0  # the budget counts calls and tokens over this much play
@@ -994,9 +995,10 @@ class Strategist:
             # One trigger holds every find not yet sent, so a run of them is one replan.
             pending = next((t for t in self.inbox if t["trigger"] == "discovery"), None)
             if pending is None:
-                self.inbox.append({"trigger": "discovery", "finds": finds, "tick": w.tick})
+                self.inbox.append({"trigger": "discovery", "finds": finds[-FINDS_KEPT:], "tick": w.tick})
             else:
                 pending["finds"].extend(finds)
+                del pending["finds"][:-FINDS_KEPT]  # a crowded view or a new map never floods the prompt
         drained = drain_triggers(m)
         if runner.acceptance is not None:
             for trigger in drained:

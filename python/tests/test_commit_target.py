@@ -149,6 +149,103 @@ class NearerCandidateTest(unittest.TestCase):
         w.tick += targets.LAPSE_TICKS + 1
         self.assertEqual(targets.hold(m, w, "g", lambda: (2, 2), lambda t: True), (2, 2))
 
+    def test_retreat_keeps_its_safe_tile_when_a_nearer_one_is_found(self):
+        from tests.test_survival_runs import ctx as fight_ctx, hit, world
+
+        w, c = world(health=4), fight_ctx(on_hostile="fight")
+        w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
+        apply_zone(w, w.map_id, -5, 10, {"safe": True, "brightness": 1})
+        hit(w)
+        self.assertEqual(dispatch(w, c).reason, "retreat → safe (-5, 10)")
+        apply_zone(w, w.map_id, 4, 10, {"safe": True, "brightness": 1})  # nearer, found later
+        w.tick += 5
+        hit(w)
+        c.memory.held_queue = None
+        self.assertEqual(dispatch(w, c).reason, "retreat → safe (-5, 10)")
+        self.assertEqual(c.memory.targets["safe"].target, (w.map_id, (-5, 10)))
+
+    def test_loot_keeps_its_supply_and_walks_to_it_out_of_sight(self):
+        w = field(at=(10, 4))
+        w.perception = 4
+        op = {"op": "fetch_item", "code": "apple"}
+        plan = Plan([op], dict(PARAM_DEFAULTS))
+        m = Memory()
+        w.entities = [Entity("supply", 21, (13, 4), "apple")]
+        out = dispatch(w, ctx(m, plan))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(m.targets["loot"].target, (21, (13, 4)))
+        walk_off(w, m, (6, 4))  # out of sight of it now
+        w.entities = [Entity("supply", 22, (4, 4), "apple")]  # another, nearer
+        out = dispatch(w, ctx(m, plan))
+        self.assertEqual((out.state, m.path[-1]), ("Loot", (13, 4)), out.reason)
+        w.pos = (11, 4)  # in sight again, and gone
+        w.entities = [Entity("supply", 22, (4, 4), "apple")]
+        dispatch(w, ctx(m, plan))
+        self.assertEqual(m.targets["loot"].target, (22, (4, 4)))
+
+    def test_heal_keeps_the_food_it_went_for(self):
+        w = field(at=(10, 4))
+        w.health = 4
+        m = Memory()
+        w.entities = [Entity("supply", 31, (13, 4), "apple")]
+        self.assertEqual(dispatch(w, ctx(m)).reason, "heal_food → (13, 4)")
+        w.entities.append(Entity("supply", 32, (8, 4), "berry"))  # nearer, seen later
+        w.tick += 5
+        self.assertEqual(dispatch(w, ctx(m)).reason, "heal_food → (13, 4)")
+
+    def test_gather_waits_on_a_taken_step_then_gives_up(self):
+        w = field(width=21, height=3, at=(2, 1))  # a one-cell corridor
+        w.view.tiles[(12, 1)] = "grass"
+        m = Memory()
+        c = ctx(m, Plan([{"op": "gather_gems", "count": 3}], dict(PARAM_DEFAULTS)))
+        dispatch(w, c)
+        self.assertEqual(m.gather_target, ("grass", (12, 1)))
+        w.entities = [Entity("character", 9, (3, 1), "peer")]  # stands in the way
+        m.path, m.goal = [], ""
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.wait, out.intents), ("Gather", True, None), out.reason)
+        self.assertEqual(m.gather_target, ("grass", (12, 1)))
+        w.tick += 50  # gather.HOLD_TICKS
+        out = dispatch(w, c)
+        self.assertFalse(out.wait and out.state == "Gather", out.reason)
+        self.assertIsNone(m.gather_hold)
+
+    def test_level_keeps_its_door_when_a_nearer_one_is_seen(self):
+        from agentrealm_agent.states.level import LEVEL_TARGET, level_outcome
+
+        w = field(at=(4, 4))
+        w.map_level = 1
+        w.view.tiles[(18, 4)] = "framed_door"
+        m = Memory()
+        c = ctx(m)
+        level_outcome(w, m, c.policy)
+        self.assertEqual(m.targets[LEVEL_TARGET].target, ("level:door", MAP, (18, 4)))
+        walk_off(w, m, (8, 4))
+        m.nav_stuck.active = None  # another walk had the move
+        w.view.tiles[(6, 6)] = "framed_door"  # nearer, seen later
+        level_outcome(w, m, c.policy)
+        self.assertEqual(m.targets[LEVEL_TARGET].target, ("level:door", MAP, (18, 4)))
+        self.assertEqual(m.path[-1], (18, 4))
+
+    def test_the_held_queue_probe_keeps_no_pick(self):
+        import threading
+        from pathlib import Path
+
+        from agentrealm_agent.config import CharacterConfig
+        from agentrealm_agent.runner import Runner
+
+        cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[]), Path("t.toml"))
+        r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
+        self.addCleanup(r.trace.close)
+        r.world = field(at=(10, 4))
+        r.world.health = 4  # Heal picks a safe tile, but answers with no reflex
+        apply_zone(r.world, MAP, 18, 4, {"safe": True, "brightness": 1})
+        r.mem = Memory(need_self=False, need_position=False)
+        r.mem.gather_target = ("grass", (1, 1))
+        self.assertIsNone(r.reflex_while_held())
+        self.assertEqual(r.mem.targets, {})
+        self.assertEqual(r.mem.gather_target, ("grass", (1, 1)))
+
 
 class PrerequisiteTest(unittest.TestCase):
     """A prerequisite is a stop inserted before the target, which stays."""
@@ -178,6 +275,18 @@ class PrerequisiteTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(51, "key")]
         out = dispatch(w, ctx(m, plan, self.kb()))
         self.assertEqual(m.targets[ENTRANCE_GOAL].stops, [])
+        self.assertEqual((out.state, m.path[-1]), ("Level", (18, 4)), out.reason)
+
+    def test_a_take_that_keeps_failing_gives_the_stop_up(self):
+        w = field(at=(7, 5))
+        w.view.tiles[(18, 4)] = "framed_door"
+        w.entities = [Entity("supply", 51, (6, 6), "key")]
+        m = Memory()
+        plan = Plan([{"op": "enter_level", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
+        for _ in range(3):  # refused each time: the key stays on the ground
+            out = dispatch(w, ctx(m, plan, self.kb(), pickup=False))
+            self.assertEqual((out.state, out.intents), ("Level", [{"verb": "Take", "supply_id": 51}]))
+        out = dispatch(w, ctx(m, plan, self.kb(), pickup=False))
         self.assertEqual((out.state, m.path[-1]), ("Level", (18, 4)), out.reason)
 
     def test_no_stop_when_the_item_is_carried(self):
@@ -311,6 +420,17 @@ class DiscoveryTest(unittest.TestCase):
         self.assertEqual(llm.calls, 2)
         asks = [c.args[2]["strategist"] for c in r.log.call_args_list if c.args[2]["strategist"]["event"] == "ask"]
         self.assertEqual([f["kind"] for f in asks[1]["triggers"][0]["finds"]], ["npc", "entrance"])
+
+    def test_a_discovery_carries_at_most_the_newest_finds(self):
+        s, r = make(), fake_runner()
+        s._collect(r)
+        r.world.entities = [Entity("npc", i, (i, 1), "villager") for i in range(40)]
+        s._collect(r)
+        r.world.entities += [Entity("npc", 100 + i, (i, 2), "villager") for i in range(5)]
+        s._collect(r)
+        finds = s.inbox[-1]["finds"]
+        self.assertEqual(len(finds), 16)
+        self.assertEqual(finds[-1]["id"], 104)
 
     def test_an_item_the_gems_can_now_buy(self):
         s, r = make(), fake_runner()

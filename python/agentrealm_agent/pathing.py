@@ -379,14 +379,17 @@ def commit_explore(
     target = held[1]
     if leg is None or leg.target != target:
         path = commit_walk(m, w, goal, target, None, params)
+        if not path:
+            again = nearest_target(w, {target}, params)
+            path = commit_walk(m, w, goal, target, again[1], params) if again and again[1] else None
         if path:
+            targets_mod.reached_way(m, goal)
             return path, Leg(target)
-        again = nearest_target(w, {target}, params)
-        if again and again[1]:
-            return commit_walk(m, w, goal, target, again[1], params), Leg(target)
-        if not no_way(w, target, params):
-            return None, Leg(target)  # no path this decision: stuck detection decides (A15)
-        targets_mod.release(m, goal)  # proven walled in
+        # No path this decision: stuck detection escalates it (A15), up to
+        # ``MISS_LIMIT`` decisions in a row; walled in, it goes at once.
+        if not no_way(w, target, params) and not targets_mod.missed(m, goal):
+            return None, Leg(target)
+        targets_mod.release(m, goal)
         if leg is None:
             return None, None
         targets_mod.commit(m, w, goal, (here_map, leg.target), op)

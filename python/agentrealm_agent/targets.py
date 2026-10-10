@@ -14,17 +14,32 @@ a safe tile, a shop cell, a door, a supply) it keeps it until one of:
 - nothing pursued it for ``LAPSE_TICKS``: the episode it served (a
   retreat, a heal) is over, and the next one picks afresh.
 
-Another candidate becoming nearer is never a reason. What comes up on the
-way is a *stop* inserted before the target, never a new target: a
-prerequisite (a key before a locked door) or a short detour to a valuable
-in view (``states/detour.py``). The target stays committed while its stops
-are walked, and the walk resumes toward it after them.
+Another candidate becoming nearer is never a reason. A prerequisite that
+comes up on the way (a key before a locked entrance) is a *stop* inserted
+before the target, never a new target: the target stays committed while the
+stop is walked, and the walk resumes toward it after. A short detour to a
+valuable in view (``states/detour.py``) needs no stop: it is a reflex with
+its own record (``Memory.detour``), and the walk it interrupted resumes
+because its target is still committed here.
 
-Each walk label (``Memory.goal`` value: ``gather``, ``explore``,
-``heal_rest``, ``safe``, ``travel``, ``loot``, ``level``…) keeps one
-``Commitment`` in ``Memory.targets``. A state asks ``hold`` for its target:
-the committed one while the state's own ``keep`` test passes, else its
-``pick``, committed from then on.
+Each committing state keeps one ``Commitment`` in ``Memory.targets`` under
+its own key (not always its ``Memory.goal`` label):
+
+| Key | State | Target |
+|---|---|---|
+| ``explore``, ``explore_area`` | Explore (safe default, plan op) | (map, frontier cell) |
+| ``safe`` | Retreat and Park (``pathing.RETREAT_TARGET``) | (map, safe cell) |
+| ``heal_safe`` | Heal's rest and measure walks (``pathing.HEAL_TARGET``) | (map, safe cell) |
+| ``heal_explore``, ``heal_food`` | Heal | (map, zone edge cell); food supply id |
+| ``travel`` | Travel, symbolic ``to`` (``states.travel.TRAVEL_TARGET``) | ``ResolvedDestination`` |
+| ``loot`` | Loot | (supply id, cell) |
+| ``level`` | Level inside a level (``LEVEL_TARGET``) | (goal label, map, cell) |
+| ``level:entrance`` | Level, with its prerequisite stops | (map, entrance cell) |
+
+Gather keeps its own record, ``Memory.gather_target``, under the same rules.
+
+A state asks ``hold`` for its target: the committed one while the state's
+own ``keep`` test passes, else its ``pick``, committed from then on.
 """
 
 from __future__ import annotations
@@ -42,6 +57,9 @@ T = TypeVar("T", bound=Hashable)
 
 # A commitment no state asked about for this long has lapsed (30 s at 10 ticks/s).
 LAPSE_TICKS = 300
+# Decisions in a row with no path to the target, though not proven walled in,
+# before it is let go: a backstop for a search that can neither find nor rule out a way.
+MISS_LIMIT = 10
 
 
 @dataclass
@@ -51,6 +69,7 @@ class Stop:
     pos: Pos
     why: str  # "prerequisite: key", "detour: gem"
     supply_id: int | None = None  # the supply to take there, when there is one
+    tries: int = 0  # Takes sent for it; a stop that keeps failing is given up
 
 
 @dataclass
@@ -62,6 +81,8 @@ class Commitment:
     target: Hashable  # a cell, or whatever the state resolves (Travel: a destination)
     since: int  # tick it was committed
     seen: int  # tick a state last pursued it; ``LAPSE_TICKS`` after, it lapses
+    misses: int = 0  # decisions in a row it had no path, not yet proven impossible
+    given_up: set = field(default_factory=set)  # cells of stops given up on: never inserted again for this target
     stops: list[Stop] = field(default_factory=list)
 
 
@@ -125,14 +146,34 @@ def release(m: Memory, goal: str, target: Hashable | None = None) -> None:
         del m.targets[goal]
 
 
+def missed(m: Memory, goal: str) -> bool:
+    """``goal`` had no path to its target this decision: True once that has
+    happened ``MISS_LIMIT`` times in a row, and the target is released."""
+    c = m.targets.get(goal)
+    if c is None:
+        return True
+    c.misses += 1
+    if c.misses < MISS_LIMIT:
+        return False
+    del m.targets[goal]
+    return True
+
+
+def reached_way(m: Memory, goal: str) -> None:
+    """``goal`` has a path to its target again: the misses start over."""
+    c = m.targets.get(goal)
+    if c is not None:
+        c.misses = 0
+
+
 def add_stop(m: Memory, goal: str, stop: Stop) -> bool:
     """Insert ``stop`` before ``goal``'s target, ahead of any stop already there.
 
-    The target stays committed. False when ``goal`` has no commitment or
-    already stops at that cell.
+    The target stays committed. False when ``goal`` has no commitment,
+    already stops at that cell, or gave a stop there up.
     """
     c = m.targets.get(goal)
-    if c is None or any(s.pos == stop.pos for s in c.stops):
+    if c is None or stop.pos in c.given_up or any(s.pos == stop.pos for s in c.stops):
         return False
     c.stops.insert(0, stop)
     return True
@@ -144,8 +185,14 @@ def next_stop(m: Memory, goal: str) -> Stop | None:
     return c.stops[0] if c is not None and c.stops else None
 
 
-def finish_stop(m: Memory, goal: str, stop: Stop) -> None:
-    """``stop`` was visited, or can no longer be: the walk resumes toward the target."""
+def finish_stop(m: Memory, goal: str, stop: Stop, *, given_up: bool = False) -> None:
+    """``stop`` was visited, or can no longer be: the walk resumes toward the target.
+
+    ``given_up``: it could not be done (no room, refused, no way there), so
+    it is not inserted again while this target stays committed.
+    """
     c = m.targets.get(goal)
     if c is not None and stop in c.stops:
         c.stops.remove(stop)
+        if given_up:
+            c.given_up.add(stop.pos)

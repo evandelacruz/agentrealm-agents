@@ -11,17 +11,16 @@ cell of the current path and going by it adds at most
 on ground ``gather_ground`` allows (off hazards, clear of every known
 hostile's bar), and the survival reflexes above it still win.
 
-The detour is a stop inserted before the walk's committed target
-(``targets``): the target stays, and once the find is taken, seen gone or
-given up (no step, or ``DETOUR_TICKS`` without taking it), the state that
-was walking replans to the same target.
+The walk it interrupts keeps its committed target (``targets``): once the
+find is taken, seen gone or given up (no step, or ``DETOUR_TICKS`` without
+taking it, after which that find is skipped for the run), the state that was
+walking plans again to the same target.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .. import targets as targets_mod
 from ..healing import FOOD_CODES, hurt
 from ..knowledge_base import knowledge_items
 from ..memory import Memory
@@ -82,7 +81,6 @@ class DetourState(State):
             if find is None:
                 return StateOutcome(None, "no find off the walk", state=self.name)
             d = m.detour = Detour(find.id, find.pos, find.code, m.goal, world.tick)
-            targets_mod.add_stop(m, d.resumes, targets_mod.Stop(d.pos, f"detour: {d.code}", d.supply_id))
         step = _step_toward(world, ctx, d.pos)
         if step is None:
             m.detour_skipped.add(d.supply_id)
@@ -136,9 +134,6 @@ def _still_on(w: WorldModel, d: Detour) -> bool:
 
 def _end(m: Memory, d: Detour) -> None:
     """The find is taken, gone or given up: the walk it left resumes toward its target."""
-    stop = targets_mod.next_stop(m, d.resumes)
-    if stop is not None and stop.supply_id == d.supply_id:
-        targets_mod.finish_stop(m, d.resumes, stop)
     if m.goal == GOAL:
         m.path, m.goal = [], ""
     m.detour = None

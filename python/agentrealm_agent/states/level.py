@@ -16,7 +16,8 @@ from __future__ import annotations
 from .. import targets as targets_mod
 from ..config import Policy
 from ..healing import supply_matches
-from ..knowledge_base import KnowledgeBase
+from ..loot import Pickup, loot_score, pickup_room
+from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..memory import Memory
 from ..navigation import cost_path, doors_goal_path, nearest_target
 from ..navigation import stuck as nav_stuck
@@ -32,6 +33,8 @@ PREREQUISITE_GOAL = "level:prerequisite"
 GOALS = (DOOR_GOAL, FRONTIER_GOAL)
 # The commitment of the door or frontier Level walks to inside a level (A71).
 LEVEL_TARGET = "level"
+# Takes sent for a prerequisite before its stop is given up (A71).
+PREREQUISITE_TRIES = 3
 
 
 def inside_level(w: WorldModel) -> bool:
@@ -206,6 +209,14 @@ def _prerequisite_step(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutco
     if stop is None:
         return None
     if chebyshev(stop.pos, here) <= 1 and stop.supply_id is not None:
+        item = _supply(w, stop.supply_id)
+        items = knowledge_items(ctx.knowledge)
+        fits = item is not None and pickup_room(w, Pickup(item.id, item.code, item.pos, None, loot_score(item.code, items)), items) is True
+        if not fits or stop.tries >= PREREQUISITE_TRIES:
+            # No room, or refused every time: the entrance walk goes on without it.
+            targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)
+            return None
+        stop.tries += 1
         return StateOutcome([take(stop.supply_id)], f"take {needs} before entrance {door}", state=LevelState.name)
     policy = ctx.policy
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
@@ -219,7 +230,7 @@ def _prerequisite_step(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutco
     step = bounded_step(m, w, PREREQUISITE_GOAL, stop.pos, plan_avoid, plan, params=params)
     if step is None:
         if nav_stuck.backed_off(m, PREREQUISITE_GOAL, w.map_id, stop.pos, w.tick):
-            targets_mod.finish_stop(m, ENTRANCE_GOAL, stop)  # given up: the entrance walk goes on
+            targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)  # the entrance walk goes on
         return None
     return StateOutcome([set_position(step)], f"{needs} → {stop.pos} before entrance {door}", state=LevelState.name)
 

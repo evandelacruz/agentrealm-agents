@@ -106,6 +106,41 @@ class PlannerLeavesNoPocketTest(unittest.TestCase):
         self.assertEqual(w.pos, TOWN)
 
 
+class NoPathProvenTest(unittest.TestCase):
+    """``cost_path`` says no path is proven only when its search ran out of cells."""
+
+    def walled_goal(self) -> WorldModel:
+        w = WorldModel(character_id=1, map_id=MAP, pos=(1, 1), perception=8)
+        for x in range(12):
+            for y in range(12):
+                wall = max(abs(x - 8), abs(y - 8)) == 1  # a ring round the goal at (8, 8)
+                w.view.tiles[(x, y)] = "wall" if wall else "dirt"
+        return w
+
+    def test_a_walled_in_goal_is_proven(self):
+        w, nav = self.walled_goal(), NavSearchState(goal=(8, 8), map_id=MAP)
+        self.assertIsNone(cost_path(w, (8, 8), CostGridParams(), nav=nav))
+        self.assertTrue(nav.no_path_proven)
+
+    def test_no_step_found_on_a_budget_is_not_proven(self):
+        w, nav = field(), NavSearchState(goal=TOWN, map_id=MAP)
+        with mock.patch.object(planner, "_fine_path", return_value=None):
+            self.assertIsNone(cost_path(w, TOWN, CostGridParams(), nav=nav))
+        self.assertFalse(nav.no_path_proven)
+
+    def test_a_path_found_clears_it(self):
+        w, nav = self.walled_goal(), NavSearchState(goal=(8, 8), map_id=MAP)
+        cost_path(w, (8, 8), CostGridParams(), nav=nav)
+        self.assertTrue(cost_path(w, (4, 4), CostGridParams(), nav=nav))
+        self.assertFalse(nav.no_path_proven)
+
+    def test_standing_on_the_goal_clears_it(self):
+        w, nav = self.walled_goal(), NavSearchState(goal=(8, 8), map_id=MAP)
+        cost_path(w, (8, 8), CostGridParams(), nav=nav)
+        self.assertEqual(cost_path(w, w.pos, CostGridParams(), nav=nav), [])
+        self.assertFalse(nav.no_path_proven)
+
+
 class ParkWalksOutTest(unittest.TestCase):
     """Run 6's park, through the dispatcher: Park walks to town (A66)."""
 

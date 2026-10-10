@@ -736,6 +736,8 @@ def cost_path(
     coarse_budget = COARSE_NODE_BUDGET if coarse_budget is None else coarse_budget
     fine_budget = FINE_NODE_BUDGET if fine_budget is None else fine_budget
     assert w.pos is not None
+    if nav is not None:
+        nav.no_path_proven = False
     if w.pos == goal:
         return []
     grid = _Grid(w, {goal}, params)

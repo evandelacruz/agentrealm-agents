@@ -73,10 +73,10 @@ class NavSearchState:
     step: dict[Pos, int | None] = field(default_factory=dict)  # cost to enter each expanded tile, as searched
     # Cell estimates the window search has raised past the corridor's (``_fine_path``).
     learned: dict[Pos, int] = field(default_factory=dict)
-    # The last ``cost_path`` answer is final for the map as known: False only
-    # while the corridor is unfinished and the walk goes by straight line, so
-    # its ``None`` means "no step yet", not "no path" (``retreat_step``).
-    settled: bool = True
+    # The last ``cost_path`` call proved there is no path: its search ran out
+    # of cells, not of budget. Any other ``None`` is "no step found", which a
+    # caller must not take for "no path" (``retreat_step``).
+    no_path_proven: bool = False
 
     def reset(self, goal: Pos) -> None:
         self.goal, self.origin = goal, None
@@ -741,7 +741,7 @@ def cost_path(
     grid = _Grid(w, {goal}, params)
     direct = _astar(grid, fine_budget)
     if nav is not None:
-        nav.settled = True
+        nav.no_path_proven = direct.path is None and not direct.budget_hit
     if direct.path is not None or not direct.budget_hit:
         return direct.path
 
@@ -760,8 +760,6 @@ def cost_path(
         return _fine_path(
             grid, _toward(goal, corridor, nav.came), set(_corridor_index(corridor)), fine_budget, nav.learned
         )
-    if nav is not None and not _in_rect(goal, *_perception_bounds(w)):
-        nav.settled = False  # the corridor search goes on next call
     return _fine_path(grid, _toward(goal, None), None, fine_budget)
 
 

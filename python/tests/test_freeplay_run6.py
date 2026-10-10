@@ -28,6 +28,7 @@ from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.navigation.stuck import PROGRESS_TICK_LIMIT
 from agentrealm_agent.navigation import planner
 from agentrealm_agent.navigation.planner import CostGridParams, NavSearchState, cost_path
 from agentrealm_agent.park import PARK_NO_PATH
@@ -128,8 +129,14 @@ class ParkWalksOutTest(unittest.TestCase):
         self.assertEqual(w.pos, TOWN)
 
 
+def no_path_proven(w, goal, params=None, *, nav=None, **_):
+    """``cost_path`` whose search ran out of cells: no path at all."""
+    nav.no_path_proven = True
+    return None
+
+
 class NoStepRulesTheCellOutTest(unittest.TestCase):
-    """A safe cell the planner gives no step toward is ruled out, never planned again at once."""
+    """A safe cell with no path is ruled out, never planned again at once."""
 
     def stuck(self):
         w, m = field(), Memory()
@@ -140,7 +147,7 @@ class NoStepRulesTheCellOutTest(unittest.TestCase):
 
     def test_the_nearest_safe_cell_is_ruled_out_and_the_next_is_taken(self):
         w, c = self.stuck()
-        with mock.patch("agentrealm_agent.states.retreat.cost_path", return_value=None):
+        with mock.patch("agentrealm_agent.states.retreat.cost_path", no_path_proven):
             out = retreat_step(w, c, "Park")
         self.assertIsNone(out.intents)
         self.assertEqual(out.reason, "safe (390, 369): no path, ruled out")
@@ -165,26 +172,31 @@ class NoStepRulesTheCellOutTest(unittest.TestCase):
 
     def test_a_ruled_out_cell_is_tried_again_once_the_mark_lapses(self):
         w, c = self.stuck()
-        with mock.patch("agentrealm_agent.states.retreat.cost_path", return_value=None):
+        with mock.patch("agentrealm_agent.states.retreat.cost_path", no_path_proven):
             retreat_step(w, c, "Park")
         w.tick += SAFE_UNREACHABLE_TICKS
         pick = retreat_safe_goal(c.memory, w, c.policy, c.knowledge, set(), set())
         self.assertEqual(pick, (390, 369))
 
-    def test_no_step_while_the_corridor_is_unfinished_rules_nothing_out(self):
-        # The corridor search ran out of budget and the straight-line walk
-        # found no step: that is "no step yet", not "no path" (review on #165).
+    def test_no_step_found_is_not_no_path(self):
+        # A wall across the corridor band in the window, with a way round
+        # outside it: the budgeted window search finds no step, which proves
+        # nothing (review on #165). Town is not ruled out at once; only a whole
+        # stuck window with no step to it rules it out.
         w, c = self.stuck()
         c.memory.safe_unreachable[(MAP, (390, 369))] = w.tick  # only town is left: far, out of sight
-        with mock.patch.object(planner, "COARSE_NODE_BUDGET", 0), mock.patch.object(planner, "_fine_path", return_value=None):
+        with mock.patch.object(planner, "_fine_path", return_value=None):
             out = retreat_step(w, c, "Park")
-        self.assertEqual(out.reason, f"safe {TOWN}: corridor still searching")
-        self.assertNotIn((MAP, TOWN), c.memory.safe_unreachable)
+            self.assertEqual(out.reason, f"safe {TOWN}: no step found")
+            self.assertNotIn((MAP, TOWN), c.memory.safe_unreachable)
+            w.tick += PROGRESS_TICK_LIMIT
+            retreat_step(w, c, "Park")
+        self.assertIn((MAP, TOWN), c.memory.safe_unreachable, "a stuck window with no step rules town out")
 
     def test_the_town_cell_is_ruled_out_too(self):
         w, c = self.stuck()
         c.memory.safe_unreachable[(MAP, (390, 369))] = w.tick
-        with mock.patch("agentrealm_agent.states.retreat.cost_path", return_value=None):
+        with mock.patch("agentrealm_agent.states.retreat.cost_path", no_path_proven):
             out = retreat_step(w, c, "Park")
         self.assertEqual(out.reason, f"safe {TOWN}: no path, ruled out")
         self.assertIn((MAP, TOWN), c.memory.safe_unreachable)
@@ -215,7 +227,7 @@ class ParkEndsWithNoPathLeftTest(unittest.TestCase):
         r.pacer.wait_next_window = s.wait
         now = iter(range(1000))
         r.clock = lambda: float(next(now))
-        with mock.patch("agentrealm_agent.states.retreat.cost_path", return_value=None):
+        with mock.patch("agentrealm_agent.states.retreat.cost_path", no_path_proven):
             report = r.park()
         self.assertEqual(report.outcome, PARK_NO_PATH)
         self.assertLess(report.seconds, 10, "not the whole minute")

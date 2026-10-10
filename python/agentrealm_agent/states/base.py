@@ -29,6 +29,9 @@ class PlayContext:
     plan: Plan | None = None  # validated goal stack (A34)
     directives: Directives = field(default_factory=default_directives)
     gem_cuts: GemYieldTracker | None = None  # cuts waiting out their gem window: exhausted for Gather (A63)
+    # The runner's held-queue probe (A64): only the states that can answer
+    # with a reflex run (``dispatch.PROBE_STATES``), not the whole list.
+    probe: bool = False
 
 
 @dataclass

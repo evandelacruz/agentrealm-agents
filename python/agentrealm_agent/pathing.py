@@ -368,6 +368,9 @@ def commit_explore(
 SAFE_GOAL_CHECKS = 4
 # A safe cell a path check found no way to is skipped this long, then tried again.
 SAFE_UNREACHABLE_TICKS = nav_stuck.BACKOFF_BASE_TICKS
+# A safe cell seen in a known hostile's reach is skipped this long, so the
+# pick does not turn back for it the moment the pack drops out of view.
+SAFE_THREATENED_TICKS = nav_stuck.BACKOFF_BASE_TICKS
 # Heal's walks to safe ground: a cell either gave up on is skipped by every safe walk.
 SAFE_WALK_GOALS = ("heal_rest", "heal_measure")
 # Paths to safe ground: one of these that ends on a cell needs no search to it.
@@ -388,7 +391,10 @@ def reachable_safe_goal(
 
     Skipped: a cell in ``threatened``, a known hostile's reach
     (``survival.hostile_reach``; A63 run 4: Heal walked to a safe tile beside
-    a hostile pack and died), though ``town`` is still the last resort; a
+    a hostile pack and died), and one seen there within
+    ``SAFE_THREATENED_TICKS`` (``Memory.safe_threatened``), since ``w.entities``
+    holds only what is in view and a pick that forgot the pack once it left
+    view would turn back toward it; ``town`` is still the last resort. Also a
     cell ``params`` avoids, one a check found no way to within
     ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), and one a
     Heal walk gave up on and still backs off. The first ``SAFE_GOAL_CHECKS``
@@ -402,6 +408,10 @@ def reachable_safe_goal(
     if w.pos in candidates:
         return w.pos
     mid = w.map_id
+
+    for p in candidates:
+        if p in threatened:
+            m.safe_threatened[(mid, p)] = w.tick
 
     def skipped(p: Pos) -> bool:
         if p in params.avoid:
@@ -419,7 +429,11 @@ def reachable_safe_goal(
             return False
         return True
 
-    left = [p for p in candidates if p not in threatened and not skipped(p)]
+    def recently_threatened(p: Pos) -> bool:
+        seen = m.safe_threatened.get((mid, p))
+        return seen is not None and w.tick - seen < SAFE_THREATENED_TICKS
+
+    left = [p for p in candidates if not recently_threatened(p) and not skipped(p)]
     here = w.pos
     first = left[:SAFE_GOAL_CHECKS]
     rest = left[SAFE_GOAL_CHECKS:]

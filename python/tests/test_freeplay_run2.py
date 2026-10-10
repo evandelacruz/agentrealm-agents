@@ -31,7 +31,7 @@ from agentrealm_agent.gem_yield import (
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import SAFE_GOAL_CHECKS, grid_params, reachable_safe_goal
+from agentrealm_agent.pathing import SAFE_GOAL_CHECKS, SAFE_THREATENED_TICKS, grid_params, reachable_safe_goal
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
@@ -294,7 +294,10 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         w, m = world(), Memory()
         params = grid_params(Policy(kind="scripted"), set(), set())
         self.assertEqual(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None, {self.PACKED}), OPEN)
-        self.assertNotIn((MAP, self.PACKED), m.safe_unreachable, "a threat is not a wall: tried again once it leaves")
+        self.assertNotIn((MAP, self.PACKED), m.safe_unreachable, "a threat is not a wall")
+        self.assertEqual(m.safe_threatened, {(MAP, self.PACKED): w.tick})
+        self.assertEqual(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None), OPEN, "remembered out of view")
+        w.tick += SAFE_THREATENED_TICKS
         self.assertEqual(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None), self.PACKED)
 
     def test_with_every_safe_tile_threatened_it_falls_back_to_town(self):
@@ -310,6 +313,31 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         self.packed(w)
         out = dispatch(w, c)
         self.assertEqual((out.state, out.reason), ("Heal", f"heal_measure → {OPEN}"))
+
+    def test_heal_keeps_its_pick_when_the_pack_leaves_view(self):
+        # Review on #147: with the pack out of view the nearer tile looked
+        # safe again, so the walk turned back toward the pack and flip-flopped.
+        w, c = world(health=4), ctx()
+        safe(w, self.PACKED, OPEN)
+        self.packed(w)
+        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {OPEN}")
+        w.entities = []
+        w.tick += 10
+        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {OPEN}")
+        w.tick += SAFE_THREATENED_TICKS
+        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {self.PACKED}", "tried again once the mark lapses")
+
+    def test_retreat_keeps_its_pick_when_the_pack_leaves_view(self):
+        w, c = world(health=4), ctx(on_hostile="fight")
+        w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
+        hit(w)
+        self.packed(w)
+        safe(w, self.PACKED, OPEN)
+        self.assertEqual(dispatch(w, c).reason, f"retreat → safe {OPEN}")
+        w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
+        w.tick += 10
+        c.memory.held_queue = None
+        self.assertEqual(dispatch(w, c).reason, f"retreat → safe {OPEN}")
 
     def test_heal_falls_back_to_town_when_every_safe_tile_is_beside_a_pack(self):
         kb = KnowledgeBase("sandbox")

@@ -160,13 +160,17 @@ def _out(intents: list[dict] | None, reason: str) -> StateOutcome:
     return StateOutcome(intents, reason, state=HealState.name)
 
 
-def _plan_blocked(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> tuple[set[Pos], set[Pos]]:
+def _plan_blocked(
+    w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, reach: set[Pos] | None = None
+) -> tuple[set[Pos], set[Pos]]:
     """Heal's (avoid, costly): hazards are both; cells in a known hostile's
-    reach are costly, so a walk to food or safe ground goes round a pack
-    instead of through it (A63 run 4)."""
+    reach (``reach``, computed here when not given) are costly, so a walk to
+    food or safe ground goes round a pack instead of through it (A63 run 4)."""
     nav_avoid, nav_costly = navigation_avoid_costly(m.nav, ctx.knowledge, w.map_id, w.tick)
     hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
-    return nav_avoid | hazards, nav_costly | hazards | hostile_reach(w, policy)
+    if reach is None:
+        reach = hostile_reach(w, policy)
+    return nav_avoid | hazards, nav_costly | hazards | reach
 
 
 def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *, goal: str) -> StateOutcome | None:
@@ -174,11 +178,10 @@ def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *,
     first, then nearest), skipping those a walk gave up on and those in a
     known hostile's reach, else toward the town cell
     (``pathing.reachable_safe_goal``; free-play run 2, A63 run 4)."""
-    plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)
+    reach = hostile_reach(w, policy)
+    plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx, reach)
     params = grid_params(policy, plan_avoid, plan_costly)
-    target = reachable_safe_goal(
-        m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge), hostile_reach(w, policy)
-    )
+    target = reachable_safe_goal(m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge), reach)
     if target is None:
         return None
     return _walk_toward(w, m, policy, ctx, target, goal=goal)

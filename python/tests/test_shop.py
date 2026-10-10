@@ -83,11 +83,15 @@ class ShopBuyTest(unittest.TestCase):
         self.assertNotEqual(out.state, "Shop")
         self.assertIsNone(plan.current(), "it costs more than the gems held: dropped")
 
-    def test_buy_goal_done_when_held(self):
+    def test_buy_goal_done_once_one_more_is_held(self):
+        # Free-play run 5: a buy is one purchase, whatever was already held.
         w = world()
-        w.held_supplies = [InventorySupply(1, "torch")]
         op = {"op": "buy", "code": "torch"}
-        self.assertTrue(goal_done(op, w, Plan([op], dict(PARAM_DEFAULTS))))
+        plan = Plan([op], dict(PARAM_DEFAULTS))
+        plan.advance(w)
+        self.assertFalse(goal_done(op, w, plan))
+        w.held_supplies = [InventorySupply(1, "torch")]
+        self.assertTrue(goal_done(op, w, plan))
 
     def _sent_take(self):
         w = world()

@@ -12,7 +12,6 @@ from ..healing import (
     hurt,
     known_safe_cells,
     note_regen_sample,
-    note_try,
     rearm_after_drink,
     regen_known,
     save_regen_yes,
@@ -257,7 +256,6 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
     for food in close[:FOOD_CANDIDATES]:
         if chebyshev(food.pos, here) <= 1:
             nav_stuck.finish_in_reach(m, w, "heal_food")
-            note_try(m, "take", food.id)
             return _out([take(food.id)], f"take food {food.code}")
         if out := _cut_toward(w, m, policy, ctx, food.pos):
             return out
@@ -299,13 +297,15 @@ def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
     ``_rearm_weapon`` on Heal's next decision, the drink done or not (A24). It
     is always a weapon (``equip.weapon_to_rearm``): the one armed now, else
     the last one armed this run, never the potion or tool in the slot (free-play
-    run 4 re-armed a potion). A rejected ``Use`` is retried at most
-    ``HEAL_MAX_TRIES`` times per supply.
+    run 4 re-armed a potion). A drink the server refuses is retried at most
+    ``HEAL_MAX_TRIES`` times per supply: the runner counts each refused one
+    against ``heal_drink`` (``Runner._note_heal_refused``), never a drink only
+    decided.
     """
     item = carried_heal(w, m)
     if item is None:
         return None
-    note_try(m, "use", item.id)
+    m.heal_drink = item.id
     if m.heal_rearm is None:
         m.heal_rearm = weapon_to_rearm(w, m)
     if w.armed_code == item.code:

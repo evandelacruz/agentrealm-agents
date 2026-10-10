@@ -39,7 +39,7 @@ def supply_matches(want: str, code: str) -> bool:
 REGEN_MEASURE_TICKS = 200
 # A longer gap between Heal windows than this restarts the regen sample.
 REGEN_SAMPLE_GAP_TICKS = 50
-# Times one Take or Use of the same supply is sent before Heal gives up on it.
+# Times the server may refuse a Take or Use of the same supply before Heal gives up on it.
 HEAL_MAX_TRIES = 3
 
 SURVIVAL_KEY = "survival"
@@ -57,6 +57,7 @@ def tries_left(m: Memory, kind: str, supply_id: int) -> bool:
 
 
 def note_try(m: Memory, kind: str, supply_id: int) -> None:
+    """Count one refused ``Take`` or ``Use`` of ``supply_id`` (``kind`` is "take" or "use")."""
     key = (kind, supply_id)
     m.heal_tries[key] = m.heal_tries.get(key, 0) + 1
 

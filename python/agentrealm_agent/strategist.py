@@ -1222,6 +1222,7 @@ class Strategist:
             runner.plan.wait_started_tick = old.wait_started_tick
             runner.plan.stalled_since_tick = old.stalled_since_tick
             runner.plan.block_before = old.block_before
+            runner.plan.held_before = old.held_before
         else:
             runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
             runner.mem.walks.clear()  # the new head walks a path of its own (A15)

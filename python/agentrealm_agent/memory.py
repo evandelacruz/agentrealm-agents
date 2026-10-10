@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+import copy
+from dataclasses import dataclass, field, fields
+from typing import TYPE_CHECKING, Iterable
 
 from .navigation import NavSearchState
 from .navigation.rejection import NavMemory
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
 from .travel.strength import StrengthBracket
 from .world import Pos
 
+# Memory fields that cache search work rather than record a decision:
+# ``Memory.snapshot`` shares them instead of copying them (A13 corridors).
+SEARCH_CACHES = ("corridors",)
 SIGNALS_KEPT = 16  # newest strategist signals kept until the strategist drains them (A35)
 
 @dataclass(frozen=True)
@@ -146,7 +150,8 @@ class Memory:
     heal_regen_sample: tuple[int, int, int] | None = None
     heal_regen_absent: bool = False
     heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
-    heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
+    heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times the server refused it (A24)
+    heal_drink: int | None = None  # supply id of the drink sent, until its Use applies or is refused or another queue replaces it (A24)
     heal_rearm: str | None = None  # weapon code armed before a drink; restored once, on Heal's next decision (A24)
     last_weapon: str | None = None  # the last weapon seen armed this run (equip.note_last_weapon): what a drink re-arms
     heal_pending: tuple[int, str, str] | None = None  # (health before, supply code, "take"|"use") awaiting observation
@@ -161,6 +166,20 @@ class Memory:
     equip_refused_sig: tuple | None = None  # loadout and inventory the refusals hold for; None until the next observation syncs it (A19)
     equip_not_wearable: set[str] = field(default_factory=set)  # subtypes Wear rejected with not_wearable for the run (A55)
     equip_try_refused: set[str] = field(default_factory=set)  # subtypes whose slot-learn Wear was refused transiently (A55)
+
+    def snapshot(self) -> Memory:
+        """A deep copy, for :meth:`restore` after a probe that must leave no trace.
+
+        ``SEARCH_CACHES`` are shared, not copied: they hold search progress, not
+        decisions, and copying a corridor search costs more than the probe itself.
+        """
+        shared = {id(getattr(self, name)): getattr(self, name) for name in SEARCH_CACHES}
+        return copy.deepcopy(self, shared)
+
+    def restore(self, saved: Memory, names: Iterable[str] | None = None) -> None:
+        """Put back the fields ``names`` (default: every field) from a :meth:`snapshot`."""
+        for name in names if names is not None else (f.name for f in fields(self)):
+            setattr(self, name, getattr(saved, name))
 
 
 def queue_signal(m: Memory, payload: dict) -> None:

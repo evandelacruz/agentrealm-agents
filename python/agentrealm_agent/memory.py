@@ -155,6 +155,7 @@ class Memory:
     heal_regen_sample: tuple[int, int, int] | None = None
     heal_regen_absent: bool = False
     heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
+    heal_safe_given_up: int | None = None  # map id where Heal's walk to safe ground gave its one tile up this hurt spell (run 9, A84)
     heal_refusals: dict[tuple[str, int], HealRefusal | NoopDrink] = field(default_factory=dict)  # ("take"|"use", supply id) -> its last refusal (A80) or no-op drink (A76) and what Heal does about it
     heal_drink: int | None = None  # supply id of the drink sent, until its Use applies or is refused or another queue replaces it (A24)
     heal_rearm: str | None = None  # weapon code armed before a drink; restored once, on Heal's next decision (A24)

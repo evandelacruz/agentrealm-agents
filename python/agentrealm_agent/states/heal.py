@@ -9,6 +9,7 @@ from ..equip import weapon_to_rearm
 from ..healing import (
     carried_heal,
     food_in_sight,
+    health_low,
     hurt,
     known_safe_cells,
     must_arm,
@@ -33,10 +34,11 @@ from ..pathing import (
     grid_params,
     nav_search,
     reachable_safe_goal,
+    safe_ruled_out,
 )
 from ..survival import hostiles_in_range, hostiles_reaching, town_cell
 from ..world import Pos, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome
+from .base import PlayContext, State, StateOutcome, top_op
 from .break_state import break_toward
 from .gather_safe import hostiles_near
 from .intents import arm_and_use, set_position, take, use_self
@@ -64,6 +66,12 @@ class HealState(State):
     safe zone again: it asks the planner once for food and potions (a
     ``heal_supplies`` trigger) and sends nothing, so the plan's executor or
     the safe default moves.
+
+    Safe ground (the walk, the rest, the regen sample) outranks a plan op in
+    progress only when health is low (``healing.health_low``): at 9/10 the
+    plan's op goes first. The walk commits to one safe tile a path reaches;
+    when it gives that tile up, Heal gives safe ground up until the next full
+    heal, asks the planner for supplies, and yields (free-play run 9).
 
     A drink is ``Arm`` and ``Use`` in one paced queue. Heal runs on the next
     decision after it, even at full health or with a hostile in range, to
@@ -110,11 +118,23 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     if known == "no":
         _ask_for_supplies(w, m)
         return _out(None, "no safe-zone regen this run")
+    if (op := top_op(ctx)) is not None and not health_low(w):
+        # Resting or measuring regen with health not low is worth less than
+        # the plan's op (free-play run 9: a measure walk at 9/10 held off
+        # ``travel`` for 217 s).
+        m.heal_regen_sample = None
+        return _out(None, f"health not low: the plan's {op['op']} goes first")
     if not standing_in_safe_zone(w):
         m.heal_regen_sample = None
+        if m.heal_safe_given_up == w.map_id:
+            _ask_for_supplies(w, m, safe_ground="unreachable")
+            return _out(None, "safe ground out of reach until healed")
         goal = "heal_rest" if known == "yes" else "heal_measure"
         if out := _walk_to_safe(w, m, policy, ctx, goal=goal):
             return out
+        if m.heal_safe_given_up == w.map_id:
+            _ask_for_supplies(w, m, safe_ground="unreachable")
+            return _out(None, "safe tile given up: safe ground out of reach until healed")
         return _out(None, "no reachable safe tile")
     if known is None:
         verdict = note_regen_sample(m, w)
@@ -160,17 +180,20 @@ def _explore_zone(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) ->
     return _out([wait()], "heal: rest in the safe zone")
 
 
-def _ask_for_supplies(w: WorldModel, m: Memory) -> None:
-    """Hurt, nothing to eat or drink, and no regen: ask the planner for food
-    and potions (a ``fetch_item`` or ``buy``), once until health is full again
+def _ask_for_supplies(w: WorldModel, m: Memory, *, safe_ground: str | None = None) -> None:
+    """Hurt, nothing to eat or drink, and no regen, or (``safe_ground``) no
+    safe ground to rest on: ask the planner for food and potions (a
+    ``fetch_item`` or ``buy``), once until health is full again
     (``note_heal_window`` re-arms it)."""
     if m.heal_supplies_asked:
         return
     m.heal_supplies_asked = True
-    queue_signal(
-        m,
-        {"trigger": "heal_supplies", "health": w.health, "max_health": w.max_health, "regen": "no", "tick": w.tick},
-    )
+    signal = {"trigger": "heal_supplies", "health": w.health, "max_health": w.max_health, "tick": w.tick}
+    if safe_ground is None:
+        signal["regen"] = "no"
+    else:
+        signal["safe_ground"] = safe_ground
+    queue_signal(m, signal)
 
 
 def _out(intents: list[dict] | None, reason: str) -> StateOutcome:
@@ -192,30 +215,49 @@ def _plan_blocked(
 
 
 def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *, goal: str) -> StateOutcome | None:
-    """A step toward the first known safe cell a path reaches (near town
-    first, then nearest), skipping those a walk gave up on and those in a
-    known hostile's ground, in view or remembered
-    (``hostile_ground.ground_by_hostile``), else toward the town cell
-    (``pathing.reachable_safe_goal``; free-play run 2, A63 run 4). The cell is
-    committed (``pathing.HEAL_TARGET``, A71): kept while it stays valid, even
-    when another safe cell comes nearer; a walk that gives it up this
-    decision picks the next one at once."""
+    """A step toward the one safe cell this walk commits to, or None.
+
+    The cell is picked as Retreat and Park pick theirs
+    (``pathing.reachable_safe_goal``): the first known safe cell a path
+    reaches (near town first, then nearest), else the town cell, skipping
+    cells proven walled in (``navigation.no_way``) or ruled out
+    (``pathing.safe_ruled_out``) and those in a known hostile's ground, in
+    view or remembered (``hostile_ground.ground_by_hostile``; free-play run
+    2, A63 run 4). It is committed (``pathing.HEAL_TARGET``, A71) and kept
+    while it stays valid, even when another safe cell comes nearer.
+
+    A walk that gives it up (no path, no progress in a stuck window, or
+    pacing), or a check that rules it out, marks it unreachable for every
+    safe walk (``Memory.safe_unreachable``, as Retreat and Park do) and ends
+    safe ground for this hurt spell (``Memory.heal_safe_given_up``): Heal
+    never moves on to the next tile, so unreachable tiles cannot chain into
+    a loop (free-play run 9: 217 s between safe tiles it could not reach).
+    A cell a hostile now holds is no give-up: the next one is taken.
+    """
     reach = ground_by_hostile(w, policy)
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx, set().union(*reach.values()))
     params = grid_params(policy, plan_avoid, plan_costly)
-    for _ in range(2):  # a kept cell the walk gives up on this decision is replaced at once
-        target = reachable_safe_goal(
-            m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge), reach, prefer=committed_safe(m, w, HEAL_TARGET)
-        )
-        commit_safe(m, w, HEAL_TARGET, target)
-        if target is None:
-            return None
-        if out := _walk_toward(w, m, policy, ctx, target, goal=goal):
-            return out
-        if not nav_stuck.backed_off(m, goal, w.map_id, target, w.tick):
-            return None
-        commit_safe(m, w, HEAL_TARGET, None)
-    return None
+    kept = committed_safe(m, w, HEAL_TARGET)
+    target = reachable_safe_goal(m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge), reach, prefer=kept)
+    if kept is not None and target != kept and safe_ruled_out(m, w, kept):
+        _give_up_safe(m, w, kept)  # the one cell it committed to is out of reach: no second pick
+        return None
+    commit_safe(m, w, HEAL_TARGET, target)
+    if target is None:
+        return None
+    if out := _walk_toward(w, m, policy, ctx, target, goal=goal):
+        return out
+    if nav_stuck.backed_off(m, goal, w.map_id, target, w.tick):
+        _give_up_safe(m, w, target)
+    return None  # else no step open this decision: the cell stays committed
+
+
+def _give_up_safe(m: Memory, w: WorldModel, cell: Pos) -> None:
+    """The walk to ``cell`` is over: rule it out for every safe walk and end
+    safe ground for this hurt spell (``note_heal_window`` lifts it)."""
+    m.safe_unreachable[(w.map_id, cell)] = w.tick
+    commit_safe(m, w, HEAL_TARGET, None)
+    m.heal_safe_given_up = w.map_id
 
 
 def _walk_toward(

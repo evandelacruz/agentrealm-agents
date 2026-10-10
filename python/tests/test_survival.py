@@ -125,11 +125,11 @@ class RetreatTest(unittest.TestCase):
         safe_at(w, (9, 1))
         w.health, w.lives = 3, 6
         w.threat.record(("npc", "gnawer"), 5)
-        w.entities = [Entity("npc", 1, (1, 1), code="gnawer"), Entity("npc", 2, (6, 3), code="snotling")]
+        w.entities = [Entity("npc", 1, (1, 1), code="gnawer"), Entity("npc", 2, (5, 3), code="snotling")]
         c = ctx(m=m, hostile=["npc"])
         with mock.patch.object(retreat, "cost_path", wraps=retreat.cost_path) as planned:
             self.assertEqual(dispatch(w, c).state, "Retreat")
-            w.entities[1] = Entity("npc", 2, (7, 3), code="snotling")  # moves, still in reach
+            w.entities[1] = Entity("npc", 2, (6, 3), code="snotling")  # moves, still in reach (not of the safe tile)
             m.held_queue = None
             self.assertEqual(dispatch(w, c).state, "Retreat")
             self.assertEqual(planned.call_count, 1)

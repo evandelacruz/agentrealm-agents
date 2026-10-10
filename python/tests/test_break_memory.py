@@ -334,22 +334,21 @@ class BreakArmsOnceTest(unittest.TestCase):
         self.assertNotIn(arm(6), out.intents)
         self.assertIsNone(m.break_rearm)
 
-    def test_repeated_arm_decisions_escalate_past_break(self):
+    def test_out_of_reach_the_decision_steps_before_arming(self):
+        # A68: only a decision's first intent is sent, so [Arm, SetPosition]
+        # sent the Arm and dropped the step. Arming waits until in reach.
         w = self._world()
-        w.armed_code = None  # every decision arms: an arm that never lands
-        w.held_supplies = [InventorySupply(6, "pocket_knife")]
+        w.armed_code = None
+        w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(6, "pocket_knife")]
         m = Memory()
         att = nav_stuck.track(m, w, "goto", (0, 0))
         att.level = nav_stuck.BREAK
         c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
-        for _ in range(nav_stuck.ARM_DECISION_LIMIT):
+        for _ in range(nav_stuck.ARM_DECISION_LIMIT + 1):
             out = BreakState().act(w, c)
-            self.assertIn(arm(6), out.intents)
-            self.assertEqual(att.level, nav_stuck.BREAK)
-        out = BreakState().act(w, c)
-        self.assertNotIn(arm(6), out.intents or [])
-        self.assertEqual(att.level, nav_stuck.REVEAL, "arming is no progress: on to step 3")
-        self.assertEqual(att.reasons[-1], "arm_only")
+            self.assertEqual([i["verb"] for i in out.intents], ["SetPosition"], out.reason)
+        self.assertEqual(att.arm_decisions, 0, "walking is not arming")
+        self.assertEqual(att.level, nav_stuck.BREAK)
 
     def test_in_reach_arm_that_never_lands_escalates(self):
         # Review on #139: arm + Use queued every decision, neither runs.

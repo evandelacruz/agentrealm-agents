@@ -123,8 +123,13 @@ def decide(
     directives: Directives | None = None,
     plan: Plan | None = None,
     gem_cuts: GemYieldTracker | None = None,
+    probe: bool = False,
 ) -> Decision:
-    """Run the priority dispatcher (A5) and keep its first intent as a Decision."""
+    """Run the priority dispatcher (A5) and keep its first intent as a Decision.
+
+    ``probe`` runs only the states that can answer with a reflex, for the
+    runner's held-queue probe (A64).
+    """
     ctx = PlayContext(
         m,
         policy,
@@ -134,12 +139,15 @@ def decide(
         directives=directives or default_directives(),
         plan=plan,
         gem_cuts=gem_cuts,
+        probe=probe,
     )
     if params is not None:
         ctx.params = params
     outcome = dispatch(w, ctx)
-    if outcome.state != "Gather":
-        m.gather_status = ""  # Gather did not decide: its last word is stale
+    if outcome.state != "Gather" and not (probe and not outcome.state):
+        # Gather did not decide: its last word is stale. A probe no state
+        # answered leaves the decision that sent the held queue standing.
+        m.gather_status = ""
     intents = outcome.intents
     intent = intents[0] if intents else None
     submit_queue = intents if intents and outcome.paced else None

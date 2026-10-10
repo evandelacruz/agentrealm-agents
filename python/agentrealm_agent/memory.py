@@ -72,6 +72,7 @@ class Memory:
     path_skip: set = field(default_factory=set)  # walk_skip of the walk queue sent, never counted in path_threats (A63)
     planned_threats: set = field(default_factory=set)  # hostiles whose reach Heal's or Retreat's path crossed when planned (A63)
     safe_unreachable: dict = field(default_factory=dict)  # (map_id, cell) -> tick a path check found no way to that safe cell (``pathing.reachable_safe_goal``)
+    safe_threatened: dict = field(default_factory=dict)  # (map_id, cell) -> {(kind, id): tick that hostile last had the safe cell in its reach} (``pathing.reachable_safe_goal``)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     hunt_search: HuntSearch | None = None  # Travel's search for a hunting ground when none is known (A27)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)

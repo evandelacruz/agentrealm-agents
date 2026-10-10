@@ -235,7 +235,7 @@ class HealStateTest(unittest.TestCase):
             w.entities = [Entity("npc", 20, (4, 2), "wartlurch")]  # it moves, still in reach
             self.assertEqual(dispatch(w, c).state, "Heal")
             self.assertEqual(planned.call_count, 1, "no new hostile, no new plan")
-            w.entities.append(Entity("npc", 21, (2, 2), "wartlurch"))
+            w.entities.append(Entity("npc", 21, (5, 2), "wartlurch"))  # out of reach of us and the safe tile
             dispatch(w, c)
             self.assertEqual(planned.call_count, 2, "a hostile not in reach when planned is")
 

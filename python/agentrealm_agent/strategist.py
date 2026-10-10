@@ -104,11 +104,11 @@ from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
+from .gem_yield import keep_gather_region
 from .gem_yield import summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, greeted_npc_ids, in_sight, spoken_npc_ids
-from .states.gather import keep_gather_region
 from .survival import known_hostile, retreat_goal
 from .travel.knowledge import iter_entrances, town_from_kb
 from .travel.ops import travel_op_from_plan_goal
@@ -1133,16 +1133,22 @@ class Strategist:
         head = old.current()
         if goals and head is not None:
             kept = keep_gather_region(
-                head, goals[0], runner.world, runner.mem, runner.knowledge, runner.gem_cuts, triggers, runner.tick_hz
+                head, goals[0], runner.world, runner.mem.gather_in_region, runner.knowledge,
+                runner.gem_cuts, triggers, runner.tick_hz,
             )
             if kept is not None:
-                # The region is the head's committed target (A71): no reason to move it.
-                # Said through last_reply_rejected on purpose: that is how the
-                # planner learns a part of its reply was not applied, and why.
-                note = f"gather_gems kept its region at {head['x']}, {head['y']}: it is not exhausted, cuts there still work, and nothing changed"
-                record["region_kept"] = goals[0]
-                self.rejected = [*self.rejected, note]
-                goals = [kept, *goals[1:]]
+                # The region is the head's committed target (A71). Another cell
+                # of it is the same target; a move with no reason is refused,
+                # and said through last_reply_rejected on purpose: that is how
+                # the planner learns a part of its reply was not applied, and why.
+                goals = [kept[0], *goals[1:]]
+                if kept[1]:
+                    record["region_kept"] = goals[0]
+                    self.rejected = [
+                        *self.rejected,
+                        f"gather_gems kept its region at {head['x']}, {head['y']}: it is not exhausted, "
+                        "cuts there still work, and nothing changed",
+                    ]
         if same_ops(goals, old.goals[old.index :]):
             # A timer reply that re-sends the stack (or leaves an empty one
             # empty): keep its progress (stall clock, wait start, block

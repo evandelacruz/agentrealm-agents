@@ -8,7 +8,7 @@
    line, or a corridor read from the next tile, from the other
    (``planner._toward``, ``cost_path``).
 3. The planner moved the ``gather_gems`` region 4 times in 50 s with no
-   reason (``gather.keep_gather_region``).
+   reason (``gem_yield.keep_gather_region``).
 4. Retreat's stuck window kept counting while a losing Retreat drank or
    fought back (``retreat.no_progress``).
 """
@@ -221,6 +221,7 @@ class GatherRegionKeptTest(unittest.TestCase):
         r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
         round_trip(s, r)
         self.assertIs(r.plan, before)
+        self.assertEqual(s.rejected, [], "nothing was refused, so the planner is told nothing")
 
     def test_an_exhausted_region_may_move(self):
         s, r = self.settled(self.reply(100, 100))
@@ -278,10 +279,12 @@ class GatherRegionKeptTest(unittest.TestCase):
         self.assertEqual(r.plan.current()["x"], 100)
 
     def test_new_information_may_move_it(self):
-        s, r = self.settled(self.reply(100, 100))
-        r.mem.strategist_signals.append({"trigger": "death", "tick": 5})
-        round_trip(s, r)
-        self.assertEqual(r.plan.current()["x"], 100)
+        for trigger in ("death", "map", "hurt"):
+            with self.subTest(trigger):
+                s, r = self.settled(self.reply(100, 100))
+                r.mem.strategist_signals.append({"trigger": trigger, "tick": 5})
+                round_trip(s, r)
+                self.assertEqual(r.plan.current()["x"], 100)
 
 
 class RetreatWindowPausedTest(unittest.TestCase):

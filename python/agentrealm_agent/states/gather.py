@@ -34,6 +34,8 @@ from ..gem_yield import (
     better_region,
     exhausted_cells,
     poor_regions,
+    STALL_SECONDS,
+    cut_or_since,
     region_corner,
     region_of,
 )
@@ -77,8 +79,6 @@ SHADOW_SECONDS = 15
 SHADOW_GAP_SECONDS = 5
 # Moving off goes to cells at least this far from the shadowing hostile, in one walk.
 MOVE_OFF_DISTANCE = 2 * GATHER_HOSTILE_RADIUS
-# No cut that took effect for this long is a stall, said in ``gather_status``.
-STALL_SECONDS = 30
 # Gather's last decision, for the planner's State (``Memory.gather_status``).
 CUTTING = "cutting"
 TAKING = "taking a gem"
@@ -268,22 +268,6 @@ def gather_outcome(
     return out
 
 
-def _no_cut_there(
-    w: WorldModel, m: Memory, region: tuple[int, int], gem_cuts: GemYieldTracker | None, tick_hz: int
-) -> bool:
-    """Gather has stood in ``region`` for ``STALL_SECONDS`` with no cut there taking effect.
-
-    Counted from arrival (``Memory.gather_in_region``), so a long walk there
-    never counts, and only a cut inside ``region`` resets it."""
-    rec = m.gather_in_region
-    if rec is None or rec[0] != region or w.tick - rec[2] >= STALL_SECONDS * tick_hz:
-        return False
-    since = rec[1]
-    if gem_cuts is not None and gem_cuts.last_cut_pos is not None and region_of(gem_cuts.last_cut_pos) == region:
-        since = max(since, gem_cuts.last_cut_tick or since)
-    return w.tick - since >= STALL_SECONDS * tick_hz
-
-
 def _note_in_region(w: WorldModel, m: Memory, target: tuple[int, int] | None, tick_hz: int) -> None:
     """Keep ``Memory.gather_in_region``: the clock starts on arrival in the
     target region, not on the walk there, and starts over after
@@ -304,8 +288,7 @@ def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | N
     if w.tick - seen >= STALL_SECONDS * tick_hz:
         since = w.tick
     m.gather_spell = (since, w.tick)
-    last_cut = gem_cuts.last_cut_tick if gem_cuts is not None and gem_cuts.last_cut_tick is not None else since
-    return max(0, w.tick - max(since, last_cut)) // max(1, tick_hz)
+    return max(0, w.tick - cut_or_since(gem_cuts, since)) // max(1, tick_hz)
 
 
 def _barred_by_hostile(w: WorldModel, policy: Policy, skip: set[tuple[int, int]], exhausted: set[Pos]) -> bool:
@@ -483,52 +466,6 @@ def _end_walk_out(m: Memory) -> None:
     """Something to cut or take turned up: a walk out of safe ground is over."""
     if m.goal == GOAL and m.gather_target is not None and m.gather_target[0] == OUT:
         m.path, m.goal, m.gather_target = [], "", None
-
-
-# Triggers that say the character's situation changed: a reason to move a
-# ``gather_gems`` region (``keep_gather_region``).
-SITUATION_TRIGGERS = frozenset({"death", "map", "hurt"})
-
-
-def keep_gather_region(
-    old: GoalOp,
-    new: GoalOp,
-    w: WorldModel,
-    m: Memory,
-    knowledge: KnowledgeBase | None,
-    gem_cuts: GemYieldTracker | None,
-    triggers: list[dict],
-    tick_hz: int = DEFAULT_TICK_RATE_HZ,
-) -> GoalOp | None:
-    """``new`` with ``old``'s region when a planner reply moves a ``gather_gems``
-    head's region for no reason, else None (A71).
-
-    The region a ``gather_gems`` names is its committed target. It moves
-    only for a reason: the region is exhausted (barren or poor), Gather
-    found it impossible (it stood there ``STALL_SECONDS`` with no cut there
-    taking effect, ``_no_cut_there``), or the situation changed (a death, a
-    new map, a hurt, or a hostile pack seen). Another cell of the same region is the same target. Free-play
-    run 4: the planner moved the region 4 times in 50 s. Two ops that differ
-    in anything but the region, or that name none, are different goals.
-    """
-    if old.get("op") != "gather_gems" or new.get("op") != "gather_gems" or old.get("count") != new.get("count"):
-        return None
-    if "x" not in old or "x" not in new or (old["x"], old["y"]) == (new["x"], new["y"]):
-        return None
-    kept = {**new, "x": old["x"], "y": old["y"]}
-    region = region_of((old["x"], old["y"]))
-    if region == region_of((new["x"], new["y"])):
-        return kept
-    if region in barren_regions(knowledge, w.map_id) or region in poor_regions(knowledge, w.map_id):
-        return None  # exhausted
-    if _no_cut_there(w, m, region, gem_cuts, tick_hz):
-        return None  # impossible
-    for t in triggers:
-        if t.get("trigger") in SITUATION_TRIGGERS:
-            return None  # new information
-        if t.get("trigger") == "discovery" and any(f.get("kind") == "hostile_pack" for f in t.get("finds") or []):
-            return None
-    return kept
 
 
 def _regions(

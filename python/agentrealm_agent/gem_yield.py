@@ -45,6 +45,9 @@ from .world import Pos, WorldModel, chebyshev
 from .zone_discovery import safe_tiles, safe_zone_of
 
 KEY = "gem_yield"
+# No cut that took effect for this long is a stall: Gather says so in its
+# status, and a planner reply may then move its region (``keep_gather_region``).
+STALL_SECONDS = 30
 REGION_SIZE = 16  # blocks per region side
 # A fair sample: this many cuts with no gem marks a region barren. At the
 # manual's lowest rate (10% a cut, GAME_NOTES.md Gems) a normal region shows
@@ -442,3 +445,63 @@ def summary(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, Any]:
     out["best"] = [e for _, _, e in best[:SUMMARY_BEST]]
     out["barren"] = sorted(dry, key=lambda d: (d["x"], d["y"]))
     return out
+
+
+def cut_or_since(gem_cuts: GemYieldTracker | None, since: int, region: tuple[int, int] | None = None) -> int:
+    """The later of ``since`` and the latest cut that took effect (inside
+    ``region``, when given): where a no-cut stall clock counts from."""
+    if gem_cuts is None or gem_cuts.last_cut_tick is None:
+        return since
+    if region is not None and (gem_cuts.last_cut_pos is None or region_of(gem_cuts.last_cut_pos) != region):
+        return since
+    return max(since, gem_cuts.last_cut_tick)
+
+
+# Triggers that say the character's situation changed: a reason to move a
+# ``gather_gems`` region (``keep_gather_region``).
+SITUATION_TRIGGERS = frozenset({"death", "map", "hurt"})
+
+
+def keep_gather_region(
+    old: dict[str, Any],
+    new: dict[str, Any],
+    w: WorldModel,
+    in_region: tuple[tuple[int, int], int, int] | None,
+    kb: KnowledgeBase | None,
+    gem_cuts: GemYieldTracker | None,
+    triggers: list[dict[str, Any]],
+    tick_hz: int,
+) -> tuple[dict[str, Any], bool] | None:
+    """``new`` with ``old``'s ``x, y``, and whether that refused a move to
+    another region, when a planner reply moves a ``gather_gems`` head for no
+    reason; None when ``new`` stands as it is (A71).
+
+    The region a ``gather_gems`` names is its committed target. It moves
+    only for a reason: the region is exhausted (barren or poor), Gather
+    found it impossible (it stood there ``STALL_SECONDS`` with no cut there
+    taking effect: ``in_region`` is Gather's ``Memory.gather_in_region``), or
+    the situation changed (a death, a new map, a hurt, or a hostile pack
+    seen). Another cell of the same region is the same target. Free-play
+    run 4: the planner moved the region 4 times in 50 s. Two ops that differ
+    in anything but the cell, or that name none, are different goals.
+    """
+    if old.get("op") != "gather_gems" or new.get("op") != "gather_gems" or old.get("count") != new.get("count"):
+        return None
+    if "x" not in old or "x" not in new or (old["x"], old["y"]) == (new["x"], new["y"]):
+        return None
+    kept = {**new, "x": old["x"], "y": old["y"]}
+    region = region_of((old["x"], old["y"]))
+    if region == region_of((new["x"], new["y"])):
+        return kept, False
+    if region in barren_regions(kb, w.map_id) or region in poor_regions(kb, w.map_id):
+        return None  # exhausted
+    stall = STALL_SECONDS * tick_hz
+    if in_region is not None and in_region[0] == region and w.tick - in_region[2] < stall:
+        if w.tick - cut_or_since(gem_cuts, in_region[1], region) >= stall:
+            return None  # impossible: no cut there since arriving
+    for t in triggers:
+        if t.get("trigger") in SITUATION_TRIGGERS:
+            return None  # new information
+        if t.get("trigger") == "discovery" and any(f.get("kind") == "hostile_pack" for f in t.get("finds") or []):
+            return None
+    return kept, True

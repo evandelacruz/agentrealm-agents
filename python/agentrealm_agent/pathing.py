@@ -23,6 +23,7 @@ from .navigation import stuck as nav_stuck
 from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
 from .healing import hurt
+from . import targets as targets_mod
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from .survival import is_hostile, pursuer_peaks, reach_by_hostile, safe_goals, town_cell
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
@@ -208,7 +209,7 @@ def path_for_plan_op(
     params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
     found = nearest_explore_target(w, targets, params, knowledge)
     leg = Leg(found[0]) if found and found[1] else None
-    path, leg = commit_explore(m, w, label, targets, leg, found[1] if leg else None, params, knowledge)
+    path, leg = commit_explore(m, w, label, targets, leg, found[1] if leg else None, params, knowledge, op=op)
     return (path, label, leg) if path else None
 
 
@@ -263,22 +264,20 @@ def commit_walk(
     target: Pos,
     found: list[Pos] | None,
     params: CostGridParams,
-    *,
-    any_target: bool = False,
 ) -> list[Pos] | None:
     """The path to walk toward ``target``: the one ``goal`` is already on, or ``found``.
 
     The walker commits to its path (``navigation.walk``, A15): it is kept
     until it is walked, a cell on it turns out blocked or a step on it is
-    rejected, the target changes, or ``found`` is cheaper by more than
-    ``walk.SWITCH_GAIN``; and never dropped for a path that steps straight
-    back to the cell just left while it is still open.
+    rejected, the target changes, or ``found`` (to the same target) is
+    cheaper by more than ``walk.SWITCH_GAIN``; and never dropped for a path
+    that steps straight back to the cell just left while it is still open.
 
     ``params`` must be the grid the planner searched ``found`` on: the kept
     path and ``found`` are both priced on it, so the comparison sees the
     same hazards, hostiles and fog price the search did.
     """
-    path, walk = nav_walk.commit(m.walks.get(goal), w, goal, target, found, params, any_target=any_target)
+    path, walk = nav_walk.commit(m.walks.get(goal), w, goal, target, found, params)
     if walk is None:
         nav_walk.drop(m, goal)
     else:
@@ -317,6 +316,7 @@ def clue_redirects(
     if not side or nearest_target(w, side, params) is None:
         return False
     nav_walk.drop(m, goal)
+    targets_mod.release(m, goal)  # a clue is new information: the next pick takes its side
     if m.goal == goal:
         m.path, m.goal = [], ""
     return True
@@ -331,19 +331,26 @@ def commit_explore(
     found: list[Pos] | None,
     params: CostGridParams,
     knowledge: KnowledgeBase | None = None,
+    *,
+    op: GoalOp | None = None,
 ) -> tuple[list[Pos] | None, Leg | None]:
     """``commit_walk`` for an explore walk (``explore``, ``explore_area``), and the leg it walks.
 
-    ``targets`` are the frontier cells the planner chose ``leg`` from. The
-    walk keeps heading for the frontier it was exploring
-    (``walk.follow_frontier``), so a reveal that makes another frontier the
-    nearest never turns it round; only a route there cheaper by more than
-    ``walk.SWITCH_GAIN`` does, or the kept one being blocked. ``leg`` and
-    ``found`` are the planner's choice, None when it found no frontier.
+    ``targets`` are the frontier cells the planner chose ``leg`` from;
+    ``leg`` and ``found`` are its choice, None when it found no frontier.
+    The frontier the walk heads for is committed (``targets``, A71): it is
+    kept while it is still a frontier cell, or still unseen and not backed
+    off, even when another frontier becomes nearer or another state walked
+    the character off the path; a path to it is planned again then. A reveal
+    that takes the cell off the frontier is reaching it: the walk re-aims at
+    the nearest frontier ahead (``walk.follow_frontier``) and commits to
+    that. Only a target proven unreachable (``no_way``) gives way to the
+    planner's pick.
 
-    A direction clue (A32) is a target change: Explore calls
-    ``clue_redirects`` first each decision, which drops a walk heading off
-    the clue's side; a re-aim prefers that side too (``nearest_explore_target``).
+    A direction clue (A32) is new information: Explore calls
+    ``clue_redirects`` first each decision, which drops a walk and its
+    target heading off the clue's side; the next pick prefers that side
+    (``nearest_explore_target``).
     """
     def ahead(back: Pos | None) -> tuple[Pos, list[Pos]] | None:
         found = nearest_explore_target(
@@ -357,9 +364,33 @@ def commit_explore(
         nav_walk.drop(m, goal)
     else:
         m.walks[goal] = walk
-    path = commit_walk(m, w, goal, leg.target if leg else w.pos, found, params, any_target=True)
-    kept = m.walks.get(goal)
-    return path, (Leg(kept.target) if kept is not None else leg)
+        targets_mod.commit(m, w, goal, (w.map_id, walk.target), op)
+    here_map = w.map_id
+
+    def keep(t: tuple[int | None, Pos]) -> bool:
+        mid, p = t
+        if mid != here_map:
+            return False
+        return p in targets or (p not in w.view.tiles and not nav_stuck.backed_off(m, goal, mid, p, w.tick))
+
+    held = targets_mod.hold(m, w, goal, lambda: (here_map, leg.target) if leg else None, keep, op)
+    if held is None:
+        return None, None
+    target = held[1]
+    if leg is None or leg.target != target:
+        path = commit_walk(m, w, goal, target, None, params)
+        if path:
+            return path, Leg(target)
+        again = nearest_target(w, {target}, params)
+        if again and again[1]:
+            return commit_walk(m, w, goal, target, again[1], params), Leg(target)
+        if not no_way(w, target, params):
+            return None, Leg(target)  # no path this decision: stuck detection decides (A15)
+        targets_mod.release(m, goal)  # proven walled in
+        if leg is None:
+            return None, None
+        targets_mod.commit(m, w, goal, (here_map, leg.target), op)
+    return commit_walk(m, w, goal, leg.target, found, params), leg
 
 
 # Safe cells path-checked per decision, nearest first, before the town cell
@@ -375,6 +406,34 @@ SAFE_THREATENED_TICKS = nav_stuck.BACKOFF_BASE_TICKS
 SAFE_WALK_GOALS = ("heal_rest", "heal_measure")
 # Paths to safe ground: one of these that ends on a cell needs no search to it.
 SAFE_PATH_GOALS = ("safe", *SAFE_WALK_GOALS)
+# The commitments of the walks to safe ground (A71): Retreat's, which Park
+# shares (both walk ``retreat_step``), and Heal's rest and measure walks.
+# Retreat runs from a hostile and Heal does not, so each picks by its own
+# rules and keeps its own cell.
+RETREAT_TARGET = "safe"
+HEAL_TARGET = "heal_safe"
+
+
+def committed_safe(m: Memory, w: WorldModel, key: str) -> Pos | None:
+    """The safe cell ``key``'s walks committed to on this map, or None (A71).
+
+    Standing on it is reaching it: the commitment is released.
+    """
+    c = targets_mod.committed(m, w, key)
+    if c is None or c.target[0] != w.map_id:
+        return None
+    if c.target[1] == w.pos:
+        targets_mod.release(m, key)
+        return None
+    return c.target[1]
+
+
+def commit_safe(m: Memory, w: WorldModel, key: str, cell: Pos | None) -> None:
+    """Commit ``key``'s walks to ``cell``; None, or the cell we stand on, releases them."""
+    if cell is None or cell == w.pos:
+        targets_mod.release(m, key)
+    else:
+        targets_mod.commit(m, w, key, (w.map_id, cell))
 
 
 def reachable_safe_goal(
@@ -385,10 +444,15 @@ def reachable_safe_goal(
     town: Pos | None,
     reach: dict[tuple[str, int], set[Pos]] | None = None,
     skip: Collection[tuple[str, int]] = (),
+    prefer: Pos | None = None,
 ) -> Pos | None:
     """The first of ``candidates`` (in the caller's order) a path reaches,
     else ``town`` when a path reaches it, else None. The cell we stand on is
     taken as is.
+
+    ``prefer`` is the cell the walk committed to (``committed_safe``, A71): it
+    is kept while it is still a candidate or ``town`` and none of the skips
+    below rules it out, however near the others have come.
 
     Skipped: a cell in the ``reach`` of a known hostile not in ``skip``
     (``survival.reach_by_hostile``; A63 run 4: Heal walked to a safe tile
@@ -442,6 +506,14 @@ def reachable_safe_goal(
             del m.safe_threatened[(mid, p)]  # lapsed marks are dropped, so a long run does not pile them up
         return any(key not in skip for key in live)
 
+    if (
+        prefer is not None
+        and (prefer in candidates or prefer == town)
+        and not recently_threatened(prefer)
+        and not skipped(prefer)
+        and reaches(prefer)
+    ):
+        return prefer
     left = [p for p in candidates if not recently_threatened(p) and not skipped(p)]
     here = w.pos
     first = left[:SAFE_GOAL_CHECKS]
@@ -461,16 +533,26 @@ def retreat_safe_goal(
 ) -> Pos | None:
     """Where Retreat, Park and Fight's retreat tail walk: the nearest known safe
     cell a path reaches and out of reach of a hostile it is not running from,
-    else the town cell (``reachable_safe_goal``).
+    else the town cell (``reachable_safe_goal``). Once picked, the cell is
+    committed (``RETREAT_TARGET``, A71) and kept while it stays valid.
 
     The hostiles it runs from (``pursuer_peaks``) do not rule a cell out:
     they follow anyway, and are usually right beside the nearest safe cell.
     """
     params = grid_params(policy, avoid, costly)
     reach = reach_by_hostile(w, policy)
-    return reachable_safe_goal(
-        m, w, safe_goals(w, knowledge), params, town_cell(w, knowledge), reach, skip=pursuer_peaks(w, policy)
+    goal = reachable_safe_goal(
+        m,
+        w,
+        safe_goals(w, knowledge),
+        params,
+        town_cell(w, knowledge),
+        reach,
+        skip=pursuer_peaks(w, policy),
+        prefer=committed_safe(m, w, RETREAT_TARGET),
     )
+    commit_safe(m, w, RETREAT_TARGET, goal)
+    return goal
 
 
 def nav_search(m: Memory, w: WorldModel, plan: str, goal: Pos) -> NavSearchState:

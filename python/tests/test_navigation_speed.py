@@ -264,7 +264,7 @@ class HeldQueueProbeTest(unittest.TestCase):
 
     def test_probe_states(self):
         ctx = PlayContext(Memory(need_self=False), Policy(kind="scripted"), random.Random(0), probe=True)
-        reflexes = ["Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee", "Pickup", "Recover"]
+        reflexes = ["Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee", "Pickup", "Recover", "Detour"]
         self.assertEqual([s.name for s in dispatch_states(ctx)], reflexes, "no Greet, no executor")
         ctx.memory.boss = mock.Mock()
         self.assertEqual([s.name for s in dispatch_states(ctx)], reflexes + ["Boss"], "Boss once a boss fight is engaged")

@@ -31,6 +31,7 @@ from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome, top_executor
 from .boss import BossState, sync_boss
 from .break_state import BreakState
+from .detour import DetourState
 from .downed import DownedState
 from .equip import EquipState
 from .escape import EscapeState
@@ -57,7 +58,8 @@ from .wait import WaitState
 # Act on what is happening now (PLAYABLE_AGENT_PLAN.md State machine). Sync
 # and Downed only wait, the forced waits. Escape, Retreat and Heal (A10)
 # are survival; Fight (A23) slots in before Flee; then Pickup in reach (A20),
-# Recover (A11), and Greet (A65), a one-tick hello to an NPC in sight.
+# Recover (A11), Detour (A71) to a valuable a few steps off the walk, and
+# Greet (A65), a one-tick hello to an NPC in sight.
 REFLEXES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
@@ -68,6 +70,7 @@ REFLEXES: tuple[State, ...] = (
     FleeState(),
     PickupState(),
     RecoverState(),
+    DetourState(),
     GreetState(),
 )
 

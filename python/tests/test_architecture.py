@@ -20,7 +20,7 @@ from agentrealm_agent.states import PlayContext, StateOutcome, dispatch
 from agentrealm_agent.world import Entity, WorldModel
 
 # Spelled out here, not imported, so the test reads the spec rather than the code.
-REFLEXES = {"Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee", "Pickup", "Recover", "Greet"}
+REFLEXES = {"Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee", "Pickup", "Recover", "Detour", "Greet"}
 SAFE_DEFAULT = "Explore"
 
 

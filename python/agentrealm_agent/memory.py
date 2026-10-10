@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .navigation import NavSearchState
 from .navigation.rejection import NavMemory
 from .navigation.stuck import NavStuckMemory
 from .navigation.walk import Walk
+from .targets import Commitment
+
+if TYPE_CHECKING:
+    from .states.detour import Detour
 from .travel.strength import StrengthBracket
 from .world import Pos
 
@@ -44,6 +49,7 @@ class Memory:
     goal: str = ""
     goal_op: dict | None = None  # the plan op m.path was set for, so a same-kind head swap replans (A34)
     walks: dict[str, Walk] = field(default_factory=dict)  # goal -> the path its walk committed to, kept while it stays the best way (A15)
+    targets: dict[str, Commitment] = field(default_factory=dict)  # goal -> the target it committed to, kept until reached or impossible (A71)
     state: str = ""  # active state (A5): kept until its done() holds or a higher guard fires
     need_position: bool = True
     need_self: bool = True
@@ -98,6 +104,9 @@ class Memory:
     flee_gaps: list[tuple[int, int]] = field(default_factory=list)
     flee_since: int = 0
     flee_failed: bool = False
+    # Detour (A71): the find a detour walks to, and finds it gave up on this run.
+    detour: Detour | None = None
+    detour_skipped: set[int] = field(default_factory=set)
     # Retreat (A9): the goal of the walk queue it last sent, so a reflex probe
     # lets that queue run instead of replacing it; and (tick, distance to the
     # goal) at each Retreat decision toward ``retreat_to``, to see it losing ground.

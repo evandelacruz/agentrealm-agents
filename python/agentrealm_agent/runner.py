@@ -752,12 +752,15 @@ class Runner:
         It runs only the states that can answer with a reflex (``dispatch.PROBE_STATES``),
         so a poll while a queue runs costs no executor's search (A64).
         Heal's and Gather's re-arms stay due too: the drink or cut they follow may
-        still be in the held queue (A24, A22).
+        still be in the held queue (A24, A22). So do the targets states
+        committed to (A71): a pick made in a probe whose answer is not sent is
+        no commitment.
         """
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op, m.boss, dict(m.greetings))
         saved_threats = (set(m.walk_skip), set(m.planned_threats))
         saved_rearm = (m.heal_rearm, m.gather_rearm)
+        saved_targets = (copy.deepcopy(m.targets), m.gather_target, m.detour)  # a pick the probe drops is no commitment (A71)
         saved_stuck = copy.deepcopy(m.nav_stuck)
         saved_plan = self.plan.snapshot()
         try:
@@ -775,6 +778,7 @@ class Runner:
         m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
         m.walk_skip, m.planned_threats = saved_threats
         m.heal_rearm, m.gather_rearm = saved_rearm
+        m.targets, m.gather_target, m.detour = saved_targets
         self.rng.setstate(saved[3])
         return None
 

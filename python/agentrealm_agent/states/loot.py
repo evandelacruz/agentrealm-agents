@@ -1,12 +1,15 @@
 """Loot: carry out the plan's ``fetch_item`` op (A20).
 
 Walks to a free supply of the op's code in sight and ``Take``s it; with none
-in sight and the op naming a cell, walks there to look. A supply underfoot
-or adjacent that is merely worthwhile is **Pickup**'s, a reflex.
+in sight and the op naming a cell, walks there to look. The supply it walks
+to is committed (A71): kept until taken, seen gone, or given up, even when
+another of the same code comes nearer. A supply underfoot or adjacent that
+is merely worthwhile is **Pickup**'s, a reflex.
 """
 
 from __future__ import annotations
 
+from .. import targets as targets_mod
 from ..healing import supply_matches
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
@@ -36,7 +39,7 @@ class LootState(State):
         op = my_op(ctx, self.name)
         assert op is not None and world.pos is not None
         code = op["code"]
-        supply = _nearest_supply(world, code)
+        supply = _committed_supply(world, ctx, op)
         if supply is not None and chebyshev(supply.pos, world.pos) <= 1:
             nav_stuck.finish_in_reach(ctx.memory, world, GOAL)
             return StateOutcome([take(supply.id)], f"fetch {code}", state=self.name)
@@ -47,6 +50,32 @@ class LootState(State):
         if step is None:
             return StateOutcome(None, f"no step toward {code}", state=self.name)
         return StateOutcome([set_position(step)], f"fetch {code} → {target}", state=self.name)
+
+
+def _committed_supply(w: WorldModel, ctx: PlayContext, op: dict) -> Entity | None:
+    """The supply this ``fetch_item`` op committed to while it is still there,
+    else the nearest one of its code, committed from now on (A71).
+
+    One out of sight is kept too: its cell is walked to and looked at, and
+    only a look that finds it gone lets it go.
+    """
+    m, code = ctx.memory, op["code"]
+    here = w.pos
+    assert here is not None
+
+    def pick() -> tuple[int, Pos] | None:
+        e = _nearest_supply(w, code)
+        return (e.id, e.pos) if e is not None else None
+
+    def keep(t: tuple[int, Pos]) -> bool:
+        sid, pos = t
+        return any(e.kind == "supply" and e.id == sid for e in w.entities) or chebyshev(pos, here) > w.perception
+
+    held = targets_mod.hold(m, w, GOAL, pick, keep, op)
+    if held is None:
+        return None
+    sid, pos = held
+    return next((e for e in w.entities if e.kind == "supply" and e.id == sid), None) or Entity("supply", sid, pos, code)
 
 
 def _nearest_supply(w: WorldModel, code: str) -> Entity | None:

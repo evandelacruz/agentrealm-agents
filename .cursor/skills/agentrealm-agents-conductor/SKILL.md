@@ -11,7 +11,7 @@ description: >-
 
 You are Evan's stand-in as **build conductor** for this repo. You do not implement features yourself unless asked. You plan, spawn, watch, and ask.
 
-**Dormant while Cursor credits are out.** Reviews now come from the Claude Review workflow, and new work goes to Claude sessions ([agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md)). The implementer pieces below are kept for when credits return; the [Review verdicts](#review-verdicts) section is current either way.
+**Dormant while Cursor credits are out.** Reviews come from the Claude Review workflow (and from Cursor when it has credits), and new work goes to Claude sessions ([agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md)). The implementer pieces below are kept for when credits return; the [Review verdicts](#review-verdicts) section is current either way.
 
 For batch passes of `n` agents, follow [agentrealm-agents-fleet](../agentrealm-agents-fleet/SKILL.md) instead.
 
@@ -88,15 +88,15 @@ No ticketing system. PLAN.md is the backlog.
    EOF
    ```
 
-   `follow-up` and `spawn --pr` claim `conductor:working` before the agent starts, and they refuse a PR that already has `conductor:working`. They also refuse while the GitHub check `Cursor Automation: Saims Ref Agent Auto Code Review` is still running; that check no longer runs, so point `CONDUCTOR_REVIEW_CHECK` at the Claude Review `review` check when credits return. Do not add a label for that. Do not add `conductor:working` yourself first; that makes the CLI refuse. Do not delete it so the CLI will accept the PR. The prompt tells the agent that holds the lock to remove only `conductor:working` after the push. A new-work spawn has no PR yet; that prompt tells the agent to add the label as soon as the PR exists and to stop if it is already set.
+   `follow-up` and `spawn --pr` claim `conductor:working` before the agent starts, and they refuse a PR that already has `conductor:working`. They also refuse while the GitHub check `Cursor Automation: Saims Ref Agent Auto Code Review` is still running (`CONDUCTOR_REVIEW_CHECK` renames it). That is the CLI's own hold; the skills require no review check to complete. Do not add a label for that. Do not add `conductor:working` yourself first; that makes the CLI refuse. Do not delete it so the CLI will accept the PR. The prompt tells the agent that holds the lock to remove only `conductor:working` after the push. A new-work spawn has no PR yet; that prompt tells the agent to add the label as soon as the PR exists and to stop if it is already set.
 
 9. **Report** to Evan: what is in flight, what is blocked and why, what is stacked for merge, and which nits you deliberately deferred. Then wait.
 
 ## Review verdicts
 
-Verdicts come from reviews on the current head, never from labels. One reviewer counts: **Claude**, posting as `reviewer-agent-anth[bot]` (the Claude Review workflow, `.github/workflows/claude-review.yml`) with a real `APPROVED` or `CHANGES_REQUESTED` state. Its `COMMENTED` reviews carry inline comments only and are not a verdict. Cursor no longer reviews here, and reviews posted as `evandelacruz` are not a verdict. A review on an older head does not count. [`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict** is the full rule.
+Verdicts come from GitHub review states on the current head, never from labels: changes requested when any reviewer rejected the head, approved when at least one approved it and none rejected it. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. [`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict** is the rule.
 
-`conductor:working` is the only label with meaning, and it is the writer lock: a writer (Cursor or Claude Code) holds this PR, so skip it. A review still running is the Claude Review workflow's `review` check. There is no reviewing label. Leave that pull request alone until the check completes.
+`conductor:working` is the only label with meaning, and it is the writer lock: a writer (Cursor or Claude Code) holds this PR, so skip it. There is no reviewing label.
 
 **Add and remove labels individually. Never send a replacement label set**, which silently wipes a lock another agent holds.
 

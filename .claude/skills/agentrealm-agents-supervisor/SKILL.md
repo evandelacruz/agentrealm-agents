@@ -16,7 +16,7 @@ Repo: `evandelacruz/agentrealm-agents`. Read [`AGENTS.md`](../../../AGENTS.md) f
 
 ## Who reviews
 
-Claude's reviews come from the Claude Review workflow (`.github/workflows/claude-review.yml`), which posts as `reviewer-agent-anth[bot]` with a real `APPROVED` or `CHANGES_REQUESTED` state on every ready pull request. It is the only reviewer; Cursor no longer reviews here. It needs repo secrets `CLAUDE_REVIEWER_APP_ID`, `CLAUDE_REVIEWER_APP_PRIVATE_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`, and takes its model from the optional repo variable `CLAUDE_REVIEW_MODEL`. Nothing in these skills posts reviews. A head with no Claude verdict yet is waiting, not blocked; one whose `review` check run failed or was cancelled has no verdict coming, so name it in the report for Evan and carry on with the pass.
+The Claude Review workflow (`.github/workflows/claude-review.yml`) reviews every ready pull request as `reviewer-agent-anth[bot]`, with a real `APPROVED` or `CHANGES_REQUESTED` review. It needs repo secrets `CLAUDE_REVIEWER_APP_ID`, `CLAUDE_REVIEWER_APP_PRIVATE_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`, and takes its model from the optional repo variable `CLAUDE_REVIEW_MODEL`. Cursor and people may review too; every reviewer counts the same, by [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict**. Nothing in these skills posts reviews. A `review` check run that failed or was cancelled means no Claude review is coming for that head: name it in the report for Evan and carry on with the pass.
 
 New work goes to Claude sessions too ([agentrealm-agents-implementer-fleet](../agentrealm-agents-implementer-fleet/SKILL.md)). The Cursor implementer fleet is dormant while Cursor credits are out; never try the conductor `spawn`.
 
@@ -26,12 +26,12 @@ Do the steps in order. Each one reads fresh state; never reuse a count from an e
 
 ### 1. Merge
 
-No `gh` CLI here. Reads and the merge go through the GitHub MCP tools, as in [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Reading the pull request**, including its traps about omitted `labels`, lazy `mergeable_state`, and the `review` check.
+No `gh` CLI here. Reads and the merge go through the GitHub MCP tools, as in [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Reading the pull request**, including its traps about omitted `labels`, lazy `mergeable_state`, and reviewer check runs.
 
 List open pull requests. A pull request is **mergeable** when all of these hold on its **current head commit**:
 
-- CI green: every CI check run on the head has completed, none with `failure` or `timed_out`. Running or queued is not green. `skipped` and `neutral` are fine. A head with no CI run at all is not green; step 2 says why that usually means a conflict. The Claude Review `review` check is not CI; its result is the verdict below.
-- Reviewed and approved: the review verdict is **approved** (`reviewer-agent-anth[bot]` approved the current head), derived as in [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict**. The supervisor and the fixer fleet read the verdict by that one definition, so every open pull request is mergeable, fixable, or in progress. Anything short of approved is not mergeable.
+- CI green: every CI check run on the head has completed, none with `failure` or `timed_out`. Running or queued is not green. `skipped` and `neutral` are fine. A head with no CI run at all is not green; step 2 says why that usually means a conflict. Reviewer check runs are not CI and never hold a merge.
+- No reviewer rejected the current head, and at least one approved it ([agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict**). Beyond that, the merge goes through or GitHub refuses it.
 - It changes nothing under `.github/workflows/` or `.github/actions/` (see **Never**).
 - No merge conflict: `mergeable_state` is not `"dirty"`. If it reads `"unknown"`, read again; if it still does, it is not mergeable this pass.
 - No `conductor:working` label.
@@ -54,8 +54,7 @@ Re-list open pull requests and read each one fresh: `pull_request_read` `get` fo
 
 **A missing CI run means check for a conflict first.** GitHub does not start `pull_request` workflows on a head that conflicts with its base, so a head with no `test` run is usually `"dirty"`. Read `mergeable_state` before treating it as a CI outage. `"dirty"` is a merge conflict: the fixer fleet's spawn row, not a stop.
 
-`idle` is the number of pull requests that [agentrealm-agents-fixer-fleet](../agentrealm-agents-fixer-fleet/SKILL.md) **What counts as blocked** marks **spawn**: first matching row of that table, with its traps. Do not restate or adjust that table here; the supervisor and the fixer fleet must agree on what gets a fixer. In particular, only the Claude Review `review` check still running holds a pull request back; another check still running does not.
-
+`idle` is the number of pull requests that [agentrealm-agents-fixer-fleet](../agentrealm-agents-fixer-fleet/SKILL.md) **What counts as blocked** marks **spawn**: first matching row of that table, with its traps. Do not restate or adjust that table here; the supervisor and the fixer fleet must agree on what gets a fixer. 
 Also note `open`, the total count of open pull requests, and `inflight`, the Claude implementer sessions still running without a pull request yet. Find them with `list_sessions(tags=["agentrealm-agents-implementer-fleet"])`: a session counts when `get_session` shows its `status_bucket` as `working` or `blocked`, and no open pull request has its branch (the session's `outcome_branch`) as head. Each fleet session is tagged with its backlog ID too, lower case.
 
 ### 3. Dispatch
@@ -83,7 +82,7 @@ Never both in one pass. A pull request the fixer fleet has not locked yet still 
 
 ### 4. Report
 
-One short block: what you merged, what you left unmerged for Evan to judge and why (workflow changes, failed or cancelled `review` checks), what you dispatched and with what `n`, and `open` / `idle` / `inflight` after the pass.
+One short block: what you merged, what you left unmerged for Evan to judge and why (workflow changes, failed or cancelled `review` checks, reviewers who disagree and a fixer could not settle), what you dispatched and with what `n`, and `open` / `idle` / `inflight` after the pass.
 
 ## Stop and tell Evan
 

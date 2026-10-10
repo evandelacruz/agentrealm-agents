@@ -139,10 +139,12 @@ class _Grid:
         if same_world is not None:
             assert same_world.w is w and same_world.params is params
             self.occupied, self.hostiles = same_world.occupied, same_world.hostiles
+            self.for_sale = same_world.for_sale
             self._danger, self._costs = same_world.danger_map(), same_world._costs
             self.known_box = same_world.known_box
         else:
             self.occupied = w.occupied()
+            self.for_sale = w.for_sale()
             self.hostiles: list[Entity] = [e for e in w.entities if params.is_hostile(w, e)]
             self._danger: dict[Pos, int] | None = None  # built on first use (``danger_map``)
             # Each non-goal cell's cost, worked out once: a search prices a
@@ -191,6 +193,10 @@ class _Grid:
                 base += OCCUPANT
             return base + self.danger(p)
         if p in params.break_nominated:
+            return None
+        if p in self.for_sale and not goal:
+            # Walking onto a priced supply buys it: only a ``Take`` buys (A21).
+            # As the goal it is where Shop walks up to; no Step lands on it.
             return None
         block = self.tiles.get(p)
         if block is not None and block in DOORS:

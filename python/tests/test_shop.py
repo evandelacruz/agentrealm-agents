@@ -24,6 +24,9 @@ from agentrealm_agent.shop import (
 )
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
+from agentrealm_agent.brain import walkable_prefix
+from agentrealm_agent.plan import parse_directives_goals
+from agentrealm_agent.travel import record_shop_cell
 from agentrealm_agent.world import Entity, WorldModel
 
 
@@ -196,6 +199,75 @@ class ShopBuyTest(unittest.TestCase):
         out = dispatch(w, ctx(w, plan=plan, params=params))
         self.assertEqual((out.state, out.intents), ("Shop", [{"verb": "Take", "supply_id": 6}]))
         self.assertEqual(plan.acted, {"op": "buy", "code": "torch"})
+
+
+def walk(w: WorldModel, c: PlayContext, state: str, limit: int = 20) -> tuple[list, object]:
+    """Dispatch and apply each SetPosition ``state`` sends until it sends
+    something else: the cells stepped onto, and that last outcome."""
+    stepped = []
+    for _ in range(limit):
+        out = dispatch(w, c)
+        if out.state != state or not out.intents or out.intents[0]["verb"] != "SetPosition":
+            return stepped, out
+        w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+        stepped.append(w.pos)
+        if c.memory.path and c.memory.path[0] == w.pos:
+            c.memory.path = c.memory.path[1:]  # as the runner does once a Step is queued
+        w.tick += 10
+    return stepped, out
+
+
+class ShopTilesAreNotWalkedTest(unittest.TestCase):
+    """Free-play run 1: ``travel:shop`` stepped onto the shop's sword and
+    bought it (21 → 6 gems) when the plan wanted a potion."""
+
+    def test_travel_to_shop_ends_next_to_it(self):
+        w = world(at=(0, 2))
+        w.gems = 21
+        w.entities = [Entity("supply", 7, (4, 2), "bronze_sword", gem_price=15)]
+        c = ctx(w, plan=Plan(parse_directives_goals(["travel:shop"]), dict(PARAM_DEFAULTS)))
+        record_shop_cell(c.knowledge, 1, (4, 2))
+        stepped, out = walk(w, c, "Travel")
+        self.assertNotIn((4, 2), stepped)
+        self.assertEqual(max(abs(w.pos[0] - 4), abs(w.pos[1] - 2)), 1, (w.pos, out.reason))
+        self.assertIsNone(c.plan.current(), "arrived beside the shop: the op is done")
+
+    def test_walks_route_around_items_for_sale(self):
+        w = world(at=(0, 2))
+        w.entities = [Entity("supply", 7, (2, 2), "bronze_sword", gem_price=15)]
+        c = ctx(w, plan=Plan(parse_directives_goals(["travel:point:4:2"]), dict(PARAM_DEFAULTS)))
+        stepped, _ = walk(w, c, "Travel")
+        self.assertNotIn((2, 2), stepped)
+        self.assertEqual(w.pos, (4, 2))
+
+    def test_travel_to_a_point_on_an_item_for_sale_ends_beside_it(self):
+        w = world(at=(0, 2))
+        w.entities = [Entity("supply", 7, (4, 2), "bronze_sword", gem_price=15)]
+        c = ctx(w, plan=Plan(parse_directives_goals(["travel:point:4:2"]), dict(PARAM_DEFAULTS)))
+        stepped, _ = walk(w, c, "Travel")
+        self.assertNotIn((4, 2), stepped)
+        self.assertIsNone(c.plan.current(), "arrived beside it: the op is done")
+
+    def test_walk_queue_stops_before_an_item_for_sale(self):
+        w = world(at=(0, 2))
+        w.entities = [Entity("supply", 7, (2, 2), "bronze_sword", gem_price=15)]
+        m = Memory()
+        prefix = walkable_prefix(w, m, Policy(kind="scripted"), [(1, 2), (2, 2), (3, 2)])
+        self.assertEqual(prefix, [(1, 2)])
+
+    def test_buy_takes_only_the_named_item(self):
+        w = world(at=(0, 2))
+        w.gems = 21
+        w.entities = [
+            Entity("supply", 7, (2, 2), "bronze_sword", gem_price=15),
+            Entity("supply", 8, (4, 2), "small_potion", gem_price=3),
+        ]
+        c = ctx(w, plan=Plan([{"op": "buy", "code": "small_potion"}], dict(PARAM_DEFAULTS)))
+        stepped, out = walk(w, c, "Shop")
+        self.assertNotIn((2, 2), stepped)
+        self.assertNotIn((4, 2), stepped)
+        self.assertEqual(out.state, "Shop")
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 8}])
 
 
 class ShopRefusalCapTest(unittest.TestCase):

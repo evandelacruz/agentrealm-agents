@@ -25,6 +25,7 @@ from .intents import arm, set_position, use_block
 from .solve import held_supply, use_reach
 
 GOAL = "break"
+GOAL_STATE = "Break"  # only Break's own arming counts against stuck step 2, not Heal's
 
 
 def _stuck_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
@@ -65,6 +66,10 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
     if op is not None:
         choice = _plan_choice(w, ctx, op)
     elif att is not None and att.level == nav_stuck.BREAK:
+        if att.arm_decisions >= nav_stuck.ARM_DECISION_LIMIT:
+            # Arming again and again opened nothing: on to step 3 (A15).
+            nav_stuck.escalate(m, w, att, "arm_only")
+            return StateOutcome(None, "arming made no progress", state=state)
         choice = _stuck_choice(w, ctx)
     else:
         choice = None
@@ -91,6 +96,9 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
             m.break_rearm = w.armed_code
         if choice.supply.id >= 0:
             intents.append(arm(choice.supply.id))
+            att = nav_stuck.active(m, w)
+            if state == GOAL_STATE and att is not None and att.level == nav_stuck.BREAK:
+                att.arm_decisions += 1
 
     here = w.pos
     if here is None or w.map_id is None:

@@ -111,6 +111,7 @@ class Memory:
     clue_signals: list[dict] = field(default_factory=list)
     # Strategist (A35): death, goal_done and goal_failed triggers, via queue_signal; clue and stuck live elsewhere.
     strategist_signals: list[dict] = field(default_factory=list)
+    last_decision: str = ""  # "State: reason" of the last decision, for the planner's stall line
     strategist_progress_tick: int = -1  # last tick with an applied Step (the idle trigger counts from it); -1 before the first real tick
     # Shop (A21): (supply id, code, gems before, supply pos, map id, tick sent)
     # of the Take in flight. Settled on an applied Take or a gem drop, counted

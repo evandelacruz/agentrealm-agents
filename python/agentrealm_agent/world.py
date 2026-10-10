@@ -724,6 +724,11 @@ class WorldModel:
     def occupied(self) -> set[Pos]:
         return {e.pos for e in self.entities if e.kind in ("character", "npc")}
 
+    def for_sale(self) -> set[Pos]:
+        """Cells of priced supplies in sight. Stepping onto one buys it, so
+        no walk ever does: a buy is the Shop executor's ``Take`` (A21)."""
+        return {e.pos for e in self.entities if e.kind == "supply" and e.gem_price}
+
     def entity_read_due(self, refresh: int) -> bool:
         """We moved since the last real entity read, and it is ``refresh`` ticks old.
 
@@ -743,7 +748,7 @@ class WorldModel:
 
     def open_neighbours(self, p: Pos, avoid: set[Pos] = frozenset()) -> list[Pos]:
         """Walkable, unoccupied tiles one step from p, minus avoid."""
-        occ = self.occupied() | avoid
+        occ = self.occupied() | self.for_sale() | avoid
         return [n for n in self.neighbours(p) if self.view.walkable(n) and n not in occ]
 
 

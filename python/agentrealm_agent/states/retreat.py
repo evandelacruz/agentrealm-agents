@@ -27,6 +27,7 @@ from ..survival import (
     retreat_goal,
     safe_goals,
     should_retreat,
+    town_cell,
     would_lose,
 )
 from ..world import Entity, Pos, WorldModel, chebyshev
@@ -89,7 +90,8 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     (A9); Flee passes the oscillation escape it already took as ``paced``.
 
     A goal the walk gets no nearer to in a stuck window (``no_progress``) is
-    ruled out for ``SAFE_UNREACHABLE_TICKS`` and the next one is taken.
+    ruled out for ``SAFE_UNREACHABLE_TICKS`` and the next one is taken; the
+    town cell, the last resort, is only planned again.
     """
     m, policy = ctx.memory, ctx.policy
     goals = safe_goals(w, ctx.knowledge)
@@ -106,8 +108,11 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     goal = retreat_safe_goal(m, w, policy, ctx.knowledge, plan_avoid, plan_costly)
     if goal is not None and no_progress(w, m, goal):
         # Reachable by budget but no nearer in a whole stuck window: rule it
-        # out for a while and take the next candidate, else town (free-play run 3).
-        m.safe_unreachable[(w.map_id, goal)] = w.tick
+        # out for a while and take the next candidate, else town (free-play
+        # run 3). Town is the last resort and is never ruled out this way:
+        # its walk only plans afresh.
+        if goal != town_cell(w, ctx.knowledge):
+            m.safe_unreachable[(w.map_id, goal)] = w.tick
         if m.goal == "safe":
             m.path = []
         m.retreat_walk = None
@@ -153,28 +158,27 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
 
 
 def no_progress(w: WorldModel, m: Memory, goal: Pos) -> bool:
-    """The walk to ``goal`` has gone a stuck window (``PROGRESS_TICK_LIMIT``,
-    A15) without its remaining path shortening (A9, A66).
+    """The walk to ``goal`` has gone a stuck window (``PROGRESS_TICK_LIMIT``)
+    without its remaining path shortening (A9, A66).
 
-    Samples at each call: the remaining path is the kept path to ``goal``
-    plus the straight line to its first cell; no kept path is no progress. A
-    new goal, or a gap longer than the window since the last sample (another
-    state walked meanwhile), starts the window over. Once it reports, the
-    record is cleared, so the next goal gets a window of its own.
+    A15's progress record, without its escalation ladder: the attempt for
+    the ``safe`` walk at ``goal`` is sampled each call (``nav_stuck.observe``)
+    but never made active, so it changes no other walk's window or the
+    oscillation guard. A decision that skips it starts the window over
+    (``nav_stuck.resume``). Once it reports, the attempt is dropped, so the
+    goal gets a fresh window if it is picked again.
     """
-    path = m.path if m.goal == "safe" and m.path and m.path[-1] == goal else []
-    rest = path[path.index(w.pos) + 1 :] if w.pos in path else path
-    left = len(rest) + chebyshev(w.pos, rest[0]) if rest else None
-    if m.safe_walk_to != goal or w.tick - m.safe_walk_seen > nav_stuck.PROGRESS_TICK_LIMIT:
-        m.safe_walk_to, m.safe_walk_best, m.safe_walk_since = goal, left, w.tick
-    elif m.safe_walk_best is None:
-        m.safe_walk_best = left  # the first path planned sets the bar, it is not progress
-    elif left is not None and left < m.safe_walk_best:
-        m.safe_walk_best, m.safe_walk_since = left, w.tick
-    m.safe_walk_seen = w.tick
-    if w.tick - m.safe_walk_since < nav_stuck.PROGRESS_TICK_LIMIT:
+    att = nav_stuck.attempt(m, w, "safe", goal)
+    if att is None:
         return False
-    m.safe_walk_to = None
+    nav_stuck.resume(m, att, w.tick)
+    started = att.window_tick if att.best is None else None
+    nav_stuck.observe(att, w, m.path if m.goal == "safe" and m.path and m.path[-1] == goal else None)
+    if started is not None:
+        att.window_tick = started  # the first path planned sets the bar; it is not progress
+    if w.tick - att.window_tick < nav_stuck.PROGRESS_TICK_LIMIT:
+        return False
+    nav_stuck.finish(m, att)
     return True
 
 

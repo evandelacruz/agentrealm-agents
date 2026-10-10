@@ -110,6 +110,16 @@ class SafeWalkWithNoProgressTest(unittest.TestCase):
         self.assertEqual(outs[0].reason, f"retreat → safe {STUCK}")
         self.assertEqual(outs[-1].reason, f"retreat → safe {TOWN}")
 
+    def test_town_is_never_ruled_out(self):
+        # Review on #151: town is the last resort, so a walk that gets no
+        # nearer to it plans again instead of being left with no goal.
+        kb = KnowledgeBase("sandbox")
+        sync_town(kb, {"map_id": MAP, "x": TOWN[0], "y": TOWN[1]})
+        w, c = world(), parking(kb)  # no safe tile known: town is the only goal
+        outs = stand_still(w, c, 3 * nav_stuck.PROGRESS_TICK_LIMIT)
+        self.assertNotIn((MAP, TOWN), c.memory.safe_unreachable)
+        self.assertEqual({o.reason for o in outs}, {f"retreat → safe {TOWN}"})
+
 
 if __name__ == "__main__":
     unittest.main()

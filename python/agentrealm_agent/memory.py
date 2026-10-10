@@ -104,13 +104,6 @@ class Memory:
     retreat_walk: Pos | None = None
     retreat_to: Pos | None = None
     retreat_gaps: list[tuple[int, int]] = field(default_factory=list)
-    # A Retreat or Park walk to safety (A9, A66): its goal, the shortest
-    # remaining path seen in this stuck window, the tick the window began or
-    # last shortened, and the tick of the last sample (``retreat.no_progress``).
-    safe_walk_to: Pos | None = None
-    safe_walk_best: int | None = None
-    safe_walk_since: int = 0
-    safe_walk_seen: int = 0
     # The runner's park phase (A66): the run is over and only the survival
     # reflexes and Park run, walking to safe ground before the exit.
     parking: bool = False

@@ -300,6 +300,7 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         self.assertEqual(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None), OPEN, "remembered out of view")
         w.tick += SAFE_THREATENED_TICKS
         self.assertEqual(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None), self.PACKED)
+        self.assertEqual(m.safe_threatened, {}, "a lapsed mark is dropped")
 
     def test_with_every_safe_tile_threatened_it_falls_back_to_town(self):
         w, m = world(), Memory()

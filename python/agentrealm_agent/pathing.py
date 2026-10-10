@@ -432,8 +432,15 @@ def reachable_safe_goal(
         return True
 
     def recently_threatened(p: Pos) -> bool:
-        marks = m.safe_threatened.get((mid, p), {})
-        return any(key not in skip and w.tick - seen < SAFE_THREATENED_TICKS for key, seen in marks.items())
+        marks = m.safe_threatened.get((mid, p))
+        if not marks:
+            return False
+        live = {key: seen for key, seen in marks.items() if w.tick - seen < SAFE_THREATENED_TICKS}
+        if live:
+            m.safe_threatened[(mid, p)] = live
+        else:
+            del m.safe_threatened[(mid, p)]  # lapsed marks are dropped, so a long run does not pile them up
+        return any(key not in skip for key in live)
 
     left = [p for p in candidates if not recently_threatened(p) and not skipped(p)]
     here = w.pos

@@ -9,7 +9,7 @@ from .break_memory import break_costs_for_planning, nominate_on_path
 from .clues import direction_hint, nearest_explore_target, on_hint_side
 from .config import Policy
 from .knowledge_base import KnowledgeBase
-from .memory import Memory
+from .memory import SAFE_EXPLORE_GOAL, Memory
 from .navigation import (
     CostGridParams,
     NavSearchState,
@@ -195,10 +195,6 @@ def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos |
     if prefix and step_open(w, blocked, prefix[0]):
         return prefix[0]
     return None
-
-
-# ``Memory.goal`` of the safe default's walk (no plan op, PLAN.md Architecture).
-SAFE_EXPLORE_GOAL = "explore"
 
 
 def plan_op_goal(op: GoalOp) -> str:
@@ -501,7 +497,9 @@ def reachable_safe_goal(
     left are searched, then the nearest of the rest; a cell a kept safe
     walk (``SAFE_PATH_GOALS``) already ends on needs no search. "No way" is a
     search that proved it (``navigation.no_way``): one cut short by its
-    budget still counts as a way, since it walks toward the cell.
+    budget still counts as a way, since it walks toward the cell. A Retreat
+    or Park walk also marks a cell the planner settles on no path to
+    (``retreat_step``), the town cell too.
     """
     if w.pos is None or w.map_id is None:
         return None

@@ -28,10 +28,13 @@ from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.navigation import planner
 from agentrealm_agent.navigation.planner import CostGridParams, NavSearchState, cost_path
 from agentrealm_agent.park import PARK_NO_PATH
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
+from agentrealm_agent.pathing import SAFE_UNREACHABLE_TICKS, retreat_safe_goal
+from agentrealm_agent.states.explore import KEEP_AWAY_HOLD_TICKS
 from agentrealm_agent.states.retreat import retreat_step
 from agentrealm_agent.travel import sync_town
 from agentrealm_agent.world import Entity, Pos, WorldModel
@@ -146,6 +149,38 @@ class NoStepRulesTheCellOutTest(unittest.TestCase):
         out = retreat_step(w, c, "Park")
         self.assertEqual(out.reason, f"retreat → safe {TOWN}", "the next decision walks to the next one")
 
+    def test_a_cell_blocked_only_by_someone_standing_there_is_not_ruled_out(self):
+        # Occupants are priced (``OCCUPANT``), never impassable: a crowd round
+        # us leaves a path whose first cell is taken, not "no path", so it
+        # waits and rules nothing out (review on #165).
+        w, c = self.stuck()
+        x, y = w.pos
+        w.entities = [Entity("npc", 20 + i, (x + dx, y + dy), code="townsfolk") for i, (dx, dy) in enumerate(
+            [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)])]
+        out = retreat_step(w, c, "Park")
+        self.assertEqual((out.intents, out.reason), (None, "safe (390, 369): next step not open"))
+        self.assertEqual(c.memory.safe_unreachable, {})
+        w.entities = []  # they walk on
+        self.assertTrue(retreat_step(w, c, "Park").intents)
+
+    def test_a_ruled_out_cell_is_tried_again_once_the_mark_lapses(self):
+        w, c = self.stuck()
+        with mock.patch("agentrealm_agent.states.retreat.cost_path", return_value=None):
+            retreat_step(w, c, "Park")
+        w.tick += SAFE_UNREACHABLE_TICKS
+        pick = retreat_safe_goal(c.memory, w, c.policy, c.knowledge, set(), set())
+        self.assertEqual(pick, (390, 369))
+
+    def test_no_step_while_the_corridor_is_unfinished_rules_nothing_out(self):
+        # The corridor search ran out of budget and the straight-line walk
+        # found no step: that is "no step yet", not "no path" (review on #165).
+        w, c = self.stuck()
+        c.memory.safe_unreachable[(MAP, (390, 369))] = w.tick  # only town is left: far, out of sight
+        with mock.patch.object(planner, "COARSE_NODE_BUDGET", 0), mock.patch.object(planner, "_fine_path", return_value=None):
+            out = retreat_step(w, c, "Park")
+        self.assertEqual(out.reason, f"safe {TOWN}: corridor still searching")
+        self.assertNotIn((MAP, TOWN), c.memory.safe_unreachable)
+
     def test_the_town_cell_is_ruled_out_too(self):
         w, c = self.stuck()
         c.memory.safe_unreachable[(MAP, (390, 369))] = w.tick
@@ -218,6 +253,16 @@ class CautiousSafeDefaultTest(unittest.TestCase):
                     w.view.tiles[(x, y)] = "wall"
         out = dispatch(w, c)
         self.assertEqual((out.reason, out.intents), ("hurt, hostile near: hold", None))
+
+    def test_a_hold_ends_after_its_bound(self):
+        w, c = hurt_beside((13, 10))
+        for x in range(30):
+            for y in range(30):
+                if (x, y) != (10, 10) and x <= 10:
+                    w.view.tiles[(x, y)] = "wall"
+        self.assertEqual(dispatch(w, c).reason, "hurt, hostile near: hold")
+        w.tick += KEEP_AWAY_HOLD_TICKS
+        self.assertNotIn("hostile near", dispatch(w, c).reason, "it explores again")
 
     def test_at_full_health_it_explores(self):
         w, c = hurt_beside((13, 10))

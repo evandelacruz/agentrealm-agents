@@ -103,7 +103,6 @@ from .travel.strength import StrengthBracket
 from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .pathing import SAFE_EXPLORE_GOAL
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
@@ -1228,8 +1227,8 @@ class Strategist:
             # The safe default's walk serves no op, so its queue is cut at its
             # next step, not run out (free-play run 6: the walk queued before
             # the first reply took the character into a hostile).
-            if head is None and goals and runner.mem.held_queue is not None and runner.mem.goal == SAFE_EXPLORE_GOAL:
-                runner.mem.resend_held_queue = runner.mem.need_position = True
+            if head is None and goals:
+                runner.mem.cut_safe_default_walk()
             runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
             runner.mem.walks.clear()  # the new head walks a path of its own (A15)
             runner.mem.gather_status = ""  # it was the old head's

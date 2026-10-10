@@ -42,6 +42,8 @@ from .intents import set_position
 # Hurt, the safe default keeps away from a known hostile this close: the
 # planner's danger radius (``navigation.planner``).
 CAUTION_RADIUS = HOSTILE_DANGER_RADIUS
+# How long it holds with no step away before it explores again (10 s at 10 ticks/s).
+KEEP_AWAY_HOLD_TICKS = 100
 
 
 class ExploreState(State):
@@ -85,11 +87,16 @@ def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateO
 
     Free-play run 6: the character started hurt beside a hostile's post, and
     before the planner's first reply the safe default walked ten steps
-    toward it and died. Exploring waits until we heal or the hostile is
-    gone; the reflexes (Retreat, Flee, Fight) still act above this.
+    toward it and died. The reflexes (Retreat, Flee, Fight, Heal) still act
+    above this; it covers the ground between them, a hostile near but not in
+    range. A hold lasts at most ``KEEP_AWAY_HOLD_TICKS``, then the safe
+    default explores again, still away from hostiles, so a hostile that
+    stays put never holds it for good.
     """
+    m = ctx.memory
     near = [e for e in w.entities if is_hostile(w, ctx.policy, e) and chebyshev(e.pos, w.pos) <= CAUTION_RADIUS]
     if not near:
+        m.keep_away_hold = None
         return None
 
     def gap(p: Pos) -> int:
@@ -97,9 +104,15 @@ def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateO
 
     blocked, _, _ = plan_sets(w, ctx.memory, ctx.policy, ctx.knowledge)
     options = [p for p in w.open_neighbours(w.pos, blocked) if gap(p) > gap(w.pos)]
-    ctx.memory.path = []  # one step at a time: no walk queue toward anything
     if not options:
+        if m.keep_away_hold is None:
+            m.keep_away_hold = w.tick
+        if w.tick - m.keep_away_hold >= KEEP_AWAY_HOLD_TICKS:
+            return None
+        m.path = []
         return StateOutcome(None, "hurt, hostile near: hold", state=state, wait=True)
+    m.keep_away_hold = None
+    m.path = []  # one step at a time: no walk queue toward anything
     step = min(options, key=lambda p: (not is_safe_ish(w, p, ctx.policy), -gap(p), p))
     return StateOutcome([set_position(step)], "hurt, hostile near: step away", state=state)
 

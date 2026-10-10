@@ -271,7 +271,7 @@ class DispatcherFallThroughTest(unittest.TestCase):
         c = ctx(w, on_hostile="flee", hostile=["npc"], hostile_range=2)
         c.params = {**PARAM_DEFAULTS, "retreat_hits": 2, "risk": 0.0, "lives_floor": 1}
         out = dispatch(w, c)
-        self.assertEqual(out.yielded, ["Retreat: safe (4, 0): no path, ruled out"])
+        self.assertEqual(out.yielded, ["Retreat: safe (4, 0): next step not open"])
         self.assertEqual(out.state, "Flee")
         self.assertIsNotNone(out.intents)
 

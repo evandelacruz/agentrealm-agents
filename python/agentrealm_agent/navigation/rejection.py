@@ -33,14 +33,6 @@ class NavMemory:
     wait_tile: MapPos | None = None  # block_occupied or unhandled code: keep off for one decision
 
 
-def copy_nav(nav: NavMemory) -> NavMemory:
-    return NavMemory(
-        impassable=set(nav.impassable),
-        occupant_until=dict(nav.occupant_until),
-        wait_tile=nav.wait_tile,
-    )
-
-
 def locked_doors_from_kb(kb: KnowledgeBase | None, map_id: int) -> set[Pos]:
     if kb is None:
         return set()

@@ -73,10 +73,19 @@ class ProbeLeavesMemoryTest(unittest.TestCase):
         m.restore(saved)
         self.assertEqual(m, saved)
 
+    def test_a_snapshot_shares_the_search_caches(self):
+        # A corridor search is search work, not a decision: never copied (cost).
+        m = Memory()
+        m.corridors["goto"] = object()
+        saved = m.snapshot()
+        self.assertIs(saved.corridors, m.corridors)
+        self.assertIsNot(saved.nav, m.nav)
+
 
 class DrinkTriesCountRejectionsTest(unittest.TestCase):
-    def sent(self, r: Runner, queue: list[dict]) -> None:
+    def sent(self, r: Runner, queue: list[dict], drink: int | None = 4) -> None:
         r.mem.pending_intents, r.mem.pending_next_index = [dict(i) for i in queue], 0
+        r.mem.heal_drink = drink  # use_carried_heal records the supply it decided on
 
     def test_a_rejected_use_counts_one_try(self):
         r = make_runner(self)
@@ -97,6 +106,32 @@ class DrinkTriesCountRejectionsTest(unittest.TestCase):
         r.on_result({"outcome": "applied"}, 0)
         r.on_result({"outcome": "applied"}, 1)
         self.assertEqual(r.mem.heal_tries, {})
+        self.assertIsNone(r.mem.heal_drink)
+
+    def test_a_rejected_arm_and_use_count_one_try(self):
+        r = make_runner(self)
+        self.sent(r, DRINK)
+        r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
+        self.sent(r, DRINK, drink=None)  # the same drink's Use, read after the Arm
+        r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 1)
+        self.assertEqual(r.mem.heal_tries, {("use", 4): 1})
+
+    def test_a_use_only_drink_counts_against_the_potion_decided(self):
+        # The potion is armed already, so the drink is Use alone. The second
+        # potion of the same code is the one decided: its refusals count, so
+        # it too is written off after HEAL_MAX_TRIES.
+        r = make_runner(self)
+        r.world.armed_code = "small_potion"
+        r.world.held_supplies = list(POTIONS[1:])  # no weapon to put back first
+        r.mem.heal_tries[("use", 4)] = HEAL_MAX_TRIES
+        for _ in range(HEAL_MAX_TRIES):
+            d = r._decide(r.world, r.mem)
+            self.assertEqual(d.intent, DRINK[1])
+            self.assertEqual(r.mem.heal_drink, 5)
+            r.mem.pending, r.mem.pending_intents = dict(DRINK[1]), None
+            r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
+        self.assertEqual(r.mem.heal_tries[("use", 5)], HEAL_MAX_TRIES)
+        self.assertIsNone(carried_heal(r.world, r.mem))
 
     def test_a_rejected_weapon_arm_is_no_drink(self):
         r = make_runner(self)

@@ -299,11 +299,13 @@ def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
     the last one armed this run, never the potion or tool in the slot (free-play
     run 4 re-armed a potion). A drink the server refuses is retried at most
     ``HEAL_MAX_TRIES`` times per supply: the runner counts each refused one
-    (``healing.note_heal_refused``), never a drink only decided.
+    against ``heal_drink`` (``Runner._note_heal_refused``), never a drink only
+    decided.
     """
     item = carried_heal(w, m)
     if item is None:
         return None
+    m.heal_drink = item.id
     if m.heal_rearm is None:
         m.heal_rearm = weapon_to_rearm(w, m)
     if w.armed_code == item.code:

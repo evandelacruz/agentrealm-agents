@@ -62,7 +62,6 @@ def note_try(m: Memory, kind: str, supply_id: int) -> None:
     m.heal_tries[key] = m.heal_tries.get(key, 0) + 1
 
 
-
 def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
     here = w.pos
     if here is None:
@@ -166,14 +165,6 @@ def known_safe_cells(w: WorldModel) -> list[Pos]:
     return sorted(safe_tiles(w, map_id), key=order)
 
 
-def supply_in_hand(w: WorldModel, queue: list[dict], index: int) -> InventorySupply | None:
-    """The held supply the ``Use`` at ``queue[index]`` was made with (``code_in_hand``), or None."""
-    before = next((i for i in reversed(queue[:index]) if i.get("verb") != "Wait"), None)
-    if before and before.get("verb") == "Arm":
-        return next((h for h in w.held_supplies if h.id == before.get("supply_id")), None)
-    return next((h for h in w.held_supplies if h.code == w.armed_code), None) if w.armed_code else None
-
-
 def code_in_hand(w: WorldModel, queue: list[dict], index: int) -> str | None:
     """The code the ``Use`` at ``queue[index]`` was made with, from the last
     intent other than a ``Wait`` queued before it: what a self-``Use`` drinks
@@ -184,8 +175,12 @@ def code_in_hand(w: WorldModel, queue: list[dict], index: int) -> str | None:
     ``Arm`` before the ``Use`` names the item while it is still held; with
     none, or once an observation shows it armed, it is ``armed_code``.
     """
-    held = supply_in_hand(w, queue, index)
-    return held.code if held is not None else w.armed_code
+    before = next((i for i in reversed(queue[:index]) if i.get("verb") != "Wait"), None)
+    if before and before.get("verb") == "Arm":
+        for h in w.held_supplies:
+            if h.id == before.get("supply_id"):
+                return h.code
+    return w.armed_code
 
 
 def note_heal_pending(m: Memory, w: WorldModel, code: str, kind: str) -> None:

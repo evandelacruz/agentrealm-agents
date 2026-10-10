@@ -330,6 +330,38 @@ def _search(w: WorldModel, goal: Pos, params: CostGridParams, max_nodes: int = 1
     return _astar(_Grid(w, {goal}, params), max_nodes)
 
 
+def no_way(w: WorldModel, goal: Pos, params: CostGridParams | None = None) -> bool:
+    """True only when ``goal`` is walled in: the passable cells joined to it
+    run out within ``FINE_NODE_BUDGET`` without reaching ``w.pos``, or the
+    goal itself is impassable. Only the goal's side proves it: a search from
+    our side that runs out says where we stand is shut, which a move ends,
+    not where the goal is."""
+    assert w.pos is not None
+    if w.pos == goal:
+        return False
+    grid = _Grid(w, {goal}, params or CostGridParams())
+    return grid.cost(goal) is None or _walled_in(grid, goal, w.pos, FINE_NODE_BUDGET)
+
+
+def _walled_in(grid: _Grid, goal: Pos, start: Pos, max_cells: int) -> bool:
+    """The passable cells joined to ``goal`` number at most ``max_cells`` and
+    do not touch ``start``."""
+    seen, todo = {goal}, [goal]
+    while todo:
+        cur = todo.pop()
+        for dx, dy in NEIGHBOURS:
+            n = (cur[0] + dx, cur[1] + dy)
+            if n == start:
+                return False
+            if n in seen or not grid.in_box(n) or grid.cost(n) is None:
+                continue
+            seen.add(n)
+            if len(seen) > max_cells:
+                return False
+            todo.append(n)
+    return True
+
+
 def _corridor(nav: NavSearchState, start_m: Pos, goal_m: Pos) -> list[Pos]:
     out = [start_m]
     while out[-1] != goal_m:

@@ -1,7 +1,8 @@
 """Retreat: walk to safety before the next hits could kill (A9).
 
 Priority 1. Runs with a hostile in range, somewhere safe to head for
-(``retreat_goal``: a known safe tile, or the town cell), and
+(``retreat_goal``: a known safe tile, or the town cell; it walks to the
+nearest one a path reaches, ``pathing.retreat_safe_goal``), and
 ``should_retreat`` from health and the threat table; never on a safe tile or
 during a boss fight (A38).
 """
@@ -11,8 +12,8 @@ from __future__ import annotations
 import dataclasses
 
 from ..directives import attack_forbidden
-from ..navigation import cost_path, oscillation
-from ..pathing import grid_params, nav_search, next_step
+from ..navigation import cost_path, no_way, oscillation
+from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
 from ..survival import (
     LOSING_NAV,
     RETREAT_NAV,
@@ -22,6 +23,7 @@ from ..survival import (
     on_safe_tile,
     pursuer_peaks,
     retreat_goal,
+    safe_goals,
     should_retreat,
     would_lose,
 )
@@ -74,7 +76,8 @@ class RetreatState(State):
 
 
 def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | None = None) -> StateOutcome:
-    """A walk queue along a path to ``retreat_goal``, or no intent when there is none.
+    """A walk queue along a path to the nearest safe cell a path reaches, else
+    the town cell (``pathing.retreat_safe_goal``), or no intent when there is none.
 
     While the queue it sent is still running, it holds the round (``wait``,
     not a reflex), so the runner lets the queue walk. Losing ground
@@ -84,14 +87,22 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     (A9); Flee passes the oscillation escape it already took as ``paced``.
     """
     m, policy = ctx.memory, ctx.policy
-    goal = retreat_goal(w, ctx.knowledge)
-    if goal is None:
+    goals = safe_goals(w, ctx.knowledge)
+    if not goals:
         return StateOutcome(None, "nowhere safe known", state=state)
-    if w.pos == goal:
+    if w.pos == goals[0]:
         return StateOutcome(None, "at safe tile", state=state)
     # The oscillation guard caught Flee/Retreat pacing: the paced cell is
     # shut, so a path stepping onto it is replanned around it below (A15).
     escape = oscillation.take_escape(m, w) if paced is None else paced
+    _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+    # The nearest safe cell a path reaches, else town (free-play run 2). The
+    # escape cells shut only this decision's route, not where it may lead.
+    goal = retreat_safe_goal(m, w, policy, ctx.knowledge, plan_avoid, plan_costly)
+    lasting = grid_params(policy, set(plan_avoid), set(plan_costly))  # without this decision's escape: what no_way proves
+    plan_avoid |= escape
+    if goal is None:
+        return StateOutcome(None, "safe tile unreachable", state=state)
     losing = losing_ground(w, ctx, goal)
     if losing:
         if out := _turn_on_losing(w, ctx, state):
@@ -99,8 +110,6 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
         m.path = []  # replan below, weighing no hostile
     elif not escape and m.held_queue is not None and m.state == state and m.retreat_walk == goal:
         return StateOutcome(None, f"retreat → safe {goal}: queue under way", state=state, wait=True)
-    _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
-    plan_avoid |= escape
     pursuers = pursuer_peaks(w, policy, everyone=losing)
     # Cells in reach of a hostile it is not running from cost a detour, and a
     # kept path that now crosses the reach of one it did not cross when
@@ -119,6 +128,8 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
         m.path = cost_path(w, goal, params, nav=nav_search(m, w, nav_key, goal)) or []
         step = next_step(w, plan_avoid, m.path)
     if step is None:
+        if not m.path and no_way(w, goal, lasting):  # proven walled in: the next decision picks another safe cell
+            m.safe_unreachable[(w.map_id, goal)] = w.tick
         return StateOutcome(None, "safe tile unreachable", state=state)
     # The runner queues the walkable prefix of ``m.path`` from this first step,
     # and leaves these out of its threats: the path weighs none of them. Set

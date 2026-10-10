@@ -9,7 +9,7 @@ from ..healing import (
     carried_heal,
     food_in_sight,
     hurt,
-    nearest_known_safe,
+    known_safe_cells,
     note_regen_sample,
     note_try,
     rearm_after_drink,
@@ -21,8 +21,8 @@ from ..memory import Memory, queue_signal
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import bounded_step, grid_params, nav_search
-from ..survival import hostile_reach, hostiles_in_range, hostiles_reaching
+from ..pathing import bounded_step, grid_params, nav_search, reachable_safe_goal
+from ..survival import hostile_reach, hostiles_in_range, hostiles_reaching, town_cell
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .break_state import break_toward
@@ -170,10 +170,15 @@ def _plan_blocked(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) ->
 
 
 def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *, goal: str) -> StateOutcome | None:
-    target = nearest_known_safe(w, skip=lambda p: nav_stuck.backed_off(m, goal, w.map_id, p, w.tick))
+    """A step toward the first known safe cell a path reaches (near town
+    first, then nearest), skipping those a walk gave up on, else toward the
+    town cell (``pathing.reachable_safe_goal``; free-play run 2)."""
+    plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)
+    params = grid_params(policy, plan_avoid, plan_costly)
+    target = reachable_safe_goal(m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge))
     if target is None:
         return None
-    return _walk_toward(w, m, policy, ctx, target[1], goal=goal)
+    return _walk_toward(w, m, policy, ctx, target, goal=goal)
 
 
 def _walk_toward(

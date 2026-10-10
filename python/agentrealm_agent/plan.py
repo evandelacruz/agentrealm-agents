@@ -68,7 +68,7 @@ OP_FIELDS: dict[str, str] = {
     "use_block": "x, y, code (the supply to use on it)",
     "compose": "composes_into (the whole item to make)",
     "fetch_item": "code, optional x, y",
-    "gather_gems": "count (the gem total to reach), optional x, y (lifts the barren mark on that block's region; it does not move the character)",
+    "gather_gems": "count (the gem total to reach), optional x, y (a block of the region to gather in: Gather walks there and cuts only there while it has a cell to cut; it lifts that region's barren mark)",
     "equip": "optional code (else the best held gear is armed and worn)",
     "enter_level": "x, y (the level door)",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",

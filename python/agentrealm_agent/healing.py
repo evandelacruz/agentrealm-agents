@@ -148,26 +148,20 @@ def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
     return None
 
 
-def nearest_known_safe(w: WorldModel, skip: Callable[[Pos], bool] | None = None) -> tuple[int, Pos] | None:
-    """Nearest known safe cell on the current map, preferring cells near town.
-
-    ``skip`` leaves cells out, such as those a walk gave up on (A15)."""
-    here = w.pos
-    map_id = w.map_id
+def known_safe_cells(w: WorldModel) -> list[Pos]:
+    """The known safe cells on the current map, those near town first, then
+    nearest first (ties to the smaller cell). Heal path-checks them in this
+    order (``pathing.reachable_safe_goal``)."""
+    here, map_id = w.pos, w.map_id
     if here is None or map_id is None:
-        return None
-    candidates: list[tuple[int, int, Pos]] = []
-    for pos in safe_tiles(w, map_id):
-        if skip is not None and skip(pos):
-            continue
-        near_town = any(
-            am == map_id and chebyshev(pos, anchor) <= 8 for am, anchor in w.respawn_anchors
-        )
-        candidates.append((0 if near_town else 1, chebyshev(here, pos), pos))
-    if not candidates:
-        return None
-    candidates.sort()
-    return map_id, candidates[0][2]
+        return []
+    anchors = [anchor for am, anchor in w.respawn_anchors if am == map_id]
+
+    def order(pos: Pos) -> tuple[int, int, Pos]:
+        near_town = any(chebyshev(pos, anchor) <= 8 for anchor in anchors)
+        return (0 if near_town else 1, chebyshev(here, pos), pos)
+
+    return sorted(safe_tiles(w, map_id), key=order)
 
 
 def self_use_code(w: WorldModel, before: dict | None) -> str | None:

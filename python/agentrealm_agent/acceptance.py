@@ -2,7 +2,8 @@
 
 ``AcceptanceHooks`` are the hooks the runner calls on an attached acceptance
 object; each does nothing here, so a metrics class overrides only the hooks it
-measures; M8 also reads tick events (``NPCDied``) through ``on_events``, and
+measures; M8 also reads tick events (``NPCDied``, ``SupplyUsed``) through
+``on_events`` and its drinks' results through ``on_intent_result``, and
 M11 level clears through ``on_level_clear``. The park phase after a run
 (A66) is not the scenario: no hook fires during it but ``on_park_start`` and
 ``on_park_end``, and ``ParkSplit`` keeps its API errors apart. A new hook is declared here and
@@ -87,6 +88,11 @@ class AcceptanceHooks:
 
     def on_rejection(self, code: str, *, verb: str | None = None) -> None:
         """One of our intents was rejected with ``code``."""
+
+    def on_intent_result(self, intent: dict | None, result: dict) -> None:
+        """One result of our own queue, with the intent it answers (None when
+        the runner no longer holds it). ``result["outcome"]`` is ``applied``,
+        ``applied_no_effect`` or ``rejected``."""
 
     def on_death(self) -> None:
         """A ``Died`` event arrived for our character."""

@@ -8,8 +8,12 @@ module checks for each clause:
   a shop weapon is armed (not the starting pocket knife), and held plus stowed
   potions reach ``potion_reserve`` at least once.
 - Heals from food it picks up and from carried potions: **Heal** sends a
-  ``Take`` on ground food, and **Heal** sends ``Arm`` + ``Use`` self on a
-  carried potion.
+  ``Take`` on ground food, and a self-``Use`` **Heal** sends with a potion in
+  hand uses one up (A76): its result is ``applied`` and the held plus stowed
+  potion count then drops below what it was when the drink was sent, or a
+  ``SupplyUsed`` event names our character and a potion. A ``Use`` that
+  applies and leaves the potions as they were drank nothing and does not
+  count.
 - Kills lone weak hostiles without dying: at least one ``NPCDied`` for the
   NPC **Fight** was attacking when it was the lone hostile in the combat group,
   measured, with a threat table hit at most the weak default (2). The fight
@@ -67,6 +71,17 @@ class M8AcceptanceMetrics(TimedRunHooks):
     _fighting: bool = field(default=False, repr=False)  # an attack was sent since entering Fight
     _fight_target: int | None = field(default=None, repr=False)  # NPC id this fight attacks
     _weak_lone_fight: bool = field(default=False, repr=False)
+    _character_id: int | None = field(default=None, repr=False)
+    # Heal's potion drink still out: the potion count when it was sent (A76).
+    # It is judged on the first decision after its applied result, whose
+    # observation carries the inventory, and dropped when it is refused or
+    # used nothing up, when a queue without it replaces it, or on a death.
+    _drink_potions: int | None = field(default=None, repr=False)
+    _drink_applied: bool = field(default=False, repr=False)
+    # A queue without the drink was sent: forget it once that response's
+    # results and events are read, which may still carry the drink's own
+    # (as ``Runner._forget_replaced_drink``).
+    _drink_replaced: bool = field(default=False, repr=False)
 
     def before_tick(
         self,
@@ -87,14 +102,26 @@ class M8AcceptanceMetrics(TimedRunHooks):
         self.potion_reserve = max(0, int(params.get("potion_reserve", self.potion_reserve)))
         self._note_gems(w)
         self._note_loadout(w)
+        self._character_id = w.character_id
+        self._note_drink_used_up(w)
         if potion_count(w) >= self.potion_reserve:
             self.potion_reserve_met = True
         if intents is not None:
             self._note_heal(state, intents, w)
             self._note_fight(state, intents, w, policy, params)
 
+    def on_intent_result(self, intent: dict | None, result: dict) -> None:
+        if self._drink_potions is None or not is_self_use(intent):
+            return
+        if result.get("outcome") == "applied":
+            self._drink_applied = True  # the count drop is read on the next decision
+        else:
+            self._drink_potions = None  # refused, or used nothing up
+
     def on_events(self, events: list[dict]) -> None:
         for ev in events:
+            if ev.get("kind") == "SupplyUsed":
+                self._note_supply_used(ev)
             if ev.get("kind") != "NPCDied" or self._fight_target is None:
                 continue
             if ev.get("npc_id") != self._fight_target:
@@ -102,6 +129,13 @@ class M8AcceptanceMetrics(TimedRunHooks):
             if self._weak_lone_fight:
                 self.weak_hostile_kills += 1
             self._end_fight()
+        if self._drink_replaced and not self._drink_applied:
+            self._drink_potions = None
+        self._drink_replaced = False
+
+    def on_death(self) -> None:
+        super().on_death()
+        self._drink_potions, self._drink_applied = None, False
 
     def _end_fight(self) -> None:
         self._fighting = False
@@ -129,18 +163,49 @@ class M8AcceptanceMetrics(TimedRunHooks):
         if weapon and is_weapon(weapon) and weapon != STARTING_WEAPON:
             self.shop_weapon = True
 
+    def _note_supply_used(self, ev: dict) -> None:
+        """Our own ``SupplyUsed`` for a potion while Heal's drink is out: it was drunk.
+
+        The event reaches every character in sight of the block, so another
+        character's drink is not ours."""
+        if self._drink_potions is None or ev.get("supply_code") not in POTION_CODES:
+            return
+        if self._character_id is not None and ev.get("actor_id") == self._character_id:
+            self.heal_potion = True
+            self._drink_potions = None
+
+    def _note_drink_used_up(self, w: WorldModel) -> None:
+        """An applied drink counts only if the potion count shows one gone.
+
+        A ``Use`` that applied and left the potions as they were drank nothing
+        (A67 run 4: potions 2 -> 2)."""
+        if self._drink_potions is None or not self._drink_applied:
+            return
+        if potion_count(w) < self._drink_potions:
+            self.heal_potion = True
+        self._drink_potions, self._drink_applied = None, False
+
     def _note_heal(self, state: str, intents: list[dict], w: WorldModel) -> None:
+        """Heal's food ``Take``, and the potion drink whose result decides ``heal_potion``.
+
+        A sent queue replaces the one before it, so a drink still out is
+        forgotten (after this response, ``on_events``) unless this queue
+        carries a new one."""
+        drink = state == "Heal" and any(
+            is_self_use(intent) and code_in_hand(w, intents, i) in POTION_CODES
+            for i, intent in enumerate(intents)
+        )
+        if drink:
+            self._drink_potions, self._drink_applied = potion_count(w), False
+        self._drink_replaced = not drink
         if state != "Heal":
             return
-        for i, intent in enumerate(intents):
+        for intent in intents:
             if intent.get("verb") == "Take":
                 sid = intent.get("supply_id")
                 for e in w.entities:
                     if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
                         self.heal_food_take = True
-            if is_self_use(intent):
-                if code_in_hand(w, intents, i) in POTION_CODES:
-                    self.heal_potion = True
 
     def _note_fight(
         self,

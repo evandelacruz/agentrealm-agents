@@ -48,6 +48,8 @@ def world(**kw) -> WorldModel:
 HELD = object()  # the runner polling a held queue: before_tick sees intents=None
 WAIT = [{"verb": "Wait"}]
 SWING = [{"verb": "Use", "target": {"kind": "npc", "npc_id": 5}}] * 3
+DRINK = {"verb": "Use", "target": {"kind": "self"}}
+APPLIED = {"outcome": "applied"}
 WINNABLE = {**PARAM_DEFAULTS, "fight_margin": 0.5}  # a 10-health start beats one snotling
 
 
@@ -110,12 +112,12 @@ class MilestoneGateTest(unittest.TestCase):
         )
         self.assertTrue(m.heal_food_take)
         w.armed_code = "small_potion"
-        decide(
-            m,
-            w,
-            state="Heal",
-            intents=[{"verb": "Use", "target": {"kind": "self"}}],
-        )
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        decide(m, w, state="Heal", intents=[DRINK])
+        self.assertFalse(m.heal_potion, "sent is not drunk")
+        m.on_intent_result(DRINK, APPLIED)
+        w.held_supplies, w.armed_code = [], None
+        decide(m, w, state="Heal", intents=HELD)
         self.assertTrue(m.heal_potion)
 
     def test_heal_arm_and_use_potion_while_weapon_still_armed(self):
@@ -124,11 +126,131 @@ class MilestoneGateTest(unittest.TestCase):
         w = world()
         w.armed_code = "bronze_sword"
         w.held_supplies = [InventorySupply(4, "small_potion"), InventorySupply(6, "bronze_sword")]
-        use = {"verb": "Use", "target": {"kind": "self"}}
-        decide(m, w, state="Heal", intents=[{"verb": "Arm", "supply_id": 6}, use])
-        self.assertFalse(m.heal_potion)
-        decide(m, w, state="Heal", intents=[{"verb": "Arm", "supply_id": 4}, use])
+        sword_use = [{"verb": "Arm", "supply_id": 6}, DRINK]
+        decide(m, w, state="Heal", intents=sword_use)
+        m.on_intent_result(DRINK, APPLIED)
+        w.held_supplies = [InventorySupply(6, "bronze_sword")]  # lost some other way
+        decide(m, w, state="Heal", intents=HELD)
+        self.assertFalse(m.heal_potion, "a self-Use with the sword in hand drinks nothing")
+        w.held_supplies = [InventorySupply(4, "small_potion"), InventorySupply(6, "bronze_sword")]
+        decide(m, w, state="Heal", intents=[{"verb": "Arm", "supply_id": 4}, DRINK])
+        m.on_intent_result(DRINK, APPLIED)
+        w.held_supplies = [InventorySupply(6, "bronze_sword")]
+        decide(m, w, state="Heal", intents=HELD)
         self.assertTrue(m.heal_potion)
+
+
+class PotionDrinkTest(unittest.TestCase):
+    """A76: only a Use that uses a potion up counts as Heal drinking one."""
+
+    def drink_sent(self, potions=2) -> tuple[M8AcceptanceMetrics, WorldModel]:
+        m = metrics()
+        w = world(health=8, max_health=10)
+        w.armed_code = "small_potion"
+        w.held_supplies = [InventorySupply(10 + i, "small_potion") for i in range(potions)]
+        decide(m, w, state="Heal", intents=[DRINK])
+        return m, w
+
+    def test_applied_use_that_leaves_the_potions_is_not_a_drink(self):
+        # A67 run 4: a Use at 8/10 health, potions 2 -> 2.
+        m, w = self.drink_sent()
+        m.on_intent_result(DRINK, APPLIED)
+        decide(m, w, state="Heal", intents=HELD)
+        self.assertFalse(m.heal_potion)
+        self.assertIn("Heal never drank a carried potion", m.failures())
+        # Judged once: a later potion loss with no drink out is not that drink.
+        w.held_supplies = w.held_supplies[:1]
+        decide(m, w, state="Explore", intents=HELD)
+        self.assertFalse(m.heal_potion)
+
+    def test_applied_use_and_a_potion_gone_is_a_drink(self):
+        m, w = self.drink_sent()
+        m.on_intent_result(DRINK, APPLIED)
+        w.held_supplies = w.held_supplies[:1]
+        decide(m, w, state="Heal", intents=HELD)
+        self.assertTrue(m.heal_potion)
+        self.assertNotIn("Heal never drank a carried potion", m.failures())
+
+    def test_a_stowed_potion_counts_toward_the_drop(self):
+        m, w = self.drink_sent(potions=1)
+        w.chest_supplies = [InventorySupply(20, "small_potion")]
+        decide(m, w, state="Heal", intents=[DRINK])  # resent with one stowed: 2 before
+        m.on_intent_result(DRINK, APPLIED)
+        w.held_supplies = []
+        decide(m, w, state="Heal", intents=HELD)
+        self.assertTrue(m.heal_potion)
+
+    def test_potion_gone_without_an_applied_result_is_not_a_drink(self):
+        m, w = self.drink_sent()
+        w.held_supplies = w.held_supplies[:1]
+        decide(m, w, state="Heal", intents=HELD)
+        self.assertFalse(m.heal_potion)
+
+    def test_no_effect_or_rejected_use_is_not_a_drink(self):
+        for outcome in ("applied_no_effect", "rejected"):
+            with self.subTest(outcome=outcome):
+                m, w = self.drink_sent()
+                m.on_intent_result(DRINK, {"outcome": outcome})
+                w.held_supplies = w.held_supplies[:1]
+                decide(m, w, state="Heal", intents=HELD)
+                self.assertFalse(m.heal_potion)
+
+    def test_a_queue_that_replaces_the_drink_drops_it(self):
+        m, w = self.drink_sent()
+        decide(m, w, state="Explore", intents=WAIT)
+        m.on_events([])  # that response carried nothing of the drink
+        m.on_intent_result(DRINK, APPLIED)
+        w.held_supplies = w.held_supplies[:1]
+        decide(m, w, state="Explore", intents=HELD)
+        self.assertFalse(m.heal_potion)
+
+    def test_the_replacing_responses_own_drink_result_still_counts(self):
+        # Sent queues replace the drink, but that response may still carry
+        # its result (an empty stop keeps the same queue id), as the runner's
+        # _forget_replaced_drink allows.
+        m, w = self.drink_sent()
+        decide(m, w, state="Explore", intents=[])
+        m.on_intent_result(DRINK, APPLIED)
+        m.on_events([])
+        w.held_supplies = w.held_supplies[:1]
+        decide(m, w, state="Explore", intents=HELD)
+        self.assertTrue(m.heal_potion)
+
+    def test_the_replacing_responses_supply_used_still_counts(self):
+        m, w = self.drink_sent()
+        decide(m, w, state="Explore", intents=[])
+        m.on_events([{"kind": "SupplyUsed", "actor_id": 1, "supply_code": "small_potion"}])
+        self.assertTrue(m.heal_potion)
+
+    def test_a_death_drops_the_drink(self):
+        m, w = self.drink_sent()
+        m.on_intent_result(DRINK, APPLIED)
+        m.on_death()
+        w.held_supplies = []  # the potions fell with the chest
+        decide(m, w, state="Heal", intents=HELD)
+        self.assertFalse(m.heal_potion)
+
+    def test_our_supply_used_event_is_a_drink(self):
+        m, _ = self.drink_sent()
+        m.on_events([{"kind": "SupplyUsed", "actor_id": 1, "supply_code": "small_potion"}])
+        self.assertTrue(m.heal_potion)
+
+    def test_supply_used_by_another_character_or_for_another_supply_is_not(self):
+        m, _ = self.drink_sent()
+        m.on_events(
+            [
+                {"kind": "SupplyUsed", "actor_id": 2, "supply_code": "small_potion"},
+                {"kind": "SupplyUsed", "actor_id": 1, "supply_code": "teleport_scroll"},
+            ]
+        )
+        self.assertFalse(m.heal_potion)
+
+    def test_supply_used_with_no_drink_out_is_not_counted(self):
+        m = metrics()
+        w = world()
+        decide(m, w, state="Explore", intents=WAIT)
+        m.on_events([{"kind": "SupplyUsed", "actor_id": 1, "supply_code": "small_potion"}])
+        self.assertFalse(m.heal_potion)
 
     def test_weak_kill_on_npc_died_after_lone_weak_fight(self):
         m = metrics()
@@ -215,6 +337,20 @@ class RunnerHookTest(RunnerCase):
         decide(m, weak_fight_world(), state="Fight", intents=SWING)
         r.on_events([{"kind": "NPCDied", "npc_id": 5}])
         self.assertEqual(m.weak_hostile_kills, 1)
+
+    def test_a_drinks_result_reaches_the_gate_through_the_runner(self):
+        stop = threading.Event()
+        m = metrics()
+        r = self.make_runner(TownServer(10, stop), stop, m)
+        w = r.world
+        w.health, w.max_health, w.armed_code = 8, 10, "small_potion"
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        decide(m, w, state="Heal", intents=[DRINK])
+        r.mem.pending, r.mem.pending_queue = DRINK, "q1"
+        r.apply_intent_results([{"queue_id": "q1", "index": 0, "tick": 101, "outcome": "applied"}])
+        w.held_supplies = []
+        decide(m, w, state="Heal", intents=HELD)
+        self.assertTrue(m.heal_potion)
 
 
 class SmokeScriptTest(unittest.TestCase):

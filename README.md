@@ -134,7 +134,7 @@ Pass criteria (PLAN.md A25, checked in [`m8_acceptance.py`](python/agentrealm_ag
 - deaths are counted and reported and play goes on after the respawn; with `--stop-on-death`, no death (the first one fails and ends the run), and alive at the end of the run;
 - no fight started below the health floor (`would_lose` at the first attack after entering **Fight**);
 - no API error;
-- on a run of at least 95% of an hour: gems earned at least once; armor worn; a shop weapon armed; potion reserve reached; **Heal** took ground food and drank a carried potion; at least one lone weak hostile kill (`NPCDied` for the NPC **Fight** attacked while it was the lone hostile, of a measured type hitting at most 2).
+- on a run of at least 95% of an hour: gems earned at least once; armor worn; a shop weapon armed; potion reserve reached; **Heal** took ground food and drank a carried potion (a self-`Use` that applied and used one up, A76); at least one lone weak hostile kill (`NPCDied` for the NPC **Fight** attacked while it was the lone hostile, of a measured type hitting at most 2).
 
 Free play (A67): run the same script on a copy of the M8 profile whose directives file holds `goals = []`, so nothing is pinned and the planner decides everything (`--profile path/to/copy.toml`; the directives file sits beside it, named after it). Below 95% of an hour only the short-run gates are checked, so judge gear and gems from the log ([`docs/observations/A67_free_play_runs.md`](docs/observations/A67_free_play_runs.md)).
 

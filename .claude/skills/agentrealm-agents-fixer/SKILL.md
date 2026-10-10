@@ -89,15 +89,23 @@ Five things these tools do that will mislead you:
 - **`issue_read` does not resolve pull request numbers.** Labels come from `list_pull_requests`.
 - **`mergeable_state` is lazy.** It reads `"unknown"` on a first fetch, so read again. `"dirty"` is a conflict. `"unstable"` is a pending or failing check, **not** a conflict. `"behind"` just means the base moved.
 - **Still-running, `skipped`, and `neutral` checks are not failure.**
-- **Reviewers post check runs of their own,** the Claude Review workflow's `review` job and `Cursor Automation: Saims Ref Agent Auto Code Review`. They are not CI (see **Red CI** below), and running or red, they never keep a fixer off a pull request. Only the supervisor waits on a running one, before a merge.
+- **Reviewers post check runs of their own,** the Claude Review workflow's `review` job and `Cursor Automation: Saims Ref Agent Auto Code Review`. They are not CI (see **Red CI** below), and running or red, they never keep a fixer off a pull request. Only the merge waits on a running one (**Merge rule** below).
 
-**The review verdict.** There is no `reviewDecision` field; read the reviews. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. For each reviewer, take their latest `APPROVED` or `CHANGES_REQUESTED` review on the current head. `COMMENTED` reviews are threads, not a verdict; that includes Claude Code reviews posted as `evandelacruz`. Reviews on an older head do not count.
+**The review verdict.** There is no `reviewDecision` field; read the reviews. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. For each reviewer, take their latest `APPROVED` or `CHANGES_REQUESTED` review on the current head. `COMMENTED` reviews are threads, not a verdict, whatever their body says; that includes Claude Code reviews posted as `evandelacruz`. Reviews on an older head do not count.
 
-- **Changes requested**: any reviewer rejected the current head.
+- **Changes requested**: any reviewer's latest review on the current head rejected it.
 - **Approved**: at least one reviewer approved the current head, and none rejected it.
 - Otherwise it is waiting on a review, not blocked.
 
-Act on rejecting reviews and their threads, whoever posted them. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. No review check has to complete.
+**Merge rule.** The review side of a merge holds when all three are true on the current head:
+
+1. at least one reviewer approved it;
+2. no reviewer's latest review on it requested changes;
+3. no review is in flight: no reviewer check run (the Claude Review workflow's `review` job, `Cursor Automation: Saims Ref Agent Auto Code Review`) is queued or in progress on it.
+
+A reviewer check that finished, in any conclusion, holds nothing. This is the one statement of the rule; every other skill links here. The supervisor applies it, together with its own CI, conflict, lock and workflow-file checks ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) step 1).
+
+Act on rejecting reviews and their threads, whoever posted them. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. A fixer waits on no review check; only the merge does.
 
 A rejection clears only when a push gets a fresh review, or when Evan dismisses it. The Claude Review bot runs only on a push, so a reply alone changes nothing. If you push nothing because every blocking finding gets a reply instead, release the lock and tell Evan that the rejection is disputed.
 

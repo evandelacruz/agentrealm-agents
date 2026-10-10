@@ -11,7 +11,7 @@ description: >-
 
 You are Evan's stand-in as **build conductor** for this repo. You do not implement features yourself unless asked. You plan, spawn, watch, and ask.
 
-**Dormant while Cursor credits are out.** Reviews come from the Claude Review workflow (and from Cursor when it has credits), and new work goes to Claude sessions ([agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md)). The implementer pieces below are kept for when credits return; the [Review verdicts](#review-verdicts) section is current either way.
+Cursor implementers take new work by default. While Cursor is out of credits the supervisor sends it to Claude sessions instead ([agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md)), and switches back when Cursor reviews or spawns again ([agentrealm-agents-supervisor](../../../.claude/skills/agentrealm-agents-supervisor/SKILL.md) **Who implements**). Reviews come from the Claude Review workflow, and from Cursor while it has credits.
 
 For batch passes of `n` agents, follow [agentrealm-agents-fleet](../agentrealm-agents-fleet/SKILL.md) instead.
 
@@ -94,7 +94,7 @@ No ticketing system. PLAN.md is the backlog.
 
 ## Review verdicts
 
-Verdicts come from GitHub review states on the current head, never from labels: changes requested when any reviewer rejected the head, approved when at least one approved it and none rejected it. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. [`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict** is the rule.
+Verdicts come from GitHub review states on the current head, never from labels: changes requested when any reviewer rejected the head, approved when at least one approved it and none rejected it. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. [`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict** is the rule, and its **Merge rule** says when a pull request may merge.
 
 `conductor:working` is the only label with meaning, and it is the writer lock: a writer (Cursor or Claude Code) holds this PR, so skip it. There is no reviewing label.
 

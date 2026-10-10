@@ -10,7 +10,7 @@ description: >-
 
 Batch counterpart to [agentrealm-agents-conductor](../agentrealm-agents-conductor/SKILL.md). Plans and spawns **`n`** agents. Needs `CURSOR_API_KEY`.
 
-**Dormant while Cursor credits are out.** New work goes to [agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md) and fixes to [agentrealm-agents-fixer-fleet](../../../.claude/skills/agentrealm-agents-fixer-fleet/SKILL.md). Review verdicts follow [agentrealm-agents-conductor](../agentrealm-agents-conductor/SKILL.md) **Review verdicts**.
+This is the default implementer fleet. While Cursor is out of credits the supervisor sends new work to [agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md) instead ([agentrealm-agents-supervisor](../../../.claude/skills/agentrealm-agents-supervisor/SKILL.md) **Who implements**). Review verdicts follow [agentrealm-agents-conductor](../agentrealm-agents-conductor/SKILL.md) **Review verdicts**.
 
 Repo: `evandelacruz/agentrealm-agents`.
 

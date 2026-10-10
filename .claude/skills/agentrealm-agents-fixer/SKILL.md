@@ -89,7 +89,7 @@ Five things these tools do that will mislead you:
 - **`issue_read` does not resolve pull request numbers.** Labels come from `list_pull_requests`.
 - **`mergeable_state` is lazy.** It reads `"unknown"` on a first fetch, so read again. `"dirty"` is a conflict. `"unstable"` is a pending or failing check, **not** a conflict. `"behind"` just means the base moved.
 - **Still-running, `skipped`, and `neutral` checks are not failure.**
-- **Reviewers post check runs of their own,** the Claude Review workflow's `review` job and `Cursor Automation: Saims Ref Agent Auto Code Review`. They are not CI (see **Red CI** below), and running or red, they never hold a pull request back.
+- **Reviewers post check runs of their own,** the Claude Review workflow's `review` job and `Cursor Automation: Saims Ref Agent Auto Code Review`. They are not CI (see **Red CI** below), and running or red, they never keep a fixer off a pull request. Only the supervisor waits on a running one, before a merge.
 
 **The review verdict.** There is no `reviewDecision` field; read the reviews. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. For each reviewer, take their latest `APPROVED` or `CHANGES_REQUESTED` review on the current head. `COMMENTED` reviews are threads, not a verdict; that includes Claude Code reviews posted as `evandelacruz`. Reviews on an older head do not count.
 

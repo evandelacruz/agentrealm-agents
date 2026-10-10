@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 from .item_table import InventorySupply, merge_heal
@@ -39,9 +40,6 @@ def supply_matches(want: str, code: str) -> bool:
 REGEN_MEASURE_TICKS = 200
 # A longer gap between Heal windows than this restarts the regen sample.
 REGEN_SAMPLE_GAP_TICKS = 50
-# Times the server may refuse a Take or Use of the same supply before Heal gives up on it.
-HEAL_MAX_TRIES = 3
-
 SURVIVAL_KEY = "survival"
 REGEN_KEY = "safe_zone_regen"
 
@@ -52,28 +50,123 @@ def hurt(w: WorldModel) -> bool:
     return w.health < w.max_health
 
 
-def tries_left(m: Memory, kind: str, supply_id: int) -> bool:
-    return m.heal_tries.get((kind, supply_id), 0) < HEAL_MAX_TRIES
+# What Heal does after the server refuses a food ``Take`` or a drink, by the
+# rejection's code (API rules, Tick Rejection Reasons). There is no count of
+# tries: each refusal changes what Heal sends next, or holds that supply until
+# the situation it was refused in changes, so the same refusal is never sent
+# twice into the same situation.
+#
+#   arm     a drink's ``Use`` found nothing armed: the next drink sends ``Arm`` first
+#   forget  the supply is gone, or we do not carry it: never again
+#   walk    a ``Take`` out of reach: walk onto the food, then ``Take``
+#   wait    we, or the world, cannot act now: try again on a later tick
+#   hold    anything else, an unknown code included: not again until the
+#           situation (``heal_situation``) changes
+REARM_CODES = frozenset({"nothing_armed", "not_held"})
+GONE_CODES = frozenset({"supply_gone"})
+REACH_CODES = frozenset({"target_not_nearby", "target_out_of_range"})
+# Codes whose handling is "hold" by what they mean (the situation they need
+# changed is in ``heal_situation``), so the trace does not call them unknown.
+HOLD_CODES = frozenset({"would_strand", "carry_capacity_full", "not_allowed_in_safe_zone"})
 
 
-def note_try(m: Memory, kind: str, supply_id: int) -> None:
-    """Count one refused ``Take`` or ``Use`` of ``supply_id`` (``kind`` is "take" or "use")."""
-    key = (kind, supply_id)
-    m.heal_tries[key] = m.heal_tries.get(key, 0) + 1
+@dataclass(frozen=True)
+class HealRefusal:
+    """The last refusal of one supply's ``Take`` or drink (A80)."""
+
+    code: str
+    action: str  # "arm" | "forget" | "walk" | "wait" | "hold"
+    tick: int
+    situation: tuple  # ``heal_situation`` when it was refused
+
+
+def heal_situation(w: WorldModel, target: Pos | None = None) -> tuple:
+    """What a ``Take`` or drink was decided from: where we stand, what is armed
+    and held, health, and the food's cell for a ``Take``. A held supply is
+    tried again only once one of these differs (a step, a new item, health
+    up or down, the food moved)."""
+    held = tuple(sorted(h.id for h in w.held_supplies))
+    return (w.map_id, w.pos, w.armed_code, held, w.health, w.max_health, target)
+
+
+def refusal_action(rejection: dict, *, verb: str, armed_first: bool, on_target: bool) -> str:
+    """What to do about one refusal (see ``REARM_CODES`` and the table above).
+
+    ``verb`` is the refused intent's. ``armed_first`` says the drink already
+    sent its ``Arm``, so arming again is not something new to try, and
+    ``on_target`` that a ``Take`` was sent standing on the food, so walking
+    there is not either: both then hold.
+    """
+    code = rejection.get("code") or ""
+    if code in GONE_CODES or (code == "not_held" and verb in ("Arm", "Take")):
+        return "forget"
+    if code in REARM_CODES and verb == "Use":
+        return "hold" if armed_first else "arm"
+    if code in REACH_CODES and verb == "Take":
+        return "hold" if on_target else "walk"
+    if rejection.get("category") == "state" or (rejection.get("retryability") == "transient" and code not in HOLD_CODES):
+        return "wait"
+    if rejection.get("retryability") == "permanent":
+        return "forget"
+    return "hold"
+
+
+def known_refusal(rejection: dict) -> bool:
+    """A code this module handles by name; any other is traced as unknown."""
+    code = rejection.get("code") or ""
+    return code in REARM_CODES | GONE_CODES | REACH_CODES | HOLD_CODES or rejection.get("category") == "state"
+
+
+def note_refusal(m: Memory, kind: str, supply_id: int, refusal: HealRefusal) -> None:
+    """File a refusal of ``supply_id`` (``kind`` is "take" or "use"). Only the
+    runner calls it, for a result the server sent, never a probe (A77)."""
+    m.heal_refusals[(kind, supply_id)] = refusal
+
+
+def clear_refusal(m: Memory, kind: str, supply_id: int) -> None:
+    """The ``Take`` or drink went through: what was refused before is over."""
+    m.heal_refusals.pop((kind, supply_id), None)
+
+
+def can_try(m: Memory, w: WorldModel, kind: str, supply_id: int, target: Pos | None = None) -> bool:
+    """Whether Heal may send a ``Take`` (``kind`` "take", ``target`` the food's
+    cell) or a drink ("use") of ``supply_id`` now, by its last refusal."""
+    r = m.heal_refusals.get((kind, supply_id))
+    if r is None or r.action in ("arm", "walk"):
+        return True
+    if r.action == "forget":
+        return False
+    if r.action == "wait":
+        return w.tick > r.tick and w.alive
+    return heal_situation(w, target) != r.situation
+
+
+def must_arm(m: Memory, supply_id: int) -> bool:
+    """A drink of ``supply_id`` found nothing armed: send its ``Arm`` whatever
+    ``armed_code`` says (it may trail the server)."""
+    r = m.heal_refusals.get(("use", supply_id))
+    return r is not None and r.action == "arm"
+
+
+def must_stand_on(m: Memory, food: Entity) -> bool:
+    """A ``Take`` of ``food`` was out of reach from where it was sent: walk onto
+    its cell before taking it. Food that moved since is aimed at afresh."""
+    r = m.heal_refusals.get(("take", food.id))
+    return r is not None and r.action == "walk" and r.situation[-1] == food.pos
 
 
 def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
     here = w.pos
     if here is None:
         return []
-    out = [e for e in w.entities if e.kind == "supply" and e.code in FOOD_CODES and tries_left(m, "take", e.id)]
+    out = [e for e in w.entities if e.kind == "supply" and e.code in FOOD_CODES and can_try(m, w, "take", e.id, e.pos)]
     out.sort(key=lambda e: (chebyshev(e.pos, here), e.id))
     return out
 
 
 def carried_heal(w: WorldModel, m: Memory) -> InventorySupply | None:
     """Carried food first, then a potion (PLAYABLE_AGENT_PLAN.md Heal row)."""
-    usable = [h for h in w.held_supplies if tries_left(m, "use", h.id)]
+    usable = [h for h in w.held_supplies if can_try(m, w, "use", h.id)]
     for codes in (FOOD_CODES, POTION_CODES):
         for h in usable:
             if h.code in codes:

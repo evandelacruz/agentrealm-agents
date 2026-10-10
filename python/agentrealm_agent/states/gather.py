@@ -410,9 +410,11 @@ def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reas
     tool = pick_supply_for_capability(w, CUT, knowledge)
     if tool is None or tool.id < 0:
         return StateOutcome([use_block(p)], reason, state=state)
+    queue = arm_and_use(w, m, tool.id, use_block(p))
+    if not queue:  # the cut's cooldown leaves no room for the Arm and the Use together
+        return StateOutcome(None, f"wait out the cooldown to arm {tool.code}, {reason}", state=state, wait=True, progress=False)
     if m.gather_rearm is None and w.armed_code and w.armed_code not in FOOD_CODES | POTION_CODES:
         m.gather_rearm = (w.armed_code, tool.code)  # food or a potion is Heal's to put back
-    queue = arm_and_use(w, m, tool.id, use_block(p))
     return StateOutcome(queue, f"arm {tool.code}, {reason}", state=state, paced=True)
 
 

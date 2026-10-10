@@ -7,14 +7,15 @@ from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.executor import DEFAULT_WEAPON_COOLDOWN_TICKS
 from agentrealm_agent.healing import (
-    HEAL_MAX_TRIES,
     REGEN_KEY,
     REGEN_MEASURE_TICKS,
     SURVIVAL_KEY,
     absorb_heal_pending,
     hurt,
     note_heal_pending,
-    note_try,
+    HealRefusal,
+    heal_situation,
+    note_refusal,
     regen_known,
     save_regen_yes,
 )
@@ -84,16 +85,17 @@ class HealStateTest(unittest.TestCase):
         out = dispatch(w, ctx())
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 2, "y": 2}])
 
-    def test_rejected_take_is_not_retried_forever(self):
-        # The runner counts each refused Take (``Runner._note_heal_refused``).
+    def test_a_held_take_waits_for_the_situation_to_change(self):
+        # The runner files each refusal (``Runner._note_heal_refused``).
         w = grid(at=(1, 1))
         w.entities = [Entity("supply", 8, (2, 1), "apple")]
         m = Memory()
-        for _ in range(HEAL_MAX_TRIES):
-            self.assertEqual(verbs(dispatch(w, ctx(m))), ["Take"])
-            note_try(m, "take", 8)
-            w.tick += 7
-        self.assertNotIn("Take", verbs(dispatch(w, ctx(m))))
+        self.assertEqual(verbs(dispatch(w, ctx(m))), ["Take"])
+        note_refusal(m, "take", 8, HealRefusal("odd_code", "hold", w.tick, heal_situation(w, (2, 1))))
+        w.tick += 7
+        self.assertNotIn("Take", verbs(dispatch(w, ctx(m))), "nothing changed: not sent again")
+        w.health = 4
+        self.assertEqual(verbs(dispatch(w, ctx(m))), ["Take"], "health changed: try again")
 
     def test_carried_food_before_potion(self):
         w = grid()
@@ -102,14 +104,13 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(out.intents[0], {"verb": "Arm", "supply_id": 5})
         self.assertEqual(verbs(out), ["Arm", "Use"])
 
-    def test_drinks_carried_potion_and_caps_rejected_use(self):
+    def test_drinks_carried_potion_and_holds_a_refused_one(self):
         w = grid()
         w.held_supplies = [InventorySupply(4, "small_potion")]
         m = Memory()
-        for _ in range(HEAL_MAX_TRIES):
-            self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
-            note_try(m, "use", 4)  # the runner counts each refused drink
-            w.tick += 7
+        self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
+        note_refusal(m, "use", 4, HealRefusal("odd_code", "hold", w.tick, heal_situation(w)))
+        w.tick += 7
         self.assertNotIn("Use", verbs(dispatch(w, ctx(m))))
 
     def test_rearms_weapon_after_drinking_potion(self):

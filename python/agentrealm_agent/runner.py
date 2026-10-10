@@ -46,7 +46,19 @@ from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
 from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
-from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, code_in_hand, note_try
+from .healing import (
+    FOOD_CODES,
+    POTION_CODES,
+    HealRefusal,
+    absorb_heal_pending,
+    clear_refusal,
+    code_in_hand,
+    heal_situation,
+    known_refusal,
+    note_heal_pending,
+    note_refusal,
+    refusal_action,
+)
 from .shop import note_shop_result
 from .states.explore import plan_sets
 from .travel.resolve import travel_given_up
@@ -1082,8 +1094,9 @@ class Runner:
                     m.need_position, m.path = True, []
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True
-            if is_self_use(intent):
-                m.heal_drink = None  # the drink went through: nothing to count
+            if is_self_use(intent) and m.heal_drink is not None:
+                clear_refusal(m, "use", m.heal_drink)  # the drink went through
+                m.heal_drink = None
             if intent and intent.get("verb") == "Use":
                 m.last_use_tick = int(result.get("tick", w.tick))
                 block = use_target_block(intent, w.entities)
@@ -1112,6 +1125,7 @@ class Runner:
             if intent and intent.get("verb") == "Take":
                 code = supply_code_for_take(intent, w.entities)
                 self._applied_take_codes.append(code)
+                clear_refusal(m, "take", intent.get("supply_id"))
                 if take_raises_gems(code):
                     self.gem_cuts.note_take()
                 learn_chest_upgrade(w, code)
@@ -1132,7 +1146,7 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
-        self._note_heal_refused(index)
+        self._note_heal_refused(index, result)
         target = use_target_block(intent, w.entities) if intent and intent.get("verb") == "Use" else None
         self._note_break_use(intent, result, target, index)
         if self.acceptance is not None:
@@ -1185,32 +1199,51 @@ class Runner:
         if intents is not None and not any(is_self_use(i) for i in intents):
             self.mem.heal_drink = None
 
-    def _note_heal_refused(self, index: int) -> None:
-        """Count a try against the food or potion a rejected intent was for (A24).
+    def _note_heal_refused(self, index: int, result: dict) -> None:
+        """File why the server refused a food ``Take`` or a drink, and trace it (A80).
 
-        Only a sent intent the server rejected counts, never one only decided
-        (free-play run 5: probes whose drink was never sent wrote both potions
-        off). A drink counts once, against the supply it was decided for
-        (``Memory.heal_drink``), whether its ``Arm`` or its ``Use`` self was
+        Only a sent intent the server rejected is filed, never one only
+        decided (free-play run 5: probes whose drink was never sent wrote both
+        potions off). A drink is filed once, against the supply it was decided
+        for (``Memory.heal_drink``), whether its ``Arm`` or its ``Use`` self was
         rejected; a rejected food ``Take``, from any state, against that food.
+        What Heal does next follows from the code (``healing.refusal_action``),
+        never from a count; an unknown code is traced as one.
         """
         w, m = self.world, self.mem
         intent = self._intent_at(index)
         if not intent:
             return
-        if intent.get("verb") == "Take":
+        rejection = result.get("rejection") or {}
+        verb = intent.get("verb")
+        if verb == "Take":
             sid = intent.get("supply_id")
-            if any(e.kind == "supply" and e.id == sid and e.code in FOOD_CODES for e in w.entities):
-                note_try(m, "take", sid)
-            return
-        if intent.get("verb") == "Arm" and intent.get("supply_id") == m.heal_drink:
-            after = next((i for i in self._held_intents()[index + 1 :] if i.get("verb") != "Wait"), None)
-            drink = is_self_use(after)
+            food = next((e for e in w.entities if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES), None)
+            if food is None:
+                return
+            kind, target, armed_first = "take", food.pos, False
         else:
-            drink = is_self_use(intent)
-        if drink and m.heal_drink is not None:
-            note_try(m, "use", m.heal_drink)
+            queue = self._held_intents()
+            if verb == "Arm" and intent.get("supply_id") == m.heal_drink:
+                after = next((i for i in queue[index + 1 :] if i.get("verb") != "Wait"), None)
+                drink = is_self_use(after)
+            else:
+                drink = is_self_use(intent)
+            if not drink or m.heal_drink is None:
+                return
+            sid, target = m.heal_drink, None
+            kind = "use"
+            armed_first = any(i.get("verb") == "Arm" and i.get("supply_id") == sid for i in queue[:index])
             m.heal_drink = None
+        action = refusal_action(rejection, verb=verb, armed_first=armed_first, on_target=target is not None and w.pos == target)
+        note_refusal(m, kind, sid, HealRefusal(rejection.get("code") or "?", action, int(result.get("tick", w.tick)), heal_situation(w, target)))
+        known = known_refusal(rejection)
+        label = "" if known else "unknown refusal "
+        self.log(
+            "heal_refusal",
+            f"{verb} of supply {sid} refused {label}{rejection.get('code') or '?'}: {action}",
+            {"verb": verb, "supply_id": sid, "rejection": rejection, "action": action, "known": known},
+        )
 
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
         """Remember an applied Read/Say in the knowledge base; count a refused one.

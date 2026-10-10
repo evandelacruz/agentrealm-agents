@@ -119,3 +119,88 @@ Intents: 373 `Step`, 1,055 `Wait`, **289 `Arm`**, 21 `Say`, 6 `Use`, 0 `Take`. C
    Suspects: `strategist.py:509–525` (no time-at-cell or top-op progress line, no entrances) and `strategist.py:656` (shows the 0, 0 the planner never sent). Omitting x, y for a symbolic `to` when they are 0, 0, and adding something like `stalled_at_cell_s` with the top op's last decision, would let the planner see this stall.
 
 **Minor:** call 1 ran before the first `self` and inventory reads (`gems=None`, `health=None/None`, `armed=None`), so the run's first plan was made blind. `nearest_safe` pointed at (370, 370), but every zone read near it came back `safe=False`. Greet said hello to 6 snotlings and gristlewicks, monster-looking types that had not yet hit anyone this run, so they counted as not hostile.
+
+### Run 3: a potion stuck in the weapon slot, so 33 equip ops and every cut did nothing
+
+- **Code:** `main` at `bd5aeff`, after #135 (one hostility test), #137 (Heal walk, Take resend, gather/retreat pacing), #139 (run 1 fixes: Break arm flip-flop, shop tiles, planner stall view and entrances) and #140 (run 2 fixes: hub give-ups lapse, reachable safe tile, gather target region).
+- **Verdict:** exit 0, `PASS` after **601.5 s**, on the short-run gates only (as in run 1). The park timed out after 60.3 s at (369, 369) with `safe tile unreachable` (defect 3). The character started with 10/10 health, 7 lives and **17 gems**. It had the bronze_sword armed and the pocket knife held, and stood on the overworld 34 blocks south-west of the town cell.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; gems earned **yes** (from piles only); armor **no**; shop weapon **yes** (the sword it started with); potion reserve **no**; Heal took food on the ground **no**, Heal drank a potion **no**.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–66 s | `travel` town, `explore_area` town r20, `gather_gems` | Fled chugbugs at the start, then Heal walked to safe ground and ate an apple. Reached the town cell at 66 s. **No give-up on town or the shop all run.** |
+| 66–123 s | `read` (399, 406), `explore_area` town, `buy` small_potion, `gather_gems`, `buy` bronze_mail | Greet worked through the town NPCs. The planner tried to read the statues for the reversed clue, and the reads looped. |
+| 123–184 s | `travel` town, `buy` small_potion, `gather_gems`, `buy` bronze_mail, `equip` | Explore went 60 cells south, where it was hit for 3. Retreat brought it back to safe ground. |
+| 184–195 s | `buy` small_potion | Shop walked to (421, 399) and took the potion with `Take` (**gems 17 → 7**). Heal then sent `Arm` small_potion twice and never sent the `Use`. From 191 s the potion is armed (defect 1). |
+| 195–600 s | `equip` bronze_sword (33 stacks), `gather_gems`, `buy` bronze_mail | Every `equip` finished "nothing left to equip" (145 decisions), and the potion stayed armed. Gather cut grass and bushes with the potion, and no cut had an effect (defect 2). Gems came back to 17 from gem piles only. |
+
+Planner calls: **56** (50 `applied`, 5 `unchanged`, 1 kept). 55 plans accepted, 0 errors. From call 19 on, nearly every reply reported that "the potion is still armed" and re-sent `equip`, by code or bare, sometimes both.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **17** | **17** (−10 for the potion, +10 from piles) |
+| Armed | bronze_sword | **small_potion**, from 191 s |
+| Worn | `{}` | `{}` |
+| Held | `{"pocket_knife": 1}` | `{"pocket_knife": 1, "bronze_sword": 1}` |
+| Potions | 0 | 1, armed and never drunk |
+
+Bought: one small_potion, by the planner's `buy` op. Equipped: nothing. The potion was armed by Heal, not by an `equip` op. Armor: none, since bronze_mail costs 20.
+
+#### Gems earned
+
+**10**, all from gem piles: 5 `Take` on gems, plus pickups on walks. Gather sent 39 cuts (grass and bush). The last `gather_run` the planner saw was `{"cuts": 0, "gems_gained": 6, "no_effect_cuts": 35}`, and its `gather_status` alternated between "cuts have no effect here" and "walking to a gem pile". The planner never named a `gather_gems` region.
+
+#### Deaths
+
+**0** (lives 7 → 7). Hits: 1 from chugbugs at the start, and 3 in the south field at 128 s. Health was 10/10 at the end.
+
+#### Greetings and clues
+
+Greet said hello to 17 NPCs, with the same lines as run 1: statue_carver, elder, tongues_lady (reversed), pond_fisher, five rumor_tellers and the farmer. The planner decoded the reversed line again and tied it to the carver's statue. It sent `read` ops at the statues, which looped, and dropped them at 123 s.
+
+#### Level entrances
+
+**8 known, all now in the planner's State** (#139), each with a distance: the nearest is (300, 316), 67 cells north-west. **None visited or entered**, and no op named an `entrance`. The run never got past stage 2's gear step.
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 116,316, output 18,705, cache write 100,503, cache read 5,527,665 |
+
+Call 1 wrote the cache (~100k), as in A63 runs 1–3.
+
+#### Decision mix
+
+Intents outside held queues: 39 `Use` (cuts), 17 greetings, 6 `Take` (5 gems, 1 potion), 3 `Read`, **3 `Arm`** (two potion, one sword re-arm), plus queued walks. Call mix: 707 `tick`, 236 `entities`, 217 `zone`, 112 `strategist`, 60 `self`, 41 `terrain`.
+
+#### Run 2 fixes, checked
+
+| Run 2 defect | Run 3 |
+|---|---|
+| A town give-up lasts the whole run (#140 §1) | **Not exercised.** Travel gave up nothing. It reached the town cell at 66 s, and Shop reached the potion at 190 s. |
+| A safe tile that cannot be reached (#140 §2) | **Not fixed for Park.** At (369, 369), 2 cells from the chosen safe tile (371, 371), Park sent nothing for 60 s with `safe tile unreachable`. Retreat at 350 s did reach its safe tile. |
+| Gather steering (#140 §3) | **Inconclusive.** No `gather_gems` x, y was named. Gather moved through 9 regions, but every cut had no effect because of the armed potion (defect 2), so its yield data is noise. |
+
+#### Top 3 defects
+
+1. **Heal's drink sends the `Arm` and never the `Use`, and the stale re-arm blocks Equip for the rest of the run.** At 191 s, on safe ground at 7/10 health, Heal returned `[Arm potion, Use self]` (`states/heal.py:270`). The brain keeps only the first intent (`brain.py:144`), so only the `Arm` went out, twice. `m.heal_rearm` stayed `bronze_sword`, and Equip treats the armed slot as Heal's while it is set (`states/equip.py:50`). So `best_equip_upgrade` sees no upgrade, and every `equip` op finishes at once (`states/equip.py:31–32`): 33 planner stacks, 145 "nothing left to equip". The potion was never drunk.
+
+   ```
+   190 s  Take(1844) (buy small_potion)       gems 17 → 7
+   191 s  Arm (arm and use small_potion)
+   193 s  Arm (re-arm bronze_sword)
+   194 s  Arm (arm and use small_potion)      armed = small_potion until the end
+   call 23  "The previous equip finished with nothing left to equip, yet small_potion is still armed."
+   call 56  "If it finishes with the potion still armed, the equip op itself is broken."
+   ```
+
+2. **Gather cuts with whatever is armed, then trusts the result.** `states/gather.py:353` sends `Use` on grass or a bush without checking that the armed item cuts. With the potion armed, all 39 cuts did nothing. Each no-effect cut feeds `GemYieldTracker`, and `gem_cuts.uncuttable` (`states/gather.py:225`) then writes off those cells and regions. That poisons #140's region steering, and the planner's `gather_status` says "cuts have no effect here" for ground that cuts fine with a blade. Gather should arm a cutter, or report "no cutter armed", before cutting.
+
+3. **Park and Retreat keep picking a safe tile they cannot walk to.** `pathing.reachable_safe_goal` counts a search cut short by its budget as a way (`pathing.py:407`), so (371, 371) passed. Retreat then found no step to it, but marks a tile unreachable only when `no_way` proves it (`states/retreat.py:131`). So the same tile was picked on every decision, and Park stood 2 cells from it for 60 s. A failed `cost_path` to a tile `reachable_safe_goal` just accepted should mark it in `safe_unreachable` too, or fall through to town.
+
+**Minor:** the planner sent `read` at a town statue cell three times, and each read looped until it was dropped. Explore took the character 60 cells south of town into a hostile field while it had no potion.

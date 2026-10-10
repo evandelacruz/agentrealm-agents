@@ -14,4 +14,4 @@
 opus: opus-review-agent[bot]
 sonnet: sonnet-review-agent[bot]
 cursor: cursor[bot]
-second: cursor
+second: sonnet

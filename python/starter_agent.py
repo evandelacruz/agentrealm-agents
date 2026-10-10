@@ -51,8 +51,8 @@ from agentrealm_agent.character_select import (
 from agentrealm_agent.client import ApiError, Client
 from agentrealm_agent.executor import wait
 from agentrealm_agent.executor.movement import ticks_per_step
-from agentrealm_agent.pathing import flee_step, hostiles_in_range
-from agentrealm_agent.world import Pos, WorldModel, chebyshev
+from agentrealm_agent.pathing import flee_step
+from agentrealm_agent.world import Entity, Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60
 WINDOW_MARGIN = 0.05
@@ -86,6 +86,17 @@ def move_ready(world: WorldModel, mem: StarterMemory) -> bool:
         return True
     wait_ticks = ticks_per_step(tick_rate_hz=mem.hz, movement_speed_milli=world.movement_speed)
     return mem.server_tick - mem.last_move_tick >= wait_ticks
+
+
+def hostiles_in_range(world: WorldModel, policy: config.Policy) -> list[Entity]:
+    """Entities of a ``policy.hostile`` kind within ``policy.hostile_range``.
+
+    The starter keeps no record of which NPC types attacked it, so it flees
+    every NPC of a hostile kind; the full agent's ``survival.is_hostile`` does not.
+    """
+    if world.pos is None:
+        return []
+    return [e for e in world.entities if e.kind in policy.hostile and chebyshev(e.pos, world.pos) <= policy.hostile_range]
 
 
 def blocked_tiles(world: WorldModel, policy: config.Policy) -> set[Pos]:

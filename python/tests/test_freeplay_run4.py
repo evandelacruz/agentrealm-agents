@@ -287,6 +287,33 @@ class GatherRegionKeptTest(unittest.TestCase):
                 self.assertEqual(r.plan.current()["x"], 100)
 
 
+class GatherArrivalClockTest(unittest.TestCase):
+    """Gather writes ``Memory.gather_in_region`` itself: the clock starts on arrival, not on the walk."""
+
+    def test_the_clock_starts_on_arrival_and_again_after_a_spell_away(self):
+        from agentrealm_agent.gem_yield import GemYieldTracker, STALL_SECONDS
+        from agentrealm_agent.states import gather_outcome
+
+        w, m = open_field(at=(30, 5), size=48), Memory()
+        w.view.tiles[(5, 5)] = "grass"
+        op = {"op": "gather_gems", "count": 5, "x": 5, "y": 5}
+        policy, cuts = Policy(kind="scripted", goals=[], on_hostile="ignore"), GemYieldTracker()
+
+        def decide(at, tick):
+            w.pos, w.tick = at, tick
+            gather_outcome(w, m, policy, op=op, gem_cuts=cuts, tick_hz=10)
+
+        decide((30, 5), 100)
+        self.assertIsNone(m.gather_in_region, "walking toward the region starts no clock")
+        decide((10, 5), 400)
+        self.assertEqual(m.gather_in_region, ((0, 0), 400, 400), "arrival starts it")
+        decide((9, 5), 450)
+        self.assertEqual(m.gather_in_region, ((0, 0), 400, 450), "staying keeps it")
+        decide((30, 5), 500)
+        decide((10, 5), 450 + STALL_SECONDS * 10)
+        self.assertEqual(m.gather_in_region[1], 450 + STALL_SECONDS * 10, "back after 30 s away: it starts over")
+
+
 class RetreatWindowPausedTest(unittest.TestCase):
     """The safe walk's stuck window does not count time a losing Retreat spent drinking or fighting back (A9)."""
 

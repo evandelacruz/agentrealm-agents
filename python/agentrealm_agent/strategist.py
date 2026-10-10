@@ -104,8 +104,7 @@ from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
-from .gem_yield import keep_gather_region
-from .gem_yield import summary as gem_yield_summary
+from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, greeted_npc_ids, in_sight, spoken_npc_ids

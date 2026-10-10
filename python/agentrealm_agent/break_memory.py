@@ -36,8 +36,11 @@ MANUAL_CAPABILITIES: dict[str, frozenset[str]] = {
     "matches": frozenset({"burn"}),
     "torch": frozenset({"burn"}),
 }
-# Weapons are not used up by a break; tools are (M §11).
-WEAPONS = frozenset({"bronze_sword", "pocket_knife", "bronze_mallet"})
+# Each weapon's damage, from the Manual's Supplies reference: the win
+# estimate's swing (``survival.swing_damage``, A81). Weapons are not used up
+# by a break; tools are (M §11).
+WEAPON_DAMAGE: dict[str, int] = {"bronze_sword": 4, "pocket_knife": 2, "bronze_mallet": 6}
+WEAPONS = frozenset(WEAPON_DAMAGE)
 
 
 def break_key(map_id: int, pos: Pos, capability: str) -> str:

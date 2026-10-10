@@ -23,6 +23,7 @@ from .pathing import step_open
 from .poll_cadence import gate_tick_call, is_urgent
 from .states import PlayContext, dispatch
 from .states.intents import set_position, take, use_on, withdraw_all
+from .survival import hostiles_reaching, pursuer_peaks
 from .world import DOORS, Pos, WorldModel
 from .zone_discovery import next_zone_probe
 
@@ -32,6 +33,7 @@ __all__ = [
     "choose_call",
     "decide",
     "path_blockers",
+    "path_threats",
     "remaining_path_stale",
     "set_position",
     "take",
@@ -214,10 +216,30 @@ def path_blockers(w: WorldModel, m: Memory, policy: Policy, knowledge: Knowledge
     return out
 
 
-def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> bool:
-    """True when the rest of a held walk queue no longer matches the map (A43).
+def path_threats(w: WorldModel, m: Memory, policy: Policy) -> set[tuple[str, int]]:
+    """The known hostiles with a cell the rest of the held walk queue steps onto
+    in their reach (``survival.hostiles_reaching``), leaving out the fight's
+    group and the last hitter (``pursuer_peaks``) and whoever the walk was
+    planned without (``Memory.path_skip``: every hostile, for a losing Retreat).
 
-    A cell that was already blocked when the queue was sent does not count:
-    the replan could not avoid it, so resending would only send it again.
+    Those follow the walk anyway, or it went through their reach on purpose,
+    so they never make its queue stale.
     """
-    return bool(path_blockers(w, m, policy, knowledge) - m.path_blockers)
+    cells = remaining_walk_cells(w, m)
+    if not cells or not w.alive or policy.kind == "idle":
+        return set()
+    return hostiles_reaching(w, policy, cells, skip=set(pursuer_peaks(w, policy)) | m.path_skip)
+
+
+def remaining_path_stale(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> bool:
+    """True when the rest of a held walk queue no longer matches the map (A43),
+    or now crosses the reach of a known hostile it did not cross when sent
+    (A63 run 4).
+
+    A cell that was already blocked, or a hostile already in reach, when the
+    queue was sent does not count: the replan could not avoid it, so resending
+    would only send it again.
+    """
+    if path_blockers(w, m, policy, knowledge) - m.path_blockers:
+        return True
+    return bool(path_threats(w, m, policy) - m.path_threats)

@@ -10,7 +10,7 @@ description: >-
 
 Batch counterpart to [agentrealm-agents-conductor](../agentrealm-agents-conductor/SKILL.md). Plans and spawns **`n`** agents. Needs `CURSOR_API_KEY`.
 
-**Dormant while Cursor credits are out.** New work goes to [agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md) and fixes to [agentrealm-agents-fixer-fleet](../../../.claude/skills/agentrealm-agents-fixer-fleet/SKILL.md). Review verdicts follow [agentrealm-agents-conductor](../agentrealm-agents-conductor/SKILL.md) **Review verdicts**.
+This is the default implementer fleet. While Cursor is out of credits the supervisor sends new work to [agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md) instead ([agentrealm-agents-supervisor](../../../.claude/skills/agentrealm-agents-supervisor/SKILL.md) **Who implements**). Review verdicts follow [agentrealm-agents-conductor](../agentrealm-agents-conductor/SKILL.md) **Review verdicts**.
 
 Repo: `evandelacruz/agentrealm-agents`.
 
@@ -37,7 +37,7 @@ Repo: `evandelacruz/agentrealm-agents`.
    |---|---|
    | `conductor:working` label | skip: an implementer or fixer holds it |
    | `Cursor Automation: Saims Ref Agent Auto Code Review` still running | skip: a review is in progress |
-   | merge conflict, changes requested, red CI, or unresolved threads without approval | **fix** |
+   | merge conflict, changes requested, or red CI | **fix** |
    | approved with open threads | **polish** |
    | approved, no conflicts, nothing open | skip: Evan merges |
    | draft | skip |
@@ -69,10 +69,12 @@ Repo: `evandelacruz/agentrealm-agents`.
 6. **Sanity-check, then spawn.** For every new-work ID, confirm it is not already `done` on `origin/main`. Use the brief shape in [implementer-brief.md](../agentrealm-agents-conductor/references/implementer-brief.md).
 
    ```bash
-   npm --prefix tools/conductor run spawn -- --ids A8 --name "Runtime directives" -- <<'EOF'
+   npm --prefix tools/conductor run spawn -- --ids A8 --name "A8: Runtime directives" -- <<'EOF'
    <implementer brief>
    EOF
    ```
+
+   Start `--name` with the slice's IDs, as above. The supervisor and the next fleet read running agents' names to see which IDs are taken.
 
    Fix / polish on an existing PR: `spawn --pr <url>` or `follow-up --agent bc-… --pr <url>`.
 
@@ -88,7 +90,7 @@ Repo: `evandelacruz/agentrealm-agents`.
 
 **Read `note` and `remaining`.** Skip items whose note starts with "Waiting on" or says blocked. Those are Evan's to resolve, not an implementer's. Skip umbrella items, whose work lives in their child IDs.
 
-**Ready items.** Choose work from PLAN.md **Milestones**: any item ID whose `status.json` state is not `done` and whose **Depends on** IDs are all `done`, minus the items the rule above skips and any an open pull request already covers (cites the ID in its title or body). If no ready work is left for a slot, leave it empty. If every slot is empty, spawn nothing and say that ready backlog work is exhausted.
+**Ready items.** Choose work from PLAN.md **Milestones**: any item ID whose `status.json` state is not `done` and whose **Depends on** IDs are all `done`, minus the items the rule above skips and any an open pull request already covers (cites the ID in its title or body) or a running Cursor agent already holds (`npm --prefix tools/conductor run status`: its name starts with the ID). If no ready work is left for a slot, leave it empty. If every slot is empty, spawn nothing and say that ready backlog work is exhausted.
 
 **One reviewable PR per agent.** Split a large item with an explicit scope and leave it `partial`.
 

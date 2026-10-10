@@ -37,6 +37,7 @@ from ..gem_yield import (
     region_corner,
     region_of,
 )
+from ..healing import FOOD_CODES, POTION_CODES
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
@@ -49,7 +50,8 @@ from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets, safe_default
 from .fight import engage
 from .gather_safe import GATHER_HOSTILE_RADIUS, gather_ground
-from .intents import arm_and_use, set_position, take, use_block
+from .intents import arm, arm_and_use, set_position, take, use_block
+from .solve import held_supply
 
 # Authored gem piles spawn as ground supplies (Obs, GAME_NOTES.md Gems).
 # Gem caches (gem_cache_5/7/10) are a different drop and are not piles.
@@ -98,7 +100,8 @@ class GatherState(State):
     piles until the gem counter reaches the op's count, walking to the
     nearest known one when none is in reach, field cells before safe ones.
     A cut goes out with a tool that cuts, armed in the same queue when the
-    armed item is not known to cut.
+    armed item is not known to cut; the weapon it swapped out is armed again
+    once no ``gather_gems`` op is on top.
     Grass and bushes in a barren region (unless the op names it), or where
     cuts had no effect, are skipped. On safe ground with nothing to cut, it
     heads out to field ground or the frontier;
@@ -113,7 +116,7 @@ class GatherState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        return my_op(ctx, self.name) is not None
+        return my_op(ctx, self.name) is not None or ctx.memory.gather_rearm is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
@@ -121,6 +124,8 @@ class GatherState(State):
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         op = my_op(ctx, self.name)
         m = ctx.memory
+        if op is None:
+            return _rearm_weapon(world, m)
         tick_hz = ctx.plan.tick_hz if ctx.plan is not None else DEFAULT_TICK_RATE_HZ
         shadow = shadowing_hostile(world, m, ctx.policy, tick_hz)
         if shadow is not None:
@@ -378,8 +383,24 @@ def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reas
     tool = pick_supply_for_capability(w, CUT, knowledge)
     if tool is None or tool.id < 0:
         return StateOutcome([use_block(p)], reason, state=state)
+    if m.gather_rearm is None and w.armed_code and w.armed_code not in FOOD_CODES | POTION_CODES:
+        m.gather_rearm = (w.armed_code, tool.code)  # food or a potion is Heal's to put back
     queue = arm_and_use(w, m, tool.id, use_block(p))
     return StateOutcome(queue, f"arm {tool.code}, {reason}", state=state, paced=True)
+
+
+def _rearm_weapon(w: WorldModel, m: Memory) -> StateOutcome:
+    """Arm the weapon a cut swapped out, once no ``gather_gems`` op is on top.
+
+    Sent once, and only while the cutting tool is still armed: something
+    else arming since (Equip's upgrade, say) is not undone.
+    """
+    weapon, tool = m.gather_rearm or ("", "")
+    m.gather_rearm = None
+    supply = held_supply(w, weapon) if w.armed_code == tool else None
+    if supply is None:
+        return StateOutcome(None, "no gather op", state=GatherState.name)
+    return StateOutcome([arm(supply.id)], f"re-arm {weapon}", state=GatherState.name)
 
 
 def _move_off(

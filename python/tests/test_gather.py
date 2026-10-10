@@ -264,6 +264,40 @@ class GatherArmsACutterTest(unittest.TestCase):
         self.assertEqual(out.intents, [{"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
         self.assertFalse(out.paced)
 
+    def test_the_weapon_swapped_out_comes_back_once_gathering_is_over(self):
+        """Review on #152: a mallet swapped for the knife was never put back,
+        so every later fight used the knife."""
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "bronze_mallet"
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        m = Memory()
+        out = dispatch(w, ctx(w, ["gather_gems:5"], m))
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual([i["verb"] for i in out.intents], ["Arm", "Use"])
+        self.assertEqual(m.gather_rearm, ("bronze_mallet", "pocket_knife"))
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(6, "bronze_mallet")]
+        out = dispatch(w, ctx(w, [], m))
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 6}])
+        self.assertIsNone(m.gather_rearm)
+
+    def test_an_arm_made_since_is_not_undone(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "bronze_sword"  # Equip's upgrade, after the cut
+        w.held_supplies = [InventorySupply(6, "bronze_mallet"), InventorySupply(5, "pocket_knife")]
+        m = Memory(gather_rearm=("bronze_mallet", "pocket_knife"))
+        self.assertNotEqual(dispatch(w, ctx(w, [], m)).state, "Gather")
+        self.assertIsNone(m.gather_rearm)
+
+    def test_a_potion_swapped_out_is_not_put_back(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "small_potion"
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        m = Memory()
+        outcome(w, m)
+        self.assertIsNone(m.gather_rearm)
+
     def test_with_nothing_that_cuts_it_cuts_with_what_is_in_hand(self):
         w = grid(["ggg"], at=(1, 0))
         w.armed_code = "fake_cleaver"

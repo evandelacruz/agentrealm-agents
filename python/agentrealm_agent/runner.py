@@ -748,12 +748,13 @@ class Runner:
         was too: reflexes never consume its ops, so the probe must not advance,
         pop, or drop them (A34). Greet (4c) is not a reflex here: its hello waits
         for the next decision window, and the probe leaves its tries as they were (A65).
-        Heal's re-arm stays due too: the drink it follows may still be in the held queue (A24).
+        Heal's and Gather's re-arms stay due too: the drink or cut they follow may
+        still be in the held queue (A24, A22).
         """
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op, m.boss, dict(m.greetings))
         saved_threats = (set(m.walk_skip), set(m.planned_threats))
-        saved_rearm = m.heal_rearm
+        saved_rearm = (m.heal_rearm, m.gather_rearm)
         saved_stuck = copy.deepcopy(m.nav_stuck)
         saved_plan = self.plan.snapshot()
         try:
@@ -770,7 +771,7 @@ class Runner:
         # the held queue keeps running, so memory keeps its plan (A63 runs 3, 4).
         m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
         m.walk_skip, m.planned_threats = saved_threats
-        m.heal_rearm = saved_rearm
+        m.heal_rearm, m.gather_rearm = saved_rearm
         self.rng.setstate(saved[3])
         return None
 

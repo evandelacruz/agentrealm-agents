@@ -100,6 +100,14 @@ STATES: tuple[State, ...] = REFLEXES + EXECUTORS + (IdleState(),)
 SURVIVAL = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee")
 PARK_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name in SURVIVAL) + (ParkState(),)
 
+# The runner's held-queue probe (A64): the states that can answer with a
+# reflex, so a poll while a queue runs skips every executor's search. Greet
+# is left out: its hello waits for a decision window (A65). Boss is the one
+# executor whose fight moves are reflexes, so it comes last and runs only
+# once a boss fight is engaged (``Memory.boss``).
+_BOSS = next(s for s in EXECUTORS if s.name == "Boss")
+PROBE_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name != GreetState.name) + (_BOSS,)
+
 
 def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     """Run the first state that is active and not done, or whose guard holds.
@@ -138,6 +146,8 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
         outcome = _run_states(world, ctx, yielded)
     finally:
         end_decision(m.nav, world.tick)
+    if ctx.probe:
+        return outcome  # not a decision window: no op's stall clock runs (A64)
     if op is not None and ctx.plan is not None and ctx.plan.current() is op:
         _note_op_progress(ctx.plan, world, m, op, owner, outcome)
     oscillation.note_move(m, outcome.intents, m.state)
@@ -202,11 +212,26 @@ def _breaking_for(owner: str | None, m: Memory, world: WorldModel) -> bool:
     return att.goal.startswith(OWNER_WALKS.get(owner, ()))
 
 
-def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> StateOutcome:
-    """The first state, in ``STATES`` order, that runs and sends an intent or
-    waits; in the park phase, in ``PARK_STATES`` order (A66)."""
+def _states(ctx: PlayContext) -> tuple[State, ...]:
+    """The states this call may run: ``PARK_STATES`` in the park phase (A66),
+    else ``PROBE_STATES`` in the held-queue probe (A64), else all of ``STATES``."""
     m = ctx.memory
-    for state in PARK_STATES if m.parking else STATES:
+    if m.parking:
+        return PARK_STATES  # Park walks with ``retreat_step``, a reflex: the probe keeps it
+    if ctx.probe:
+        return PROBE_STATES if m.boss is not None else PROBE_STATES[:-1]
+    return STATES
+
+
+def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> StateOutcome:
+    """The first state, in ``_states`` order, that runs and sends an intent or
+    waits.
+
+    In the held-queue probe, when none does, ``Memory.state`` stays the state
+    that sent the held queue (A64).
+    """
+    m = ctx.memory
+    for state in _states(ctx):
         active = state.name == m.state and not state.done(world, ctx)
         if not (active or state.guard(world, ctx)):
             continue
@@ -216,6 +241,7 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
             outcome.yielded = yielded
             return outcome
         yielded.append(f"{state.name}: {outcome.reason}")
-    m.state = ""
+    if not ctx.probe:
+        m.state = ""
     reason = f"no state ({'; '.join(yielded)})" if yielded else "no state"
     return StateOutcome(None, reason, yielded=yielded)

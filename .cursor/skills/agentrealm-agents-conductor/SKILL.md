@@ -88,7 +88,7 @@ No ticketing system. PLAN.md is the backlog.
    EOF
    ```
 
-   `follow-up` and `spawn --pr` claim `conductor:working` before the agent starts, and they refuse a PR that already has `conductor:working`. They also refuse while the GitHub check `Cursor Automation: Saims Ref Agent Auto Code Review` is still running (`CONDUCTOR_REVIEW_CHECK` renames it). That is the CLI's own hold; the skills require no review check to complete. Do not add a label for that. Do not add `conductor:working` yourself first; that makes the CLI refuse. Do not delete it so the CLI will accept the PR. The prompt tells the agent that holds the lock to remove only `conductor:working` after the push. A new-work spawn has no PR yet; that prompt tells the agent to add the label as soon as the PR exists and to stop if it is already set.
+   `follow-up` and `spawn --pr` claim `conductor:working` before the agent starts, and they refuse a PR that already has `conductor:working`. They also refuse while a reviewer check (the Claude Review `review` job or the Cursor check) is still running, so a fixer does not chase a review that has not landed. Do not add a label for that. Do not add `conductor:working` yourself first; that makes the CLI refuse. Do not delete it so the CLI will accept the PR. The prompt tells the agent that holds the lock to remove only `conductor:working` after the push. A new-work spawn has no PR yet; that prompt tells the agent to add the label as soon as the PR exists and to stop if it is already set.
 
 9. **Report** to Evan: what is in flight, what is blocked and why, what is stacked for merge, and which nits you deliberately deferred. Then wait.
 

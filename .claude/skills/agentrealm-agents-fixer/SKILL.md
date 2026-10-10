@@ -99,6 +99,8 @@ Five things these tools do that will mislead you:
 
 Act on rejecting reviews and their threads, whoever posted them. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. No review check has to complete.
 
+A rejection clears only when a push gets a fresh review, or when Evan dismisses it. The Claude Review bot runs only on a push, so a reply alone changes nothing. If you push nothing because every blocking finding gets a reply instead, release the lock and tell Evan that the rejection is disputed.
+
 A review on an older head still leaves its inline threads, and they are read like any other.
 
 The first review's threads are often resolved while a later review's are not. Read the threads, not just the newest review body.

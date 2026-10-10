@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { REVIEW_CHECK_NAME, WORKING_LABEL } from "./config.js";
+import { REVIEWER_CHECK_NAMES, WORKING_LABEL } from "./config.js";
 import { lockHeld, pullRequestNumber } from "./lock.js";
 
 const execFileAsync = promisify(execFile);
@@ -42,7 +42,7 @@ export type PrCommentSummary = {
   unresolvedReviewThreads: number;
   issueComments: number;
   checksOk: boolean | null;
-  /** The `REVIEW_CHECK_NAME` check has not finished. The CLI starts no fixer meanwhile. */
+  /** A reviewer check has not finished. The CLI starts no fixer meanwhile. */
   reviewInProgress: boolean;
   /** Open labels on the PR — carries the conductor in-flight locks. */
   labels: string[];
@@ -116,10 +116,14 @@ export function hasMergeConflict(pr: Pick<OpenPr, "mergeable" | "mergeStateStatu
   return pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY";
 }
 
-/** True while the auto code-review check is still running. A label is not involved. */
+function isReviewerCheck(c: StatusCheckRollupItem): boolean {
+  return REVIEWER_CHECK_NAMES.includes(c.name ?? "");
+}
+
+/** True while a reviewer check is still running. A label is not involved. */
 export function reviewInProgress(pr: Pick<OpenPr, "statusCheckRollup">): boolean {
   return (pr.statusCheckRollup ?? []).some(
-    (check) => check.name === REVIEW_CHECK_NAME && rollupItemPending(check),
+    (check) => isReviewerCheck(check) && rollupItemPending(check),
   );
 }
 
@@ -131,8 +135,9 @@ export function reviewInProgress(pr: Pick<OpenPr, "statusCheckRollup">): boolean
  * for PRs whose smoke job has not finished yet.
  */
 export function rollupOk(pr: Pick<OpenPr, "statusCheckRollup">): boolean | null {
-  const checks = pr.statusCheckRollup;
-  if (!checks || checks.length === 0) return null;
+  // Reviewer checks are not CI: a failed review job is no reason for a fixer.
+  const checks = (pr.statusCheckRollup ?? []).filter((c) => !isReviewerCheck(c));
+  if (checks.length === 0) return null;
   if (checks.some(rollupItemPending)) return null;
   return checks.every(rollupItemSucceeded);
 }
@@ -196,8 +201,8 @@ export function triagePrs<T extends TriageFields>(
   const clear = settled.filter((s) => !blocked(s));
   return {
     needsFix,
-    // An open thread on an approved PR is a nit by the reviewer's own verdict,
-    // so it takes the skill's polish path — never a `--pr` fixer spawn.
+    // Approved means no reviewer rejects the head, so per the fixer skill an
+    // open thread does not block: it takes the polish path, never a `--pr` fixer spawn.
     needsPolish: clear.filter((s) => s.unresolvedReviewThreads > 0 && s.verdict === "APPROVED"),
     mergeReady: clear.filter(
       (s) =>
@@ -322,7 +327,7 @@ async function assertReviewSettled(prRef: string): Promise<void> {
   ]);
   if (reviewInProgress(view)) {
     throw new Error(
-      `PR #${number} has "${REVIEW_CHECK_NAME}" still running. Not starting a fixer.`,
+      `PR #${number} has a reviewer check still running. Not starting a fixer.`,
     );
   }
 }

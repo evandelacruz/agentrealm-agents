@@ -31,10 +31,11 @@ review on the head. Any rejection is `CHANGES_REQUESTED`; otherwise one
 approval is `APPROVED`; anything else is `review:none`. `COMMENTED` reviews
 do not count. `conductor:working` is the only label with meaning.
 
-`follow-up` and `spawn --pr` refuse to start while the GitHub check
-`Cursor Automation: Saims Ref Agent Auto Code Review` is running (override
-with `CONDUCTOR_REVIEW_CHECK`), and `prs` prints `review-check:running`. That
-hold is the CLI's own; the skills require no review check to complete.
+Reviewer checks are the Claude Review workflow's `review` job and
+`Cursor Automation: Saims Ref Agent Auto Code Review` (override the Cursor
+name with `CONDUCTOR_REVIEW_CHECK`). They are not CI, so they never count
+toward red or green. While one is running, `follow-up` and `spawn --pr`
+refuse to start and `prs` prints `review-check:running`.
 
 "Needs fixer follow-up" lists PRs with a merge conflict, red CI, changes
 requested, or unresolved threads without approval.

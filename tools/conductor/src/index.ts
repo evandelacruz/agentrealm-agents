@@ -22,6 +22,8 @@ export { followUp, type FollowUpOptions } from "./follow-up.js";
 export { listCloudAgents } from "./status.js";
 export {
   REVIEW_CHECK_NAME,
+  CLAUDE_REVIEW_CHECK_NAME,
+  REVIEWER_CHECK_NAMES,
   DEFAULT_ENV_NAME,
   DEFAULT_MODEL,
   DEFAULT_REPO_URL,

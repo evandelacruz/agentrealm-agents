@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { REVIEW_CHECK_NAME } from "./config.js";
+import { CLAUDE_REVIEW_CHECK_NAME, REVIEW_CHECK_NAME } from "./config.js";
 import {
   hasMergeConflict,
   headVerdict,
@@ -12,7 +12,7 @@ import {
   triagePrs,
 } from "./gh.js";
 
-test("reviewInProgress is only the auto code-review check while it is running", () => {
+test("reviewInProgress is a reviewer check while it is running", () => {
   assert.equal(
     reviewInProgress({
       statusCheckRollup: [{ name: REVIEW_CHECK_NAME, status: "IN_PROGRESS", conclusion: null }],
@@ -29,6 +29,34 @@ test("reviewInProgress is only the auto code-review check while it is running", 
     false,
   );
   assert.equal(reviewInProgress({ statusCheckRollup: null }), false);
+});
+
+test("reviewInProgress also covers the Claude Review job", () => {
+  assert.equal(
+    reviewInProgress({
+      statusCheckRollup: [{ name: CLAUDE_REVIEW_CHECK_NAME, status: "QUEUED", conclusion: null }],
+    }),
+    true,
+  );
+});
+
+test("rollupOk ignores reviewer checks: a failed review job is not red CI", () => {
+  assert.equal(
+    rollupOk({
+      statusCheckRollup: [
+        { name: "python", status: "COMPLETED", conclusion: "SUCCESS" },
+        { name: CLAUDE_REVIEW_CHECK_NAME, status: "COMPLETED", conclusion: "FAILURE" },
+        { name: REVIEW_CHECK_NAME, status: "COMPLETED", conclusion: "FAILURE" },
+      ],
+    }),
+    true,
+  );
+  assert.equal(
+    rollupOk({
+      statusCheckRollup: [{ name: CLAUDE_REVIEW_CHECK_NAME, status: "COMPLETED", conclusion: "SUCCESS" }],
+    }),
+    null,
+  );
 });
 
 test("rollupOk is null when any CheckRun is still in progress", () => {

@@ -94,7 +94,7 @@ No ticketing system. PLAN.md is the backlog.
 
 ## Review verdicts
 
-Verdicts come from GitHub review states on the current head, never from labels: changes requested when any reviewer (either bot or a person) rejected the head, approved when both reviewers of the pair in [`.github/reviewers`](../../../.github/reviewers) on `main` approved it (the Opus bot, plus `cursor[bot]` or the Sonnet bot) and none rejected it. Open threads never block. [`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict** is the rule, and its **Merge rule** says when a pull request may merge.
+Verdicts come from GitHub review states on the current head, never from labels, and only trusted reviewers count (anyone else's review is ignored). Changes requested when any of them rejected the head, approved when both reviewers of the pair in [`.github/reviewers`](../../../.github/reviewers) on `main` approved it (the Opus bot, plus `cursor[bot]` or the Sonnet bot) and none rejected it. Open threads never block. [`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict** is the rule, and its **Merge rule** says when a pull request may merge.
 
 `conductor:working` is the only label with meaning, and it is the writer lock: a writer (Cursor or Claude Code) holds this PR, so skip it. There is no reviewing label.
 

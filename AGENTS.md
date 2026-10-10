@@ -45,7 +45,7 @@ Decided. Do not cross without flagging prominently.
 - Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`. The `test` GitHub Actions workflow runs both on every PR.
 - Open PRs **ready for review, not draft**. If tooling defaults to draft, run `gh pr ready`.
 - **Never merge.** Evan merges, and so does the supervisor ([`.claude/skills/agentrealm-agents-supervisor/SKILL.md`](.claude/skills/agentrealm-agents-supervisor/SKILL.md)). No other agent does.
-- **Review verdict:** every pull request has two reviewers, set in [`.github/reviewers`](.github/reviewers): the Opus bot always, plus Cursor or the Sonnet bot. It is approved when both approved its current head, no reviewer at all (a person included) rejected it, and no review is running. Open threads never block. Rule: [`agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict**. Only Evan edits `.github/reviewers`.
+- **Review verdict:** every pull request has two reviewers, set in [`.github/reviewers`](.github/reviewers): the Opus bot always, plus Cursor or the Sonnet bot. Only trusted reviewers count; anyone else's review is ignored. It is approved when both approved its current head, no trusted reviewer (a person included) rejected it, and no review is running. Open threads never block. Rule: [`agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict**. Only Evan edits `.github/reviewers`.
 - Do not add dependencies, or change moderation or the call budget or pacing, without flagging prominently.
 - If blocked by an open architecture, legal, or moderation question, an open design question, or a server gap, **halt and say why**. Do not invent. Check PLAN.md and the published docs first.
 - Backlog items are PR-sized. If one still needs a second PR, ship a reviewable slice, mark the ID `partial` with a `remaining` note in `status.json`, and let the next pass continue it.
@@ -55,7 +55,7 @@ Decided. Do not cross without flagging prominently.
 
 `conductor:working` is the writer lock for **implementers and fixers** (Cursor or Claude Code). Reviewers never take it.
 
-- Claim it when you start writing. Release it when you finish (after the push, PR ready) or if the spawn that claimed it failed before the agent started.
+- Claim it when you start writing. Release it when you finish (after the push, PR ready) or if the spawn that claimed it failed before the agent started. One exception: a fixer that declines every finding and has nothing to push keeps it and hands the PR to Evan ([`agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) **Declined everything**).
 - The claim is check-then-add, not atomic. Two writers that start at the same moment can both claim it.
 - Skip a PR that already has the label. Do not add a second writer. Do not delete a lock you did not claim in this session.
 - Cursor `status` listing an implementer as `finished` means that worker should already have released. If the label is still on the PR, another worker may hold it (Claude Code fixers use the same label and do not appear in that list) or the holder crashed. Leave the label and tell Evan. Do not treat "Cursor finished" as permission to clear it.

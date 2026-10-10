@@ -24,15 +24,15 @@ First row that matches decides it:
 
 | Condition | Outcome |
 |---|---|
-| has `conductor:working` | **skip**: an implementer or fixer holds it and releases it when they finish. Never delete the label to spawn. |
+| has `conductor:working` | **skip**: an implementer or fixer holds it and releases it when they finish, or a fixer handed it to Evan and left the label on. Never delete the label to spawn. |
 | draft | **skip**: still being written |
 | `mergeable_state` is `"dirty"` | **spawn**: merge conflict |
 | a CI check run (not a reviewer's check) concluded `failure` or `timed_out` | **spawn**: red CI |
-| a reviewer rejected the current head, the rejection has inline threads, and a fixer replied on each of them after that review without pushing | **skip**: disputed, Evan decides |
-| a reviewer rejected the current head | **spawn**: review |
+| the review verdict is changes requested, and a `Handed to Evan:` comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` is newer than the latest rejecting review on the current head | **skip**: a fixer declined every finding and handed it to Evan, even if the label is gone. Evan dismisses the rejection or names the findings to fix. |
+| the review verdict is changes requested | **spawn**: review |
 | anything else | **skip**: nothing blocks it |
 
-Open review threads are never a blocker on their own. A pull request no reviewer rejected is not blocked, however many threads are open.
+Open review threads are never a blocker on their own. A pull request no trusted reviewer rejected is not blocked, however many threads are open, and a rejection from anyone else is no reason to spawn.
 
 The three spawn rows are not exclusive. A pull request that conflicts **and** is red **and** was rejected is one session whose brief carries all three.
 
@@ -118,7 +118,7 @@ hand-edit it. In status.json keep the more advanced state per ID.
 Run <run_id>: pull the output with get_job_logs(failed_only=true).
 Reproduce locally, fix, confirm. Never skip or disable a test.
 
-[review] <reviewer> requested changes on the head. Its threads:
+[review] <trusted reviewer> requested changes on the head. Its threads:
 - <path>:<line>: <what it asks, one line>
 - …
 

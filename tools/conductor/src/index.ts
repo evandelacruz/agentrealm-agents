@@ -5,6 +5,7 @@ export {
   holdLock,
   listOpenPrs,
   parseReviewers,
+  trustedReview,
   releaseWorkingLock,
   reviewInProgress,
   rollupOk,

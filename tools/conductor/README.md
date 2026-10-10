@@ -26,8 +26,10 @@ Open PR summaries include merge-conflict state (`merge:conflict` / `merge:ok`)
 and the writer lock (`lock:working` / `lock:none`). Review verdicts come from
 submitted reviews on the **current head** only, never from labels, per the
 fixer skill's **The review verdict**, each reviewer by their latest
-`APPROVED` / `CHANGES_REQUESTED` review on the head. Any reviewer's rejection
-is `CHANGES_REQUESTED`; otherwise approvals from both of the pair in
+`APPROVED` / `CHANGES_REQUESTED` review on the head. Only trusted reviews
+count: a bot listed in `.github/reviewers` (GraphQL `__typename` `Bot`), or a
+person whose `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR`; every
+other review is ignored. Any trusted reviewer's rejection is `CHANGES_REQUESTED`; otherwise approvals from both of the pair in
 `.github/reviewers` on `main` (the Opus bot, plus Cursor or the Sonnet bot) are
 `APPROVED`; anything else is `review:none`. `COMMENTED` reviews do not count.
 If `.github/reviewers` is missing or malformed, `prs` warns and takes `cursor`
@@ -39,7 +41,7 @@ name with `CONDUCTOR_REVIEW_CHECK`). They are not CI, so they never count
 toward red or green. While one is running, `follow-up` and `spawn --pr`
 refuse to start and `prs` prints `review-check:running`.
 
-`prs` does not apply the "disputed, Evan decides" row of
+`prs` does not apply the "handed to Evan" row of
 [agentrealm-agents-fixer-fleet](../../.claude/skills/agentrealm-agents-fixer-fleet/SKILL.md)
 **What counts as blocked**: it still lists such a pull request under
 needs-fix. Check the threads before following up on one.

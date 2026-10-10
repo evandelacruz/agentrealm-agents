@@ -158,12 +158,21 @@ export type Verdict = "APPROVED" | "CHANGES_REQUESTED" | null;
 export type ReviewNode = {
   state: string;
   body: string;
-  author: { login: string } | null;
+  /** `__typename` is `Bot` for an app; a person can register a bot's login without the suffix. */
+  author: { __typename?: string; login: string } | null;
+  /** OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, …: the author's standing in this repo. */
+  authorAssociation: string;
   commit: { oid: string } | null;
 };
 
-/** The two reviewers every PR needs: the Opus bot and the second one, by login. */
-export type ReviewerPair = { opus: string; second: string };
+/**
+ * The two reviewers every PR needs, the Opus bot and the second one, by
+ * login, plus every bot login the file lists: the bots whose verdicts count.
+ */
+export type ReviewerPair = { opus: string; second: string; bots: string[] };
+
+/** People whose verdicts count. Anyone else can post a review on a public repo; it is ignored. */
+const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 /** GraphQL drops the `[bot]` suffix that REST keeps; compare without it. */
 function loginKey(login: string): string {
@@ -187,7 +196,20 @@ export function parseReviewers(text: string): ReviewerPair {
   }
   const second = fields.get(which);
   if (!opus || !second) throw new Error(`${REVIEWERS_FILE}: needs opus and ${which} logins.`);
-  return { opus, second };
+  const bots = ["opus", "sonnet", "cursor"].flatMap((k) => fields.get(k) ?? []);
+  return { opus, second, bots };
+}
+
+/**
+ * A review counts toward the verdict only from a bot listed in
+ * `REVIEWERS_FILE` or a person who is OWNER, MEMBER or COLLABORATOR.
+ */
+export function trustedReview(r: ReviewNode, pair: ReviewerPair): boolean {
+  if (!r.author) return false;
+  if (r.author.__typename === "Bot") {
+    return pair.bots.some((b) => loginKey(b) === loginKey(r.author!.login));
+  }
+  return TRUSTED_ASSOCIATIONS.has(r.authorAssociation);
 }
 
 /** The pair on `main`, or `cursor` as the second when the file is missing or malformed, as the workflow does. */
@@ -210,16 +232,18 @@ async function loadReviewerPair(owner: string, name: string): Promise<ReviewerPa
 
 /**
  * The review verdict on the current head, per the fixer skill. Labels play
- * no part. Each reviewer's latest APPROVED / CHANGES_REQUESTED review on
- * `headSha` is their verdict; COMMENTED reviews are threads. Any reviewer's
- * rejection wins, a person's included; otherwise it is approved only when
- * both of the pair approved; otherwise it is still waiting on a review.
+ * no part, and untrusted reviews (`trustedReview`) are skipped. Each
+ * trusted reviewer's latest APPROVED / CHANGES_REQUESTED review on
+ * `headSha` is their verdict; COMMENTED reviews are threads. Any trusted
+ * reviewer's rejection wins, a person's included; otherwise it is approved
+ * only when both of the pair approved; otherwise it is still waiting on a review.
  */
 export function headVerdict(reviews: ReviewNode[], headSha: string, pair: ReviewerPair): Verdict {
   const latest = new Map<string, string>();
   for (const r of reviews) {
     if (r.commit?.oid !== headSha) continue;
     if (r.state !== "APPROVED" && r.state !== "CHANGES_REQUESTED") continue;
+    if (!trustedReview(r, pair)) continue;
     latest.set(loginKey(r.author?.login ?? ""), r.state);
   }
   if ([...latest.values()].includes("CHANGES_REQUESTED")) return "CHANGES_REQUESTED";
@@ -278,7 +302,7 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
         "api",
         "graphql",
         "-f",
-        `query=query { repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${pr.number}) { reviewThreads(first: 100) { nodes { isResolved } } reviews(last: 50) { nodes { state body author { login } commit { oid } } } } } }`,
+        `query=query { repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${pr.number}) { reviewThreads(first: 100) { nodes { isResolved } } reviews(last: 50) { nodes { state body authorAssociation author { __typename login } commit { oid } } } } } }`,
       ]),
       ghJson<{ comments: unknown[] }>([
         "pr",

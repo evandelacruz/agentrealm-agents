@@ -912,7 +912,9 @@ class Strategist:
         ):
             plan, record, pinned, _ = self.deferred
             self.deferred = None
-            self._apply(runner, plan, record, pinned)
+            # A directives op that ended while it waited must not come back.
+            if same_ops(plan.goals[:pinned], runner.plan.directive_ops()):
+                self._apply(runner, plan, record, pinned)
         try:
             answer = self._answers.get_nowait()
         except queue.Empty:
@@ -1147,7 +1149,8 @@ class Strategist:
 
     def _apply(self, runner: Any, new: Plan, record: dict[str, Any], pinned: int) -> None:
         """Make ``new`` the stack. The same op on top carries on where it was;
-        a new head drops the old head's path, walks and targets."""
+        a new head drops the old head's path and walks (its targets were
+        committed for the old op, so they no longer hold, ``targets``)."""
         old, goals = runner.plan, new.goals
         runner.plan = new
         head = old.current()

@@ -696,7 +696,7 @@ Intents: 868 `Step`, 2,453 `Wait`, 23 `Say`, 20 `Use`, 13 `Read`, 9 `Take`, no `
 
 - **Code:** `main` at `17503b3`, after #172 (A81: the agent matches the game update; Gather cuts grass only, the win estimate prices our swing by the published roll, and the planner's arc counts kill drops) and #174 (run 8's notes). #175 (Gather stall, Detour risk gate, bad planner reply) is not in it.
 - **Knowledge base:** kept from run 8 on the same machine, as a real user's would be. Run 8 started with it empty. At the start it held 3 hostile types (snotling, gristlewick, chugbug), 14 hostile sightings, each with a post, the town cell, 8 level entrances, 9 shop prices, 23 clues and 20 greeted NPCs. It held no regen answer and no damage per type. The gem-yield table was reset by #172's new format.
-- **Verdict:** exit 0, `PASS` after **602.9 s**, on the short-run gates only. The park **parked safe** at (380, 405) after 0.3 s and cleared the queue. The character started at **6/10**, 5 lives and **5 gems** at (408, 419), where run 8's park left it. It had the pocket knife armed and held matches ×3.
+- **Verdict:** exit 0, `PASS` after **602.9 s**, on the short-run gates only. The park **parked safe** at (380, 405) after 0.3 s and cleared the queue. The character started at **6/10**, 5 lives and **5 gems** at (408, 419), 1 cell from (409, 418), where run 8's park left it. It had the pocket knife armed and held matches ×3.
 - **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; weak hostile kills **0**; gems earned **yes**; armor **no**; shop weapon **no**; potion reserve **no**; Heal took ground food **yes**, Heal drank a potion **no** (none held). Planner: 47 calls, 47 plans accepted, 0 errors.
 
 #### Planner ops over time

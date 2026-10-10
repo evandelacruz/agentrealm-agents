@@ -10,11 +10,12 @@ cell of the route still ahead (the queued steps, then the path) and going
 by it adds at most ``DETOUR_EXTRA_STEPS`` steps, counted from where the
 character stands. Hostile safety is Gather's: the find must be
 on ground ``gather_ground`` allows (off hazards, clear of every known
-hostile's bar, in view or remembered), the straight way there must stay
+hostile's bar, in view or remembered), the path walked there must stay
 out of every known hostile's reach (``route_clear``), and the survival
 reflexes above it still win. A ``gather_gems`` op with ``fight`` on top
 lifts the remembered and route tests, as it does for Gather. A find whose
-ground turns out held (a hit on the way) is dropped (free-play run 5).
+ground or path turns out held (a hit on the way, say) is dropped, and one
+with no clear path is skipped for the run (free-play run 5).
 
 The walk it interrupts keeps its committed target (``targets``): once the
 find is taken, seen gone or given up (no step, or ``DETOUR_TICKS`` without
@@ -33,7 +34,6 @@ from ..loot import GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
-from ..survival import hostile_reach
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
 from .gather_safe import Danger, danger, gather_ground, reach_cells, route_clear
@@ -75,22 +75,24 @@ class DetourState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         m = ctx.memory
+        known = danger(world, ctx.policy, chosen_fight(ctx))  # once per decision
         d = m.detour
-        if d is not None and not _still_on(world, d, ctx):
+        if d is not None and not _still_on(world, d, ctx, known):
             if world.tick - d.since >= DETOUR_TICKS:
                 m.detour_skipped.add(d.supply_id)  # timed out: given up for the run, never re-picked
             _end(m, d)
             d = None
         if d is None:
-            find = detour_find(world, ctx)
+            find = detour_find(world, ctx, known)
             if find is None:
                 return StateOutcome(None, "no find off the walk", state=self.name)
             d = m.detour = Detour(find.id, find.pos, find.code, m.goal, world.tick)
-        step = _step_toward(world, ctx, d.pos)
-        if step is None:
+        step = _step_toward(world, ctx, d.pos, known)
+        if step is None or not route_clear(world, ctx.policy, m.path, known):
             m.detour_skipped.add(d.supply_id)
             _end(m, d)
-            return StateOutcome(None, f"no step to {d.code} at {d.pos}", state=self.name)
+            why = "no step" if step is None else "no way clear of hostiles"
+            return StateOutcome(None, f"{why} to {d.code} at {d.pos}", state=self.name)
         back = f", then back to {d.resumes}" if d.resumes else ""
         return StateOutcome([set_position(step)], f"detour → {d.code} at {d.pos}{back}", reflex=True, state=self.name)
 
@@ -115,8 +117,9 @@ def extra_steps(here: Pos, find: Pos, path: list[Pos]) -> int | None:
     return min(costs) if costs else None
 
 
-def detour_find(w: WorldModel, ctx: PlayContext) -> Entity | None:
-    """The valuable worth a detour off the walk under way: fewest extra steps, then id."""
+def detour_find(w: WorldModel, ctx: PlayContext, known: Danger | None = None) -> Entity | None:
+    """The valuable worth a detour off the walk under way, on ground Gather
+    may work (``known``, this decision's ``Danger``): fewest extra steps, then id."""
     m = ctx.memory
     here = w.pos
     if here is None or m.goal in ("", GOAL):
@@ -125,13 +128,13 @@ def detour_find(w: WorldModel, ctx: PlayContext) -> Entity | None:
     if not route:
         return None
     items = knowledge_items(ctx.knowledge)
-    known = danger(w, ctx.policy, chosen_fight(ctx))
+    known = known or danger(w, ctx.policy, chosen_fight(ctx))
     best: tuple[int, int, Entity] | None = None
     for e in w.entities:
         if e.id in m.detour_skipped or chebyshev(e.pos, here) <= 1 or not valuable(w, e, items):
             continue  # in reach is Pickup's
         extra = extra_steps(here, e.pos, route)
-        if extra is None or extra > DETOUR_EXTRA_STEPS or not safe_find(w, ctx, e.pos, known):
+        if extra is None or extra > DETOUR_EXTRA_STEPS or not gather_ground(w, e.pos, ctx.policy, known):
             continue
         if best is None or (extra, e.id) < best[:2]:
             best = (extra, e.id, e)
@@ -144,28 +147,14 @@ def chosen_fight(ctx: PlayContext) -> bool:
     return op is not None and op["op"] == "gather_gems" and bool(op.get("fight"))
 
 
-def safe_find(w: WorldModel, ctx: PlayContext, at: Pos, known: Danger) -> bool:
-    """``at`` is ground Gather may work, and the straight way there from
-    where we stand stays out of known hostiles' reach (unless ``known.fight``)."""
-    if not gather_ground(w, at, ctx.policy, known):
-        return False
-    return w.pos is None or route_clear(w, ctx.policy, straight_line(w.pos, at), known)
-
-
-def straight_line(a: Pos, b: Pos) -> list[Pos]:
-    """The cells a walk from ``a`` to ``b`` crosses going diagonally first, ``b`` included."""
-    (x, y), out = a, []
-    while (x, y) != b:
-        x += (b[0] > x) - (b[0] < x)
-        y += (b[1] > y) - (b[1] < y)
-        out.append((x, y))
-    return out
-
-
-def _still_on(w: WorldModel, d: Detour, ctx: PlayContext) -> bool:
-    """The find is still there, on safe ground, and the detour has time left."""
+def _still_on(w: WorldModel, d: Detour, ctx: PlayContext, known: Danger) -> bool:
+    """The find is still there, on ground Gather may work, the path being
+    walked to it is clear of known reach, and the detour has time left."""
+    m = ctx.memory
     there = any(e.kind == "supply" and e.id == d.supply_id for e in w.entities)
-    return there and w.tick - d.since < DETOUR_TICKS and safe_find(w, ctx, d.pos, danger(w, ctx.policy, chosen_fight(ctx)))
+    if not there or w.tick - d.since >= DETOUR_TICKS or not gather_ground(w, d.pos, ctx.policy, known):
+        return False
+    return m.goal != GOAL or route_clear(w, ctx.policy, m.path, known)
 
 
 def _end(m: Memory, d: Detour) -> None:
@@ -175,13 +164,12 @@ def _end(m: Memory, d: Detour) -> None:
     m.detour = None
 
 
-def _step_toward(w: WorldModel, ctx: PlayContext, at: Pos) -> Pos | None:
+def _step_toward(w: WorldModel, ctx: PlayContext, at: Pos, known: Danger) -> Pos | None:
     """A bounded walk to ``at`` (``bounded_step``) that goes round every known hostile's reach, remembered ones too."""
     m, policy = ctx.memory, ctx.policy
     nav_avoid, nav_costly = navigation_avoid_costly(m.nav, ctx.knowledge, w.map_id, w.tick)
     hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
-    reach = hostile_reach(w, policy) if chosen_fight(ctx) else reach_cells(w, policy)
-    avoid, costly = nav_avoid | hazards, nav_costly | hazards | reach
+    avoid, costly = nav_avoid | hazards, nav_costly | hazards | reach_cells(w, policy, known)
 
     def params():
         return grid_params(policy, avoid, costly)

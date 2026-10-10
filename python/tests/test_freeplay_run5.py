@@ -26,7 +26,7 @@ from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.states import PlayContext
-from agentrealm_agent.states.detour import DetourState, detour_find, straight_line
+from agentrealm_agent.states.detour import DetourState, detour_find
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.states.gather_safe import danger, gather_ground, known_reach, route_clear
 from agentrealm_agent.zone_discovery import apply_zone
@@ -204,7 +204,7 @@ class GatherKeepsClearTest(unittest.TestCase):
         see(w, [], POST_STILL_TICKS + 1)
         far = (30, 10)
         self.assertTrue(gather_ground(w, far, policy()))
-        self.assertFalse(route_clear(w, policy(), straight_line(w.pos, far)))
+        self.assertFalse(route_clear(w, policy(), [(x, 10) for x in range(3, 31)]))
         w.entities = [Entity("supply", 50, far, "gem")]
         gather(w, m, {"op": "gather_gems", "count": 5})
         self.assertIsNone(m.gather_target)
@@ -213,7 +213,7 @@ class GatherKeepsClearTest(unittest.TestCase):
         w = field()
         post_seen_then_left(w)
         w.pos = (19, 12)  # inside the post's reach
-        self.assertTrue(route_clear(w, policy(), straight_line(w.pos, (19, 20))))
+        self.assertTrue(route_clear(w, policy(), [(19, y) for y in range(13, 21)]))
 
 
     def test_a_walk_whose_way_ahead_enters_reach_is_replanned(self):
@@ -310,8 +310,27 @@ class DetourKeepsClearTest(unittest.TestCase):
         DetourState().act(w, c)
         self.assertIsNone(m.detour)
 
-    def test_the_straight_way_goes_diagonally_first(self):
-        self.assertEqual(straight_line((0, 0), (3, 1)), [(1, 1), (2, 1), (3, 1)])
+    def test_a_find_reached_only_through_reach_is_skipped(self):
+        """Row 12 joins the walk's row 10 only at (20, 11), inside the post's reach; the find is outside it."""
+        w, m = field(at=(12, 10)), Memory()
+        for x in range(-1, 41):
+            for y in range(-1, 41):
+                if y not in (10, 12) or x in (-1, 40):
+                    w.view.tiles[(x, y)] = "wall"
+        w.view.tiles[(20, 11)] = "dirt"
+        w.view.tiles[(19, 14)] = "dirt"
+        w.pos = (19, 20)
+        see(w, [guard((19, 14))], 0)
+        see(w, [guard((19, 14))], POST_STILL_TICKS)
+        w.pos = (12, 10)
+        find = Entity("supply", 70, (24, 12), "gem")
+        see(w, [find], POST_STILL_TICKS + 1)
+        m.goal, m.path = "travel", [(x, 10) for x in range(13, 36)]
+        c = self.ctx(m, [{"op": "travel", "to": "point", "x": 35, "y": 10}])
+        self.assertEqual(detour_find(w, c), find)  # its ground is clear
+        DetourState().act(w, c)
+        self.assertIsNone(m.detour)
+        self.assertIn(70, m.detour_skipped)
 
 
 class FightFieldTest(unittest.TestCase):

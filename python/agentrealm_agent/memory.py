@@ -92,10 +92,11 @@ class Memory:
     gather_status: str = ""  # Gather's last decision, e.g. cutting, walking to grass, blocked by hostile (planner State)
     # Gather's stall clock: (tick this spell of Gather began, tick of its latest decision) (A63 run 3).
     gather_spell: tuple[int, int] | None = None
-    # Gather standing in its target region: (region, tick it arrived, tick it
-    # was last there). A planner reply may move the region once Gather has
-    # stood in it for 30 s with no cut there (A71, ``keep_gather_region``).
-    gather_in_region: tuple[tuple[int, int], int, int] | None = None
+    # Gather's progress toward its target region: (region, nearest it has
+    # been in blocks, 0 inside; tick that nearest was reached; tick Gather was
+    # last there). A planner reply may move the region once Gather has gone
+    # 30 s with no nearer approach and no cut there (A71, ``keep_gather_region``).
+    gather_in_region: tuple[tuple[int, int], int, int, int] | None = None
     # A hostile near Gather that has not hit us: (its id, tick its shadow clock
     # started, tick Gather last saw it near) (A63 run 3).
     gather_shadow: tuple[int, int, int] | None = None

@@ -466,7 +466,7 @@ def keep_gather_region(
     old: dict[str, Any],
     new: dict[str, Any],
     w: WorldModel,
-    in_region: tuple[tuple[int, int], int, int] | None,
+    in_region: tuple[tuple[int, int], int, int, int] | None,
     kb: KnowledgeBase | None,
     gem_cuts: GemYieldTracker | None,
     triggers: list[dict[str, Any]],
@@ -478,8 +478,9 @@ def keep_gather_region(
 
     The region a ``gather_gems`` names is its committed target. It moves
     only for a reason: the region is exhausted (barren or poor), Gather
-    found it impossible (it stood there ``STALL_SECONDS`` with no cut there
-    taking effect: ``in_region`` is Gather's ``Memory.gather_in_region``), or
+    found it impossible (``STALL_SECONDS`` with no nearer approach and no cut
+    there taking effect: ``in_region`` is Gather's ``Memory.gather_in_region``,
+    so a long walk that keeps closing in never counts, a blocked one does), or
     the situation changed (a death, a new map, a hurt, or a hostile pack
     seen). Another cell of the same region is the same target. Free-play
     run 4: the planner moved the region 4 times in 50 s. Two ops that differ
@@ -496,9 +497,9 @@ def keep_gather_region(
     if region in barren_regions(kb, w.map_id) or region in poor_regions(kb, w.map_id):
         return None  # exhausted
     stall = STALL_SECONDS * tick_hz
-    if in_region is not None and in_region[0] == region and w.tick - in_region[2] < stall:
-        if w.tick - cut_or_since(gem_cuts, in_region[1], region) >= stall:
-            return None  # impossible: no cut there since arriving
+    if in_region is not None and in_region[0] == region and w.tick - in_region[3] < stall:
+        if w.tick - cut_or_since(gem_cuts, in_region[2], region) >= stall:
+            return None  # impossible: no nearer and no cut there for the stall window
     for t in triggers:
         if t.get("trigger") in SITUATION_TRIGGERS:
             return None  # new information

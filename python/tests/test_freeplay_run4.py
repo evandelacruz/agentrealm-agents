@@ -274,7 +274,18 @@ class GatherRegionKeptTest(unittest.TestCase):
 
         s, r = self.settled(self.reply(100, 100))
         r.world.tick = 1000
-        r.mem.gather_in_region = ((0, 0), 1000 - STALL_SECONDS * 10, 995)  # stood in it 30 s, no cut
+        r.mem.gather_in_region = ((0, 0), 0, 1000 - STALL_SECONDS * 10, 995)  # stood in it 30 s, no cut
+        r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["x"], 100)
+
+    def test_a_walk_that_gets_no_nearer_may_move_it(self):
+        """Blocked on the way: 30 s with no nearer approach is impossible, never reached or not."""
+        from agentrealm_agent.states.gather import STALL_SECONDS
+
+        s, r = self.settled(self.reply(100, 100))
+        r.world.tick = 1000
+        r.mem.gather_in_region = ((0, 0), 12, 1000 - STALL_SECONDS * 10, 995)  # 12 blocks off for 30 s
         r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
         round_trip(s, r)
         self.assertEqual(r.plan.current()["x"], 100)
@@ -284,7 +295,7 @@ class GatherRegionKeptTest(unittest.TestCase):
         s, r = self.settled(self.reply(100, 100))
         r.world.tick = 1000
         r.mem.gather_spell = (400, 995)  # Gather began 60 s ago, walking
-        r.mem.gather_in_region = ((0, 0), 900, 995)
+        r.mem.gather_in_region = ((0, 0), 0, 900, 995)  # arrived 10 s ago
         r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
         round_trip(s, r)
         self.assertEqual(r.plan.current()["x"], 10)
@@ -296,7 +307,7 @@ class GatherRegionKeptTest(unittest.TestCase):
             with self.subTest(cut_at=cut_at):
                 s, r = self.settled(self.reply(100, 100))
                 r.world.tick = 1000
-                r.mem.gather_in_region = ((0, 0), 1000 - STALL_SECONDS * 10, 995)
+                r.mem.gather_in_region = ((0, 0), 0, 1000 - STALL_SECONDS * 10, 995)
                 r.gem_cuts.last_cut_tick, r.gem_cuts.last_cut_pos = 990, cut_at
                 r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
                 round_trip(s, r)
@@ -327,9 +338,9 @@ class GatherRegionKeptTest(unittest.TestCase):
 
 
 class GatherArrivalClockTest(unittest.TestCase):
-    """Gather writes ``Memory.gather_in_region`` itself: the clock starts on arrival, not on the walk."""
+    """Gather writes ``Memory.gather_in_region`` itself: the clock runs from its last nearer step or its arrival."""
 
-    def test_the_clock_starts_on_arrival_and_again_after_a_spell_away(self):
+    def test_the_clock_runs_from_the_last_approach_or_arrival(self):
         from agentrealm_agent.gem_yield import GemYieldTracker, STALL_SECONDS
         from agentrealm_agent.states import gather_outcome
 
@@ -343,14 +354,17 @@ class GatherArrivalClockTest(unittest.TestCase):
             gather_outcome(w, m, policy, op=op, gem_cuts=cuts, tick_hz=10)
 
         decide((30, 5), 100)
-        self.assertIsNone(m.gather_in_region, "walking toward the region starts no clock")
+        self.assertEqual(m.gather_in_region, ((0, 0), 15, 100, 100), "the walk there starts at 15 blocks off")
+        decide((20, 5), 200)
+        self.assertEqual(m.gather_in_region, ((0, 0), 5, 200, 200), "nearer: the clock starts over")
+        decide((20, 6), 250)
+        self.assertEqual(m.gather_in_region, ((0, 0), 5, 200, 250), "no nearer: it runs")
         decide((10, 5), 400)
-        self.assertEqual(m.gather_in_region, ((0, 0), 400, 400), "arrival starts it")
+        self.assertEqual(m.gather_in_region, ((0, 0), 0, 400, 400), "arrival starts it again")
         decide((9, 5), 450)
-        self.assertEqual(m.gather_in_region, ((0, 0), 400, 450), "staying keeps it")
-        decide((30, 5), 500)
+        self.assertEqual(m.gather_in_region, ((0, 0), 0, 400, 450), "staying in the region keeps it running")
         decide((10, 5), 450 + STALL_SECONDS * 10)
-        self.assertEqual(m.gather_in_region[1], 450 + STALL_SECONDS * 10, "back after 30 s away: it starts over")
+        self.assertEqual(m.gather_in_region[2], 450 + STALL_SECONDS * 10, "after 30 s off the region it starts over")
 
 
 class RetreatWindowPausedTest(unittest.TestCase):

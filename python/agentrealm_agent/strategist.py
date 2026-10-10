@@ -1146,7 +1146,7 @@ class Strategist:
                     self.rejected = [
                         *self.rejected,
                         f"gather_gems kept its region at {head['x']}, {head['y']}: it is not exhausted, "
-                        "cuts there still work, and nothing changed",
+                        "not yet shown impossible, and nothing changed",
                     ]
         if same_ops(goals, old.goals[old.index :]):
             # A timer reply that re-sends the stack (or leaves an empty one

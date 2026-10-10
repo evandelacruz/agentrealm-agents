@@ -35,6 +35,7 @@ from ..gem_yield import (
     exhausted_cells,
     poor_regions,
     STALL_SECONDS,
+    blocks_to_region,
     cut_or_since,
     region_corner,
     region_of,
@@ -269,15 +270,17 @@ def gather_outcome(
 
 
 def _note_in_region(w: WorldModel, m: Memory, target: tuple[int, int] | None, tick_hz: int) -> None:
-    """Keep ``Memory.gather_in_region``: the clock starts on arrival in the
-    target region, not on the walk there, and starts over after
-    ``STALL_SECONDS`` away from it."""
-    if target is None or w.pos is None or region_of(w.pos) != target:
+    """Keep ``Memory.gather_in_region``: the tick Gather last got nearer its
+    target region, or arrived in it. A walk that keeps closing in is never
+    a stall; one that is blocked, or Gather in the region with no cut, is.
+    ``STALL_SECONDS`` without working the region starts it over."""
+    if target is None or w.pos is None:
         return
+    d = blocks_to_region(w.pos, target)
     rec = m.gather_in_region
-    if rec is None or rec[0] != target or w.tick - rec[2] >= STALL_SECONDS * tick_hz:
-        rec = (target, w.tick, w.tick)
-    m.gather_in_region = (target, rec[1], w.tick)
+    if rec is None or rec[0] != target or w.tick - rec[3] >= STALL_SECONDS * tick_hz or d < rec[1]:
+        rec = (target, d, w.tick, w.tick)
+    m.gather_in_region = (target, rec[1], rec[2], w.tick)
 
 
 def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | None, tick_hz: int) -> int:

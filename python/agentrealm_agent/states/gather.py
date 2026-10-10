@@ -577,7 +577,7 @@ def _replan_gather(
         path = cost_path(w, target, params)
         if next_step(w, blocked, path):
             m.path, m.goal, m.gather_target = path, GOAL, ("pile", target)
-            return
+            return False
 
     bush_at: dict[Pos, Pos] = {}
     for p in sorted(preferred):
@@ -590,17 +590,18 @@ def _replan_gather(
         found = nearest_target(w, _nearest(here, bush_at), params)
         if found and next_step(w, blocked, found[1]):
             m.path, m.goal, m.gather_target = found[1], GOAL, ("bush", bush_at[found[0]])
-            return
+            return False
 
     grass = {p for p in preferred if w.view.tiles[p] == "grass"}
     if grass:
         found = nearest_target(w, _nearest(here, grass), params)
         if found and next_step(w, blocked, found[1]):
             m.path, m.goal, m.gather_target = found[1], GOAL, ("grass", found[0])
-            return
+            return False
 
     if here in safe:
         _plan_out(w, m, policy, blocked, params, safe)
+    return False
 
 
 def _path_to(w: WorldModel, target: tuple[str, Pos], params) -> list[Pos] | None:

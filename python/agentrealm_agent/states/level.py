@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from .. import targets as targets_mod
 from ..config import Policy
+from ..healing import supply_matches
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, doors_goal_path, nearest_target
@@ -174,7 +175,7 @@ def _needs(w: WorldModel, ctx: PlayContext, door: Pos) -> str | None:
             continue
         needs = row["needs"]
         carried = [s.code for s in w.held_supplies + w.chest_supplies] + [w.armed_code or ""]
-        return None if any(needs in code for code in carried if code) else needs
+        return None if any(supply_matches(needs, code) for code in carried if code) else needs
     return None
 
 
@@ -197,7 +198,7 @@ def _prerequisite_step(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutco
             targets_mod.finish_stop(m, ENTRANCE_GOAL, stop)
             stop = None
     if stop is None and needs is not None:
-        found = [e for e in w.entities if e.kind == "supply" and e.gem_price is None and needs in (e.code or "")]
+        found = [e for e in w.entities if e.kind == "supply" and e.gem_price is None and supply_matches(needs, e.code or "")]
         if found:
             item = min(found, key=lambda e: (chebyshev(e.pos, here), e.id))
             stop = targets_mod.Stop(item.pos, f"prerequisite: {needs}", item.id)

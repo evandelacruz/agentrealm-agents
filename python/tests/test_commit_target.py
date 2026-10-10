@@ -22,7 +22,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
-from agentrealm_agent.states.detour import DETOUR_EXTRA_STEPS, extra_steps
+from agentrealm_agent.states.detour import DETOUR_EXTRA_STEPS, DETOUR_TICKS, extra_steps
 from agentrealm_agent.states.explore import explore_outcome
 from agentrealm_agent.states.level import ENTRANCE_GOAL
 from agentrealm_agent.states.travel import TRAVEL_TARGET, resolve_destination
@@ -161,7 +161,7 @@ class PrerequisiteTest(unittest.TestCase):
     def test_the_key_is_a_stop_before_the_locked_entrance(self):
         w = field(at=(10, 4))
         w.view.tiles[(18, 4)] = "framed_door"
-        w.entities = [Entity("supply", 51, (6, 6), "brass_key")]
+        w.entities = [Entity("supply", 51, (6, 6), "key"), Entity("supply", 52, (12, 6), "keystone")]
         m = Memory()
         plan = Plan([{"op": "enter_level", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
         out = dispatch(w, ctx(m, plan, self.kb()))
@@ -175,7 +175,7 @@ class PrerequisiteTest(unittest.TestCase):
         self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 51}])
         # Taken: the stop is done and the walk resumes toward the entrance.
         w.entities = []
-        w.held_supplies = [InventorySupply(51, "brass_key")]
+        w.held_supplies = [InventorySupply(51, "key")]
         out = dispatch(w, ctx(m, plan, self.kb()))
         self.assertEqual(m.targets[ENTRANCE_GOAL].stops, [])
         self.assertEqual((out.state, m.path[-1]), ("Level", (18, 4)), out.reason)
@@ -183,8 +183,8 @@ class PrerequisiteTest(unittest.TestCase):
     def test_no_stop_when_the_item_is_carried(self):
         w = field(at=(10, 4))
         w.view.tiles[(18, 4)] = "framed_door"
-        w.entities = [Entity("supply", 51, (6, 6), "brass_key")]
-        w.held_supplies = [InventorySupply(9, "iron_key")]
+        w.entities = [Entity("supply", 51, (6, 6), "key")]
+        w.held_supplies = [InventorySupply(9, "key")]
         m = Memory()
         plan = Plan([{"op": "enter_level", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
         out = dispatch(w, ctx(m, plan, self.kb()))
@@ -239,6 +239,21 @@ class DetourTest(unittest.TestCase):
         self.play(w, m, plan, 1)
         w.entities = [Entity("supply", 78, (8, 6), "dirt_clod"), Entity("supply", 79, (9, 6), "apple")]  # food while not hurt
         self.assertEqual(self.play(w, m, plan, 1)[0].state, "Travel")
+
+    def test_a_detour_that_times_out_gives_its_find_up(self):
+        w = field(at=(2, 4))
+        plan = Plan([{"op": "travel", "to": "point", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
+        m = Memory()
+        self.play(w, m, plan, 1)
+        x, y = m.path[5]
+        gem = (x, y + 2 if y + 2 <= 7 else y - 2)
+        w.entities = [Entity("supply", 77, gem, "gem")]
+        self.assertEqual(dispatch(w, ctx(m, plan, pickup=True)).state, "Detour")
+        w.tick += DETOUR_TICKS  # never got there
+        out = dispatch(w, ctx(m, plan, pickup=True))
+        self.assertEqual(out.state, "Travel", out.reason)
+        self.assertIn(77, m.detour_skipped)
+        self.assertIsNone(m.detour)
 
     def test_extra_steps_bound(self):
         path = [(x, 4) for x in range(3, 19)]
@@ -321,8 +336,22 @@ class DiscoveryTest(unittest.TestCase):
         self.assertEqual(r.plan.current()["to"], "town")
         self.assertEqual(r.mem.path, [])
 
+    def test_a_deferred_head_takes_over_after_the_longest_wait(self):
+        llm = FakeLLM({"goals": [{"op": "travel", "to": "town", "x": 0, "y": 0}]})
+        s, r = make(llm), fake_runner()
+        head = r.plan.current()
+        r.mem.held_queue = {"queue_id": "q", "next_index": 1}  # a queue that never ends
+        round_trip(s, r)
+        s.clock.now += DEFER_WAIT - 0.1
+        s.on_window(r)
+        self.assertIs(r.plan.current(), head)
+        s.clock.now += 0.1
+        s.on_window(r)
+        self.assertEqual(r.plan.current()["to"], "town")
+
 
 DISCOVERY_WAIT = 5.0  # discovery.DISCOVERY_GAP_S, spelled out so the test reads the spec
+DEFER_WAIT = 10.0  # strategist.DEFER_MAX_S
 
 
 if __name__ == "__main__":

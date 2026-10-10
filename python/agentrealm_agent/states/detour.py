@@ -73,6 +73,8 @@ class DetourState(State):
         m = ctx.memory
         d = m.detour
         if d is not None and not _still_on(world, d):
+            if world.tick - d.since >= DETOUR_TICKS:
+                m.detour_skipped.add(d.supply_id)  # timed out: given up for the run, never re-picked
             _end(m, d)
             d = None
         if d is None:

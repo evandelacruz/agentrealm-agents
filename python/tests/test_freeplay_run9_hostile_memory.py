@@ -117,6 +117,15 @@ class RememberedPostsFadeTest(unittest.TestCase):
         self.assertEqual(s.spells, 2)
         self.assertEqual(len(known_reach(w, policy())), 2)
 
+    def test_a_guard_flickering_at_the_edge_of_sight_adds_no_spells(self):
+        """Review on #180: in and out of view every few ticks is one spell."""
+        w = field(at=(17, 10))
+        load_hostiles(kb_with_post(), w)
+        guard = Entity("npc", 9, POST, CODE)
+        for t in range(LAST_SEEN + 1, LAST_SEEN + 200, 2):
+            see(w, [guard] if t % 4 == 1 else [], t)
+        self.assertEqual(w.sightings[("npc", 9)].spells, 1)
+
     def test_its_strength_is_saved_as_it_has_faded(self):
         kb = kb_with_post()
         w = field()
@@ -199,6 +208,22 @@ class ThreatKeptAcrossRunsTest(unittest.TestCase):
         w = self.measured_run()
         self.assertEqual(w.threat.by_type[self.WEAK], 1)
         self.assertEqual((w.threat.hits[self.WEAK], w.threat.misses[self.WEAK]), (1, 1))
+
+    def test_a_miss_on_another_tick_is_not_cancelled_by_a_hit(self):
+        """Review on #180: events with no tick of their own take their group's,
+        so a hit on one tick and a miss on the next are told apart."""
+        w = field(at=(5, 5))
+        see(w, [Entity("npc", 3, (6, 5), self.WEAK[1])], 0)
+        groups = [
+            {"tick": 1, "events": [
+                {"kind": "Attacked", "actor_kind": "npc", "actor_id": 3},
+                {"kind": "Damaged", "amount": 1, "source_kind": "npc", "source_id": 3},
+            ]},
+            {"tick": 16, "events": [{"kind": "Attacked", "actor_kind": "npc", "actor_id": 3}]},
+            {"tick": 31, "events": [{"kind": "Damaged", "amount": 1, "source_kind": "npc", "source_id": 3}]},
+        ]
+        w.learn_threat(w.apply_events(groups), w.entities)
+        self.assertEqual((w.threat.hits[self.WEAK], w.threat.misses[self.WEAK]), (2, 1))
 
     def test_a_measured_type_loads_and_allows_a_weak_fight(self):
         kb = KnowledgeBase.empty("fake-world")

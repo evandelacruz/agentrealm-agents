@@ -57,7 +57,9 @@ SIGHTING_TICKS = 600
 # Its ``Sighting.strength`` is 1 while the guard is in view and halves every
 # ``POST_HALF_LIFE_TICKS`` of world time out of view (5 min at 10 ticks/s),
 # times the spells it was seen on its post, up to ``POST_MAX_SPELLS``: a post
-# seen again and again stays strong for longer. A post in sight with nobody
+# seen again and again stays strong for longer. A spell counts when the guard
+# is back on its post after ``SIGHTING_TICKS`` out of view, so a guard at the
+# edge of sight flickering in and out adds none. A post in sight with nobody
 # on it halves every ``EMPTY_POST_HALF_LIFE_TICKS`` looked at (1 s), at most
 # once a look. It holds ground while at least ``POST_HOLD_STRENGTH``, only
 # prices it below that, and is forgotten below ``POST_FORGET_STRENGTH``.
@@ -80,7 +82,8 @@ class Sighting:
     (``survival.is_hostile``), so a type found hostile later counts.
 
     A post fades once its guard is out of view (``strength``, as of tick
-    ``noted``; ``fade_post``). ``spells`` counts the times it came into view.
+    ``noted``; ``fade_post``). ``spells`` counts the times its guard was
+    seen back on its post after a while away.
     """
 
     entity: Entity  # as last seen
@@ -576,8 +579,8 @@ class WorldModel:
             s = self.sightings.get(key)
             if s is None or s.map_id != self.map_id:
                 s = self.sightings[key] = Sighting(e, self.map_id, tick, e.pos, noted=tick)
-            elif not s.in_view:
-                s.spells += 1
+            elif s.post and not s.in_view and e.pos == s.home and tick - s.tick >= SIGHTING_TICKS:
+                s.spells += 1  # back on its post after a while away: one more spell
             s.entity, s.tick, s.strength, s.noted, s.in_view = e, tick, 1.0, tick, True
             if not s.post and e.kind == "npc" and self.npc_still_ticks(e) >= POST_STILL_TICKS:
                 s.home, s.post = e.pos, True
@@ -747,6 +750,8 @@ class WorldModel:
         self.changed_blocks = []
         for group in events_by_tick or []:
             for ev in group.get("events") or []:
+                if "tick" not in ev and "tick" in group:
+                    ev = {**ev, "tick": group["tick"]}  # flat, each event keeps its tick (count_swings pairs on it)
                 flat.append(ev)
                 kind = ev.get("kind")
                 if hostile_hit(ev):

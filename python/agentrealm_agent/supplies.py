@@ -45,6 +45,10 @@ BUNDLED_PATH = Path(__file__).resolve().parent / "reference" / "supplies.json"
 CACHE_PATH = STATE_DIR / "supplies.json"
 CACHE_MAX_AGE_SECONDS = 3600
 FETCH_TIMEOUT_SECONDS = 5.0
+# The ``use_effects`` that open a block (cut, chop, smash, burn, blast); light
+# and water open none (docs/GAME_NOTES.md Breaking blocks). ``plan`` takes its
+# ``break_block`` capabilities from here.
+CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
 # A ``Use`` on a block reaches the next block, corners included, with a tool
 # or a weapon that authors no ``attack_range`` (API Use, B104).
 DEFAULT_BLOCK_REACH = 1
@@ -115,13 +119,17 @@ def fetch(url: str = SUPPLIES_URL, timeout: float = FETCH_TIMEOUT_SECONDS) -> An
 
 def load(
     *,
-    fetcher: Callable[[], Any] = fetch,
-    cache_path: Path = CACHE_PATH,
+    fetcher: Callable[[], Any] | None = None,
+    cache_path: Path | None = None,
     now: Callable[[], float] = time.time,
 ) -> str:
     """Replace the table from the freshest source that works; return its name
-    (``cache``, ``served``, ``stale cache`` or ``bundled``)."""
+    (``cache``, ``served``, ``stale cache`` or ``bundled``). ``fetcher`` and
+    ``cache_path`` default to the module's ``fetch`` and ``CACHE_PATH``, read
+    on each call, so tests can turn both off in one place (tests/__init__.py)."""
     global _table
+    fetcher = fetcher or fetch
+    cache_path = cache_path or CACHE_PATH
     try:
         fresh = now() - cache_path.stat().st_mtime < CACHE_MAX_AGE_SECONDS
     except OSError:
@@ -145,11 +153,17 @@ def _save_cache(path: Path, raw: Any) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    except OSError:
+        return  # an unsaved cache only means the next run fetches again
+    try:
         with os.fdopen(fd, "w") as f:
             json.dump(raw, f)
         os.replace(tmp, path)
-    except OSError:
-        pass  # an unsaved cache only means the next run fetches again
+    except (OSError, TypeError, ValueError):
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def row(code: str | None) -> Supply | None:
@@ -189,8 +203,6 @@ def kept_on_break(code: str | None) -> bool:
 
 def break_capabilities(code: str | None) -> frozenset[str]:
     """The block-breaking capabilities among its ``use_effects`` (cut, chop, …)."""
-    from .plan import CAPABILITIES  # here, not at the top: plan imports healing, which imports this module
-
     r = row(code)
     return r.use_effects & CAPABILITIES if r is not None else frozenset()
 

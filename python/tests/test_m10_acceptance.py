@@ -187,7 +187,6 @@ class RunAcceptanceSmokeTest(unittest.TestCase):
         lines: list[str] = []
         with mock.patch.object(acceptance_smoke, "Runner", FakeRunner), \
                 mock.patch.object(acceptance_smoke, "load_knowledge", side_effect=[kb, KnowledgeBase("olympuff")]), \
-                mock.patch.object(acceptance_smoke, "load_supplies"), \
                 mock.patch.object(acceptance_smoke, "save_knowledge", side_effect=OSError("disk full")):
             elapsed, knowledge = acceptance_smoke.run_acceptance_smoke(
                 object(), cfg, 9, metrics(), timeout_s=0, out=lines.append

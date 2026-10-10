@@ -263,9 +263,6 @@ class SmokeScriptTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", self.tmp)
         patch.start()
         self.addCleanup(patch.stop)
-        offline = mock.patch("agentrealm_agent.supplies.load", return_value="bundled")  # no fetch in tests
-        offline.start()
-        self.addCleanup(offline.stop)
 
     def main(self, argv, env=None):
         out, err = io.StringIO(), io.StringIO()

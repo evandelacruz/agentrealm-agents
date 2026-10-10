@@ -206,7 +206,6 @@ class SharedRunSmokeTest(unittest.TestCase):
         m = metrics()
         with mock.patch.object(acceptance_smoke, "Runner", FakeRunner), \
                 mock.patch.object(acceptance_smoke, "load_knowledge"), \
-                mock.patch.object(acceptance_smoke, "load_supplies"), \
                 mock.patch.object(acceptance_smoke, "save_knowledge"):
             acceptance_smoke.run_acceptance_smoke(mock.Mock(), cfg, 9, m, timeout_s=0)
         self.assertIs(m.stop, seen["stop"])

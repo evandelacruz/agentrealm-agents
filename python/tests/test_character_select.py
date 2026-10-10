@@ -95,9 +95,6 @@ class ProfileAndCliTest(unittest.TestCase):
         patch = mock.patch.object(config, "STATE_DIR", self.dir)
         patch.start()
         self.addCleanup(patch.stop)
-        offline = mock.patch("agentrealm_agent.supplies.load", return_value="bundled")  # no fetch in tests
-        offline.start()
-        self.addCleanup(offline.stop)
         self.toml = self.dir / "wren.toml"
         self.toml.write_text('world = "sandbox"\n', encoding="utf-8")
 

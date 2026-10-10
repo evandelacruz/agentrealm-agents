@@ -131,6 +131,18 @@ class LoadTest(unittest.TestCase):
         self.assertEqual(self.load(None), "stale cache")
         self.assertTrue(supplies.is_weapon("cleaver"))
 
+    def test_a_failed_cache_save_leaves_no_temp_file(self):
+        with mock.patch.object(supplies.os, "replace", side_effect=OSError("disk full")):
+            self.assertEqual(self.load(SERVED), "served")
+        self.assertEqual(list(self.cache.parent.iterdir()), [])
+
+    def test_defaults_are_read_on_each_call(self):
+        # tests/__init__.py turns fetching off by patching these module names.
+        with mock.patch.object(supplies, "fetch", self.fetcher(SERVED)), \
+                mock.patch.object(supplies, "CACHE_PATH", self.cache):
+            self.assertEqual(supplies.load(), "served")
+        self.assertTrue(self.cache.exists())
+
     def test_unreachable_site_and_no_cache_fall_back_to_the_bundled_copy(self):
         self.assertEqual(self.load([]), "bundled")
         self.assertTrue(supplies.is_weapon("pocket_knife"))

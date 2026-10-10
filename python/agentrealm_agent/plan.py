@@ -15,6 +15,7 @@ from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .memory import Memory, note_goal_done, note_goal_failed
+from .supplies import CAPABILITIES
 from .travel.ops import parse_travel_string, travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
 
@@ -26,7 +27,6 @@ TRAVEL_TO = frozenset({"entrance", "town", "hunting_ground", "shop", "point"})
 # Destinations the agent finds itself: they take no x, y (``shop`` and
 # ``entrance`` may name one by x, y; without, the nearest known one).
 TRAVEL_SYMBOLIC = frozenset({"entrance", "town", "hunting_ground", "shop"})
-CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
 ALL_PARAMS = frozenset(PARAM_DEFAULTS)
 
 # Op name -> the executor state that carries it out (PLAN.md **Architecture:

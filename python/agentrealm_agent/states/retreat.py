@@ -124,6 +124,7 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     losing = losing_ground(w, ctx, goal)
     if losing:
         if out := _turn_on_losing(w, ctx, state):
+            m.retreat_paused = (goal, w.tick)  # a drink or a swing is not the walk getting stuck
             return out
         m.path = []  # replan below, weighing no hostile
     elif not escape and m.held_queue is not None and m.state == state and m.retreat_walk == goal:
@@ -165,13 +166,18 @@ def no_progress(w: WorldModel, m: Memory, goal: Pos) -> bool:
     the ``safe`` walk at ``goal`` is sampled each call (``nav_stuck.observe``)
     but never made active, so it changes no other walk's window or the
     oscillation guard. A decision that skips it starts the window over
-    (``nav_stuck.resume``). Once it reports, the attempt is dropped, so the
-    goal gets a fresh window if it is picked again.
+    (``nav_stuck.resume``). The window pauses while a losing Retreat drinks
+    or fights back instead of walking (``Memory.retreat_paused``): the time
+    since that decision is not counted. Once it reports, the attempt is
+    dropped, so the goal gets a fresh window if it is picked again.
     """
     att = nav_stuck.attempt(m, w, "safe", goal)
     if att is None:
         return False
     nav_stuck.resume(m, att, w.tick)
+    paused, m.retreat_paused = m.retreat_paused, None
+    if paused is not None and paused[0] == goal:
+        att.window_tick = min(w.tick, att.window_tick + w.tick - paused[1])
     started = att.window_tick if att.best is None else None
     nav_stuck.observe(att, w, m.path if m.goal == "safe" and m.path and m.path[-1] == goal else None)
     if started is not None:

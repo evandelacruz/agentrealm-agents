@@ -34,6 +34,9 @@ from ..gem_yield import (
     better_region,
     exhausted_cells,
     poor_regions,
+    STALL_SECONDS,
+    blocks_to_region,
+    cut_or_since,
     region_corner,
     region_of,
 )
@@ -77,8 +80,6 @@ SHADOW_SECONDS = 15
 SHADOW_GAP_SECONDS = 5
 # Moving off goes to cells at least this far from the shadowing hostile, in one walk.
 MOVE_OFF_DISTANCE = 2 * GATHER_HOSTILE_RADIUS
-# No cut that took effect for this long is a stall, said in ``gather_status``.
-STALL_SECONDS = 30
 # Gather's last decision, for the planner's State (``Memory.gather_status``).
 CUTTING = "cutting"
 TAKING = "taking a gem"
@@ -258,6 +259,7 @@ def gather_outcome(
         m.gather_status = WALKING.format(WALK_TARGETS.get(walk or "", "a cell to cut"))
     else:
         m.gather_status = CUTTING
+    _note_in_region(w, m, target, tick_hz)
     idle = _seconds_without_cut(w, m, gem_cuts, tick_hz)
     if m.gather_status != CUTTING and idle >= STALL_SECONDS:
         m.gather_status = STALLED.format(m.gather_status, idle)
@@ -265,6 +267,20 @@ def gather_outcome(
         m.gather_status = IN_REGION.format(m.gather_status, *region_corner(worked))
         out.reason = IN_REGION.format(out.reason, *region_corner(worked))
     return out
+
+
+def _note_in_region(w: WorldModel, m: Memory, target: tuple[int, int] | None, tick_hz: int) -> None:
+    """Keep ``Memory.gather_in_region``: the tick Gather last got nearer its
+    target region, or arrived in it. A walk that keeps closing in is never
+    a stall; one that is blocked, or Gather in the region with no cut, is.
+    ``STALL_SECONDS`` without working the region starts it over."""
+    if target is None or w.pos is None:
+        return
+    d = blocks_to_region(w.pos, target)
+    rec = m.gather_in_region
+    if rec is None or rec[0] != target or w.tick - rec[3] >= STALL_SECONDS * tick_hz or d < rec[1]:
+        rec = (target, d, w.tick, w.tick)
+    m.gather_in_region = (target, rec[1], rec[2], w.tick)
 
 
 def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | None, tick_hz: int) -> int:
@@ -275,8 +291,7 @@ def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | N
     if w.tick - seen >= STALL_SECONDS * tick_hz:
         since = w.tick
     m.gather_spell = (since, w.tick)
-    last_cut = gem_cuts.last_cut_tick if gem_cuts is not None and gem_cuts.last_cut_tick is not None else since
-    return max(0, w.tick - max(since, last_cut)) // max(1, tick_hz)
+    return max(0, w.tick - cut_or_since(gem_cuts, since)) // max(1, tick_hz)
 
 
 def _barred_by_hostile(w: WorldModel, policy: Policy, skip: set[tuple[int, int]], exhausted: set[Pos]) -> bool:

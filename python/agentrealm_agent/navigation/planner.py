@@ -444,24 +444,60 @@ def _corridor_index(corridor: list[Pos]) -> dict[Pos, int]:
     return {**beside, **index}
 
 
-def _toward(goal: Pos, corridor: list[Pos] | None) -> Callable[[Pos], int]:
-    """Estimated steps left to ``goal``, along the corridor when there is one.
+def _toward(goal: Pos, corridor: list[Pos] | None, came: dict[Pos, Pos] | None = None) -> Callable[[Pos], int]:
+    """Estimated steps left to ``goal``, along the corridor search's tree when there is one.
 
-    A cell in corridor tile i heads for the centre of tile i + 1 (the last
-    tile heads for the goal), then follows the rest of the corridor. A cell
-    in a tile beside the corridor counts as in the first corridor tile it touches.
+    A cell heads for the next tile toward the goal in ``came`` (the tree the
+    corridor search grew back from the goal's tile): its centre, or the goal
+    itself when that tile holds it. From there it follows the tree. A cell
+    in a tile beside the corridor that the tree has not reached heads for
+    the best tile next to it that it has.
+
+    Each cell's estimate depends on the tree alone, never on the tile we
+    stand in, so a step that lowered it is never undone by the next
+    decision's plan from the new cell (free-play run 4: a corridor read from
+    each side of a tile edge, or a fall back to straight-line, priced two
+    cells each below the other, and Travel paced between them).
     """
     if not corridor:
         return lambda p: chebyshev(p, goal)
-    waypoints = [macro_center(m) for m in corridor[1:]] + [goal]
-    rest = [0] * len(waypoints)
-    for i in range(len(waypoints) - 2, -1, -1):
-        rest[i] = rest[i + 1] + chebyshev(waypoints[i], waypoints[i + 1])
-    index = _corridor_index(corridor)
+    goal_m = macro_cell(goal)
+    tree = dict(came or {})
+    for a, b in zip(corridor, corridor[1:]):
+        tree.setdefault(a, b)
+
+    def point(m: Pos) -> Pos:
+        return goal if m == goal_m else macro_center(m)
+
+    rest: dict[Pos, int | None] = {goal_m: 0}
+
+    def rest_from(m: Pos) -> int | None:
+        """Estimated steps from ``point(m)`` to the goal along the tree; None off it."""
+        chain: list[Pos] = []
+        cur: Pos | None = m
+        while cur is not None and cur not in rest and cur not in chain:
+            chain.append(cur)
+            cur = tree.get(cur)
+        tail = rest.get(cur) if cur is not None else None
+        for t in reversed(chain):
+            nxt = tree.get(t)
+            tail = None if tail is None or nxt is None else tail + chebyshev(point(t), point(nxt))
+            rest[t] = tail
+        return rest[m]
+
+    def via(p: Pos, m: Pos) -> int | None:
+        r = rest_from(m)
+        return None if r is None else chebyshev(p, point(m)) + r
 
     def h(p: Pos) -> int:
-        i = index[macro_cell(p)]
-        return chebyshev(p, waypoints[i]) + rest[i]
+        m = macro_cell(p)
+        if m == goal_m:
+            return chebyshev(p, goal)
+        nxt = tree.get(m)
+        if nxt is not None and (out := via(p, nxt)) is not None:
+            return out
+        near = [v for dx, dy in NEIGHBOURS if (v := via(p, (m[0] + dx, m[1] + dy))) is not None]
+        return min(near) if near else chebyshev(p, goal)
 
     return h
 
@@ -649,9 +685,11 @@ def cost_path(
             nav.reset(goal)
         corridor = _coarse_search(grid, _MacroCosts(grid), nav, coarse_budget)
     if corridor:
-        found = _fine_path(grid, _toward(goal, corridor), set(_corridor_index(corridor)), fine_budget)
-        if found:
-            return found
+        # The corridor's answer stands, a step or none: a straight-line
+        # retry from a cell the corridor will not leave walks back to where
+        # the corridor came from (free-play run 4). None is "no path", which
+        # stuck detection escalates (A15).
+        return _fine_path(grid, _toward(goal, corridor, nav.came), set(_corridor_index(corridor)), fine_budget)
     return _fine_path(grid, _toward(goal, None), None, fine_budget)
 
 

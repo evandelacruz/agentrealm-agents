@@ -6,8 +6,9 @@ walked, and Pickup takes it once it is in reach. No planner call.
 
 A valuable is a free gem, a life (a code the item table learned, A47), or
 food while hurt. It is a detour when it lies within ``DETOUR_REACH`` of a
-cell of the current path and going by it adds at most
-``DETOUR_EXTRA_STEPS`` steps. Hostile safety is Gather's: the find must be
+cell of the route still ahead (the queued steps, then the path) and going
+by it adds at most ``DETOUR_EXTRA_STEPS`` steps, counted from where the
+character stands. Hostile safety is Gather's: the find must be
 on ground ``gather_ground`` allows (off hazards, clear of every known
 hostile's bar), and the survival reflexes above it still win.
 
@@ -27,7 +28,7 @@ from ..memory import Memory
 from ..loot import GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_room
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import bounded_step, grid_params, nav_search
+from ..pathing import bounded_step, grid_params, nav_search, route_ahead
 from ..survival import hostile_reach
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -101,7 +102,10 @@ def valuable(w: WorldModel, e: Entity, items: dict) -> bool:
 
 def extra_steps(here: Pos, find: Pos, path: list[Pos]) -> int | None:
     """Steps going by ``find`` adds to walking ``path`` from ``here``, rejoining
-    it at the best cell within ``DETOUR_REACH`` of ``find``; None when no cell is."""
+    it at the best cell within ``DETOUR_REACH`` of ``find``; None when no cell is.
+
+    ``path`` must start at the step after ``here`` (``route_ahead``): cell i
+    is i + 1 steps away. A find beside the route then costs at most 2."""
     to_find = chebyshev(here, find)
     costs = [to_find + chebyshev(find, p) - (i + 1) for i, p in enumerate(path) if chebyshev(find, p) <= DETOUR_REACH]
     return min(costs) if costs else None
@@ -111,14 +115,17 @@ def detour_find(w: WorldModel, ctx: PlayContext) -> Entity | None:
     """The valuable worth a detour off the walk under way: fewest extra steps, then id."""
     m = ctx.memory
     here = w.pos
-    if here is None or not m.path or m.goal in ("", GOAL):
+    if here is None or m.goal in ("", GOAL):
+        return None
+    route = route_ahead(w, m)  # the queued steps too: priced from where we stand
+    if not route:
         return None
     items = knowledge_items(ctx.knowledge)
     best: tuple[int, int, Entity] | None = None
     for e in w.entities:
         if e.id in m.detour_skipped or chebyshev(e.pos, here) <= 1 or not valuable(w, e, items):
             continue  # in reach is Pickup's
-        extra = extra_steps(here, e.pos, m.path)
+        extra = extra_steps(here, e.pos, route)
         if extra is None or extra > DETOUR_EXTRA_STEPS or not gather_ground(w, e.pos, ctx.policy):
             continue
         if best is None or (extra, e.id) < best[:2]:

@@ -13,13 +13,12 @@ from dataclasses import dataclass
 from .config import Policy
 from .directives import Directives, default_directives
 from .plan import Plan
-from .executor.movement import step_landing
 from .gem_yield import GemYieldTracker
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import known_prefix
 from .navigation.rejection import navigation_avoid_costly
-from .pathing import step_open
+from .pathing import remaining_walk_cells, step_open
 from .poll_cadence import gate_tick_call, is_urgent
 from .states import PlayContext, dispatch
 from .states.intents import set_position, take, use_on, withdraw_all
@@ -191,25 +190,6 @@ def _cell_on_path_blocked(w: WorldModel, avoid: set[Pos], p: Pos) -> bool:
     if not w.view.walkable(p):
         return True
     return p in w.occupied() or p in w.for_sale()
-
-
-def remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
-    """Tiles the held walk queue still steps onto, from tracked position.
-
-    Only the queue on the server counts: the plan past its horizon is
-    replanned when the queue runs out anyway.
-    """
-    if w.pos is None or m.pending_intents is None:
-        return []
-    pos = w.pos
-    cells: list[Pos] = []
-    for i in range(m.pending_next_index, len(m.pending_intents)):
-        intent = m.pending_intents[i]
-        if intent.get("verb") != "Step":
-            continue
-        pos = step_landing(pos, intent["direction"])
-        cells.append(pos)
-    return cells
 
 
 def path_blockers(w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None = None) -> set[Pos]:

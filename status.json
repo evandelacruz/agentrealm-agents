@@ -25,7 +25,7 @@
 
   "A8": {"state": "done"},
 
-  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats. Free-play run 3: a Retreat, Park or Heal walk that gets no nearer a safe tile in a stuck window rules it out for a bounded time and moves on to the next candidate, else town (retreat.no_progress; Heal through bounded_step)."},
+  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats. Free-play run 3: a Retreat, Park or Heal walk that gets no nearer a safe tile in a stuck window rules it out for a bounded time and moves on to the next candidate, else town (retreat.no_progress; Heal through bounded_step). A losing Retreat's drink or swing pauses the safe walk's stuck window."},
 
   "A10": {"state": "done"},
 
@@ -33,7 +33,7 @@
 
   "A12": {"state": "done"},
 
-  "A13": {"state": "done"},
+  "A13": {"state": "done", "note": "Free-play run 4: the window search ranks cells by the corridor tree, not by the tile it stands in, and never falls back to a straight line from a corridor with no step."},
 
   "A14": {"state": "done"},
 
@@ -145,5 +145,5 @@
 
   "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."},
 
-  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. No live run yet."}
+  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. Free-play run 4 played it live; its fixes: Detour prices finds from where the character stands, queued steps included (pathing.route_ahead), and a planner reply that moves the gather_gems region needs a reason (gem_yield.keep_gather_region)."}
 }

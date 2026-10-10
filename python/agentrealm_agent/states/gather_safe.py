@@ -1,6 +1,6 @@
 """Which ground **Gather** may work, and which counts as safe-ish (A22). Not a ``STATES`` entry.
 
-``GatherState`` targets a gem pile, grass or bush only where ``gather_ground``
+``GatherState`` targets a gem pile or grass only where ``gather_ground``
 holds: known ground off hazards with no known hostile near, in view or
 remembered (``hostile_ground.known_reach``), and walks there only by a route clear of every
 known hostile's reach (``route_clear``). Detour (A71) uses the same two
@@ -29,7 +29,7 @@ def hostiles_near(w: WorldModel, pos: Pos, policy: Policy, radius: int | None = 
 
 
 def gather_ground(w: WorldModel, pos: Pos, policy: Policy, d: Danger | None = None) -> bool:
-    """Known ground where cutting grass or a bush, or taking a gem pile, is allowed.
+    """Known ground where cutting grass, or taking a gem pile, is allowed.
 
     The cell must be revealed, not on a hazard tile, and have no known
     hostile in view within its ``gather_bar``: ``GATHER_HOSTILE_RADIUS`` for

@@ -447,7 +447,7 @@ class GatherRegionsTest(unittest.TestCase):
 
     def test_with_too_few_cuts_here_it_keeps_cutting(self):
         kb = KnowledgeBase.empty("fake-world")
-        sample(kb, (40, 8), FAIR_SAMPLE_CUTS - 1, 0)
+        sample(kb, (40, 8), FAIR_SAMPLE_CUTS - 1, 1)
         sample(kb, (24, 8), 8, 2)
         out = gather_outcome(gem_world(), Memory(), POLICY, knowledge=kb, op=GATHER)
         self.assertEqual(out.reason, "cut grass")

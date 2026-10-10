@@ -576,3 +576,118 @@ Decisions outside held queues: 109 planner waits (healing in town, 420–593 s),
    ```
 
 **Minor:** One planner reply at 195 s was not a JSON object. The next call recovered. The (413–415, 414) cluster took two stops: Detour aimed at one pile, and Pickup took only its neighbour. Greet said hello to 5 chugbugs, 4 snotlings and 2 gristlewicks.
+
+### Run 8: baseline on the game update; grass pays, bushes do not, and the agent never swings
+
+- **Code:** `main` at `7b16517`, with every fix from runs 4–7 (#159–#171). It is the first run on the game update: attack power 2 for everyone (about 65% to hit, knife 1–4 damage), grass gems at 20%/25%, bushes drop berries only, and a killed hostile may drop a gem (source: the Unreleased section of `CHANGELOG.md` in the game server repo, `evandelacruz/saims`). These facts replace `docs/GAME_NOTES.md` Gems and the knife's damage 2, which still describe the old game. The update to GAME_NOTES, and the agent's adaptation, are on the `c/game-update-1010` branch. The agent on `main` is not adapted yet, so this run is the baseline.
+- **Verdict:** exit 0, `PASS` after **601.5 s**, on the short-run gates only. The park **parked safe** at (409, 418) after 0.3 s and cleared the queue. The character started at **4/10**, 5 lives and **1 gem** at (399, 370), where run 7's park left it. It had the pocket knife armed and held matches ×2 and no potion. The container was fresh, so the local state directory, and with it the world knowledge base, started empty: no hostile type or sighting from runs 4–7 was loaded.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; weak hostile kills **0**; gems earned **yes**; armor **no**; shop weapon **no**; potion reserve **no**; Heal took ground food **yes**, Heal drank a potion **no** (none held). Planner: 51 calls, 50 plans accepted, 1 error (not JSON, at 589.6 s).
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–67 s | `travel` town, `read` ×2, `explore_area` town r20 | Started at 4/10. Heal walked it into the safe zone and rested 15 s. Health did not rise. |
+| 67–120 s | `read` ×4–6, `say` rumor_teller | Asked the rumor tellers and read signs. At 109 s Detour took it to the gem pile at (428, 366), 2 cells from the gristlewick pack, at 4/10 (defect 2). It took the pile and 3 hits, down to **1/10**. Retreat walked it out. |
+| 120–200 s | `travel` town, `wait` 20 s, `read`, `gather_gems:30` | Back to town at 1–2/10. It greeted 9 townsfolk. |
+| 200–290 s | `read` ×3–4 (statues), `gather_gems:10`, `buy` small_potion, `gather_gems:30` | Detour took the (413–415, 414) cluster (+3). Two apples and a berry brought it to 8/10. |
+| 290–310 s | `buy` matches, `buy` small_potion, `gather_gems:30` (384, 370) | Bought a third box of matches at 305.6 s (**5 → 0**), on the rumor "Take matches. Lots." The potion buy then had no gems. |
+| 310–440 s | `gather_gems:30` (384, 370), then `gather_gems:30 fight`, then `gather_gems:15`, `buy` bronze_sword | **0 cuts in 177 s.** Gather reported blocked by a hostile, and fell back to Explore's keep-away and explore walks (defect 1). |
+| 440–511 s | `gather_gems:15`, `buy` bronze_sword | Cut 19 times at (359–388, 409–441) (+2). Detour took the (359–361, 440) triple (+3). At 511 s, 3 chugbugs hit it at once beside the cut, 8 → 5. |
+| 511–590 s | `travel` town, `wait` 20 s, `gather_gems:15` (384, 416), `buy` bronze_sword | Retreat, then Travel, took it back to safe ground at 6/10. It set out to gather again at 553 s. |
+| 590–600 s | none | A reply that was not JSON cleared the stack (defect 3). The safe default explored until the stop. |
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **1** | **5** (+9 earned, −5 for matches) |
+| Armed | pocket_knife | pocket_knife |
+| Worn | `{}` | `{}` |
+| Held | matches ×2 | matches ×3 |
+| Potions | 0 | 0 |
+
+Bought: matches, by a `buy` op, once. Equipped: nothing. Drank: nothing; no potion was held.
+
+#### Gems earned
+
+**9** in 600 s, **0.9 a minute**.
+
+| Source | Gems | Cuts | |
+|---|---|---|---|
+| Gem piles | 7 | | All by Detour: (428, 366) at 113 s, (413–415, 414) at 209–218 s, (359–361, 440) at 456–458 s. |
+| Grass | 2 | 6 | (388, 430) at 442 s and (366, 409) at 505 s, 1 in 3. |
+| Bushes | 0 | 13 | None of them could drop a gem. A 14th cut, Break's at (369, 426), dropped a berry, which it took. |
+| Kills | 0 | | The agent swung 0 times. |
+
+Cut grass and bushes grew back in about 60 s, as GAME_NOTES says. Gather cut only from 440 s to 511 s: 71 s of cutting in a 600 s run.
+
+#### Fights
+
+| Time | Where | Hostiles | Their swings | Hits | Damage | Ours | Outcome |
+|---|---|---|---|---|---|---|---|
+| 112–115 s | (428–429, 366–368), the pile beside the pack | npc 217, npc 216 (gristlewick pack) | 5 | 3 | 3 | 0 | Retreat walked out at 1/10. |
+| 511 s | (365, 408), cutting | 3 chugbugs (npc 164, 167, 168) | 3 | 3 | 3 | 0 | Retreat, then Travel, walked out at 5/10. |
+
+- **Count:** 2 encounters, both Retreats. Hostiles swung 8 times and hit 6 (75%, near the update's 65%), for 1 damage each.
+- **Our hit rate:** none to measure. The agent never sent `Attack`. Its win estimate still assumes 1 damage a hit against 10 health and one swing a second (`survival.py:21–23`), so no fight looked winnable. A planner `gather_gems` with `fight: true` at 415 s met no fight either.
+- **Kills and deaths:** 0 and 0. The lowest health was 1/10 at 115 s.
+
+#### Runs 4–7 fixes, checked
+
+| Fix | Run 8 | |
+|---|---|---|
+| Park dead end (#165) | **Holds.** Parked safe in 0.3 s at (409, 418). | Not a hard test: it started on safe ground. |
+| One refuge for Retreat and Flee (#168) | **Holds.** 0 Flee decisions. All 4 Retreats walked straight out or ended at once: (403, 398) at 113 s, (399, 429) at 434 s, (397, 401) at 511 s and 538 s. | Run 7: 19 s back and forth, 6 hits. |
+| Stale planner reply (#168) | **Holds.** One `buy` matches, at 305.6 s. Call 27 was applied at 304.0 s, before the buy, and no later reply put it back. | Run 7: a second box bought. |
+| Persisted hostility (#162, #165) | **Not tested.** The knowledge base started empty. In the run, the pack was learned at 112 s, and Gather and Detour kept off it after that. | |
+| Heal refusal and no-op drinks (#169, #171) | **Not tested.** No potion was held. | |
+
+#### What the update changes for the agent
+
+- **Bush cuts earn nothing now.** Gather treats grass and bushes alike (`states/gather.py:696–712`, from GAME_NOTES Gems). 13 of its 19 cuts were bushes, for 0 gems. Grass gave 2 in 6. Gather should cut grass only, and take bushes for food.
+- **Fights are worth taking, but the agent cannot see it.** The hostiles hit 75% of swings for 1 damage. Our knife now does 1–4 at about 65%. The win model in `survival.py:21–23` is from before the update, so the agent retreated from 3 chugbugs at 8/10 and never swung. Kill drops stay out of reach until it changes.
+- **The yield model needs to start again.** The region yields learned before the update (A63) count bush cuts and the old rates. The planner read "1 gem in 1 cut" at (384, 416) as the best region.
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 144,328, output 12,271, cache write 101,586, cache read 5,079,300 |
+
+#### Decision mix
+
+Intents: 868 `Step`, 2,453 `Wait`, 23 `Say`, 20 `Use`, 13 `Read`, 9 `Take`, no `Attack`, no `Arm`. Call mix: 643 `tick`, 282 `zone`, 216 `entities`, 118 `strategist`, 52 `self`, 43 `terrain`, 16 `position`.
+
+#### Top 3 defects
+
+1. **Gather made no cut for 177 s, blocked by a hostile 10–13 cells off** (`states/gather.py:306–319`, `states/explore.py:86–119`). From 263 s to 440 s Gather made no cut. Its status said blocked by a hostile (the planner's notes read "blocked by a hostile for 62 s", then 153 s, then 171 s). With no cut to make, it fell back to Explore's keep-away ("hurt, hostile near: step away" at 6–8/10) and to explore walks. The hostile was a snotling 10–13 cells off, by the planner's notes, and grass lay all around town. The first cut came only once Gather had walked south to (388, 430). That cost about 30% of the run, at 1 gem in 3 grass cuts.
+
+   ```
+   256.6 s  @393,381  gather → (398, 369)
+   263.8 s  @398,371  look for gems: hurt, hostile near: step away   (×4)
+   273–433 s          look for gems: explore … / gather → (368, 411)
+   415.6 s  strategist: gather_status blocked by a hostile for 153 s with no cuts
+   440.8 s  @388,430  cut grass   (first cut of the run)
+   ```
+
+2. **Detour takes a hurt character to a gem pile beside a pack** (`states/detour.py:118`). At 109 s, at 4/10, Detour walked from the explore walk to the pile at (428, 366). It is the same pile beside the gristlewick pack as run 7's defect 2. The pack was not known as hostile yet (empty knowledge base), so nothing priced it. It took the gem and 3 hits, down to 1/10. A gem detour has no health gate: food has one (`hurt`), but gems are always worth the steps. Heal had also stopped resting at 4/10 after 15 s without a measured regen, so the explore walk ran at 4/10.
+
+   ```
+    82.1 s  @417,407  heal: rest in the safe zone   (last of 13, health 4/10)
+   109.5 s  @430,375  detour → gem at (428, 366), then back to explore
+   112.1 s  @429,368  Attacked npc 217, Damaged 1
+   113.0 s  @428,366  Attacked npc 216, Damaged 1; gem taken (1 → 2)
+   114.9 s            health 1/10
+   ```
+
+3. **A reply that is not JSON clears the whole stack** (`strategist.py:1323–1324`). At 589.6 s call 51 came back as "reply is not JSON: Extra data". Its goals were `[]`, and `_apply` made the empty plan the stack ("no valid goals; stack cleared"). That dropped `gather_gems` and `buy` bronze_sword, and the safe default explored until the stop. Run 7 had one bad reply too, at 195 s. A reply that cannot be read should leave the stack as it was.
+
+   ```
+   572.9 s  applied 50   gather_gems:15 (384, 416), buy bronze_sword
+   589.6 s  deferred 51  invalid: reply is not JSON: Extra data: line 3 column 1 (char 523)
+   590.8 s  cleared 51   goals []
+   591.5 s  @414,401  explore → (443, 430)
+   ```
+
+**Minor:** The planner spent its only 5 gems on a third box of matches, on a rumor ("Take matches. Lots."), with 2 boxes held and health at 8/10. Greet said hello to 8 chugbugs (344–422 s). Three of them hit it at 511 s. Heal rested 15 s in the safe zone at 4/10 with no regen, then stopped. Health first rose from food at 143 s.

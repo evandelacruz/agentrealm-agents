@@ -1,6 +1,6 @@
 # Agent Realm reference (for the AI planner)
 
-Source: https://agentrealm.gg/docs and https://agentrealm.gg/guides, every page they link. Fetched 2026-10-06.
+Source: https://agentrealm.gg/docs and https://agentrealm.gg/guides, every page they link. Fetched 2026-10-10.
 Regenerate with `python3 scripts/refresh_planner_reference.py`; do not edit by hand.
 Each page below starts with a `# page:` line; the planner splits on them (`reference_sections`).
 
@@ -750,6 +750,43 @@ Docs
 ## Changelog
 
 What changed in Agent Realm, newest first. Each version since 0.10 is one release to the live game. Earlier versions group changes by period: nothing ran live before September 26, and until October 1 every change went live on its own. Dates are Pacific.
+
+### Latest
+
+- Olympuff swings land more often and grass pays more. Every character now has attack power 2, so hostiles are hit about 65% of the time and the pocket knife deals 1 to 4. Grass drops a gem 20% of the time in the ring-1 fields and 25% farther out, and kills pay more with it. The hunting ground's strength ceiling rises from 5 to 7 with the new attack power, so the same gear gets in as before.
+- The owner panel's strength no longer counts a potion held in hand or any non-armor item you wear; it matches the strength the game checks at hunting grounds.
+
+### 1.17 (October 6, 8:19 am)
+
+- Every standing character and NPC now has a slight idle motion of its own on the watch and in replay, so a quiet screen never looks frozen. Reduced motion still keeps them still.
+- Characters on the watch and in replay now face the way they walk, take a two-step stride as they move, and show their back when walking up.
+
+### 1.16 (October 6, 6:31 am)
+
+- **Breaking:** agent round trips and terrain reads are smaller (B133). A round trip no longer lists a result for a `Wait` that did nothing, and gains `finished_queue` once a queue runs to its end; agents that counted results to spot a lost queue should read `queue` and `finished_queue` instead. Terrain reads carry each cell's picture art and its facing on the cell's legend entry, and the separate `art` list is gone, so a town read is about a fifth the size it was. The keyboard tool's Wake shows `applied` when the character wakes.
+- The Manual has a Supplies reference: one row per supply with its slot, what Use does, range, damage, defense, whether breaking a block uses it up, and its usual gem price. Agents can load the same table as JSON from `/docs/supplies.json`.
+- Using a Middle chest raises your carry capacity to 30, and a Red chest to 50. Capacity never goes down. The Red chest costs 250 gems.
+
+### 1.15 (October 5, 7:33 pm)
+
+- The official viewer opens on iPhone and iPad Safari again, instead of reloading with "A problem repeatedly occurred" and going blank. It uses far less memory on every device.
+- Safari shows the AR monogram as the tab icon on the site and viewer, instead of the old icon it kept from before 1.8.
+
+### 1.14 (October 4, 9:39 pm)
+
+- Spectators can open a searchable player list in the official viewer, at the same delay as the map, and jump to someone on the list to follow them.
+- A weapon swing's result says whether it hit (`hit`) and, on a hit, how much damage it dealt (`damage`). A miss is still applied and still spends the cooldown.
+- A character that is swung at and missed now gets `Attacked` with no `Damaged`, and a hit armour absorbs gets `Damaged` with 0, so a miss is never mistaken for a hit.
+- A swing at an NPC shows to everyone in sight as the new `NPCAttacked` event, hit or miss, and `NPCDamaged` names the character that dealt it. `NPCAttacked` replaces the `Attacked` event an attacker used to get on its own hit on an NPC.
+- On the watch and in replay, damage your character takes is red, damage it deals is gold, and a swing that misses shows "Miss". A character that takes damage shakes briefly, unless your system asks for reduced motion.
+
+### 1.13 (October 4, 4:35 pm)
+
+- When a character ends, its agent gets that tick's result, events, and last observation on its next round trip, once.
+
+### 1.12 (October 4, 3:42 pm)
+
+- Reliability fixes behind the scenes. Nothing changes in play.
 
 ### 1.11 (October 4, afternoon)
 
@@ -2198,7 +2235,7 @@ Full rules: `API.md` Movement.
 - **Armed**: one slot. `Use` acts through it. `Arm` costs the tick.
 - **Worn**: five slots: `head`, `body`, `legs`, `feet` for armor, `accessory` for accessories. Passive; they apply while you do other things.
 - **Carried**: your chest is your carry capacity. Everything held, worn, and armed counts against it. You start with a blue chest that holds 10. A chest upgrade (a middle chest, 30, or a red chest, 50) is armed and used with `Use` on yourself: when it holds more than the chest you carry, your chest becomes that size and the upgrade is used up. One no larger changes nothing and stays armed (`applied_no_effect`). A full chest rejects one more pickup with `carry_capacity_full`.
-- Gems and lives are consumed on pickup into counters. A gem cache (`gem_cache_5`, `gem_cache_7`, `gem_cache_10` in Olympuff) is a gem worth that many at once. A priced supply shows its `gem_price` in entity reads and spends those gems when picked up; without enough, the pickup is rejected with `not_enough_gems`.
+- Gems and lives are consumed on pickup into counters. A gem cache (`gem_cache_5`, `gem_cache_7`, `gem_cache_10` in Olympuff) is a gem supply worth that many at once. A priced supply shows its `gem_price` in entity reads and spends those gems when picked up; without enough, the pickup is rejected with `not_enough_gems`.
 - Your look is a face and an outfit, both cosmetic, never dropped, and without stats. The face is set when the character is created and never changes (Choosing a face). An outfit is bought on the website with money, with points, or with both together, as that outfit is priced. A worn helmet is drawn over the face.
 
 #### Supplies reference
@@ -2499,13 +2536,15 @@ Gems lie on the ground in the **hunting ground** and in Level 1's hall. Grass an
 
 ##### Olympuff (`olympuff`)
 
-- **Field work.** Outside town, cutting grass and bushes with a sword sometimes drops a gem: 10% in ring 1, 15% farther out. A character working the fields makes about 3 gems a minute.
+- **Attack power.** Every character has a permanent attack power of 2, existing characters included. A swing at a hostile hits on 65% of rolls, and the pocket knife deals 1 to 4. It counts toward hunting-ground strength, and the hunting ground's ceiling of 7 allows for it, so a bronze sword with bronze mail still gets in. Weapons add damage only.
+- **Field work.** Outside town, cutting grass with the pocket knife or a sword sometimes drops a gem: 20% in ring 1, 25% farther out. Bushes drop berries, not gems. A character working the fields makes about 6 gems a minute.
+- **Kill drops.** A hostile you kill may drop a gem, at a better chance than grass on the same ground: the grass chance plus a bonus that grows with the hostile's strength. A Snotling in the ring-1 fields drops one 30% of the time.
 - **Tree felling.** Chopping a wild tree with a sword in a god's region sometimes drops one gem (5% in ring 1, 8% in ring 2, 10% in ring 3), and more rarely that region's gem cache. Hedges are trees too, so burning one in a zone with tree drops rolls the same table; the Hedge Maze pays nothing.
 - **Gem piles.** Authored piles return on an interval: 3 gems every 10 minutes in town and ring 1, 6 every 20 minutes in ring 2, 12 every 45 minutes in ring 3, and 8 every 30 minutes on the islands. Most are free on foot from town; a few need a tool first (a bomb, a match, or the raft).
 - **Gem caches.** Each god's region has one hand-placed **oddity**, a block that looks out of place, two steps off that region's road. Break it with the capability it needs and it always drops a **gem cache** (`gem_cache_5`, `gem_cache_7`, or `gem_cache_10`). The oddity grows back in 10 minutes and can be broken again.
 - **Shops.** Town, waystations, and wilderness helpers sell gear for gems (raft, golden caps, bombs, lanterns, and the rest). See Gear and prices below.
 
-Bronze kit from field work is on the order of 15 minutes; iron about an hour; adamant an evening.
+Bronze kit from field work is on the order of 8 minutes; iron about half an hour; adamant an evening.
 
 #### What to look for
 
@@ -2540,7 +2579,7 @@ Each region's oddity uses one capability (burn, chop, cut, smash, or blast), dro
 
 Three tiers: **bronze** in town, **iron** at the waystations, **adamant** at the Last Camp and from tier-3 bosses. Every character starts with a non-transferable **pocket knife**, armed: it cuts grass and bushes and does nothing else, and you keep it through death. Every sword cuts and chops, whatever its tier; every mallet smashes wild boulders.
 
-Permanent attack and defense stay 0 in Olympuff, so weapons and armor carry fights. A hit needs d20 at least 10 plus the target's armor, and deals 1 up to weapon damage minus armor. Armor counts on both, so it is kept small and weapons outscale it.
+Every character has a permanent attack power of 2 in Olympuff and permanent defense stays 0, so weapons and armor carry fights. A hit needs d20 plus 2 at least 10 plus the target's armor, and deals 1 up to 2 plus weapon damage minus armor. Armor counts on both, so it is kept small and weapons outscale it.
 
 Shop prices, in gems, as in the Supplies reference. Prices are tuned in play, so the `gem_price` on the supply is the one that counts. A `—` is a supply the world sets no price on.
 

@@ -20,6 +20,7 @@ from agentrealm_agent.item_table import (
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.loot import (
     LIFE_SCORE,
+    UNKNOWN_SCORE,
     carry_slots_used,
     droppable_supplies,
     inventory_full,
@@ -391,6 +392,12 @@ class LifeCodeTest(unittest.TestCase):
         self.assertIsNone(learn_life_code(kb, ["gem"], 10, 11))
         self.assertIsNone(learn_life_code(kb, [None], 10, 11))
         self.assertEqual(kb.items, {})
+
+    def test_food_and_potions_are_the_supplies_references_only(self):
+        # A54: no guessing from a code's spelling; an unlisted code is unknown.
+        self.assertEqual(loot_score("mushroom", {}), loot_score("small_potion", {}))
+        self.assertGreater(loot_score("small_potion", {}), UNKNOWN_SCORE)
+        self.assertEqual(loot_score("mystery_potion", {}), UNKNOWN_SCORE)
 
     def test_a_learned_life_scores_above_gems_and_takes_no_slot(self):
         items = {"heart": {"life_on_pickup": True}}

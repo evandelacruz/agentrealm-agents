@@ -87,7 +87,7 @@ class SightingsTest(unittest.TestCase):
         self.assertIn((POST, policy().hostile_range + 1), known_reach(w, policy()))
 
     def test_a_post_with_the_guard_gone_from_it_fades_fast_and_is_forgotten(self):
-        """Free-play run 9 (A82): a post in sight and empty halves every second looked at."""
+        """Free-play run 9 (A84): a post in sight and empty halves every second looked at."""
         w = field()
         post_seen_then_left(w)
         w.pos = (17, 10)  # the post is in sight and nobody is on it

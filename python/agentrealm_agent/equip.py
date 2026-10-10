@@ -2,8 +2,8 @@
 
 Only sourced facts decide what goes where:
 
-- **Weapons** are the exact codes GAME_NOTES names as weapons
-  (``break_memory.WEAPONS``). Nothing else is armed by Equip.
+- **Weapons** are the subtypes the Manual's Supplies reference lists in the
+  ``weapon`` class (A54, ``supplies.is_weapon``). Nothing else is armed by Equip.
 - **Worn slots** come from the snapshot's ``worn`` by slot: the world model
   files a subtype seen worn in a slot there for the run (``WorldModel.worn_slots``).
   A held subtype never seen worn has no slot for scoring until Equip tries
@@ -30,10 +30,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .break_memory import WEAPONS
-from .healing import FOOD_CODES, POTION_CODES
 from .item_table import InventorySupply
 from .loot import NON_TRANSFERABLE
+from .supplies import heals, is_weapon
 from .memory import Memory
 from .threat import ThreatTable
 from .world import WorldModel
@@ -48,11 +47,8 @@ MIN_GAIN_RATIO = 1.25
 
 
 def is_consumable(code: str | None) -> bool:
-    return bool(code) and (code in FOOD_CODES or code in POTION_CODES)
-
-
-def is_weapon(code: str | None) -> bool:
-    return bool(code) and code in WEAPONS
+    """Food or a potion: Heal's to use, never equipped."""
+    return heals(code)
 
 
 def wear_slot(code: str | None, w: WorldModel) -> str | None:

@@ -53,7 +53,7 @@ POST_STILL_TICKS = 50
 # A hostile out of view that keeps no post is remembered where it was last
 # seen for this long (60 s at 10 ticks/s), on any map.
 SIGHTING_TICKS = 600
-# A remembered post fades: hostiles roam and respawn (free-play run 9, A82).
+# A remembered post fades: hostiles roam and respawn (free-play run 9, A84).
 # Its ``Sighting.strength`` is 1 while the guard is in view and halves every
 # ``POST_HALF_LIFE_TICKS`` of world time out of view (5 min at 10 ticks/s),
 # times the spells it was seen on its post, up to ``POST_MAX_SPELLS``: a post
@@ -789,7 +789,7 @@ class WorldModel:
 
     def learn_threat(self, events: list[dict], earlier: list[Entity]) -> None:
         """Folds this round trip's Damaged events into the threat table (A6),
-        with each hostile type's hits and misses (A82), and the NPC types its Attacked, Damaged and NPCDied events show hostile
+        with each hostile type's hits and misses (A84), and the NPC types its Attacked, Damaged and NPCDied events show hostile
         into ``hostile_types``.
 
         Call after apply_observation, so a source first listed in the same

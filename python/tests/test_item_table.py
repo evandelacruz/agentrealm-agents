@@ -90,14 +90,16 @@ class MergeTest(unittest.TestCase):
         it.absorb_supply_entry(items, {"id": 1, "x": 0, "y": 0, "supply_subtype_code": "apple"})
         self.assertEqual(items, {})
 
-    def test_supply_read_does_not_store_capabilities_until_served(self):
-        # Entity reads serve gem_price today, not capability tags (PLAN.md Server gaps, A54).
-        items: dict = {}
+    def test_supply_entry_capabilities_merge_sorted_and_grow_only(self):
+        # The Supplies reference files capabilities through the same entry (A54).
+        items: dict = {"bronze_sword": {"capabilities": ["smash"]}}
         it.absorb_supply_entry(
             items,
-            {"id": 1, "supply_subtype_code": "bronze_sword", "gem_price": 5, "capabilities": ["cut", "chop"]},
+            {"supply_subtype_code": "bronze_sword", "gem_price": 5, "capabilities": ["cut", "chop", 3]},
         )
-        self.assertEqual(items, {"bronze_sword": {"gem_price": 5}})
+        self.assertEqual(items, {"bronze_sword": {"gem_price": 5, "capabilities": ["chop", "cut", "smash"]}})
+        it.absorb_supply_entry(items, {"supply_subtype_code": "bronze_sword", "capabilities": []})
+        self.assertEqual(items["bronze_sword"]["capabilities"], ["chop", "cut", "smash"])
 
 
 class EntitiesTest(unittest.TestCase):

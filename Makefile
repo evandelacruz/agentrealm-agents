@@ -3,7 +3,7 @@ setup: ## Install the AI planner's provider SDK (python/requirements.txt); live 
 	python3 -m pip install -r python/requirements.txt
 
 test: ## Run unit tests (no server)
-	cd python && python3 -m unittest discover -s tests
+	cd python && python3 -m unittest discover -s tests -t .
 
 conductor-test: ## Build and test tools/conductor (Node 22+)
 	cd tools/conductor && npm ci && npm test

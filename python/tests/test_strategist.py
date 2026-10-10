@@ -255,6 +255,67 @@ class CadenceTest(unittest.TestCase):
         self.assertEqual(llm.calls, 2)
         self.assertEqual(sent_triggers(r, 1), ["goal_done", "goal_failed", "death", "clue", "stuck"])
 
+    def test_a_slow_reply_does_not_set_off_the_timer_at_once(self):
+        """The timer counts from when the last call ended, not when it was sent (A83)."""
+        llm = FakeLLM(WAIT_ANSWER, WAIT_ANSWER)
+        s, r = make(llm, replan_s=15), fake_runner()
+        s.on_window(r)  # the first call goes out
+        s.serve_one(timeout=0)
+        s.clock.now += 20  # the reply took longer than replan_s
+        s.on_window(r)  # and is applied now
+        self.assertEqual(s.calls, 1)
+        self.assertNotIn("timer", [t["trigger"] for t in s.inbox])
+        s.clock.now += 14.9
+        s.on_window(r)
+        self.assertEqual(s.calls, 1, "the gap is 15 s after the reply")
+        s.clock.now += 0.1
+        s.on_window(r)
+        self.assertEqual(s.calls, 2)
+        self.assertEqual(sent_triggers(r, 1), ["timer"])
+
+    def test_a_failed_call_starts_the_gap_too(self):
+        llm = FakeLLM(RuntimeError("boom"), WAIT_ANSWER)
+        s, r = make(llm, replan_s=15), fake_runner()
+        s.on_window(r)
+        s.serve_one(timeout=0)
+        s.clock.now += 20
+        s.on_window(r)  # the failure lands
+        s.inbox = []  # leave out the triggers it put back, to watch the timer alone
+        s.clock.now += 14.9
+        s.on_window(r)
+        self.assertEqual(s.calls, 1, "the gap is 15 s after the failure, not after the send")
+        s.clock.now += 0.1
+        s.on_window(r)
+        self.assertEqual(s.calls, 2)
+        self.assertEqual(sent_triggers(r, 1), ["timer"])
+
+    def test_an_event_still_calls_at_once_after_a_reply(self):
+        llm = FakeLLM(WAIT_ANSWER, WAIT_ANSWER)
+        s, r = make(llm, replan_s=15), fake_runner()
+        s.on_window(r)
+        s.serve_one(timeout=0)
+        s.clock.now += 20  # a slow reply
+        s.on_window(r)
+        queue_signal(r.mem, {"trigger": "stuck"})
+        s.on_window(r)  # no gap for an event
+        self.assertEqual(s.calls, 2)
+        self.assertEqual(sent_triggers(r, 1), ["stuck"])
+
+    def test_a_discovery_alone_waits_its_gap_after_the_reply(self):
+        llm = FakeLLM(WAIT_ANSWER, WAIT_ANSWER)
+        s, r = make(llm, replan_s=60), fake_runner()
+        s.on_window(r)
+        s.serve_one(timeout=0)
+        s.clock.now += 20  # a slow reply: the send was long ago, the reply is now
+        s.on_window(r)
+        s.inbox.append({"trigger": "discovery", "finds": [], "tick": r.world.tick})
+        s.clock.now += 4.9
+        s.on_window(r)
+        self.assertEqual(s.calls, 1)
+        s.clock.now += 0.1
+        s.on_window(r)
+        self.assertEqual(s.calls, 2)
+
     def test_one_call_in_flight_at_a_time(self):
         llm = FakeLLM(WAIT_ANSWER)
         s, r = make(llm), fake_runner()
@@ -482,7 +543,7 @@ class ProgressTest(unittest.TestCase):
             round_trip(s, r)
             self.assertIs(r.plan, before, reply)
             self.assertEqual((r.mem.path, r.mem.goal), ([(1, 1), (2, 2)], "explore"), reply)
-            self.assertEqual(logged_events(r), ["ask", "unchanged"], reply)
+            self.assertEqual(logged_events(r), ["ask", "error" if reply == "not json" else "unchanged"], reply)
 
     def test_reworded_why_does_not_restart_a_wait(self):
         s, r = make(FakeLLM({"goals": [{"op": "wait", "seconds": 20, "why": "boss is about to spawn"}, {"op": "buy", "code": "rope"}]})), fake_runner()
@@ -624,7 +685,7 @@ class PlannerViewTest(unittest.TestCase):
         s.on_window(r)
         s.serve_one(timeout=0)
         r.world.tick += STALL_SECONDS * 10
-        s.last_call_at = None
+        s.last_reply_at = None
         s.inbox.append({"trigger": "timer"})
         s.on_window(r)
         s.serve_one(timeout=0)
@@ -650,12 +711,6 @@ class SafeDefaultTest(unittest.TestCase):
     def test_empty_goals_clear_the_stack(self):
         self.assert_cleared({"goals": []})
 
-    def test_reply_that_is_not_json_clears_the_stack(self):
-        self.assert_cleared("I think you should explore")
-
-    def test_reply_that_is_not_an_object_clears_the_stack(self):
-        self.assert_cleared([{"op": "wait", "seconds": 1, "why": "x"}])
-
     def test_long_or_unexplained_wait_is_not_a_plan(self):
         self.assert_cleared({"goals": [{"op": "wait", "seconds": 600, "why": "rest"}, {"op": "wait", "seconds": 5}]})
 
@@ -669,6 +724,37 @@ class SafeDefaultTest(unittest.TestCase):
         s, r = make(FakeLLM({"goals": []})), fake_runner(goals=["gather_gems:5"])
         round_trip(s, r)
         self.assertEqual(r.plan.current()["op"], "gather_gems")
+
+
+class UnreadableReplyTest(unittest.TestCase):
+    """A82, free-play run 8: a reply that was not JSON cleared gather_gems and
+    buy for the safe default. A reply that is not a JSON object is no plan:
+    the stack and its walk stay, and the call is retried after the backoff."""
+
+    STACK = [{"op": "gather_gems", "count": 5}, {"op": "buy", "code": "small_potion"}]
+
+    def assert_kept(self, raw):
+        s, r = make(FakeLLM(raw, WAIT_ANSWER)), fake_runner()
+        r.plan = Plan([dict(g) for g in self.STACK], dict(PARAM_DEFAULTS))
+        r.mem.path, r.mem.goal = [(1, 1)], "gather"
+        s.inbox.append({"trigger": "timer"})
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals, self.STACK)
+        self.assertEqual((r.mem.path, r.mem.goal), ([(1, 1)], "gather"))
+        self.assertEqual(logged_events(r), ["ask", "error"])
+        self.assertIn("timer", [t["trigger"] for t in s.inbox])  # put back for the retry
+        self.assertEqual(s.failures_in_a_row, 1)
+        s.on_window(r)
+        self.assertEqual(logged_events(r), ["ask", "error"], "no retry inside the backoff")
+        s.clock.now += BACKOFF_BASE_S
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["op"], "wait", "the retry's reply applies")
+
+    def test_a_reply_that_is_not_json_keeps_the_stack(self):
+        self.assert_kept("I think you should explore")
+
+    def test_a_reply_that_is_not_an_object_keeps_the_stack(self):
+        self.assert_kept([{"op": "wait", "seconds": 1, "why": "x"}])
 
 
 class ParamsTest(unittest.TestCase):

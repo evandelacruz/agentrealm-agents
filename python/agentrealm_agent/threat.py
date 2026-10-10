@@ -12,7 +12,7 @@ raise the default for an unmeasured hostile.
 
 Each hostile type's swings at us are counted too: a hit per ``Damaged``, a
 miss per ``Attacked`` with no ``Damaged`` from the same attacker on its tick
-(API Events, B131). ``hostile_memory`` carries the table across runs (A82).
+(API Events, B131). ``hostile_memory`` carries the table across runs (A84).
 """
 
 from __future__ import annotations

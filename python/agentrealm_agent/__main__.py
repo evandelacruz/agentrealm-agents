@@ -23,6 +23,7 @@ from .park import ABORT_JOIN_SECONDS, DEFAULT_PARK_SECONDS, PARK_SECONDS_HELP, i
 from .run_metrics import RunMetrics, compare_run_metrics, load_metrics_source, metrics_from_trace
 from .runner import Runner
 from .strategist import PlannerConfigError, Strategist
+from .supplies import load_for_run as load_supplies
 
 # How long `run` waits for the driver thread to stop before saving, once it
 # has stopped waiting on the park phase (A66): the driver returned, or a
@@ -224,6 +225,7 @@ def run(
     def out(line: str) -> None:
         print(line, flush=True)
 
+    load_supplies(world_knowledge, out)
     thread = threading.Thread(
         target=_drive,
         args=(cfg, client, cid, stop, abort, out, world_knowledge, planner, park_seconds),

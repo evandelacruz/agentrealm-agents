@@ -48,8 +48,6 @@ from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, 
 from .equip import note_equip_result, sync_refusals
 from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
 from .healing import (
-    FOOD_CODES,
-    POTION_CODES,
     AppliedDrink,
     HealRefusal,
     NoopDrink,
@@ -67,6 +65,7 @@ from .healing import (
     refusal_action,
 )
 from .shop import note_shop_result
+from .supplies import heals, is_food
 from .states.explore import plan_sets
 from .travel.resolve import travel_given_up
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
@@ -1226,13 +1225,13 @@ class Runner:
         if verb == "Take":
             sid = intent.get("supply_id")
             for e in w.entities:
-                if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
+                if e.kind == "supply" and e.id == sid and is_food(e.code):
                     note_heal_pending(m, w, e.code, "take")
             return
         if not is_self_use(intent):
             return
         code = code_in_hand(self.world, self._held_intents(), index)
-        if code in FOOD_CODES | POTION_CODES:
+        if heals(code):
             note_heal_pending(m, w, code, "use")
 
     def _forget_replaced_drink(self, intents: list[dict] | None) -> None:
@@ -1261,7 +1260,7 @@ class Runner:
         tick = int(result.get("tick", w.tick))
         if verb == "Take":
             sid = intent.get("supply_id")
-            food = next((e for e in w.entities if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES), None)
+            food = next((e for e in w.entities if e.kind == "supply" and e.id == sid and is_food(e.code)), None)
             if food is not None:
                 self._heal_refused.append(HealRefused("take", sid, verb, rejection, tick, False, food.pos))
             return

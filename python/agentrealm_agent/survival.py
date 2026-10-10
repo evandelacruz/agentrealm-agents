@@ -6,7 +6,7 @@ import math
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from .break_memory import WEAPON_DAMAGE
+from .supplies import weapon_damage
 from .threat import UNMEASURED_DEFAULT, ThreatTable, TypeKey, type_key_for_entity
 from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
@@ -30,8 +30,9 @@ UNKILLED_HOSTILE_HEALTH = 10
 BASE_ATTACK_POWER = 2
 COMBAT_DIE = 20
 COMBAT_HIT_TARGET = 10
-# Weapon damage is ``break_memory.WEAPON_DAMAGE``, the one list of weapons.
-# An armed item not on it (food, a tool, nothing) swings as the starting knife.
+# Weapon damage is the Supplies reference's (``supplies.weapon_damage``, A54).
+# An armed item it lists as no weapon (food, a tool, nothing) swings as the
+# starting knife.
 STARTING_WEAPON = "pocket_knife"
 NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)
@@ -172,12 +173,6 @@ def max_hit_damage(group: list[Entity], threat: ThreatTable) -> int:
     return max(threat.damage_per_hit(type_key_for_entity(e)) for e in group)
 
 
-def retreat_by_health(health: int | None, retreat_hits: int, hit_damage: int) -> bool:
-    if health is None or hit_damage <= 0:
-        return False
-    return health <= retreat_hits * hit_damage
-
-
 def on_safe_tile(w: WorldModel) -> bool:
     if w.map_id is None or w.pos is None:
         return False
@@ -293,7 +288,7 @@ def hostile_swing_damage(damage: int, threat: ThreatTable | None = None, key: Ty
 def _hostile_damage(threat: ThreatTable, key: TypeKey | None) -> float:
     """A type's expected swing (``hostile_swing_damage``): at its largest
     measured hit, or, never measured, at the world's base attack power
-    (``UNMEASURED_DEFAULT``, the published rules; A82)."""
+    (``UNMEASURED_DEFAULT``, the published rules; A84)."""
     damage = threat.by_type.get(key, UNMEASURED_DEFAULT) if key is not None else UNMEASURED_DEFAULT
     return hostile_swing_damage(damage, threat, key)
 
@@ -319,7 +314,9 @@ def swing_damage(weapon: str | None) -> float:
     """Expected damage of one swing of ``weapon`` at a hostile: the hit
     chance times the mean of 1 up to attack power plus weapon damage (the
     pocket knife: 0.65 × 2.5)."""
-    damage = WEAPON_DAMAGE.get(weapon or "", WEAPON_DAMAGE[STARTING_WEAPON])
+    damage = weapon_damage(weapon)
+    if damage is None:
+        damage = weapon_damage(STARTING_WEAPON) or 0
     return hit_chance() * (1 + max(1, BASE_ATTACK_POWER + damage)) / 2
 
 
@@ -383,6 +380,12 @@ def at_health_floor(w: WorldModel, params: dict[str, float | int], group: list[E
 
     Retreat runs at or below it, and Flee never picks a fight it would lose there.
     """
+    floor = health_floor(w, params, group)
+    return w.health is not None and floor > 0 and w.health <= floor
+
+
+def health_floor(w: WorldModel, params: dict[str, float | int], group: list[Entity]) -> int:
+    """Retreat's floor against ``group``: effective ``retreat_hits`` times the
+    hardest hit among them (threat table). Detour keeps above it too (A82)."""
     eff = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
-    hits = effective_retreat_hits(int(params["retreat_hits"]), eff)
-    return retreat_by_health(w.health, hits, max_hit_damage(group, w.threat))
+    return effective_retreat_hits(int(params["retreat_hits"]), eff) * max_hit_damage(group, w.threat)

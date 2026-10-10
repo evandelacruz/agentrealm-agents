@@ -119,7 +119,7 @@
 
   "A46": {"state": "done"},
 
-  "A54": {"state": "open", "note": "Waiting on the Manual Supplies reference (saims B132)."},
+  "A54": {"state": "done"},
 
   "A50": {"state": "done"},
 
@@ -167,5 +167,9 @@
 
   "A81": {"state": "done"},
 
-  "A82": {"state": "in_progress"}
+  "A82": {"state": "done"},
+
+  "A83": {"state": "done"},
+
+  "A84": {"state": "in_progress"}
 }

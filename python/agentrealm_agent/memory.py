@@ -95,8 +95,9 @@ class Memory:
     greetings: dict[int, tuple[int, int | None]] = field(default_factory=dict)  # npc id -> (greetings sent, tick of the last), Greet (A65)
     greet_say_npc: int | None = None  # npc id of the last Say submitted when Greet decided it; None after any other Say (A65)
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
-    gather_target: tuple[str, Pos] | None = None  # ("pile" | "grass" | "out" | "off" | "region", cell) Gather is walking toward (A22)
+    gather_target: tuple[str, Pos] | None = None  # ("pile" | "grass" | "out" | "off" | "region" | "clear", cell) Gather is walking toward (A22)
     gather_hold: tuple[tuple[str, Pos], int] | None = None  # (target, tick) Gather began waiting on a taken first step (A71)
+    gather_clear_seen: frozenset[Pos] = frozenset()  # cells to cut and piles in sight when Gather last chose a "clear" walk (A82)
     gather_status: str = ""  # Gather's last decision, e.g. cutting, walking to grass, blocked by hostile (planner State)
     # Gather's stall clock: (tick this spell of Gather began, tick of its latest decision) (A63 run 3).
     gather_spell: tuple[int, int] | None = None

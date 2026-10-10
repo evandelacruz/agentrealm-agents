@@ -1,4 +1,4 @@
-"""Free-play run 9 offline: a persisted knowledge base walled Gather in, and kept every fight refused (A82).
+"""Free-play run 9 offline: a persisted knowledge base walled Gather in, and kept every fight refused (A84).
 
 Run 9 was the first run to start from a knowledge base earlier runs had
 filled. Two things it carried, or failed to carry, stopped the agent:
@@ -86,9 +86,9 @@ class RememberedPostsFadeTest(unittest.TestCase):
         return m
 
     def test_a_post_seen_just_now_still_blocks_gather(self):
+        """Its grass is barred: Gather walks on to ground clear of it (A82)."""
         m = self.gather_at(LAST_SEEN + 10)
-        self.assertIsNone(m.gather_target)
-        self.assertEqual(m.gather_status, "blocked by hostile")
+        self.assertEqual(m.gather_target[0], "clear")
 
     def test_an_aged_post_no_longer_blocks_gather(self):
         m = self.gather_at(LAST_SEEN + 2 * POST_HALF_LIFE_TICKS)
@@ -103,7 +103,7 @@ class RememberedPostsFadeTest(unittest.TestCase):
 
     def test_a_post_seen_on_many_spells_stays_strong_for_longer(self):
         m = self.gather_at(LAST_SEEN + 2 * POST_HALF_LIFE_TICKS, spells=3)
-        self.assertIsNone(m.gather_target)
+        self.assertEqual(m.gather_target[0], "clear")
 
     def test_seeing_the_guard_again_makes_its_post_strong_again(self):
         w = field(at=(17, 10))

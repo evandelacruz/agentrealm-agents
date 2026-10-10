@@ -145,5 +145,7 @@
 
   "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."},
 
-  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. No live run yet."}
+  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. No live run yet."},
+
+  "A72": {"state": "done", "note": "Planner State signs_seen (unread first, nearest, capped at 5, read flag from read_cells) and a sign discovery trigger for a newly seen unread readable cell. No sign detour; reading stays the planner's read op. No live run yet."}
 }

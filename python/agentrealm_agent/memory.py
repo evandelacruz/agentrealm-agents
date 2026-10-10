@@ -71,7 +71,7 @@ class Memory:
     walk_skip: set = field(default_factory=set)  # hostiles the walk being decided was planned without (Retreat sets it, A63)
     path_skip: set = field(default_factory=set)  # walk_skip of the walk queue sent, never counted in path_threats (A63)
     planned_threats: set = field(default_factory=set)  # hostiles whose reach Heal's or Retreat's path crossed when planned (A63)
-    safe_unreachable: dict = field(default_factory=dict)  # (map_id, cell) -> tick a path check found no way to that safe cell (``pathing.reachable_safe_goal``)
+    safe_unreachable: dict = field(default_factory=dict)  # (map_id, cell) -> tick a path check found no way to that safe cell, or a Retreat or Park walk there made no progress (``pathing.reachable_safe_goal``, ``retreat.no_progress``)
     safe_threatened: dict = field(default_factory=dict)  # (map_id, cell) -> {(kind, id): tick that hostile last had the safe cell in its reach} (``pathing.reachable_safe_goal``)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     hunt_search: HuntSearch | None = None  # Travel's search for a hunting ground when none is known (A27)
@@ -129,11 +129,13 @@ class Memory:
     heal_regen_absent: bool = False
     heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
-    heal_rearm: str | None = None  # weapon code armed before a drink; restored once (A24)
+    heal_rearm: str | None = None  # weapon code armed before a drink; restored once, on Heal's next decision (A24)
     heal_pending: tuple[int, str, str] | None = None  # (health before, supply code, "take"|"use") awaiting observation
     # Boss (A38): the fight under way, or None. Set and cleared only by states/boss.sync_boss.
     boss: BossFight | None = None
     solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)
+    # (weapon, tool): Gather armed the cutting tool over the weapon, re-armed once no gather op is on top
+    gather_rearm: tuple[str, str] | None = None
     break_rearm: str | None = None  # code armed before Break, restored when break finishes (A28)
     break_pending: tuple[int, Pos, str] | None = None  # map, block and capability a Use in flight targets (A28)
     equip_refused: set[tuple[str | None, str]] = field(default_factory=set)  # (subtype, slot) Equip was refused; (None, slot) for Remove (A19)

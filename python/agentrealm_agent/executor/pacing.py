@@ -87,6 +87,25 @@ def pace_speech(
     )
 
 
+def arm_then_use(
+    arm: dict,
+    use: dict,
+    *,
+    horizon_ticks: int,
+    ticks_since_last_use: int | None = None,
+) -> list[dict]:
+    """``Arm`` then ``Use`` in one queue, the ``Use`` behind the Waits its
+    cooldown still owes, cut at the horizon.
+
+    A state that returns the two unpaced has only its first intent sent
+    (``brain.decide``): the ``Arm`` goes out and the ``Use`` never does.
+    """
+    queue = pace_uses([arm, use], ticks_since_last=ticks_since_last_use)[:horizon_ticks]
+    while queue and queue[-1] == wait():
+        queue.pop()
+    return queue
+
+
 def build_attack_queue(
     uses: Iterable[dict],
     retreat: Iterable[dict] | None = None,

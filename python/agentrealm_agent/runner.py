@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .break_memory import TRANSIENT_BREAK_REJECTIONS, record_attempt
+from .break_memory import TRANSIENT_BREAK_REJECTIONS, cannot_cut, record_attempt
 from .gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
 from .brain import (
     Decision,
@@ -47,7 +47,7 @@ from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
 from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
-from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, self_use_code
+from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, code_in_hand
 from .shop import note_shop_result
 from .states.explore import plan_sets
 from .travel.resolve import travel_given_up
@@ -751,10 +751,13 @@ class Runner:
         for the next decision window, and the probe leaves its tries as they were (A65).
         It runs only the states that can answer with a reflex (``dispatch.PROBE_STATES``),
         so a poll while a queue runs costs no executor's search (A64).
+        Heal's and Gather's re-arms stay due too: the drink or cut they follow may
+        still be in the held queue (A24, A22).
         """
         m = self.mem
         saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op, m.boss, dict(m.greetings))
         saved_threats = (set(m.walk_skip), set(m.planned_threats))
+        saved_rearm = (m.heal_rearm, m.gather_rearm)
         saved_stuck = copy.deepcopy(m.nav_stuck)
         saved_plan = self.plan.snapshot()
         try:
@@ -771,6 +774,7 @@ class Runner:
         # the held queue keeps running, so memory keeps its plan (A63 runs 3, 4).
         m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
         m.walk_skip, m.planned_threats = saved_threats
+        m.heal_rearm, m.gather_rearm = saved_rearm
         self.rng.setstate(saved[3])
         return None
 
@@ -1050,6 +1054,13 @@ class Runner:
             return m.pending
         return None
 
+    def _held_intents(self) -> list[dict]:
+        """The queue whose results are being read, as sent."""
+        m = self.mem
+        if m.pending_intents is not None:
+            return m.pending_intents
+        return [m.pending] if m.pending is not None else []
+
     def on_result(self, result: dict, index: int) -> bool:
         """Applies one intent result. True when it was rejected."""
         w, m = self.world, self.mem
@@ -1090,8 +1101,10 @@ class Runner:
                 elif on_block and result.get("outcome") == "applied_no_effect" and not probe:
                     # Nothing was cut, so nothing to file: Gather just moves on (A63).
                     # A Break probe that misses is a capability miss (GAME_NOTES:
-                    # which item works is per block), not ground that does not cut.
-                    self.gem_cuts.note_no_effect(w, block, tile, m.last_use_tick)
+                    # which item works is per block), not ground that does not cut,
+                    # and so is a cut made with an item that does not cut (a potion).
+                    if not cannot_cut(code_in_hand(w, self._held_intents(), index), self.knowledge):
+                        self.gem_cuts.note_no_effect(w, block, tile, m.last_use_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):
@@ -1162,7 +1175,7 @@ class Runner:
         target = intent.get("target") or {}
         if target.get("kind") != "character" or int(target.get("character_id", -1)) != w.character_id:
             return
-        code = self_use_code(self.world, self._intent_at(index - 1) if index > 0 else None)
+        code = code_in_hand(self.world, self._held_intents(), index)
         if code in FOOD_CODES | POTION_CODES:
             note_heal_pending(m, w, code, "use")
 

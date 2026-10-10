@@ -35,7 +35,7 @@ StateOutcome(intents, reason, state="MyState", wait=False, reflex=False, paced=F
 - **`reason`** — short label for logs and traces.
 - **`wait=True`** — intentional hold: no intent, but the round is **not** passed down (see fall-through below).
 - **`reflex=True`** — this intent preempts a movement queue (same as reflex rules in PLAN.md).
-- **`paced=True`** — intents are already a full paced queue (Fight); the runner sends them as-is.
+- **`paced=True`** — intents are already a full paced queue (Fight); the runner sends them as-is. Without it only the **first** intent is sent: `[Arm, Use]` unpaced sends the `Arm` alone. To arm something and use it, return `arm_and_use(...)` (`states/intents.py`) with `paced=True`, as Heal and Gather do.
 - **`progress`** (executors) — whether this outcome moves the plan's top op forward. Dispatch resets the op's stall clock only on progress; an op with none for 30 s is dropped (A34). Set `progress=False` on a try that has not done the job yet (a `Use` or `Compose` that may be refused). An executor that returns `wait=True` must also set `progress=False`, unless the wait itself is the job (the plan's `wait` op, Boss standing on its door): otherwise a wait that never ends pins the stack.
 
 ### Fall-through (A44)

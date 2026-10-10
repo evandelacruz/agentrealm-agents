@@ -4,7 +4,9 @@ Runs only in the runner's park phase (``Memory.parking``, ``park.py``), when
 the scenario is over. Dispatch then runs the survival reflexes and Park,
 nothing else (``dispatch.PARK_STATES``). Park walks Retreat's path to the
 nearest known safe tile a path reaches, else the town cell
-(``retreat_step``), whether or not anything threatens.
+(``retreat_step``), whether or not anything threatens. A safe tile it gets
+no nearer to in a stuck window is ruled out for a while, and it moves on to
+the next, else town (``retreat.no_progress``).
 """
 
 from __future__ import annotations

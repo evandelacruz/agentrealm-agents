@@ -16,9 +16,9 @@ What was known when the run started primes the record and raises nothing.
 Each find is raised once a run (an item again only after the gems held
 fell below its price), so an NPC walking in and out of view does not raise
 it again. The strategist merges the finds of one window into one trigger
-and lets a discovery alone start a call at most every
-``DISCOVERY_GAP_S`` (``Strategist.on_window``), so one find never sets off
-a burst of replans.
+and lets a discovery alone start a call only ``DISCOVERY_GAP_S`` after
+the last call ended (``Strategist.on_window``, A83), so one find never
+sets off a burst of replans.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from .survival import known_hostile
 from .travel.knowledge import iter_entrances
 from .world import Pos, WorldModel
 
-# A discovery with no other trigger waits this long after the last call.
+# A discovery with no other trigger waits this long after the last call ended (A83).
 DISCOVERY_GAP_S = 5.0
 # Known hostiles inside one square of this side are one pack.
 PACK_CELL = 16

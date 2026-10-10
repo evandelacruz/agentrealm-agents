@@ -39,7 +39,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from dataclasses import dataclass
 
-from ..healing import FOOD_CODES, hurt
+from ..healing import hurt
+from ..supplies import is_food
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from ..knowledge_base import knowledge_items
 from ..memory import Memory
@@ -124,7 +125,7 @@ def valuable(w: WorldModel, e: Entity, items: dict) -> bool:
     """A free ground supply worth a detour that fits: a gem, a life, or food while hurt."""
     if e.kind != "supply" or e.gem_price is not None or not e.code:
         return False
-    if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code, items) or (hurt(w) and e.code in FOOD_CODES)):
+    if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code, items) or (hurt(w) and is_food(e.code))):
         return False
     return pickup_room(w, Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items)), items) is not False
 
@@ -140,7 +141,7 @@ def allowance(w: WorldModel, e: Entity, finds: list[Entity], items: dict) -> int
         steps = GEM_PILE_STEPS + GEM_CLUSTER_STEPS * (min(piles, GEM_CLUSTER_MAX) - 1)
     if is_life_supply(e.code, items):
         steps = max(steps, LIFE_STEPS)
-    if hurt(w) and e.code in FOOD_CODES:
+    if hurt(w) and is_food(e.code):
         steps = max(steps, FOOD_STEPS)
     return steps
 

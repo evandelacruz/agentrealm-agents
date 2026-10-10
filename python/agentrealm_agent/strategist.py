@@ -27,7 +27,13 @@ One window, on the tick thread:
    the world, not the plan, so they still win at once.
 3. If nothing is in flight, the inbox has triggers and the budget allows it,
    build the prompt, log it to the trace, and hand it to the background
-   thread. A discovery alone starts a call at most every ``DISCOVERY_GAP_S``.
+   thread. A discovery alone waits ``DISCOVERY_GAP_S`` after the last reply.
+
+The timer is a gap, not a rate (A83): ``timer`` is raised once
+``replan_s`` has passed since the last call ended (its reply applied,
+kept, dropped or failed), so a slow reply never makes the next call follow
+it at once. An event still starts a call as soon as none is in flight,
+within the budget and any backoff.
 
 The op table in ``plan.py`` (``OP_FIELDS``) is the contract with the model.
 When the planner needs something the states cannot do, add an op there and
@@ -43,7 +49,8 @@ Settings (environment variables, defaults in brackets):
   ``OPENAI_API_KEY`` (:data:`KEY_ENV`). The planner's own names come first
   because some hosts strip the standard ones from the environment.
 - ``AGENTREALM_PLANNER_EFFORT`` [low]: Anthropic effort level.
-- ``AGENTREALM_PLANNER_REPLAN_S`` [15]: with no event, replan this often.
+- ``AGENTREALM_PLANNER_REPLAN_S`` [15]: with no event, replan this long
+  after the last call ended (A83).
 - ``AGENTREALM_PLANNER_CALLS_PER_MIN`` [6] and
   ``AGENTREALM_PLANNER_TOKENS_PER_MIN`` [the larger of 40000 and 1.5 times
   the cached prefix]: the budget, over the last 60 seconds of play, every
@@ -188,7 +195,7 @@ State stall shows how long the character has neither moved, gained or spent gems
 
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
-"wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game. A "discovery" trigger lists what the character has just found: an NPC not seen before (kind "npc"), a level entrance (kind "entrance"), an item for sale the gems held can now buy (kind "affordable"), a pack of known-hostile NPCs in a part of the map where none was seen (kind "hostile_pack"), or a sign or statue not read yet (kind "sign"); replan if it changes what is worth doing. A new head op takes over once the action under way ends (within a few seconds), never in the middle of a walk; the survival states still act at once. The agent keeps each target it picks (a grass cell, a frontier, a safe tile, a shop cell, a door) until it gets there or finds it out of reach, and takes a gem, life or (when hurt) food in view before walking on when it is worth the extra steps (more for a cluster of gem piles or a life).
+"wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and, with none, a few seconds after each reply, so plan the next few steps, not the whole game. A "discovery" trigger lists what the character has just found: an NPC not seen before (kind "npc"), a level entrance (kind "entrance"), an item for sale the gems held can now buy (kind "affordable"), a pack of known-hostile NPCs in a part of the map where none was seen (kind "hostile_pack"), or a sign or statue not read yet (kind "sign"); replan if it changes what is worth doing. A new head op takes over once the action under way ends (within a few seconds), never in the middle of a walk; the survival states still act at once. The agent keeps each target it picks (a grass cell, a frontier, a safe tile, a shop cell, a door) until it gets there or finds it out of reach, and takes a gem, life or (when hurt) food in view before walking on when it is worth the extra steps (more for a cluster of gem piles or a life).
 
 Examples:
 {{"goals":[{{"op":"buy","code":"torch","why":"clue mentions darkness"}}],"params":{{"curiosity":0.3}},"notes":"try the cave entrance"}}
@@ -898,7 +905,8 @@ class Strategist:
     inbox: list[dict[str, Any]] = field(default_factory=list)  # triggers not yet sent
     in_flight: list[dict[str, Any]] | None = None  # triggers of the call being answered
     calls: int = 0  # calls this run, for the trace
-    last_call_at: float | None = None
+    last_call_at: float | None = None  # when the last call was sent
+    last_reply_at: float | None = None  # when the last call ended; the timer and discovery gaps count from it (A83)
     failures_in_a_row: int = 0  # failed calls since the last good one; sets the backoff
     retry_at: float = 0.0  # after a failure, no call before this clock time
     spent: deque = field(default_factory=deque)  # [sent_at, tokens] per call in the budget window
@@ -1039,7 +1047,7 @@ class Strategist:
             return
         if self.in_flight is not None or runner.world.pos is None:
             return  # one call at a time, and nothing to plan from before the first position read
-        if self.last_call_at is None or self.clock() - self.last_call_at >= self.config.replan_s:
+        if self.last_reply_at is None or self.clock() - self.last_reply_at >= self.config.replan_s:
             if not any(t["trigger"] == "timer" for t in self.inbox):
                 self.inbox.append({"trigger": "timer", "tick": runner.world.tick})
         if self.clock() < self.retry_at:
@@ -1048,10 +1056,10 @@ class Strategist:
             self._send(runner)
 
     def _discovery_waits(self) -> bool:
-        """The inbox holds only a discovery, and the last call was under ``DISCOVERY_GAP_S`` ago (A71)."""
+        """The inbox holds only a discovery, and the last call ended under ``DISCOVERY_GAP_S`` ago (A71, A83)."""
         if any(t["trigger"] != "discovery" for t in self.inbox):
             return False
-        return self.last_call_at is not None and self.clock() - self.last_call_at < DISCOVERY_GAP_S
+        return self.last_reply_at is not None and self.clock() - self.last_reply_at < DISCOVERY_GAP_S
 
     def token_budget(self) -> int:
         """``tokens_per_min``, or :func:`default_tokens_per_min` when it is unset."""
@@ -1180,6 +1188,7 @@ class Strategist:
         """
         triggers, self.in_flight = self.in_flight or [], None
         asked, self.asked = self.asked, None
+        self.last_reply_at = self.clock()
         reported = tokens_used(answer.usage)
         if reported is not None and self.spent:
             self.spent[-1][1] = reported

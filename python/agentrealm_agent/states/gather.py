@@ -47,8 +47,9 @@ from ..gem_yield import (
     region_corner,
     region_of,
 )
-from ..healing import FOOD_CODES, POTION_CODES
+from ..supplies import heals
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
+from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
@@ -445,19 +446,26 @@ def _gather_cells(
     return StateOutcome(None, "no gather target", state=state)
 
 
+def _cut_tool(w: WorldModel, knowledge: KnowledgeBase | None) -> InventorySupply | None:
+    """The held supply ``_cut`` arms before it cuts, or None to cut with what
+    is in hand: the armed one cuts, or nothing held is known to."""
+    if CUT in capabilities_for_code(w.armed_code or "", knowledge):
+        return None
+    tool = pick_supply_for_capability(w, CUT, knowledge)
+    return tool if tool is not None and tool.id >= 0 else None
+
+
 def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reason: str, state: str) -> StateOutcome:
     """``Use`` on ``p`` with a tool that cuts: when what is armed is not known
     to cut (a potion a drink left armed, say), arm a held one that is, in the
     same paced queue. With none held, cut with what is in hand."""
-    if CUT in capabilities_for_code(w.armed_code or "", knowledge):
-        return StateOutcome([use_block(p)], reason, state=state)
-    tool = pick_supply_for_capability(w, CUT, knowledge)
-    if tool is None or tool.id < 0:
+    tool = _cut_tool(w, knowledge)
+    if tool is None:
         return StateOutcome([use_block(p)], reason, state=state)
     queue = arm_and_use(w, m, tool.id, use_block(p))
     if not queue:  # the cut's cooldown leaves no room for the Arm and the Use together
         return StateOutcome(None, f"wait out the cooldown to arm {tool.code}, {reason}", state=state, wait=True, progress=False)
-    if m.gather_rearm is None and w.armed_code and w.armed_code not in FOOD_CODES | POTION_CODES:
+    if m.gather_rearm is None and w.armed_code and not heals(w.armed_code):
         m.gather_rearm = (w.armed_code, tool.code)  # food or a potion is Heal's to put back
     return StateOutcome(queue, f"arm {tool.code}, {reason}", state=state, paced=True)
 

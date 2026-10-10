@@ -4,6 +4,7 @@ import random
 import unittest
 from unittest import mock
 
+from agentrealm_agent import supplies
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.item_table import InventorySupply

@@ -5,7 +5,7 @@ from __future__ import annotations
 from ..config import Policy
 from ..directives import attack_forbidden
 from ..executor import build_attack_queue, queue_horizon_intents
-from ..healing import POTION_CODES, potion_count
+from ..healing import potion_count
 from ..memory import BossFight, Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, guided_step, nav_search, next_step

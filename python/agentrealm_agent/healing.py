@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Callable, Literal
 
 from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
 from .item_table import InventorySupply, merge_heal
+from .supplies import heals, is_food, is_potion
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe, safe_tiles
 
@@ -14,30 +15,25 @@ if TYPE_CHECKING:
     from .knowledge_base import KnowledgeBase
     from .memory import Memory
 
-# GAME_NOTES.md Items: golden cap (M §16), apples and berries on the ground
-# in town (Obs). Whether apples and berries heal on pickup or carried and
-# `Use`d is unmeasured (GAME_NOTES open measurements), so Heal tries both and
-# files what each did in the item table (A24).
-FOOD_CODES = frozenset({"apple", "berry", "golden_cap"})
-# GAME_NOTES.md Items: small potion +10, large +30 (M §16).
-POTION_CODES = frozenset({"small_potion", "large_potion"})
+# Food and potions are the Supplies reference's (A54, ``supplies.is_food``,
+# ``supplies.is_potion``). Heal still tries food both ways, a ``Take`` and a
+# carried ``Use``, and files what each did in the item table (A24).
 
 
 def potion_count(w: WorldModel) -> int:
     """Held, stowed and armed potions (Boss preconditions, Shop reserve, A21,
     A38). The armed one counts when ``held`` leaves it out, so a drink that
     moved a potion into the slot and drank nothing is not a potion gone (A76)."""
-    codes = POTION_CODES
-    n = sum(1 for h in w.held_supplies if h.code in codes)
-    n += sum(1 for s in w.chest_supplies if s.code in codes)
-    if w.armed_id is not None and w.armed_code in codes and all(h.id != w.armed_id for h in w.held_supplies):
+    n = sum(1 for h in w.held_supplies if is_potion(h.code))
+    n += sum(1 for s in w.chest_supplies if is_potion(s.code))
+    if w.armed_id is not None and is_potion(w.armed_code) and all(h.id != w.armed_id for h in w.held_supplies):
         n += 1
     return n
 
 
 def supply_matches(want: str, code: str) -> bool:
     """``code`` satisfies a want for ``want``: the same code, or any potion for a potion (A21)."""
-    return want == code or (want in POTION_CODES and code in POTION_CODES)
+    return want == code or (is_potion(want) and is_potion(code))
 
 
 # Ticks at 10 Hz in a safe zone with no health back before this run counts
@@ -286,7 +282,7 @@ def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
     here = w.pos
     if here is None:
         return []
-    out = [e for e in w.entities if e.kind == "supply" and e.code in FOOD_CODES and can_try(m, w, "take", e.id, e.pos)]
+    out = [e for e in w.entities if e.kind == "supply" and is_food(e.code) and can_try(m, w, "take", e.id, e.pos)]
     out.sort(key=lambda e: (chebyshev(e.pos, here), e.id))
     return out
 
@@ -300,9 +296,9 @@ def carried_heal(w: WorldModel, m: Memory) -> InventorySupply | None:
     if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):
         carried.append(InventorySupply(w.armed_id, w.armed_code))
     usable = [h for h in carried if can_try(m, w, "use", h.id)]
-    for codes in (FOOD_CODES, POTION_CODES):
+    for kind in (is_food, is_potion):
         for h in usable:
-            if h.code in codes:
+            if kind(h.code):
                 return h
     return None
 
@@ -415,7 +411,7 @@ def note_heal_pending(m: Memory, w: WorldModel, code: str, kind: str) -> None:
 
     Only while hurt: at full health nothing can heal, so nothing is learned.
     """
-    if not hurt(w) or code not in FOOD_CODES | POTION_CODES:
+    if not hurt(w) or not heals(code):
         return
     assert w.health is not None
     m.heal_pending = (w.health, code, kind)

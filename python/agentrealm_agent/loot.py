@@ -27,12 +27,15 @@ from typing import Any
 from typing import TYPE_CHECKING
 
 from .item_table import InventorySupply
+from .supplies import heals
 from .world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .knowledge_base import KnowledgeBase
 
-# The Olympuff starting kit's pocket knife cannot change hands (Manual §5.3, §11).
+# The Olympuff starting kit's pocket knife cannot change hands (Manual §5.3,
+# §11). The Supplies reference does not say which supplies are transferable,
+# so this stays a seed.
 NON_TRANSFERABLE = frozenset({"pocket_knife"})
 # Observed on the wire (GAME_NOTES.md, docs/observations/A20_live_play.md).
 GEM_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
@@ -44,8 +47,6 @@ LIFE_SUPPLY_CODES: frozenset[str] = frozenset()
 # ``Take`` of one raises capacity to this, and ``carry_capacity_full`` still
 # lowers it to what was really carried (A47).
 MANUAL_CHEST_CAPACITY: dict[str, int] = {"middle_chest": 30, "red_chest": 100}
-# Food GAME_NOTES names (Manual §16; Obs).
-FOOD_CODES = frozenset({"golden_cap", "apple", "berry"})
 
 LIFE_SCORE = 10_000
 GEM_SCORE = 5_000
@@ -75,7 +76,7 @@ def loot_score(code: str | None, items: dict[str, dict[str, Any]]) -> int:
     price = (items.get(code) or {}).get("gem_price")
     if isinstance(price, int) and price > 0:
         return 500 + min(price, 500)
-    if "potion" in code or code in FOOD_CODES:
+    if heals(code):
         return 200
     return UNKNOWN_SCORE
 

@@ -378,3 +378,97 @@ Decisions outside held queues: 54 no state (the park), 35 planner waits, 32 Deto
 3. **A `buy` op counts as done once any of the item is held** (A21). `goal_done` returns true for `buy` when a matching supply is held or stowed (`plan.py:771–772`). With 2 small_potions held, each `buy` small_potion finished at once: 8 times between 95 s and 300 s, each re-sent by the planner ("the potion count is still 2, so it did not complete"). Raising `potion_reserve` to 3 at 287 s changed nothing. A `buy` should be done when the count it found on top has gone up by one, or when the held count reaches `potion_reserve` for a potion.
 
 **Minor:** Travel to town was given up twice mid-walk (at 3/10 near 316 s, after an escalation to Break at (429, 385), and at 540 s). Each time the Explore safe default then walked north toward the gristlewick. `explore_area` (399, 406) r12 finished at once 6 times. A Detour to a berry at (449, 370) alternated "stop, the step may land on a blocked cell" and one step for 12 decisions. The park found no reachable safe tile from (430, 378) and sent nothing for 60 s. Break armed matches at 2/10 beside the gristlewick.
+
+### Run 6: killed 11 s in, at the spot where run 5's park gave up, and the park gives up again in a dead end
+
+- **Code:** `main` at `1dfbe12`, after #161 (A24, A64, A21: the held-queue probe leaves Memory as it found it, Heal counts only rejected tries, a `buy` buys one more) and #155 (A72: State `signs_seen`, a discovery for an unread sign).
+- **Verdict:** exit 0, `PASS` after **601.6 s**, on the short-run gates only. The park **timed out** after 60.4 s at (383, 369), with "Park: safe tile unreachable" on every decision, and cleared the queue (defect 1). The character started with **6/10 health**, 6 lives and **7 gems** at (430, 378), the cell where run 5's park timed out, 9 cells from the gristlewick. It had the pocket knife armed and held nothing. The local state directory was empty again.
+- **Gate summary:** deaths **1**; API errors **0**; fights below the health floor 0; gems earned **yes**; armor **no**; shop weapon **no**; potion reserve **no**; Heal took ground food **no**, Heal drank a potion **no**. Planner: 47 calls, 43 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–11 s | `travel` town, `explore_area` town r20; from 9 s `travel` point (424, 370), `read` ×3, `say` | The first decision, before any plan, queued a 10-step Explore walk north toward (415, 353), past the gristlewick and two snotlings. The plan applied at 1.8 s did not stop it. The gristlewick hit it at 4.8 s, and it was **killed at 10.7 s** (defect 2). |
+| 11–63 s | `travel` point (424, 370), `travel` town, `read` ×3, `say`, `explore_area` | Respawned in town at 15.8 s, 10/10. Greet said hello to 11 NPCs, and 6 gave clues. The `travel` point the planner sent at 2/10 to get off the field was still on top, so Break cut 9 bushes from (413, 374) to (421, 370), back toward where it died. |
+| 63–226 s | `travel` town, `read` ×4–7, `say` statue_carver, `gather_gems`, `buy` bronze_sword | Read all 13 signs, nearest first, walking up to 30 cells for some. A Detour to the (413–415, 414) pile at 85–98 s was broken off for the reads. |
+| 226–417 s | `gather_gems` (region (384, 368) from 334 s), `buy` bronze_sword | 3 gems from cuts, at 254 s, 308 s and 415 s (**7 → 10**). From 372 s to 406 s Gather walked back and forth between a bush near (387, 369) and grass 4–9 cells east (defect 3). |
+| 417–460 s | `buy` small_potion, `gather_gems` (368, 368), `buy` bronze_sword | Shop walked to the shop out of sight (`travel:shop`, from (382, 369) to (421, 399)) and bought one potion (**10 → 0**). The `buy` then finished. Detour took the (413–415, 414) pile (**+3**). |
+| 460–600 s | `gather_gems`, `travel` town, `wait`, `travel` point (370, 384) | Gather and Retreat paced (369, 398) ↔ (370, 399) at 483–494 s. The guard fired and gave nothing up. Stuck detection gave up `travel` town at 507 s and the `travel` point at 528 s. Gather then cut near (368, 369–377) and at (384, 368) until the end. |
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **7** | **3** (+6 earned, −10 for one small_potion) |
+| Armed | pocket_knife | pocket_knife |
+| Worn | `{}` | `{}` |
+| Held | none | small_potion ×1 |
+| Potions | 0 | 1 |
+
+Bought: one small_potion (10), by a `buy` op. Equipped: nothing; no `equip` op was sent. Drank: nothing. It held no potion before the death, and health stayed at 10/10 from the respawn to the end.
+
+#### Gems earned
+
+**6**: 3 from cuts ((388, 368) at 254 s, (375, 369) at 308 s, (383, 368) at 415 s; 73 cuts, none with no effect) and the (413–415, 414) pile (+3) at 456–460 s, by Detour. Cut yield was 0.04–0.06 gems per cut in the two regions it worked. The gem at (379, 377), on the farmer's "hollow rock", stuck a Detour at 236 s.
+
+#### Deaths
+
+**1** (lives 6 → 5), at 10.7 s, killed by the gristlewick (npc 217) near (424, 369), three hits of 2 at 4.8 s, 8.0 s and 10.7 s, 6 → 0. It held no potion: both of run 5's were lost at its death, and the one bought after it was drunk. So nothing could be drunk. Flee stepped one cell west at a time, and the gristlewick kept up.
+
+#### Run 5 fixes, checked
+
+| Run 5 defect | Run 6 | |
+|---|---|---|
+| Probe uses up Heal's drink tries (A24, A64, #161) | **Not tested.** It held no potion while hurt: none before the death, and the one bought at 443 s was never needed. 0 drinks were sent, so no try was counted or lost. | Run 5: both potions written off in 6 s. |
+| A `buy` done once any is held (A21, #161) | **Holds; with stock, not tested.** 1 `buy` op, 1 purchase, 0 ops finished at once. It held no potion when the op came up, so a `buy` with stock in hand did not run. | Run 5: 8 ops finished at once. |
+| Park timeout | **Not fixed.** Timed out again: 60.4 s at (383, 369), 0 steps after the first 2 (defect 1). #161 did not change it. | Run 5: 60.3 s at (430, 378). |
+| Shop out of sight (A75, #157) | **Fixed.** The `buy` walked `travel:shop` from 35 cells off and bought at once. | Run 5: not tested. |
+
+#### Signs (#155)
+
+- **Seen: 13.** Sign discoveries fired as they came into view: 2 in the first trigger, and up to 11 unread at 61 s. `signs_seen` listed them unread first, with the read flag.
+- **Read: 13 of 13.** Every `Read` returned its text as a Clues row of kind "sign": the eight gods, the four direction signs, and "Potions and food heal. Town is safe".
+- **Plan changed: no.** The planner put `read` ops on top from call 2 to call 21 (64–226 s, about a quarter of the run), and dropped each one once it was read. No op came from what a sign said. It never set out for a temple, a garden or the ruins, and the stack stayed `gather_gems`, `buy` bronze_sword. Its notes picked up the statue clue ("count the statues, one faces away") but sent nothing for it.
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 190,590, output 14,775, cache write 101,184, cache read 5,969,856 |
+
+#### Decision mix
+
+Decisions outside held queues: 65 no state (the park, and 3 planner waits), 71 Gather walks and 76 cuts (51 bush, 25 grass), 26 greetings, 16 Break (8 walks, 8 cuts), 16 Explore, 16 respawn syncs, 13 reads (6 read walks), 11 Retreat, 9 Travel, 9 Detour, 7 shop walks, 4 Flee, 4 `take gem`, 3 `take apple`, 1 Heal walk. Intents: 707 `Step`, 2,045 `Wait`, 84 `Use`, 26 `Say`, 13 `Read`, 9 `Take`. Call mix: 815 `tick`, 210 `entities`, 114 `zone`, 107 `strategist`, 66 `self`, 31 `terrain`, 16 `position`.
+
+#### Top 3 defects
+
+1. **Park walks into a dead end of the coarse corridor, then sends nothing for 60 s, because town is never ruled out.** The park began at (385, 367), with the gristlewick and two snotlings at (401–402, 368–369) in view. No safe tile was a candidate, so the goal was the town cell (397, 401), 34 rows south and outside the perception window. The direct A* hit its budget, so `cost_path` took the corridor branch (`navigation/planner.py:687–692`). Hostile reach priced the way east as costly, so the corridor ran south-west, macro (23, 23) → (24, 24) → (24, 25). `_fine_path` (`planner.py:505`) gave a 2-cell path to (383, 369), the cell with the best score in the window. From there no reachable cell beats where it stands, so `_fine_path` returns None (`:515–517`). `retreat_step` then sends nothing and says "safe tile unreachable" (`states/retreat.py:149–152`). It marks the goal only when `no_way` proves it walled off, and town is not: `no_way` is false. `no_progress` never rules out town (`retreat.py:114`), so each decision picks town again, plans the same corridor, and stands still. Replayed offline from the saved terrain, with the three NPCs in view and the gristlewick known hostile, it gives the same two steps and then "safe tile unreachable" on every decision. Without the three NPCs in view, Park walks east to town. Run 5's park timed out with the same message at (430, 378), 9 cells from the gristlewick, and run 6 started there and died in 11 s (defect 2). When `cost_path` gives no step toward town, Park should drop the corridor and take the best step of a plain fine search, or fall back to the nearest cell it has been safe on.
+
+   ```
+   600.8 s  @385,367  retreat → safe (397, 401)     Step(down_left)   corridor (23,23)→(24,24)→(24,25)
+   602.6 s  @384,368  retreat → safe (397, 401)     Step(down_left)
+   603.5 s  @383,369  no state (Park: safe tile unreachable)    × every decision to 660 s
+   660.8 s  park timed out at 76:383,369 after 60.4s, queue cleared
+   ```
+
+2. **The first decision walks into a pack it does not know is hostile, and the plan that lands 1 s later does not stop it.** At 0.6 s, before any plan, the Explore safe default queued 10 steps north toward (415, 353), from (430, 378) to (429, 368). That is 1 cell from the gristlewick, whose pack was in view at the first `entities` read. Which NPC types are hostile is learned per run (`WorldModel.hostile_types`, `world.py:246`, filled at `:691`). The knowledge base has an `npc_types` table (`knowledge_base.py:67`) that nothing writes. So the type that killed run 5 showed as `"hostile": false` in the planner's State. The planner's `travel` town was applied at 1.8 s, but a new plan never replaces a queue already sent (A71). The queue ran on, and the first hit came at 4.8 s, at 6/10 with no potion. Hostile types should be saved to the knowledge base, and a run that starts hurt beside an NPC pack should not send a walk toward it before the first plan.
+
+   ```
+   0.6 s   @430,378  explore → (415, 353)   10×Step 27×Wait     npc 217 gristlewick at (438, 369) in view
+   1.8 s   plan replaced (travel town, explore_area town)        queue held
+   4.8 s   @429,368  Attacked, Damaged 2 by npc 217             6 → 4
+   10.7 s  Died                                                  lives 6 → 5
+   ```
+
+3. **Gather goes back and forth between a regrown bush and grass several cells off** (`states/gather.py:605–617`). Gather's pick takes the nearest stand beside a bush in the region before any grass, however far the bush is. A bush beside (387, 369) kept growing back at the region's west edge. So after each grass cut 4–9 cells east, the next pick walked back to that bush, and after the bush cut, the nearest grass was again to the east: 8 walks of 4–9 cells between 372 s and 406 s, 2 cuts per round trip. With a cut yield of 0.04–0.06 gems, the walking halved the cuts per minute. The pick should weigh walking distance against kind, so grass next to the character beats a bush 9 cells off.
+
+   ```
+   374.7 s  @387,369  cut grass
+   376.0 s  gather → (391, 368)   4×Step    378.6 s cut grass, 380.0 s cut bush
+   381.8 s  gather → (387, 369)   4×Step    384.3 s gather → (392, 368)   5×Step
+   390.7 s  gather → (387, 369)   5×Step    393.4 s gather → (396, 368)   9×Step
+   401.3 s  gather → (387, 369)   9×Step
+   ```
+
+**Minor:** The `travel` point (424, 370) that the planner sent at 2/10, to get the character off the field, came back after the respawn. Break then cut 9 bushes on the way back toward where it died (18–63 s). Gather and Retreat paced (369, 398) ↔ (370, 399) at 483–494 s, and the guard gave nothing up. Stuck detection gave up `travel` town at 507 s and a `travel` point 1 cell away at 528 s (a bush and a wall in the way). Greet said hello to 8 chugbugs and 4 snotlings. The first planner call went out before the first observation, so its State said `health=None/None gems=None`.

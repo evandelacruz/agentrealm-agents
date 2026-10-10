@@ -145,5 +145,7 @@
 
   "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."},
 
-  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. Free-play run 4 played it live; its fixes: Detour prices finds from where the character stands, queued steps included (pathing.route_ahead), and a planner reply that moves the gather_gems region needs a reason (gem_yield.keep_gather_region)."}
+  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. Free-play run 4 played it live; its fixes: Detour prices finds from where the character stands, queued steps included (pathing.route_ahead), and a planner reply that moves the gather_gems region needs a reason (gem_yield.keep_gather_region)."},
+
+  "A73": {"state": "done", "note": "A67 run 4. (a) #158: Detour prices from the route ahead, queued steps included (pathing.route_ahead). (b) Every find in view is priced by the true extra steps it adds over known ground, no reach cut; allowance by kind: gem pile 8, +4 per adjacent pile up to 16, life 16, food while hurt 4 (detour.allowance). No live run yet."}
 }

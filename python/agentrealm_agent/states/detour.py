@@ -1,25 +1,33 @@
-"""Detour: take a valuable a few steps off the walk, then resume it (A71).
+"""Detour: take a valuable off the walk, then resume it (A71, A73).
 
 A reflex that extends **Pickup**: Pickup takes what is in reach; Detour
-walks to a valuable that comes into view a few steps off the path being
-walked, and Pickup takes it once it is in reach. No planner call.
+walks to a valuable that comes into view off the path being walked, and
+Pickup takes it once it is in reach. No planner call.
 
 A valuable is a free gem, a life (a code the item table learned, A47), or
-food while hurt. It is a detour when it lies within ``DETOUR_REACH`` of a
-cell of the route still ahead (the queued steps, then the path) and going
-by it adds at most ``DETOUR_EXTRA_STEPS`` steps, counted from where the
-character stands. Hostile safety is Gather's: the find must be
-on ground ``gather_ground`` allows (off hazards, clear of every known
-hostile's bar), and the survival reflexes above it still win.
+food while hurt. Every one in view is priced by the steps going by it adds
+to the walk: the walking distance from where the character stands to the
+find, then on to the best cell of the route still ahead (the queued steps,
+then the path), less the steps the walk takes to that cell anyway
+(``extra_steps``, a search over known ground, so a wall between the route
+and the find counts). There is no fixed reach: each kind has its own
+allowance (``allowance``). A gem pile is worth ``GEM_PILE_STEPS``, and each
+gem pile next to it adds ``GEM_CLUSTER_STEPS`` (one stop takes them all);
+a life is worth ``LIFE_STEPS``; food while hurt ``FOOD_STEPS``. Hostile
+safety is Gather's: the find must be on ground ``gather_ground`` allows
+(off hazards, clear of every known hostile's bar), and the survival
+reflexes above it still win.
 
-The walk it interrupts keeps its committed target (``targets``): once the
-find is taken, seen gone or given up (no step, or ``DETOUR_TICKS`` without
-taking it, after which that find is skipped for the run), the state that was
-walking plans again to the same target.
+A detour is a short insert, never a new target: the walk it interrupts
+keeps its committed target (``targets``). Once the find is taken, seen gone
+or given up (no step, or ``DETOUR_TICKS`` without taking it, after which
+that find is skipped for the run), the state that was walking plans again
+to the same target.
 """
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from ..healing import FOOD_CODES, hurt
@@ -30,16 +38,21 @@ from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
 from ..survival import hostile_reach
-from ..world import Entity, Pos, WorldModel, chebyshev
+from ..world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .gather_safe import gather_ground
 from .intents import set_position
 
 GOAL = "detour"
-# A find may lie this far from a cell of the path being walked.
-DETOUR_REACH = 3
-# Going by the find may add at most this many steps to the walk.
-DETOUR_EXTRA_STEPS = 4
+# The most steps going by a find may add to the walk, by kind (A73; free-play
+# run 4 walked past a gem triple 5 cells off that cost about 7).
+GEM_PILE_STEPS = 8
+# Each gem pile next to the find adds this much: one stop takes them all.
+GEM_CLUSTER_STEPS = 4
+# A cluster counts at most this many piles.
+GEM_CLUSTER_MAX = 3
+LIFE_STEPS = 16
+FOOD_STEPS = 4
 # A detour that has not taken its find in this long is given up (10 s at 10 ticks/s).
 DETOUR_TICKS = 100
 
@@ -100,15 +113,62 @@ def valuable(w: WorldModel, e: Entity, items: dict) -> bool:
     return pickup_room(w, Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items)), items) is not False
 
 
-def extra_steps(here: Pos, find: Pos, path: list[Pos]) -> int | None:
-    """Steps going by ``find`` adds to walking ``path`` from ``here``, rejoining
-    it at the best cell within ``DETOUR_REACH`` of ``find``; None when no cell is.
+def allowance(w: WorldModel, e: Entity, finds: list[Entity], items: dict) -> int:
+    """The most steps going by ``e`` may add to the walk: the best of what it is.
 
-    ``path`` must start at the step after ``here`` (``route_ahead``): cell i
-    is i + 1 steps away. A find beside the route then costs at most 2."""
-    to_find = chebyshev(here, find)
-    costs = [to_find + chebyshev(find, p) - (i + 1) for i, p in enumerate(path) if chebyshev(find, p) <= DETOUR_REACH]
-    return min(costs) if costs else None
+    ``finds`` are the valuables in view; the gem piles among them next to a
+    gem pile ``e`` make it a cluster."""
+    steps = 0
+    if e.code in GEM_SUPPLY_CODES:
+        piles = sum(1 for f in finds if f.code in GEM_SUPPLY_CODES and chebyshev(f.pos, e.pos) <= 1)
+        steps = GEM_PILE_STEPS + GEM_CLUSTER_STEPS * (min(piles, GEM_CLUSTER_MAX) - 1)
+    if is_life_supply(e.code, items):
+        steps = max(steps, LIFE_STEPS)
+    if hurt(w) and e.code in FOOD_CODES:
+        steps = max(steps, FOOD_STEPS)
+    return steps
+
+
+def extra_steps(w: WorldModel, here: Pos, find: Pos, route: list[Pos], limit: int, avoid: Collection[str] = ()) -> int | None:
+    """Steps going by ``find`` adds to walking ``route`` from ``here``,
+    rejoining it at its best cell; None when that is more than ``limit``.
+
+    ``route`` must start at the step after ``here`` (``route_ahead``): cell i
+    is i + 1 steps away. Distances are walks over known ground (walkable or a
+    door, never a tile in ``avoid``; the route's own cells count as open),
+    searched from ``find`` no further than the straight line to ``here``
+    plus ``limit``. A find beside the route costs at most 2."""
+    if not route:
+        return None
+    # Straight lines never overestimate a walk: past the limit on them, no search.
+    reach = chebyshev(here, find)
+    if reach + min(chebyshev(find, p) - (i + 1) for i, p in enumerate(route)) > limit:
+        return None
+    on_route = set(route) | {here}
+
+    def open_(p: Pos) -> bool:
+        tile = w.view.tiles.get(p)
+        return p in on_route or (tile not in avoid and (w.view.walkable(p) or tile in DOORS))
+
+    dist, frontier = {find: 0}, [find]
+    for steps in range(1, reach + limit + 1):
+        nxt = []
+        for x, y in frontier:
+            for dx, dy in NEIGHBOURS:
+                p = (x + dx, y + dy)
+                if p not in dist and open_(p):
+                    dist[p] = steps
+                    nxt.append(p)
+        frontier = nxt
+        if not frontier:
+            break
+    if here not in dist:
+        return None
+    rejoin = [dist[p] - (i + 1) for i, p in enumerate(route) if p in dist]
+    if not rejoin:
+        return None
+    extra = dist[here] + min(rejoin)
+    return extra if extra <= limit else None
 
 
 def detour_find(w: WorldModel, ctx: PlayContext) -> Entity | None:
@@ -121,12 +181,13 @@ def detour_find(w: WorldModel, ctx: PlayContext) -> Entity | None:
     if not route:
         return None
     items = knowledge_items(ctx.knowledge)
+    finds = [e for e in w.entities if valuable(w, e, items)]
     best: tuple[int, int, Entity] | None = None
-    for e in w.entities:
-        if e.id in m.detour_skipped or chebyshev(e.pos, here) <= 1 or not valuable(w, e, items):
+    for e in finds:
+        if e.id in m.detour_skipped or chebyshev(e.pos, here) <= 1 or not gather_ground(w, e.pos, ctx.policy):
             continue  # in reach is Pickup's
-        extra = extra_steps(here, e.pos, route)
-        if extra is None or extra > DETOUR_EXTRA_STEPS or not gather_ground(w, e.pos, ctx.policy):
+        extra = extra_steps(w, here, e.pos, route, allowance(w, e, finds, items), ctx.policy.avoid_blocks)
+        if extra is None:
             continue
         if best is None or (extra, e.id) < best[:2]:
             best = (extra, e.id, e)

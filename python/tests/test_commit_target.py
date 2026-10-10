@@ -22,7 +22,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
-from agentrealm_agent.states.detour import DETOUR_EXTRA_STEPS, DETOUR_TICKS, extra_steps
+from agentrealm_agent.states.detour import DETOUR_TICKS, GEM_PILE_STEPS, extra_steps
 from agentrealm_agent.states.explore import explore_outcome
 from agentrealm_agent.states.level import ENTRANCE_GOAL
 from agentrealm_agent.states.travel import TRAVEL_TARGET, resolve_destination
@@ -433,9 +433,9 @@ class DetourTest(unittest.TestCase):
         self.assertIsNone(m.detour)
 
     def test_extra_steps_bound(self):
-        path = [(x, 4) for x in range(3, 19)]
-        self.assertLessEqual(extra_steps((2, 4), (8, 6), path), DETOUR_EXTRA_STEPS)
-        self.assertIsNone(extra_steps((2, 4), (8, 8), path), "further than DETOUR_REACH from the path")
+        w, path = field(height=20), [(x, 4) for x in range(3, 19)]
+        self.assertLessEqual(extra_steps(w, (2, 4), (8, 6), path, GEM_PILE_STEPS), 2)
+        self.assertIsNone(extra_steps(w, (2, 4), (3, 16), path, GEM_PILE_STEPS), "12 steps out and 12 back")
 
     def test_a_find_beside_a_hostile_is_left(self):
         w = field(at=(2, 4))

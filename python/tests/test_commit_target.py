@@ -173,7 +173,7 @@ class NearerCandidateTest(unittest.TestCase):
         w.entities = [Entity("supply", 21, (13, 4), "apple")]
         out = dispatch(w, ctx(m, plan))
         self.assertEqual(out.state, "Loot")
-        self.assertEqual(m.targets["loot"].target, (21, (13, 4)))
+        self.assertEqual(m.targets["loot"].target, (MAP, 21, (13, 4)))
         walk_off(w, m, (6, 4))  # out of sight of it now
         w.entities = [Entity("supply", 22, (4, 4), "apple")]  # another, nearer
         out = dispatch(w, ctx(m, plan))
@@ -181,7 +181,20 @@ class NearerCandidateTest(unittest.TestCase):
         w.pos = (11, 4)  # in sight again, and gone
         w.entities = [Entity("supply", 22, (4, 4), "apple")]
         dispatch(w, ctx(m, plan))
-        self.assertEqual(m.targets["loot"].target, (22, (4, 4)))
+        self.assertEqual(m.targets["loot"].target, (MAP, 22, (4, 4)))
+
+    def test_loot_lets_go_of_a_supply_stuck_detection_gave_up_on(self):
+        w = field(at=(10, 4))
+        op = {"op": "fetch_item", "code": "apple"}
+        plan = Plan([op], dict(PARAM_DEFAULTS))
+        m = Memory()
+        w.entities = [Entity("supply", 21, (13, 4), "apple"), Entity("supply", 22, (4, 4), "apple")]
+        dispatch(w, ctx(m, plan))
+        self.assertEqual(m.targets["loot"].target, (MAP, 21, (13, 4)))
+        att = nav_stuck.attempt(m, w, "loot", (13, 4))
+        nav_stuck.give_up(m, w, att, "time")
+        out = dispatch(w, ctx(m, plan))
+        self.assertEqual((m.targets["loot"].target, m.path[-1]), ((MAP, 22, (4, 4)), (4, 4)), out.reason)
 
     def test_heal_keeps_the_food_it_went_for(self):
         w = field(at=(10, 4))
@@ -431,6 +444,20 @@ class DiscoveryTest(unittest.TestCase):
         finds = s.inbox[-1]["finds"]
         self.assertEqual(len(finds), 16)
         self.assertEqual(finds[-1]["id"], 104)
+
+    def test_a_new_hostile_pack(self):
+        s, r = make(), fake_runner()
+        r.world.hostile_types.add(("npc", "gnawer"))
+        r.world.entities = [Entity("npc", 1, (2, 2), "gnawer")]
+        s._collect(r)  # primes: known at the start
+        r.world.entities += [Entity("npc", 2, (3, 3), "gnawer")]  # same square: same pack
+        s._collect(r)
+        self.assertEqual(s.inbox, [t for t in s.inbox if t["trigger"] != "discovery"])
+        r.world.entities += [Entity("npc", 3, (40, 2), "gnawer"), Entity("npc", 4, (41, 3), "gnawer")]
+        s._collect(r)
+        self.assertEqual(
+            s.inbox[-1]["finds"], [{"kind": "hostile_pack", "count": 2, "types": ["gnawer"], "cell": [40, 2]}]
+        )
 
     def test_an_item_the_gems_can_now_buy(self):
         s, r = make(), fake_runner()

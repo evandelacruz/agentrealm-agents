@@ -57,32 +57,40 @@ def _committed_supply(w: WorldModel, ctx: PlayContext, op: dict) -> Entity | Non
     else the nearest one of its code, committed from now on (A71).
 
     One out of sight is kept too: its cell is walked to and looked at, and
-    only a look that finds it gone lets it go.
+    only a look that finds it gone lets it go. A change of map, or stuck
+    detection giving the walk to it up (``bounded_step``'s backoff), lets it go too.
     """
     m, code = ctx.memory, op["code"]
     here = w.pos
     assert here is not None
 
-    def pick() -> tuple[int, Pos] | None:
-        e = _nearest_supply(w, code)
-        return (e.id, e.pos) if e is not None else None
+    def given_up(pos: Pos) -> bool:
+        return nav_stuck.backed_off(m, GOAL, w.map_id, pos, w.tick)
 
-    def keep(t: tuple[int, Pos]) -> bool:
-        sid, pos = t
+    def pick() -> tuple[int | None, int, Pos] | None:
+        e = _nearest_supply(w, code, skip=given_up)
+        return (w.map_id, e.id, e.pos) if e is not None else None
+
+    def keep(t: tuple[int | None, int, Pos]) -> bool:
+        mid, sid, pos = t
+        if mid != w.map_id or given_up(pos):
+            return False
         return any(e.kind == "supply" and e.id == sid for e in w.entities) or chebyshev(pos, here) > w.perception
 
     held = targets_mod.hold(m, w, GOAL, pick, keep, op)
     if held is None:
         return None
-    sid, pos = held
+    _, sid, pos = held
     return next((e for e in w.entities if e.kind == "supply" and e.id == sid), None) or Entity("supply", sid, pos, code)
 
 
-def _nearest_supply(w: WorldModel, code: str) -> Entity | None:
-    """The nearest free (unpriced) ground supply of ``code`` in sight."""
+def _nearest_supply(w: WorldModel, code: str, skip=lambda pos: False) -> Entity | None:
+    """The nearest free (unpriced) ground supply of ``code`` in sight, leaving out cells ``skip`` names."""
     here = w.pos
     found = [
-        e for e in w.entities if e.kind == "supply" and e.gem_price is None and supply_matches(code, e.code)
+        e
+        for e in w.entities
+        if e.kind == "supply" and e.gem_price is None and supply_matches(code, e.code) and not skip(e.pos)
     ]
     return min(found, key=lambda e: (chebyshev(e.pos, here), e.id)) if found and here is not None else None
 

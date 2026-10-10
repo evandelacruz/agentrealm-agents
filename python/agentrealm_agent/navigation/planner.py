@@ -71,10 +71,13 @@ class NavSearchState:
     cost: dict[Pos, int] = field(default_factory=dict)
     closed: set[Pos] = field(default_factory=set)
     step: dict[Pos, int | None] = field(default_factory=dict)  # cost to enter each expanded tile, as searched
+    # Cell estimates the window search has raised past the corridor's (``_fine_path``).
+    learned: dict[Pos, int] = field(default_factory=dict)
 
     def reset(self, goal: Pos) -> None:
         self.goal, self.origin = goal, None
         self.frontier, self.came, self.cost, self.closed, self.step = [], {}, {}, set(), {}
+        self.learned = {}
 
 
 def macro_cell(p: Pos) -> Pos:
@@ -503,53 +506,112 @@ def _toward(goal: Pos, corridor: list[Pos] | None, came: dict[Pos, Pos] | None =
 
 
 def _fine_path(
-    grid: _Grid, h: Callable[[Pos], int], corridor: set[Pos] | None, max_nodes: int
+    grid: _Grid,
+    h: Callable[[Pos], int],
+    corridor: set[Pos] | None,
+    max_nodes: int,
+    learned: dict[Pos, int] | None = None,
 ) -> list[Pos] | None:
     """Best path inside the perception window, kept to ``corridor`` tiles when given.
 
     ``corridor`` is the corridor's tiles and those beside them. Ends on the
-    goal when the search reaches it; otherwise on the expanded cell with the
-    least cost so far plus twice ``h``, which favours progress over an
-    exactly cheapest prefix, so a blocked or unseen corridor point still
-    gives a step when one gets closer. The start competes on the same score:
-    ``None`` when no reachable cell beats where we stand, so a dead end next
-    to a goal that cannot be reached is "no path", never a step away and
-    back (A58 run 7, Heal pacing beside unreachable food).
+    goal when the search reaches it. Otherwise it ends where the walk can go
+    on: a cell beside the window's edge with a passable cell past it, or one
+    the node budget left unexpanded. Never in a dead end the search saw all
+    round: a pocket in sight is no end, however near the goal it looks
+    (free-play run 6: Park walked 2 cells into one and stood there).
+
+    With ``learned`` (the corridor branch, ``NavSearchState.learned``) it is
+    real-time search that learns (LSS-LRTA*): it ends on the end with the
+    least cost so far plus estimate, and raises the estimate of every cell
+    it searched to what it learned the way on costs. A dead end then looks
+    as dear as the way out of it, so the next decision walks away from it
+    and none walks back in (free-play run 6).
+
+    Without it, an end scores its cost so far plus twice ``h``, which
+    favours progress over an exactly cheapest prefix, and the start competes
+    on the same score: ``None`` when no end beats where we stand, so a dead
+    end next to a goal that cannot be reached is "no path", never a step
+    away and back (A58 run 7, Heal pacing beside unreachable food).
     """
     w, goal = grid.w, grid.goal
     assert w.pos is not None
     start = w.pos
     x0, y0, x1, y1 = _perception_bounds(w)
-    frontier: list[tuple[int, int, Pos]] = [(h(start), 0, start)]
+
+    def est(p: Pos) -> int:
+        return max(h(p), learned.get(p, 0)) if learned is not None else h(p)
+
+    frontier: list[tuple[int, int, Pos]] = [(est(start), 0, start)]
     came: dict[Pos, Pos] = {}
     cost: dict[Pos, int] = {start: 0}
-    reached: set[Pos] = set()
-    expanded = 0
-    while frontier and expanded < max_nodes:
+    expanded: set[Pos] = set()
+    # Past the window's edge: cost to get there, and the cell in the window it is entered from.
+    past: dict[Pos, tuple[int, Pos]] = {}
+    while frontier and len(expanded) < max_nodes:
         _, g, cur = heapq.heappop(frontier)
-        if g > cost.get(cur, 10**9):
+        if g > cost.get(cur, 10**9) or cur in expanded:
             continue
         if cur == goal:
             return _unwind(came, start, goal)
-        expanded += 1
-        if cur != start:
-            reached.add(cur)
+        expanded.add(cur)
         for dx, dy in NEIGHBOURS:
             n = (cur[0] + dx, cur[1] + dy)
-            if not _in_rect(n, x0, y0, x1, y1) or not grid.in_box(n):
-                continue
-            if corridor is not None and macro_cell(n) not in corridor:
+            if not grid.in_box(n) or (corridor is not None and macro_cell(n) not in corridor):
                 continue
             sc = grid.cost(n)
             if sc is None:
                 continue
             ng = g + sc
+            if not _in_rect(n, x0, y0, x1, y1):
+                if ng < past.get(n, (10**9, cur))[0]:
+                    past[n] = (ng, cur)
+                continue
             if ng < cost.get(n, 10**9):
                 cost[n] = ng
                 came[n] = cur
-                heapq.heappush(frontier, (ng + h(n), ng, n))
-    best = min(reached | {start}, key=lambda p: (cost[p] + 2 * h(p), h(p), p != start, p))
+                heapq.heappush(frontier, (ng + est(n), ng, n))
+    # Each end: its cost from here, and the last cell of the path to it inside the window.
+    ends = {p: (cost[p], p) for p in cost.keys() - expanded}
+    ends.update(past)
+    if learned is not None:
+        if not ends:
+            return None  # walled in inside the window
+        _learn(grid, expanded, ends, est, learned)
+        best = min(ends, key=lambda p: (ends[p][0] + est(p), est(p), p))
+        last = ends[best][1]
+        return None if last == start else _unwind(came, start, last)
+    candidates = {last for _, last in ends.values()} | {start}
+    best = min(candidates, key=lambda p: (cost[p] + 2 * h(p), h(p), p != start, p))
     return None if best == start else _unwind(came, start, best)
+
+
+def _learn(
+    grid: _Grid, searched: set[Pos], ends: dict[Pos, tuple[int, Pos]], est: Callable[[Pos], int], learned: dict[Pos, int]
+) -> None:
+    """Raise each searched cell's estimate to the cheapest way from it to an
+    end, plus that end's estimate: one Dijkstra back from the ends."""
+    best = {p: est(p) for p in ends}
+    queue = [(v, p) for p, v in best.items()]
+    heapq.heapify(queue)
+    while queue:
+        v, cur = heapq.heappop(queue)
+        if v > best.get(cur, 10**9):
+            continue
+        sc = grid.cost(cur)
+        if sc is None:
+            continue
+        for dx, dy in NEIGHBOURS:
+            n = (cur[0] + dx, cur[1] + dy)
+            if n not in searched or n in ends:
+                continue
+            nv = v + sc
+            if nv < best.get(n, 10**9):
+                best[n] = nv
+                heapq.heappush(queue, (nv, n))
+    for p in searched:
+        if p in best and best[p] > learned.get(p, 0):
+            learned[p] = best[p]
 
 
 def path_cost(w: WorldModel, path: list[Pos], goal: Pos, params: CostGridParams | None = None) -> int | None:
@@ -689,7 +751,9 @@ def cost_path(
         # retry from a cell the corridor will not leave walks back to where
         # the corridor came from (free-play run 4). None is "no path", which
         # stuck detection escalates (A15).
-        return _fine_path(grid, _toward(goal, corridor, nav.came), set(_corridor_index(corridor)), fine_budget)
+        return _fine_path(
+            grid, _toward(goal, corridor, nav.came), set(_corridor_index(corridor)), fine_budget, nav.learned
+        )
     return _fine_path(grid, _toward(goal, None), None, fine_budget)
 
 

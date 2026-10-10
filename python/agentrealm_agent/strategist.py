@@ -1224,6 +1224,11 @@ class Strategist:
             runner.plan.block_before = old.block_before
             runner.plan.held_before = old.held_before
         else:
+            # The safe default's walk serves no op, so its queue is cut at its
+            # next step, not run out (free-play run 6: the walk queued before
+            # the first reply took the character into a hostile).
+            if head is None and goals:
+                runner.mem.cut_safe_default_walk()
             runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
             runner.mem.walks.clear()  # the new head walks a path of its own (A15)
             runner.mem.gather_status = ""  # it was the old head's

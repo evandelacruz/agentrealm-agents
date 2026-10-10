@@ -9,7 +9,7 @@ from .break_memory import break_costs_for_planning, nominate_on_path
 from .clues import direction_hint, nearest_explore_target, on_hint_side
 from .config import Policy
 from .knowledge_base import KnowledgeBase
-from .memory import Memory
+from .memory import SAFE_EXPLORE_GOAL, Memory
 from .navigation import (
     CostGridParams,
     NavSearchState,
@@ -195,10 +195,6 @@ def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos |
     if prefix and step_open(w, blocked, prefix[0]):
         return prefix[0]
     return None
-
-
-# ``Memory.goal`` of the safe default's walk (no plan op, PLAN.md Architecture).
-SAFE_EXPLORE_GOAL = "explore"
 
 
 def plan_op_goal(op: GoalOp) -> str:
@@ -501,7 +497,9 @@ def reachable_safe_goal(
     left are searched, then the nearest of the rest; a cell a kept safe
     walk (``SAFE_PATH_GOALS``) already ends on needs no search. "No way" is a
     search that proved it (``navigation.no_way``): one cut short by its
-    budget still counts as a way, since it walks toward the cell.
+    budget still counts as a way, since it walks toward the cell. A Retreat
+    or Park walk also marks a cell it found no step toward for a stuck
+    window (``retreat_step``), the town cell too.
     """
     if w.pos is None or w.map_id is None:
         return None
@@ -514,12 +512,7 @@ def reachable_safe_goal(
             m.safe_threatened.setdefault((mid, p), {})[key] = w.tick
 
     def skipped(p: Pos) -> bool:
-        if p in params.avoid:
-            return True
-        seen = m.safe_unreachable.get((mid, p))
-        if seen is not None and w.tick - seen < SAFE_UNREACHABLE_TICKS:
-            return True
-        return any(nav_stuck.backed_off(m, goal, mid, p, w.tick) for goal in SAFE_WALK_GOALS)
+        return p in params.avoid or safe_ruled_out(m, w, p)
 
     def reaches(p: Pos) -> bool:
         if m.goal in SAFE_PATH_GOALS and m.path and m.path[-1] == p:
@@ -560,6 +553,16 @@ def reachable_safe_goal(
     if town is not None and town not in first and not skipped(town) and reaches(town):
         return town
     return None
+
+
+def safe_ruled_out(m: Memory, w: WorldModel, p: Pos) -> bool:
+    """A check or a walk found no way to safe cell ``p`` within
+    ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), or a Heal walk
+    gave up on it and still backs off."""
+    seen = m.safe_unreachable.get((w.map_id, p))
+    if seen is not None and w.tick - seen < SAFE_UNREACHABLE_TICKS:
+        return True
+    return any(nav_stuck.backed_off(m, goal, w.map_id, p, w.tick) for goal in SAFE_WALK_GOALS)
 
 
 def retreat_safe_goal(

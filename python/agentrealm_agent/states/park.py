@@ -6,7 +6,10 @@ nothing else (``dispatch.PARK_STATES``). Park walks Retreat's path to the
 nearest known safe tile a path reaches, else the town cell
 (``retreat_step``), whether or not anything threatens. A safe tile it gets
 no nearer to in a stuck window is ruled out for a while, and it moves on to
-the next, else town (``retreat.no_progress``).
+the next, else town (``retreat.no_progress``); so is one it finds no step
+toward for a stuck window, the town cell included. One proven walled in
+(``navigation.no_way``) is ruled out at once. Once all are ruled out, the
+runner ends the park (``park.PARK_NO_PATH``).
 """
 
 from __future__ import annotations

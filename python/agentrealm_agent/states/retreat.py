@@ -91,7 +91,11 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
 
     A goal the walk gets no nearer to in a stuck window (``no_progress``) is
     ruled out for ``SAFE_UNREACHABLE_TICKS`` and the next one is taken; the
-    town cell, the last resort, is only planned again.
+    town cell, the last resort, is only planned again while it has a path; a
+    stuck window with no step to it rules it out too. A goal proven walled in
+    from its own side (``no_way``) is ruled out at once, the town cell too. Either way the
+    next decision takes the next one: never the same empty decision for
+    good. A path whose first cell is not open rules nothing out.
     """
     m, policy = ctx.memory, ctx.policy
     goals = safe_goals(w, ctx.knowledge)
@@ -109,9 +113,12 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     if goal is not None and no_progress(w, m, goal):
         # Reachable by budget but no nearer in a whole stuck window: rule it
         # out for a while and take the next candidate, else town (free-play
-        # run 3). Town is the last resort and is never ruled out this way:
-        # its walk only plans afresh.
-        if goal != town_cell(w, ctx.knowledge):
+        # run 3). Town is the last resort: while a path to it exists its walk
+        # only plans afresh, but a whole stuck window with no step to it at
+        # all rules it out too (free-play run 6: Park stood 60 s planning
+        # nothing toward town).
+        has_path = m.goal == "safe" and bool(m.path)  # a partial path need not end on the goal
+        if goal != town_cell(w, ctx.knowledge) or not has_path:
             m.safe_unreachable[(w.map_id, goal)] = w.tick
         if m.goal == "safe":
             m.path = []
@@ -138,18 +145,35 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     # Each danger profile keeps its own corridor (``RETREAT_NAV``, ``LOSING_NAV``).
     nav_key = LOSING_NAV if losing else RETREAT_NAV
     new_threat = bool(hostiles_reaching(w, policy, m.path, skip=pursuers) - m.planned_threats)
+    nav = nav_search(m, w, nav_key, goal)
     if m.goal != "safe" or not m.path or m.path[-1] != goal or new_threat:
-        m.path = cost_path(w, goal, params, nav=nav_search(m, w, nav_key, goal)) or []
+        m.path = cost_path(w, goal, params, nav=nav) or []
         m.goal = "safe"
         m.planned_threats = hostiles_reaching(w, policy, m.path, skip=pursuers)
     step = next_step(w, plan_avoid, m.path)
     if step is None and m.path:
-        m.path = cost_path(w, goal, params, nav=nav_search(m, w, nav_key, goal)) or []
+        m.path = cost_path(w, goal, params, nav=nav) or []
         step = next_step(w, plan_avoid, m.path)
     if step is None:
-        if not m.path and no_way(w, goal, lasting):  # proven walled in: the next decision picks another safe cell
-            m.safe_unreachable[(w.map_id, goal)] = w.tick
-        return StateOutcome(None, "safe tile unreachable", state=state)
+        if m.path:
+            # A path whose first cell is not open this decision (someone stands on it, or it is unseen): wait.
+            return StateOutcome(None, f"safe {goal}: next step not open", state=state)
+        if escape:
+            # Shut only for this decision: the next one plans without it (review on #140).
+            return StateOutcome(None, f"safe {goal}: no path past the paced cell", state=state)
+        if not no_way(w, goal, lasting):
+            # No step found is not no path: a budgeted search can miss a way
+            # round, and one from our side that runs out shows only that where
+            # we stand is shut, maybe for this decision alone. ``no_progress``
+            # rules the cell out, the town cell too, if it goes on for a stuck
+            # window.
+            return StateOutcome(None, f"safe {goal}: no step found", state=state)
+        # Proven from the goal's side: walled in. Rule the cell out, the town
+        # cell too, so the next decision takes the next safe cell instead of
+        # planning the same nothing again (free-play runs 5 and 6: Park stood
+        # 60 s on one cell).
+        m.safe_unreachable[(w.map_id, goal)] = w.tick
+        return StateOutcome(None, f"safe {goal}: no path, ruled out", state=state)
     # The runner queues the walkable prefix of ``m.path`` from this first step,
     # and leaves these out of its threats: the path weighs none of them. Set
     # only here, so a walk that falls through to another state never inherits it.

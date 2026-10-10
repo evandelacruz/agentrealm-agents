@@ -38,8 +38,15 @@ export const CLAUDE_REVIEW_WORKFLOW = "Claude Review";
 /** The review pair and the bot logins, read from `main`. See `parseReviewers`. */
 export const REVIEWERS_FILE = ".github/reviewers";
 
-/** The pair when `REVIEWERS_FILE` is missing or malformed, as the workflow falls back to `cursor`. */
-export const DEFAULT_REVIEWER_PAIR = { opus: "opus-review-agent[bot]", second: "cursor[bot]" };
+/**
+ * The pair when `REVIEWERS_FILE` is missing or malformed, as the workflow falls
+ * back to `cursor`. The logins copy `REVIEWERS_FILE`; keep them in sync.
+ */
+export const DEFAULT_REVIEWER_PAIR = {
+  opus: "opus-review-agent[bot]",
+  second: "cursor[bot]",
+  bots: ["opus-review-agent[bot]", "sonnet-review-agent[bot]", "cursor[bot]"],
+};
 
 export function requireApiKey(): string {
   const key = process.env.CURSOR_API_KEY?.trim();

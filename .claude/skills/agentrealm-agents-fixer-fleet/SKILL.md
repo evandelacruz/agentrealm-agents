@@ -24,15 +24,15 @@ First row that matches decides it:
 
 | Condition | Outcome |
 |---|---|
-| has `conductor:working` | **skip**: an implementer or fixer holds it and releases it when they finish. Never delete the label to spawn. |
+| has `conductor:working` | **skip**: an implementer or fixer holds it and releases it when they finish, or a fixer handed it to Evan and left the label on. Never delete the label to spawn. |
 | draft | **skip**: still being written |
 | `mergeable_state` is `"dirty"` | **spawn**: merge conflict |
 | a CI check run (not a reviewer's check) concluded `failure` or `timed_out` | **spawn**: red CI |
-| a reviewer rejected the current head, the rejection has inline threads, and a fixer replied on each of them after that review without pushing | **skip**: disputed, Evan decides |
-| a reviewer rejected the current head | **spawn**: review |
+| the review verdict is changes requested, and the newest pull request comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` starts with `Handed to Evan:` and is newer than the latest rejecting review on the current head | **skip**: a fixer declined every finding and handed it to Evan, even if the label is gone. Evan dismisses the rejection, or comments naming the findings to fix; that later comment ends the skip, and the brief carries it. |
+| the review verdict is changes requested | **spawn**: review |
 | anything else | **skip**: nothing blocks it |
 
-Open review threads are never a blocker on their own. A pull request no reviewer rejected is not blocked, however many threads are open.
+Open review threads are never a blocker on their own. A pull request no trusted reviewer rejected is not blocked, however many threads are open, and a rejection from anyone else is no reason to spawn.
 
 The three spawn rows are not exclusive. A pull request that conflicts **and** is red **and** was rejected is one session whose brief carries all three.
 
@@ -54,7 +54,7 @@ list_pull_requests(owner="evandelacruz", repo="agentrealm-agents", state="open",
 
 A pull request with no labels comes back with **no `labels` key at all**.
 
-Then per pull request: `pull_request_read` `get` for `mergeable_state`, `get_check_runs` for CI, `get_reviews` and `get_review_comments` for the review. Record which blockers each one has; the brief needs them.
+Then per pull request: `pull_request_read` `get` for `mergeable_state`, `get_check_runs` for CI, `get_reviews` and `get_review_comments` for the review, and `get_comments` for the pull request's own comments (with `author_association`), which the `Handed to Evan:` row needs. Record which blockers each one has; the brief needs them.
 
 **2. Claim the lock, one at a time.** You claim it, not the session you spawn. `issue_write` **replaces** the whole label set, so send the existing labels plus the new one:
 
@@ -100,10 +100,13 @@ One pass: apply the fixes and push. Write nothing to GitHub except the
 label, a reply naming the fixing commit on each thread your push fixed
 (then resolve that thread), and a reply on each thread you deliberately
 leave unfixed (leave it open). No reviews, no approvals, no merging, no
-re-running CI.
+re-running CI. The one exception: if you decline every finding and have
+nothing to push, follow the skill's Declined everything and post its one
+Handed to Evan: comment.
 
 The conductor:working label is already claimed for you. Do not claim it
 again. After your push, remove only that label, keeping every other one.
+After Declined everything, keep it.
 
 You are on <head ref>, the PR's own branch. Push there with
 git push -u origin <head ref>. Do not force-push. Do not open a second PR.
@@ -118,9 +121,12 @@ hand-edit it. In status.json keep the more advanced state per ID.
 Run <run_id>: pull the output with get_job_logs(failed_only=true).
 Reproduce locally, fix, confirm. Never skip or disable a test.
 
-[review] <reviewer> requested changes on the head. Its threads:
+[review] <trusted reviewer> requested changes on the head. Its threads:
 - <path>:<line>: <what it asks, one line>
 - …
+
+[Evan's call] A fixer handed this PR to Evan, and Evan answered:
+<his comment, quoted>. Fix the findings it names.
 
 Keep the same backlog item IDs (<IDS>) and cite them in the commit. Do not
 expand the slice. Flag prominently if you add a dependency or touch

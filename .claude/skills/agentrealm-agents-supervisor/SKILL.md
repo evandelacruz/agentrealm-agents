@@ -17,7 +17,7 @@ Repo: `evandelacruz/agentrealm-agents`. Read [`AGENTS.md`](../../../AGENTS.md) f
 
 ## Who reviews
 
-Every pull request has exactly two reviewers, set in [`.github/reviewers`](../../../.github/reviewers) on `main`: the Opus Review Agent always, and `second:`, either `cursor` (`cursor[bot]`, through its `Cursor Automation: Saims Ref Agent Auto Code Review` check) or `sonnet` (a second Claude app). The Claude Review workflow (`.github/workflows/claude-review.yml`) runs the Opus review, and the Sonnet review when `main` says `sonnet`. People may review too. Who must approve, and whose rejection blocks, is [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict**. Nothing in these skills posts reviews. A Claude Review job that failed or was cancelled means that reviewer's review is not coming for that head: name it in the report for Evan and carry on with the pass.
+Every pull request has exactly two reviewers, set in [`.github/reviewers`](../../../.github/reviewers) on `main`: the Opus Review Agent always, and `second:`, either `cursor` (`cursor[bot]`, through its `Cursor Automation: Saims Ref Agent Auto Code Review` check) or `sonnet` (a second Claude app). The Claude Review workflow (`.github/workflows/claude-review.yml`) runs the Opus review, and the Sonnet review when `main` says `sonnet`. People may review too, but on this public repo only trusted reviewers' verdicts count. Who is trusted, who must approve, and whose rejection blocks, is [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict**. Nothing in these skills posts reviews. A Claude Review job that failed or was cancelled means that reviewer's review is not coming for that head: name it in the report for Evan and carry on with the pass.
 
 **The second reviewer follows Cursor's credits, and only Evan flips it.** Never edit `.github/reviewers` or Cursor's settings yourself. Read `second:` from `main` each pass and compare it with the mode (**Who implements**):
 
@@ -71,7 +71,7 @@ No `gh` CLI here. Reads and the merge go through the GitHub MCP tools, as in [ag
 List open pull requests. A pull request is **mergeable** when all of these hold on its **current head commit**:
 
 - CI green: every CI check run on the head has completed, none with `failure` or `timed_out`. Running or queued is not green. `skipped` and `neutral` are fine. A head with no CI run at all is not green; step 2 says why that usually means a conflict. Reviewer check runs (every Claude Review workflow job, the Cursor check) are not CI.
-- The [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Merge rule** holds: both of the pair in `.github/reviewers` on `main` approved, no reviewer rejected, no review in flight. Beyond that, the merge goes through or GitHub refuses it.
+- The [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Merge rule** holds: both of the pair in `.github/reviewers` on `main` approved, no trusted reviewer rejected, no review in flight. Beyond that, the merge goes through or GitHub refuses it.
 - It changes nothing under `.github/workflows/` or `.github/actions/`, and does not change `.github/reviewers` (see **Never**).
 - No merge conflict: `mergeable_state` is not `"dirty"`. If it reads `"unknown"`, read again; if it still does, it is not mergeable this pass.
 - No `conductor:working` label.

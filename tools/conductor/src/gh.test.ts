@@ -6,6 +6,7 @@ import {
   headVerdict,
   holdLock,
   parseReviewers,
+  trustedReview,
   type ReviewNode,
   reviewInProgress,
   rollupOk,
@@ -122,32 +123,38 @@ test("hasMergeConflict reads CONFLICTING or DIRTY", () => {
   assert.equal(hasMergeConflict({ mergeable: "MERGEABLE", mergeStateStatus: "CLEAN" }), false);
 });
 
-test("submittedReviewShas skips PENDING drafts", () => {
-  assert.deepEqual(
-    submittedReviewShas([
-      { state: "PENDING", commit: { oid: "draft" } },
-      { state: "COMMENTED", commit: { oid: "real" } },
-      { state: "APPROVED", commit: null },
-    ]),
-    ["real"],
-  );
-});
 
 const HEAD = "head-sha";
 
-function review(login: string, state: string, oid: string, body = ""): ReviewNode {
-  return { state, body, author: { login }, commit: { oid } };
+const BOTS = ["opus-review-agent", "sonnet-review-agent", "cursor"];
+
+/** Bots by login, as GraphQL types them; everyone else is a person with `association`. */
+function review(login: string, state: string, oid: string, body = "", association = "OWNER"): ReviewNode {
+  const isBot = BOTS.includes(login.replace(/\[bot\]$/, ""));
+  return {
+    state,
+    body,
+    author: { __typename: isBot ? "Bot" : "User", login },
+    authorAssociation: isBot ? "NONE" : association,
+    commit: { oid },
+  };
 }
 
 const OPUS = "opus-review-agent[bot]";
-const PAIR = { opus: OPUS, second: "cursor[bot]" };
+const PAIR = {
+  opus: OPUS,
+  second: "cursor[bot]",
+  bots: ["opus-review-agent[bot]", "sonnet-review-agent[bot]", "cursor[bot]"],
+};
 
 test("parseReviewers picks the second reviewer's login", () => {
   const file = "# comment\nopus: o[bot]\nsonnet: s[bot]\ncursor: cursor[bot]\nsecond: cursor\n";
-  assert.deepEqual(parseReviewers(file), { opus: "o[bot]", second: "cursor[bot]" });
+  const bots = ["o[bot]", "s[bot]", "cursor[bot]"];
+  assert.deepEqual(parseReviewers(file), { opus: "o[bot]", second: "cursor[bot]", bots });
   assert.deepEqual(parseReviewers(file.replace("second: cursor", "second: sonnet")), {
     opus: "o[bot]",
     second: "s[bot]",
+    bots,
   });
   assert.throws(() => parseReviewers(file.replace("second: cursor", "second: both")));
   assert.throws(() => parseReviewers("opus: o[bot]\nsecond: sonnet\n"));
@@ -172,7 +179,7 @@ test("headVerdict compares logins with or without the [bot] suffix", () => {
   assert.equal(headVerdict(reviews, HEAD, PAIR), "APPROVED");
 });
 
-test("headVerdict: any reviewer's rejection on the head wins, a person's included", () => {
+test("headVerdict: any trusted reviewer's rejection on the head wins, a person's included", () => {
   const both = [review(OPUS, "APPROVED", HEAD), review("cursor", "APPROVED", HEAD)];
   assert.equal(headVerdict([...both, review("evandelacruz", "CHANGES_REQUESTED", HEAD)], HEAD, PAIR), "CHANGES_REQUESTED");
   assert.equal(headVerdict([...both, review("sonnet-review-agent", "CHANGES_REQUESTED", HEAD)], HEAD, PAIR), "CHANGES_REQUESTED");
@@ -310,4 +317,73 @@ test("triagePrs leaves out PRs whose review check is still running", () => {
   ]);
   assert.deepEqual(numbers(t.needsFix), []);
   assert.deepEqual(numbers(t.mergeReady), []);
+});
+
+test("trustedReview: listed bots and OWNER, MEMBER, COLLABORATOR people only", () => {
+  assert.equal(trustedReview(review(OPUS, "APPROVED", HEAD), PAIR), true);
+  assert.equal(trustedReview(review("sonnet-review-agent", "APPROVED", HEAD), PAIR), true);
+  for (const a of ["OWNER", "MEMBER", "COLLABORATOR"]) {
+    assert.equal(trustedReview(review("someone", "APPROVED", HEAD, "", a), PAIR), true);
+  }
+  for (const a of ["CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE"]) {
+    assert.equal(trustedReview(review("someone", "APPROVED", HEAD, "", a), PAIR), false);
+  }
+  const otherBot: ReviewNode = {
+    state: "APPROVED",
+    body: "",
+    author: { __typename: "Bot", login: "some-app[bot]" },
+    authorAssociation: "NONE",
+    commit: { oid: HEAD },
+  };
+  assert.equal(trustedReview(otherBot, PAIR), false);
+  // A person who registered a listed bot's login without the suffix is still a person.
+  const impostor: ReviewNode = {
+    state: "APPROVED",
+    body: "",
+    author: { __typename: "User", login: "opus-review-agent" },
+    authorAssociation: "NONE",
+    commit: { oid: HEAD },
+  };
+  assert.equal(trustedReview(impostor, PAIR), false);
+  assert.equal(trustedReview({ ...impostor, author: null }, PAIR), false);
+});
+
+test("headVerdict ignores untrusted reviews, approving or rejecting", () => {
+  const both = [review(OPUS, "APPROVED", HEAD), review("cursor", "APPROVED", HEAD)];
+  assert.equal(
+    headVerdict([...both, review("drive-by", "CHANGES_REQUESTED", HEAD, "", "NONE")], HEAD, PAIR),
+    "APPROVED",
+  );
+  assert.equal(
+    headVerdict([...both, review("drive-by", "CHANGES_REQUESTED", HEAD, "", "CONTRIBUTOR")], HEAD, PAIR),
+    "APPROVED",
+  );
+  assert.equal(
+    headVerdict([...both, review("collab", "CHANGES_REQUESTED", HEAD, "", "COLLABORATOR")], HEAD, PAIR),
+    "CHANGES_REQUESTED",
+  );
+  const impostor: ReviewNode = {
+    state: "APPROVED",
+    body: "",
+    author: { __typename: "User", login: "cursor" },
+    authorAssociation: "NONE",
+    commit: { oid: HEAD },
+  };
+  assert.equal(headVerdict([review(OPUS, "APPROVED", HEAD), impostor], HEAD, PAIR), null);
+});
+
+test("submittedReviewShas skips PENDING drafts and untrusted reviews", () => {
+  assert.deepEqual(
+    submittedReviewShas(
+      [
+        review("someone", "PENDING", "draft"),
+        review(OPUS, "COMMENTED", "real"),
+        { ...review(OPUS, "APPROVED", "x"), commit: null },
+        review("drive-by", "COMMENTED", "untrusted", "", "NONE"),
+        review("collab", "COMMENTED", "collab", "", "COLLABORATOR"),
+      ],
+      PAIR,
+    ),
+    ["real", "collab"],
+  );
 });

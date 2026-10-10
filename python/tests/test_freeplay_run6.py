@@ -294,6 +294,16 @@ class CautiousSafeDefaultTest(unittest.TestCase):
         self.assertNotIn("hostile near", out.reason)
         self.assertIsNone(c.memory.keep_away_hold)
 
+    def test_a_pause_in_closing_does_not_restart_the_hold(self):
+        w, c = self.boxed_in_as_it_closes()
+        self.assertEqual(dispatch(w, c).reason, "hurt, hostile near: hold")
+        moved = w.entity_moves.pop(("npc", 3))
+        w.tick += KEEP_AWAY_HOLD_TICKS // 2
+        self.assertNotIn("hostile near", dispatch(w, c).reason)
+        w.tick += KEEP_AWAY_HOLD_TICKS // 2
+        w.entity_moves[("npc", 3)] = (moved[0], w.tick)  # closing again
+        self.assertNotIn("hostile near", dispatch(w, c).reason, "the bound counts from the first hold")
+
     def test_a_hold_ends_after_its_bound(self):
         w, c = self.boxed_in_as_it_closes()
         self.assertEqual(dispatch(w, c).reason, "hurt, hostile near: hold")

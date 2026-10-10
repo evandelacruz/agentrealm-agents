@@ -133,6 +133,23 @@ class GatherKeepsWorkingTest(unittest.TestCase):
         if m.gather_target is not None:
             self.assertGreater(chebyshev(m.gather_target[1], first), GATHER_HOSTILE_RADIUS)
 
+    def test_a_taken_first_step_holds_the_walk(self):
+        """A71: a peer on the walk's only way out is waited on, not swapped
+        for another frontier."""
+        w, m = self.blocked()
+        gather_outcome(w, m, POLICY, op=GATHER)
+        kept, first = m.gather_target, m.path[0]
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                cell = (w.pos[0] + dx, w.pos[1] + dy)
+                if cell not in (w.pos, first):
+                    w.view.tiles[cell] = "wall"
+        w.entities.append(Entity("character", 5, first, "peer"))
+        m.path, m.goal = [], ""  # another state had the move
+        out = gather_outcome(w, m, POLICY, op=GATHER)
+        self.assertTrue(out.wait, out.reason)
+        self.assertEqual(m.gather_target, kept)
+
     def test_with_no_frontier_clear_of_it_it_is_still_blocked(self):
         w, m = self.blocked()
         for x in range(-1, 41):

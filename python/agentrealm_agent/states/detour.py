@@ -225,8 +225,9 @@ def risk_allowed(w: WorldModel, ctx: PlayContext, at: Pos, known: Danger) -> boo
     With no known hostile within ``RISK_RADIUS`` of it (``hostiles_within``),
     or an op that chose to fight (``known.fight``), there is none. Otherwise
     one hit from each of them (the threat table's size for its type) must
-    leave health above Retreat's floor against them (``survival.health_floor``). Free-play run 8: a detour at 4/10 to a pile 2
-    cells from a pack ended at 1/10.
+    leave health above Retreat's floor against them
+    (``survival.health_floor``). Free-play run 8: a detour at 4/10 to a pile
+    2 cells from a pack ended at 1/10.
     """
     if known.fight:
         return True

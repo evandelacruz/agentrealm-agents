@@ -112,8 +112,7 @@ def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateO
     options = [p for p in w.open_neighbours(w.pos, blocked) if gap(p) > gap(w.pos)]
     if not options:
         if not any(approaching(w, e) for e in near):
-            m.keep_away_hold = None
-            return None
+            return None  # the hold's start stays: closing in again does not restart the cap
         if m.keep_away_hold is None:
             m.keep_away_hold = w.tick
         if w.tick - m.keep_away_hold >= KEEP_AWAY_HOLD_TICKS:

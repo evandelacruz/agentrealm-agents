@@ -687,17 +687,9 @@ def _replan_gather(
         path = _path_to(w, kept, params)
         if path and not clear(path):
             path = None  # unsafe: a valid reason to drop it (A71)
-        if path and next_step(w, blocked, path):
-            m.path, m.goal, m.gather_target = path, GOAL, kept
-            m.gather_hold = None
-            return False
-        if path:
-            if m.gather_hold is None or m.gather_hold[0] != kept:
-                m.gather_hold = (kept, w.tick)
-            if w.tick - m.gather_hold[1] < HOLD_TICKS:
-                m.gather_target = kept
-                return True
-        m.gather_hold = None  # no way there, or the way stayed taken: pick again
+        held = _keep(w, m, kept, path, blocked)
+        if held is not None:
+            return held
 
     piles = [
         e for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
@@ -718,9 +710,9 @@ def _replan_gather(
         # something newly in sight stops it to be tried again.
         m.gather_clear_seen = _in_sight(w, policy, preferred, d, pile_region)
         path = _path_to(w, kept, params)
-        if path and clear(path) and next_step(w, blocked, path):
-            m.path, m.goal, m.gather_target = path, GOAL, kept
-            return False
+        held = _keep(w, m, kept, path if path and clear(path) else None, blocked)
+        if held is not None:
+            return held
 
     if here in safe:
         _plan_out(w, m, policy, blocked, params, safe, clear, d)
@@ -728,6 +720,24 @@ def _replan_gather(
         m.gather_clear_seen = _in_sight(w, policy, preferred, d, pile_region)
         _plan_clear(w, m, policy, blocked, params, clear, d)
     return False
+
+
+def _keep(w: WorldModel, m: Memory, kept: tuple[str, Pos], path: list[Pos] | None, blocked: set[Pos]) -> bool | None:
+    """Keep ``kept`` on ``path`` (a clear way to it, or None): commit to it
+    with its first step open (False), hold it while that step stays taken
+    for under ``HOLD_TICKS`` (True, A71); None to pick again."""
+    if path and next_step(w, blocked, path):
+        m.path, m.goal, m.gather_target = path, GOAL, kept
+        m.gather_hold = None
+        return False
+    if path:
+        if m.gather_hold is None or m.gather_hold[0] != kept:
+            m.gather_hold = (kept, w.tick)
+        if w.tick - m.gather_hold[1] < HOLD_TICKS:
+            m.gather_target = kept
+            return True
+    m.gather_hold = None  # no way there, or the way stayed taken: pick again
+    return None
 
 
 def _pile_in(pos: Pos, region: tuple[int, int] | None) -> bool:

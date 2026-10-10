@@ -37,7 +37,7 @@ Repo: `evandelacruz/agentrealm-agents`.
    |---|---|
    | `conductor:working` label | skip: an implementer or fixer holds it |
    | `Cursor Automation: Saims Ref Agent Auto Code Review` still running | skip: a review is in progress |
-   | merge conflict, changes requested, red CI, or unresolved threads without approval | **fix** |
+   | merge conflict, changes requested, red CI, or unresolved threads a fixer has not answered, without approval | **fix** |
    | approved with open threads | **polish** |
    | approved, no conflicts, nothing open | skip: Evan merges |
    | draft | skip |

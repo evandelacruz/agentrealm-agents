@@ -5,7 +5,8 @@ description: >
   changes, the branch conflicts with main, or CI is red. Use when Evan asks
   Claude Code to send a fixer, fix a PR, fix review comments, fix a conflict,
   or get a PR green. Claims and releases conductor:working. Writes only that
-  label, the push, and a comment on what it deliberately left alone.
+  label, the push, a reply that resolves each thread it fixed, and a reply on
+  each thread it deliberately left open.
 ---
 
 # agentrealm-agents fixer
@@ -26,10 +27,10 @@ The blockers you were handed are symptoms. Before you start typing, work out wha
 
 ## What you write
 
-Three things, and nothing else: the `conductor:working` label, your commits on the pull request's branch, and a comment on anything you deliberately left alone.
+Four things, and nothing else: the `conductor:working` label, your commits on the pull request's branch, a reply that resolves each thread your push fixed, and a reply on each thread you deliberately left alone.
 
 - **No reviews, no approvals.** Never.
-- **No resolving review threads.** You answer one; you do not close it.
+- **Resolve only what your push fixed.** A thread you left alone stays open for the reviewer. Never resolve a thread on a commit you have not pushed.
 - **No merging.**
 - **No re-running CI.** Your push triggers it.
 - **No other labels.** `conductor:working` is the only one you touch.
@@ -37,7 +38,9 @@ Three things, and nothing else: the `conductor:working` label, your commits on t
 
 ### Commenting
 
-Comment on what you did **not** fix, so the next reviewer is not left guessing. One reply on the thread, one or two sentences, saying which of these it is:
+**Threads you fixed.** After the push, reply on the thread with the commit that fixes it (`Fixed in <short SHA>.`, plus one sentence if the fix differs from what was asked), then resolve the thread. That is the whole reply; the diff says the rest.
+
+**Threads you did not fix.** Reply so the next reviewer is not left guessing, and leave the thread open. One reply, one or two sentences, saying which of these it is:
 
 - already addressed by a commit after the review,
 - does not reproduce, or is wrong about the code,
@@ -45,11 +48,9 @@ Comment on what you did **not** fix, so the next reviewer is not left guessing. 
 - needs a decision that is Evan's, not yours,
 - something **you** found that nobody asked about, and chose to leave.
 
-Never comment on what you *did* fix. The diff already says that, and a reply restating it is noise. If you fixed everything, you post nothing.
-
 A thread needing an architecture, legal, or moderation decision, a design decision PLAN.md does not settle, or a server change, is the one case where you both comment and stop: say why on the thread, leave the lock in place, and tell Evan here.
 
-Use `add_reply_to_pull_request_comment` with the thread's comment ID.
+Reply with `add_reply_to_pull_request_comment` and the thread's comment ID. Resolve with `pull_request_review_write` `method: "resolve_thread"` and the thread's node ID (`PRRT_…`, from `get_review_comments`).
 
 ## What you take
 
@@ -60,11 +61,11 @@ A pull request is yours when it is **open**, **not draft**, does **not** have `c
 | Merge conflict | `mergeable_state` is `"dirty"` |
 | Red CI | a **CI** check run completed with conclusion `failure` or `timed_out` |
 | Changes requested | the review verdict, below |
-| Unresolved threads | a thread with `is_resolved: false`, and the verdict is not approved |
+| Unresolved threads | a thread with `is_resolved: false` whose last comment is a reviewer's, not a fixer's reply, and the verdict is not approved |
 
 Several can be true at once. Clear all of them in the one pass.
 
-Not yours: drafts, and approved pull requests whose only open threads are nits. Nothing blocks those from merging.
+Not yours: drafts, and approved pull requests whose only open threads are nits. Nothing blocks those from merging. An open thread a fixer already answered without fixing is the reviewer's to take up, not yours to answer again.
 
 One pull request per pass. If asked for several, finish one before locking the next.
 
@@ -182,6 +183,10 @@ Read all of it, not only the lines the threads point at, and ask:
 ```bash
 git push -u origin <head ref>
 ```
+
+## Resolve
+
+With the push on the remote, reply on and resolve each thread it fixed, per **Commenting** above. Reply on the threads you left alone and leave them open.
 
 ## Unlock
 

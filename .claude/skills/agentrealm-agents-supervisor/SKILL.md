@@ -146,7 +146,7 @@ A switch of mode on the evidence in **Who implements** is not a stop. Report it 
 
 - Merge anything that is not mergeable by step 1, or with any merge method but squash.
 - Remove or add labels yourself. `conductor:working` belongs to the writers. The one exception is the lock the fixer fleet claims and releases under its own rules; never remove one you did not claim this pass.
-- Review, approve, comment on, or push to a pull request.
+- Review, approve, comment on, push to, or resolve threads on a pull request. Fixers resolve the threads they fix; nobody else does.
 - Commit or push to `main`, or brief any agent to. If something seems to need a direct push to `main`, stop and tell Evan.
 - Merge a pull request that changes anything under `.github/workflows/` or `.github/actions/`. Workflows run from the pull request's own files with the repo's secrets, so such a pull request can steer or forge its own Claude review. Leave it for Evan and say so in the report.
 - Decide what a pull request needs, or pick backlog work. The fleet skills, and the Cursor agent you hand the Cursor fleet to, do that.

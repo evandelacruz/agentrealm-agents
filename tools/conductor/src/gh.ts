@@ -278,6 +278,37 @@ export function triagePrs<T extends TriageFields>(
   };
 }
 
+/**
+ * Every review on the PR, oldest first, page by page. A fixed window is not
+ * enough: on a public repo anyone can post reviews, and enough untrusted ones
+ * would push the trusted verdicts out of it.
+ */
+async function listAllReviews(owner: string, name: string, prNumber: number): Promise<ReviewNode[]> {
+  const reviews: ReviewNode[] = [];
+  let after: string | null = null;
+  do {
+    const cursor: string = after ? `, after: "${after}"` : "";
+    const page: {
+      data: {
+        repository: {
+          pullRequest: {
+            reviews: { nodes: ReviewNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+          };
+        };
+      };
+    } = await ghJson([
+      "api",
+      "graphql",
+      "-f",
+      `query=query { repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${prNumber}) { reviews(first: 100${cursor}) { pageInfo { hasNextPage endCursor } nodes { state body authorAssociation author { __typename login } commit { oid } } } } } }`,
+    ]);
+    const conn = page.data.repository.pullRequest.reviews;
+    reviews.push(...conn.nodes);
+    after = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+  } while (after);
+  return reviews;
+}
+
 export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
   const prs = await listOpenPrs();
   if (prs.length === 0) return [];
@@ -288,13 +319,12 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
 
   const summaries: PrCommentSummary[] = [];
   for (const pr of prs) {
-    const [prDetail, issueComments] = await Promise.all([
+    const [prDetail, reviews, issueComments] = await Promise.all([
       ghJson<{
         data: {
           repository: {
             pullRequest: {
               reviewThreads: { nodes: Array<{ isResolved: boolean }> };
-              reviews: { nodes: ReviewNode[] };
             };
           };
         };
@@ -302,8 +332,9 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
         "api",
         "graphql",
         "-f",
-        `query=query { repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${pr.number}) { reviewThreads(first: 100) { nodes { isResolved } } reviews(last: 50) { nodes { state body authorAssociation author { __typename login } commit { oid } } } } } }`,
+        `query=query { repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${pr.number}) { reviewThreads(first: 100) { nodes { isResolved } } } } }`,
       ]),
+      listAllReviews(owner, name, pr.number),
       ghJson<{ comments: unknown[] }>([
         "pr",
         "view",
@@ -321,7 +352,7 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
       headRefName: pr.headRefName,
       headSha: pr.headRefOid,
       isDraft: pr.isDraft,
-      verdict: headVerdict(detail.reviews.nodes, pr.headRefOid, pair),
+      verdict: headVerdict(reviews, pr.headRefOid, pair),
       mergeable: pr.mergeable,
       mergeStateStatus: pr.mergeStateStatus,
       hasMergeConflict: hasMergeConflict(pr),
@@ -330,7 +361,7 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
       checksOk: rollupOk(pr),
       reviewInProgress: reviewInProgress(pr),
       labels: (pr.labels ?? []).map((l) => l.name),
-      reviewedShas: submittedReviewShas(detail.reviews.nodes),
+      reviewedShas: submittedReviewShas(reviews),
     });
   }
   return summaries;

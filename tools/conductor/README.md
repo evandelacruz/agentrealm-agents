@@ -28,12 +28,17 @@ submitted reviews on the **current head** only, never from labels, per the
 fixer skill's **The review verdict**, each reviewer by their latest
 `APPROVED` / `CHANGES_REQUESTED` review on the head. Only trusted reviews
 count: a bot listed in `.github/reviewers` (GraphQL `__typename` `Bot`), or a
-person whose `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR`; every
-other review is ignored. Any trusted reviewer's rejection is `CHANGES_REQUESTED`; otherwise approvals from both of the pair in
-`.github/reviewers` on `main` (the Opus bot, plus Cursor or the Sonnet bot) are
-`APPROVED`; anything else is `review:none`. `COMMENTED` reviews do not count.
-If `.github/reviewers` is missing or malformed, `prs` warns and takes `cursor`
-as the second reviewer, as the workflow does. `conductor:working` is the only label with meaning.
+person whose `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR`;
+every other review is ignored. `prs` reads every review, page by page, so
+untrusted ones cannot crowd the trusted ones out. Any trusted reviewer's
+rejection is `CHANGES_REQUESTED`; otherwise approvals from both of the pair
+in `.github/reviewers` on `main` (the Opus bot, plus Cursor or the Sonnet
+bot) are `APPROVED`; anything else is `review:none`. `COMMENTED` reviews do
+not count. If `.github/reviewers` is missing or malformed, `prs` warns and
+takes `cursor` as the second reviewer, as the workflow does, with the bot
+logins from `DEFAULT_REVIEWER_PAIR` in `src/config.ts`, a copy of the file
+that must be kept in sync with it. `conductor:working` is the only label
+with meaning.
 
 Reviewer checks are every job of the Claude Review workflow and
 `Cursor Automation: Saims Ref Agent Auto Code Review` (override the Cursor

@@ -71,7 +71,7 @@ No `gh` CLI here. Reads and the merge go through the GitHub MCP tools, as in [ag
 List open pull requests. A pull request is **mergeable** when all of these hold on its **current head commit**:
 
 - CI green: every CI check run on the head has completed, none with `failure` or `timed_out`. Running or queued is not green. `skipped` and `neutral` are fine. A head with no CI run at all is not green; step 2 says why that usually means a conflict. Reviewer check runs (every Claude Review workflow job, the Cursor check) are not CI.
-- The [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Merge rule** holds: both of the pair in `.github/reviewers` on `main` approved, no reviewer rejected, no review in flight. Beyond that, the merge goes through or GitHub refuses it.
+- The [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Merge rule** holds: both of the pair in `.github/reviewers` on `main` approved, no trusted reviewer rejected, no review in flight. Beyond that, the merge goes through or GitHub refuses it.
 - It changes nothing under `.github/workflows/` or `.github/actions/`, and does not change `.github/reviewers` (see **Never**).
 - No merge conflict: `mergeable_state` is not `"dirty"`. If it reads `"unknown"`, read again; if it still does, it is not mergeable this pass.
 - No `conductor:working` label.

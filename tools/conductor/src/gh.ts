@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
   CLAUDE_REVIEW_WORKFLOW,
+  DEFAULT_REVIEWER_PAIR,
   REVIEW_CHECK_NAME,
   REVIEWERS_FILE,
   WORKING_LABEL,
@@ -189,6 +190,24 @@ export function parseReviewers(text: string): ReviewerPair {
   return { opus, second };
 }
 
+/** The pair on `main`, or `cursor` as the second when the file is missing or malformed, as the workflow does. */
+async function loadReviewerPair(owner: string, name: string): Promise<ReviewerPair> {
+  try {
+    return parseReviewers(
+      await ghText([
+        "api",
+        "-H",
+        "Accept: application/vnd.github.raw",
+        `repos/${owner}/${name}/contents/${REVIEWERS_FILE}?ref=main`,
+      ]),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`Cannot read ${REVIEWERS_FILE} on main; second reviewer is cursor. ${message}`);
+    return DEFAULT_REVIEWER_PAIR;
+  }
+}
+
 /**
  * The review verdict on the current head, per the fixer skill. Labels play
  * no part. Each reviewer's latest APPROVED / CHANGES_REQUESTED review on
@@ -241,14 +260,7 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
 
   const owner = await ghText(["repo", "view", "--json", "owner", "--jq", ".owner.login"]);
   const name = await ghText(["repo", "view", "--json", "name", "--jq", ".name"]);
-  const pair = parseReviewers(
-    await ghText([
-      "api",
-      "-H",
-      "Accept: application/vnd.github.raw",
-      `repos/${owner}/${name}/contents/${REVIEWERS_FILE}?ref=main`,
-    ]),
-  );
+  const pair = await loadReviewerPair(owner, name);
 
   const summaries: PrCommentSummary[] = [];
   for (const pr of prs) {

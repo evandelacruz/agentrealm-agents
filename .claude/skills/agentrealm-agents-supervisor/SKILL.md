@@ -26,6 +26,13 @@ Every pull request has exactly two reviewers, set in [`.github/reviewers`](../..
 
 Repeat it every pass until the file matches the mode.
 
+**A flip strands open pull requests.** A reviewer reviews a head only when its review is triggered, by a push or a re-run, so after Evan flips `second:` no open head has a review from the new second reviewer, and none can reach Approved until it gets one. Every pass, before step 1, find the open, non-draft pull requests whose current head has no `APPROVED` or `CHANGES_REQUESTED` review from the second reviewer and no reviewer check still queued or running:
+
+- `second: sonnet`: re-run that head's latest Claude Review workflow run (`actions_run_trigger` `method: "rerun_workflow_run"` with its `run_id`, from the `review` check run's `html_url`). The re-run's `pair` job reads `main` again and adds the Sonnet review. Re-run a head once: if its run already has a `review (sonnet)` job, do not re-run it; name it in the report.
+- `second: cursor`: nothing here can trigger Cursor's review. Name the pull requests in the report so Evan can.
+
+The report lists the pull requests you re-ran.
+
 ## Who implements
 
 New backlog work goes to one of two fleets. The mode says which:
@@ -65,7 +72,7 @@ List open pull requests. A pull request is **mergeable** when all of these hold 
 
 - CI green: every CI check run on the head has completed, none with `failure` or `timed_out`. Running or queued is not green. `skipped` and `neutral` are fine. A head with no CI run at all is not green; step 2 says why that usually means a conflict. Reviewer check runs (every Claude Review workflow job, the Cursor check) are not CI.
 - The [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Merge rule** holds: both of the pair in `.github/reviewers` on `main` approved, no reviewer rejected, no review in flight. Beyond that, the merge goes through or GitHub refuses it.
-- It changes nothing under `.github/workflows/` or `.github/actions/` (see **Never**).
+- It changes nothing under `.github/workflows/` or `.github/actions/`, and does not change `.github/reviewers` (see **Never**).
 - No merge conflict: `mergeable_state` is not `"dirty"`. If it reads `"unknown"`, read again; if it still does, it is not mergeable this pass.
 - No `conductor:working` label.
 - Not draft.
@@ -156,8 +163,9 @@ A switch of mode on the evidence in **Who implements** is not a stop. Report it 
 
 - Merge anything that is not mergeable by step 1, or with any merge method but squash.
 - Remove or add labels yourself. `conductor:working` belongs to the writers. The one exception is the lock the fixer fleet claims and releases under its own rules; never remove one you did not claim this pass.
-- Review, approve, comment on, push to, or resolve threads on a pull request. Fixers resolve the threads they fix; nobody else does.
+- Review, approve, comment on, push to, or resolve threads on a pull request. Re-running a Claude Review run after a flip (**Who reviews**) is the one write you make to a pull request's checks. Fixers resolve the threads they fix; nobody else does.
 - Edit `.github/reviewers` or Cursor's review automation. Evan flips them (**Who reviews**).
 - Commit or push to `main`, or brief any agent to. If something seems to need a direct push to `main`, stop and tell Evan.
 - Merge a pull request that changes anything under `.github/workflows/` or `.github/actions/`. Workflows run from the pull request's own files with the repo's secrets, so such a pull request can steer or forge its own Claude review. Leave it for Evan and say so in the report.
+- Merge a pull request that changes `.github/reviewers`. It decides who must approve every later pull request. Leave it for Evan and say so in the report.
 - Decide what a pull request needs, or pick backlog work. The fleet skills, and the Cursor agent you hand the Cursor fleet to, do that.

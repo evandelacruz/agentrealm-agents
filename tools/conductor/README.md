@@ -29,7 +29,9 @@ fixer skill's **The review verdict**, each reviewer by their latest
 `APPROVED` / `CHANGES_REQUESTED` review on the head. Any reviewer's rejection
 is `CHANGES_REQUESTED`; otherwise approvals from both of the pair in
 `.github/reviewers` on `main` (the Opus bot, plus Cursor or the Sonnet bot) are
-`APPROVED`; anything else is `review:none`. `COMMENTED` reviews do not count. `conductor:working` is the only label with meaning.
+`APPROVED`; anything else is `review:none`. `COMMENTED` reviews do not count.
+If `.github/reviewers` is missing or malformed, `prs` warns and takes `cursor`
+as the second reviewer, as the workflow does. `conductor:working` is the only label with meaning.
 
 Reviewer checks are every job of the Claude Review workflow and
 `Cursor Automation: Saims Ref Agent Auto Code Review` (override the Cursor

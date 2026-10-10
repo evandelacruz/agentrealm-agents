@@ -267,7 +267,7 @@ class Runner:
             },
         )
 
-    def _decide(self, w, m, *, plan: Plan | None = None):
+    def _decide(self, w, m, *, plan: Plan | None = None, probe: bool = False):
         if m.parking:
             plan = None  # the run is over: no op runs while parking (A66)
         return decide(
@@ -281,6 +281,7 @@ class Runner:
             directives=self.directives.directives,
             plan=plan,
             gem_cuts=self.gem_cuts,
+            probe=probe,
         )
 
     def log(self, call: str, detail: str, record: dict) -> None:
@@ -748,6 +749,8 @@ class Runner:
         was too: reflexes never consume its ops, so the probe must not advance,
         pop, or drop them (A34). Greet (4c) is not a reflex here: its hello waits
         for the next decision window, and the probe leaves its tries as they were (A65).
+        It runs only the states that can answer with a reflex (``dispatch.PROBE_STATES``),
+        so a poll while a queue runs costs no executor's search (A64).
         Heal's and Gather's re-arms stay due too: the drink or cut they follow may
         still be in the held queue (A24, A22).
         """
@@ -758,7 +761,7 @@ class Runner:
         saved_stuck = copy.deepcopy(m.nav_stuck)
         saved_plan = self.plan.snapshot()
         try:
-            d = self._decide(self.world, m, plan=self.plan)
+            d = self._decide(self.world, m, plan=self.plan, probe=True)
         finally:
             self.plan.restore(saved_plan)
             m.boss = saved[5]  # boss memory belongs to the stack (A38)

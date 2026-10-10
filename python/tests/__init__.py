@@ -4,7 +4,7 @@ No test reaches the network: the Supplies reference (A54) is never fetched
 and no cached copy is read, so every run started in a test plays from the
 copy checked in with the agent.
 
-No test reads or writes ``python/.state`` (A84): before the agent is imported,
+No test reads or writes ``python/.state`` (A86): before the agent is imported,
 ``AGENTREALM_STATE_DIR`` points at a fresh temp dir, so traces and the world
 knowledge base land there. An audit hook records every file operation this
 process makes under ``python/.state``, and ``load_tests`` adds

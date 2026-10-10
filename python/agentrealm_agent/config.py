@@ -18,7 +18,7 @@ STATE_DIR_ENV = "AGENTREALM_STATE_DIR"
 
 
 def state_dir() -> Path:
-    """``$AGENTREALM_STATE_DIR`` when set, else ``python/.state`` (A84: ``make test`` points it at a temp dir)."""
+    """``$AGENTREALM_STATE_DIR`` when set, else ``python/.state`` (A86: ``make test`` points it at a temp dir)."""
     override = os.environ.get(STATE_DIR_ENV)
     return Path(override).expanduser().resolve() if override else DEFAULT_STATE_DIR
 

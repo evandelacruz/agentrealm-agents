@@ -32,7 +32,7 @@ class ConfigTest(unittest.TestCase):
 
 
 class StateDirTest(unittest.TestCase):
-    """``AGENTREALM_STATE_DIR`` moves traces and the knowledge base (A84)."""
+    """``AGENTREALM_STATE_DIR`` moves traces and the knowledge base (A86)."""
 
     def test_env_overrides_state_dir(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {config.STATE_DIR_ENV: tmp}):

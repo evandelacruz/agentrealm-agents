@@ -71,7 +71,7 @@ class Memory:
     walk_skip: set = field(default_factory=set)  # hostiles the walk being decided was planned without (Retreat sets it, A63)
     path_skip: set = field(default_factory=set)  # walk_skip of the walk queue sent, never counted in path_threats (A63)
     planned_threats: set = field(default_factory=set)  # hostiles whose reach Heal's or Retreat's path crossed when planned (A63)
-    safe_unreachable: dict = field(default_factory=dict)  # (map_id, cell) -> tick a path check found no way to that safe cell (``pathing.reachable_safe_goal``)
+    safe_unreachable: dict = field(default_factory=dict)  # (map_id, cell) -> tick a path check found no way to that safe cell, or a Retreat or Park walk there made no progress (``pathing.reachable_safe_goal``, ``retreat.no_progress``)
     safe_threatened: dict = field(default_factory=dict)  # (map_id, cell) -> {(kind, id): tick that hostile last had the safe cell in its reach} (``pathing.reachable_safe_goal``)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     hunt_search: HuntSearch | None = None  # Travel's search for a hunting ground when none is known (A27)
@@ -104,6 +104,13 @@ class Memory:
     retreat_walk: Pos | None = None
     retreat_to: Pos | None = None
     retreat_gaps: list[tuple[int, int]] = field(default_factory=list)
+    # A Retreat or Park walk to safety (A9, A66): its goal, the shortest
+    # remaining path seen in this stuck window, the tick the window began or
+    # last shortened, and the tick of the last sample (``retreat.no_progress``).
+    safe_walk_to: Pos | None = None
+    safe_walk_best: int | None = None
+    safe_walk_since: int = 0
+    safe_walk_seen: int = 0
     # The runner's park phase (A66): the run is over and only the survival
     # reflexes and Park run, walking to safe ground before the exit.
     parking: bool = False

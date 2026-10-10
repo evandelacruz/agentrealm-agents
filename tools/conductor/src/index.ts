@@ -1,6 +1,5 @@
 export {
   acquireWorkingLock,
-  claudeBodyVerdict,
   hasMergeConflict,
   headVerdict,
   holdLock,
@@ -22,9 +21,9 @@ export { spawnImplementer, type SpawnOptions } from "./spawn.js";
 export { followUp, type FollowUpOptions } from "./follow-up.js";
 export { listCloudAgents } from "./status.js";
 export {
-  CLAUDE_REVIEWER_LOGIN,
-  CURSOR_REVIEWER_LOGIN,
   REVIEW_CHECK_NAME,
+  CLAUDE_REVIEW_CHECK_NAME,
+  CLAUDE_REVIEW_WORKFLOW,
   DEFAULT_ENV_NAME,
   DEFAULT_MODEL,
   DEFAULT_REPO_URL,

@@ -137,7 +137,7 @@
 
   "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Free-play run 2 timed out on a walled-off safe tile; Park now picks the nearest one a path reaches, else town. Free-play run 3: Park sat 60 s two cells from a safe tile it never got nearer; a Park or Retreat walk with no progress in a stuck window now rules the tile out for 300 ticks and moves on, else town."},
 
-  "A67": {"state": "partial", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 (#138): accidental sword buy, 0 gems, 370 s Break Arm loop; its defects A68, A69 and A70 are fixed (#139, #146). Run 3 (#150, 600 s at bd5aeff): no deaths, gems from piles only, no armor or potions; short-run gates only. Its top defects are fixed: Heal's drink sends its Use and Gather cuts only with a cutter (#152, A24, A22), and a Park or Retreat walk that gets no nearer a safe tile rules it out (#151, A9, A66).", "remaining": "Rerun on main with the run 3 fixes and record it in docs/observations/A67_free_play_runs.md. Run 2 (fixes in #140) has no notes in the doc."},
+  "A67": {"state": "partial", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 (#138): accidental sword buy, 0 gems, 370 s Break Arm loop; its defects A68, A69 and A70 are fixed (#139, #146). Run 3 (#150, 600 s at bd5aeff): no deaths, gems from piles only, no armor or potions; short-run gates only. Its top defects are fixed: Heal's drink sends its Use and Gather cuts only with a cutter (#152, A24, A22), and a Park or Retreat walk that gets no nearer a safe tile rules it out (#151, A9, A66). Run 4 (#156, 600 s at a227906, after A71): no deaths, 17 → 14 gems (one potion bought, 7 from piles), no armor; short-run gates only. Its top defects are A73 (Detour misses gem piles beside the walk), A74 (Equip cannot clear a potion from the armed slot) and A75 (a buy with no shop in sight lets Explore wander).", "remaining": "Rerun on main once A73–A76 are fixed and record it. Run 2 (fixes in #140) has no notes in the doc."},
 
   "A68": {"state": "done", "note": "Armed supply is a candidate and wins a tie (#139); Break steps toward its block and arms only once in reach, so the step is never dropped behind an Arm."},
 
@@ -145,5 +145,13 @@
 
   "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."},
 
-  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. Free-play run 4 played it live; its fixes: Detour prices finds from where the character stands, queued steps included (pathing.route_ahead), and a planner reply that moves the gather_gems region needs a reason (gem_yield.keep_gather_region)."}
+  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. Free-play run 4 played it live; its fixes: Detour prices finds from where the character stands, queued steps included (pathing.route_ahead), and a planner reply that moves the gather_gems region needs a reason (gem_yield.keep_gather_region)."},
+
+  "A73": {"state": "open", "note": "A67 run 4: Queue-aware pricing fixed in #158 (pathing.route_ahead); left: Detour judges a gem pile in view by the steps it adds, past the fixed 3-cell reach."},
+
+  "A74": {"state": "open", "note": "A67 run 4: Equip clears an unowned non-weapon from the armed slot; Heal records only a weapon to re-arm."},
+
+  "A75": {"state": "open", "note": "A67 run 4: a buy with no shop item in sight stops at the nearest known shop cell first."},
+
+  "A76": {"state": "open", "note": "A67 run 4: the M8 heal_potion gate counts a self-Use with a potion in hand, even one that drank nothing (228 s, potions 2 → 2); count only a Use that uses a potion up."}
 }

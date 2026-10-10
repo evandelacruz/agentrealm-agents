@@ -72,6 +72,16 @@ class PricedByStepsTest(unittest.TestCase):
         w.entities = gems((14, 12))
         self.assertIsNone(detour_find(w, ctx(m, plan, pickup=True)))
 
+    def test_a_find_beside_a_winding_route_waits_until_the_walk_comes_by(self):
+        w = open_field(at=HERE)
+        for y in range(20):
+            w.view.tiles[(11, y)] = "wall"  # the route goes down, round the wall's end, and back up
+        route = [(10, y) for y in range(6, 20)] + [(11, 20)] + [(12, y) for y in range(19, 3, -1)]
+        find = (13, 5)  # beside (12, 5): 3 off in a straight line, about 30 on foot
+        self.assertIsNone(extra_steps(w, (10, 5), find, route, GEM_PILE_STEPS), "not a short insert from here")
+        later = route.index((12, 8))
+        self.assertLessEqual(extra_steps(w, (12, 8), find, route[later + 1 :], GEM_PILE_STEPS), 2)
+
     def test_a_find_off_danger_free_ground_is_left(self):
         w, m, plan = walking()
         w.hostile_types.add(("npc", "gnawer"))

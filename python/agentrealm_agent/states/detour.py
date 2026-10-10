@@ -130,14 +130,18 @@ def allowance(w: WorldModel, e: Entity, finds: list[Entity], items: dict) -> int
 
 
 def extra_steps(w: WorldModel, here: Pos, find: Pos, route: list[Pos], limit: int, avoid: Collection[str] = ()) -> int | None:
-    """Steps going by ``find`` adds to walking ``route`` from ``here``,
-    rejoining it at its best cell; None when that is more than ``limit``.
+    """Steps going by ``find`` now adds to walking ``route`` from ``here``,
+    rejoining it at its best cell; None when that is more than ``limit``, or
+    when the walk to ``find`` is longer than the straight line plus ``limit``.
 
     ``route`` must start at the step after ``here`` (``route_ahead``): cell i
     is i + 1 steps away. Distances are walks over known ground (walkable or a
     door, never a tile in ``avoid``; the route's own cells count as open),
     searched from ``find`` no further than the straight line to ``here``
-    plus ``limit``. A find beside the route costs at most 2."""
+    plus ``limit``. A find near in a straight line but far on foot (beside a
+    later stretch of a route that winds round a wall) is no short insert from
+    here: it is priced again as the walk comes by it. A find beside the route
+    within that search costs at most 2."""
     if not route:
         return None
     # Straight lines never overestimate a walk: past the limit on them, no search.
@@ -163,7 +167,7 @@ def extra_steps(w: WorldModel, here: Pos, find: Pos, route: list[Pos], limit: in
         if not frontier:
             break
     if here not in dist:
-        return None
+        return None  # not a short insert from here: priced again as the walk comes by
     rejoin = [dist[p] - (i + 1) for i, p in enumerate(route) if p in dist]
     if not rejoin:
         return None

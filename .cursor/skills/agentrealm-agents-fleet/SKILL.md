@@ -1,8 +1,8 @@
 ---
 name: agentrealm-agents-fleet
 description: >-
-  Batch-spawn n cloud agents against agentrealm-agents: assign each to one open PR (fix or
-  polish) or one chosen backlog item. Use when Evan asks to kick off a fleet,
+  Batch-spawn n cloud agents against agentrealm-agents: assign each to one blocked PR (fix)
+  or one chosen backlog item. Use when Evan asks to kick off a fleet,
   spawn n agents in parallel, or run a batch conductor pass.
 ---
 
@@ -38,8 +38,7 @@ Repo: `evandelacruz/agentrealm-agents`.
    | `conductor:working` label | skip: an implementer or fixer holds it |
    | a reviewer check (any Claude Review workflow job, or `Cursor Automation: Saims Ref Agent Auto Code Review`) still running | skip: a review is in progress |
    | merge conflict, changes requested, or red CI | **fix** |
-   | approved with open threads | **polish** |
-   | approved, no conflicts, nothing open | skip: Evan merges |
+   | approved | skip: Evan merges it as-is, open threads or not |
    | draft | skip |
 
    The working-label row always wins. Implementers and fixers claim the lock and must release it when they finish. Reviewers never take it. Cursor `status` listing the original implementer as `finished` means that worker should already have released; if the label is still there, a Claude Code fixer may hold it (they do not appear in that list) or the holder crashed. **Never remove `conductor:working` to "unstick" a PR.** Report it to Evan and fill the slot with other work.
@@ -76,7 +75,7 @@ Repo: `evandelacruz/agentrealm-agents`.
 
    Start `--name` with the slice's IDs, as above. The supervisor and the next fleet read running agents' names to see which IDs are taken.
 
-   Fix / polish on an existing PR: `spawn --pr <url>` or `follow-up --agent bc-… --pr <url>`.
+   Fix on an existing PR: `spawn --pr <url>` or `follow-up --agent bc-… --pr <url>`.
 
    Both commands claim `conductor:working` and refuse a PR that already has it. They also refuse while a reviewer check (any Claude Review workflow job, or `Cursor Automation: Saims Ref Agent Auto Code Review`) is still running. Do not add the label yourself before the command, and do not delete it so the command will accept the PR. The agent that holds the lock removes only that label after the push. Skip a locked PR and skip a PR whose reviewer check is still running. Claude Code uses the same label for review fixes, skips that same check, and does not take new backlog slots or review.
 

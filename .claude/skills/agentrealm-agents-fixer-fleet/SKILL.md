@@ -147,5 +147,5 @@ Give the threads and the failing check in the brief rather than sending the sess
 
 - Fixing anything yourself. You spawn; the sessions fix.
 - Merging, reviewing, approving, resolving threads, commenting on a pull request. The fixer sessions resolve the threads they fix; you do not.
-- Backlog work, and polish on approved pull requests that nothing blocks.
+- Backlog work, and pull requests that nothing blocks. An approved one merges as-is.
 - Spawning for a locked or draft pull request.

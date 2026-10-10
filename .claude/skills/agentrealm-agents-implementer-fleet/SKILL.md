@@ -139,7 +139,7 @@ Halt rules:
 ## Out of scope
 
 - Implementing anything yourself. You spawn; the sessions implement.
-- Open pull requests: fixing, polishing, reviewing, approving, merging, or commenting.
+- Open pull requests: fixing, reviewing, approving, merging, or commenting.
 - Claiming `conductor:working` yourself. New work has no pull request yet; each session claims and releases its own.
 - Committing or pushing to `main`, or briefing a session to.
 - Inventing stack, architecture, or policy answers.

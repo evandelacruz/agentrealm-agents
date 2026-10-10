@@ -40,7 +40,7 @@ Traps that make you spawn at nothing:
 - `mergeable_state` reads `"unknown"` on a first fetch. Read it again. `"dirty"` is a conflict; `"unstable"` is a pending or failing check, not a conflict.
 - Still-running, `skipped`, and `neutral` checks are not failure.
 - Reviewer check runs (the Claude Review `review` job, the Cursor check) are not CI. Running, failed or cancelled, they are no reason to spawn or to skip.
-- Verdicts come from review states, never from labels. [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict** states the rule; keep it in that one place. [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) states the derivation; keep it in that one place. `conductor:working` is a writer lock shared with Cursor. Do not delete it to "unstick" a pull request.
+- Verdicts come from review states, never from labels. [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict** states the rule; keep it in that one place. `conductor:working` is a writer lock shared with Cursor. Do not delete it to "unstick" a pull request.
 
 ## The pass
 

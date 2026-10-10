@@ -25,13 +25,15 @@ npm --prefix tools/conductor install
 Open PR summaries include merge-conflict state (`merge:conflict` / `merge:ok`)
 and the writer lock (`lock:working` / `lock:none`). Review verdicts come from
 submitted reviews on the **current head** only, never from labels, per the
-fixer skill's **The review verdict**: any reviewer counts (the Claude Review
-bot, Cursor, a person), each by their latest `APPROVED` / `CHANGES_REQUESTED`
-review on the head. Any rejection is `CHANGES_REQUESTED`; otherwise one
-approval is `APPROVED`; anything else is `review:none`. `COMMENTED` reviews
-do not count. `conductor:working` is the only label with meaning.
+fixer skill's **The review verdict**, each reviewer by their latest
+`APPROVED` / `CHANGES_REQUESTED` review on the head. Any reviewer's rejection
+is `CHANGES_REQUESTED`; otherwise approvals from both of the pair in
+`.github/reviewers` on `main` (the Opus bot, plus Cursor or the Sonnet bot) are
+`APPROVED`; anything else is `review:none`. `COMMENTED` reviews do not count.
+If `.github/reviewers` is missing or malformed, `prs` warns and takes `cursor`
+as the second reviewer, as the workflow does. `conductor:working` is the only label with meaning.
 
-Reviewer checks are the Claude Review workflow's `review` job and
+Reviewer checks are every job of the Claude Review workflow and
 `Cursor Automation: Saims Ref Agent Auto Code Review` (override the Cursor
 name with `CONDUCTOR_REVIEW_CHECK`). They are not CI, so they never count
 toward red or green. While one is running, `follow-up` and `spawn --pr`

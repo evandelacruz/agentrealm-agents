@@ -1,16 +1,21 @@
 name: Claude Review
 
-# Reviews every ready pull request as the Claude reviewer GitHub App, so the
-# verdict is a real APPROVED or CHANGES_REQUESTED review from its own account
-# (Evan's account cannot approve the pull requests it opens). The fixer and
-# supervisor skills read that verdict.
+# Every ready pull request gets exactly two reviewers (.github/reviewers): the
+# Opus Review Agent always, and a second reviewer, `cursor` or `sonnet`, read
+# from the base branch's .github/reviewers, never the PR head. This workflow
+# runs the Opus review, and the Sonnet review when the base says `sonnet`; Cursor
+# reviews through its own automation. Each Claude reviewer is its own GitHub
+# App, so the verdict is a real APPROVED or CHANGES_REQUESTED review from its
+# own account (Evan's account cannot approve the pull requests it opens). The
+# fixer and supervisor skills read that verdict.
 #
-# The app posts as reviewer-agent-anth[bot]. Needs secrets
-# CLAUDE_REVIEWER_APP_ID, CLAUDE_REVIEWER_APP_PRIVATE_KEY and
-# CLAUDE_CODE_OAUTH_TOKEN. The app needs Pull requests read/write, Contents
-# read, Checks read and Commit statuses read; it has no Contents write, so it
-# can never merge or push. Optional repo variable CLAUDE_REVIEW_MODEL picks the
-# model.
+# Opus: secrets CLAUDE_REVIEWER_APP_ID and CLAUDE_REVIEWER_APP_PRIVATE_KEY,
+# optional repo variable CLAUDE_REVIEW_MODEL (default `opus`).
+# Sonnet: secrets CLAUDE_REVIEWER2_APP_ID and CLAUDE_REVIEWER2_APP_PRIVATE_KEY,
+# optional repo variable CLAUDE_REVIEW2_MODEL (default `sonnet`).
+# Both use CLAUDE_CODE_OAUTH_TOKEN. Each app needs Pull requests read/write,
+# Contents read, Checks read and Commit statuses read; neither has Contents
+# write, so neither can merge or push.
 #
 # pull_request runs workflows from the PR's own head with secrets, so a PR that
 # changes .github/workflows/ or .github/actions/ can steer or forge its own
@@ -38,13 +43,49 @@ permissions:
   pull-requests: read
 
 jobs:
-  # tools/conductor matches this workflow name and job name (config.ts) to tell
-  # the reviewer check from CI. Renaming either makes the CLI count it as CI.
-  review:
+  # Which Claude reviewers run: always opus, plus sonnet when the base branch's
+  # .github/reviewers says `second: sonnet`. A missing file means `cursor`.
+  pair:
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      reviewers: ${{ steps.read.outputs.reviewers }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          sparse-checkout: .github/reviewers
+          sparse-checkout-cone-mode: false
+
+      - id: read
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -f .github/reviewers ]; then
+            second=$(sed -n 's/^second:[[:space:]]*//p' .github/reviewers | tr -d '[:space:]')
+          else
+            echo "::warning::No .github/reviewers on $BASE; second reviewer is cursor."
+            second=cursor
+          fi
+          case "$second" in
+            cursor) echo 'reviewers=["opus"]' >> "$GITHUB_OUTPUT" ;;
+            sonnet) echo 'reviewers=["opus","sonnet"]' >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::.github/reviewers on $BASE: second must be cursor or sonnet, got '$second'."; exit 1 ;;
+          esac
+
+  # One review per reviewer, each as its own app. tools/conductor matches this
+  # workflow name (config.ts) to tell reviewer checks from CI. Renaming it
+  # makes the CLI count them as CI.
+  review:
+    needs: pair
+    strategy:
+      fail-fast: false
+      matrix:
+        reviewer: ${{ fromJSON(needs.pair.outputs.reviewers) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -84,8 +125,10 @@ jobs:
       - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         id: app-token
         with:
-          app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
-          private-key: ${{ secrets.CLAUDE_REVIEWER_APP_PRIVATE_KEY }}
+          # Indexed by name, so a missing Sonnet secret fails here instead of
+          # falling back to the Opus app.
+          app-id: ${{ secrets[matrix.reviewer == 'sonnet' && 'CLAUDE_REVIEWER2_APP_ID' || 'CLAUDE_REVIEWER_APP_ID'] }}
+          private-key: ${{ secrets[matrix.reviewer == 'sonnet' && 'CLAUDE_REVIEWER2_APP_PRIVATE_KEY' || 'CLAUDE_REVIEWER_APP_PRIVATE_KEY'] }}
 
       - uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1
         env:
@@ -106,6 +149,6 @@ jobs:
               - `gh pr review ${{ github.event.pull_request.number }} --approve -b "<summary>"` when nothing blocking is open, yours or anyone's.
               - `gh pr review ${{ github.event.pull_request.number }} --request-changes -b "<summary>"` otherwise.
           claude_args: >-
-            ${{ vars.CLAUDE_REVIEW_MODEL && format('--model {0}', vars.CLAUDE_REVIEW_MODEL) || '' }}
+            --model ${{ matrix.reviewer == 'sonnet' && (vars.CLAUDE_REVIEW2_MODEL || 'sonnet') || (vars.CLAUDE_REVIEW_MODEL || 'opus') }}
             --add-dir ${{ runner.temp }}/review-context
             --allowedTools "Bash(gh pr diff ${{ github.event.pull_request.number }}:*),Bash(gh pr view ${{ github.event.pull_request.number }}:*),Bash(gh pr checks ${{ github.event.pull_request.number }}:*),Bash(gh pr review ${{ github.event.pull_request.number }}:*),mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob"

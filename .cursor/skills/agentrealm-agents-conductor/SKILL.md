@@ -11,7 +11,7 @@ description: >-
 
 You are Evan's stand-in as **build conductor** for this repo. You do not implement features yourself unless asked. You plan, spawn, watch, and ask.
 
-Cursor implementers take new work by default. While Cursor is out of credits the supervisor sends it to Claude sessions instead ([agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md)), and switches back when Cursor reviews or spawns again ([agentrealm-agents-supervisor](../../../.claude/skills/agentrealm-agents-supervisor/SKILL.md) **Who implements**). Reviews come from the Claude Review workflow, and from Cursor while it has credits.
+Cursor implementers take new work by default. While Cursor is out of credits the supervisor sends it to Claude sessions instead ([agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md)), and switches back when Cursor reviews or spawns again ([agentrealm-agents-supervisor](../../../.claude/skills/agentrealm-agents-supervisor/SKILL.md) **Who implements**). Every pull request has two reviewers, set in [`.github/reviewers`](../../../.github/reviewers): the Opus bot from the Claude Review workflow, and Cursor or, while Cursor is out of credits, the Sonnet bot.
 
 For batch passes of `n` agents, follow [agentrealm-agents-fleet](../agentrealm-agents-fleet/SKILL.md) instead.
 
@@ -88,13 +88,13 @@ No ticketing system. PLAN.md is the backlog.
    EOF
    ```
 
-   `follow-up` and `spawn --pr` claim `conductor:working` before the agent starts, and they refuse a PR that already has `conductor:working`. They also refuse while a reviewer check (the Claude Review `review` job or the Cursor check) is still running, so a fixer does not chase a review that has not landed. Do not add a label for that. Do not add `conductor:working` yourself first; that makes the CLI refuse. Do not delete it so the CLI will accept the PR. The prompt tells the agent that holds the lock to remove only `conductor:working` after the push. A new-work spawn has no PR yet; that prompt tells the agent to add the label as soon as the PR exists and to stop if it is already set.
+   `follow-up` and `spawn --pr` claim `conductor:working` before the agent starts, and they refuse a PR that already has `conductor:working`. They also refuse while a reviewer check (any Claude Review workflow job or the Cursor check) is still running, so a fixer does not chase a review that has not landed. Do not add a label for that. Do not add `conductor:working` yourself first; that makes the CLI refuse. Do not delete it so the CLI will accept the PR. The prompt tells the agent that holds the lock to remove only `conductor:working` after the push. A new-work spawn has no PR yet; that prompt tells the agent to add the label as soon as the PR exists and to stop if it is already set.
 
 9. **Report** to Evan: what is in flight, what is blocked and why, and what is stacked for merge. Then wait.
 
 ## Review verdicts
 
-Verdicts come from GitHub review states on the current head, never from labels: changes requested when any reviewer rejected the head, approved when at least one approved it and none rejected it. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. [`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict** is the rule, and its **Merge rule** says when a pull request may merge.
+Verdicts come from GitHub review states on the current head, never from labels: changes requested when any reviewer (either bot or a person) rejected the head, approved when both reviewers of the pair in [`.github/reviewers`](../../../.github/reviewers) on `main` approved it (the Opus bot, plus `cursor[bot]` or the Sonnet bot) and none rejected it. Open threads never block. [`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict** is the rule, and its **Merge rule** says when a pull request may merge.
 
 `conductor:working` is the only label with meaning, and it is the writer lock: a writer (Cursor or Claude Code) holds this PR, so skip it. There is no reviewing label.
 

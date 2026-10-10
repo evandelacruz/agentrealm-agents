@@ -91,25 +91,31 @@ Five things these tools do that will mislead you:
 - **`issue_read` does not resolve pull request numbers.** Labels come from `list_pull_requests`.
 - **`mergeable_state` is lazy.** It reads `"unknown"` on a first fetch, so read again. `"dirty"` is a conflict. `"unstable"` is a pending or failing check, **not** a conflict. `"behind"` just means the base moved.
 - **Still-running, `skipped`, and `neutral` checks are not failure.**
-- **Reviewers post check runs of their own,** the Claude Review workflow's `review` job and `Cursor Automation: Saims Ref Agent Auto Code Review`. They are not CI (see **Red CI** below), and running or red, they never keep a fixer off a pull request. Only the merge waits on a running one (**Merge rule** below).
+- **Reviewers post check runs of their own,** every job of the Claude Review workflow (`pair` and the `review` jobs) and `Cursor Automation: Saims Ref Agent Auto Code Review`. They are not CI (see **Red CI** below), and running or red, they never keep a fixer off a pull request. Only the merge waits on a running one (**Merge rule** below).
 
-**The review verdict.** There is no `reviewDecision` field; read the reviews. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. For each reviewer, take their latest `APPROVED` or `CHANGES_REQUESTED` review on the current head. `COMMENTED` reviews are threads, not a verdict, whatever their body says; that includes Claude Code reviews posted as `evandelacruz`. Reviews on an older head do not count.
+**The review verdict.** This is the one statement of the rule; every other skill links here. There is no `reviewDecision` field; read the reviews.
 
-- **Changes requested**: any reviewer's latest review on the current head rejected it.
-- **Approved**: at least one reviewer approved the current head, and none rejected it.
+Every pull request has exactly two reviewers, the **pair**, set in [`.github/reviewers`](../../../.github/reviewers) on `main`: the Opus bot (`opus:`) always, and the second reviewer `second:` names, `cursor` (`cursor[bot]`) or `sonnet` (the `sonnet:` bot). Read the file fresh from `main`; never from a pull request's head. Logins may come back with or without the `[bot]` suffix; compare without it.
+
+For each reviewer, take their latest `APPROVED` or `CHANGES_REQUESTED` review on the current head. `COMMENTED` reviews are threads, not a verdict, whatever their body says; that includes Claude Code reviews posted as `evandelacruz`. Reviews on an older head do not count.
+
+- **Changes requested**: any reviewer's latest review on the current head rejected it. Any reviewer at all: either of the pair, the bot outside the pair, or a person (Evan's rejection blocks).
+- **Approved**: both reviewers of the pair approved the current head, and no reviewer rejected it. Another reviewer's approval does not stand in for either of the pair.
 - Otherwise it is waiting on a review, not blocked.
+
+Open threads never block, approved or not.
 
 **Merge rule.** The review side of a merge holds when all three are true on the current head:
 
-1. at least one reviewer approved it;
+1. it is **Approved**, above: both of the pair approved it;
 2. no reviewer's latest review on it requested changes;
-3. no review is in flight: no reviewer check run (the Claude Review workflow's `review` job, `Cursor Automation: Saims Ref Agent Auto Code Review`) is queued or in progress on it.
+3. no review is in flight: no reviewer check run (any job of the Claude Review workflow, `Cursor Automation: Saims Ref Agent Auto Code Review`) is queued or in progress on it.
 
-A reviewer check that finished, in any conclusion, holds nothing. This is the one statement of the rule; every other skill links here. The supervisor applies it, together with its own CI, conflict, lock and workflow-file checks ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) step 1).
+A reviewer check that finished, in any conclusion, holds nothing. The supervisor applies this, together with its own CI, conflict, lock and workflow-file checks ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) step 1).
 
 Act on rejecting reviews, whoever posted them; their threads hold the details. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. A fixer waits on no review check; only the merge does.
 
-A rejection clears only when a push gets a fresh review, or when Evan dismisses it. The Claude Review bot runs only on a push, so a reply alone changes nothing. If you push nothing because every blocking finding gets a reply instead, release the lock and tell Evan that the rejection is disputed.
+A rejection clears only when a push gets a fresh review, or when Evan dismisses it. The Claude reviewers run only on a push, so a reply alone changes nothing. If you push nothing because every blocking finding gets a reply instead, release the lock and tell Evan that the rejection is disputed.
 
 A review on an older head still leaves its inline threads, and they are read like any other.
 
@@ -155,7 +161,7 @@ git merge origin/main
 
 Regenerate rather than hand-edit anything generated: `npm --prefix tools/conductor install` for `tools/conductor/package-lock.json`. In `status.json`, keep both sides' states and take the more advanced one per ID. Stop and ask Evan only when both sides changed the same logic and keeping either loses behavior.
 
-**Red CI.** First check it is actually CI. A real CI check has `/actions/runs/<run_id>/job/<job_id>` in its `html_url`; that is also where the run ID comes from. The reviewer checks are not CI: the Cursor check is not a workflow run, and the Claude Review workflow's `review` job runs the reviewer, whose result is the review it posts. A failed or cancelled reviewer check is nothing for you to fix; leave it to the supervisor.
+**Red CI.** First check it is actually CI. A real CI check has `/actions/runs/<run_id>/job/<job_id>` in its `html_url`; that is also where the run ID comes from. The reviewer checks are not CI: the Cursor check is not a workflow run, and the Claude Review workflow's jobs run the Claude reviewers, whose result is the review they post. A failed or cancelled reviewer check is nothing for you to fix; leave it to the supervisor.
 
 Pull the real output before theorizing. Reproduce locally, fix, confirm. Never skip, disable, or quarantine a test to get green. If a test is flaky and you can make it robust inside this slice, do that; otherwise say so and stop.
 

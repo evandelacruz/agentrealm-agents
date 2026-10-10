@@ -53,7 +53,7 @@ export type PrCommentSummary = {
   reviewInProgress: boolean;
   /** Open labels on the PR — carries the conductor in-flight locks. */
   labels: string[];
-  /** Commit SHAs that already carry a submitted review (human or agent). */
+  /** Commit SHAs that already carry a submitted trusted review (human or agent). See `trustedReview`. */
   reviewedShas: string[];
 };
 
@@ -361,7 +361,7 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
       checksOk: rollupOk(pr),
       reviewInProgress: reviewInProgress(pr),
       labels: (pr.labels ?? []).map((l) => l.name),
-      reviewedShas: submittedReviewShas(reviews),
+      reviewedShas: submittedReviewShas(reviews, pair),
     });
   }
   return summaries;
@@ -475,12 +475,11 @@ export async function withWorkingLock<T>(
  * author has not sent, so they must not count as "this commit was reviewed" —
  * treating them as reviewed would silently drop the PR out of the queue.
  */
-export function submittedReviewShas(
-  reviews: Array<Pick<ReviewNode, "state" | "commit">>,
-): string[] {
+export function submittedReviewShas(reviews: ReviewNode[], pair: ReviewerPair): string[] {
   const shas = new Set<string>();
   for (const review of reviews) {
     if (review.state === "PENDING") continue;
+    if (!trustedReview(review, pair)) continue;
     if (review.commit?.oid) shas.add(review.commit.oid);
   }
   return [...shas];

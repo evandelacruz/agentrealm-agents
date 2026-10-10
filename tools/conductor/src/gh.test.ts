@@ -123,16 +123,6 @@ test("hasMergeConflict reads CONFLICTING or DIRTY", () => {
   assert.equal(hasMergeConflict({ mergeable: "MERGEABLE", mergeStateStatus: "CLEAN" }), false);
 });
 
-test("submittedReviewShas skips PENDING drafts", () => {
-  assert.deepEqual(
-    submittedReviewShas([
-      { state: "PENDING", commit: { oid: "draft" } },
-      { state: "COMMENTED", commit: { oid: "real" } },
-      { state: "APPROVED", commit: null },
-    ]),
-    ["real"],
-  );
-});
 
 const HEAD = "head-sha";
 
@@ -380,4 +370,20 @@ test("headVerdict ignores untrusted reviews, approving or rejecting", () => {
     commit: { oid: HEAD },
   };
   assert.equal(headVerdict([review(OPUS, "APPROVED", HEAD), impostor], HEAD, PAIR), null);
+});
+
+test("submittedReviewShas skips PENDING drafts and untrusted reviews", () => {
+  assert.deepEqual(
+    submittedReviewShas(
+      [
+        review("someone", "PENDING", "draft"),
+        review(OPUS, "COMMENTED", "real"),
+        { ...review(OPUS, "APPROVED", "x"), commit: null },
+        review("drive-by", "COMMENTED", "untrusted", "", "NONE"),
+        review("collab", "COMMENTED", "collab", "", "COLLABORATOR"),
+      ],
+      PAIR,
+    ),
+    ["real", "collab"],
+  );
 });

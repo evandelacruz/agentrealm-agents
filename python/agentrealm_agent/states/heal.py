@@ -33,6 +33,7 @@ from ..pathing import (
     committed_safe,
     grid_params,
     nav_search,
+    SAFE_UNREACHABLE_TICKS,
     reachable_safe_goal,
     safe_ruled_out,
 )
@@ -70,8 +71,9 @@ class HealState(State):
     Safe ground (the walk, the rest, the regen sample) outranks a plan op in
     progress only when health is low (``healing.health_low``): at 9/10 the
     plan's op goes first. The walk commits to one safe tile a path reaches;
-    when it gives that tile up, Heal gives safe ground up until the next full
-    heal, asks the planner for supplies, and yields (free-play run 9).
+    when it gives that tile up, Heal gives safe ground up until a full heal
+    (at low health, for ``SAFE_UNREACHABLE_TICKS``), asks the planner for
+    supplies, and yields (free-play run 9).
 
     A drink is ``Arm`` and ``Use`` in one paced queue. Heal runs on the next
     decision after it, even at full health or with a hostile in range, to
@@ -126,15 +128,19 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
         return _out(None, f"health not low: the plan's {op['op']} goes first")
     if not standing_in_safe_zone(w):
         m.heal_regen_sample = None
-        if m.heal_safe_given_up == w.map_id:
+        if _safe_given_up(m, w):
             _ask_for_supplies(w, m, safe_ground="unreachable")
-            return _out(None, "safe ground out of reach until healed")
+            return _out(None, "safe ground given up for now")
         goal = "heal_rest" if known == "yes" else "heal_measure"
         if out := _walk_to_safe(w, m, policy, ctx, goal=goal):
             return out
-        if m.heal_safe_given_up == w.map_id:
+        if _safe_given_up(m, w):
             _ask_for_supplies(w, m, safe_ground="unreachable")
-            return _out(None, "safe tile given up: safe ground out of reach until healed")
+            return _out(None, "safe tile given up: safe ground given up for now")
+        if committed_safe(m, w, HEAL_TARGET) is None:
+            # No safe cell a path reaches at all (every one walled in, held or
+            # ruled out), not a step held this decision: tell the planner too.
+            _ask_for_supplies(w, m, safe_ground="unreachable")
         return _out(None, "no reachable safe tile")
     if known is None:
         verdict = note_regen_sample(m, w)
@@ -228,10 +234,13 @@ def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *,
 
     A walk that gives it up (no path, no progress in a stuck window, or
     pacing), or a check that rules it out, marks it unreachable for every
-    safe walk (``Memory.safe_unreachable``, as Retreat and Park do) and ends
-    safe ground for this hurt spell (``Memory.heal_safe_given_up``): Heal
-    never moves on to the next tile, so unreachable tiles cannot chain into
-    a loop (free-play run 9: 217 s between safe tiles it could not reach).
+    safe walk (``Memory.safe_unreachable``, as Retreat and Park do) and gives
+    safe ground up (``Memory.heal_safe_given_up``): until a full heal, or,
+    once health is low, for ``SAFE_UNREACHABLE_TICKS``. Heal never moves on
+    to the next tile at once, so unreachable tiles cannot chain into a loop
+    (free-play run 9: 217 s between safe tiles it could not reach). At low
+    health one tile is tried again after each lapse, so a reachable tile is
+    never shut out for good.
     A cell a hostile now holds is no give-up: the next one is taken.
     """
     reach = ground_by_hostile(w, policy)
@@ -253,11 +262,25 @@ def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *,
 
 
 def _give_up_safe(m: Memory, w: WorldModel, cell: Pos) -> None:
-    """The walk to ``cell`` is over: rule it out for every safe walk and end
-    safe ground for this hurt spell (``note_heal_window`` lifts it)."""
+    """The walk to ``cell`` is over: rule it out for every safe walk and give
+    safe ground up while that mark holds (``_safe_given_up``)."""
     m.safe_unreachable[(w.map_id, cell)] = w.tick
     commit_safe(m, w, HEAL_TARGET, None)
-    m.heal_safe_given_up = w.map_id
+    m.heal_safe_given_up = (w.map_id, w.tick)
+
+
+def _safe_given_up(m: Memory, w: WorldModel) -> bool:
+    """Heal gave its safe tile up on this map, and health is not low or the
+    give-up is younger than ``SAFE_UNREACHABLE_TICKS``. A full heal clears it
+    (``note_heal_window``); low health lets one tile be tried again once the
+    give-up lapses, so a reachable tile is never shut out for good."""
+    g = m.heal_safe_given_up
+    if g is None:
+        return False
+    if g[0] != w.map_id or (health_low(w) and w.tick - g[1] >= SAFE_UNREACHABLE_TICKS):
+        m.heal_safe_given_up = None
+        return False
+    return True
 
 
 def _walk_toward(

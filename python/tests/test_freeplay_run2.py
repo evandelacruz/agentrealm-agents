@@ -331,7 +331,7 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         # ground for this hurt spell: never back toward the pack (run 9).
         out = dispatch(w, c)
         self.assertNotEqual(out.state, "Heal")
-        self.assertEqual(c.memory.heal_safe_given_up, MAP)
+        self.assertEqual(c.memory.heal_safe_given_up[0], MAP)
 
     def test_retreat_keeps_its_pick_when_the_pack_leaves_view(self):
         w, c = world(health=4), ctx(on_hostile="fight")

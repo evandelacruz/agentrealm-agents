@@ -18,6 +18,7 @@ from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_agent.pathing import SAFE_UNREACHABLE_TICKS
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
@@ -110,18 +111,35 @@ class OneSafeTileTest(unittest.TestCase):
         self.assertIn("Heal: no reachable safe tile", out.yielded)
         for cell in CLUSTER[:4]:
             self.assertIn((MAP, cell), c.memory.safe_unreachable)
+        # Review on #178: the planner hears of it too, not only after a give-up.
+        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "heal_supplies"]
+        self.assertEqual([a.get("safe_ground") for a in asks], ["unreachable"])
+
+    def test_a_retreat_or_park_mark_on_the_committed_tile_ends_the_walk(self):
+        # One reachability for every safe walk: a cell Retreat or Park ruled
+        # out is out for Heal too, and counts as its one give-up.
+        w, c = world(health=7), ctx()
+        safe(w, *CLUSTER)
+        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {CLUSTER[0]}")
+        c.memory.safe_unreachable[(MAP, CLUSTER[0])] = w.tick  # as retreat.no_progress marks it
+        w.tick += 10
+        out = dispatch(w, c)
+        self.assertNotEqual(out.state, "Heal")
+        self.assertEqual(c.memory.heal_safe_given_up, (MAP, w.tick))
+        self.assertIn("Heal: safe tile given up: safe ground given up for now", out.yielded)
 
     def test_a_run_of_unreachable_tiles_ends_after_the_first(self):
         # Reachable by budget, never nearer: the old walk gave each tile up
-        # in turn and started on the next, then came round again.
-        w, c = world(health=4), ctx()
+        # in turn and started on the next, then came round again. Health not
+        # low: given up until a full heal.
+        w, c = world(health=7), ctx()
         safe(w, *CLUSTER)
         outs = stand_still(w, c, 6 * nav_stuck.PROGRESS_TICK_LIMIT)
         self.assertEqual(set(measure_targets(outs)), {f"heal_measure → {CLUSTER[0]}"})
         self.assertIn((MAP, CLUSTER[0]), c.memory.safe_unreachable)
-        self.assertEqual(c.memory.heal_safe_given_up, MAP)
+        self.assertEqual(c.memory.heal_safe_given_up[0], MAP)
         self.assertNotEqual(outs[-1].state, "Heal")
-        self.assertIn("Heal: safe ground out of reach until healed", outs[-1].yielded)
+        self.assertIn("Heal: safe ground given up for now", outs[-1].yielded)
         asks = [s for s in c.memory.strategist_signals if s["trigger"] == "heal_supplies"]
         self.assertEqual(len(asks), 1)
         self.assertEqual(asks[0]["safe_ground"], "unreachable")
@@ -131,7 +149,7 @@ class OneSafeTileTest(unittest.TestCase):
         w, c = world(health=4), ctx()
         safe(w, *CLUSTER)
         stand_still(w, c, nav_stuck.PROGRESS_TICK_LIMIT + 20)
-        self.assertEqual(c.memory.heal_safe_given_up, MAP)
+        self.assertEqual(c.memory.heal_safe_given_up[0], MAP)
         w.health = 10
         dispatch(w, c)
         self.assertIsNone(c.memory.heal_safe_given_up)
@@ -140,6 +158,30 @@ class OneSafeTileTest(unittest.TestCase):
         self.assertEqual(out.state, "Heal")
         self.assertTrue(out.reason.startswith("heal_measure → "), out.reason)
         self.assertNotEqual(out.reason, f"heal_measure → {CLUSTER[0]}", "the given-up tile is still ruled out")
+
+    def test_at_low_health_one_tile_is_tried_again_after_the_give_up_lapses(self):
+        # Review on #178: a give-up that never lapsed shut every safe tile out
+        # for the spell, even reachable ones, with no other way to heal.
+        w, c = world(health=4), ctx()
+        safe(w, *CLUSTER)
+        outs = stand_still(w, c, nav_stuck.PROGRESS_TICK_LIMIT + 20)
+        given_up = c.memory.heal_safe_given_up[1]
+        self.assertEqual(set(measure_targets(outs)), {f"heal_measure → {CLUSTER[0]}"})
+        w.tick = given_up + SAFE_UNREACHABLE_TICKS - 1
+        self.assertNotEqual(dispatch(w, c).state, "Heal", "still given up")
+        w.tick = given_up + SAFE_UNREACHABLE_TICKS
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Heal")
+        self.assertTrue(out.reason.startswith("heal_measure → "), out.reason)
+
+    def test_not_low_the_give_up_holds_past_the_lapse(self):
+        w, c = world(health=7), ctx()
+        safe(w, *CLUSTER)
+        stand_still(w, c, nav_stuck.PROGRESS_TICK_LIMIT + 20)
+        w.tick = c.memory.heal_safe_given_up[1] + 3 * SAFE_UNREACHABLE_TICKS
+        self.assertNotEqual(dispatch(w, c).state, "Heal")
+        w.health = 4  # now low: one tile again
+        self.assertEqual(dispatch(w, c).state, "Heal")
 
 
 if __name__ == "__main__":

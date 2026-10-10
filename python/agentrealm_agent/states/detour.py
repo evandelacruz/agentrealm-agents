@@ -17,11 +17,15 @@ a life is worth ``LIFE_STEPS``; food while hurt ``FOOD_STEPS``. Hostile
 safety is Gather's: the find must be on ground ``gather_ground`` allows
 (off hazards, clear of every known hostile's bar, in view or remembered),
 the path walked there must stay out of every known hostile's reach
-(``route_clear``), and the survival reflexes above it still win. A
-``gather_gems`` op with ``fight`` on top lifts the remembered and route
-tests, as it does for Gather. A find whose ground or path turns out held
-(a hit on the way, say) is dropped, and one with no clear path is skipped
-for the run (free-play run 5).
+(``route_clear``), and the survival reflexes above it still win. A find
+is priced by risk too (``risk_allowed``): one within ``RISK_RADIUS`` of a
+known hostile, in view or remembered, is taken only while one hit from
+each of them would leave health above Retreat's floor. A detour is
+opportunistic, so it takes no risk the goal did not ask for (A82). A
+``gather_gems`` op with ``fight`` on top lifts the remembered, route and
+risk tests, as it does for Gather. A find whose ground or path turns out
+held (a hit on the way, say), or whose risk health no longer covers, is
+dropped, and one with no clear path is skipped for the run (free-play run 5).
 
 A detour is a short insert, never a new target: the walk it interrupts
 keeps its committed target (``targets``). Once the find is taken, seen gone
@@ -37,13 +41,15 @@ from dataclasses import dataclass
 
 from ..healing import hurt
 from ..supplies import is_food
-from ..hostile_ground import Danger, danger, reach_cells
+from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from ..knowledge_base import knowledge_items
 from ..memory import Memory
 from ..loot import GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_room
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
+from ..survival import health_floor
+from ..threat import type_key_for_entity
 from ..world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
 from .gather_safe import gather_ground, route_clear
@@ -61,6 +67,9 @@ LIFE_STEPS = 16
 FOOD_STEPS = 4
 # A detour that has not taken its find in this long is given up (10 s at 10 ticks/s).
 DETOUR_TICKS = 100
+# A find this close to a known hostile is a risk: the radius in which Gather
+# keeps off the hostile that hit us and the path planner prices danger (#162).
+RISK_RADIUS = GATHER_HOSTILE_RADIUS
 
 
 @dataclass
@@ -200,12 +209,35 @@ def detour_find(w: WorldModel, ctx: PlayContext, known: Danger | None = None) ->
     for e in finds:
         if e.id in m.detour_skipped or chebyshev(e.pos, here) <= 1 or not gather_ground(w, e.pos, ctx.policy, known):
             continue  # in reach is Pickup's
+        if not risk_allowed(w, ctx, e.pos, known):
+            continue
         extra = extra_steps(w, here, e.pos, route, allowance(w, e, finds, items), ctx.policy.avoid_blocks)
         if extra is None:
             continue
         if best is None or (extra, e.id) < best[:2]:
             best = (extra, e.id, e)
     return best[2] if best is not None else None
+
+
+def risk_allowed(w: WorldModel, ctx: PlayContext, at: Pos, known: Danger) -> bool:
+    """Whether health covers the risk of a find at ``at``.
+
+    With no known hostile within ``RISK_RADIUS`` of it (``hostiles_within``),
+    or an op that chose to fight (``known.fight``), there is none. Otherwise
+    one hit from each of them (the threat table's size for its type) must
+    leave health above Retreat's floor against them
+    (``survival.health_floor``). Free-play run 8: a detour at 4/10 to a pile
+    2 cells from a pack ended at 1/10.
+    """
+    if known.fight:
+        return True
+    near = hostiles_within(w, ctx.policy, at, RISK_RADIUS)
+    if not near:
+        return True
+    if w.health is None:
+        return False
+    volley = sum(w.threat.damage_per_hit(type_key_for_entity(e)) for e in near)
+    return w.health - volley > health_floor(w, ctx.params, near)
 
 
 def chosen_fight(ctx: PlayContext) -> bool:
@@ -215,11 +247,14 @@ def chosen_fight(ctx: PlayContext) -> bool:
 
 
 def _still_on(w: WorldModel, d: Detour, ctx: PlayContext, known: Danger) -> bool:
-    """The find is still there, on ground Gather may work, the path being
-    walked to it is clear of known reach, and the detour has time left."""
+    """The find is still there, on ground Gather may work, its risk still
+    covered by health, the path being walked to it is clear of known reach,
+    and the detour has time left."""
     m = ctx.memory
     there = any(e.kind == "supply" and e.id == d.supply_id for e in w.entities)
     if not there or w.tick - d.since >= DETOUR_TICKS or not gather_ground(w, d.pos, ctx.policy, known):
+        return False
+    if not risk_allowed(w, ctx, d.pos, known):
         return False
     return m.goal != GOAL or route_clear(w, ctx.policy, m.path, known)
 

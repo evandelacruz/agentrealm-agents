@@ -68,8 +68,11 @@ create_session(
   outcome_branch="<branch>",
   title="implementer: <IDS>: <short scope>",
   tags=["agentrealm-agents-implementer-fleet", "<id lower case>"],
+  model="<implementer model>",
   prompt="<brief>")
 ```
+
+`model` is the implementer model from the supervisor's **Models** ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md)). With none on record, omit it and the session inherits this one's.
 
 Omit `environment_id` so the session inherits this one's. Never pass `permission_mode: "plan"`: it blocks on an approval nobody is waiting to give. One session per slice, never two.
 

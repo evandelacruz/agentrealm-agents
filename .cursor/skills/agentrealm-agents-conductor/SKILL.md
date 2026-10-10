@@ -2,8 +2,8 @@
 name: agentrealm-agents-conductor
 description: >-
   Play the agentrealm-agents build conductor: read the PLAN.md backlog, pick next ready work item
-  IDs, spawn implementer cloud agents, watch open PRs for review comments and
-  approved-PR nits, and stack merge-ready work. Use when the user asks to run a
+  IDs, spawn implementer cloud agents, watch open PRs for review comments, and
+  stack merge-ready work. Use when the user asks to run a
   conductor pass, kick off next steps, or keep the build moving.
 ---
 
@@ -73,7 +73,7 @@ No ticketing system. PLAN.md is the backlog.
 8. **Watch open PRs**, blockers first:
    - Carrying `conductor:working` → skip. A writer already holds it (Cursor or Claude Code). Do not follow up, spawn `--pr`, or delete the label.
    - Changes requested (see [Review verdicts](#review-verdicts)), a merge conflict, or red CI, **and no `conductor:working`** → follow up on the same agent, or spawn a fixer attached to the PR (`--pr <url>`). Open threads without a rejection are not a blocker.
-   - Approved → leave it for Evan to merge as-is. Its open threads are not work: the fixer that fixed a thread resolves it.
+   - Approved → awaiting the Claude polish pass if it has no `polish-done`, else ready to merge. You never polish: every approved PR gets one polish pass from a Claude fixer ([`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **Polish**), dispatched by the supervisor, which ends by adding `polish-done`. A Cursor follow-up would never add that label and would reset the approval, so do not send one at an approved PR.
 
    Blocker follow-up:
 
@@ -96,16 +96,16 @@ No ticketing system. PLAN.md is the backlog.
 
 Verdicts come from GitHub review states on the current head, never from labels, and only trusted reviewers count (anyone else's review is ignored). Changes requested when any of them rejected the head, approved when both reviewers of the pair in [`.github/reviewers`](../../../.github/reviewers) on `main` approved it (the Opus bot, plus `cursor[bot]` or the Sonnet bot) and none rejected it. Open threads never block. [`agentrealm-agents-fixer`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict** is the rule, and its **Merge rule** says when a pull request may merge.
 
-`conductor:working` is the only label with meaning, and it is the writer lock: a writer (Cursor or Claude Code) holds this PR, so skip it. There is no reviewing label.
+`conductor:working` is the writer lock: a writer (Cursor or Claude Code) holds this PR, so skip it. `polish-done` means a Claude fixer gave the approved PR its one polish pass; the supervisor merges only PRs that carry it. Never add or remove it yourself. No other label has meaning. There is no reviewing label.
 
-**Add and remove labels individually. Never send a replacement label set**, which silently wipes a lock another agent holds.
+**Add and remove labels individually. Never send a replacement label set**, which silently wipes a lock another agent holds. (Claude's GitHub tools have only a replace-all label call; the Claude skills send the full set read back immediately before. That is their constraint, not a licence for you.)
 
 Implementers and fixers claim `conductor:working` and release it when they finish. Reviewers never take it. The conductor CLI (`follow-up`, `spawn --pr`) and Claude Code fixers both use this label. A crash leaves it on. **Do not clear a lock you did not claim in this session.** Cursor `status` showing the original implementer `finished` means that worker should have released; if the label is still there, a Claude Code fixer may hold it. Leave it and tell Evan. Claude Code fixers do not review; that skill is [`.claude/skills/agentrealm-agents-fixer/SKILL.md`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md).
 
 ## Merge policy
 
 - **You never merge.** Evan merges, and so does the [agentrealm-agents supervisor](../../../.claude/skills/agentrealm-agents-supervisor/SKILL.md).
-- Flag PRs that are approved, CI-green, and conflict-free as ready for Evan to merge.
+- Flag PRs that are approved, CI-green, conflict-free, and carry `polish-done` as ready to merge. An approved PR without `polish-done` is awaiting its polish pass, not ready.
 - Treat moderation, a new dependency, and changes to the call budget or pacing as human-merge surfaces even when review is green.
 
 ## Out of scope

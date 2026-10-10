@@ -38,7 +38,7 @@ Repo: `evandelacruz/agentrealm-agents`.
    | `conductor:working` label | skip: an implementer or fixer holds it |
    | a reviewer check (any Claude Review workflow job, or `Cursor Automation: Saims Ref Agent Auto Code Review`) still running | skip: a review is in progress |
    | merge conflict, changes requested, or red CI | **fix** |
-   | approved | skip: Evan merges it as-is, open threads or not |
+   | approved | skip: a Claude fixer gives it its one polish pass, then the supervisor or Evan merges it. Never send a Cursor agent at an approved PR. |
    | draft | skip |
 
    The working-label row always wins. Implementers and fixers claim the lock and must release it when they finish. Reviewers never take it. Cursor `status` listing the original implementer as `finished` means that worker should already have released; if the label is still there, a Claude Code fixer may hold it (they do not appear in that list) or the holder crashed. **Never remove `conductor:working` to "unstick" a PR.** Report it to Evan and fill the slot with other work.

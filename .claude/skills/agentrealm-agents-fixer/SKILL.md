@@ -2,17 +2,19 @@
 name: agentrealm-agents-fixer
 description: >
   Fix one blocked agentrealm-agents pull request and push. A review requested
-  changes, the branch conflicts with main, or CI is red. Use when Evan asks
-  Claude Code to send a fixer, fix a PR, fix review comments, fix a conflict,
-  or get a PR green. Claims and releases conductor:working. Writes only that
-  label, the push, a reply that resolves each thread it fixed, a reply on
-  each thread it deliberately left open, and a hand-off comment when it
-  declines every finding.
+  changes, the branch conflicts with main, or CI is red; or give an approved
+  pull request its one polish pass. Use when Evan asks Claude Code to send a
+  fixer, fix a PR, fix review comments, fix a conflict, get a PR green, or
+  polish a PR. Claims and releases conductor:working. Writes only that
+  label, polish-done after a polish pass, the push, a reply that resolves
+  each thread it fixed, a reply on each thread it deliberately left open, a
+  hand-off comment when it declines every finding, and a polish report
+  comment.
 ---
 
 # agentrealm-agents fixer
 
-One pass on one blocked pull request: claim the lock, apply the fixes, push, release the lock. That is the whole job.
+One pass on one blocked pull request: claim the lock, apply the fixes, push, release the lock. That is the whole job. An approved pull request gets the same pass once, as polish (**Polish**).
 
 Repo: `evandelacruz/agentrealm-agents`. Read [`AGENTS.md`](../../../AGENTS.md) before editing. PLAN.md outranks the backlog state. `status.json` is not a source of truth.
 
@@ -28,13 +30,13 @@ The blockers you were handed are symptoms. Before you start typing, work out wha
 
 ## What you write
 
-Four things, and nothing else: the `conductor:working` label, your commits on the pull request's branch, a reply that resolves each thread your push fixed, and a reply on each thread you deliberately left alone. The one exception is the hand-off comment in **Declined everything** below.
+Four things, and nothing else: the `conductor:working` label, your commits on the pull request's branch, a reply that resolves each thread your push fixed, and a reply on each thread you deliberately left alone. The exceptions are the hand-off comment in **Declined everything** below, and the two a polish pass adds (**Polish**): the `polish-done` label, and one pull request comment listing the larger items you reported instead of doing.
 
 - **No reviews, no approvals.** Never.
 - **Resolve only what your push fixed.** A thread you left alone stays open for the reviewer. Never resolve a thread on a commit you have not pushed.
 - **No merging.**
 - **No re-running CI.** Your push triggers it.
-- **No other labels.** `conductor:working` is the only one you touch.
+- **No other labels.** `conductor:working` is the only one you touch, except `polish-done` at the end of a polish pass (**Polish**).
 - **No second pull request**, and no force-push.
 
 ### Commenting
@@ -62,12 +64,13 @@ A pull request is yours when it is **open**, **not draft**, does **not** have `c
 | Merge conflict | `mergeable_state` is `"dirty"` |
 | Red CI | a **CI** check run completed with conclusion `failure` or `timed_out` |
 | Changes requested | the review verdict, below |
+| Polish due | the verdict is approved, no CI check run is red, `mergeable_state` is not `"dirty"`, and the pull request has no `polish-done` label |
 
-Several can be true at once. Clear all of them in the one pass.
+Several of the first three can be true at once. Clear all of them in the one pass. Polish due is never true alongside them: it needs an approved, unconflicted pull request with no red CI.
 
-Those three are the only blockers. Open review threads are not one: they are where a `CHANGES_REQUESTED` review spells out what it wants. An open thread on a pull request no trusted reviewer rejected never makes it yours and never holds a merge.
+The first three are the only blockers. Polish due is not a blocker but the one pass every approved pull request gets before it merges. Open review threads are not a blocker: they are where a `CHANGES_REQUESTED` review spells out what it wants. An open thread on a pull request no trusted reviewer rejected never makes it yours and never holds a merge.
 
-Not yours: drafts, and pull requests none of the three blocks.
+Not yours: drafts, and pull requests with none of these four.
 
 One pull request per pass. If asked for several, finish one before locking the next.
 
@@ -119,7 +122,7 @@ Open threads never block, approved or not.
 2. no reviewer's latest review on it requested changes;
 3. no review is in flight: no reviewer check run (any job of the Claude Review workflow, `Cursor Automation: Saims Ref Agent Auto Code Review`) is queued or in progress on it.
 
-A reviewer check that finished, in any conclusion, holds nothing. The supervisor applies this, together with its own CI, conflict, lock and workflow-file checks ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) step 1).
+A reviewer check that finished, in any conclusion, holds nothing. The supervisor applies this, together with its own CI, conflict, lock, `polish-done` and workflow-file checks ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) step 1).
 
 Act on every trusted rejecting review, whichever trusted reviewer posted it; its threads hold the details. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. A fixer waits on no review check; only the merge does.
 
@@ -139,7 +142,7 @@ You declined every blocking finding, each with a reply on its thread, and there 
 
 When a later comment from Evan after a hand-off names findings to fix, fix those: that is Evan's decision, not a reviewer's suggestion.
 
-This applies only when nothing gets pushed. If you also fixed a conflict, red CI, or any one finding, push, and release the lock as usual; the push gets a fresh review.
+This applies only when nothing gets pushed, and never to a polish pass: an approved pull request has no rejection to hand over, so a polish pass with nothing to push still releases the lock and adds `polish-done` (**Unlock**). If you also fixed a conflict, red CI, or any one finding, push, and release the lock as usual; the push gets a fresh review.
 
 ## Lock
 
@@ -201,6 +204,20 @@ Read all of it, not only the lines the threads point at, and ask:
 
 **Look broadly, act narrowly.** Fix what you find only when it is inside this slice, clearly wrong, and small. Say what you fixed and why in the commit, since nobody asked for it. Everything else (larger, arguable, or outside the slice) gets a comment and no code, per **Commenting** above. Your own pass must never turn into a rewrite: one unrequested fix that is plainly right is worth more than five that widen the diff and force another review cycle.
 
+**Polish.** An approved pull request gets one polish pass before it merges, so the small debt reviewers leave behind gets paid while the change is fresh. You decide what is worth doing; the reviewers' prompts do not sort their comments for you.
+
+Read every trusted review body and every thread, open or resolved, plus the whole diff. Then sort each finding:
+
+- **Do now:** anything a later reader, agent, or newcomer copying the agent pays for if it stays. A wrong or misleading comment, docstring, name, or log line. A branch or rejection path the pull request adds with no test. Dead code or a stale TODO the change leaves behind. A break from a pattern the repo already uses for the same thing. An edge case with a small, obvious fix. A doc a review noted should change.
+- **Skip:** taste and style with no reader cost, "could also be written as", and anything a test or linter already holds.
+- **Report, do not do:** refactors, new behavior, a change outside this slice, or anything that deserves its own backlog ID. Post one comment on the pull request with `add_issue_comment` listing them, so Evan sees them.
+
+**Docs agree with the change.** Whatever the comments say, check every doc that describes what this pull request changed, and fix the ones that now disagree with the code: `README.md` and `PLAN.md` (the backlog item and the design sections its IDs point to), the backlog IDs' `status.json` entries, `docs/observations/*`, `docs/CHARACTER_AND_STATES.md` and the other files under `docs/`, `AGENTS.md` and the skills (agents act on these), and the planner prompt text in `python/agentrealm_agent/strategist.py` when behavior the planner relies on changed. Search for the names the change touched (states, intents, reflexes, flags, trace fields, config keys) rather than trusting memory. Fix only disagreement with this change; a doc that was already wrong before it is a comment, not a fix. Edit only the `status.json` entries of the IDs this pull request covers (`AGENTS.md`).
+
+Stay inside the slice and keep it small: polish never widens the diff into a second review of the design. A polish push follows **Push** like any other. A "nit" that turns out to be a design question is a report item, not a change and not a stop. Reply on and resolve the threads you fixed, and reply on the open threads you skipped or reported, per **Commenting**; resolved threads need nothing.
+
+Whether or not you push, finish by adding `polish-done` as you release the lock (**Unlock**). It is how everyone knows the one pass happened: after it, an approval merges even if the re-review leaves new nits.
+
 ## Push
 
 - Run `make test`, and `make conductor-test` if you touched `tools/conductor`.
@@ -225,3 +242,5 @@ issue_write(method="update", owner="evandelacruz", repo="agentrealm-agents",
 ```
 
 If the pull request had no other labels, that is `labels: []`. If you stop before the push, leave the label in place and tell Evan which pull request still holds it. After **Declined everything**, the label stays too.
+
+**After a polish pass,** send the label set minus `conductor:working` plus `polish-done`, in the same call. With nothing worth doing, there is nothing to push: still release the lock and add `polish-done`. The pull request stays approved and merges.

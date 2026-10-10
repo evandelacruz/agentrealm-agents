@@ -135,5 +135,13 @@
 
   "A65": {"state": "done", "note": "Planner State nearby_npcs and npcs_spoken_to; Greet reflex says hello once to a likely helper in sight (stays put, not known hostile; none off safe ground while NPCs are hostile). No live run yet."},
 
-  "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Not yet seen in a live run."}
+  "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Not yet seen in a live run."},
+
+  "A67": {"state": "open", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 filed: accidental sword buy, 0 gems, 370 s Break Arm loop; short-run gates only. Rerun after A68-A70."},
+
+  "A68": {"state": "open", "note": "A67 run 1: Break flips Arm between two held weapons forever; armed weapon not a candidate, step dropped behind the Arm."},
+
+  "A69": {"state": "open", "note": "A67 run 1: travel to shop ends on the item cell and takes (buys) it."},
+
+  "A70": {"state": "open", "note": "A67 run 1: planner State has no stall signal or entrances, and echoes the 0,0 symbolic travel placeholder."}
 }

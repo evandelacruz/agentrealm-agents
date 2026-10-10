@@ -28,7 +28,7 @@ First row that matches decides it:
 | draft | **skip**: still being written |
 | `mergeable_state` is `"dirty"` | **spawn**: merge conflict |
 | a CI check run (not a reviewer's check) concluded `failure` or `timed_out` | **spawn**: red CI |
-| the review verdict is changes requested, and a `Handed to Evan:` comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` is newer than the latest rejecting review on the current head | **skip**: a fixer declined every finding and handed it to Evan, even if the label is gone. Evan dismisses the rejection or names the findings to fix. |
+| the review verdict is changes requested, and the newest pull request comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` starts with `Handed to Evan:` and is newer than the latest rejecting review on the current head | **skip**: a fixer declined every finding and handed it to Evan, even if the label is gone. Evan dismisses the rejection, or comments naming the findings to fix; that later comment ends the skip, and the brief carries it. |
 | the review verdict is changes requested | **spawn**: review |
 | anything else | **skip**: nothing blocks it |
 
@@ -121,6 +121,9 @@ Reproduce locally, fix, confirm. Never skip or disable a test.
 [review] <trusted reviewer> requested changes on the head. Its threads:
 - <path>:<line>: <what it asks, one line>
 - …
+
+[Evan's call] A fixer handed this PR to Evan, and Evan answered:
+<his comment, quoted>. Fix the findings it names.
 
 Keep the same backlog item IDs (<IDS>) and cite them in the commit. Do not
 expand the slice. Flag prominently if you add a dependency or touch

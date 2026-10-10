@@ -134,8 +134,10 @@ The first review's threads are often resolved while a later review's are not. Re
 You declined every blocking finding, each with a reply on its thread, and there is no other blocker to fix, so you have nothing to push. The rejection still stands, and with the lock released the next fleet pass would spawn a fixer at the same review, which declines it again, forever. So hand the pull request to Evan instead:
 
 1. **Keep `conductor:working` on the pull request.** Do not release it. It keeps every fleet and the supervisor off the pull request until Evan acts.
-2. **Post one comment on the pull request** with `add_issue_comment`, starting with `Handed to Evan:`, naming the rejecting review, saying in a sentence or two why each finding was declined (link the thread replies), and ending: `Dismiss the rejection, or say which findings to fix, then remove conductor:working.`
+2. **Post one comment on the pull request** with `add_issue_comment`, starting with `Handed to Evan:`, naming the rejecting review, saying in a sentence or two why each finding was declined (link the thread replies), and ending: `Dismiss the rejection, or comment here naming the findings to fix, then remove conductor:working.`
 3. **Tell Evan here** which pull request you handed over.
+
+When a later comment from Evan after a hand-off names findings to fix, fix those: that is Evan's decision, not a reviewer's suggestion.
 
 This applies only when nothing gets pushed. If you also fixed a conflict, red CI, or any one finding, push, and release the lock as usual; the push gets a fresh review.
 

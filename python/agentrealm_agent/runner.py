@@ -1051,13 +1051,12 @@ class Runner:
             return m.pending
         return None
 
-    def _act_before(self, index: int) -> dict | None:
-        """The last intent other than a ``Wait`` queued before ``index``."""
-        for i in range(index - 1, -1, -1):
-            intent = self._intent_at(i)
-            if intent is not None and intent.get("verb") != "Wait":
-                return intent
-        return None
+    def _held_intents(self) -> list[dict]:
+        """The queue whose results are being read, as sent."""
+        m = self.mem
+        if m.pending_intents is not None:
+            return m.pending_intents
+        return [m.pending] if m.pending is not None else []
 
     def on_result(self, result: dict, index: int) -> bool:
         """Applies one intent result. True when it was rejected."""
@@ -1101,7 +1100,7 @@ class Runner:
                     # A Break probe that misses is a capability miss (GAME_NOTES:
                     # which item works is per block), not ground that does not cut,
                     # and so is a cut made with an item that does not cut (a potion).
-                    if not cannot_cut(code_in_hand(w, self._act_before(index)), self.knowledge):
+                    if not cannot_cut(code_in_hand(w, self._held_intents(), index), self.knowledge):
                         self.gem_cuts.note_no_effect(w, block, tile, m.last_use_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
@@ -1173,7 +1172,7 @@ class Runner:
         target = intent.get("target") or {}
         if target.get("kind") != "character" or int(target.get("character_id", -1)) != w.character_id:
             return
-        code = code_in_hand(self.world, self._act_before(index))
+        code = code_in_hand(self.world, self._held_intents(), index)
         if code in FOOD_CODES | POTION_CODES:
             note_heal_pending(m, w, code, "use")
 

@@ -138,8 +138,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
                     if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
                         self.heal_food_take = True
             if intent.get("verb") == "Use" and _is_self_use(intent, w):
-                before = next((x for x in reversed(intents[:i]) if x.get("verb") != "Wait"), None)
-                if code_in_hand(w, before) in POTION_CODES:
+                if code_in_hand(w, intents, i) in POTION_CODES:
                     self.heal_potion = True
 
     def _note_fight(

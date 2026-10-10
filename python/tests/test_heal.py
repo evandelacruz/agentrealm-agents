@@ -14,6 +14,7 @@ from agentrealm_agent.healing import (
     absorb_heal_pending,
     hurt,
     note_heal_pending,
+    note_try,
     regen_known,
     save_regen_yes,
 )
@@ -84,11 +85,13 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 2, "y": 2}])
 
     def test_rejected_take_is_not_retried_forever(self):
+        # The runner counts each refused Take (``Runner._note_heal_refused``).
         w = grid(at=(1, 1))
         w.entities = [Entity("supply", 8, (2, 1), "apple")]
         m = Memory()
         for _ in range(HEAL_MAX_TRIES):
             self.assertEqual(verbs(dispatch(w, ctx(m))), ["Take"])
+            note_try(m, "take", 8)
             w.tick += 7
         self.assertNotIn("Take", verbs(dispatch(w, ctx(m))))
 
@@ -105,6 +108,7 @@ class HealStateTest(unittest.TestCase):
         m = Memory()
         for _ in range(HEAL_MAX_TRIES):
             self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
+            note_try(m, "use", 4)  # the runner counts each refused drink
             w.tick += 7
         self.assertNotIn("Use", verbs(dispatch(w, ctx(m))))
 

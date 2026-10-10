@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+import copy
+from dataclasses import dataclass, field, fields
+from typing import TYPE_CHECKING, Iterable
 
 from .navigation import NavSearchState
 from .navigation.rejection import NavMemory
@@ -161,6 +162,15 @@ class Memory:
     equip_refused_sig: tuple | None = None  # loadout and inventory the refusals hold for; None until the next observation syncs it (A19)
     equip_not_wearable: set[str] = field(default_factory=set)  # subtypes Wear rejected with not_wearable for the run (A55)
     equip_try_refused: set[str] = field(default_factory=set)  # subtypes whose slot-learn Wear was refused transiently (A55)
+
+    def snapshot(self) -> Memory:
+        """A deep copy of everything, for :meth:`restore` after a probe that must leave no trace."""
+        return copy.deepcopy(self)
+
+    def restore(self, saved: Memory, names: Iterable[str] | None = None) -> None:
+        """Put back the fields ``names`` (default: every field) from a :meth:`snapshot`."""
+        for name in names if names is not None else (f.name for f in fields(self)):
+            setattr(self, name, getattr(saved, name))
 
 
 def queue_signal(m: Memory, payload: dict) -> None:

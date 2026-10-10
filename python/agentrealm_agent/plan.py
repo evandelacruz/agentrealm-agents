@@ -63,7 +63,7 @@ OP_FIELDS: dict[str, str] = {
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
     "say": "text, and exactly one of npc_id (an id from State nearby_npcs) or npc_type (an NPC type code; the nearest NPC of that type in sight)",
-    "buy": "code (a potion, a tool, gear). With none in sight it walks to the nearest known shop, or to town to look for one; it is dropped when no known shop sells it or it costs more gems than are held",
+    "buy": "code (a potion, a tool, gear). Buys one more, whatever is already held: it is done once one more is held than when it reached the top, so put two buy ops on the stack to buy two. With none in sight it walks to the nearest known shop, or to town to look for one; it is dropped when no known shop sells it or it costs more gems than are held",
     "break_block": 'x, y, capability ("cut"|"chop"|"smash"|"burn"|"blast")',
     "use_block": "x, y, code (the supply to use on it)",
     "compose": "composes_into (the whole item to make)",
@@ -540,6 +540,7 @@ class Plan:
     stalled_since_tick: int | None = None  # first tick the current op found no path
     acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
+    held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
 
@@ -553,6 +554,7 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.block_before,
+            self.held_before,
             self.directive_end,
         )
 
@@ -566,6 +568,7 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.block_before,
+            self.held_before,
             self.directive_end,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
@@ -587,6 +590,10 @@ class Plan:
                 continue
             if op["op"] in BLOCK_CHANGE_OPS and self.block_before is None and world.map_id is not None:
                 self.block_before = world.view.tiles.get((op["x"], op["y"]))
+            if op["op"] == "buy":
+                # A drink, a drop or a death lowers the bar: the buy still adds one.
+                held = count_held(world, op["code"])
+                self.held_before = held if self.held_before is None else min(self.held_before, held)
             if not goal_done(op, world, self):
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
@@ -620,7 +627,7 @@ class Plan:
         self.goals = self.goals[: self.index] + kept
         self.directive_end = self.index + kept_directives
         if head_dropped:
-            self.wait_started_tick = self.stalled_since_tick = self.block_before = None
+            self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = None
 
     def finish_current(self, reason: str, memory: Memory | None = None) -> None:
         """Pop an op whose state saw it finish (``fight_boss``, A38)."""
@@ -648,6 +655,7 @@ class Plan:
         self.wait_started_tick = None
         self.stalled_since_tick = None
         self.block_before = None
+        self.held_before = None
 
     @classmethod
     def from_directives(
@@ -769,7 +777,9 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         tile = world.view.tiles.get((op["x"], op["y"]))
         return plan.block_before is not None and tile is not None and tile != plan.block_before
     if name == "buy":
-        return any(supply_matches(op["code"], s.code) for s in world.held_supplies + world.chest_supplies)
+        # One more than the fewest held since it reached the top: a buy is one
+        # purchase, whatever was already held (free-play run 5).
+        return plan.held_before is not None and count_held(world, op["code"]) > plan.held_before
     if name == "fetch_item":
         return any(supply_matches(op["code"], s.code) for s in world.held_supplies)
     if name == "gather_gems":
@@ -778,6 +788,11 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
     # defeat (A38), Investigate once read or greeted (A30), Equip and Level
     # when nothing is left to do.
     return False
+
+
+def count_held(world: WorldModel, code: str) -> int:
+    """How many supplies held or stowed satisfy a want for ``code`` (``supply_matches``)."""
+    return sum(1 for s in world.held_supplies + world.chest_supplies if supply_matches(code, s.code))
 
 
 def load_plan_json(text: str, *, floor_params: dict[str, float | int]) -> Plan:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import random
 import threading
@@ -22,7 +21,7 @@ from .brain import (
     remaining_walk_cells,
     walkable_prefix,
 )
-from .navigation.rejection import copy_nav, learn_step_rejection, on_block_changed
+from .navigation.rejection import learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
 from .navigation.stuck import expire_hub_give_ups
 from .navigation.stuck import on_break_opened, on_break_tried
@@ -47,7 +46,7 @@ from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
 from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
-from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, code_in_hand
+from .healing import FOOD_CODES, POTION_CODES, note_heal_pending, absorb_heal_pending, code_in_hand, note_try, supply_in_hand
 from .shop import note_shop_result
 from .states.explore import plan_sets
 from .travel.resolve import travel_given_up
@@ -105,6 +104,11 @@ QUEUE_RESULT_SLACK = 2
 # (agentrealm.gg/docs/manual, Intent reference). Drop may take a worn supply,
 # which is not documented either way.
 LOADOUT_VERBS = ("Wear", "Remove", "Drop")
+# Memory the held-queue probe puts back even when its reflex is sent: the
+# navigation learnings and stuck attempts (only a real decision window ages or
+# escalates them, A14, A15), the boss fight (it belongs to the stack, A38), and
+# Greet's tries (its hello waits for a decision window, A65).
+PROBE_NEVER_KEEPS = ("nav", "nav_stuck", "boss", "greetings")
 
 
 @dataclass
@@ -742,45 +746,32 @@ class Runner:
     def reflex_while_held(self) -> Decision | None:
         """A reflex (2–4b) that fires while a queue is held, else None.
 
-        Only a firing reflex may touch the path and the rng; they stay as they
-        were otherwise, so the held queue's steps are not planned twice. The
-        navigation learnings always stay as they were: this probe is not the
-        decision window that ages them (A14), and neither do the stuck attempts,
-        which only a real decision may escalate (A15). The goal stack always stays as it
-        was too: reflexes never consume its ops, so the probe must not advance,
-        pop, or drop them (A34). Greet (4c) is not a reflex here: its hello waits
-        for the next decision window, and the probe leaves its tries as they were (A65).
-        It runs only the states that can answer with a reflex (``dispatch.PROBE_STATES``),
-        so a poll while a queue runs costs no executor's search (A64).
-        Heal's and Gather's re-arms stay due too: the drink or cut they follow may
-        still be in the held queue (A24, A22). So do the targets states
-        committed to (A71): a pick made in a probe whose answer is not sent is
-        no commitment.
+        The probe has no side effects on memory unless its reflex is sent:
+        memory is snapshot before it and put back whole when nothing is sent,
+        and so are the rng and the goal stack. A pick, a try, a commitment or a
+        re-arm made for an answer that is not sent never happened (A71, A24,
+        A22; free-play run 5: Heal's drink tries were spent by probes whose
+        drink was never sent, and both potions were written off). The goal
+        stack is put back even when the reflex is sent: reflexes never consume
+        its ops (A34). So is ``PROBE_NEVER_KEEPS``. It runs only the states
+        that can answer with a reflex (``dispatch.PROBE_STATES``), so a poll
+        while a queue runs costs no executor's search (A64).
         """
         m = self.mem
-        saved = (list(m.path), m.goal, copy_nav(m.nav), self.rng.getstate(), m.goal_op, m.boss, dict(m.greetings))
-        saved_threats = (set(m.walk_skip), set(m.planned_threats))
-        saved_rearm = (m.heal_rearm, m.gather_rearm)
-        saved_targets = (copy.deepcopy(m.targets), m.gather_target, m.detour)  # a pick the probe drops is no commitment (A71)
-        saved_stuck = copy.deepcopy(m.nav_stuck)
+        saved = m.snapshot()
+        saved_rng = self.rng.getstate()
         saved_plan = self.plan.snapshot()
         try:
             d = self._decide(self.world, m, plan=self.plan, probe=True)
         finally:
             self.plan.restore(saved_plan)
-            m.boss = saved[5]  # boss memory belongs to the stack (A38)
-            m.greetings = saved[6]  # Greet's hello waits for a decision window: a probe sends none (A65)
-        m.nav = saved[2]
-        m.nav_stuck = saved_stuck
+            m.restore(saved, PROBE_NEVER_KEEPS)
         if d.reflex and not self.held_queue_matches(d):
             return d
         # No reflex, or one that asks for what the held queue already does:
-        # the held queue keeps running, so memory keeps its plan (A63 runs 3, 4).
-        m.path, m.goal, m.goal_op = saved[0], saved[1], saved[4]
-        m.walk_skip, m.planned_threats = saved_threats
-        m.heal_rearm, m.gather_rearm = saved_rearm
-        m.targets, m.gather_target, m.detour = saved_targets
-        self.rng.setstate(saved[3])
+        # nothing is sent, so memory is exactly as it was (A63 runs 3, 4).
+        m.restore(saved)
+        self.rng.setstate(saved_rng)
         return None
 
     def note_held_path_stale(self) -> None:
@@ -1137,6 +1128,7 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
+        self._note_heal_refused(index)
         target = use_target_block(intent, w.entities) if intent and intent.get("verb") == "Use" else None
         self._note_break_use(intent, result, target, index)
         if self.acceptance is not None:
@@ -1180,6 +1172,34 @@ class Runner:
         code = code_in_hand(self.world, self._held_intents(), index)
         if code in FOOD_CODES | POTION_CODES:
             note_heal_pending(m, w, code, "use")
+
+    def _note_heal_refused(self, index: int) -> None:
+        """Count a try against the food or potion a rejected intent was for (A24).
+
+        Only a sent intent the server rejected counts, never one only decided
+        (free-play run 5: probes whose drink was never sent wrote both potions
+        off). A drink is ``Arm`` then ``Use`` self, and either one rejected
+        counts against the supply it drinks; a rejected food ``Take``, against that food.
+        """
+        w, m, queue = self.world, self.mem, self._held_intents()
+        intent = self._intent_at(index)
+        if not intent:
+            return
+        if intent.get("verb") == "Take":
+            sid = intent.get("supply_id")
+            if any(e.kind == "supply" and e.id == sid and e.code in FOOD_CODES for e in w.entities):
+                note_try(m, "take", sid)
+            return
+        if intent.get("verb") == "Arm":
+            after = next((i for i in queue[index + 1 :] if i.get("verb") != "Wait"), None)
+            held = next((h for h in w.held_supplies if h.id == intent.get("supply_id")), None)
+            if is_self_use(after) and held is not None and held.code in FOOD_CODES | POTION_CODES:
+                note_try(m, "use", held.id)
+            return
+        if is_self_use(intent):
+            held = supply_in_hand(w, queue, index)
+            if held is not None and held.code in FOOD_CODES | POTION_CODES:
+                note_try(m, "use", held.id)
 
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
         """Remember an applied Read/Say in the knowledge base; count a refused one.

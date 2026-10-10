@@ -1,0 +1,609 @@
+[
+ {
+  "code": "accessory",
+  "name": "Accessory armor",
+  "class": "armor",
+  "use_effects": [],
+  "defense": 0,
+  "stacks": false
+ },
+ {
+  "code": "adamant_greaves",
+  "name": "Adamant greaves",
+  "class": "armor",
+  "slot": "legs",
+  "use_effects": [],
+  "defense": 1,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 150
+  }
+ },
+ {
+  "code": "adamant_helm",
+  "name": "Adamant helm",
+  "class": "armor",
+  "slot": "head",
+  "use_effects": [],
+  "defense": 1,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 150
+  }
+ },
+ {
+  "code": "adamant_mail",
+  "name": "Adamant mail",
+  "class": "armor",
+  "slot": "body",
+  "use_effects": [],
+  "defense": 3,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 300
+  }
+ },
+ {
+  "code": "adamant_mallet",
+  "name": "Adamant mallet",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack",
+   "smash"
+  ],
+  "attack_range": 1,
+  "damage": 20,
+  "used_up_on_break": false,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 400
+  }
+ },
+ {
+  "code": "adamant_sword",
+  "name": "Adamant sword",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack",
+   "cut",
+   "chop"
+  ],
+  "attack_range": 1,
+  "damage": 14,
+  "used_up_on_break": false,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 300
+  }
+ },
+ {
+  "code": "apple",
+  "name": "Apple",
+  "class": "consumable",
+  "use_effects": [],
+  "heal": 2,
+  "stacks": false,
+  "eaten_on_pickup": true
+ },
+ {
+  "code": "berry",
+  "name": "Berry",
+  "class": "consumable",
+  "use_effects": [],
+  "heal": 1,
+  "stacks": false,
+  "eaten_on_pickup": true
+ },
+ {
+  "code": "bomb",
+  "name": "Bomb",
+  "class": "tool",
+  "slot": "armed",
+  "use_effects": [
+   "blast"
+  ],
+  "used_up_on_break": true,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 40
+  }
+ },
+ {
+  "code": "boots_of_speed",
+  "name": "Boots of speed",
+  "class": "armor",
+  "slot": "feet",
+  "use_effects": [],
+  "defense": 0,
+  "grants": {
+   "movement_speed": 0.5
+  },
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 200
+  }
+ },
+ {
+  "code": "bronze_mail",
+  "name": "Bronze mail",
+  "class": "armor",
+  "slot": "body",
+  "use_effects": [],
+  "defense": 1,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 20
+  }
+ },
+ {
+  "code": "bronze_mallet",
+  "name": "Bronze mallet",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack",
+   "smash"
+  ],
+  "attack_range": 1,
+  "damage": 6,
+  "used_up_on_break": false,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 25
+  }
+ },
+ {
+  "code": "bronze_sword",
+  "name": "Bronze sword",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack",
+   "cut",
+   "chop"
+  ],
+  "attack_range": 1,
+  "damage": 4,
+  "used_up_on_break": false,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 15
+  }
+ },
+ {
+  "code": "disguise_cloak",
+  "name": "Disguise cloak",
+  "class": "accessory",
+  "slot": "accessory",
+  "use_effects": [],
+  "grants": {
+   "disguise": true
+  },
+  "stacks": false
+ },
+ {
+  "code": "feet",
+  "name": "Feet armor",
+  "class": "armor",
+  "slot": "feet",
+  "use_effects": [],
+  "defense": 0,
+  "stacks": false
+ },
+ {
+  "code": "gem",
+  "name": "Gem",
+  "class": "gem",
+  "use_effects": [],
+  "stacks": true,
+  "eaten_on_pickup": true
+ },
+ {
+  "code": "gem_cache_10",
+  "name": "Gem cache (10)",
+  "class": "gem",
+  "use_effects": [],
+  "stacks": true,
+  "eaten_on_pickup": true
+ },
+ {
+  "code": "gem_cache_5",
+  "name": "Gem cache (5)",
+  "class": "gem",
+  "use_effects": [],
+  "stacks": true,
+  "eaten_on_pickup": true
+ },
+ {
+  "code": "gem_cache_7",
+  "name": "Gem cache (7)",
+  "class": "gem",
+  "use_effects": [],
+  "stacks": true,
+  "eaten_on_pickup": true
+ },
+ {
+  "code": "goggles",
+  "name": "Goggles",
+  "class": "accessory",
+  "slot": "accessory",
+  "use_effects": [],
+  "grants": {
+   "trap_detection": 3,
+   "perception": 5
+  },
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 60,
+   "sandbox": 8
+  }
+ },
+ {
+  "code": "golden_cap",
+  "name": "Golden cap",
+  "class": "consumable",
+  "use_effects": [],
+  "heal": 6,
+  "stacks": false,
+  "eaten_on_pickup": true,
+  "gem_prices": {
+   "olympuff": 8
+  }
+ },
+ {
+  "code": "head",
+  "name": "Head armor",
+  "class": "armor",
+  "slot": "head",
+  "use_effects": [],
+  "defense": 1,
+  "stacks": false,
+  "gem_prices": {
+   "sandbox": 3
+  }
+ },
+ {
+  "code": "heart",
+  "name": "Heart",
+  "class": "life",
+  "use_effects": [],
+  "stacks": true,
+  "eaten_on_pickup": true
+ },
+ {
+  "code": "iron_helm",
+  "name": "Iron helm",
+  "class": "armor",
+  "slot": "head",
+  "use_effects": [],
+  "defense": 1,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 40
+  }
+ },
+ {
+  "code": "iron_mail",
+  "name": "Iron mail",
+  "class": "armor",
+  "slot": "body",
+  "use_effects": [],
+  "defense": 2,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 80
+  }
+ },
+ {
+  "code": "iron_mallet",
+  "name": "Iron mallet",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack",
+   "smash"
+  ],
+  "attack_range": 1,
+  "damage": 12,
+  "used_up_on_break": false,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 120
+  }
+ },
+ {
+  "code": "iron_sword",
+  "name": "Iron sword",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack",
+   "cut",
+   "chop"
+  ],
+  "attack_range": 1,
+  "damage": 8,
+  "used_up_on_break": false,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 80
+  }
+ },
+ {
+  "code": "iron_whip",
+  "name": "Iron whip",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack"
+  ],
+  "attack_range": 2,
+  "damage": 6,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 100
+  }
+ },
+ {
+  "code": "lantern",
+  "name": "Lantern",
+  "class": "tool",
+  "slot": "armed",
+  "use_effects": [
+   "light"
+  ],
+  "light_radius": 14,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 80
+  }
+ },
+ {
+  "code": "large_potion",
+  "name": "Large potion",
+  "class": "consumable",
+  "slot": "armed",
+  "use_effects": [
+   "heal"
+  ],
+  "heal": 30,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 40
+  }
+ },
+ {
+  "code": "legs",
+  "name": "Leg armor",
+  "class": "armor",
+  "slot": "legs",
+  "use_effects": [],
+  "defense": 0,
+  "stacks": false
+ },
+ {
+  "code": "mallet",
+  "name": "Mallet",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack",
+   "smash"
+  ],
+  "attack_range": 1,
+  "damage": 0,
+  "used_up_on_break": false,
+  "stacks": false
+ },
+ {
+  "code": "map",
+  "name": "Map",
+  "class": "accessory",
+  "slot": "accessory",
+  "use_effects": [],
+  "grants": {
+   "map": true
+  },
+  "stacks": false
+ },
+ {
+  "code": "matches",
+  "name": "Matches",
+  "class": "tool",
+  "slot": "armed",
+  "use_effects": [
+   "burn"
+  ],
+  "used_up_on_break": true,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 5
+  }
+ },
+ {
+  "code": "middle_chest",
+  "name": "Middle chest",
+  "class": "consumable",
+  "slot": "armed",
+  "use_effects": [
+   "chest"
+  ],
+  "chest_capacity": 30,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 50
+  }
+ },
+ {
+  "code": "mushroom",
+  "name": "Mushroom",
+  "class": "consumable",
+  "use_effects": [],
+  "heal": 3,
+  "stacks": false,
+  "eaten_on_pickup": true
+ },
+ {
+  "code": "pocket_knife",
+  "name": "Pocket knife",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack",
+   "cut"
+  ],
+  "attack_range": 1,
+  "damage": 2,
+  "used_up_on_break": false,
+  "stacks": false
+ },
+ {
+  "code": "potion",
+  "name": "Potion",
+  "class": "consumable",
+  "slot": "armed",
+  "use_effects": [
+   "heal"
+  ],
+  "heal": 10,
+  "stacks": false,
+  "gem_prices": {
+   "sandbox": 2
+  }
+ },
+ {
+  "code": "raft",
+  "name": "Raft",
+  "class": "tool",
+  "slot": "armed",
+  "use_effects": [
+   "water"
+  ],
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 30
+  }
+ },
+ {
+  "code": "red_chest",
+  "name": "Red chest",
+  "class": "consumable",
+  "slot": "armed",
+  "use_effects": [
+   "chest"
+  ],
+  "chest_capacity": 50,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 250
+  }
+ },
+ {
+  "code": "salvaged_bomb",
+  "name": "Salvaged bomb",
+  "class": "tool",
+  "slot": "armed",
+  "use_effects": [
+   "blast"
+  ],
+  "used_up_on_break": true,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 30
+  }
+ },
+ {
+  "code": "small_potion",
+  "name": "Small potion",
+  "class": "consumable",
+  "slot": "armed",
+  "use_effects": [
+   "heal"
+  ],
+  "heal": 10,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 10
+  }
+ },
+ {
+  "code": "sword",
+  "name": "Sword",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack",
+   "cut",
+   "chop"
+  ],
+  "attack_range": 1,
+  "damage": 2,
+  "used_up_on_break": false,
+  "stacks": false,
+  "gem_prices": {
+   "sandbox": 5
+  }
+ },
+ {
+  "code": "teleport_scroll",
+  "name": "Teleport scroll",
+  "class": "consumable",
+  "slot": "armed",
+  "use_effects": [
+   "teleport"
+  ],
+  "teleport_range": 8,
+  "stacks": false
+ },
+ {
+  "code": "torch",
+  "name": "Torch",
+  "class": "tool",
+  "slot": "armed",
+  "use_effects": [
+   "burn",
+   "light"
+  ],
+  "light_radius": 8,
+  "used_up_on_break": true,
+  "stacks": false,
+  "gem_prices": {
+   "olympuff": 10
+  }
+ },
+ {
+  "code": "trap_grade_2",
+  "name": "Trap grade 2",
+  "class": "trap",
+  "slot": "armed",
+  "use_effects": [
+   "trap"
+  ],
+  "stacks": false
+ },
+ {
+  "code": "truth_lens",
+  "name": "Truth lens",
+  "class": "accessory",
+  "slot": "accessory",
+  "use_effects": [],
+  "grants": {
+   "reveals_disguise": true
+  },
+  "stacks": false
+ },
+ {
+  "code": "whip",
+  "name": "Whip",
+  "class": "weapon",
+  "slot": "armed",
+  "use_effects": [
+   "attack"
+  ],
+  "attack_range": 1,
+  "damage": 0,
+  "stacks": false
+ }
+]

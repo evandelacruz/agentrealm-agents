@@ -12,6 +12,7 @@ from .acceptance import AcceptanceHooks, ParkSplit
 from .client import ApiError, Client
 from .executor.intents import wait
 from .knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge
+from .supplies import load_for_run as load_supplies
 from .park import ABORT_JOIN_SECONDS, DEFAULT_PARK_SECONDS, PARK_DIED, PARK_SECONDS_HELP, install_stop_signals
 from .runner import Runner
 from .strategist import Strategist
@@ -165,6 +166,8 @@ def run_acceptance_smoke(
     def emit(line: str) -> None:
         if out is not None:
             out(line)
+
+    load_supplies(knowledge, emit)
 
     runner = Runner(
         cfg,

@@ -40,7 +40,7 @@ from ..gem_yield import (
     region_corner,
     region_of,
 )
-from ..healing import FOOD_CODES, POTION_CODES
+from ..supplies import block_reach, heals
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, reach_cells
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
@@ -61,9 +61,6 @@ from .solve import held_supply
 # Gem caches (gem_cache_5/7/10) are a different drop and are not piles.
 # A priced supply with the same code is shop stock: taking it is a purchase.
 GEM_PILE_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
-# Bushes are not walkable, so they are cut from a neighbouring cell: the
-# pocket knife's range is 1 (GAME_NOTES.md Olympuff starting kit).
-BUSH_REACH = 1
 CUT = "cut"  # the capability Gather arms for: grass and bushes are cut
 GOAL = "gather"
 OUT = "out"  # ``m.gather_target`` kind: walking off safe ground to field ground or the frontier
@@ -411,7 +408,10 @@ def _gather_cells(
         _end_walk_out(m)
         return _cut(w, m, knowledge, here, "cut grass", state)
 
-    bushes = [p for p in preferred if view.tiles[p] == "bush" and chebyshev(p, here) <= BUSH_REACH]
+    # Bushes are not walkable: one is cut from as far as the cutting tool
+    # reaches, by the Supplies reference (A54).
+    reach = block_reach(_cutter_code(w, knowledge))
+    bushes = [p for p in preferred if view.tiles[p] == "bush" and chebyshev(p, here) <= reach]
     if bushes:
         _end_walk_out(m)
         p = min(bushes, key=lambda pos: (chebyshev(pos, here), pos))
@@ -434,6 +434,14 @@ def _gather_cells(
     return StateOutcome(None, "no gather target", state=state)
 
 
+def _cutter_code(w: WorldModel, knowledge: KnowledgeBase | None) -> str | None:
+    """The subtype ``_cut`` swings: the armed one when it cuts, else the held one it would arm."""
+    if CUT in capabilities_for_code(w.armed_code or "", knowledge):
+        return w.armed_code
+    tool = pick_supply_for_capability(w, CUT, knowledge)
+    return tool.code if tool is not None else w.armed_code
+
+
 def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reason: str, state: str) -> StateOutcome:
     """``Use`` on ``p`` with a tool that cuts: when what is armed is not known
     to cut (a potion a drink left armed, say), arm a held one that is, in the
@@ -446,7 +454,7 @@ def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reas
     queue = arm_and_use(w, m, tool.id, use_block(p))
     if not queue:  # the cut's cooldown leaves no room for the Arm and the Use together
         return StateOutcome(None, f"wait out the cooldown to arm {tool.code}, {reason}", state=state, wait=True, progress=False)
-    if m.gather_rearm is None and w.armed_code and w.armed_code not in FOOD_CODES | POTION_CODES:
+    if m.gather_rearm is None and w.armed_code and not heals(w.armed_code):
         m.gather_rearm = (w.armed_code, tool.code)  # food or a potion is Heal's to put back
     return StateOutcome(queue, f"arm {tool.code}, {reason}", state=state, paced=True)
 

@@ -4,6 +4,7 @@ import random
 import unittest
 from unittest import mock
 
+from agentrealm_agent import supplies
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.item_table import InventorySupply
@@ -195,13 +196,23 @@ class GatherActTest(unittest.TestCase):
         self.assertEqual(out.intents[0]["target"], {"kind": "block", "x": 1, "y": 0})
 
     def test_bush_beyond_one_block_is_walked_to_not_cut(self):
-        # A longer weapon reach does not stretch block Use past adjacent.
+        # get_self's reach does not stretch it; the cutting tool's Supplies reference row does (A54).
         w = grid(["..b"], at=(0, 0))
         w.attack_range = 3
         m = Memory()
         out = outcome(w, m)
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
         self.assertEqual(m.gather_target, ("bush", (2, 0)))
+
+    def test_bush_reach_is_the_cutting_tools_reference_range(self):
+        # A54: the reach comes from the Supplies reference row of the tool that cuts.
+        long_knife = supplies.Supply("long_knife", "weapon", frozenset({"attack", "cut"}), attack_range=2)
+        w = grid(["..b"], at=(0, 0))
+        safe(w, (0, 0))
+        w.armed_code = "long_knife"
+        with mock.patch.dict(supplies._table, {"long_knife": long_knife}):
+            out = outcome(w)
+        self.assertEqual(out.intents[0]["target"], {"kind": "block", "x": 2, "y": 0})
 
     def test_unlisted_supply_codes_are_not_treated_as_gem_piles(self):
         w = grid(["...", "..."], at=(1, 0))

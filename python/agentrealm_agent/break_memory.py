@@ -1,10 +1,11 @@
 """Break memory per (block, capability) and grid break costs (A28).
 
-A supply's capabilities come only from sourced facts: the manual's per-class
-rules applied to the exact subtype codes docs/GAME_NOTES.md names (applied at
-read time, never stored), plus any capability a break with that subtype armed
-has opened, filed on its ``items`` row (A46). No read serves an item's class,
-so an unlisted code carries none until it opens a block (PLAN.md Server gaps). Break attempts are stored with keys
+A supply's capabilities come only from sourced facts: the ones the Manual's
+Supplies reference lists in its ``use_effects`` (A54, ``supplies``), plus any
+capability a break with that subtype armed has opened (A46). Both are filed on
+its ``items`` row; the reference is also read directly, so a caller with no
+knowledge base still sees them. A code the reference does not list carries
+none until it opens a block. Break attempts are stored with keys
 ``"<map_id>,<x>,<y>,<capability>"``.
 """
 
@@ -14,10 +15,10 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
-from .healing import FOOD_CODES, POTION_CODES
 from .item_table import InventorySupply, merge_capability
 from .knowledge_base import KnowledgeBase
 from .plan import CAPABILITIES
+from .supplies import break_capabilities, kept_on_break, listed
 from .world import Pos, WorldModel
 
 BREAKABLE = frozenset({"bush", "tree", "rock", "mountain", "wall"})
@@ -26,18 +27,6 @@ BREAK_BASE_COST = DEFAULT_WEAPON_COOLDOWN_TICKS + 1
 # Refusals of a break that say "not yet", not "cannot": the pair is not marked failed.
 TRANSIENT_BREAK_REJECTIONS = frozenset({"attack_cooldown"})
 
-# Manual per-class rules (§5.3, §11, §16) on the codes GAME_NOTES names:
-# every sword cuts and chops, the starting pocket knife cuts, every mallet
-# smashes, matches and torches burn. No bomb code is sourced yet.
-MANUAL_CAPABILITIES: dict[str, frozenset[str]] = {
-    "bronze_sword": frozenset({"cut", "chop"}),
-    "pocket_knife": frozenset({"cut"}),
-    "bronze_mallet": frozenset({"smash"}),
-    "matches": frozenset({"burn"}),
-    "torch": frozenset({"burn"}),
-}
-# Weapons are not used up by a break; tools are (M §11).
-WEAPONS = frozenset({"bronze_sword", "pocket_knife", "bronze_mallet"})
 
 
 def break_key(map_id: int, pos: Pos, capability: str) -> str:
@@ -45,10 +34,11 @@ def break_key(map_id: int, pos: Pos, capability: str) -> str:
 
 
 def capabilities_for_code(code: str, kb: KnowledgeBase | None = None) -> frozenset[str]:
-    """Sourced capabilities of subtype ``code``: manual rules plus breaks it opened."""
+    """Sourced capabilities of subtype ``code``: the Supplies reference's plus
+    those its ``items`` row holds (filed from the reference, or a break it opened)."""
     if not code:
         return frozenset()
-    caps = set(MANUAL_CAPABILITIES.get(code, ()))
+    caps = set(break_capabilities(code))
     if kb is not None:
         with kb.lock:
             row = kb.items.get(code)
@@ -58,17 +48,18 @@ def capabilities_for_code(code: str, kb: KnowledgeBase | None = None) -> frozens
 
 
 def cannot_cut(code: str | None, kb: KnowledgeBase | None = None) -> bool:
-    """Sourced facts say ``code`` does not cut: food or a potion, or an item
-    whose known capabilities leave ``cut`` out (a mallet, matches).
+    """Sourced facts say ``code`` does not cut: the Supplies reference lists it
+    without ``cut`` (food, a potion, a mallet, matches), or its known
+    capabilities leave ``cut`` out.
 
-    An unsourced code, or an empty hand, may still cut: no read serves an
-    item's class, so only a known miss is ruled out.
+    A code the reference does not list, or an empty hand, may still cut: only
+    a known miss is ruled out.
     """
     if not code:
         return False
-    if code in FOOD_CODES | POTION_CODES:
-        return True
     caps = capabilities_for_code(code, kb)
+    if listed(code):
+        return "cut" not in caps
     return bool(caps) and "cut" not in caps
 
 
@@ -168,8 +159,8 @@ def _capability_order(cap: str) -> tuple[int, str]:
 def pick_supply_for_capability(
     w: WorldModel, capability: str, kb: KnowledgeBase | None = None
 ) -> InventorySupply | None:
-    """The held or armed supply to use for ``capability``: weapons first, the
-    armed one on a tie, then by code.
+    """The held or armed supply to use for ``capability``: one a break does not
+    use up first, the armed one on a tie, then by code.
 
     The armed supply wins a tie, so a break arms its tool once and keeps it.
     An armed supply is not in ``held``: without the tie-break, two weapons
@@ -179,7 +170,7 @@ def pick_supply_for_capability(
     for s in held_supplies(w):
         if capability not in capabilities_for_code(s.code, kb):
             continue
-        weapon = 0 if s.code in WEAPONS else 1
+        weapon = 0 if kept_on_break(s.code) else 1
         armed = 0 if s.code == w.armed_code else 1
         cands.append(((weapon, armed, s.code), s))
     if not cands:
@@ -195,8 +186,9 @@ def untried_capabilities(kb: KnowledgeBase | None, map_id: int | None, pos: Pos,
 
 
 def break_step_cost(kb: KnowledgeBase | None, code: str) -> int:
-    """Weapon cooldown plus one, plus the gem price of a tool a break uses up."""
-    return BREAK_BASE_COST + (0 if code in WEAPONS else _tool_gem_cost(kb, code))
+    """Weapon cooldown plus one, plus the gem price of a tool a break uses up
+    (any supply the reference does not list as kept on a break)."""
+    return BREAK_BASE_COST + (0 if kept_on_break(code) else _tool_gem_cost(kb, code))
 
 
 def breakable_block(w: WorldModel, pos: Pos) -> str | None:

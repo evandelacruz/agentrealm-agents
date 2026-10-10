@@ -171,6 +171,7 @@ class RunWiringTest(unittest.TestCase):
         client = mock.Mock()
         client.self_.return_value = {"lives": 1, "alive": True, "placed": True}
         with mock.patch.object(cli, "resolve_character_id", return_value=1), \
+                mock.patch.object(cli, "load_supplies"), \
                 mock.patch.object(cli, "config") as cfg_mod:
             cfg_mod.load.return_value = cfg
             with redirect_stdout(out), redirect_stderr(err):

@@ -353,6 +353,7 @@ class StopSignalsTest(unittest.TestCase):
         with mock.patch.object(cli, "Runner", WedgedRunner), \
                 mock.patch.object(cli, "SHUTDOWN_JOIN_SECONDS", 0.1), \
                 mock.patch.object(cli, "load_knowledge"), \
+                mock.patch.object(cli, "load_supplies"), \
                 mock.patch.object(cli, "save_knowledge"), \
                 redirect_stdout(io.StringIO()) as out:
             timer = threading.Timer(0.2, signal_twice)

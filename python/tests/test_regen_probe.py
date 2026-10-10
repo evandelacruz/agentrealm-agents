@@ -97,6 +97,9 @@ class ProbeRunTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.worlds = Path(tmp.name)
+        offline = mock.patch("agentrealm_agent.supplies.load", return_value="bundled")  # no fetch in tests
+        offline.start()
+        self.addCleanup(offline.stop)
         for patch in (
             mock.patch("agentrealm_agent.knowledge_base.WORLDS_DIR", self.worlds),
             mock.patch("agentrealm_agent.acceptance_smoke.Runner", FakeRunner),

@@ -38,7 +38,8 @@ from dataclasses import dataclass, field
 from .acceptance_run import FULL_RUN_FRACTION, TimedRunHooks  # FULL_RUN_FRACTION: re-exported for the smoke script
 from .config import Policy
 from .equip import is_consumable, is_weapon, wear_slot
-from .healing import FOOD_CODES, POTION_CODES, potion_count, code_in_hand
+from .healing import potion_count, code_in_hand
+from .supplies import is_food, is_potion
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .survival import combat_group, would_lose
@@ -168,7 +169,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
 
         The event reaches every character in sight of the block, so another
         character's drink is not ours."""
-        if self._drink_potions is None or ev.get("supply_code") not in POTION_CODES:
+        if self._drink_potions is None or not is_potion(ev.get("supply_code")):
             return
         if self._character_id is not None and ev.get("actor_id") == self._character_id:
             self.heal_potion = True
@@ -192,7 +193,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
         forgotten (after this response, ``on_events``) unless this queue
         carries a new one."""
         drink = state == "Heal" and any(
-            is_self_use(intent) and code_in_hand(w, intents, i) in POTION_CODES
+            is_self_use(intent) and is_potion(code_in_hand(w, intents, i))
             for i, intent in enumerate(intents)
         )
         if drink:
@@ -204,7 +205,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
             if intent.get("verb") == "Take":
                 sid = intent.get("supply_id")
                 for e in w.entities:
-                    if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
+                    if e.kind == "supply" and e.id == sid and is_food(e.code):
                         self.heal_food_take = True
 
     def _note_fight(

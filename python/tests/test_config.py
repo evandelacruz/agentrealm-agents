@@ -31,10 +31,6 @@ class ConfigTest(unittest.TestCase):
                     config.load(p)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class StateDirTest(unittest.TestCase):
     """``AGENTREALM_STATE_DIR`` moves traces and the knowledge base (A84)."""
 
@@ -47,3 +43,7 @@ class StateDirTest(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(config.state_dir(), config.DEFAULT_STATE_DIR)
         self.assertEqual(config.DEFAULT_STATE_DIR, Path(config.__file__).resolve().parent.parent / ".state")
+
+
+if __name__ == "__main__":
+    unittest.main()

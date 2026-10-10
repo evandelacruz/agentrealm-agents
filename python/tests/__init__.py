@@ -58,7 +58,13 @@ class StateDirUntouched(unittest.TestCase):
 
 
 def load_tests(loader, standard_tests, pattern):
-    """Discover the package as usual, then append ``StateDirUntouched`` so it runs after everything else."""
-    suite = loader.discover(start_dir=os.path.dirname(__file__), pattern=pattern or "test*.py")
+    """Discover the package as usual, then append ``StateDirUntouched`` so it runs after everything else.
+
+    A package's ``load_tests`` must find the submodules itself (``standard_tests``
+    holds only this file's tests), hence the inner ``discover``. ``top_level_dir``
+    is ``python/``, so modules load as ``tests.test_*`` as in ``make test``.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    suite = loader.discover(start_dir=here, pattern=pattern or "test*.py", top_level_dir=os.path.dirname(here))
     suite.addTests(loader.loadTestsFromTestCase(StateDirUntouched))
     return suite

@@ -349,6 +349,17 @@ class DiscoveryTest(unittest.TestCase):
         s.on_window(r)
         self.assertEqual(r.plan.current()["to"], "town")
 
+    def test_a_deferred_head_is_dropped_when_the_stack_changed(self):
+        llm = FakeLLM({"goals": [{"op": "travel", "to": "town", "x": 0, "y": 0}]})
+        s, r = make(llm), fake_runner()
+        r.mem.held_queue = {"queue_id": "q", "next_index": 1}
+        round_trip(s, r)
+        r.plan.finish_current("explored", memory=r.mem)  # the old head ended while it waited
+        r.mem.held_queue = None
+        s.on_window(r)
+        self.assertIsNone(s.deferred)
+        self.assertIsNone(r.plan.current(), "the stale reply did not overwrite the stack")
+
 
 DISCOVERY_WAIT = 5.0  # discovery.DISCOVERY_GAP_S, spelled out so the test reads the spec
 DEFER_WAIT = 10.0  # strategist.DEFER_MAX_S

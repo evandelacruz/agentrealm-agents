@@ -807,7 +807,7 @@ class Strategist:
     rejected: list[str] = field(default_factory=list)  # what the last reply had dropped or ignored, for the next State
     stall: StallClock = field(default_factory=StallClock)
     discoveries: Discoveries = field(default_factory=Discoveries)  # what this run has seen, for discovery triggers (A71)
-    deferred: tuple[Plan, dict[str, Any], int, float] | None = None  # (plan, record, pinned, since) waiting for an action boundary (A71)
+    deferred: tuple[Plan, dict[str, Any], int, float, dict | None] | None = None  # (plan, record, pinned, since, head it replaces) waiting for an action boundary (A71)
     _requests: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=1), repr=False)
     _answers: queue.Queue = field(default_factory=queue.Queue, repr=False)
     _stop: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -910,11 +910,15 @@ class Strategist:
         if self.deferred is not None and (
             runner.mem.held_queue is None or self.clock() - self.deferred[3] >= DEFER_MAX_S
         ):
-            plan, record, pinned, _ = self.deferred
+            plan, record, pinned, _, head = self.deferred
             self.deferred = None
-            # A directives op that ended while it waited must not come back.
-            if same_ops(plan.goals[:pinned], runner.plan.directive_ops()):
+            # Built against a stack that has since changed (its head finished
+            # or was dropped, a directives op ended): stale, so it is dropped;
+            # the goal_done or goal_failed trigger asks again.
+            if runner.plan.current() is head and same_ops(plan.goals[:pinned], runner.plan.directive_ops()):
                 self._apply(runner, plan, record, pinned)
+            else:
+                runner.log("strategist", "deferred plan dropped: the stack changed while it waited", {"strategist": {"event": "deferred_dropped", **record}})
         try:
             answer = self._answers.get_nowait()
         except queue.Empty:
@@ -1142,7 +1146,7 @@ class Strategist:
         new_head = not (goals and head is not None and same_ops(goals[:1], [head]))
         if new_head and head is not None and runner.mem.held_queue is not None:
             # Mid-action: the new head waits for the queue to end (A71).
-            self.deferred = (new, record, len(pinned), self.clock())
+            self.deferred = (new, record, len(pinned), self.clock(), head)
             runner.log("strategist", "new head deferred to the next action boundary", {"strategist": {"event": "deferred", **record}})
             return
         self._apply(runner, new, record, len(pinned))

@@ -99,9 +99,8 @@ class SafeWalkWithNoProgressTest(unittest.TestCase):
         w.tick = marked + SAFE_UNREACHABLE_TICKS - 1
         self.assertEqual(dispatch(w, c).reason, f"retreat → safe {OPEN}")
         w.tick = marked + SAFE_UNREACHABLE_TICKS
-        self.assertEqual(dispatch(w, c).reason, f"retreat → safe {OPEN}", "the committed tile is kept (A71)")
-        c.memory.targets.clear()  # a new walk to safe ground
-        self.assertEqual(dispatch(w, c).reason, f"retreat → safe {STUCK}", "the nearer tile is tried again")
+        self.assertEqual(dispatch(w, c).reason, f"retreat → safe {OPEN}", "the tile it moved on to is kept (A71)")
+        self.assertEqual(c.memory.targets["safe"].target, (MAP, OPEN), "kept by the commitment, not by the mark")
 
     def test_with_no_candidate_left_it_walks_to_town(self):
         kb = KnowledgeBase("sandbox")

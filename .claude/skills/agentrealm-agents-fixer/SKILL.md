@@ -65,7 +65,7 @@ A pull request is yours when it is **open**, **not draft**, does **not** have `c
 
 Several can be true at once. Clear all of them in the one pass.
 
-Those three are the only blockers. Open review threads are not one: they are where a `CHANGES_REQUESTED` review spells out what it wants. An open thread on a pull request no reviewer rejected never makes it yours and never holds a merge.
+Those three are the only blockers. Open review threads are not one: they are where a `CHANGES_REQUESTED` review spells out what it wants. An open thread on a pull request no trusted reviewer rejected never makes it yours and never holds a merge.
 
 Not yours: drafts, and pull requests none of the three blocks.
 

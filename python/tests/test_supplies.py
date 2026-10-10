@@ -1,5 +1,6 @@
 """The Manual's Supplies reference (A54)."""
 
+import http.client
 import json
 import os
 import tempfile
@@ -9,6 +10,7 @@ from unittest import mock
 
 from agentrealm_agent import supplies
 from agentrealm_agent.knowledge_base import KnowledgeBase
+from tests import REAL_FETCH
 
 SERVED = [
     {"code": "cleaver", "class": "weapon", "slot": "armed", "use_effects": ["attack", "cut", "chop"],
@@ -80,6 +82,13 @@ class QuestionsTest(unittest.TestCase):
             supplies.load_for_run(kb, lines.append)
         self.assertEqual(kb.items["cleaver"]["capabilities"], ["chop", "cut"])
         self.assertEqual(lines, ["supplies reference: 5 subtypes (bundled)"])
+
+
+class FetchTest(unittest.TestCase):
+    def test_a_truncated_or_failed_answer_is_none(self):
+        for error in (http.client.IncompleteRead(b"[{"), http.client.BadStatusLine("x"), OSError("reset")):
+            with mock.patch.object(supplies.urllib.request, "urlopen", side_effect=error):
+                self.assertIsNone(REAL_FETCH("https://example.invalid/supplies.json"), type(error).__name__)
 
 
 class LoadTest(unittest.TestCase):

@@ -42,6 +42,7 @@ from ..gem_yield import (
 )
 from ..supplies import block_reach, heals
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, reach_cells
+from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
@@ -410,7 +411,8 @@ def _gather_cells(
 
     # Bushes are not walkable: one is cut from as far as the cutting tool
     # reaches, by the Supplies reference (A54).
-    reach = block_reach(_cutter_code(w, knowledge))
+    tool = _cut_tool(w, knowledge)
+    reach = block_reach(tool.code if tool is not None else w.armed_code)
     bushes = [p for p in preferred if view.tiles[p] == "bush" and chebyshev(p, here) <= reach]
     if bushes:
         _end_walk_out(m)
@@ -434,22 +436,21 @@ def _gather_cells(
     return StateOutcome(None, "no gather target", state=state)
 
 
-def _cutter_code(w: WorldModel, knowledge: KnowledgeBase | None) -> str | None:
-    """The subtype ``_cut`` swings: the armed one when it cuts, else the held one it would arm."""
+def _cut_tool(w: WorldModel, knowledge: KnowledgeBase | None) -> InventorySupply | None:
+    """The held supply ``_cut`` arms before it cuts, or None to cut with what
+    is in hand: the armed one cuts, or nothing held is known to."""
     if CUT in capabilities_for_code(w.armed_code or "", knowledge):
-        return w.armed_code
+        return None
     tool = pick_supply_for_capability(w, CUT, knowledge)
-    return tool.code if tool is not None else w.armed_code
+    return tool if tool is not None and tool.id >= 0 else None
 
 
 def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reason: str, state: str) -> StateOutcome:
     """``Use`` on ``p`` with a tool that cuts: when what is armed is not known
     to cut (a potion a drink left armed, say), arm a held one that is, in the
     same paced queue. With none held, cut with what is in hand."""
-    if CUT in capabilities_for_code(w.armed_code or "", knowledge):
-        return StateOutcome([use_block(p)], reason, state=state)
-    tool = pick_supply_for_capability(w, CUT, knowledge)
-    if tool is None or tool.id < 0:
+    tool = _cut_tool(w, knowledge)
+    if tool is None:
         return StateOutcome([use_block(p)], reason, state=state)
     queue = arm_and_use(w, m, tool.id, use_block(p))
     if not queue:  # the cut's cooldown leaves no room for the Arm and the Use together

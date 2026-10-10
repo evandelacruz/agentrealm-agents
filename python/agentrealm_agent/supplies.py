@@ -24,6 +24,7 @@ still covers it.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import tempfile
@@ -113,8 +114,8 @@ def fetch(url: str = SUPPLIES_URL, timeout: float = FETCH_TIMEOUT_SECONDS) -> An
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             return json.loads(resp.read())
-    except (urllib.error.URLError, OSError, ValueError):
-        return None
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
+        return None  # refused, reset, timed out, truncated, or not JSON
 
 
 def load(

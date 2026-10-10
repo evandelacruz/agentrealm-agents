@@ -10,5 +10,6 @@ from unittest import mock
 
 from agentrealm_agent import supplies
 
+REAL_FETCH = supplies.fetch  # for the test of fetch itself
 mock.patch.object(supplies, "fetch", lambda *args, **kwargs: None).start()
 mock.patch.object(supplies, "CACHE_PATH", supplies.BUNDLED_PATH.with_name("no-cache-in-tests.json")).start()

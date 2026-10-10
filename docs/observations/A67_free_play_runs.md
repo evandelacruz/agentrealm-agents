@@ -237,7 +237,7 @@ Bought: one small_potion, by the planner's `buy` op. Equipped: the sword three t
 
 #### Gems earned
 
-**7**, all from three gem piles: (413, 414) +3, (361, 440) +3 and (446, 376) +1. Detour walked to each of them. `gather_run={"cuts": 64, "gems_gained": 7, "no_effect_cuts": 0}`, so #152's cutter fix holds: no cut was wasted, though none dropped a gem. Two triples were passed and never taken: (359–361, 360) at 2–6 s (defect 1) and (377–379, 377), which no walk came within Detour's 3 cells of.
+**7**, all from three gem piles: (413, 414) +3, (361, 440) +3 and (446, 376) +1. Detour walked to each of them. `gather_run={"cuts": 64, "gems_gained": 7, "no_effect_cuts": 0}`, so #152's cutter fix holds: no cut was wasted, though none dropped a gem. Each pile was a triple of adjacent gems. The (359–361, 440) triple was passed at 96–98 s and taken only 250 s later (defect 1). Two triples were never taken: (359–361, 360), passed at 2–6 s (defect 1), and (377–379, 377), which no walk came within Detour's 3 cells of.
 
 #### Deaths
 
@@ -262,7 +262,19 @@ Decisions outside held queues: 61 cuts (44 bush, 17 grass), 42 Gather walks, 25 
 
 #### Top 3 defects
 
-1. **Detour prices finds against a path with the queued walk cut off, so it misses gems beside the walk under way.** When a walk queue goes out, `runner.py:944` drops the queued cells from `m.path` (`m.path = m.path[queued:]`). While that queue runs, the held-queue probe runs Detour, and `detour_find` (`states/detour.py:114`, `:121`) measures each find from where the character stands against a path that starts up to 10 steps ahead. Cells beside the queued stretch are not on it at all, and later cells are counted as nearer than they are. At 2–6 s the first Explore walk, (369, 369) toward (344, 356), queued 10 steps through (363, 365) and (359, 364), 2–4 cells from three adjacent gems at (359–361, 360). From (363, 365), `extra_steps` on the cut path gives 5, 6 and 7 extra steps, over `DETOUR_EXTRA_STEPS` = 4. On the rest of the walk it gives 1, 2 and 3. The gems were in view, and no state suppressed Detour; it never fired. When the queue ended at 6 s, Travel took over toward town, away from them. Detour should price against the held queue's remaining cells plus `m.path`.
+1. **Detour misses gem piles a few cells off the walk, so they are taken on a later pass or never.** Two triples show it.
+
+   **(359–361, 440), taken 255 s after it was first seen.** First seen at 87–89 s. At 96–98 s the Explore safe default (defect 3) walked past it, 5 cells off, from (376, 446) to (361, 433). Nothing went for it. The nearest path cell was past `DETOUR_REACH` = 3 (`states/detour.py:39`), and going by it added about 7 steps, over `DETOUR_EXTRA_STEPS` = 4 (`:41`). The walk under way was Explore's, not Gather's, so no other state took gem piles. It went back at 331 s only because Gather, working a `gather_gems` op from 199 s, picked the pile as its target ("gather → (361, 440)"). Detour took the last stretch at 336 s, and the three gems were taken at 342–349 s. The planner never named the pile. To take a triple on the first pass, Detour should judge a gem pile in view by the steps it adds, with a larger allowance for a pile, not by a fixed 3-cell reach.
+
+   ```
+   87 s   @383,448  (359..361, 440) first in view
+   97 s   @366,437  explore → (361, 433)               5 cells off, no detour
+   331 s  @385,434  gather → (361, 440)                 Gather picks the pile
+   336 s  @375,433  detour → gem at (361, 440), then back to gather
+   342–349 s  take gem ×3                               gems 10 → 13
+   ```
+
+   **(359–361, 360), never taken: the queued walk is cut off the path Detour prices against.** When a walk queue goes out, `runner.py:944` drops the queued cells from `m.path` (`m.path = m.path[queued:]`). While that queue runs, the held-queue probe runs Detour, and `detour_find` (`states/detour.py:114`, `:121`) measures each find from where the character stands against a path that starts up to 10 steps ahead. Cells beside the queued stretch are not on it at all, and later cells are counted as nearer than they are. At 2–6 s the first Explore walk, (369, 369) toward (344, 356), queued 10 steps through (363, 365) and (359, 364), 2–4 cells from three adjacent gems at (359–361, 360). From (363, 365), `extra_steps` on the cut path gives 5, 6 and 7 extra steps, over `DETOUR_EXTRA_STEPS` = 4. On the rest of the walk it gives 1, 2 and 3. The gems were in view, and no state suppressed Detour; it never fired. When the queue ended at 6 s, Travel took over toward town, away from them. Detour should price against the held queue's remaining cells plus `m.path`.
 
    ```
    t=2 s  @369,369  queue 10×Step 27×Wait (explore → (344, 356))     m.path = cells 11+

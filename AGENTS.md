@@ -45,6 +45,7 @@ Decided. Do not cross without flagging prominently.
 - Run `make test` before pushing, and `make conductor-test` if you touched `tools/conductor`. The `test` GitHub Actions workflow runs both on every PR.
 - Open PRs **ready for review, not draft**. If tooling defaults to draft, run `gh pr ready`.
 - **Never merge.** Evan merges, and so does the supervisor ([`.claude/skills/agentrealm-agents-supervisor/SKILL.md`](.claude/skills/agentrealm-agents-supervisor/SKILL.md)). No other agent does.
+- **Review verdict:** any reviewer counts (the Claude Review bot, Cursor, a person). A pull request is approved when at least one reviewer approved its current head and none rejected it. `COMMENTED` reviews are threads, not a verdict. Full rule: [`agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) **The review verdict**.
 - Do not add dependencies, or change moderation or the call budget or pacing, without flagging prominently.
 - If blocked by an open architecture, legal, or moderation question, an open design question, or a server gap, **halt and say why**. Do not invent. Check PLAN.md and the published docs first.
 - Backlog items are PR-sized. If one still needs a second PR, ship a reviewable slice, mark the ID `partial` with a `remaining` note in `status.json`, and let the next pass continue it.
@@ -66,7 +67,9 @@ Decided. Do not cross without flagging prominently.
 | Supervisor: merges what is ready, dispatches fixers or new work | Claude Code | [`.claude/skills/agentrealm-agents-supervisor`](.claude/skills/agentrealm-agents-supervisor/SKILL.md) |
 | Fixer fleet: one Claude session per blocked PR | Claude Code | [`.claude/skills/agentrealm-agents-fixer-fleet`](.claude/skills/agentrealm-agents-fixer-fleet/SKILL.md) |
 | Fixer: one pass on one blocked PR | Claude Code | [`.claude/skills/agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) |
-| Conductor: plans, spawns implementers, watches PRs | Cursor | [`.cursor/skills/agentrealm-agents-conductor`](.cursor/skills/agentrealm-agents-conductor/SKILL.md) |
-| Fleet: batch of `n` Cursor implementers | Cursor | [`.cursor/skills/agentrealm-agents-fleet`](.cursor/skills/agentrealm-agents-fleet/SKILL.md) |
+| Implementer fleet: one Claude session per ready backlog slice | Claude Code | [`.claude/skills/agentrealm-agents-implementer-fleet`](.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md) |
+| Reviewer: one review per ready PR head, as `reviewer-agent-anth[bot]` | GitHub Actions | [`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml) |
+| Conductor: plans, spawns implementers, watches PRs (dormant while Cursor credits are out) | Cursor | [`.cursor/skills/agentrealm-agents-conductor`](.cursor/skills/agentrealm-agents-conductor/SKILL.md) |
+| Fleet: batch of `n` Cursor implementers (dormant while Cursor credits are out) | Cursor | [`.cursor/skills/agentrealm-agents-fleet`](.cursor/skills/agentrealm-agents-fleet/SKILL.md) |
 
 Cursor agents are spawned with [`tools/conductor`](tools/conductor/README.md).

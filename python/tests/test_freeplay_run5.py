@@ -28,7 +28,7 @@ from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.detour import detour_find, straight_line
 from agentrealm_agent.states.gather import gather_outcome
-from agentrealm_agent.states.gather_safe import gather_ground, known_reach, route_clear
+from agentrealm_agent.states.gather_safe import danger, gather_ground, known_reach, route_clear
 from agentrealm_agent.world import POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
 
 MAP = 1
@@ -107,6 +107,15 @@ class SightingsTest(unittest.TestCase):
         see(w, [], SIGHTING_TICKS + 2)
         self.assertEqual(known_reach(w, policy()), [])
 
+    def test_a_sighting_on_a_map_left_behind_expires_but_a_post_is_kept(self):
+        w = field()
+        w.pos = (15, 10)
+        see(w, [Entity("npc", 8, (16, 16), GUARD[1])], 0)  # a passer-by
+        post_seen_then_left(w)
+        w.map_id = MAP + 1
+        see(w, [], SIGHTING_TICKS + 1)
+        self.assertEqual(set(w.sightings), {("npc", 9)})
+
     def test_a_type_not_known_hostile_holds_no_ground(self):
         w = field()
         w.hostile_types.clear()
@@ -135,12 +144,27 @@ class ReachFromHitsTest(unittest.TestCase):
         w.hostile_types.clear()
         pile = Entity("supply", 50, (25, 10), "gem")
         see(w, [guard((20, 10)), pile], 0)
+        see(w, [guard((20, 10)), pile], POST_STILL_TICKS)  # it keeps a post
         gather(w, m, {"op": "gather_gems", "count": 5})
         self.assertEqual(m.gather_target, ("pile", (25, 10)))
-        see(w, [guard((15, 10)), pile], 20)
-        self.hit(w, (14, 10), 21)  # 6 from where it was first seen
+        see(w, [guard((15, 10)), pile], 60)
+        self.hit(w, (14, 10), 61)  # 6 from its post
         gather(w, m, {"op": "gather_gems", "count": 5})
         self.assertNotEqual(m.gather_target, ("pile", (25, 10)))
+
+    def test_a_roamer_that_hit_us_holds_no_cell_for_the_run(self):
+        """With no post, the cell it was first seen on is no ground it keeps."""
+        w = field()
+        w.pos = (15, 10)
+        see(w, [guard()], 0)
+        see(w, [guard((15, 11))], 5)
+        self.hit(w, (15, 12), 6)
+        self.assertEqual(w.sightings[("npc", 9)].reach, 0)
+        w.pos = (2, 10)
+        see(w, [], 7)
+        self.assertEqual(known_reach(w, policy()), [((15, 11), 6)])  # last seen, bar of the one that hit us
+        see(w, [], SIGHTING_TICKS + 8)
+        self.assertEqual(known_reach(w, policy()), [])
 
 
 class GatherKeepsClearTest(unittest.TestCase):
@@ -148,7 +172,7 @@ class GatherKeepsClearTest(unittest.TestCase):
         w = field()
         post_seen_then_left(w)
         self.assertFalse(gather_ground(w, PILE, policy()))
-        self.assertTrue(gather_ground(w, PILE, policy(), fight=True))
+        self.assertTrue(gather_ground(w, PILE, policy(), danger(w, policy(), fight=True)))
 
     def test_gather_walks_to_another_pile(self):
         w, m = field(), Memory()

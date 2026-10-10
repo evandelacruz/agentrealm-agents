@@ -36,7 +36,7 @@ from ..pathing import bounded_step, grid_params, nav_search, route_ahead
 from ..survival import hostile_reach
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
-from .gather_safe import gather_ground, reach_cells, route_clear
+from .gather_safe import Danger, danger, gather_ground, reach_cells, route_clear
 from .intents import set_position
 
 GOAL = "detour"
@@ -125,13 +125,13 @@ def detour_find(w: WorldModel, ctx: PlayContext) -> Entity | None:
     if not route:
         return None
     items = knowledge_items(ctx.knowledge)
-    fight = chosen_fight(ctx)
+    known = danger(w, ctx.policy, chosen_fight(ctx))
     best: tuple[int, int, Entity] | None = None
     for e in w.entities:
         if e.id in m.detour_skipped or chebyshev(e.pos, here) <= 1 or not valuable(w, e, items):
             continue  # in reach is Pickup's
         extra = extra_steps(here, e.pos, route)
-        if extra is None or extra > DETOUR_EXTRA_STEPS or not safe_find(w, ctx, e.pos, fight):
+        if extra is None or extra > DETOUR_EXTRA_STEPS or not safe_find(w, ctx, e.pos, known):
             continue
         if best is None or (extra, e.id) < best[:2]:
             best = (extra, e.id, e)
@@ -144,12 +144,12 @@ def chosen_fight(ctx: PlayContext) -> bool:
     return op is not None and op["op"] == "gather_gems" and bool(op.get("fight"))
 
 
-def safe_find(w: WorldModel, ctx: PlayContext, at: Pos, fight: bool) -> bool:
+def safe_find(w: WorldModel, ctx: PlayContext, at: Pos, known: Danger) -> bool:
     """``at`` is ground Gather may work, and the straight way there from
-    where we stand stays out of known hostiles' reach (unless ``fight``)."""
-    if not gather_ground(w, at, ctx.policy, fight=fight):
+    where we stand stays out of known hostiles' reach (unless ``known.fight``)."""
+    if not gather_ground(w, at, ctx.policy, known):
         return False
-    return fight or w.pos is None or route_clear(w, ctx.policy, straight_line(w.pos, at))
+    return w.pos is None or route_clear(w, ctx.policy, straight_line(w.pos, at), known)
 
 
 def straight_line(a: Pos, b: Pos) -> list[Pos]:
@@ -165,7 +165,7 @@ def straight_line(a: Pos, b: Pos) -> list[Pos]:
 def _still_on(w: WorldModel, d: Detour, ctx: PlayContext) -> bool:
     """The find is still there, on safe ground, and the detour has time left."""
     there = any(e.kind == "supply" and e.id == d.supply_id for e in w.entities)
-    return there and w.tick - d.since < DETOUR_TICKS and safe_find(w, ctx, d.pos, chosen_fight(ctx))
+    return there and w.tick - d.since < DETOUR_TICKS and safe_find(w, ctx, d.pos, danger(w, ctx.policy, chosen_fight(ctx)))
 
 
 def _end(m: Memory, d: Detour) -> None:

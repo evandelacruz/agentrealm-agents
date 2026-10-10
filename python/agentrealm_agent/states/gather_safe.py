@@ -14,6 +14,8 @@ ground a hurt character walks first (``safe_explore_path``).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ..config import Policy
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..survival import hostile_reach, is_attacker, is_hostile, recently_attacked
@@ -50,15 +52,32 @@ def hostiles_near(w: WorldModel, pos: Pos, policy: Policy, radius: int | None = 
     return any(is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= reach for e in w.entities)
 
 
-def gather_ground(w: WorldModel, pos: Pos, policy: Policy, *, fight: bool = False) -> bool:
+@dataclass(frozen=True)
+class Danger:
+    """What one decision knows of hostile ground, worked out once (``danger``):
+    ``held``, the ground remembered hostiles hold (``known_reach``), and
+    ``fight``, the op chose to fight for its ground, so remembered ground and
+    routes bar nothing."""
+
+    held: tuple[tuple[Pos, int], ...] = ()
+    fight: bool = False
+
+
+def danger(w: WorldModel, policy: Policy, fight: bool = False) -> Danger:
+    """This decision's ``Danger``: nothing held when ``fight``, else ``known_reach``."""
+    return Danger(fight=True) if fight else Danger(tuple(known_reach(w, policy)))
+
+
+def gather_ground(w: WorldModel, pos: Pos, policy: Policy, d: Danger | None = None) -> bool:
     """Known ground where cutting grass or a bush, or taking a gem pile, is allowed.
 
     The cell must be revealed, not on a hazard tile, and have no known
     hostile in view within its ``gather_bar``: ``GATHER_HOSTILE_RADIUS`` for
     the one that hit us, a step past our weapon reach or ``policy.hostile_range``
     for any other. Nor may it lie in ground a remembered hostile holds
-    (``known_reach``), unless ``fight``: the planner chose to fight for it
-    (a ``gather_gems`` op with ``fight``). Safe zones are not required.
+    (``d.held``, worked out here when ``d`` is None), unless the planner
+    chose to fight for it (a ``gather_gems`` op with ``fight``). Safe zones
+    are not required.
     """
     if w.map_id is None or pos not in w.view.tiles:
         return False
@@ -66,17 +85,17 @@ def gather_ground(w: WorldModel, pos: Pos, policy: Policy, *, fight: bool = Fals
         return False
     if any(is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= gather_bar(w, e, policy) for e in w.entities):
         return False
-    return fight or not any(chebyshev(c, pos) <= r for c, r in known_reach(w, policy))
+    held = (d or danger(w, policy)).held
+    return not any(chebyshev(c, pos) <= r for c, r in held)
 
 
 def known_reach(w: WorldModel, policy: Policy) -> list[tuple[Pos, int]]:
     """Ground known hostiles hold beyond where they stand in view: (centre, radius) each (free-play run 5).
 
-    One that keeps ground (``Sighting.keeps_ground``: a post, or a place it
-    hit us from) holds ``policy.hostile_range``, or the reach it hit us from
-    when further, plus ``GATHER_SHADOW_MARGIN``, round its home, in view or
-    not: it goes back there. One out of view also holds its ``gather_bar``
-    round the cell it was last seen on.
+    One that keeps a post (``Sighting.post``) holds ``policy.hostile_range``,
+    or the reach it hit us from when further, plus ``GATHER_SHADOW_MARGIN``,
+    round that post, in view or not: it goes back there. One out of view
+    also holds its ``gather_bar`` round the cell it was last seen on.
     """
     if w.map_id is None:
         return []
@@ -85,29 +104,33 @@ def known_reach(w: WorldModel, policy: Policy) -> list[tuple[Pos, int]]:
     for key, s in w.sightings.items():
         if s.map_id != w.map_id or not is_hostile(w, policy, s.entity):
             continue
-        if s.keeps_ground:
+        if s.post:
             out.append((s.home, max(policy.hostile_range, s.reach) + GATHER_SHADOW_MARGIN))
         if key not in in_view:
             out.append((s.entity.pos, gather_bar(w, s.entity, policy)))
     return out
 
 
-def reach_cells(w: WorldModel, policy: Policy) -> set[Pos]:
+def reach_cells(w: WorldModel, policy: Policy, d: Danger | None = None) -> set[Pos]:
     """Every cell in a known hostile's reach: ``hostile_reach`` of those in
-    view and ``known_reach``. A walk prices them ``costly``."""
+    view and ``d.held``. A walk prices them ``costly``."""
     cells = hostile_reach(w, policy)
-    for (cx, cy), r in known_reach(w, policy):
+    for (cx, cy), r in (d or danger(w, policy)).held:
         cells.update((cx + dx, cy + dy) for dx in range(-r, r + 1) for dy in range(-r, r + 1))
     return cells
 
 
-def route_clear(w: WorldModel, policy: Policy, path: list[Pos]) -> bool:
-    """No cell of ``path`` lies in a known hostile's reach (``reach_cells``).
+def route_clear(w: WorldModel, policy: Policy, path: list[Pos], d: Danger | None = None) -> bool:
+    """No cell of ``path`` lies in a known hostile's reach (``reach_cells``),
+    or ``d.fight``: the op chose the risk.
 
     Reach that already holds where we stand is not counted: walking out of
     it is the way off. A target whose cheapest route still crosses reach is
     not free to take (free-play run 5: piles beside a post cost 12 hits).
     """
+    d = d or danger(w, policy)
+    if d.fight:
+        return True
     here = w.pos
     skip = {
         (e.kind, e.id)
@@ -115,7 +138,7 @@ def route_clear(w: WorldModel, policy: Policy, path: list[Pos]) -> bool:
         if here is not None and is_hostile(w, policy, e) and chebyshev(e.pos, here) <= policy.hostile_range
     }
     near = hostile_reach(w, policy, skip)
-    zones = [(c, r) for c, r in known_reach(w, policy) if here is None or chebyshev(c, here) > r]
+    zones = [(c, r) for c, r in d.held if here is None or chebyshev(c, here) > r]
     return not any(p in near or any(chebyshev(c, p) <= r for c, r in zones) for p in path)
 
 

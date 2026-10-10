@@ -1,4 +1,7 @@
-"""Gather: carry out the plan's ``gather_gems`` op from grass, bushes and gem piles (A22).
+"""Gather: carry out the plan's ``gather_gems`` op from grass and gem piles (A22, A81).
+
+Bushes drop berries, not gems (GAME_NOTES.md Gems), so Gather never cuts
+one; food is Heal's and Loot's.
 
 It works any known ground off hazards with no known hostile near
 (``gather_ground``), the open field and safe zones alike, but cuts field
@@ -7,7 +10,7 @@ have no effect (A63 run 2). With nothing to cut while standing on safe
 ground it walks out to the nearest known field ground, else the nearest
 frontier. With every known cell to cut held by a hostile, it walks on to
 the nearest frontier clear of every known hostile rather than stand off one
-(A82). Grass and bushes in a region our own cuts showed barren are left
+(A82). Grass in a region our own cuts showed barren is left
 alone (A63), unless the op names that region with ``x, y``, and so are cells
 it cut too recently to have grown back, cells whose last ``Use`` had no
 effect, and regions or safe zones where cuts keep having none
@@ -31,6 +34,7 @@ from ..config import Policy
 from ..directives import attack_forbidden
 from ..executor import DEFAULT_TICK_RATE_HZ
 from ..gem_yield import (
+    GATHER_BLOCKS,
     REGION_SIZE,
     GemYieldTracker,
     barren_regions,
@@ -64,10 +68,7 @@ from .solve import held_supply
 # Gem caches (gem_cache_5/7/10) are a different drop and are not piles.
 # A priced supply with the same code is shop stock: taking it is a purchase.
 GEM_PILE_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
-# Bushes are not walkable, so they are cut from a neighbouring cell: the
-# pocket knife's range is 1 (GAME_NOTES.md Olympuff starting kit).
-BUSH_REACH = 1
-CUT = "cut"  # the capability Gather arms for: grass and bushes are cut
+CUT = "cut"  # the capability Gather arms for: grass is cut
 GOAL = "gather"
 OUT = "out"  # ``m.gather_target`` kind: walking off safe ground to field ground or the frontier
 OFF = "off"  # ``m.gather_target`` kind: moving off from a hostile that shadows us
@@ -91,7 +92,7 @@ MOVE_OFF_DISTANCE = 2 * GATHER_HOSTILE_RADIUS
 # Gather's last decision, for the planner's State (``Memory.gather_status``).
 CUTTING = "cutting"
 TAKING = "taking a gem"
-WALKING = "walking to {}"  # grass, a bush, a gem pile
+WALKING = "walking to {}"  # grass, a gem pile
 NO_EFFECT = "cuts have no effect here"
 HEADING_OUT = "heading out of safe ground"
 NONE_CUTTABLE = "no cuttable cell in view"
@@ -101,24 +102,18 @@ MOVING_OFF = "moving off from a hostile that shadows"
 FIGHTING = "fighting a hostile that shadows"
 WAITING = "way to {} taken, waiting"
 STALLED = "{}, no cut for {} s"
-WALK_TARGETS = {
-    "grass": "grass",
-    "bush": "a bush",
-    "pile": "a gem pile",
-    REGION: "a target region",
-    CLEAR: "ground clear of hostiles",
-}
+WALK_TARGETS = {"grass": "grass", "pile": "a gem pile", REGION: "a target region", CLEAR: "ground clear of hostiles"}
 IN_REGION = "{} (region {},{})"  # any status while Gather works only in a target region
 
 
 class GatherState(State):
-    """Executor for ``gather_gems``: ``Use`` grass and bushes or ``Take`` gem
+    """Executor for ``gather_gems``: ``Use`` grass or ``Take`` gem
     piles until the gem counter reaches the op's count, walking to the
     nearest known one when none is in reach, field cells before safe ones.
     A cut goes out with a tool that cuts, armed in the same queue when the
     armed item is not known to cut; the weapon it swapped out is armed again
     once no ``gather_gems`` op is on top.
-    Grass and bushes in a barren region (unless the op names it), or where
+    Grass in a barren region (unless the op names it), or where
     cuts had no effect, are skipped. On safe ground with nothing to cut, it
     heads out to field ground or the frontier;
     with nowhere to head, it explores (the safe default) to reveal more.
@@ -205,7 +200,7 @@ def fight_shadow(w: WorldModel, ctx: PlayContext, e: Entity) -> StateOutcome | N
 
 
 def is_gem_pile(e: Entity) -> bool:
-    """A free ground gem: an authored pile, or one a grass or bush drop left."""
+    """A free ground gem: an authored pile, or one a grass cut or a kill dropped."""
     return (
         e.kind == "supply"
         and e.code in GEM_PILE_SUPPLY_CODES
@@ -236,7 +231,7 @@ def gather_outcome(
     pile; else ``NO_EFFECT`` when standing where cuts are known not to work,
     or the latest cut had no effect in this region and none worked since;
     else ``WALKING`` and the target for any other walk; else ``CUTTING``.
-    With none, ``BLOCKED`` when known grass or a bush is barred only by a
+    With none, ``BLOCKED`` when known grass is barred only by a
     hostile near it, ``REGION_BARREN`` when standing in a skipped barren
     region, else ``NONE_CUTTABLE``. Any status but ``CUTTING`` adds how long
     it has been when no cut has taken effect for ``STALL_SECONDS`` (``STALLED``).
@@ -315,13 +310,13 @@ def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | N
 def _barred_by_hostile(
     w: WorldModel, policy: Policy, skip: set[tuple[int, int]], exhausted: set[Pos], d: Danger | None = None
 ) -> bool:
-    """Known grass or a bush Gather would cut, but for a hostile near it, in view or remembered."""
+    """Known grass Gather would cut, but for a hostile near it, in view or remembered."""
     if not any(is_hostile(w, policy, e) for e in w.entities) and not any(
         is_hostile(w, policy, s.entity) for s in w.sightings.values()
     ):
         return False
     return any(
-        block in ("grass", "bush")
+        block in GATHER_BLOCKS
         and p not in exhausted
         and region_of(p) not in skip
         and block not in policy.avoid_blocks
@@ -356,7 +351,7 @@ def _gather_step(
     cuttable = {
         p
         for p, block in view.tiles.items()
-        if block in ("grass", "bush")
+        if block in GATHER_BLOCKS
         and p not in exhausted
         and region_of(p) not in skip
         and gather_ground(w, p, policy, d)
@@ -425,12 +420,6 @@ def _gather_cells(
     if view.tiles.get(here) == "grass" and here in preferred:
         _end_walk_out(m)
         return _cut(w, m, knowledge, here, "cut grass", state)
-
-    bushes = [p for p in preferred if view.tiles[p] == "bush" and chebyshev(p, here) <= BUSH_REACH]
-    if bushes:
-        _end_walk_out(m)
-        p = min(bushes, key=lambda pos: (chebyshev(pos, here), pos))
-        return _cut(w, m, knowledge, p, "cut bush", state)
 
     # A target that no longer qualifies is let go, whoever walked last.
     if not _still_wanted(w, m.gather_target, policy, cuttable, here in safe, d, pile_region):
@@ -635,7 +624,7 @@ def _still_wanted(
 
 
 # Target kinds ``_replan_gather`` walks back to once another state took the path.
-KEPT_KINDS = ("pile", "bush", "grass", OUT, CLEAR)
+KEPT_KINDS = ("pile", "grass", OUT, CLEAR)
 # Gather waits this long for a taken first step toward its target (an
 # occupant), then gives the target up (5 s at 10 ticks/s, as a walk's fog hold).
 HOLD_TICKS = 50
@@ -655,10 +644,9 @@ def _replan_gather(
 ) -> bool:
     """Plan to the committed target (``m.gather_target``) while one is kept,
     else pick: the nearest pile (in ``pile_region`` when set), then the
-    nearest bush or grass by walk (``_cut_targets``; ``preferred``: field
-    cells before safe ones), then a kept walk to ground clear of hostiles
-    (``CLEAR``, tried after the picks: it ends for something it can reach),
-    then, on safe ground,
+    nearest grass by walk (``preferred``: field cells before safe ones),
+    then a kept walk to ground clear of hostiles (``CLEAR``, tried after the
+    picks: it ends for something it can reach), then, on safe ground,
     out to field ground or the frontier; else, when ``barred()`` (known cells
     to cut held by a hostile), the nearest frontier clear of every known
     hostile (``_plan_clear``); leave ``m.path`` alone if none.
@@ -712,10 +700,9 @@ def _replan_gather(
             m.path, m.goal, m.gather_target = path, GOAL, ("pile", pile.pos)
             return False
 
-    cut_at = _cut_targets(w, preferred)
-    found = _nearest_clear(w, set(cut_at), params, blocked, clear)
+    found = _nearest_clear(w, set(preferred), params, blocked, clear)
     if found:
-        m.path, m.goal, m.gather_target = found[1], GOAL, cut_at[found[0]]
+        m.path, m.goal, m.gather_target = found[1], GOAL, ("grass", found[0])
         return False
 
     if kept is not None and kept[0] == CLEAR and _clear_of_hostiles(w, policy, kept[1], d):
@@ -733,27 +720,6 @@ def _replan_gather(
         m.gather_clear_seen = _in_sight(w, policy, preferred, d, pile_region)
         _plan_clear(w, m, policy, blocked, params, clear, d)
     return False
-
-
-def _cut_targets(w: WorldModel, preferred: set[Pos]) -> dict[Pos, tuple[str, Pos]]:
-    """Where to stand to cut each of ``preferred``, as cell -> ``("grass", cell)``
-    or ``("bush", bush)``: onto grass, beside a bush.
-
-    Grass and bushes drop gems alike (GAME_NOTES.md Gems), so one search
-    picks the nearest stand of either. Taking bushes first walked back and
-    forth past grass beside the character to a bush 9 cells off (free-play
-    run 6: 8 walks in 34 s, 2 cuts each). A grass cell beside a bush is
-    grass: standing there cuts both.
-    """
-    out = {p: ("grass", p) for p in sorted(preferred) if w.view.tiles[p] == "grass"}
-    occupied = w.occupied()
-    for p in sorted(preferred):
-        if w.view.tiles[p] != "bush":
-            continue
-        for stand in w.neighbours(p):
-            if w.view.walkable(stand) and stand not in occupied:
-                out.setdefault(stand, ("bush", p))
-    return out
 
 
 def _pile_in(pos: Pos, region: tuple[int, int] | None) -> bool:
@@ -780,13 +746,8 @@ def _nearest_clear(
 
 
 def _path_to(w: WorldModel, target: tuple[str, Pos], params) -> list[Pos] | None:
-    """A path to a kept target: beside a bush, onto anything else; None when nothing reaches it."""
-    kind, pos = target
-    if kind == "bush":
-        cells = {n for n in w.neighbours(pos) if w.view.walkable(n) and n not in w.occupied()}
-    else:
-        cells = {pos}
-    found = nearest_target(w, cells, params) if cells else None
+    """A path onto a kept target; None when nothing reaches it."""
+    found = nearest_target(w, {target[1]}, params)
     return found[1] if found and found[1] else None
 
 

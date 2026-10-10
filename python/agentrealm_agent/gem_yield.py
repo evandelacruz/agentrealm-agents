@@ -1,7 +1,8 @@
 """Gem yield per region, learned from the agent's own cuts (A63).
 
-Gem drops from cutting grass and bushes vary by area, and some areas drop
-none. Nothing here knows where: every number comes from cuts this agent made.
+Gem drops from cutting grass vary by area, and some areas drop none (bushes
+drop berries, not gems: GAME_NOTES.md Gems). Nothing here knows where: every
+number comes from cuts this agent made.
 
 1. **Measure.** Each block our ``Use`` cut is one record: the cell, its block
    type, the tick, and whether a gem came of it. The drop is tied to the cut
@@ -11,13 +12,26 @@ none. Nothing here knows where: every number comes from cuts this agent made.
    ``Take`` applied since the cut (:func:`take_raises_gems`). Cuts still
    waiting at a death or a map change are dropped, not filed.
 2. **Summarise.** Cells fall in ``REGION_SIZE`` square regions per map. Each
-   region keeps its cuts, gems and last tick of grass and bush cuts. A region
-   with ``BARREN_MIN_CUTS`` or more such cuts and no gem is barren.
+   region keeps its cuts, gems and last tick of grass cuts.
+3. **Judge against the map's own rate.** :func:`expected_yield` is the gems
+   a cut drops on this map, from all our cuts here, pulled toward the
+   manual's rate (``PRIOR_YIELD``) while the sample is small. A region is
+   poor when a fair sample gave under half that rate, and good at that rate
+   or better. It is barren after ``BARREN_MIN_CUTS`` cuts with no gem: enough
+   that ground at the manual's lowest rate would almost surely have shown
+   one (:func:`barren_min_cuts`). That one is not measured: a rich map must
+   not mark unlucky ground barren sooner, and a region's own misses must
+   not put off its own mark.
 
 Stored in the world knowledge base under ``kb.extra["gem_yield"]``::
 
-    {"<map_id>": {"cuts": [{"x", "y", "block", "tick", "gem"}, ...],
+    {"version": VERSION,
+     "<map_id>": {"cuts": [{"x", "y", "block", "tick", "gem"}, ...],
                   "regions": {"<rx>,<ry>": {"cuts", "gems", "last_tick"}}}}
+
+A store of another ``version`` is read as empty and replaced on the next
+cut: totals from before A81 counted bush cuts at the old drop rates, and
+read now they would mark regions barren that Gather would never revisit.
 
 ``cuts`` keeps the latest ``MAX_RECORDS`` per map; ``regions`` keeps every
 total. The planner's State shows :func:`summary`; Gather skips barren
@@ -36,6 +50,7 @@ work and drop no gem.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -45,14 +60,21 @@ from .world import Pos, WorldModel, chebyshev
 from .zone_discovery import safe_tiles, safe_zone_of
 
 KEY = "gem_yield"
+# Bumped when what a stored cut or total means changes. 2: A81, grass only
+# (bushes drop berries), at the 20%/25% grass rates.
+VERSION = 2
 # No cut that took effect for this long is a stall: Gather says so in its
 # status, and a planner reply may then move its region (``keep_gather_region``).
 STALL_SECONDS = 30
 REGION_SIZE = 16  # blocks per region side
-# A fair sample: this many cuts with no gem marks a region barren. At the
-# manual's lowest rate (10% a cut, GAME_NOTES.md Gems) a normal region shows
-# no gem in 30 cuts about 4% of the time (0.9**30); at 15 it would be 21%.
-BARREN_MIN_CUTS = 30
+# The manual's lowest grass rate: a cut drops a gem 20% of the time in the
+# ring-1 fields, 25% farther out (GAME_NOTES.md Gems). It is the prior for
+# ``expected_yield`` until our own cuts on a map outweigh it.
+PRIOR_YIELD = 0.20
+PRIOR_CUTS = 20  # the prior counts as this many cuts
+# Ground at the manual's lowest rate shows no gem in ``BARREN_MIN_CUTS`` cuts
+# at most this often, so a barren mark is rarely wrong.
+BARREN_FALSE_RATE = 0.04
 GEM_WINDOW_TICKS = 5  # a gem that shows up later than this is not the cut's
 MAX_RECORDS = 500  # cut records kept per map; region totals are kept in full
 # A cut block shows its destroyed type until it grows back; a cut bush took
@@ -60,7 +82,9 @@ MAX_RECORDS = 500  # cut records kept per map; region totals are kept in full
 # is exhausted, whatever a stale terrain read still says.
 REGROW_TICKS = 600
 CUT_BLOCKS = BREAKABLE | {"grass"}  # blocks a cut or break is recorded on
-GATHER_BLOCKS = frozenset({"grass", "bush"})  # the cuts the region yield counts
+# The cuts the region yield counts, and the blocks Gather cuts: bushes drop
+# berries, not gems (GAME_NOTES.md Gems).
+GATHER_BLOCKS = frozenset({"grass"})
 SUMMARY_RADIUS = 3  # barren regions this far (Chebyshev, in regions) from ours are shown
 # Best regions shown to the planner, at any distance: walking out of range of
 # the one productive region must not hide it (A63 run 3).
@@ -73,14 +97,12 @@ MAX_NO_EFFECT = 500  # no-effect cuts remembered, oldest dropped first
 NO_EFFECT_TTL = 10 * REGROW_TICKS
 # Gather leaves poor ground for a better known region (free-play run 2: 54
 # cuts for 1 gem in one region while the next one over gave 1 gem in 4).
-# A region with at least FAIR_SAMPLE_CUTS cuts and fewer than POOR_YIELD gems
-# a cut is poor: half the manual's lowest drop rate (10% a cut, GAME_NOTES.md Gems).
+# A region with at least FAIR_SAMPLE_CUTS cuts and fewer than half the
+# expected yield in gems a cut is poor (``poor``).
 FAIR_SAMPLE_CUTS = 20
-POOR_YIELD = 0.05
-# A region is better when it gave at least GOOD_YIELD gems a cut over at least
+# A region is better when it gave at least the expected yield over at least
 # GOOD_MIN_CUTS cuts, and lies within BETTER_REGION_BLOCKS of us; the planner
 # can name a region at any distance with a ``gather_gems`` x, y.
-GOOD_YIELD = 0.10
 GOOD_MIN_CUTS = 4
 BETTER_REGION_BLOCKS = 64
 GEM_CODE = "gem"  # a ground gem (GAME_NOTES.md Gems)
@@ -129,13 +151,13 @@ class GemYieldTracker:
     claimed: set[int] = field(default_factory=set)  # ground gems already credited to a cut
     on_ground: set[int] = field(default_factory=set)  # claimed gems not yet gone from view
     last_gems: int | None = None  # the gem counter at the last update
-    # Uses that left grass or a bush unchanged (``applied_no_effect``), one
+    # Uses that left grass unchanged (``applied_no_effect``), one
     # (map_id, cell, tick) per cut, oldest first, at most MAX_NO_EFFECT and
     # forgotten after NO_EFFECT_TTL. Each holds its cell out of Gather for
     # REGROW_TICKS; NO_EFFECT_ZONE_CUTS of them mark ground uncuttable.
     no_effect: list[tuple[int, Pos, int]] = field(default_factory=list)
-    cuts: int = 0  # Uses on grass or a bush that took effect, this run
-    no_effect_cuts: int = 0  # Uses on grass or a bush that did nothing, this run
+    cuts: int = 0  # Uses on grass that took effect, this run
+    no_effect_cuts: int = 0  # Uses on grass that did nothing, this run
     # The latest no-effect cut (map_id, cell, tick), cleared by a cut that takes effect.
     last_no_effect: tuple[int, Pos, int] | None = None
     gems_gained: int = 0  # rises of the gem counter this run, spending not taken off
@@ -158,7 +180,7 @@ class GemYieldTracker:
 
     def note_no_effect(self, w: WorldModel, pos: Pos, block: str, tick: int) -> None:
         """Our ``Use`` on ``pos`` came back ``applied_no_effect`` while it showed
-        ``block``. Grass or a bush: held out of Gather, never filed as a cut."""
+        ``block``. Grass: held out of Gather, never filed as a cut."""
         if w.map_id is None or block not in GATHER_BLOCKS:
             return
         self.no_effect.append((w.map_id, pos, tick))
@@ -277,10 +299,20 @@ class GemYieldTracker:
                 cut.gems_before += 1
 
 
+def _stored_row(kb: KnowledgeBase, map_id: int) -> dict[str, Any] | None:
+    """One map's stored row, or None when there is none or the store is of
+    another ``VERSION``. The caller holds ``kb.lock``."""
+    root = kb.extra.get(KEY)
+    if not isinstance(root, dict) or root.get("version") != VERSION:
+        return None
+    row = root.get(str(map_id))
+    return row if isinstance(row, dict) else None
+
+
 def _map_row(kb: KnowledgeBase, map_id: int) -> dict[str, Any]:
     root = kb.extra.get(KEY)
-    if not isinstance(root, dict):
-        root = kb.extra[KEY] = {}
+    if not isinstance(root, dict) or root.get("version") != VERSION:
+        root = kb.extra[KEY] = {"version": VERSION}
     row = root.get(str(map_id))
     if not isinstance(row, dict):
         row = root[str(map_id)] = {}
@@ -292,7 +324,7 @@ def _map_row(kb: KnowledgeBase, map_id: int) -> dict[str, Any]:
 
 
 def record_cut(kb: KnowledgeBase | None, map_id: int, pos: Pos, block: str, tick: int, gem: bool) -> None:
-    """File one cut, and count it in its region when it was grass or a bush."""
+    """File one cut, and count it in its region when it was grass."""
     if kb is None:
         return
     with kb.lock:
@@ -312,39 +344,67 @@ def regions(kb: KnowledgeBase | None, map_id: int | None) -> dict[str, dict[str,
     if kb is None or map_id is None:
         return {}
     with kb.lock:
-        root = kb.extra.get(KEY)
-        row = root.get(str(map_id)) if isinstance(root, dict) else None
-        raw = row.get("regions") if isinstance(row, dict) else None
+        row = _stored_row(kb, map_id)
+        raw = row.get("regions") if row is not None else None
         return {k: dict(v) for k, v in raw.items() if isinstance(v, dict)} if isinstance(raw, dict) else {}
+
+
+def expected_yield(by_region: dict[str, dict[str, Any]]) -> float:
+    """Gems a grass cut drops on this map, from one map's region totals
+    (:func:`regions`): ``PRIOR_YIELD`` weighted as ``PRIOR_CUTS`` cuts, plus
+    every cut. No region is left out for how its cuts came out: keeping only
+    the ones that dropped a gem would skew the rate high and mark unlucky
+    ground poor. Ground that drops none pulls it low instead, which only
+    makes poor rarer and good easier."""
+    cuts = sum(int(v.get("cuts", 0)) for v in by_region.values())
+    gems = sum(int(v.get("gems", 0)) for v in by_region.values())
+    return (gems + PRIOR_YIELD * PRIOR_CUTS) / (cuts + PRIOR_CUTS)
+
+
+def barren_min_cuts(rate: float = PRIOR_YIELD) -> int:
+    """Cuts with no gem after which ground dropping at ``rate`` would have
+    shown one at least ``1 - BARREN_FALSE_RATE`` of the time (15 at 20%)."""
+    rate = min(max(rate, 0.01), 0.99)
+    return max(1, math.ceil(math.log(BARREN_FALSE_RATE) / math.log(1 - rate)))
+
+
+BARREN_MIN_CUTS = barren_min_cuts(PRIOR_YIELD)  # at the manual's lowest grass rate
 
 
 def barren(region: dict[str, Any]) -> bool:
     return int(region.get("cuts", 0)) >= BARREN_MIN_CUTS and int(region.get("gems", 0)) == 0
 
 
-def poor(region: dict[str, Any]) -> bool:
-    """A fair sample with a low yield (barren ones included)."""
+def poor(region: dict[str, Any], rate: float = PRIOR_YIELD) -> bool:
+    """A fair sample under half the expected ``rate``. A barren region is
+    poor too once it has ``FAIR_SAMPLE_CUTS`` cuts; before that it is skipped
+    as barren only."""
     cuts = int(region.get("cuts", 0))
-    return cuts >= FAIR_SAMPLE_CUTS and int(region.get("gems", 0)) < POOR_YIELD * cuts
+    return cuts >= FAIR_SAMPLE_CUTS and int(region.get("gems", 0)) < rate / 2 * cuts
 
 
-def good(region: dict[str, Any]) -> bool:
+def good(region: dict[str, Any], rate: float = PRIOR_YIELD) -> bool:
+    """At least the expected ``rate`` over ``GOOD_MIN_CUTS`` or more cuts."""
     cuts = int(region.get("cuts", 0))
-    return cuts >= GOOD_MIN_CUTS and int(region.get("gems", 0)) >= GOOD_YIELD * cuts
+    return cuts >= GOOD_MIN_CUTS and int(region.get("gems", 0)) >= rate * cuts
 
 
 def poor_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[int, int]]:
     """The poor regions of one map, as ``(rx, ry)``."""
-    return {r for key, v in regions(kb, map_id).items() if poor(v) and (r := _parse(key)) is not None}
+    by_region = regions(kb, map_id)
+    rate = expected_yield(by_region)
+    return {r for key, v in by_region.items() if poor(v, rate) and (r := _parse(key)) is not None}
 
 
 def better_region(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> tuple[int, int] | None:
     """The best good region within ``BETTER_REGION_BLOCKS`` of ``pos``, by
     yield then distance, or None."""
     best: tuple[float, int, tuple[int, int]] | None = None
-    for key, v in regions(kb, map_id).items():
+    by_region = regions(kb, map_id)
+    rate = expected_yield(by_region)
+    for key, v in by_region.items():
         r = _parse(key)
-        if r is None or not good(v):
+        if r is None or not good(v, rate):
             continue
         distance = blocks_to_region(pos, r)
         if distance > BETTER_REGION_BLOCKS:
@@ -362,14 +422,7 @@ def region_corner(region: tuple[int, int]) -> Pos:
 
 def barren_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[int, int]]:
     """The barren regions of one map, as ``(rx, ry)``: read once per decision."""
-    if kb is None or map_id is None:
-        return set()
-    with kb.lock:
-        root = kb.extra.get(KEY)
-        row = root.get(str(map_id)) if isinstance(root, dict) else None
-        raw = row.get("regions") if isinstance(row, dict) else None
-        keys = [k for k, v in raw.items() if isinstance(v, dict) and barren(v)] if isinstance(raw, dict) else []
-    return {r for r in map(_parse, keys) if r is not None}
+    return {r for key, v in regions(kb, map_id).items() if barren(v) and (r := _parse(key)) is not None}
 
 
 def exhausted_cells(
@@ -385,9 +438,8 @@ def exhausted_cells(
     if kb is None or map_id is None:
         return pending
     with kb.lock:
-        root = kb.extra.get(KEY)
-        row = root.get(str(map_id)) if isinstance(root, dict) else None
-        cuts = row.get("cuts") if isinstance(row, dict) else None
+        row = _stored_row(kb, map_id)
+        cuts = row.get("cuts") if row is not None else None
         recent = [c for c in cuts if isinstance(c, dict) and tick - int(c.get("tick", 0)) < REGROW_TICKS] if isinstance(cuts, list) else []
     return pending | {(int(c["x"]), int(c["y"])) for c in recent if "x" in c and "y" in c}
 
@@ -410,7 +462,8 @@ def blocks_to_region(pos: Pos, region: tuple[int, int]) -> int:
 
 def summary(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, Any]:
     """The planner's ``gem_yield``: the best sampled regions, at any distance,
-    and the barren ones near us.
+    and the barren ones near us, with ``expected_yield``, the map's
+    measured gems a cut that poor and good are judged against.
 
     A region is named by its corner block ``x, y`` (``REGION_SIZE`` on a side),
     so a ``gather_gems`` op can name it back; a best region also carries its
@@ -423,7 +476,9 @@ def summary(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, Any]:
     best: list[tuple[float, int, dict[str, Any]]] = []
     dry: list[dict[str, int]] = []
     sampled_here: dict[str, int] | None = None
-    for key, region in regions(kb, w.map_id).items():
+    by_region = regions(kb, w.map_id)
+    rate = expected_yield(by_region)
+    for key, region in by_region.items():
         r = _parse(key)
         if r is None:
             continue
@@ -439,7 +494,7 @@ def summary(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, Any]:
             entry = {**corner, "cuts": cuts, "gems": gems, "yield": round(gems / cuts, 2), "distance": distance}
             best.append((gems / cuts, -distance, entry))
     best.sort(key=lambda t: (t[0], t[1]), reverse=True)
-    out: dict[str, Any] = {"region_size": REGION_SIZE}
+    out: dict[str, Any] = {"region_size": REGION_SIZE, "expected_yield": round(rate, 2)}
     if sampled_here is not None:
         out["here"] = sampled_here
     out["best"] = [e for _, _, e in best[:SUMMARY_BEST]]

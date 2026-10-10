@@ -65,7 +65,7 @@
 
   "A21": {"state": "done"},
 
-  "A22": {"state": "done", "note": "Free-play run 5: Gather and Detour keep off ground remembered hostiles hold (posts, last-seen cells, reach learned from hits) and take no target whose route crosses a known hostile's reach, unless the gather_gems op sets fight; while Gather works only in a target region it walks to piles only there."},
+  "A22": {"state": "done", "note": "Free-play run 5: Gather and Detour keep off ground remembered hostiles hold (posts, last-seen cells, reach learned from hits) and take no target whose route crosses a known hostile's reach, unless the gather_gems op sets fight; while Gather works only in a target region it walks to piles only there. Free-play run 6: hostile NPC types and their sightings are kept in the world knowledge base across runs (hostile_memory), and Gather picks the nearest bush or grass by walk, not any bush before any grass."},
 
   "A23": {"state": "done"},
 

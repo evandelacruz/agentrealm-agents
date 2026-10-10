@@ -42,6 +42,7 @@ from .item_table import (
     use_npc_type,
     use_target_block,
 )
+from .hostile_memory import load_hostiles, save_hostiles
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
@@ -192,6 +193,8 @@ class Runner:
         self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
         self._removed_map: int | None = None  # A18: map the character was on when it was taken off
         self.world = WorldModel(character_id)
+        # Hostile types and posts earlier runs learned (free-play run 6); saved back at exit.
+        self._loaded_hostiles = load_hostiles(knowledge, self.world)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
         self.rng = random.Random(seed)
@@ -366,6 +369,7 @@ class Runner:
             if self.knowledge is not None:
                 # Tiles learned from tick deltas, which terrain reads did not merge.
                 sync_world_maps(self.knowledge, self.world)
+                save_hostiles(self.knowledge, self.world, self._loaded_hostiles)
             self.trace.close()
 
     def next_window(self, not_before: float) -> None:

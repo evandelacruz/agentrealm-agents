@@ -129,8 +129,8 @@ def is_attacker(w: WorldModel, e: Entity) -> bool:
 
 def known_hostile(w: WorldModel, e: Entity) -> bool:
     """``e`` has shown it is hostile: a boss, the last thing that hit us, or of a
-    type that has swung at us, hit us or died in view this run
-    (``WorldModel.hostile_types``, ``threat``). Helpers never do."""
+    type that has swung at us, hit us or died in view, this run or an earlier
+    one (``WorldModel.hostile_types``, ``threat``). Helpers never do."""
     if e.is_boss or is_attacker(w, e):
         return True
     key = type_key_for_entity(e)

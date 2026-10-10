@@ -151,5 +151,7 @@
 
   "A74": {"state": "open", "note": "A67 run 4: Equip clears an unowned non-weapon from the armed slot; Heal records only a weapon to re-arm."},
 
-  "A75": {"state": "open", "note": "A67 run 4: a buy with no shop item in sight stops at the nearest known shop cell first."}
+  "A75": {"state": "open", "note": "A67 run 4: a buy with no shop item in sight stops at the nearest known shop cell first."},
+
+  "A76": {"state": "open", "note": "A67 run 4: the M8 heal_potion gate counts a self-Use with a potion in hand, even one that drank nothing (228 s, potions 2 → 2); count only a Use that uses a potion up."}
 }

@@ -293,4 +293,4 @@ Decisions outside held queues: 61 cuts (44 bush, 17 grass), 42 Gather walks, 25 
    223 s  shop small_potion → (422, 398)          first sight of the shop
    ```
 
-**Minor:** Travel paced between two cells twice (above, `states/travel.py:242–245`). The Use at 228 s on a just-bought potion at 8/10 consumed nothing. The planner retargeted `gather_gems` four times in 50 s on 4–17-cut samples, though Gather already relocates itself after 20 cuts.
+**Minor:** Travel paced between two cells twice (above, `states/travel.py:242–245`). The Use at 228 s on a just-bought potion at 8/10 consumed nothing, yet the M8 potion gate counted it (A76). The planner retargeted `gather_gems` four times in 50 s on 4–17-cut samples, though Gather already relocates itself after 20 cuts.

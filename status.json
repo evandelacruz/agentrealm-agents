@@ -139,9 +139,9 @@
 
   "A67": {"state": "open", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 filed: accidental sword buy, 0 gems, 370 s Break Arm loop; short-run gates only. Rerun after A68-A70."},
 
-  "A68": {"state": "open", "note": "A67 run 1: Break flips Arm between two held weapons forever; armed weapon not a candidate, step dropped behind the Arm."},
+  "A68": {"state": "done", "note": "Armed supply is a candidate and wins a tie (#139); Break steps toward its block and arms only once in reach, so the step is never dropped behind an Arm."},
 
   "A69": {"state": "open", "note": "A67 run 1: travel to shop ends on the item cell and takes (buys) it."},
 
-  "A70": {"state": "open", "note": "A67 run 1: planner State has no stall signal or entrances, and echoes the 0,0 symbolic travel placeholder."}
+  "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."}
 }

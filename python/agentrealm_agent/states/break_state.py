@@ -82,7 +82,10 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
 
 
 def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: str = "Break") -> StateOutcome:
-    """Open ``choice``'s block: arm its supply and ``Use`` it in reach, else step toward it.
+    """Open ``choice``'s block: step toward it, then in reach arm its supply and ``Use`` it.
+
+    Arming waits until the block is in reach. Only a decision's first intent
+    is sent, so an ``Arm`` ahead of the step would leave the step unsent (A68).
 
     **Break** runs it, and so does **Heal** for food behind a block the
     weapon opens (A10).
@@ -90,20 +93,20 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
     m = ctx.memory
     _, plan_avoid, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)
     reach = use_reach(ctx.knowledge, choice.supply.code)
-    intents: list[dict] = []
-    if w.armed_code != choice.supply.code:
-        if m.break_rearm is None and w.armed_code:
-            m.break_rearm = w.armed_code
-        if choice.supply.id >= 0:
-            intents.append(arm(choice.supply.id))
-            att = nav_stuck.active(m, w)
-            if state == GOAL_STATE and att is not None and att.level == nav_stuck.BREAK:
-                att.arm_decisions += 1
 
     here = w.pos
     if here is None or w.map_id is None:
         return StateOutcome(None, "position unknown", state=state)
     if chebyshev(here, choice.pos) <= reach:
+        intents: list[dict] = []
+        if w.armed_code != choice.supply.code:
+            if m.break_rearm is None and w.armed_code:
+                m.break_rearm = w.armed_code
+            if choice.supply.id >= 0:
+                intents.append(arm(choice.supply.id))
+                att = nav_stuck.active(m, w)
+                if state == GOAL_STATE and att is not None and att.level == nav_stuck.BREAK:
+                    att.arm_decisions += 1
         m.break_pending = (w.map_id, choice.pos, choice.capability)
         return StateOutcome(
             intents + [use_block(choice.pos)], f"break {choice.capability} @ {choice.pos}", state=state, progress=False
@@ -128,7 +131,7 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
                 nav_stuck.escalate(m, w, att, stuck_reason)
         return StateOutcome(None, f"cannot reach {choice.pos}", state=state)
     m.path, m.goal = path or [], GOAL
-    return StateOutcome(intents + [set_position(step)], f"break → {choice.pos}", state=state)
+    return StateOutcome([set_position(step)], f"break → {choice.pos}", state=state)
 
 
 class BreakState(State):

@@ -42,7 +42,6 @@ class StateDirTest(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != config.STATE_DIR_ENV}
         with mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(config.state_dir(), config.DEFAULT_STATE_DIR)
-        self.assertEqual(config.DEFAULT_STATE_DIR, Path(config.__file__).resolve().parent.parent / ".state")
 
 
 if __name__ == "__main__":

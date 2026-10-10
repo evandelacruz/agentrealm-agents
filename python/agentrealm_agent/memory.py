@@ -114,6 +114,9 @@ class Memory:
     retreat_walk: Pos | None = None
     retreat_to: Pos | None = None
     retreat_gaps: list[tuple[int, int]] = field(default_factory=list)
+    # (safe goal, tick) a losing Retreat last drank or fought back instead of
+    # walking: the walk's stuck window does not count the time since (A9).
+    retreat_paused: tuple[Pos, int] | None = None
     # The runner's park phase (A66): the run is over and only the survival
     # reflexes and Park run, walking to safe ground before the exit.
     parking: bool = False

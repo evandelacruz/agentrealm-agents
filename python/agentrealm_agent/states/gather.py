@@ -456,6 +456,55 @@ def _end_walk_out(m: Memory) -> None:
         m.path, m.goal, m.gather_target = [], "", None
 
 
+# Triggers that say the character's situation changed: a reason to move a
+# ``gather_gems`` region (``keep_gather_region``).
+SITUATION_TRIGGERS = frozenset({"death", "map", "hurt"})
+
+
+def keep_gather_region(
+    old: GoalOp,
+    new: GoalOp,
+    w: WorldModel,
+    m: Memory,
+    knowledge: KnowledgeBase | None,
+    gem_cuts: GemYieldTracker | None,
+    triggers: list[dict],
+    tick_hz: int = DEFAULT_TICK_RATE_HZ,
+) -> GoalOp | None:
+    """``new`` with ``old``'s region when a planner reply moves a ``gather_gems``
+    head's region for no reason, else None (A71).
+
+    The region a ``gather_gems`` names is its committed target. It moves
+    only for a reason: the region is exhausted (barren or poor), Gather
+    found it impossible (no cut took effect there for ``STALL_SECONDS``),
+    or the situation changed (a death, a new map, a hurt, or a hostile pack
+    seen). Another cell of the same region is the same target. Free-play
+    run 4: the planner moved the region 4 times in 50 s. Two ops that differ
+    in anything but the region, or that name none, are different goals.
+    """
+    if old.get("op") != "gather_gems" or new.get("op") != "gather_gems" or old.get("count") != new.get("count"):
+        return None
+    if "x" not in old or "x" not in new or (old["x"], old["y"]) == (new["x"], new["y"]):
+        return None
+    kept = {**new, "x": old["x"], "y": old["y"]}
+    region = region_of((old["x"], old["y"]))
+    if region == region_of((new["x"], new["y"])):
+        return kept
+    if region in barren_regions(knowledge, w.map_id) or region in poor_regions(knowledge, w.map_id):
+        return None  # exhausted
+    if m.gather_spell is not None:
+        since, seen = m.gather_spell
+        last_cut = gem_cuts.last_cut_tick if gem_cuts is not None and gem_cuts.last_cut_tick is not None else since
+        if w.tick - seen < STALL_SECONDS * tick_hz and w.tick - max(since, last_cut) >= STALL_SECONDS * tick_hz:
+            return None  # impossible: no cut there
+    for t in triggers:
+        if t.get("trigger") in SITUATION_TRIGGERS:
+            return None  # new information
+        if t.get("trigger") == "discovery" and any(f.get("kind") == "hostile_pack" for f in t.get("finds") or []):
+            return None
+    return kept
+
+
 def _regions(
     w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None
 ) -> tuple[set[tuple[int, int]], tuple[int, int] | None, bool]:

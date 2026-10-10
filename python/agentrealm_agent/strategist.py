@@ -108,6 +108,7 @@ from .gem_yield import summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, greeted_npc_ids, in_sight, spoken_npc_ids
+from .states.gather import keep_gather_region
 from .survival import known_hostile, retreat_goal
 from .travel.knowledge import iter_entrances, town_from_kb
 from .travel.ops import travel_op_from_plan_goal
@@ -1129,6 +1130,17 @@ class Strategist:
         if repeats:
             record["pinned_repeats"] = repeats
         goals = pinned + [g for g in goals if g not in repeats]
+        head = old.current()
+        if goals and head is not None:
+            kept = keep_gather_region(
+                head, goals[0], runner.world, runner.mem, runner.knowledge, runner.gem_cuts, triggers, runner.tick_hz
+            )
+            if kept is not None:
+                # The region is the head's committed target (A71): no reason to move it.
+                note = f"gather_gems kept its region at {head['x']}, {head['y']}: it is not exhausted, cuts there still work, and nothing changed"
+                record["region_kept"] = goals[0]
+                self.rejected = [*self.rejected, note]
+                goals = [kept, *goals[1:]]
         if same_ops(goals, old.goals[old.index :]):
             # A timer reply that re-sends the stack (or leaves an empty one
             # empty): keep its progress (stall clock, wait start, block
@@ -1144,7 +1156,6 @@ class Strategist:
             tick_hz=runner.tick_hz,
             directive_end=len(pinned),
         )
-        head = old.current()
         new_head = not (goals and head is not None and same_ops(goals[:1], [head]))
         if new_head and head is not None and runner.mem.held_queue is not None:
             # Mid-action: the new head waits for the queue to end (A71).

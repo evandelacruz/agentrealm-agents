@@ -26,6 +26,7 @@ from .healing import hurt
 from . import targets as targets_mod
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from .survival import is_hostile, pursuer_peaks, reach_by_hostile, safe_goals, town_cell
+from .executor.movement import step_landing
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -156,6 +157,36 @@ def step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:
     if w.view.tiles.get(p) in DOORS:
         return True
     return w.view.walkable(p) and p not in w.occupied() and p not in w.for_sale()
+
+
+def remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
+    """Tiles the held walk queue still steps onto, from tracked position.
+
+    Only the queue on the server counts: the plan past its horizon is
+    replanned when the queue runs out anyway.
+    """
+    if w.pos is None or m.pending_intents is None:
+        return []
+    pos = w.pos
+    cells: list[Pos] = []
+    for i in range(m.pending_next_index, len(m.pending_intents)):
+        intent = m.pending_intents[i]
+        if intent.get("verb") != "Step":
+            continue
+        pos = step_landing(pos, intent["direction"])
+        cells.append(pos)
+    return cells
+
+
+def route_ahead(w: WorldModel, m: Memory) -> list[Pos]:
+    """Every cell the walk under way still steps onto, from where we stand:
+    the held queue's Steps (``remaining_walk_cells``), then ``m.path``.
+
+    The executor cuts the cells it queues off ``m.path``, so ``m.path``
+    alone starts up to a queue ahead of us; anything priced by steps from
+    here reads this instead (Detour, free-play run 4).
+    """
+    return remaining_walk_cells(w, m) + list(m.path)
 
 
 def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos | None:

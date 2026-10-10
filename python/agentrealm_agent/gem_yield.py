@@ -72,8 +72,8 @@ REGION_SIZE = 16  # blocks per region side
 # ``expected_yield`` until our own cuts on a map outweigh it.
 PRIOR_YIELD = 0.20
 PRIOR_CUTS = 20  # the prior counts as this many cuts
-# A region at the expected rate shows no gem in ``barren_min_cuts`` cuts at
-# most this often, so a barren mark is rarely wrong.
+# Ground at the manual's lowest rate shows no gem in ``BARREN_MIN_CUTS`` cuts
+# at most this often, so a barren mark is rarely wrong.
 BARREN_FALSE_RATE = 0.04
 GEM_WINDOW_TICKS = 5  # a gem that shows up later than this is not the cut's
 MAX_RECORDS = 500  # cut records kept per map; region totals are kept in full
@@ -376,7 +376,9 @@ def barren(region: dict[str, Any]) -> bool:
 
 
 def poor(region: dict[str, Any], rate: float = PRIOR_YIELD) -> bool:
-    """A fair sample under half the expected ``rate`` (a barren one too, once it has that many cuts; one with fewer is skipped as barren)."""
+    """A fair sample under half the expected ``rate``. A barren region is
+    poor too once it has ``FAIR_SAMPLE_CUTS`` cuts; before that it is skipped
+    as barren only."""
     cuts = int(region.get("cuts", 0))
     return cuts >= FAIR_SAMPLE_CUTS and int(region.get("gems", 0)) < rate / 2 * cuts
 

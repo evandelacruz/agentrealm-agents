@@ -9,9 +9,10 @@ per hostile.
 Gather and Detour keep their targets and routes off this ground
 (``states/gather_safe.py``). A remembered post fades (``Sighting.strength``,
 free-play run 9): once faded it holds no ground, only prices it, so Gather
-cuts its grass when no free grass is near (``Danger.price``). Retreat, Park and Heal pick a safe cell only
-outside it, and Flee runs toward the cell Retreat picked, so the two never
-pull opposite ways (``pathing.retreat_safe_goal``, free-play run 7).
+cuts its grass when no free grass is near (``Danger.price``). Retreat, Park
+and Heal pick a safe cell only outside it, and Flee runs toward the cell
+Retreat picked, so the two never pull opposite ways
+(``pathing.retreat_safe_goal``, free-play run 7).
 """
 
 from __future__ import annotations
@@ -73,7 +74,7 @@ class Danger:
     def price(self, pos: Pos) -> int:
         """Steps the faded posts whose ground covers ``pos`` add to it: the
         dearest one's, so it stays at most ``FADED_POST_STEPS``."""
-        return max((steps for (cx, cy), r, steps in self.priced if chebyshev((cx, cy), pos) <= r), default=0)
+        return max((steps for c, r, steps in self.priced if chebyshev(c, pos) <= r), default=0)
 
 
 def danger(w: WorldModel, policy: Policy, fight: bool = False) -> Danger:
@@ -109,7 +110,8 @@ def held_by_hostile(
             continue
         zones = []
         if s.post and _post_faded(s) == faded:
-            zones.append((s.home, max(policy.hostile_range, min(s.reach, POST_REACH_CAP)) + GATHER_SHADOW_MARGIN))
+            reach = max(policy.hostile_range, min(s.reach, POST_REACH_CAP))
+            zones.append((s.home, reach + GATHER_SHADOW_MARGIN))
         if key not in in_view and _last_seen_faded(w, s) == faded:
             zones.append((s.entity.pos, gather_bar(w, s.entity, policy)))
         if zones:

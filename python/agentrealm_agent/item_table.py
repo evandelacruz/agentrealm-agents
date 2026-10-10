@@ -28,13 +28,13 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   lowers that type's best hit, not the item's defense stat.
 
 - ``capabilities``: sorted list of the capabilities (``cut``, ``chop``,
-  ``smash``, ``burn``, ``blast``) this subtype has opened a block with: the
-  ``BlockChanged`` a break waited for, with this subtype armed after that
+  ``smash``, ``burn``, ``blast``) this subtype has: the ones the Manual's
+  Supplies reference lists in its ``use_effects``, filed at the start of a run
+  (A54, ``supplies.file_capabilities``), plus any it has opened a block with:
+  the ``BlockChanged`` a break waited for, with this subtype armed after that
   response's observation (A28, A46). Only ever grows. A failed break proves
   nothing about the item (the block decides, docs/GAME_NOTES.md Breaking
-  blocks), so it removes nothing. No read serves capabilities (PLAN.md Server
-  gaps), and the manual's per-class rules are not stored here: they are
-  applied at read time in ``break_memory.MANUAL_CAPABILITIES``.
+  blocks), so it removes nothing.
 - ``life_on_pickup``: ``True`` once ``lives`` rose in a response whose only
   applied ``Take`` was this subtype (A47, ``loot.learn_life_code``). Loot then
   scores it as a life.
@@ -334,7 +334,14 @@ def merge_weapon_hit(items: dict[str, dict[str, Any]], code: str | None, npc_typ
 
 
 def absorb_supply_entry(items: dict[str, dict[str, Any]], entry: dict) -> None:
-    merge_item(items, _supply_code(entry), gem_price=entry.get("gem_price"))
+    """File a supply entry's facts: ``gem_price`` from an entity read, or
+    ``capabilities`` from the Supplies reference (A54, ``supplies``)."""
+    code = _supply_code(entry)
+    merge_item(items, code, gem_price=entry.get("gem_price"))
+    caps = entry.get("capabilities")
+    for cap in caps if isinstance(caps, list) else ():
+        if isinstance(cap, str):
+            merge_capability(items, code, cap)
 
 
 def _entity_kind_entries(entities: dict, kind: str) -> Iterable[dict]:

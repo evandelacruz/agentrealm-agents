@@ -6,7 +6,7 @@ import math
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from .break_memory import WEAPON_DAMAGE
+from .supplies import weapon_damage
 from .threat import ThreatTable, TypeKey, type_key_for_entity
 from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
@@ -30,8 +30,9 @@ UNKILLED_HOSTILE_HEALTH = 10
 BASE_ATTACK_POWER = 2
 COMBAT_DIE = 20
 COMBAT_HIT_TARGET = 10
-# Weapon damage is ``break_memory.WEAPON_DAMAGE``, the one list of weapons.
-# An armed item not on it (food, a tool, nothing) swings as the starting knife.
+# Weapon damage is the Supplies reference's (``supplies.weapon_damage``, A54).
+# An armed item it lists as no weapon (food, a tool, nothing) swings as the
+# starting knife.
 STARTING_WEAPON = "pocket_knife"
 NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)
@@ -313,7 +314,9 @@ def swing_damage(weapon: str | None) -> float:
     """Expected damage of one swing of ``weapon`` at a hostile: the hit
     chance times the mean of 1 up to attack power plus weapon damage (the
     pocket knife: 0.65 × 2.5)."""
-    damage = WEAPON_DAMAGE.get(weapon or "", WEAPON_DAMAGE[STARTING_WEAPON])
+    damage = weapon_damage(weapon)
+    if damage is None:
+        damage = weapon_damage(STARTING_WEAPON) or 0
     return hit_chance() * (1 + max(1, BASE_ATTACK_POWER + damage)) / 2
 
 

@@ -40,29 +40,33 @@ class BreakMemoryTest(unittest.TestCase):
     def test_break_key_shape(self):
         self.assertEqual(break_key(12, (10, 20), "cut"), "12,10,20,cut")
 
-    def test_capabilities_from_manual_classes(self):
+    def test_capabilities_from_the_supplies_reference(self):
         self.assertEqual(capabilities_for_code("bronze_sword"), frozenset({"cut", "chop"}))
         self.assertEqual(capabilities_for_code("pocket_knife"), frozenset({"cut"}))
         self.assertEqual(capabilities_for_code("bronze_mallet"), frozenset({"smash"}))
         self.assertEqual(capabilities_for_code("matches"), frozenset({"burn"}))
+        self.assertEqual(capabilities_for_code("bomb"), frozenset({"blast"}))
+        self.assertEqual(capabilities_for_code("torch"), frozenset({"burn"}), "light is not a break capability")
 
     def test_unsourced_code_carries_nothing(self):
-        # No substring guessing: a code GAME_NOTES does not name has no class.
-        for code in ("iron_sword", "big_bomb", "matchbox", "torch_holder"):
+        # No substring guessing: a code the Supplies reference does not list has none.
+        for code in ("fake_cleaver", "big_bomb", "matchbox", "torch_holder"):
             self.assertEqual(capabilities_for_code(code), frozenset(), code)
 
     def test_cannot_cut_is_a_known_miss_only(self):
-        for code in ("small_potion", "apple", "bronze_mallet", "matches"):
+        for code in ("small_potion", "apple", "bronze_mallet", "matches", "teleport_scroll", "raft"):
             self.assertTrue(cannot_cut(code), code)
         for code in ("pocket_knife", "bronze_sword", "fake_cleaver", None):
             self.assertFalse(cannot_cut(code), code)
 
     def test_capability_learned_from_an_opened_break(self):
         kb = KnowledgeBase.empty("sandbox")
-        record_attempt(kb, map_id=1, pos=(3, 4), capability="cut", result="opened", code="iron_sword")
-        record_attempt(kb, map_id=1, pos=(5, 4), capability="chop", result="applied_no_effect", code="iron_sword")
-        self.assertEqual(capabilities_for_code("iron_sword", kb), frozenset({"cut"}))
-        self.assertEqual(capabilities_for_code("iron_mallet", kb), frozenset())
+        record_attempt(kb, map_id=1, pos=(3, 4), capability="cut", result="opened", code="fake_cleaver")
+        record_attempt(kb, map_id=1, pos=(5, 4), capability="chop", result="applied_no_effect", code="fake_cleaver")
+        self.assertEqual(capabilities_for_code("fake_cleaver", kb), frozenset({"cut"}))
+        self.assertEqual(capabilities_for_code("fake_hammer", kb), frozenset())
+        record_attempt(kb, map_id=1, pos=(6, 4), capability="smash", result="opened", code="pocket_knife")
+        self.assertEqual(capabilities_for_code("pocket_knife", kb), frozenset({"cut", "smash"}), "a break adds to the reference")
 
     def test_failed_pair_is_remembered(self):
         kb = KnowledgeBase.empty("sandbox")

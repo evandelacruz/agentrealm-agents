@@ -593,10 +593,12 @@ class SwingTest(unittest.TestCase):
         self.assertAlmostEqual(survival.swing_damage("small_potion"), survival.swing_damage("pocket_knife"))
 
     def test_every_weapon_has_a_damage_and_nothing_else_does(self):
-        """Review on #172: one list of weapons, so none swings as the knife unseen."""
-        from agentrealm_agent.break_memory import WEAPON_DAMAGE, WEAPONS
-        self.assertEqual(set(WEAPON_DAMAGE), set(WEAPONS))
-        self.assertIs(survival.WEAPON_DAMAGE, WEAPON_DAMAGE)
+        """Review on #172: one list of weapons, so none swings as the knife
+        unseen. Both are the Supplies reference's (A54)."""
+        from agentrealm_agent import supplies
+        for code in supplies._table:
+            self.assertEqual(supplies.weapon_damage(code) is not None, supplies.is_weapon(code), code)
+        self.assertAlmostEqual(survival.swing_damage("iron_sword"), 0.65 * (1 + 2 + 8) / 2)
 
     def test_a_hostile_swings_on_the_same_roll(self):
         """Its damage number is its attack power: 2 hits 65%, 1 hits 60%. The

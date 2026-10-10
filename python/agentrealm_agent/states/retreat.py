@@ -12,7 +12,9 @@ from __future__ import annotations
 import dataclasses
 
 from ..directives import attack_forbidden
+from ..memory import Memory
 from ..navigation import cost_path, no_way, oscillation
+from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
 from ..survival import (
     LOSING_NAV,
@@ -25,6 +27,7 @@ from ..survival import (
     retreat_goal,
     safe_goals,
     should_retreat,
+    town_cell,
     would_lose,
 )
 from ..world import Entity, Pos, WorldModel, chebyshev
@@ -85,6 +88,10 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
 
     **Retreat** runs it, and so does **Flee** when running away is not working
     (A9); Flee passes the oscillation escape it already took as ``paced``.
+
+    A goal the walk gets no nearer to in a stuck window (``no_progress``) is
+    ruled out for ``SAFE_UNREACHABLE_TICKS`` and the next one is taken; the
+    town cell, the last resort, is only planned again.
     """
     m, policy = ctx.memory, ctx.policy
     goals = safe_goals(w, ctx.knowledge)
@@ -99,6 +106,17 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     # The nearest safe cell a path reaches, else town (free-play run 2). The
     # escape cells shut only this decision's route, not where it may lead.
     goal = retreat_safe_goal(m, w, policy, ctx.knowledge, plan_avoid, plan_costly)
+    if goal is not None and no_progress(w, m, goal):
+        # Reachable by budget but no nearer in a whole stuck window: rule it
+        # out for a while and take the next candidate, else town (free-play
+        # run 3). Town is the last resort and is never ruled out this way:
+        # its walk only plans afresh.
+        if goal != town_cell(w, ctx.knowledge):
+            m.safe_unreachable[(w.map_id, goal)] = w.tick
+        if m.goal == "safe":
+            m.path = []
+        m.retreat_walk = None
+        goal = retreat_safe_goal(m, w, policy, ctx.knowledge, plan_avoid, plan_costly)
     lasting = grid_params(policy, set(plan_avoid), set(plan_costly))  # without this decision's escape: what no_way proves
     plan_avoid |= escape
     if goal is None:
@@ -137,6 +155,31 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     m.retreat_walk, m.walk_skip = goal, set(pursuers)
     reason = f"retreat → safe {goal}" + (" (losing ground)" if losing else "")
     return StateOutcome([set_position(step)], reason, reflex=True, state=state)
+
+
+def no_progress(w: WorldModel, m: Memory, goal: Pos) -> bool:
+    """The walk to ``goal`` has gone a stuck window (``PROGRESS_TICK_LIMIT``)
+    without its remaining path shortening (A9, A66).
+
+    A15's progress record, without its escalation ladder: the attempt for
+    the ``safe`` walk at ``goal`` is sampled each call (``nav_stuck.observe``)
+    but never made active, so it changes no other walk's window or the
+    oscillation guard. A decision that skips it starts the window over
+    (``nav_stuck.resume``). Once it reports, the attempt is dropped, so the
+    goal gets a fresh window if it is picked again.
+    """
+    att = nav_stuck.attempt(m, w, "safe", goal)
+    if att is None:
+        return False
+    nav_stuck.resume(m, att, w.tick)
+    started = att.window_tick if att.best is None else None
+    nav_stuck.observe(att, w, m.path if m.goal == "safe" and m.path and m.path[-1] == goal else None)
+    if started is not None:
+        att.window_tick = started  # the first path planned sets the bar; it is not progress
+    if w.tick - att.window_tick < nav_stuck.PROGRESS_TICK_LIMIT:
+        return False
+    nav_stuck.finish(m, att)
+    return True
 
 
 def losing_ground(w: WorldModel, ctx: PlayContext, goal: Pos) -> bool:

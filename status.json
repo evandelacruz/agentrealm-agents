@@ -25,7 +25,7 @@
 
   "A8": {"state": "done"},
 
-  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats."},
+  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats. Free-play run 3: a Retreat, Park or Heal walk that gets no nearer a safe tile in a stuck window rules it out for a bounded time and moves on to the next candidate, else town (retreat.no_progress; Heal through bounded_step)."},
 
   "A10": {"state": "done"},
 
@@ -135,7 +135,7 @@
 
   "A65": {"state": "done", "note": "Planner State nearby_npcs and npcs_spoken_to; Greet reflex says hello once to a likely helper in sight (stays put, not known hostile; none off safe ground while NPCs are hostile). No live run yet."},
 
-  "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Free-play run 2 timed out on a walled-off safe tile; Park now picks the nearest one a path reaches, else town."},
+  "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Free-play run 2 timed out on a walled-off safe tile; Park now picks the nearest one a path reaches, else town. Free-play run 3: Park sat 60 s two cells from a safe tile it never got nearer; a Park or Retreat walk with no progress in a stuck window now rules the tile out for 300 ticks and moves on, else town."},
 
   "A67": {"state": "open", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 filed: accidental sword buy, 0 gems, 370 s Break Arm loop; short-run gates only. Rerun after A68-A70."},
 

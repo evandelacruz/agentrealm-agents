@@ -65,8 +65,9 @@ class ArmThenUseTest(unittest.TestCase):
         queue = arm_then_use(self.ARM, use_block(0, 0), horizon_ticks=HORIZON, ticks_since_last_use=3)
         self.assertEqual(queue, [self.ARM] + waits_then_use(DEFAULT_WEAPON_COOLDOWN_TICKS - 3 - 1))
 
-    def test_a_use_past_the_horizon_leaves_the_arm_alone(self):
-        self.assertEqual(arm_then_use(self.ARM, use_block(0, 0), horizon_ticks=3, ticks_since_last_use=1), [self.ARM])
+    def test_a_use_past_the_horizon_sends_no_arm_alone(self):
+        # Free-play run 3: an Arm sent without its Use left the potion armed.
+        self.assertEqual(arm_then_use(self.ARM, use_block(0, 0), horizon_ticks=3, ticks_since_last_use=1), [])
 
 
 class PaceSpeechTest(unittest.TestCase):

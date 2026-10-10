@@ -452,7 +452,7 @@ Decisions outside held queues: 65 no state (the park, and 3 planner waits), 71 G
    660.8 s  park timed out at 76:383,369 after 60.4s, queue cleared
    ```
 
-2. **The first decision walks into a pack it does not know is hostile, and the plan that lands 1 s later does not stop it.** At 0.6 s, before any plan, the Explore safe default queued 10 steps north toward (415, 353), from (430, 378) to (429, 368). That is 1 cell from the gristlewick, whose pack was in view at the first `entities` read. Which NPC types are hostile is learned per run (`WorldModel.hostile_types`, `world.py:246`, filled at `:691`). The knowledge base has an `npc_types` table (`knowledge_base.py:67`) that nothing writes. So the type that killed run 5 showed as `"hostile": false` in the planner's State. The planner's `travel` town was applied at 1.8 s, but a new plan never replaces a queue already sent (A71). The queue ran on, and the first hit came at 4.8 s, at 6/10 with no potion. Hostile types should be saved to the knowledge base, and a run that starts hurt beside an NPC pack should not send a walk toward it before the first plan.
+2. **The first decision walks into a pack it does not know is hostile, and the plan that lands 1 s later does not stop it.** At 0.6 s, before any plan, the Explore safe default queued 10 steps north toward (415, 353), from (430, 378) to (429, 368). The gristlewick, whose pack was in view at the first `entities` read, stood 9 cells away when the walk was sent, and by 4.8 s it had moved to 1 cell east of the character. Which NPC types are hostile is learned per run (`WorldModel.hostile_types`, `world.py:246`, filled at `:691`). The knowledge base has an `npc_types` table (`knowledge_base.py:67`) that nothing writes. So the type that killed run 5 showed as `"hostile": false` in the planner's State. The planner's `travel` town was applied at 1.8 s, but a new plan never replaces a queue already sent (A71). The queue ran on, and the first hit came at 4.8 s, at 6/10 with no potion. Hostile types should be saved to the knowledge base, and a run that starts hurt beside an NPC pack should not send a walk toward it before the first plan.
 
    ```
    0.6 s   @430,378  explore → (415, 353)   10×Step 27×Wait     npc 217 gristlewick at (438, 369) in view
@@ -472,3 +472,107 @@ Decisions outside held queues: 65 no state (the park, and 3 planner waits), 71 G
    ```
 
 **Minor:** The `travel` point (424, 370) that the planner sent at 2/10, to get the character off the field, came back after the respawn. Break then cut 9 bushes on the way back toward where it died (18–63 s). Gather and Retreat paced (369, 398) ↔ (370, 399) at 483–494 s, and the guard gave nothing up. Stuck detection gave up `travel` town at 507 s and a `travel` point 1 cell away at 528 s (a bush and a wall in the way). Greet said hello to 8 chugbugs and 4 snotlings. The first planner call went out before the first observation, so its State said `health=None/None gems=None`.
+
+### Run 7: priced detours take two pile clusters, and a stale reply buys the matches twice
+
+- **Code:** `main` at `76d3094`, after #159 (A73: Detour prices every find by the steps it adds, with an allowance per kind). #162 (Gather and Detour keep off known hostile ground) merged while it ran and is not in it.
+- **Verdict:** exit 0, `PASS` after **601.7 s**, on the short-run gates only. The park **parked safe** at (399, 370) after 3.9 s and cleared the queue. The character started at 10/10, 5 lives and **3 gems** at (383, 369), the cell where run 6's park timed out, 18 cells west of the gristlewick and two snotlings. It had the pocket knife armed and held one small_potion.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; gems earned **yes**; armor **no**; shop weapon **no**; potion reserve **no**; Heal took ground food **no**, Heal drank a potion **no** (Retreat drank it). Planner: 52 calls, 50 plans accepted, 1 error ("payload is not an object", at 195 s).
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–63 s | `travel` town, `read`, `say` farmer, `explore_area` town r20 | The first decision, before any plan, queued a 10-step Explore walk north, away from the pack this time. Travel walked to town. Greet said hello to 8 NPCs. |
+| 63–140 s | `read` ×4–7 (statues and signs), `explore_area`, from 123 s `gather_gems:30` | Read the town signs and statues. Detour took the (413–415, 414) pile (+3). |
+| 140–200 s | `read` ×1–3, `buy` matches, `gather_gems:30` | Bought matches at 182 s (**6 → 1**). The reply applied at 183 s had been asked at 181 s, before the purchase, and put `buy` matches back (defect 3). |
+| 200–315 s | `gather_gems:30`, `buy` matches; from 268 s `gather_gems:15`, then `buy` matches on top | Cut 13 times west of town (+1), and Detour took the (359–361, 360) triple (+3). At 5 gems the second `buy` matches bought a second box (**5 → 0**). |
+| 315–372 s | `gather_gems:25` | Cut 15 times east of town at (430–432, 390–398) (+1). At 361 s Gather picked the pile at (428, 366), 25 cells north, as the pack walked toward it (defect 2). |
+| 372–411 s | `travel` town, `travel` point, `buy` small_potion, `gather_gems` | The gristlewick hit it 7 times. Retreat drank the potion at 7/10. Flee and Retreat then stepped back and forth for 19 s (defect 1), and Heal walked it out at 1/10. |
+| 411–600 s | `wait` 30 s, `travel` town, `gather_gems:25` (368, 384) | Healing in town. Each time a `wait` ended, Gather set out for (428, 366) again, at 1/10, 3/10 and 5/10. Detours to two apples cut the first two walks short (+2 health each). The third reached (400, 367) at 600 s, beside the pack, and the park took it back to safe ground. |
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **3** | **1** (+8 earned, −10 for two matches) |
+| Armed | pocket_knife | pocket_knife |
+| Worn | `{}` | `{}` |
+| Held | small_potion ×1 | matches ×2 |
+| Potions | 1 | 0 |
+
+Bought: matches twice (5 each), by `buy` ops. The second came from a stale reply (defect 3). Equipped: nothing; no `equip` op was sent. Drank: the small_potion, at 376.9 s at 7/10, while the gristlewick was hitting it. It was accepted on the first try.
+
+#### Gems earned
+
+**8**: 6 from piles, both clusters taken by Detour: (413, 414), (414, 414) and (415, 414) at 135–147 s, and (359–361, 360) at 264–267 s. 2 came from cuts, at (369, 386) at 226 s and (430, 395) at 338 s, out of 28 cuts (13 grass, 15 bush), none with no effect.
+
+#### Deaths
+
+**0**. The gristlewick (npc 217) hit it 7 times between 373.7 s and 387.4 s (1+2+2+2+2+1+2 = 12 damage), at (425–431, 368–371). Retreat drank the potion at 7/10, so health ended at 1/10, not dead. It came back to 3/10 and 5/10 from the two apples. In the park phase a snotling hit it once more, for 1.
+
+#### Detours (#159)
+
+| Find | Kind | Detour start | Walked | Straight line | Outcome |
+|---|---|---|---|---|---|
+| (413, 414), with (414, 414) | gem pile ×2 (+1 next to it) | (410, 406) at 126 s | 17 | 8 | Took 2. Pickup took the pile beside it. (415, 414) was left, 2 cells off. |
+| (415, 414) | gem pile | (413, 417) at 143 s | 8 | 2 | Took it. The explore walk had already turned south. |
+| (360, 360), with (359, 360) and (361, 360) | gem pile ×3 | (359, 372) at 259 s | 12 | 12 | Took all 3 in one stop. |
+| (428, 366) | gem pile | (430, 381) at 366 s | 11 | 11 | Broken off: the gristlewick reached it 2 cells short. This was Gather's own target too. |
+| (391, 385) | apple, hurt | (394, 400) at 492 s | 19 | 19 | Took it. |
+| (393, 381) | apple, hurt | (399, 395) at 562 s | 17 | 17 | Took it. |
+
+- **Count:** 6 detours: 4 to gems (3 finds), 2 to food while hurt. No detour to a life.
+- **Taken vs passed:** 6 piles taken, in 2 clusters. Passed in view: the hollow-rock triple (377–379, 377), 6 cells off at closest, never priced (run 6 got a Detour stuck on it). The (439–441, 360) triple, 10 cells off, came in view during the fight. The (359–361, 440) triple was 22 cells off. The singles at (428, 366) and (429, 351) were beside the pack.
+- **Extra steps:** the trace logs the find, not the price, so the extra steps each detour was priced at cannot be read back. Walked steps track the straight line, except the (413–415, 414) cluster: 25 steps for two stops 8 and 2 cells off. Detour aimed at (413, 414) and Pickup took its neighbour, so the third pile was a second detour. The two apples were 17–19 cells off in a straight line, against a 4-step food allowance. So the Gather walk out of town must have passed within a few cells of each. Detour should log the extra steps it priced, so the next run can check the allowances.
+
+#### Run 6 fixes, checked
+
+| Run 6 defect / #161 | Run 7 | |
+|---|---|---|
+| Probe uses up Heal's drink tries (A24, A64, #161) | **Holds.** 1 drink (Retreat, losing ground), accepted at once (`SupplyUsed`). No try was written off. | Run 5: both potions written off in 6 s. |
+| A `buy` buys one more (A21, #161) | **Holds, with stock in hand.** The second `buy` matches ran with 1 held and bought a second, as specified. It was not wanted (defect 3). | Run 6: with stock, not tested. |
+| Park dead end (known) | **Not hit.** The park started at (400, 367) with the pack 1 cell off and parked safe in 3.9 s. | Run 6: timed out at (383, 369). |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 197,055, output 15,252, cache write 101,204, cache read 6,173,444 |
+
+#### Decision mix
+
+Decisions outside held queues: 109 planner waits (healing in town, 420–593 s), 22 Gather walks and 27 cuts (15 bush, 12 grass), 26 greetings, 18 reads (5 read walks), 16 Explore, 15 Detour, 14 shop (9 buy, 5 walks), 12 Heal, 4 heal_measure, 4 heal in safe ground, 11 Flee, 9 Retreat, 10 Travel, 7 `take` (6 gem), 2 path resends, 1 re-arm. Intents: 675 `Step`, 1,864 `Wait`, 28 `Use`, 25 `Say`, 13 `Read`, 10 `Take`, 2 `Arm`. Call mix: 663 `tick`, 189 `entities`, 130 `zone`, 114 `strategist`, 58 `self`, 35 `terrain`, 21 `position`.
+
+#### Top 3 defects
+
+1. **Flee and Retreat step back and forth beside the gristlewick for 19 s, and it takes 6 hits** (`states/retreat.py:108`, `states/flee.py:120`). From 373.7 s Retreat's goal was the safe tile (428, 371). That is 2 cells from the gristlewick at (429, 369), and Retreat's path weighs no danger from the hostile it runs from. Flee stepped away from the gristlewick (west, then east), Retreat stepped back toward (428, 371), and neither reached it. "stop, the step may land on a blocked cell" at 374.9 s suggests the last step onto it was blocked. 11 Flee and 6 Retreat decisions between 373.7 s and 392.3 s, health 7 → 1 after the potion. `no_progress` did not rule the goal out inside its window. Heal's walk south to (405, 393) at 393.2 s got it out. Retreat should not pick a safe tile within reach of the hostile it runs from, or should rule one out after a hit there.
+
+   ```
+   373.7 s  @429,368  flee npc 217                         Step(down)
+   376.5 s  @429,368  retreat → safe (428, 371)            Step(down_left)
+   376.9 s  @428,369  retreat losing ground: arm and use small_potion
+   378.9 s  @428,369  flee npc 217   → 379.5 s @427,369 flee → 380.2 s @426,368 retreat → safe (428, 371)
+   383.7 s  @426,369  flee  → 384.8 s @427,369 flee → 385.6 s @428,369 flee → 386.6 s @429,368 retreat
+   390.2 s  @431,371  retreat → safe (428, 371)    393.2 s  @430,372  heal_measure → (405, 393)
+   ```
+
+2. **Gather takes any gem pile it knows of before the region the op names, at any health and any distance** (`states/gather.py:597–602`). The op named the region (368, 384). Gather's pick still took the nearest pile in `w.entities`, (428, 366), 42 cells from town and out of sight. It is the pile beside the gristlewick pack's ground. It set out for it at 361 s (10/10), 489 s (1/10), 559 s (3/10) and 593 s (5/10). The first walk ended in defect 1's fight. Apple detours cut the next two short, and the last reached (400, 367) beside the pack as the run ended. The hostile part is #162, merged after this run. The rest stands: a named region should bound the pile pick too, and a `wait` that ends should not hand a 1/10 character to a 40-cell walk.
+
+   ```
+   361.3 s  @431,391  gather → (428, 366)                        10/10
+   489.4 s  @390,408  gather → (428, 366) (region 368,384)       1/10
+   559.7 s  @397,401  gather → (428, 366) (region 368,384)       3/10
+   593.5 s  @393,381  gather → (428, 366) (region 368,384)       5/10; 600.3 s attacked at (400, 369)
+   ```
+
+3. **A reply asked before a `buy` finished puts the `buy` back, and buy-one-more turns it into a second purchase** (`strategist.py:1194–1209`, `plan.py:66`). Call 17 was asked at 181.0 s, with `held={"small_potion": 1}`. Shop bought matches at 182.5 s and the op finished. The reply was applied at 183.2 s, and it still held `buy` matches. Later calls saw `matches: 1` held and kept the op ("we hold 1 gem, so gather first"). At 314 s it bought a second box with its last 5 gems. A reply should drop ops that finished between its ask and its apply, and the planner should see that the op it re-sends is already done.
+
+   ```
+   181.0 s  strategist ask (call 17)      held={"small_potion": 1}
+   182.5 s  @413,401  buy matches          gems 6 → 1, op done
+   183.2 s  strategist applied (call 17)  read, buy matches, gather_gems:30
+   314.3 s  @413,401  buy matches          gems 5 → 0   ("Matches bought (2 held)")
+   ```
+
+**Minor:** One planner reply at 195 s was not a JSON object. The next call recovered. The (413–415, 414) cluster took two stops: Detour aimed at one pile, and Pickup took only its neighbour. Greet said hello to 5 chugbugs, 4 snotlings and 2 gristlewicks.

@@ -11,6 +11,8 @@ from ..healing import (
     food_in_sight,
     hurt,
     known_safe_cells,
+    must_arm,
+    must_stand_on,
     note_regen_sample,
     rearm_after_drink,
     regen_known,
@@ -257,7 +259,9 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
         targets_mod.release(m, "heal_food")
     close = kept + [f for f in close if f not in kept]
     for food in close[:FOOD_CANDIDATES]:
-        if chebyshev(food.pos, here) <= 1:
+        # A Take refused out of reach is sent again only from the food's own cell.
+        reach = 0 if must_stand_on(m, food) else 1
+        if chebyshev(food.pos, here) <= reach:
             nav_stuck.finish_in_reach(m, w, "heal_food")
             return _out([take(food.id)], f"take food {food.code}")
         if out := _cut_toward(w, m, policy, ctx, food.pos):
@@ -300,21 +304,30 @@ def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
     ``_rearm_weapon`` on Heal's next decision, the drink done or not (A24). It
     is always a weapon (``equip.weapon_to_rearm``): the one armed now, else
     the last one armed this run, never the potion or tool in the slot (free-play
-    run 4 re-armed a potion). A drink the server refuses is retried at most
-    ``HEAL_MAX_TRIES`` times per supply: the runner counts each refused one
-    against ``heal_drink`` (``Runner._note_heal_refused``), never a drink only
-    decided.
+    run 4 re-armed a potion). A drink the server refused is not sent again
+    into the same situation: the runner files the refusal's reason
+    (``Runner._note_heal_refused``, ``healing.refusal_action``) and
+    ``carried_heal`` skips that supply until it no longer applies. A ``Use``
+    refused with nothing armed is sent next time with its ``Arm``.
+
+    The ``Arm`` never goes out without its ``Use``: a cooldown that does not
+    leave room for both in one queue sends nothing yet (``arm_then_use``).
     """
     item = carried_heal(w, m)
     if item is None:
         return None
+    if w.armed_code == item.code and not must_arm(m, item.id):
+        out = _out([use_self()], f"use {item.code}")
+    elif queue := arm_and_use(w, m, item.id, use_self()):
+        out = _out(queue, f"arm and use {item.code}")
+        out.paced = True
+    else:
+        out = _out(None, f"wait out the cooldown to arm and use {item.code}")
+        out.wait = True
+        return out
     m.heal_drink = item.id
     if m.heal_rearm is None:
         m.heal_rearm = weapon_to_rearm(w, m)
-    if w.armed_code == item.code:
-        return _out([use_self()], f"use {item.code}")
-    out = _out(arm_and_use(w, m, item.id, use_self()), f"arm and use {item.code}")
-    out.paced = True
     return out
 
 

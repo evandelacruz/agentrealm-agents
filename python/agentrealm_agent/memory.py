@@ -13,9 +13,13 @@ from .navigation.walk import Walk
 from .targets import Commitment
 
 if TYPE_CHECKING:
+    from .healing import HealRefusal
     from .states.detour import Detour
 from .travel.strength import StrengthBracket
 from .world import Pos
+
+# ``Memory.goal`` of the safe default's walk (no plan op, PLAN.md Architecture).
+SAFE_EXPLORE_GOAL = "explore"
 
 # Memory fields that cache search work rather than record a decision:
 # ``Memory.snapshot`` shares them instead of copying them (A13 corridors).
@@ -81,7 +85,7 @@ class Memory:
     walk_skip: set = field(default_factory=set)  # hostiles the walk being decided was planned without (Retreat sets it, A63)
     path_skip: set = field(default_factory=set)  # walk_skip of the walk queue sent, never counted in path_threats (A63)
     planned_threats: set = field(default_factory=set)  # hostiles whose reach Heal's or Retreat's path crossed when planned (A63)
-    safe_unreachable: dict = field(default_factory=dict)  # (map_id, cell) -> tick a path check found no way to that safe cell, or a Retreat or Park walk there made no progress (``pathing.reachable_safe_goal``, ``retreat.no_progress``)
+    safe_unreachable: dict = field(default_factory=dict)  # (map_id, cell) -> tick a path check found no way to that safe cell, or a Retreat or Park walk there made no progress, or found no step, for a stuck window (``pathing.reachable_safe_goal``, ``retreat.no_progress``)
     safe_threatened: dict = field(default_factory=dict)  # (map_id, cell) -> {(kind, id): tick that hostile last had the safe cell in its reach} (``pathing.reachable_safe_goal``)
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     hunt_search: HuntSearch | None = None  # Travel's search for a hunting ground when none is known (A27)
@@ -126,6 +130,7 @@ class Memory:
     # (safe goal, tick) a losing Retreat last drank or fought back instead of
     # walking: the walk's stuck window does not count the time since (A9).
     retreat_paused: tuple[Pos, int] | None = None
+    keep_away_hold: int | None = None  # tick the hurt safe default began holding beside a hostile (``explore.keep_away``)
     # The runner's park phase (A66): the run is over and only the survival
     # reflexes and Park run, walking to safe ground before the exit.
     parking: bool = False
@@ -150,7 +155,7 @@ class Memory:
     heal_regen_sample: tuple[int, int, int] | None = None
     heal_regen_absent: bool = False
     heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
-    heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times the server refused it (A24)
+    heal_refusals: dict[tuple[str, int], HealRefusal] = field(default_factory=dict)  # ("take"|"use", supply id) -> its last refusal and what Heal does about it (A80)
     heal_drink: int | None = None  # supply id of the drink sent, until its Use applies or is refused or another queue replaces it (A24)
     heal_rearm: str | None = None  # weapon code armed before a drink; restored once, on Heal's next decision (A24)
     last_weapon: str | None = None  # the last weapon seen armed this run (equip.note_last_weapon): what a drink re-arms
@@ -166,6 +171,13 @@ class Memory:
     equip_refused_sig: tuple | None = None  # loadout and inventory the refusals hold for; None until the next observation syncs it (A19)
     equip_not_wearable: set[str] = field(default_factory=set)  # subtypes Wear rejected with not_wearable for the run (A55)
     equip_try_refused: set[str] = field(default_factory=set)  # subtypes whose slot-learn Wear was refused transiently (A55)
+
+    def cut_safe_default_walk(self) -> None:
+        """Have the runner replace the safe default's held walk queue at its
+        next poll (``resend_held_queue``), with position re-read first. Any
+        other held queue runs on: a reflex's walk is never cut for a plan."""
+        if self.held_queue is not None and self.goal == SAFE_EXPLORE_GOAL:
+            self.resend_held_queue = self.need_position = True
 
     def snapshot(self) -> Memory:
         """A deep copy, for :meth:`restore` after a probe that must leave no trace.

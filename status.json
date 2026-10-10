@@ -25,7 +25,7 @@
 
   "A8": {"state": "done"},
 
-  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats. Free-play run 3: a Retreat, Park or Heal walk that gets no nearer a safe tile in a stuck window rules it out for a bounded time and moves on to the next candidate, else town (retreat.no_progress; Heal through bounded_step). A losing Retreat's drink or swing pauses the safe walk's stuck window. Free-play run 7: a safe cell in any known hostile's ground (in view or remembered, the pursuer's included) is no refuge for Retreat, Park or Heal, and Flee runs toward the refuge Retreat picks (hostile_ground.ground_by_hostile, pathing.retreat_safe_goal)."},
+  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats. Free-play run 3: a Retreat, Park or Heal walk that gets no nearer a safe tile in a stuck window rules it out for a bounded time and moves on to the next candidate, else town (retreat.no_progress; Heal through bounded_step). A losing Retreat's drink or swing pauses the safe walk's stuck window. Free-play run 6: a safe cell no_way proves walled in is ruled out at once, the town cell too, and one with no step found for a stuck window is ruled out then (retreat_step); a path whose first cell is taken only waits. Free-play run 7: a safe cell in any known hostile's ground (in view or remembered, the pursuer's included) is no refuge for Retreat, Park or Heal, and Flee runs toward the refuge Retreat picks (hostile_ground.ground_by_hostile, pathing.retreat_safe_goal)."},
 
   "A10": {"state": "done", "note": "Free-play run 7: Heal's safe pick and walks read the same hostile ground as Retreat, remembered hostiles included; the town cell is skipped too when a hostile holds it."},
 
@@ -33,7 +33,7 @@
 
   "A12": {"state": "done"},
 
-  "A13": {"state": "done", "note": "Free-play run 4: the window search ranks cells by the corridor tree, not by the tile it stands in, and never falls back to a straight line from a corridor with no step."},
+  "A13": {"state": "done", "note": "Free-play run 4: the window search ranks cells by the corridor tree, not by the tile it stands in, and never falls back to a straight line from a corridor with no step. Free-play run 6: a partial path never ends in a pocket in sight, and the corridor's window search learns (LSS-LRTA*, NavSearchState.learned), so it walks out of a dead end."},
 
   "A14": {"state": "done"},
 
@@ -65,7 +65,7 @@
 
   "A21": {"state": "done"},
 
-  "A22": {"state": "done", "note": "Free-play run 5: Gather and Detour keep off ground remembered hostiles hold (posts, last-seen cells, reach learned from hits) and take no target whose route crosses a known hostile's reach, unless the gather_gems op sets fight; while Gather works only in a target region it walks to piles only there. Free-play run 7: the walk to an unseen named region and the move-off from a shadowing hostile keep clear of known hostile ground too."},
+  "A22": {"state": "done", "note": "Free-play run 5: Gather and Detour keep off ground remembered hostiles hold (posts, last-seen cells, reach learned from hits) and take no target whose route crosses a known hostile's reach, unless the gather_gems op sets fight; while Gather works only in a target region it walks to piles only there. Free-play run 6: hostile NPC types and their sightings are kept in the world knowledge base across runs (hostile_memory), and Gather picks the nearest bush or grass by walk, not any bush before any grass. Free-play run 7: the walk to an unseen named region and the move-off from a shadowing hostile keep clear of known hostile ground too."},
 
   "A23": {"state": "done"},
 
@@ -135,7 +135,7 @@
 
   "A65": {"state": "done", "note": "Planner State nearby_npcs and npcs_spoken_to; Greet reflex says hello once to a likely helper in sight (stays put, not known hostile; none off safe ground while NPCs are hostile). No live run yet."},
 
-  "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Free-play run 2 timed out on a walled-off safe tile; Park now picks the nearest one a path reaches, else town. Free-play run 3: Park sat 60 s two cells from a safe tile it never got nearer; a Park or Retreat walk with no progress in a stuck window now rules the tile out for 300 ticks and moves on, else town."},
+  "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Free-play run 2 timed out on a walled-off safe tile; Park now picks the nearest one a path reaches, else town. Free-play run 3: Park sat 60 s two cells from a safe tile it never got nearer; a Park or Retreat walk with no progress in a stuck window now rules the tile out for 300 ticks and moves on, else town. Free-play run 6: with every safe cell ruled out, the park ends ('no path to safe ground') instead of standing out its minute."},
 
   "A67": {"state": "partial", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 (#138): accidental sword buy, 0 gems, 370 s Break Arm loop; its defects A68, A69 and A70 are fixed (#139, #146). Run 3 (#150, 600 s at bd5aeff): no deaths, gems from piles only, no armor or potions; short-run gates only. Its top defects are fixed: Heal's drink sends its Use and Gather cuts only with a cutter (#152, A24, A22), and a Park or Retreat walk that gets no nearer a safe tile rules it out (#151, A9, A66). Run 4 (#156, 600 s at a227906, after A71): no deaths, 17 → 14 gems (one potion bought, 7 from piles), no armor; short-run gates only. Its top defects are A73 (Detour misses gem piles beside the walk), A74 (Equip cannot clear a potion from the armed slot) and A75 (a buy with no shop in sight lets Explore wander). A74 and A75 are fixed in #157, which also makes the drink's Use target self (A24): run 4's Use at 228 s drank nothing. Run 5 (#160, 600 s at 40e82f1): run 4's fixes hold; 1 death (a gristlewick, holding two potions), 14 → 7 gems, one drink that healed; short-run gates only. Its top defects are A77 (the held-queue probe uses up Heal's drink tries), A78 (Gather and Detour walk to piles beside a hostile's post) and A79 (a buy is done once one is held).", "remaining": "Rerun on main once A77–A79 are fixed and record it. Run 2 (fixes in #140) has no notes in the doc."},
 
@@ -145,7 +145,7 @@
 
   "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."},
 
-  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. Free-play run 4 played it live; its fixes: Detour prices finds from where the character stands, queued steps included (pathing.route_ahead), and a planner reply that moves the gather_gems region needs a reason (gem_yield.keep_gather_region)."},
+  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. Free-play run 4 played it live; its fixes: Detour prices finds from where the character stands, queued steps included (pathing.route_ahead), and a planner reply that moves the gather_gems region needs a reason (gem_yield.keep_gather_region). Free-play run 6: the first plan cuts the safe default's walk queue at its next step."},
 
   "A72": {"state": "done", "note": "Planner State signs_seen (unread first, nearest, capped at 5, read flag from read_cells) and a sign discovery trigger for a newly seen unread readable cell. No sign detour; reading stays the planner's read op. No live run yet."},
 
@@ -157,9 +157,11 @@
 
   "A76": {"state": "open", "note": "A67 run 4: the M8 heal_potion gate counts a self-Use with a potion in hand, even one that drank nothing (228 s, potions 2 → 2); count only a Use that uses a potion up."},
 
-  "A77": {"state": "open", "note": "A67 run 5: the held-queue probe counts Heal's drink tries (heal.py:308) without sending the drink and does not restore heal_tries (runner.py:760-783); both starting potions were written off in 6 s and the character died at 2/10 holding them."},
+  "A77": {"state": "done", "note": "Fixed in #161 (the probe restores memory whole and only server rejections are filed); A80 then removed the try count the probe was spending."},
 
   "A78": {"state": "open", "note": "A67 run 5: Gather and Detour picked gem piles beside a roaming gristlewick's post (gather_safe.py:62 checks only a hostile in view near the cell); four trips, 10 -> 3, then the death. Bar a hostile's last-seen post and the route through its reach."},
 
-  "A79": {"state": "open", "note": "A67 run 5: a buy is done once any of the item is held (plan.py:771-772); buy small_potion with 2 held finished at once 8 times."}
+  "A79": {"state": "open", "note": "A67 run 5: a buy is done once any of the item is held (plan.py:771-772); buy small_potion with 2 held finished at once 8 times."},
+
+  "A80": {"state": "done"}
 }

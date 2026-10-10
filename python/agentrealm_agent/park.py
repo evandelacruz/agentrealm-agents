@@ -19,7 +19,9 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .knowledge_base import KnowledgeBase
-from .survival import retreat_goal
+from .memory import Memory
+from .pathing import safe_ruled_out
+from .survival import retreat_goal, safe_goals
 from .world import Pos, WorldModel
 
 # Wall-clock cap on the park phase. 0 turns parking off.
@@ -37,6 +39,7 @@ PARKED_SAFE = "parked safe"
 PARK_TIMED_OUT = "park timed out"
 PARK_ABORTED = "park aborted"  # a second stop signal
 PARK_NOWHERE = "no safe ground known"
+PARK_NO_PATH = "no path to safe ground"  # every safe cell known is ruled out for now
 PARK_DOWNED = "downed"  # dead before the park began
 PARK_DIED = "died while parking"
 
@@ -69,6 +72,13 @@ class ParkReport:
 def parked(w: WorldModel, knowledge: KnowledgeBase | None) -> bool:
     """Standing where Retreat would head: a known safe tile, or the town cell."""
     return w.pos is not None and retreat_goal(w, knowledge) == w.pos
+
+
+def no_path_left(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None) -> bool:
+    """Every safe cell Park could head for is ruled out for now
+    (``pathing.safe_ruled_out``): Park has nowhere left to walk."""
+    goals = safe_goals(w, knowledge)
+    return bool(goals) and all(safe_ruled_out(m, w, p) for p in goals)
 
 
 def install_stop_signals(

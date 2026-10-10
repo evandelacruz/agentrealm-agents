@@ -149,7 +149,7 @@ class TwoLevelSearchTest(unittest.TestCase):
     def test_in_perception_goal_past_the_budget_still_gets_a_path(self):
         # A12 regression: a reachable goal in sight must never read as unreachable.
         w = strip(10, perception=5)
-        self.assertEqual(cost_path(w, (5, 0), CostGridParams(), fine_budget=2), [(1, 0)])
+        self.assertEqual(cost_path(w, (5, 0), CostGridParams(), fine_budget=2), [(1, 0), (2, 0)])
         self.assertEqual(cost_path(w, (5, 0), CostGridParams(), fine_budget=6), [(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)])
 
     def test_unfinished_corridor_still_steps_toward_the_goal(self):

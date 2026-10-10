@@ -443,9 +443,11 @@ def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reas
     tool = pick_supply_for_capability(w, CUT, knowledge)
     if tool is None or tool.id < 0:
         return StateOutcome([use_block(p)], reason, state=state)
+    queue = arm_and_use(w, m, tool.id, use_block(p))
+    if not queue:  # the cut's cooldown leaves no room for the Arm and the Use together
+        return StateOutcome(None, f"wait out the cooldown to arm {tool.code}, {reason}", state=state, wait=True, progress=False)
     if m.gather_rearm is None and w.armed_code and w.armed_code not in FOOD_CODES | POTION_CODES:
         m.gather_rearm = (w.armed_code, tool.code)  # food or a potion is Heal's to put back
-    queue = arm_and_use(w, m, tool.id, use_block(p))
     return StateOutcome(queue, f"arm {tool.code}, {reason}", state=state, paced=True)
 
 
@@ -625,8 +627,9 @@ def _replan_gather(
     pile_region: tuple[int, int] | None = None,
 ) -> bool:
     """Plan to the committed target (``m.gather_target``) while one is kept,
-    else pick: the nearest pile (in ``pile_region`` when set), then bush, then
-    grass (``preferred``: field cells before safe ones), then, on safe ground,
+    else pick: the nearest pile (in ``pile_region`` when set), then the
+    nearest bush or grass by walk (``_cut_targets``; ``preferred``: field
+    cells before safe ones), then, on safe ground,
     out to field ground or the frontier; leave ``m.path`` alone if none.
 
     Unless ``d.fight``, every walk prices known hostiles' reach as costly
@@ -678,27 +681,36 @@ def _replan_gather(
             m.path, m.goal, m.gather_target = path, GOAL, ("pile", pile.pos)
             return False
 
-    bush_at: dict[Pos, Pos] = {}
-    for p in sorted(preferred):
-        if w.view.tiles[p] != "bush":
-            continue
-        for stand in w.neighbours(p):
-            if w.view.walkable(stand) and stand not in w.occupied():
-                bush_at.setdefault(stand, p)
-    found = _nearest_clear(w, set(bush_at), params, blocked, clear)
+    cut_at = _cut_targets(w, preferred)
+    found = _nearest_clear(w, set(cut_at), params, blocked, clear)
     if found:
-        m.path, m.goal, m.gather_target = found[1], GOAL, ("bush", bush_at[found[0]])
-        return False
-
-    grass = {p for p in preferred if w.view.tiles[p] == "grass"}
-    found = _nearest_clear(w, grass, params, blocked, clear)
-    if found:
-        m.path, m.goal, m.gather_target = found[1], GOAL, ("grass", found[0])
+        m.path, m.goal, m.gather_target = found[1], GOAL, cut_at[found[0]]
         return False
 
     if here in safe:
         _plan_out(w, m, policy, blocked, params, safe, clear, d)
     return False
+
+
+def _cut_targets(w: WorldModel, preferred: set[Pos]) -> dict[Pos, tuple[str, Pos]]:
+    """Where to stand to cut each of ``preferred``, as cell -> ``("grass", cell)``
+    or ``("bush", bush)``: onto grass, beside a bush.
+
+    Grass and bushes drop gems alike (GAME_NOTES.md Gems), so one search
+    picks the nearest stand of either. Taking bushes first walked back and
+    forth past grass beside the character to a bush 9 cells off (free-play
+    run 6: 8 walks in 34 s, 2 cuts each). A grass cell beside a bush is
+    grass: standing there cuts both.
+    """
+    out = {p: ("grass", p) for p in sorted(preferred) if w.view.tiles[p] == "grass"}
+    occupied = w.occupied()
+    for p in sorted(preferred):
+        if w.view.tiles[p] != "bush":
+            continue
+        for stand in w.neighbours(p):
+            if w.view.walkable(stand) and stand not in occupied:
+                out.setdefault(stand, ("bush", p))
+    return out
 
 
 def _pile_in(pos: Pos, region: tuple[int, int] | None) -> bool:

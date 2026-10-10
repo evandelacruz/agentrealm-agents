@@ -2,8 +2,9 @@
 
 1. The held-queue probe ran Heal, whose drink counted a try before anything
    was sent; the drink was not sent, and 6 probes wrote both potions off. It
-   died at 2/10 holding both. The probe now leaves memory as it was, and a try
-   counts only when the server rejects a drink (``Runner._note_heal_refused``).
+   died at 2/10 holding both. The probe now leaves memory as it was, and only
+   a drink the server rejects is filed (``Runner._note_heal_refused``); there
+   is no try count left to spend (A80, ``tests/test_heal_refusal.py``).
 2. A ``buy`` op was done once one of its item was held, so with 2 potions held
    each ``buy small_potion`` finished at once. It now buys one more.
 """
@@ -16,7 +17,7 @@ from pathlib import Path
 
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.healing import HEAL_MAX_TRIES, carried_heal
+from agentrealm_agent.healing import carried_heal
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
@@ -58,18 +59,18 @@ class ProbeLeavesMemoryTest(unittest.TestCase):
         r.mem.held_queue = {"queue_id": "q", "next_index": 0}
         r.mem.pending_intents = [{"verb": "Step", "direction": "north"}] * 5
         before = r.mem.snapshot()
-        for _ in range(2 * HEAL_MAX_TRIES):
+        for _ in range(6):
             self.assertIsNone(r.reflex_while_held())
-        self.assertEqual(r.mem.heal_tries, {})
+        self.assertEqual(r.mem.heal_refusals, {})
         self.assertEqual(r.mem, before, "a probe whose answer is not sent leaves memory as it was")
         self.assertIsNotNone(carried_heal(r.world, r.mem), "both potions are still drinkable")
 
     def test_memory_snapshot_restores_named_fields_only(self):
-        m = Memory(goal="safe", heal_tries={("use", 4): 1})
+        m = Memory(goal="safe", heal_drink=4)
         saved = m.snapshot()
-        m.goal, m.heal_tries[("use", 4)] = "explore", 2
-        m.restore(saved, ("heal_tries",))
-        self.assertEqual((m.goal, m.heal_tries), ("explore", {("use", 4): 1}))
+        m.goal, m.heal_drink = "explore", 5
+        m.restore(saved, ("heal_drink",))
+        self.assertEqual((m.goal, m.heal_drink), ("explore", 4))
         m.restore(saved)
         self.assertEqual(m, saved)
 
@@ -82,67 +83,47 @@ class ProbeLeavesMemoryTest(unittest.TestCase):
         self.assertIsNot(saved.nav, m.nav)
 
 
-class DrinkTriesCountRejectionsTest(unittest.TestCase):
+class DrinkRefusalsFiledOnceTest(unittest.TestCase):
     def sent(self, r: Runner, queue: list[dict], drink: int | None = 4) -> None:
         r.mem.pending_intents, r.mem.pending_next_index = [dict(i) for i in queue], 0
         r.mem.heal_drink = drink  # use_carried_heal records the supply it decided on
 
-    def test_a_rejected_use_counts_one_try(self):
-        r = make_runner(self)
-        self.sent(r, DRINK)
-        r.on_result({"outcome": "applied"}, 0)
-        r.on_result({"outcome": "rejected", "rejection": {"code": "cooldown"}}, 1)
-        self.assertEqual(r.mem.heal_tries, {("use", 4): 1})
-
-    def test_a_rejected_arm_counts_against_the_drink(self):
+    def test_a_rejected_arm_is_filed_against_the_drink(self):
         r = make_runner(self)
         self.sent(r, [DRINK[0], {"verb": "Wait"}, DRINK[1]])
-        r.on_result({"outcome": "rejected", "rejection": {"code": "not_held"}}, 0)
-        self.assertEqual(r.mem.heal_tries, {("use", 4): 1})
+        r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
+        r.file_heal_refusals()
+        self.assertEqual(list(r.mem.heal_refusals), [("use", 4)])
 
-    def test_an_applied_drink_counts_nothing(self):
+    def test_an_applied_drink_files_nothing(self):
         r = make_runner(self)
         self.sent(r, DRINK)
         r.on_result({"outcome": "applied"}, 0)
         r.on_result({"outcome": "applied"}, 1)
-        self.assertEqual(r.mem.heal_tries, {})
+        self.assertEqual(r.mem.heal_refusals, {})
         self.assertIsNone(r.mem.heal_drink)
 
-    def test_a_rejected_arm_and_use_count_one_try(self):
+    def test_a_rejected_arm_and_use_file_once(self):
         r = make_runner(self)
         self.sent(r, DRINK)
         r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
+        self.assertIsNone(r.mem.heal_drink)
         self.sent(r, DRINK, drink=None)  # the same drink's Use, read after the Arm
-        r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 1)
-        self.assertEqual(r.mem.heal_tries, {("use", 4): 1})
-
-    def test_a_use_only_drink_counts_against_the_potion_decided(self):
-        # The potion is armed already, so the drink is Use alone. The second
-        # potion of the same code is the one decided: its refusals count, so
-        # it too is written off after HEAL_MAX_TRIES.
-        r = make_runner(self)
-        r.world.armed_code = "small_potion"
-        r.world.held_supplies = list(POTIONS[1:])  # no weapon to put back first
-        r.mem.heal_tries[("use", 4)] = HEAL_MAX_TRIES
-        for _ in range(HEAL_MAX_TRIES):
-            d = r._decide(r.world, r.mem)
-            self.assertEqual(d.intent, DRINK[1])
-            self.assertEqual(r.mem.heal_drink, 5)
-            r.mem.pending, r.mem.pending_intents = dict(DRINK[1]), None
-            r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
-        self.assertEqual(r.mem.heal_tries[("use", 5)], HEAL_MAX_TRIES)
-        self.assertIsNone(carried_heal(r.world, r.mem))
+        r.on_result({"outcome": "rejected", "rejection": {"code": "y"}}, 1)
+        r.file_heal_refusals()
+        self.assertEqual(r.mem.heal_refusals[("use", 4)].code, "x")
 
     def test_a_queue_that_replaces_the_drink_forgets_it(self):
         # The drink's queue was replaced (a reflex, a death's resync): a later
-        # refused self-Use must not count against that potion.
+        # refused self-Use must not be filed against that potion.
         r = make_runner(self)
         self.sent(r, DRINK)
         r._forget_replaced_drink([{"verb": "Step", "direction": "north"}])
         self.assertIsNone(r.mem.heal_drink)
         self.sent(r, DRINK, drink=None)
         r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 1)
-        self.assertEqual(r.mem.heal_tries, {})
+        r.file_heal_refusals()
+        self.assertEqual(r.mem.heal_refusals, {})
 
     def test_the_drink_survives_a_round_that_sends_nothing_or_drinks(self):
         r = make_runner(self)
@@ -155,14 +136,8 @@ class DrinkTriesCountRejectionsTest(unittest.TestCase):
         r = make_runner(self)
         self.sent(r, [{"verb": "Arm", "supply_id": 1}])
         r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
-        self.assertEqual(r.mem.heal_tries, {})
-
-    def test_three_rejections_write_a_potion_off_and_the_next_is_drunk(self):
-        r = make_runner(self)
-        for _ in range(HEAL_MAX_TRIES):
-            self.sent(r, DRINK)
-            r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 1)
-        self.assertEqual(carried_heal(r.world, r.mem).id, 5)
+        r.file_heal_refusals()
+        self.assertEqual(r.mem.heal_refusals, {})
 
 
 def buy_plan(code: str = "small_potion") -> Plan:

@@ -314,7 +314,7 @@ class GatherPathingTest(unittest.TestCase):
         self.assertEqual(out.intents[0], {"verb": "SetPosition", "x": 1, "y": 0})
         self.assertEqual((m.goal, m.gather_target), ("gather", ("grass", (2, 0))))
 
-    def test_walks_beside_a_bush_before_grass(self):
+    def test_walks_beside_a_nearer_bush_before_grass(self):
         w = grid(["g...b"], at=(2, 0))
         m = Memory()
         outcome(w, m)

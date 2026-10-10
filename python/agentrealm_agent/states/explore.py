@@ -32,10 +32,18 @@ from ..pathing import (
     replan,
 )
 from ..plan import GoalOp
-from ..world import Pos, WorldModel
+from ..navigation.planner import HOSTILE_DANGER_RADIUS
+from ..survival import is_hostile
+from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .gather_safe import hostiles_near, is_safe_ish
 from .intents import set_position
+
+# Hurt, the safe default keeps away from a known hostile this close: the
+# planner's danger radius (``navigation.planner``).
+CAUTION_RADIUS = HOSTILE_DANGER_RADIUS
+# How long it holds with no step away before it explores again (10 s at 10 ticks/s).
+KEEP_AWAY_HOLD_TICKS = 100
 
 
 class ExploreState(State):
@@ -64,8 +72,51 @@ class ExploreState(State):
 
 
 def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:
-    """The safe default: explore safe ground, then push past it (never idle)."""
+    """The safe default: explore safe ground, then push past it (never idle).
+
+    Hurt with a known hostile near, it explores nothing: it steps away from
+    the hostile, or holds when no step gets further (``keep_away``)."""
+    if not hurt(world):
+        ctx.memory.keep_away_hold = None  # healed: a later hold starts afresh
+    elif (out := keep_away(world, ctx)) is not None:
+        return out
     return explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None)
+
+
+def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateOutcome | None:
+    """One step that takes us further from the known hostiles within
+    ``CAUTION_RADIUS``, safe-ish ground first, else hold; None with none near.
+
+    Free-play run 6: the character started hurt beside a hostile's post, and
+    before the planner's first reply the safe default walked ten steps
+    toward it and died. The reflexes (Retreat, Flee, Fight, Heal) still act
+    above this; it covers the ground between them, a hostile near but not in
+    range. A hold lasts at most ``KEEP_AWAY_HOLD_TICKS``, then the safe
+    default explores again, still away from hostiles, so a hostile that
+    stays put never holds it for good.
+    """
+    m = ctx.memory
+    near = [e for e in w.entities if is_hostile(w, ctx.policy, e) and chebyshev(e.pos, w.pos) <= CAUTION_RADIUS]
+    if not near:
+        m.keep_away_hold = None
+        return None
+
+    def gap(p: Pos) -> int:
+        return min(chebyshev(e.pos, p) for e in near)
+
+    blocked, _, _ = plan_sets(w, ctx.memory, ctx.policy, ctx.knowledge)
+    options = [p for p in w.open_neighbours(w.pos, blocked) if gap(p) > gap(w.pos)]
+    if not options:
+        if m.keep_away_hold is None:
+            m.keep_away_hold = w.tick
+        if w.tick - m.keep_away_hold >= KEEP_AWAY_HOLD_TICKS:
+            return None
+        m.path = []
+        return StateOutcome(None, "hurt, hostile near: hold", state=state, wait=True)
+    m.keep_away_hold = None
+    m.path = []  # one step at a time: no walk queue toward anything
+    step = min(options, key=lambda p: (not is_safe_ish(w, p, ctx.policy), -gap(p), p))
+    return StateOutcome([set_position(step)], "hurt, hostile near: step away", state=state)
 
 
 def explore_outcome(

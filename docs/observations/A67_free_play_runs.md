@@ -691,3 +691,105 @@ Intents: 868 `Step`, 2,453 `Wait`, 23 `Say`, 20 `Use`, 13 `Read`, 9 `Take`, no `
    ```
 
 **Minor:** The planner spent its only 5 gems on a third box of matches, on a rumor ("Take matches. Lots."), with 2 boxes held and health at 8/10. Greet said hello to 8 chugbugs (344–422 s). Three of them hit it at 511 s. Heal rested 15 s in the safe zone at 4/10 with no regen, then stopped. Health first rose from food at 143 s.
+
+### Run 9: the first run with a kept knowledge base; Heal circles for 217 s, and remembered posts keep Gather off the grass
+
+- **Code:** `main` at `17503b3`, after #172 (A81: the agent matches the game update; Gather cuts grass only, the win estimate prices our swing by the published roll, and the planner's arc counts kill drops) and #174 (run 8's notes). #175 (Gather stall, Detour risk gate, bad planner reply) is not in it.
+- **Knowledge base:** kept from run 8 on the same machine, as a real user's would be. Run 8 started with it empty. At the start it held 3 hostile types (snotling, gristlewick, chugbug), 14 hostile sightings, each with a post, the town cell, 8 level entrances, 9 shop prices, 23 clues and 20 greeted NPCs. It held no regen answer and no damage per type. The gem-yield table was reset by #172's new format.
+- **Verdict:** exit 0, `PASS` after **602.9 s**, on the short-run gates only. The park **parked safe** at (380, 405) after 0.3 s and cleared the queue. The character started at **6/10**, 5 lives and **5 gems** at (408, 419), where run 8's park left it. It had the pocket knife armed and held matches ×3.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; weak hostile kills **0**; gems earned **yes**; armor **no**; shop weapon **no**; potion reserve **no**; Heal took ground food **yes**, Heal drank a potion **no** (none held). Planner: 47 calls, 47 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–35 s | `travel` town, `gather_gems:15` | Heal took two apples, then it walked to town. It was at **10/10** by 27 s. |
+| 35–50 s | `gather_gems:15` | Detour took the (413–415, 414) cluster (+3, 5 → 8). |
+| 50–293 s | `gather_gems:15` (+ `travel` town 95–152 s), then `fight: false`, then `buy` bronze_sword | **No cut in 243 s.** Gather walked to grass at (430, 409), (436, 402), (377, 379) and (399, 430) in turn, and each time fell back to "look for gems: explore". The planner's notes give the reason as "blocked by a gristlewick to the south" and "the NE pack blocks that area" (defect 2). |
+| 285–300 s | `travel` point, `gather_gems:15`, `buy` bronze_sword | Gather made its only cut, at (361, 394), 8 cells from the gristlewick's remembered post (npc 240). Flee stepped away at 285 s. At 299.7 s the gristlewick hit it for 2. Retreat walked it off. |
+| 304–521 s | `travel` town, `gather_gems:15`, `buy` bronze_sword | **Heal circled for 217 s** at 9/10 to measure regen, in a 45-cell loop north-west of town, and never reached a safe tile (defect 1). The planner's `travel` town did not run. |
+| 521–546 s | same | It reached the safe zone at (374, 395) and rested 20 s. Health did not rise. |
+| 546–600 s | `gather_gems:15`, `buy` bronze_sword | Back to town, then to Gather. A Detour to an apple brought it to 10/10 at 592 s. No cut. |
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **5** | **8** (+3 earned, nothing spent) |
+| Armed | pocket_knife | pocket_knife |
+| Worn | `{}` | `{}` |
+| Held | matches ×3 | matches ×3 |
+| Potions | 0 | 0 |
+
+Bought, equipped and drank: nothing. `buy` bronze_sword waited for 15 gems from 215 s.
+
+#### Gems earned
+
+**3** in 600 s, **0.3 a minute**: all from the (413, 414), (414, 414) and (415, 414) piles at 45–49 s, by Detour and Gather. Grass: **1 cut** (at (361, 394), 293 s), no gem. Kills: 0. Break cut two bushes on walks (126 s and 331 s), and the first was filed as a gem-yield cut.
+
+#### Fights
+
+| Time | Where | Hostile | Started by | Their swings | Hits | Damage | Ours | Outcome |
+|---|---|---|---|---|---|---|---|---|
+| 285–300 s | (355–368, 394–402), beside its post | npc 240 (gristlewick) | it | 1 | 1 | 2 | 0 | Flee, then Retreat; then Heal (defect 1). |
+
+- **Count:** 1 encounter, started by the hostile. The agent never sent `Attack`, so the new win estimate (#172) never went into a fight.
+- **Planner:** set `fight: false` on `gather_gems` from 186 s to the end ("with 10 health and 5 lives, a snotling fight isn't worth the risk yet"). The progression arc says an unmeasured type is refused, and every type was unmeasured at the start (defect 3).
+- **Kills and deaths:** 0 and 0. A hit now does 2 damage (run 8: 1).
+
+#### What the kept knowledge did
+
+| Knowledge | Used? | |
+|---|---|---|
+| Town cell, shop prices, entrances | **Yes.** All three were in call 1's State, before the first sync. | The first plan was `travel` town, then `gather_gems:15` toward the bronze sword (15). |
+| Hostile types | **Yes.** The snotlings, gristlewicks and chugbugs were hostile from the first decision. | No `Say` was sent (run 8 greeted 8 chugbugs). |
+| Hostile posts | **Too much.** Gather kept off ground near 14 remembered posts around town, and made 1 cut (defect 2). | The one cut, at (361, 394), still drew a hit from the gristlewick beside its post. |
+| Clues | **Read, not acted on.** The planner named the farmer's hollow rock (about (379, 375)) and left it until it had a mallet. | |
+| Regen | **None was saved.** Heal set out to measure it at 9/10 (defect 1). | |
+
+#### Known defects (#175 not in yet)
+
+| Defect | Run 9 | |
+|---|---|---|
+| Gather stalls near a distant hostile | **Shows, worse.** 1 cut in 600 s, no cut from 50 s to 293 s. | Run 8: no cut for 177 s. |
+| Detour at low health | **Did not show.** Detours ran at 10/10 (piles) and 9/10 (apple). | |
+| Bad planner reply wipes the stack | **Did not show.** 0 invalid replies. | |
+| Persisted hostility (#162, #165) | **Works,** and it now holds Gather off too much (defect 2). | Run 8: not tested. |
+| Park | **Holds.** Parked safe in 0.3 s. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 160,792, output 8,325, cache write 103,194, cache read 4,746,924 |
+
+#### Decision mix
+
+Intents: 1,075 `Step`, 2,909 `Wait`, 4 `Take`, 3 `Use`, no `Say`, no `Attack`. Call mix: 578 `tick`, 439 `zone`, 249 `entities`, 100 `strategist`, 52 `terrain`, 46 `self`, 8 `position`.
+
+#### Top 3 defects
+
+1. **Heal walks 217 s at 9/10 to measure regen, round safe tiles it cannot reach** (`states/heal.py:109–116`, `states/heal.py:194–218`). After the hit, health was 9/10 and the knowledge base had no regen answer, so Heal took `heal_measure` and walked for the safe zone. Each goal was a safe tile at (389–392, 393–394). The walk gave one up, then took the next one beside it, which was just as unreachable. The planner read it as "Heal-measure targets are unreachable (bush blocks the path)". It went round the same loop north-west of town about 4 times, from 304 s to 521 s, and its `travel` town op could not run. One rest in the safe zone at the end (20 s) still gave no regen answer. Two fixes are needed. A goal Heal gives up on should rule out the tiles beside it, or fall back to town. And measuring regen should not hold a 9/10 character off the plan for minutes.
+
+   ```
+   304.5 s  @361,395  heal_measure → (389, 393)
+   352.6 s  stuck: lapsed (397, 401)
+   363.0 s  @383,366  heal_measure → (389, 397)   397.4 s  @395,359  → (391, 393)
+   421.1 s  @358,382  → (389, 394)    444.8 s  @397,354  → (392, 393)   492.8 s  @396,354  → (390, 393)
+   468.6 s  @354,381  → (389, 393)    515.6 s  @361,383  → (389, 394)
+   526.3 s  @374,395  heal: rest in the safe zone   (20 s, health 9 → 9)
+   ```
+
+2. **Remembered posts wall off the grass around town, so Gather barely cuts** (`hostile_memory.py:37–117`, `states/gather.py:306–319`). The knowledge base loads every remembered sighting with its post. Run 8 left the chugbug pack's post south-west of town, the gristlewick and snotlings north-east, a snotling east and a gristlewick west. With all of them priced as hostile ground, Gather found no grass it would cut for 243 s. It went back to explore walks between town and the posts. Only 1 cut in the run, against 19 in run 8, and run 8 started with no posts known. #175's stall fix should be checked against a kept knowledge base like this one: remembered posts are the worst case for it.
+
+   ```
+    50.0 s  @415,414  gather → (430, 409)       77.9 s  look for gems: explore → (445, 411)
+   152.6 s  @397,401  gather → (436, 402)      158.2 s  look for gems: explore → (357, 388)
+   164.1 s  @396,401  gather → (377, 379)      181.7 s  look for gems: explore → (357, 388)
+   186.1 s  strategist: "Gather is blocked by a gristlewick to the south"
+   293.1 s  @361,394  cut grass   (the only cut)
+   ```
+
+3. **Measured damage per type is not saved, so each run starts with every type unmeasured, and no fight starts** (`hostile_memory.py:68–75`, `threat.py:34`). `save_hostiles` writes `hostile: true` per type and the sightings, but not `w.threat.by_type`. Run 8 measured all three types (1 a hit), and run 9 started with none. The planner's progression arc (`strategist.py:204`) refuses an unmeasured type, so its `gather_gems` kept `fight: false` all run. #172's new win estimate never went into a fight, and kill drops stayed out of reach.
+
+**Minor:** A `Take` of an apple at 222.6 s was refused `target_not_nearby`, and Heal walked to it instead. Break cuts on walks are filed as gem-yield cuts: the bush at (402, 437) is in `gem_yield`. Gristlewick 240's remembered post moved from (369, 400) to (357, 400).

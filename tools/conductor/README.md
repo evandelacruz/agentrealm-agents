@@ -25,18 +25,16 @@ npm --prefix tools/conductor install
 Open PR summaries include merge-conflict state (`merge:conflict` / `merge:ok`)
 and the writer lock (`lock:working` / `lock:none`). Review verdicts come from
 submitted reviews on the **current head** only, never from labels, per the
-conductor skill's **Review verdicts**: Cursor's latest `APPROVED` /
-`CHANGES_REQUESTED` review, and Claude Code's latest review body (posted as
-`COMMENTED` under Evan's account). Either at changes requested is
-`CHANGES_REQUESTED`; both approved is `APPROVED`; anything else is
-`review:none`. A review on an older head does not count. `conductor:working`
-is the only label with meaning.
+fixer skill's **The review verdict**: any reviewer counts (the Claude Review
+bot, Cursor, a person), each by their latest `APPROVED` / `CHANGES_REQUESTED`
+review on the head. Any rejection is `CHANGES_REQUESTED`; otherwise one
+approval is `APPROVED`; anything else is `review:none`. `COMMENTED` reviews
+do not count. `conductor:working` is the only label with meaning.
 
-A review still running is the GitHub check
-`Cursor Automation: Saims Ref Agent Auto Code Review` (override with
-`CONDUCTOR_REVIEW_CHECK` if the automation is renamed). `follow-up` and
-`spawn --pr` refuse to start while that check is running. `prs` prints
-`review-check:running`.
+`follow-up` and `spawn --pr` refuse to start while the GitHub check
+`Cursor Automation: Saims Ref Agent Auto Code Review` is running (override
+with `CONDUCTOR_REVIEW_CHECK`), and `prs` prints `review-check:running`. That
+hold is the CLI's own; the skills require no review check to complete.
 
 "Needs fixer follow-up" lists PRs with a merge conflict, red CI, changes
 requested, or unresolved threads without approval.

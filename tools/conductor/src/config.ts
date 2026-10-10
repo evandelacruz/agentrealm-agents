@@ -32,11 +32,6 @@ export const REVIEW_CHECK_NAME =
   process.env.CONDUCTOR_REVIEW_CHECK?.trim() ||
   "Cursor Automation: Saims Ref Agent Auto Code Review";
 
-/** Cursor's review bot. Its reviews carry a real APPROVED / CHANGES_REQUESTED state. */
-export const CURSOR_REVIEWER_LOGIN = "cursor";
-/** Claude Code reviews post under the repo owner's account, always as COMMENTED. */
-export const CLAUDE_REVIEWER_LOGIN = "evandelacruz";
-
 export function requireApiKey(): string {
   const key = process.env.CURSOR_API_KEY?.trim();
   if (!key) {

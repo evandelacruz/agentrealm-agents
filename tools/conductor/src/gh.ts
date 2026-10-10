@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { CLAUDE_REVIEWER_LOGIN, CURSOR_REVIEWER_LOGIN, REVIEW_CHECK_NAME, WORKING_LABEL } from "./config.js";
+import { REVIEW_CHECK_NAME, WORKING_LABEL } from "./config.js";
 import { lockHeld, pullRequestNumber } from "./lock.js";
 
 const execFileAsync = promisify(execFile);
@@ -34,7 +34,7 @@ export type PrCommentSummary = {
   /** Head commit SHA — what a review is "at". Reviews name the commit they read. */
   headSha: string;
   isDraft: boolean;
-  /** Combined Cursor + Claude verdict on `headSha` only. See `headVerdict`. */
+  /** Combined verdict of every reviewer on `headSha` only. See `headVerdict`. */
   verdict: Verdict;
   mergeable: string | null;
   mergeStateStatus: string | null;
@@ -42,7 +42,7 @@ export type PrCommentSummary = {
   unresolvedReviewThreads: number;
   issueComments: number;
   checksOk: boolean | null;
-  /** The Cursor review check has not finished. Fixers must leave the PR alone. */
+  /** The `REVIEW_CHECK_NAME` check has not finished. The CLI starts no fixer meanwhile. */
   reviewInProgress: boolean;
   /** Open labels on the PR — carries the conductor in-flight locks. */
   labels: string[];
@@ -147,70 +147,23 @@ export type ReviewNode = {
   commit: { oid: string } | null;
 };
 
-/** GraphQL drops the `[bot]` suffix that REST keeps. Match either. */
-function isAuthor(review: ReviewNode, login: string): boolean {
-  const author = review.author?.login ?? "";
-  return author === login || author === `${login}[bot]`;
-}
-
-const CONDITION = /\b(once|after|if|until|pending|assuming|but)\b/i;
-const BLOCKING =
-  /\b(?:not approving|do not merge|don't merge|treat [^.\n]* as blocking|requesting changes|changes requested|request changes|still blocking)\b|(?<!\bno |\bnon-)\bblocking issue|(?<![-\w])blocking\s*[:(]/i;
-const APPROVING =
-  /\b(no blocking issues|nothing blocking|good to merge|lgtm|approving|would approve|treat this as an approval)\b/i;
-
-/** Drop fenced code, inline code, and quoted lines: verdict words there are not the reviewer's. */
-function verdictText(body: string): string {
-  return body
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/`[^`]*`/g, "")
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith(">"))
-    .join("\n");
-}
-
-/**
- * Claude reviews post under the repo owner's account, so GitHub records them
- * as COMMENTED. The verdict is in the body: an unconditional approval is
- * APPROVED; anything else is CHANGES_REQUESTED.
- */
-export function claudeBodyVerdict(body: string): Exclude<Verdict, null> {
-  const text = verdictText(body);
-  if (BLOCKING.test(text)) return "CHANGES_REQUESTED";
-  const approval = text.match(new RegExp(`[^.\\n]*${APPROVING.source}[^.\\n]*`, "i"));
-  if (!approval || CONDITION.test(approval[0])) return "CHANGES_REQUESTED";
-  return "APPROVED";
-}
-
 /**
  * The review verdict on the current head, per the fixer skill. Labels play
- * no part. Cursor's verdict is its latest APPROVED / CHANGES_REQUESTED review;
- * Claude's is its latest review with a body. A verdict on an older commit is
- * no verdict. Either at changes requested wins; both approved is approved;
- * anything else is still waiting on a review.
+ * no part, and any reviewer counts (the Claude Review bot, Cursor, a person).
+ * Each reviewer's latest APPROVED / CHANGES_REQUESTED review on `headSha` is
+ * their verdict; COMMENTED reviews are threads. Any rejection wins; otherwise
+ * one approval is approved; otherwise it is still waiting on a review.
  */
 export function headVerdict(reviews: ReviewNode[], headSha: string): Verdict {
-  const submitted = reviews.filter((r) => r.state !== "PENDING");
-  const cursor = submitted
-    .filter(
-      (r) =>
-        isAuthor(r, CURSOR_REVIEWER_LOGIN) &&
-        (r.state === "APPROVED" || r.state === "CHANGES_REQUESTED"),
-    )
-    .at(-1);
-  const claude = submitted
-    .filter((r) => isAuthor(r, CLAUDE_REVIEWER_LOGIN) && r.body.trim() !== "")
-    .at(-1);
-
-  const cursorVerdict: Verdict =
-    cursor && cursor.commit?.oid === headSha ? (cursor.state as Verdict) : null;
-  const claudeVerdict: Verdict =
-    claude && claude.commit?.oid === headSha ? claudeBodyVerdict(claude.body) : null;
-
-  if (cursorVerdict === "CHANGES_REQUESTED" || claudeVerdict === "CHANGES_REQUESTED") {
-    return "CHANGES_REQUESTED";
+  const latest = new Map<string, string>();
+  for (const r of reviews) {
+    if (r.commit?.oid !== headSha) continue;
+    if (r.state !== "APPROVED" && r.state !== "CHANGES_REQUESTED") continue;
+    latest.set(r.author?.login ?? "", r.state);
   }
-  if (cursorVerdict === "APPROVED" && claudeVerdict === "APPROVED") return "APPROVED";
+  const verdicts = [...latest.values()];
+  if (verdicts.includes("CHANGES_REQUESTED")) return "CHANGES_REQUESTED";
+  if (verdicts.includes("APPROVED")) return "APPROVED";
   return null;
 }
 

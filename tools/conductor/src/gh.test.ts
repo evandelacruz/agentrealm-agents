@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { REVIEW_CHECK_NAME } from "./config.js";
 import {
-  claudeBodyVerdict,
   hasMergeConflict,
   headVerdict,
   holdLock,
@@ -103,76 +102,37 @@ function review(login: string, state: string, oid: string, body = ""): ReviewNod
   return { state, body, author: { login }, commit: { oid } };
 }
 
-test("claudeBodyVerdict reads an unconditional approval", () => {
-  assert.equal(claudeBodyVerdict("No blocking issues. A docs note: fix the typo."), "APPROVED");
-  assert.equal(claudeBodyVerdict("LGTM"), "APPROVED");
+test("headVerdict: one approval on the head is approved, whoever posts it", () => {
+  assert.equal(headVerdict([review("reviewer-agent-anth[bot]", "APPROVED", HEAD)], HEAD), "APPROVED");
+  assert.equal(headVerdict([review("cursor", "APPROVED", HEAD)], HEAD), "APPROVED");
+  assert.equal(headVerdict([review("someone", "APPROVED", HEAD)], HEAD), "APPROVED");
+  assert.equal(headVerdict([], HEAD), null);
 });
 
-test("claudeBodyVerdict treats findings, conditions, and blocking words as changes requested", () => {
-  assert.equal(claudeBodyVerdict("No blocking issues once the flaky test is fixed."), "CHANGES_REQUESTED");
-  assert.equal(claudeBodyVerdict("Changes requested (not approving): 6 open threads."), "CHANGES_REQUESTED");
-  assert.equal(claudeBodyVerdict("**Blocking:** the lock drops early."), "CHANGES_REQUESTED");
-  assert.equal(claudeBodyVerdict("One blocking issue in spawn.ts."), "CHANGES_REQUESTED");
-  assert.equal(claudeBodyVerdict("Two findings in gh.ts."), "CHANGES_REQUESTED");
-});
-
-test("claudeBodyVerdict ignores verdict words in quotes and code", () => {
-  assert.equal(claudeBodyVerdict("> LGTM\n\nThe loop never exits."), "CHANGES_REQUESTED");
-  assert.equal(claudeBodyVerdict("`No blocking issues` is the wrong string."), "CHANGES_REQUESTED");
-  assert.equal(claudeBodyVerdict("**Non-blocking:** rename.\n\nNo blocking issues."), "APPROVED");
-});
-
-test("headVerdict is approved only when Cursor and Claude both approve the head", () => {
-  const cursorOk = review("cursor", "APPROVED", HEAD);
-  const claudeOk = review("evandelacruz", "COMMENTED", HEAD, "No blocking issues.");
-  assert.equal(headVerdict([cursorOk, claudeOk], HEAD), "APPROVED");
-  assert.equal(headVerdict([cursorOk], HEAD), null);
-  assert.equal(headVerdict([claudeOk], HEAD), null);
-});
-
-test("headVerdict ignores verdicts on an older head", () => {
-  const reviews = [
-    review("cursor[bot]", "CHANGES_REQUESTED", "old"),
-    review("evandelacruz", "COMMENTED", "old", "Not approving."),
-  ];
-  assert.equal(headVerdict(reviews, HEAD), null);
+test("headVerdict: any rejection on the head wins", () => {
   assert.equal(
     headVerdict(
-      [review("cursor", "APPROVED", "old"), review("evandelacruz", "COMMENTED", HEAD, "LGTM")],
-      HEAD,
-    ),
-    null,
-  );
-});
-
-test("headVerdict: either reviewer at changes requested wins", () => {
-  assert.equal(
-    headVerdict(
-      [
-        review("cursor", "CHANGES_REQUESTED", HEAD),
-        review("evandelacruz", "COMMENTED", HEAD, "No blocking issues."),
-      ],
+      [review("reviewer-agent-anth[bot]", "APPROVED", HEAD), review("cursor", "CHANGES_REQUESTED", HEAD)],
       HEAD,
     ),
     "CHANGES_REQUESTED",
   );
 });
 
-test("headVerdict uses each reviewer's latest verdict and skips Cursor COMMENTED and empty replies", () => {
-  const reviews = [
-    review("cursor", "CHANGES_REQUESTED", HEAD),
-    review("cursor", "APPROVED", HEAD),
-    review("cursor", "COMMENTED", HEAD, "nit"),
-    review("evandelacruz", "COMMENTED", HEAD, "Not approving."),
-    review("evandelacruz", "COMMENTED", HEAD, "No blocking issues."),
-    review("evandelacruz", "COMMENTED", HEAD, ""),
-    review("evandelacruz", "PENDING", HEAD, "Requesting changes."),
-  ];
-  assert.equal(headVerdict(reviews, HEAD), "APPROVED");
+test("headVerdict ignores reviews on an older head", () => {
+  assert.equal(headVerdict([review("cursor[bot]", "CHANGES_REQUESTED", "old")], HEAD), null);
+  assert.equal(headVerdict([review("reviewer-agent-anth[bot]", "APPROVED", "old")], HEAD), null);
 });
 
-test("headVerdict ignores other reviewers", () => {
-  assert.equal(headVerdict([review("someone", "CHANGES_REQUESTED", HEAD)], HEAD), null);
+test("headVerdict uses each reviewer's latest verdict and skips COMMENTED and PENDING", () => {
+  const reviews = [
+    review("reviewer-agent-anth[bot]", "CHANGES_REQUESTED", HEAD),
+    review("reviewer-agent-anth[bot]", "APPROVED", HEAD),
+    review("reviewer-agent-anth[bot]", "COMMENTED", HEAD, "inline"),
+    review("evandelacruz", "COMMENTED", HEAD, "Not approving."),
+    review("someone", "PENDING", HEAD),
+  ];
+  assert.equal(headVerdict(reviews, HEAD), "APPROVED");
 });
 
 test("holdLock releases when body fails before the agent starts", async () => {

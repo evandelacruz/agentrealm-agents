@@ -92,12 +92,13 @@ HOLD_CODES = frozenset({"would_strand", "carry_capacity_full", "not_allowed_in_s
 #                below what it was then
 #
 # A hold never outlasts a fall in health: a potion that did nothing at 8/10
-# is tried again at 7/10, so it is never unusable while health falls (A80's
+# is tried again at 7/10, so it is never unusable while health falls (A67
 # run 5 died at 2/10 holding two potions written off).
 #
 # The drink always targets ``{"kind": "self"}`` (A24), so a wrong target,
 # free-play run 4's cause, is not one left to find.
-NOOP_CAUSES = ("not_armed", "full_health", "no_change")
+NoopCause = Literal["not_armed", "full_health", "no_change"]
+NOOP_CAUSES: tuple[NoopCause, ...] = ("not_armed", "full_health", "no_change")
 
 
 RefusalAction = Literal["arm", "forget", "walk", "wait", "hold"]
@@ -123,7 +124,7 @@ class NoopDrink:
     """A drink of one supply that applied and drank nothing (A76), filed
     beside A80's refusals under the same key."""
 
-    cause: str  # one of ``NOOP_CAUSES``
+    cause: NoopCause
     action: NoopAction
     tick: int
     situation: DrinkSituation  # ``drink_situation`` when it was filed
@@ -183,7 +184,7 @@ def drank(events: list[dict], character_id: int | None, code: str | None) -> boo
     )
 
 
-def noop_drink_cause(w: WorldModel, d: AppliedDrink) -> str | None:
+def noop_drink_cause(w: WorldModel, d: AppliedDrink) -> NoopCause | None:
     """Why an applied drink drank nothing, from the observation after it
     (``NOOP_CAUSES``), or None when it went through: our ``SupplyUsed``
     named it, we no longer carry it, or health rose."""
@@ -199,7 +200,7 @@ def noop_drink_cause(w: WorldModel, d: AppliedDrink) -> str | None:
     return "no_change"
 
 
-def noop_action(cause: str, *, armed_first: bool) -> NoopAction:
+def noop_action(cause: NoopCause, *, armed_first: bool) -> NoopAction:
     """What to do about a drink that drank nothing (see ``NOOP_CAUSES``)."""
     if cause == "not_armed":
         return "hold" if armed_first else "arm"

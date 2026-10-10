@@ -271,22 +271,43 @@ class CautiousSafeDefaultTest(unittest.TestCase):
         self.assertEqual(step[0], 9, "further from the hostile, to the west")
         self.assertEqual(c.memory.path, [], "one step, no walk queue")
 
-    def test_it_holds_when_no_step_gets_further(self):
+    def boxed_in_as_it_closes(self) -> tuple[WorldModel, PlayContext]:
         w, c = hurt_beside((13, 10))
+        w.entity_moves[("npc", 3)] = ((14, 10), w.tick)  # it stepped toward us
         for x in range(30):
             for y in range(30):
                 if (x, y) != (10, 10) and x <= 10:
                     w.view.tiles[(x, y)] = "wall"
+        return w, c
+
+    def test_it_holds_when_no_step_gets_further(self):
+        w, c = self.boxed_in_as_it_closes()
         out = dispatch(w, c)
         self.assertEqual((out.reason, out.intents), ("hurt, hostile near: hold", None))
 
-    def test_a_hold_ends_after_its_bound(self):
-        w, c = hurt_beside((13, 10))
-        for x in range(30):
-            for y in range(30):
-                if (x, y) != (10, 10) and x <= 10:
-                    w.view.tiles[(x, y)] = "wall"
+    def test_a_hostile_that_is_not_closing_holds_nothing(self):
+        """A82, free-play run 8: standing off a hostile that stays where it is
+        is idle; the safe default explores, still away from it."""
+        w, c = self.boxed_in_as_it_closes()
+        w.entity_moves.clear()
+        out = dispatch(w, c)
+        self.assertNotIn("hostile near", out.reason)
+        self.assertIsNone(c.memory.keep_away_hold)
+
+    def test_a_pause_in_closing_does_not_restart_the_hold(self):
+        w, c = self.boxed_in_as_it_closes()
         self.assertEqual(dispatch(w, c).reason, "hurt, hostile near: hold")
+        moved = w.entity_moves.pop(("npc", 3))
+        w.tick += KEEP_AWAY_HOLD_TICKS // 2
+        self.assertNotIn("hostile near", dispatch(w, c).reason)
+        w.tick += KEEP_AWAY_HOLD_TICKS // 2
+        w.entity_moves[("npc", 3)] = (moved[0], w.tick)  # closing again
+        self.assertNotIn("hostile near", dispatch(w, c).reason, "the bound counts from the first hold")
+
+    def test_a_hold_ends_after_its_bound(self):
+        w, c = self.boxed_in_as_it_closes()
+        self.assertEqual(dispatch(w, c).reason, "hurt, hostile near: hold")
+        w.entity_moves[("npc", 3)] = ((14, 10), w.tick + KEEP_AWAY_HOLD_TICKS)  # still closing
         w.tick += KEEP_AWAY_HOLD_TICKS
         self.assertNotIn("hostile near", dispatch(w, c).reason, "it explores again")
 

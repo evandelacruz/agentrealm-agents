@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from .navigation.planner import HOSTILE_DANGER_RADIUS
 from .survival import hostile_reach, is_attacker, is_hostile, recently_attacked
-from .world import Entity, Pos, WorldModel
+from .world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -123,3 +123,20 @@ def ground_by_hostile(w: WorldModel, policy: Policy) -> dict[HostileKey, set[Pos
     for key, zones in held_by_hostile(w, policy).items():
         out.setdefault(key, set()).update(zone_cells(zones))
     return out
+
+
+def hostiles_within(w: WorldModel, policy: Policy, pos: Pos, radius: int) -> list[Entity]:
+    """The known hostiles within ``radius`` of ``pos``: one in view where it
+    stands; one remembered (``WorldModel.sightings``) at its post, and out of
+    view also where it was last seen."""
+    out: dict[HostileKey, Entity] = {
+        (e.kind, e.id): e for e in w.entities if is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= radius
+    }
+    in_view = {(e.kind, e.id) for e in w.entities}
+    for key, s in w.sightings.items():
+        if key in out or s.map_id != w.map_id or not is_hostile(w, policy, s.entity):
+            continue
+        cells = ([s.home] if s.post else []) + ([s.entity.pos] if key not in in_view else [])
+        if any(chebyshev(c, pos) <= radius for c in cells):
+            out[key] = s.entity
+    return list(out.values())

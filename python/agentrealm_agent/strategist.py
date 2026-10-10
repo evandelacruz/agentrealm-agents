@@ -214,7 +214,7 @@ The character's arc, in order. Judge the stage from State (health, gems, armed, 
 
 Gems by area (stage 2). Gem drops from grass vary by area, and some areas drop none. State gem_yield is measured from the character's own cuts: expected_yield, the gems a cut drops on this map (the manual's rate until enough cuts measure it), the region it stands in (here, once cut there), the best regions at any distance with their yield (gems per cut) and distance in blocks, and the barren ones nearby. A good region far behind is still worth a travel back. Hunt gems where the yield is good, leave a region that shows no gems after a fair sample, and explore regions not yet sampled to sample them.
 
-How gather_gems works. Gather cuts known grass and takes gem piles off hazards with no hostile near (a hostile that has not hit us only bars cells within weapon reach plus a step; one that shadows for 15 s without attacking is fought when the profile fights and would win, else Gather walks well off from it). It remembers hostiles out of view: the cell it last saw one on, the post a guard stands on, and how far from that post it has hit the character; ground they hold is not gathered and no walk to a gem crosses it, and a hit on the way to a pile shows that pile's ground held. Set fight true on a gather_gems to gather there anyway and take the fight. Field cells come before safe-zone ones (gems drop from cuts outside town, and a cut on town grass was seen to have no effect). It walks to the nearest one itself, learns ground where cuts have no effect and leaves it, and with nothing left to cut while on safe ground it heads out to field ground or the frontier; the survival states keep the character alive while it does. It skips barren regions (15 cuts with no gem). Once its region shows a poor yield after a fair sample (20 cuts, under half of expected_yield), it leaves poor regions alone and walks to the best region within 64 blocks that gave at least expected_yield, and cuts there. A gather_gems x, y names a target region (any block of it, such as a gem_yield corner): Gather walks there and cuts only there while it knows a cell to cut there, and walks to gem piles only there (one beside it is taken anyway), and works as usual once it knows none; it also lifts that region's barren mark. Name one to send Gather to a good region it would not pick itself (a far one, say); leave x, y out to let it choose, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (a cut sent now), "taking a gem", "walking to grass" or "walking to a gem pile", "moving off from a hostile that shadows", "fighting a hostile that shadows", "blocked by hostile" (the only cuttable cells known have a hostile near), "heading out of safe ground" (nothing left to cut, walking out of the safe zone), "cuts have no effect here" (cuts here changed nothing, so it moves on to other cells), "no cuttable cell in view" (it knows no grass it may cut, so it explores for one), or "region barren" (the same, standing in a barren region); "walking to a target region" while it heads for a named region it has not seen. While it works only in a target region, the status ends in " (region x,y)", that region's corner. Any of these but "cutting" ends in ", no cut for N s" once no cut has taken effect for 30 s: that is a stall, not progress. State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress."""
+How gather_gems works. Gather cuts known grass and takes gem piles off hazards with no hostile near (a hostile that has not hit us only bars cells within weapon reach plus a step; one that shadows for 15 s without attacking is fought when the profile fights and would win, else Gather walks well off from it). It remembers hostiles out of view: the cell it last saw one on, the post a guard stands on, and how far from that post it has hit the character; ground they hold is not gathered and no walk to a gem crosses it, and a hit on the way to a pile shows that pile's ground held. Set fight true on a gather_gems to gather there anyway and take the fight. Field cells come before safe-zone ones (gems drop from cuts outside town, and a cut on town grass was seen to have no effect). It walks to the nearest one itself, learns ground where cuts have no effect and leaves it, and with nothing left to cut while on safe ground it heads out to field ground or the frontier; the survival states keep the character alive while it does. It skips barren regions (15 cuts with no gem). Once its region shows a poor yield after a fair sample (20 cuts, under half of expected_yield), it leaves poor regions alone and walks to the best region within 64 blocks that gave at least expected_yield, and cuts there. A gather_gems x, y names a target region (any block of it, such as a gem_yield corner): Gather walks there and cuts only there while it knows a cell to cut there, and walks to gem piles only there (one beside it is taken anyway), and works as usual once it knows none; it also lifts that region's barren mark. Name one to send Gather to a good region it would not pick itself (a far one, say); leave x, y out to let it choose, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (a cut sent now), "taking a gem", "walking to grass" or "walking to a gem pile", "moving off from a hostile that shadows", "fighting a hostile that shadows", "walking to ground clear of hostiles" (every cuttable cell known has a hostile near, so it walks on to the nearest unexplored edge with none near to find more), "blocked by hostile" (the same, with no such edge to walk to), "heading out of safe ground" (nothing left to cut, walking out of the safe zone), "cuts have no effect here" (cuts here changed nothing, so it moves on to other cells), "no cuttable cell in view" (it knows no grass it may cut, so it explores for one), or "region barren" (the same, standing in a barren region); "walking to a target region" while it heads for a named region it has not seen. While it works only in a target region, the status ends in " (region x,y)", that region's corner. Any of these but "cutting" ends in ", no cut for N s" once no cut has taken effect for 30 s: that is a stall, not progress. State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress."""
 
 
 def system_prompt(reference_sections: str = "") -> str:
@@ -1120,14 +1120,11 @@ class Strategist:
         del self.inbox[:-INBOX_KEPT]
 
     @staticmethod
-    def _report(acceptance: Any, reply: Any, goals: list[dict[str, Any]], record: dict[str, Any]) -> None:
+    def _report(acceptance: Any, reply: dict[str, Any], goals: list[dict[str, Any]], record: dict[str, Any]) -> None:
         """Tell the acceptance hooks what the reply was: a plan accepted (at
-        least one valid op, or an explicit empty stack), an error (not a JSON
-        object, or ops all invalid), or neither (no ``goals`` key: notes or
-        params only, the stack kept)."""
-        if not isinstance(reply, dict):
-            acceptance.on_strategist_error(record.get("invalid") or "reply is not a JSON object")
-            return
+        least one valid op, or an explicit empty stack), an error (ops all
+        invalid), or neither (no ``goals`` key: notes or params only, the
+        stack kept). A reply that is not a JSON object is ``_fail``'s."""
         if "goals" not in reply:
             return
         sent = reply["goals"]
@@ -1172,8 +1169,9 @@ class Strategist:
     def _settle(self, runner: Any, answer: Answer) -> None:
         """Charge the real token count, then apply the answer.
 
-        A failed call (network, HTTP, refusal) keeps the stack and puts its
-        triggers back for the next call. Otherwise ``params`` merge onto the
+        A failed call (network, HTTP, refusal), or a reply that is not a
+        JSON object, keeps the stack, puts its triggers back for the next
+        call and backs off (``_fail``). Otherwise ``params`` merge onto the
         current ones at once, bounded by the directives floor as it is now,
         and ``goals``, when the reply has the key, become the stack, first
         reconciled with what changed since the prompt (:class:`Asked`): an op
@@ -1182,7 +1180,7 @@ class Strategist:
         planner asked. A stack
         equal to the one left keeps its progress, and the same op on top
         keeps its own (stall clock, wait start, block snapshot, path). No
-        valid goal (or a reply that is not a JSON object) clears it: the
+        valid goal (an empty list, or only invalid ops) clears it: the
         planner layer emits nothing and the dispatcher's safe default runs.
         Directives ``goals`` override the planner: the directives ops still
         left stay on top, and the planner's goals go below them (A35), less any
@@ -1201,24 +1199,19 @@ class Strategist:
             "tokens_last_minute": sum(tokens for _, tokens in self.spent),
         }
         if answer.error:
-            self.inbox = (triggers + self.inbox)[-INBOX_KEPT:]
-            self.failures_in_a_row += 1
-            delay = min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2 ** (self.failures_in_a_row - 1))
-            self.retry_at = self.clock() + delay
-            log.warning("strategist: call failed: %s", answer.error)
-            runner.log(
-                "strategist",
-                f"failed: {answer.error}; next call in {delay:.0f}s",
-                {"strategist": {"event": "error", "error": answer.error, "backoff_s": delay, **record}},
-            )
-            if runner.acceptance is not None:
-                runner.acceptance.on_strategist_error(answer.error, auth=answer.status in AUTH_STATUSES)
+            self._fail(runner, triggers, answer.error, record, auth=answer.status in AUTH_STATUSES)
+            return
+        try:
+            reply, unreadable = parse_reply(answer.raw), "reply is not a JSON object"
+        except ValueError as e:
+            reply, unreadable = None, f"reply is not JSON: {e}"
+        if not isinstance(reply, dict):
+            # No plan to apply: the stack stays as it is and the call is
+            # retried like a failed one (A82, free-play run 8: a reply that
+            # was not JSON cleared gather_gems and buy for the safe default).
+            self._fail(runner, triggers, unreadable, record)
             return
         self.failures_in_a_row, self.retry_at = 0, 0.0
-        try:
-            reply = parse_reply(answer.raw)
-        except ValueError as e:
-            reply, record["invalid"] = None, f"reply is not JSON: {e}"
         d = runner.directives.directives
         (goals, params, notes), self.rejected = collect_rejections(
             lambda: parse_plan_payload(reply, floor_params=dict(d.params), current_params=runner.plan.params)
@@ -1229,7 +1222,7 @@ class Strategist:
             self._report(runner.acceptance, reply, goals, record)
         runner.plan.params = params
         record.update(goals=goals, params=runner.plan.params, notes=notes)
-        if isinstance(reply, dict) and "goals" not in reply:
+        if "goals" not in reply:
             runner.log("strategist", "no goals in reply; stack kept", {"strategist": {"event": "kept", **record}})
             return
         if asked is not None:
@@ -1304,6 +1297,23 @@ class Strategist:
             runner.log("strategist", "new head deferred to the next action boundary", {"strategist": {"event": "deferred", **record}})
             return
         self._apply(runner, new, record, len(pinned))
+
+    def _fail(self, runner: Any, triggers: list[dict[str, Any]], error: str, record: dict[str, Any], auth: bool = False) -> None:
+        """A call that gave no plan to apply (it failed, or its reply cannot be
+        read as a JSON object): keep the stack, put its triggers back, and
+        back off before the next call."""
+        self.inbox = (triggers + self.inbox)[-INBOX_KEPT:]
+        self.failures_in_a_row += 1
+        delay = min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2 ** (self.failures_in_a_row - 1))
+        self.retry_at = self.clock() + delay
+        log.warning("strategist: call failed: %s", error)
+        runner.log(
+            "strategist",
+            f"failed: {error}; stack kept; next call in {delay:.0f}s",
+            {"strategist": {"event": "error", "error": error, "backoff_s": delay, **record}},
+        )
+        if runner.acceptance is not None:
+            runner.acceptance.on_strategist_error(error, auth=auth)
 
     def _apply(self, runner: Any, new: Plan, record: dict[str, Any], pinned: int) -> None:
         """Make ``new`` the stack. The same op on top carries on where it was;

@@ -41,6 +41,7 @@ from ..gem_yield import (
     region_of,
 )
 from ..healing import FOOD_CODES, POTION_CODES
+from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, reach_cells
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
@@ -52,7 +53,7 @@ from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets, safe_default
 from .fight import engage
-from .gather_safe import GATHER_HOSTILE_RADIUS, Danger, danger, gather_ground, reach_cells, route_clear
+from .gather_safe import gather_ground, route_clear
 from .intents import arm, arm_and_use, set_position, take, use_block
 from .solve import held_supply
 
@@ -354,7 +355,7 @@ def _gather_step(
         if there:
             cuttable, worked = there, target
         elif named and shadow is None and region_of(here) != target and not _seen_region(w, target):
-            out = _walk_to_region(w, m, policy, knowledge, target, state)
+            out = _walk_to_region(w, m, policy, knowledge, target, state, d)
             if out is not None:
                 return out, target
     # Field cells first; safe ones only when no field cell is left to cut.
@@ -391,7 +392,7 @@ def _gather_cells(
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
     if shadow is not None:
-        off = _move_off(w, m, policy, shadow, plan_avoid, plan_costly, preferred, state)
+        off = _move_off(w, m, policy, shadow, plan_avoid, plan_costly, preferred, state, d)
         if off is not None:
             return off
     piles = [
@@ -471,21 +472,27 @@ def _move_off(
     costly: set[Pos],
     preferred: set[Pos],
     state: str,
+    d: Danger | None = None,
 ) -> StateOutcome | None:
     """One step of a single walk to ground ``MOVE_OFF_DISTANCE`` from ``shadow``,
     grass there first, rather than inching to the nearest cell it does not
     cover (A63 run 3). None once there, or with nowhere to go: the shadow's
-    clock restarts and Gather carries on.
+    clock restarts and Gather carries on. It moves off onto no other known
+    hostile's ground, and by a route clear of its reach, as Gather's other
+    walks do (free-play run 7).
     """
     here = w.pos
     assert here is not None
+    d = d or danger(w, policy)
     if not (m.goal == GOAL and m.gather_target is not None and m.gather_target[0] == OFF):
         m.path, m.goal, m.gather_target = [], "", None
-        params = grid_params(policy, blocked, costly)
-        far = {p for p in w.view.tiles if chebyshev(p, shadow.pos) >= MOVE_OFF_DISTANCE and w.view.walkable(p) and p not in blocked}
+        reach = set() if d.fight else reach_cells(w, policy, d)
+        params = grid_params(policy, blocked, costly | reach)
+        shut = blocked | reach
+        far = {p for p in w.view.tiles if chebyshev(p, shadow.pos) >= MOVE_OFF_DISTANCE and w.view.walkable(p) and p not in shut}
         for cells in ({p for p in far if p in preferred}, far):
-            found = nearest_target(w, _nearest(here, cells), params) if cells else None
-            if found and next_step(w, blocked, found[1]):
+            found = _nearest_clear(w, cells, params, blocked, lambda path: route_clear(w, policy, path, d))
+            if found:
                 m.path, m.goal, m.gather_target = found[1], GOAL, (OFF, found[0])
                 break
     step = next_step(w, blocked, m.path) if m.goal == GOAL else None
@@ -533,17 +540,31 @@ def _seen_region(w: WorldModel, region: tuple[int, int]) -> bool:
 
 
 def _walk_to_region(
-    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None, region: tuple[int, int], state: str
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    knowledge: KnowledgeBase | None,
+    region: tuple[int, int],
+    state: str,
+    d: Danger | None = None,
 ) -> StateOutcome | None:
-    """A step toward the middle of a named region no cell of which is known yet."""
+    """A step toward the middle of a named region no cell of which is known yet.
+
+    Like every Gather walk, it prices known hostiles' reach as costly and
+    takes no path that still crosses it, unless ``d.fight`` (free-play run
+    7: Gather walked toward a pack); a kept path whose way ahead comes to
+    cross it is planned again."""
+    d = d or danger(w, policy)
     x0, y0 = region_corner(region)
     middle = (x0 + REGION_SIZE // 2, y0 + REGION_SIZE // 2)
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    if not (m.goal == GOAL and m.gather_target == (REGION, middle) and next_step(w, plan_avoid, m.path)):
+    kept = m.goal == GOAL and m.gather_target == (REGION, middle) and next_step(w, plan_avoid, m.path)
+    if not (kept and route_clear(w, policy, m.path, d)):
         if m.goal == GOAL:
             m.path, m.goal, m.gather_target = [], "", None
-        path = cost_path(w, middle, grid_params(policy, plan_avoid, plan_costly))
-        if not next_step(w, plan_avoid, path):
+        costly = plan_costly if d.fight else plan_costly | reach_cells(w, policy, d)
+        path = cost_path(w, middle, grid_params(policy, plan_avoid, costly))
+        if not next_step(w, plan_avoid, path) or not route_clear(w, policy, path, d):
             return None
         m.path, m.goal, m.gather_target = path, GOAL, (REGION, middle)
     step = next_step(w, plan_avoid, m.path)

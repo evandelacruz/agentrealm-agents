@@ -1,4 +1,4 @@
-"""Flee: open distance from hostiles, toward known safety (A9)."""
+"""Flee: open distance from hostiles, toward the refuge Retreat walks to (A9)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import dataclasses
 from ..directives import attack_forbidden
 from ..memory import Memory
 from ..navigation import cost_path, oscillation
-from ..pathing import flee_run, flee_step, grid_params, outruns, step_open
+from ..pathing import flee_run, flee_step, grid_params, outruns, retreat_safe_goal, step_open
 from ..survival import (
     at_health_floor,
     combat_group,
@@ -18,7 +18,6 @@ from ..survival import (
     would_lose,
 )
 from ..world import Entity, Pos, WorldModel, chebyshev
-from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .explore import plan_sets
@@ -51,26 +50,29 @@ def _committed_step(w: WorldModel, m: Memory, hostiles: list[Entity], blocked: s
 
 
 def flee_escape(
-    w: WorldModel, m: Memory, ctx: PlayContext, hostiles: list[Entity], blocked: set[Pos], safes: set[Pos]
+    w: WorldModel, m: Memory, ctx: PlayContext, hostiles: list[Entity], blocked: set[Pos]
 ) -> list[Pos]:
     """A multi-step escape, or [] when standing still is best (A9, A58).
 
-    The first step is ``flee_step``'s, so ties still break toward the nearest
-    known safe tile. The rest is a route from there to that safe tile when
-    one is known and the agent reaches every cell of it before any hostile
-    could (``outruns``), else ``flee_run`` away from the hostiles. A safe
-    tile behind a hostile is Retreat's to reach, not Flee's.
+    It runs toward Retreat's refuge (``pathing.retreat_safe_goal``: the
+    nearest safe cell outside every known hostile's ground), so Flee and
+    Retreat never pull opposite ways (free-play run 7). The first step is
+    ``flee_step``'s, so ties break toward the refuge. The rest is a route
+    from there to the refuge when the agent reaches every cell of it before
+    any hostile could (``outruns``), else ``flee_run`` away from the
+    hostiles. A refuge behind a hostile is Retreat's to reach, not Flee's.
     """
-    first = flee_step(w, hostiles, blocked, safes)
+    policy = ctx.policy
+    _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+    refuge = retreat_safe_goal(m, w, policy, ctx.knowledge, plan_avoid, plan_costly)
+    first = flee_step(w, hostiles, blocked, [refuge] if refuge is not None else ())
     if first is None:
         return []
-    if safes:
-        goal = min(safes, key=lambda s: (chebyshev(s, first), s))
-        if goal == first:
+    if refuge is not None:
+        if refuge == first:
             return [first]
-        _, _, plan_costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
-        params = grid_params(ctx.policy, blocked, plan_costly)
-        rest = cost_path(dataclasses.replace(w, pos=first), goal, params)
+        params = grid_params(policy, blocked, plan_costly)
+        rest = cost_path(dataclasses.replace(w, pos=first), refuge, params)
         if rest and outruns([first] + rest, hostiles):
             return [first] + rest
     return flee_run(w, hostiles, blocked, first)
@@ -199,7 +201,6 @@ class FleeState(State):
             instead = instead_of_fleeing(w, ctx, target, hostiles, blocked, paced)
             if instead is not None:
                 return instead
-        safes = safe_tiles(w, w.map_id) if w.map_id is not None else set()
         # Start over when Flee did not run last decision (the threat was
         # gone in between) or the guard caught pacing; a caught escape keeps
         # off the paced cells.
@@ -208,7 +209,7 @@ class FleeState(State):
         away = _committed_step(w, m, hostiles, blocked | m.flee_avoid)
         if away is None:
             m.flee_avoid = paced
-            m.flee_path = flee_escape(w, m, ctx, hostiles, blocked | paced, safes)
+            m.flee_path = flee_escape(w, m, ctx, hostiles, blocked | paced)
             away = m.flee_path[0] if m.flee_path else None
         if away is None:
             return StateOutcome(None, "nowhere to flee", state=self.name, wait=True)

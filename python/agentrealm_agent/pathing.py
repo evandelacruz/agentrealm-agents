@@ -25,7 +25,8 @@ from .navigation.stuck import Leg, NavAttempt
 from .healing import hurt
 from . import targets as targets_mod
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
-from .survival import is_hostile, pursuer_peaks, reach_by_hostile, safe_goals, town_cell
+from .hostile_ground import ground_by_hostile
+from .survival import is_hostile, safe_goals, town_cell
 from .executor.movement import step_landing
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
@@ -477,7 +478,6 @@ def reachable_safe_goal(
     params: CostGridParams,
     town: Pos | None,
     reach: dict[tuple[str, int], set[Pos]] | None = None,
-    skip: Collection[tuple[str, int]] = (),
     prefer: Pos | None = None,
 ) -> Pos | None:
     """The first of ``candidates`` (in the caller's order) a path reaches,
@@ -488,13 +488,12 @@ def reachable_safe_goal(
     is kept while it is still a candidate or ``town`` and none of the skips
     below rules it out, however near the others have come.
 
-    Skipped: a cell in the ``reach`` of a known hostile not in ``skip``
-    (``survival.reach_by_hostile``; A63 run 4: Heal walked to a safe tile
-    beside a hostile pack and died), or seen there within
-    ``SAFE_THREATENED_TICKS`` (``Memory.safe_threatened``, kept per hostile so
-    a caller's ``skip`` also covers the marks), since ``w.entities`` holds only
-    what is in view and a pick that forgot the pack once it left view would
-    turn back toward it; ``town`` is still the last resort. Also a
+    Skipped, ``town`` included: a cell in the ``reach`` of a known hostile
+    (``hostile_ground.ground_by_hostile``, in view or remembered; A63 run 4:
+    Heal walked to a safe tile beside a hostile pack and died), or seen there
+    within ``SAFE_THREATENED_TICKS`` (``Memory.safe_threatened``), since a
+    pick that forgot the pack once it left view would turn back toward it. ``town`` is the last resort only among cells
+    outside every hostile's reach. Also a
     cell ``params`` avoids, one a check found no way to within
     ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), and one a
     Heal walk gave up on and still backs off. The first ``SAFE_GOAL_CHECKS``
@@ -509,8 +508,9 @@ def reachable_safe_goal(
         return w.pos
     mid = w.map_id
 
+    marked = set(candidates) | ({town} if town is not None else set())
     for key, cells in (reach or {}).items():
-        for p in cells.intersection(candidates):
+        for p in cells.intersection(marked):
             m.safe_threatened.setdefault((mid, p), {})[key] = w.tick
 
     def skipped(p: Pos) -> bool:
@@ -538,7 +538,7 @@ def reachable_safe_goal(
             m.safe_threatened[(mid, p)] = live
         else:
             del m.safe_threatened[(mid, p)]  # lapsed marks are dropped, so a long run does not pile them up
-        return any(key not in skip for key in live)
+        return bool(live)
 
     if (
         prefer is not None
@@ -557,7 +557,7 @@ def reachable_safe_goal(
     for p in first:
         if reaches(p):
             return p
-    if town is not None and town not in first and not skipped(town) and reaches(town):
+    if town is not None and town not in first and not recently_threatened(town) and not skipped(town) and reaches(town):
         return town
     return None
 
@@ -565,24 +565,26 @@ def reachable_safe_goal(
 def retreat_safe_goal(
     m: Memory, w: WorldModel, policy: Policy, knowledge: KnowledgeBase | None, avoid: set[Pos], costly: set[Pos]
 ) -> Pos | None:
-    """Where Retreat, Park and Fight's retreat tail walk: the nearest known safe
-    cell a path reaches and out of reach of a hostile it is not running from,
-    else the town cell (``reachable_safe_goal``). Once picked, the cell is
+    """The refuge: where Retreat, Park and Fight's retreat tail walk, and Flee
+    runs toward. The nearest known safe cell a path reaches outside the
+    ground of every known hostile, in view or remembered, the ones it runs
+    from included (``hostile_ground.ground_by_hostile``), else the town cell
+    on the same terms (``reachable_safe_goal``). Once picked, the cell is
     committed (``RETREAT_TARGET``, A71) and kept while it stays valid.
 
-    The hostiles it runs from (``pursuer_peaks``) do not rule a cell out:
-    they follow anyway, and are usually right beside the nearest safe cell.
+    A safe cell beside a pursuer is no refuge: Retreat walked back toward
+    one 2 cells from the hostile it ran from while Flee stepped away, 6 hits
+    in 19 s (free-play run 7). One threat picture for both keeps them
+    pulling the same way.
     """
     params = grid_params(policy, avoid, costly)
-    reach = reach_by_hostile(w, policy)
     goal = reachable_safe_goal(
         m,
         w,
         safe_goals(w, knowledge),
         params,
         town_cell(w, knowledge),
-        reach,
-        skip=pursuer_peaks(w, policy),
+        ground_by_hostile(w, policy),
         prefer=committed_safe(m, w, RETREAT_TARGET),
     )
     commit_safe(m, w, RETREAT_TARGET, goal)

@@ -103,11 +103,12 @@ class FightStateTest(unittest.TestCase):
         self.assertEqual(out.state, "Explore")
 
     def test_retreat_queued_after_use(self):
-        w = world(["...", "...", "..."], at=(1, 1))
+        # The safe tile lies outside the snotling's reach: one inside it is no refuge.
+        w = world([".....", ".....", "....."], at=(3, 1))
         w.health, w.lives = 500, 10
-        w.entities = [Entity("npc", 5, (2, 1), code="snotling")]
+        w.entities = [Entity("npc", 5, (4, 1), code="snotling")]
         w.threat.record(("npc", "snotling"), 1)
-        apply_zone(w, w.map_id, 0, 0, {"safe": True})
+        apply_zone(w, w.map_id, 0, 1, {"safe": True})
         out = dispatch(
             w,
             ctx(on_hostile="fight", hostile=["npc"], params={**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1}),
@@ -119,11 +120,11 @@ class FightStateTest(unittest.TestCase):
         self.assertIn("Step", verbs[use_i + 1 :])
 
     def test_decide_exposes_submit_queue(self):
-        w = world(["...", "...", "..."], at=(1, 1))
+        w = world([".....", ".....", "....."], at=(3, 1))
         w.health, w.lives = 500, 10
-        w.entities = [Entity("npc", 5, (2, 1), code="snotling")]
+        w.entities = [Entity("npc", 5, (4, 1), code="snotling")]
         w.threat.record(("npc", "snotling"), 1)
-        apply_zone(w, w.map_id, 0, 0, {"safe": True})
+        apply_zone(w, w.map_id, 0, 1, {"safe": True})
         d = decide(
             w,
             Memory(),

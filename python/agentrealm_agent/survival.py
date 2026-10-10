@@ -6,7 +6,8 @@ import math
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from .threat import ThreatTable, type_key_for_entity
+from .supplies import weapon_damage
+from .threat import ThreatTable, TypeKey, type_key_for_entity
 from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe, safe_tiles
@@ -19,8 +20,20 @@ if TYPE_CHECKING:
 # until measured"). Only the win estimate reads them; A23 refines it.
 HOSTILE_ATTACK_INTERVAL_TICKS = 15
 OUR_ATTACK_INTERVAL_TICKS = 10
-OUR_DAMAGE_PER_HIT = 1
 UNKILLED_HOSTILE_HEALTH = 10
+# Our swing, by the published roll (GAME_NOTES.md Combat): it hits when d20
+# plus attack power is at least 10 plus the target's defense, which a
+# hostile does not have; a 1 always misses and a 20 always hits. A hit deals
+# 1 up to attack power plus weapon damage. The API serves no attack power
+# (PLAN.md Server gaps), so ours is the world's base: every Olympuff
+# character has 2 (A81), a hit on 8 or better, 65% of swings.
+BASE_ATTACK_POWER = 2
+COMBAT_DIE = 20
+COMBAT_HIT_TARGET = 10
+# Weapon damage is the Supplies reference's (``supplies.weapon_damage``, A54).
+# An armed item it lists as no weapon (food, a tool, nothing) swings as the
+# starting knife.
+STARTING_WEAPON = "pocket_knife"
 NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)
 # How long Flee keeps running from a hostile that hit us once it is out of
@@ -263,26 +276,62 @@ def hostiles_reaching(
     return {(e.kind, e.id) for e in w.entities if not cells.isdisjoint(hostile_reach(w, policy, skip, only=e))}
 
 
+def hostile_swing_damage(damage: int) -> float:
+    """Expected damage of one hostile swing at us. A hostile swings with its
+    damage number as attack power and no weapon damage (GAME_NOTES.md
+    Combat), so it hits on the same roll ours does. ``damage`` is the threat
+    table's largest hit, only a floor on that number, so each landed hit is
+    priced at it, not at the mean below it. Our armor is not counted: the
+    agent does not know its defense."""
+    return hit_chance(attack_power=damage) * max(1, damage)
+
+
+def _hostile_damage(threat: ThreatTable, key: TypeKey | None) -> float:
+    """A measured type's expected swing (``hostile_swing_damage``); an
+    unmeasured one's conservative guess lands every swing, undiscounted."""
+    damage = threat.damage_per_hit(key)
+    return hostile_swing_damage(damage) if threat.measured(key) else damage
+
+
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:
     if health <= 0 or not group:
         return float("inf")
-    dps = sum(threat.damage_per_hit(type_key_for_entity(e)) for e in group) / HOSTILE_ATTACK_INTERVAL_TICKS
+    dps = sum(_hostile_damage(threat, type_key_for_entity(e)) for e in group) / HOSTILE_ATTACK_INTERVAL_TICKS
     if dps <= 0:
         return float("inf")
     return health / dps
 
 
-def ticks_to_kill_them(group: list[Entity]) -> float:
+def hit_chance(attack_power: int = BASE_ATTACK_POWER, defense: int = 0) -> float:
+    """The share of d20 faces that hit a target with ``defense``: 0.65 at
+    attack power 2 against a hostile, never below 1 face nor above 19."""
+    lowest = COMBAT_HIT_TARGET + defense - attack_power  # the lowest face that hits
+    faces = COMBAT_DIE - max(lowest, 2) + 1
+    return min(max(faces, 1), COMBAT_DIE - 1) / COMBAT_DIE
+
+
+def swing_damage(weapon: str | None) -> float:
+    """Expected damage of one swing of ``weapon`` at a hostile: the hit
+    chance times the mean of 1 up to attack power plus weapon damage (the
+    pocket knife: 0.65 × 2.5)."""
+    damage = weapon_damage(weapon)
+    if damage is None:
+        damage = weapon_damage(STARTING_WEAPON) or 0
+    return hit_chance() * (1 + max(1, BASE_ATTACK_POWER + damage)) / 2
+
+
+def ticks_to_kill_them(group: list[Entity], weapon: str | None = None) -> float:
     if not group:
         return float("inf")
-    return len(group) * UNKILLED_HOSTILE_HEALTH / (OUR_DAMAGE_PER_HIT / OUR_ATTACK_INTERVAL_TICKS)
+    return len(group) * UNKILLED_HOSTILE_HEALTH / (swing_damage(weapon) / OUR_ATTACK_INTERVAL_TICKS)
 
 
-def win_ratio(health: int | None, group: list[Entity], threat: ThreatTable) -> float:
-    """Ticks for them to kill us, over ticks for us to kill them. Higher is better for us."""
+def win_ratio(health: int | None, group: list[Entity], threat: ThreatTable, weapon: str | None = None) -> float:
+    """Ticks for them to kill us, over ticks for us to kill ``group`` with
+    ``weapon`` armed. Higher is better for us."""
     if health is None or not group:
         return float("inf")
-    return ticks_to_kill_us(health, group, threat) / ticks_to_kill_them(group)
+    return ticks_to_kill_us(health, group, threat) / ticks_to_kill_them(group, weapon)
 
 
 def has_unmeasured_type(w: WorldModel, group: list[Entity]) -> bool:
@@ -312,7 +361,7 @@ def would_lose(
     if health is None:
         health = NEW_CHARACTER_HEALTH
     margin = effective_fight_margin(float(params["fight_margin"]), eff_risk)
-    return win_ratio(health, group, w.threat) <= margin
+    return win_ratio(health, group, w.threat, w.armed_code) <= margin
 
 
 def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:

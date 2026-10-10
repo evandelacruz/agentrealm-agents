@@ -210,13 +210,15 @@ class ProbeRunTest(unittest.TestCase):
 class ProbeProfileTest(unittest.TestCase):
     """The probe profile and its directives, with the real states deciding."""
 
-    def probe_decides(self, *, health: int = 10, lives: int = 10) -> str:
+    def probe_decides(self, *, health: int = 10, lives: int = 10, measured: int | None = None) -> str:
         cfg = config.load(PROFILE)
         params = load_directives(cfg.directives_path).params
         w = hurt_on_safe_tile()
         w.pos, w.terrain_center, w.health, w.lives = (2, 2), (2, 2), health, lives
         w.entities = [Entity("npc", 3, (3, 2), "slime")]
         w.hostile_types.add(("npc", "slime"))  # a type seen attacking (survival.is_hostile)
+        if measured is not None:
+            w.threat.record(("npc", "slime"), measured)  # it has hit us for this much
         return dispatch(w, PlayContext(Memory(), cfg.policy, random.Random(0), params=params)).state
 
     def test_only_risk_and_fight_margin_move_off_the_defaults(self):
@@ -228,8 +230,9 @@ class ProbeProfileTest(unittest.TestCase):
         self.assertEqual(self.probe_decides(health=10), "Fight")
 
     def test_it_retreats_at_the_should_retreat_threshold(self):
-        self.assertEqual(self.probe_decides(health=7), "Fight")
-        self.assertEqual(self.probe_decides(health=6), "Retreat")
+        """By health 6 the hostile has hit, so its type is measured (review on #172)."""
+        self.assertEqual(self.probe_decides(health=7, measured=2), "Fight")
+        self.assertEqual(self.probe_decides(health=6, measured=2), "Retreat")
 
     def test_low_on_lives_it_retreats_instead_of_meeting_an_unmeasured_hostile(self):
         # Fewer lives lower the effective risk, so the win estimate refuses

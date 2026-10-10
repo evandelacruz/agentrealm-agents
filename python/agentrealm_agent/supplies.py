@@ -2,7 +2,7 @@
 
 The site serves the table as JSON at ``SUPPLIES_URL`` (API Supplies
 reference, saims B132): per ``code`` its ``class``, ``slot``, ``use_effects``
-(what ``Use`` does), ``attack_range``, ``heal``, ``used_up_on_break``,
+(what ``Use`` does), ``attack_range``, ``damage``, ``heal``, ``used_up_on_break``,
 ``eaten_on_pickup``, ``gem_prices`` and more; a field that does not apply is
 left out. It is a page on the website, not an API read, so it spends nothing
 from a character's call budget, and it is fetched once per run (``load``).
@@ -17,9 +17,9 @@ Where the table comes from, first that works:
    so tests and a run that never calls ``load`` still have every row.
 
 The questions the agent asks of a subtype (is it food, a potion, a weapon;
-what blocks it breaks; how far it reaches) are the functions below. A code
-the table does not list answers "no", with the default reach of one block:
-learning in play (A18, A28, A46) still covers it.
+what blocks it breaks; how much damage it deals) are the functions below. A
+code the table does not list answers "no" (or None): learning in play (A18,
+A28, A46) still covers it.
 """
 
 from __future__ import annotations
@@ -50,9 +50,6 @@ FETCH_TIMEOUT_SECONDS = 5.0
 # and water open none (docs/GAME_NOTES.md Breaking blocks). ``plan`` takes its
 # ``break_block`` capabilities from here.
 CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
-# A ``Use`` on a block reaches the next block, corners included, with a tool
-# or a weapon that authors no ``attack_range`` (API Use, B104).
-DEFAULT_BLOCK_REACH = 1
 
 
 @dataclass(frozen=True)
@@ -62,7 +59,7 @@ class Supply:
     code: str
     supply_class: str
     use_effects: frozenset[str]
-    attack_range: int | None = None
+    damage: int | None = None
     heal: int | None = None
     used_up_on_break: bool | None = None
     eaten_on_pickup: bool = False
@@ -85,12 +82,18 @@ def parse(raw: Any) -> dict[str, Supply]:
             code=code,
             supply_class=row.get("class") if isinstance(row.get("class"), str) else "",
             use_effects=frozenset(e for e in effects if isinstance(e, str)) if isinstance(effects, list) else frozenset(),
-            attack_range=_positive_int(row.get("attack_range")),
+            damage=_non_negative_int(row.get("damage")),
             heal=_positive_int(row.get("heal")),
             used_up_on_break=used_up if isinstance(used_up, bool) else None,
             eaten_on_pickup=row.get("eaten_on_pickup") is True,
         )
     return out
+
+
+def _non_negative_int(v: Any) -> int | None:
+    if isinstance(v, bool) or not isinstance(v, int):
+        return None
+    return v if v >= 0 else None
 
 
 def _positive_int(v: Any) -> int | None:
@@ -208,10 +211,11 @@ def break_capabilities(code: str | None) -> frozenset[str]:
     return r.use_effects & CAPABILITIES if r is not None else frozenset()
 
 
-def block_reach(code: str | None) -> int:
-    """How far a ``Use`` on a block reaches with ``code`` armed."""
+def weapon_damage(code: str | None) -> int | None:
+    """A weapon's published ``damage`` (0 for the bare mallet and whip), or
+    None for anything that is not a listed weapon."""
     r = row(code)
-    return r.attack_range if r is not None and r.attack_range is not None else DEFAULT_BLOCK_REACH
+    return r.damage if r is not None and r.supply_class == "weapon" else None
 
 
 def file_capabilities(items: dict[str, dict[str, Any]]) -> None:

@@ -28,15 +28,15 @@ class ParseTest(unittest.TestCase):
     def test_rows_by_code_skip_malformed(self):
         rows = supplies.parse(SERVED)
         self.assertEqual(sorted(rows), ["cleaver", "flare", "gem", "plum", "tonic"])
-        self.assertEqual(rows["cleaver"].attack_range, 2)
+        self.assertEqual(rows["cleaver"].damage, 9)
         self.assertFalse(rows["cleaver"].used_up_on_break)
-        self.assertIsNone(rows["flare"].attack_range)
+        self.assertIsNone(rows["flare"].damage)
         self.assertEqual(supplies.parse({"rows": []}), {})
 
     def test_bundled_copy_lists_the_starting_kit(self):
         rows = supplies.parse(json.loads(supplies.BUNDLED_PATH.read_text()))
         self.assertEqual(rows["pocket_knife"].use_effects, frozenset({"attack", "cut"}))
-        self.assertEqual(rows["pocket_knife"].attack_range, 1)
+        self.assertEqual(rows["pocket_knife"].damage, 2)
 
 
 class QuestionsTest(unittest.TestCase):
@@ -63,10 +63,10 @@ class QuestionsTest(unittest.TestCase):
         self.assertEqual(supplies.break_capabilities("flare"), frozenset({"burn"}), "light opens no block")
         self.assertEqual(supplies.break_capabilities("unlisted"), frozenset())
 
-    def test_block_reach_defaults_to_the_next_block(self):
-        self.assertEqual(supplies.block_reach("cleaver"), 2)
-        self.assertEqual(supplies.block_reach("flare"), 1)
-        self.assertEqual(supplies.block_reach(None), 1)
+    def test_weapon_damage_is_for_weapons_only(self):
+        self.assertEqual(supplies.weapon_damage("cleaver"), 9)
+        self.assertIsNone(supplies.weapon_damage("flare"))
+        self.assertIsNone(supplies.weapon_damage(None))
 
     def test_capabilities_filed_on_the_item_table_grow_only(self):
         items = {"flare": {"capabilities": ["smash"], "gem_price": 4}}

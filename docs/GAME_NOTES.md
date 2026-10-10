@@ -10,6 +10,7 @@ What the agent needs to know to play Agent Realm. Every fact names its source:
 | **SM** | [State machine agent guide](https://agentrealm.gg/guides/state-machine) |
 | **Tick** | The `tick` tool's description and intent schema on the Agent Realm MCP server (one call to `POST /characters/{id}/tick`) |
 | **Obs** | Observed in play with the observer character (Olympuff) on 2026-10-04, ticks 1835171–1839533 |
+| **CL** | [Changelog](https://agentrealm.gg/docs/changelog), and the server's change notes behind it (saims B136, B137, B139: the update live on 2026-10-10) |
 
 ## No spoilers in this repo
 
@@ -28,7 +29,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **The world tells you how to progress through text:** signs, statues, scrolls and helper lines. Text read in town and at entrances describes what each level asks for (Obs). Capturing and interpreting that text is the strategist's main job.
 - **Compose** joins fragment supplies into the whole they belong to, once all pieces are held. There is no workbench and no recipe catalog (M §6; API Snapshots).
 - **There is no "build".** No verb places blocks. The world changes only by destroying blocks, which grow back, and by composing supplies (M §6, §11).
-- **Combat** uses published d20 rules. A new character has 10 health and attack and defense of 0, so gear decides fights. Two weak hostiles killed the observer character in about 6 s (Obs).
+- **Combat** uses published d20 rules. A new character has 10 health, permanent attack power 2 and defense 0, so gear decides fights (M §16, CL). Two weak hostiles killed the observer character in about 6 s (Obs, before attack power 2).
 
 ## Loop, budget and timing
 
@@ -78,7 +79,8 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Safe zones.** No damage of any kind lands there, and you can't attack or set a trap from inside one. Breaking blocks is allowed (M §11). Attacking a hostile from a safe tile was `not_allowed_in_safe_zone` (Obs 1836584).
 - **Safe zones work as a refuge.** A chest outside the safe zone can still be emptied from a safe tile next to it (Obs 1837572).
 - **Edges are sharp.** Town's gate tiles were safe; the tile one step outside was not (Obs).
-- **Hunting grounds.** Your strength is permanent attack + permanent defense + armed weapon damage + worn armor defense. Over the ceiling you can't enter (`over_strength_ceiling`), and if you grow past it inside you are moved out (API Movement). Strength is readable only on the owner watch sheet (`/watch/characters/{id}/sheet`, viewing bucket), not on `get_self` (M §5.5).
+- **Hunting grounds.** Your strength is permanent attack + permanent defense + armed weapon damage + worn armor defense. Over the ceiling you can't enter (`over_strength_ceiling`), and if you grow past it inside you are moved out (API Movement). Strength is readable only on the owner watch sheet (`/watch/characters/{id}/sheet`, viewing bucket), not on `get_self` (M §5.5); the sheet counts only an armed weapon's damage and worn armor's defense, never a held potion or worn non-armor (CL, B139). Neither serves attack power on its own.
+- **Olympuff's hunting ground** has `strength_ceiling` 7: attack power 2 plus 5 of gear. The pocket knife or a bronze sword, with bronze mail or without, gets in; a bronze mallet or anything stronger does not (M §16, CL: it was 5 before attack power 2).
 - **Light.** Sight range = perception × zone brightness, plus an armed torch or lantern (or a worn light), capped at perception (Guide, The world model).
 
 ## Combat
@@ -88,7 +90,8 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   - To hit: d20 + attack ≥ 10 + target defense + target armor defense. 1 always misses, 20 always hits.
   - Damage: uniform from 1 to max(1, attack + weapon damage − defense − armor defense).
   - Die size, hit target and minimum are per-world settings (API Use).
-  - Olympuff keeps permanent attack and defense at 0 (M §16). With attack 0, a d20 roll of 10+ hits a defense-0 target: 55%.
+  - Every Olympuff character has permanent attack power 2, existing characters included; permanent defense stays 0 (M §16, CL). A d20 roll of 8+ hits a hostile, which has no defense: 65%. Damage is 1 up to 2 plus weapon damage: the pocket knife deals 1–4, a bronze sword 1–6. The world's hit target stays 10, so hostiles' swings at characters are unchanged.
+  - The API serves no attack power (PLAN.md **Server gaps**); the agent's win estimate uses the base of 2 (`survival.BASE_ATTACK_POWER`).
 - **Hostiles.** A hostile, trap or boss uses its damage number as attack power, with no weapon damage. Hostiles use the same move and attack accumulators as characters (API Use, Movement).
 - **What two weak hostiles did** (Obs 1836771–1836830):
 
@@ -100,7 +103,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   - Stepping next to the pair drew a hit on that same tick.
   - Both attacked once the observer character was adjacent, though only one was attacked.
   - Seven hits took 10 health in 59 ticks.
-  - The observer character's bronze sword landed 2 of 3 swings, for 1 and 2 damage.
+  - The observer character's bronze sword landed 2 of 3 swings, for 1 and 2 damage (at attack power 0).
 - **Hostiles stay near their spawn.** The pair stood just outside town for over 30 minutes, moving at most one block, and never followed into the safe zone (Obs).
 - **Lesson.** Several hostiles close together are one fight, not several. Never step next to a group with 10 health. Count every hostile within two blocks of the target before engaging (Obs).
 - **Combat events.** `NPCDamaged` shows damage dealt; a miss emits nothing. `NPCDied` marks a kill (M §8).
@@ -117,7 +120,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Drop** puts a carried supply on the ground under you. `Drop` and `DepositToChest` refuse a gem, a life, or a non-transferable supply (the starting kit) with `not_transferable`, permanent (M §6, §10.2, §11).
 - **`attack_range`** on `get_self` is the armed weapon's reach; 1 when the weapon authors none (M §5.3).
 - **Supplies reference.** The Manual's Supplies reference lists every supply subtype: class, slot, what `Use` does (`use_effects`), attack range, damage, heal, defense, whether a break uses it up, whether it is eaten on pickup, and gem price per world. The site serves the same rows as JSON at `https://agentrealm.gg/docs/supplies.json`, with no key (API Supplies reference, saims B132). The agent reads it through `supplies.py` (A54).
-- **Olympuff starting kit:** a non-transferable pocket knife (damage 2, range 1, cuts grass and bushes). It survives death and is re-armed on respawn (M §5.3, §11; Obs: Died dropped everything but the knife).
+- **Olympuff starting kit:** a non-transferable pocket knife (damage 2, range 1, cuts grass and bushes; with attack power 2 it deals 1–4). It survives death and is re-armed on respawn (M §5.3, §11; Obs: Died dropped everything but the knife).
 - **Buying.** Walk onto, or `Take`, a supply with a `gem_price`. Without enough gems it is `not_enough_gems` (M §11). The agent never steps onto one (`WorldModel.for_sale()` is impassable except as a search goal): Shop buys only by `Take` from a neighbouring cell, corners included (A21).
 - **Olympuff town shop prices seen** (Obs):
 
@@ -131,12 +134,14 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   | `matches` | 5 |
   | `small_potion` | 10 |
 
-- **Gems and lives are counters.** Gems and hearts (extra lives) are consumed on pickup into counters and leave nothing in the chest, so they take no slot; lives cap at 20 ever gained (M §11; API). Manual §16 documents **gem** drops from cutting Olympuff grass and bushes (10% in ring 1, 15% farther); it documents gems and hearts from **sandbox** field grass and bushes when broken. The ground `supply_subtype_code` for a life on Olympuff is not observed yet (Obs: [`docs/observations/A20_live_play.md`](observations/A20_live_play.md)).
+- **Gems and lives are counters.** Gems and hearts (extra lives) are consumed on pickup into counters and leave nothing in the chest, so they take no slot; lives cap at 20 ever gained (M §11; API). Manual §16 documents **gem** drops from cutting Olympuff grass (20% in ring 1, 25% farther) and from kills; it documents gems and hearts from **sandbox** field grass and bushes when broken. The ground `supply_subtype_code` for a life on Olympuff is not observed yet (Obs: [`docs/observations/A20_live_play.md`](observations/A20_live_play.md)).
 - **Food.** Olympuff's golden cap heals 6 and is eaten on pickup (M §16). Potions are drunk with `Arm` + `Use` on self, target `{"kind": "self"}` (M Intents, Use targets); a `character` target naming our own id drank nothing in free-play run 4. Swapping what is armed costs a tick (API Use). Small potion +10, large +30 (M §16).
 - **Gear tiers:** bronze in town, iron at waystations, adamant at the Last Camp and from bosses (M §16).
-- **Gems come from** cutting grass and bushes (10% in ring 1, 15% farther), felling trees, gem piles that return on an interval, and gem caches. Field work earns about 3 gems a minute (M §16). Gems are kept on death.
+- **Gems come from** cutting grass with the pocket knife or a sword (20% in the ring-1 fields, 25% in the hunting ground and beyond ring 1), kills, felling trees, gem piles that return on an interval, and gem caches. Field work earns about 6 gems a minute (M §16, CL). Gems are kept on death.
+- **Bushes drop berries, not gems** (M §16, CL). Cutting one is for food (a berry heals 1 on pickup), never for gems; the agent's Gather does not cut them (A81).
+- **Kill drops.** A hostile killed may drop a gem: the zone's grass chance plus a bonus for its type that grows with the hostile's strength. A Snotling in the ring-1 fields drops one 30% of the time, a Chugbug in the hunting ground 40% (M §16, CL). Where grass drops no gem (roads, shores) the bonus alone is the chance.
 - **Food and gems on the ground.** Apples, berries and gem piles lie around town, free to pick up (Obs).
-- **Authored gem piles on the wire.** In Olympuff town, a pile ready to pick up is three adjacent ground supplies on one row, each with `supply_subtype_code` `gem` and no `gem_price` (Obs: fake fixture observer, map 76, supplies 266–268 at 377–379,377 and 2226–2228 at 359–361,360, ticks ~2578415). No separate `gem_pile` code appeared on entity reads. Grass and bush drops use the same code when a gem lands on the ground.
+- **Authored gem piles on the wire.** In Olympuff town, a pile ready to pick up is three adjacent ground supplies on one row, each with `supply_subtype_code` `gem` and no `gem_price` (Obs: fake fixture observer, map 76, supplies 266–268 at 377–379,377 and 2226–2228 at 359–361,360, ticks ~2578415). No separate `gem_pile` code appeared on entity reads. A grass drop is assumed to use the same code when a gem lands on the ground.
 
 ## Compose
 
@@ -224,11 +229,11 @@ Each has a test the agent or a hand session can run.
 | How ground food other than the golden cap heals (apples, berries): on pickup, or carried and `Use`d on self | `Take` one while hurt and read `health`; if unchanged, `Arm` + `Use` self |
 | Does any supply raise max health permanently, besides a level's first clear? | Watch `max_health` in the snapshot after every pickup and `Use` |
 | How to tell a scroll supply from others before reading it. Nothing sourced names scroll subtype codes, so `Investigate` learns them by probing (PLAN.md A56); none is confirmed on the wire yet | Log `supply_subtype_code` of every supply seen; `Read` one of each once and keep the codes that do not answer `nothing_to_read` (A56 does this; note confirmed codes in [`A30_live_play.md`](observations/A30_live_play.md)) |
-| Which `supply_subtype_code` a life (heart) has on the ground. Until confirmed, `LIFE_SUPPLY_CODES` ships empty; the agent files a code as `life_on_pickup` in the item table when `lives` rises in a response whose only applied `Take` was that supply (A47), and confirming it is A57 (Obs [`A57_live_play.md`](observations/A57_live_play.md)) | On Olympuff, keep cutting grass and bushes and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16; Obs [`A20_live_play.md`](observations/A20_live_play.md), [`A47_live_play.md`](observations/A47_live_play.md)) |
+| Which `supply_subtype_code` a life (heart) has on the ground. Until confirmed, `LIFE_SUPPLY_CODES` ships empty; the agent files a code as `life_on_pickup` in the item table when `lives` rises in a response whose only applied `Take` was that supply (A47), and confirming it is A57 (Obs [`A57_live_play.md`](observations/A57_live_play.md)) | On Olympuff, keep cutting grass and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16; Obs [`A20_live_play.md`](observations/A20_live_play.md), [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? Loot drops held supplies only until this is known (A57; Obs [`A57_live_play.md`](observations/A57_live_play.md)) | `Drop` a stowed supply and read the result (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Is the armed supply also listed in `held`? A67 run 1 suggests not (the armed weapon was missing from `held`, [`A67_free_play_runs.md`](observations/A67_free_play_runs.md)). Loot counts held, worn, armed and stowed separately (A20); Heal's drink candidates and `potion_count` (the M8 potion gate, Shop's reserve) add the armed supply by id when `held` leaves it out (A76) | Compare `inventory` before and after an `Arm` |
 | Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 assumes the Manual §16 cap once a `Take` of the upgrade applies (below), and measuring it is A57 (Obs [`A57_live_play.md`](observations/A57_live_play.md)) | Buy `middle_chest` and fill until `carry_capacity_full` (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
-| Where gems drop from cutting grass and bushes. The manual gives only a rate by ring (Items, slots and gear); the agent measures yield per 16×16-block region from its own cuts (PLAN.md A63). No region yield is measured yet | Read `gem_yield` in the world knowledge base after field play |
+| Where gems drop from cutting grass. The manual gives only a rate by ring (Items, slots and gear); the agent measures yield per 16×16-block region from its own cuts, barren after 15 cuts with no gem and poor or good against the map's measured rate, with the manual's 20% as the prior (PLAN.md A63, A81). No region yield is measured yet | Read `gem_yield` in the world knowledge base after field play |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 
 ### Assumed until measured
@@ -239,7 +244,9 @@ The win estimate (A9, gated on by **Fight** in A23) uses these until the questio
 |---|---|---|
 | Hostile attack interval | 15 ticks | The two weak hostiles in Combat |
 | Our attack interval | 10 ticks | None: weapon cooldown is unmeasured |
-| Our damage per hit | 1 | A bronze sword's landed swings did 1 and 2 (Combat); a new character's knife is unmeasured |
+| Our attack power | 2 | The world's base (M §16); the API serves none, so a permanent gain above it is not counted |
+| A hostile's damage a swing | hit chance at its largest measured hit as attack power × that hit: 1.3 for one that hit for 2 | The published roll (Combat: a hostile's damage number is its attack power). The largest hit seen is only a floor on that number, so a landed hit is priced at it, not at the mean below it; our armor is not counted. A type never measured is charged the unmeasured default on every swing, with no hit chance |
+| Our damage a swing | hit chance (65%) × the mean of 1 up to 2 plus weapon damage: 1.625 with the pocket knife | The published roll (Combat) and weapon damage from the Manual's Supplies reference (`supplies.weapon_damage`); an unlisted armed item swings as the knife |
 | Health of a hostile type with no kill on record | 10 | A new character's health (PLAYABLE_AGENT_PLAN Combat) |
 | Our health when no observation has served it | 10 | A new character's health (Combat) |
 

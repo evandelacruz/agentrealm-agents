@@ -1,13 +1,15 @@
 # A60 regen probe: risk and fight_margin move off the defaults, both within
 # their ranges, so a fresh character (health 10) takes on one unmeasured
-# hostile and gets hit. The win estimate then turns to Retreat
-# (should_retreat) at health 6 against it, three default hits left. It takes
-# that fight only with at least lives_floor * 2 lives (6); with fewer, the
-# effective risk falls and it retreats instead.
+# hostile and gets hit. Once hit, the hostile's type is measured, and the win
+# estimate turns to Retreat (should_retreat) at health 6 against one that hits
+# for 2. It takes that fight only with at least lives_floor * 2 lives (6);
+# with fewer, the effective risk falls and it retreats instead.
+# fight_margin is 2.4 since the published roll priced both sides' swings
+# (A81): 1.0 before.
 goals = []
 
 [params]
-fight_margin = 1.0
+fight_margin = 2.4
 risk = 1.0
 retreat_hits = 2
 lives_floor = 3

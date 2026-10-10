@@ -237,7 +237,8 @@ def grid(rows: list[str], at) -> WorldModel:
 
 
 class GatherPicksTheNearestCutTest(unittest.TestCase):
-    """Run 6: a bush at the region's west edge, grass to the east."""
+    """Run 6: a bush at the region's west edge, grass to the east. Bushes
+    drop berries, not gems (A81), so Gather only ever walks to the grass."""
 
     ROWS = ["b..........", "...gggggggg"]
 
@@ -247,14 +248,14 @@ class GatherPicksTheNearestCutTest(unittest.TestCase):
         gather_outcome(w, m, policy())
         self.assertEqual(m.gather_target, ("grass", (5, 1)))  # one step off; ties go to the smaller cell
 
-    def test_a_nearer_bush_still_comes_first(self):
-        w = grid(self.ROWS, at=(2, 0))
+    def test_a_nearer_bush_is_passed_for_grass(self):
+        w = grid(self.ROWS, at=(1, 0))
         m = Memory()
         gather_outcome(w, m, policy())
-        self.assertEqual(m.gather_target, ("bush", (0, 0)))
+        self.assertEqual(m.gather_target, ("grass", (3, 1)))
 
     def test_no_walk_back_to_the_bush_while_grass_is_near(self):
-        """Cut the grass east of us one cell after another: never a walk to the bush."""
+        """Cut the grass east of us one cell after another: never a walk to the bush, nor a cut of it."""
         w = grid(self.ROWS, at=(4, 0))
         m = Memory()
         targets = []
@@ -271,8 +272,9 @@ class GatherPicksTheNearestCutTest(unittest.TestCase):
             else:
                 break
         kinds = [k for k, _ in targets]
-        self.assertEqual(kinds, ["grass"] * (len(kinds) - 1) + ["bush"], "the bush comes last, once the grass is cut")
+        self.assertEqual(kinds, ["grass"] * len(kinds))
         self.assertEqual(sum(1 for t in w.view.tiles.values() if t == "grass"), 0)
+        self.assertEqual(w.view.tiles[(0, 0)], "bush", "the bush is left standing")
 
 
 if __name__ == "__main__":

@@ -61,11 +61,12 @@ A pull request is yours when it is **open**, **not draft**, does **not** have `c
 | Merge conflict | `mergeable_state` is `"dirty"` |
 | Red CI | a **CI** check run completed with conclusion `failure` or `timed_out` |
 | Changes requested | the review verdict, below |
-| Unresolved threads | a thread with `is_resolved: false` whose last comment is a reviewer's, not a fixer's reply, and the verdict is not approved |
 
 Several can be true at once. Clear all of them in the one pass.
 
-Not yours: drafts, and approved pull requests whose only open threads are nits. Nothing blocks those from merging. An open thread a fixer already answered without fixing is the reviewer's to take up, not yours to answer again.
+Those three are the only blockers. Open review threads are not one: they are where a `CHANGES_REQUESTED` review spells out what it wants. An open thread on a pull request no reviewer rejected never makes it yours and never holds a merge.
+
+Not yours: drafts, and pull requests none of the three blocks.
 
 One pull request per pass. If asked for several, finish one before locking the next.
 
@@ -106,7 +107,7 @@ Five things these tools do that will mislead you:
 
 A reviewer check that finished, in any conclusion, holds nothing. This is the one statement of the rule; every other skill links here. The supervisor applies it, together with its own CI, conflict, lock and workflow-file checks ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) step 1).
 
-Act on rejecting reviews and their threads, whoever posted them. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. A fixer waits on no review check; only the merge does.
+Act on rejecting reviews, whoever posted them; their threads hold the details. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. A fixer waits on no review check; only the merge does.
 
 A rejection clears only when a push gets a fresh review, or when Evan dismisses it. The Claude Review bot runs only on a push, so a reply alone changes nothing. If you push nothing because every blocking finding gets a reply instead, release the lock and tell Evan that the rejection is disputed.
 
@@ -158,7 +159,7 @@ Regenerate rather than hand-edit anything generated: `npm --prefix tools/conduct
 
 Pull the real output before theorizing. Reproduce locally, fix, confirm. Never skip, disable, or quarantine a test to get green. If a test is flaky and you can make it robust inside this slice, do that; otherwise say so and stop.
 
-**Review threads.** Make the changes they ask for. Keep the same backlog item IDs and do not expand the slice. Anything you leave alone gets a reply, per **Commenting** above. Check PLAN.md before deciding a thread needs Evan; most questions are already answered there.
+**Changes requested.** Make the changes the rejecting review and its threads ask for. Keep the same backlog item IDs and do not expand the slice. Anything you leave alone gets a reply, per **Commenting** above. Check PLAN.md before deciding a thread needs Evan; most questions are already answered there.
 
 **Your own pass.** Then read the diff yourself. What you were handed is where to start, not the boundary of what is wrong. A reviewer catches what it catches; you are the one person with the whole change in front of you.
 

@@ -72,7 +72,7 @@ No ticketing system. PLAN.md is the backlog.
 
 8. **Watch open PRs**, blockers first:
    - Carrying `conductor:working` → skip. A writer already holds it (Cursor or Claude Code). Do not follow up, spawn `--pr`, or delete the label.
-   - Changes requested, a merge conflict, red CI, or unresolved threads a fixer has not answered, without approval (see [Review verdicts](#review-verdicts)), **and no `conductor:working`** → follow up on the same agent, or spawn a fixer attached to the PR (`--pr <url>`).
+   - Changes requested (see [Review verdicts](#review-verdicts)), a merge conflict, or red CI, **and no `conductor:working`** → follow up on the same agent, or spawn a fixer attached to the PR (`--pr <url>`). Open threads without a rejection are not a blocker.
    - Approved and still unmerged → scan for non-blocking nits and docs requests worth doing before merge. See [Approved PR polish](#approved-pr-polish).
 
    Blocker follow-up:

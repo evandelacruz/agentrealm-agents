@@ -28,7 +28,7 @@ First row that matches decides it:
 | draft | **skip**: still being written |
 | `mergeable_state` is `"dirty"` | **spawn**: merge conflict |
 | a CI check run (not a reviewer's check) concluded `failure` or `timed_out` | **spawn**: red CI |
-| a reviewer rejected the current head, and a fixer already replied on every blocking thread after that review without pushing | **skip**: disputed, Evan decides |
+| a reviewer rejected the current head, the rejection has inline threads, and a fixer replied on each of them after that review without pushing | **skip**: disputed, Evan decides |
 | a reviewer rejected the current head | **spawn**: review |
 | unresolved threads, and not approved | **spawn**: review |
 | approved, only open nit threads | **skip**: nothing blocks the merge |

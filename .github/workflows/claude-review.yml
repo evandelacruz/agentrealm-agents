@@ -38,6 +38,8 @@ permissions:
   pull-requests: read
 
 jobs:
+  # tools/conductor matches this workflow name and job name (config.ts) to tell
+  # the reviewer check from CI. Renaming either makes the CLI count it as CI.
   review:
     if: >-
       github.event.pull_request.draft == false &&

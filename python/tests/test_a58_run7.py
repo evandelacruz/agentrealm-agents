@@ -182,8 +182,10 @@ class UnreachableFoodTest(unittest.TestCase):
         w.pos = (401, 608)  # the closest cell to the food the window search reaches
         with mock.patch.object(planner, "FINE_NODE_BUDGET", SMALL_BUDGET):
             self.assertIsNone(cost_path(w, FOOD))
+            # Nearer the pond's edge, no step into that dead end either: a
+            # pocket in sight is no end (free-play run 6).
             w.pos = (403, 606)
-            self.assertTrue(cost_path(w, FOOD), "still a step while one gets closer")
+            self.assertIsNone(cost_path(w, FOOD))
 
 
 def bounded_step(*args):

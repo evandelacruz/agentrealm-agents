@@ -514,12 +514,7 @@ def reachable_safe_goal(
             m.safe_threatened.setdefault((mid, p), {})[key] = w.tick
 
     def skipped(p: Pos) -> bool:
-        if p in params.avoid:
-            return True
-        seen = m.safe_unreachable.get((mid, p))
-        if seen is not None and w.tick - seen < SAFE_UNREACHABLE_TICKS:
-            return True
-        return any(nav_stuck.backed_off(m, goal, mid, p, w.tick) for goal in SAFE_WALK_GOALS)
+        return p in params.avoid or safe_ruled_out(m, w, p)
 
     def reaches(p: Pos) -> bool:
         if m.goal in SAFE_PATH_GOALS and m.path and m.path[-1] == p:
@@ -560,6 +555,16 @@ def reachable_safe_goal(
     if town is not None and town not in first and not skipped(town) and reaches(town):
         return town
     return None
+
+
+def safe_ruled_out(m: Memory, w: WorldModel, p: Pos) -> bool:
+    """A check or a walk found no way to safe cell ``p`` within
+    ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), or a Heal walk
+    gave up on it and still backs off."""
+    seen = m.safe_unreachable.get((w.map_id, p))
+    if seen is not None and w.tick - seen < SAFE_UNREACHABLE_TICKS:
+        return True
+    return any(nav_stuck.backed_off(m, goal, w.map_id, p, w.tick) for goal in SAFE_WALK_GOALS)
 
 
 def retreat_safe_goal(

@@ -30,7 +30,7 @@ from agentrealm_agent.navigation import planner
 from agentrealm_agent.navigation.planner import CostGridParams, NavSearchState, _toward, cost_path, macro_cell
 from agentrealm_agent.plan import Plan, parse_directives_goals
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.pathing import guided_step, nav_search, route_ahead
+from agentrealm_agent.pathing import route_ahead
 from agentrealm_agent.states.detour import DETOUR_EXTRA_STEPS, detour_find, extra_steps
 from agentrealm_agent.states.retreat import no_progress
 from agentrealm_agent.travel import sync_town
@@ -190,12 +190,15 @@ class TravelPacingTest(unittest.TestCase):
 
 
 class CorridorWithNoStepTest(unittest.TestCase):
-    """A corridor whose window search finds no cell better than where we stand is no path (A13, A15).
+    """A corridor that leads into a pocket is walked back out of (A13; free-play run 6).
 
     The goal lies far east; the tile east of us is wall, so the corridor
     turns south-east, and a wall row just south shuts that way inside the
     window. A straight line east still offers a step: the old fallback took
-    it, and the next decision's corridor took it back.
+    it, and the next decision's corridor took it back. Then the window
+    search had no cell better than where we stand, and said "no path" for
+    good. It now learns that the pocket is dearer than it looks
+    (``NavSearchState.learned``) and leaves it by the north.
     """
 
     GOAL = (100, 8)
@@ -208,23 +211,24 @@ class CorridorWithNoStepTest(unittest.TestCase):
                 w.view.tiles[(x, y)] = "wall" if wall else "dirt"
         return w
 
-    def test_cost_path_says_no_path_where_a_straight_line_would_step(self):
+    def test_the_window_search_steps_where_a_straight_line_would(self):
         w = self.pocket()
         grid = planner._Grid(w, {self.GOAL}, CostGridParams())
         self.assertTrue(planner._fine_path(grid, planner._toward(self.GOAL, None), None, 400), "a straight line steps")
-        self.assertIsNone(cost_path(w, self.GOAL, CostGridParams(), nav=NavSearchState(goal=self.GOAL, map_id=MAP)))
+        self.assertTrue(cost_path(w, self.GOAL, CostGridParams(), nav=NavSearchState(goal=self.GOAL, map_id=MAP)))
 
-    def test_stuck_detection_escalates_it(self):
-        w, m = self.pocket(), Memory()
-
-        def plan(att):
-            params = nav_stuck.planning_params(m, CostGridParams(allow_goal_door=True))
-            return cost_path(w, self.GOAL, params, nav=nav_search(m, w, "travel:point", self.GOAL))
-
-        guided_step(m, w, "travel:point", self.GOAL, set(), plan)
-        att = nav_stuck.active(m, w)
-        self.assertGreater(att.level, nav_stuck.WALK)
-        self.assertEqual(att.reasons[0], "no_path")
+    def test_it_walks_out_of_the_pocket_to_the_goal_without_a_cell_twice(self):
+        w = self.pocket()
+        nav, trail = NavSearchState(goal=self.GOAL, map_id=MAP), [w.pos]
+        for _ in range(100):
+            path = cost_path(w, self.GOAL, CostGridParams(), nav=nav)
+            self.assertTrue(path, f"no path at {w.pos}")
+            trail += path
+            w.pos = path[-1]
+            if w.pos == self.GOAL:
+                break
+        self.assertEqual(w.pos, self.GOAL)
+        self.assertEqual(len(trail), len(set(trail)), "no cell walked twice")
 
 
 class GatherRegionKeptTest(unittest.TestCase):

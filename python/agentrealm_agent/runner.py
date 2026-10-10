@@ -90,7 +90,18 @@ from .scroll_investigation import (
     supply_code_on_world,
 )
 from .zone_discovery import apply_town, apply_zone, zone_failed
-from .park import PARK_ABORTED, PARK_DIED, PARK_DOWNED, PARK_NOWHERE, PARK_TIMED_OUT, PARKED_SAFE, ParkReport, parked
+from .park import (
+    PARK_ABORTED,
+    PARK_DIED,
+    PARK_DOWNED,
+    PARK_NO_PATH,
+    PARK_NOWHERE,
+    PARK_TIMED_OUT,
+    PARKED_SAFE,
+    ParkReport,
+    no_path_left,
+    parked,
+)
 from .survival import retreat_goal
 from .memory import queue_signal
 from .strategist import Strategist, same_ops
@@ -373,8 +384,8 @@ class Runner:
         runner keeps playing windows with only the survival reflexes and Park
         (``states/park.py``): Park walks Retreat's path to the nearest known
         safe tile or the town cell. It ends at once when the character
-        already stands there, is downed, or knows nowhere safe, and early on
-        ``abort``. Then one empty tick replaces whatever queue is left.
+        already stands there, is downed, knows nowhere safe, or every safe
+        cell it knows is ruled out (no path), and early on ``abort``. Then one empty tick replaces whatever queue is left.
 
         Acceptance hooks are off meanwhile: the park phase is not the
         scenario. They hear ``on_park_start`` and ``on_park_end`` only.
@@ -395,6 +406,8 @@ class Runner:
                     outcome = PARKED_SAFE
                 elif w.pos is not None and retreat_goal(w, self.knowledge) is None:
                     outcome = PARK_NOWHERE
+                elif w.pos is not None and no_path_left(w, m, self.knowledge):
+                    outcome = PARK_NO_PATH
                 elif self.abort.is_set():
                     outcome = PARK_ABORTED
                 elif self.clock() - started >= self.park_seconds:

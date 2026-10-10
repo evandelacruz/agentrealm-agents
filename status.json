@@ -25,7 +25,7 @@
 
   "A8": {"state": "done"},
 
-  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats. Free-play run 3: a Retreat, Park or Heal walk that gets no nearer a safe tile in a stuck window rules it out for a bounded time and moves on to the next candidate, else town (retreat.no_progress; Heal through bounded_step). A losing Retreat's drink or swing pauses the safe walk's stuck window."},
+  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats. Free-play run 3: a Retreat, Park or Heal walk that gets no nearer a safe tile in a stuck window rules it out for a bounded time and moves on to the next candidate, else town (retreat.no_progress; Heal through bounded_step). A losing Retreat's drink or swing pauses the safe walk's stuck window. Free-play run 6: a safe cell the planner gives no step toward is ruled out at once, the town cell too (retreat_step)."},
 
   "A10": {"state": "done"},
 
@@ -33,7 +33,7 @@
 
   "A12": {"state": "done"},
 
-  "A13": {"state": "done", "note": "Free-play run 4: the window search ranks cells by the corridor tree, not by the tile it stands in, and never falls back to a straight line from a corridor with no step."},
+  "A13": {"state": "done", "note": "Free-play run 4: the window search ranks cells by the corridor tree, not by the tile it stands in, and never falls back to a straight line from a corridor with no step. Free-play run 6: a partial path never ends in a pocket in sight, and the corridor's window search learns (LSS-LRTA*, NavSearchState.learned), so it walks out of a dead end."},
 
   "A14": {"state": "done"},
 
@@ -135,7 +135,7 @@
 
   "A65": {"state": "done", "note": "Planner State nearby_npcs and npcs_spoken_to; Greet reflex says hello once to a likely helper in sight (stays put, not known hostile; none off safe ground while NPCs are hostile). No live run yet."},
 
-  "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Free-play run 2 timed out on a walled-off safe tile; Park now picks the nearest one a path reaches, else town. Free-play run 3: Park sat 60 s two cells from a safe tile it never got nearer; a Park or Retreat walk with no progress in a stuck window now rules the tile out for 300 ticks and moves on, else town."},
+  "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Free-play run 2 timed out on a walled-off safe tile; Park now picks the nearest one a path reaches, else town. Free-play run 3: Park sat 60 s two cells from a safe tile it never got nearer; a Park or Retreat walk with no progress in a stuck window now rules the tile out for 300 ticks and moves on, else town. Free-play run 6: with every safe cell ruled out, the park ends ('no path to safe ground') instead of standing out its minute."},
 
   "A67": {"state": "partial", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 (#138): accidental sword buy, 0 gems, 370 s Break Arm loop; its defects A68, A69 and A70 are fixed (#139, #146). Run 3 (#150, 600 s at bd5aeff): no deaths, gems from piles only, no armor or potions; short-run gates only. Its top defects are fixed: Heal's drink sends its Use and Gather cuts only with a cutter (#152, A24, A22), and a Park or Retreat walk that gets no nearer a safe tile rules it out (#151, A9, A66). Run 4 (#156, 600 s at a227906, after A71): no deaths, 17 → 14 gems (one potion bought, 7 from piles), no armor; short-run gates only. Its top defects are A73 (Detour misses gem piles beside the walk), A74 (Equip cannot clear a potion from the armed slot) and A75 (a buy with no shop in sight lets Explore wander). A74 and A75 are fixed in #157, which also makes the drink's Use target self (A24): run 4's Use at 228 s drank nothing. Run 5 (#160, 600 s at 40e82f1): run 4's fixes hold; 1 death (a gristlewick, holding two potions), 14 → 7 gems, one drink that healed; short-run gates only. Its top defects are A77 (the held-queue probe uses up Heal's drink tries), A78 (Gather and Detour walk to piles beside a hostile's post) and A79 (a buy is done once one is held).", "remaining": "Rerun on main once A77–A79 are fixed and record it. Run 2 (fixes in #140) has no notes in the doc."},
 
@@ -145,7 +145,7 @@
 
   "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."},
 
-  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. Free-play run 4 played it live; its fixes: Detour prices finds from where the character stands, queued steps included (pathing.route_ahead), and a planner reply that moves the gather_gems region needs a reason (gem_yield.keep_gather_region)."},
+  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. Free-play run 4 played it live; its fixes: Detour prices finds from where the character stands, queued steps included (pathing.route_ahead), and a planner reply that moves the gather_gems region needs a reason (gem_yield.keep_gather_region). Free-play run 6: the first plan cuts the safe default's walk queue at its next step."},
 
   "A72": {"state": "done", "note": "Planner State signs_seen (unread first, nearest, capped at 5, read flag from read_cells) and a sign discovery trigger for a newly seen unread readable cell. No sign detour; reading stays the planner's read op. No live run yet."},
 

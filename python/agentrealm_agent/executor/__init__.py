@@ -16,6 +16,7 @@ from .movement import build_paced_walk_queue, direction_between, step_landing, t
 from .pacing import (
     DEFAULT_WEAPON_COOLDOWN_TICKS,
     SPEECH_INTERVAL_TICKS,
+    arm_then_use,
     build_attack_queue,
     pace_speech,
     pace_uses,
@@ -35,6 +36,7 @@ __all__ = [
     "StepDirection",
     "StepIntent",
     "WaitIntent",
+    "arm_then_use",
     "build_attack_queue",
     "build_paced_walk_queue",
     "direction_between",

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
+from .healing import FOOD_CODES, POTION_CODES
 from .item_table import InventorySupply, merge_capability
 from .knowledge_base import KnowledgeBase
 from .plan import CAPABILITIES
@@ -54,6 +55,21 @@ def capabilities_for_code(code: str, kb: KnowledgeBase | None = None) -> frozens
             learned = list(row.get("capabilities") or []) if isinstance(row, dict) else []
         caps.update(c for c in learned if c in CAPABILITIES)
     return frozenset(caps)
+
+
+def cannot_cut(code: str | None, kb: KnowledgeBase | None = None) -> bool:
+    """Sourced facts say ``code`` does not cut: food or a potion, or an item
+    whose known capabilities leave ``cut`` out (a mallet, matches).
+
+    An unsourced code, or an empty hand, may still cut: no read serves an
+    item's class, so only a known miss is ruled out.
+    """
+    if not code:
+        return False
+    if code in FOOD_CODES | POTION_CODES:
+        return True
+    caps = capabilities_for_code(code, kb)
+    return bool(caps) and "cut" not in caps
 
 
 def _break_row(kb: KnowledgeBase | None, key: str) -> dict[str, Any] | None:

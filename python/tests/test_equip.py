@@ -190,6 +190,25 @@ class UpgradeTest(unittest.TestCase):
         self.assertEqual((out.state, out.intents), ("Heal", [{"verb": "Arm", "supply_id": 6}]))
 
 
+    def test_equip_arms_over_gathers_cutter_and_gather_does_not_undo_it(self):
+        """Review on #152: Gather's re-arm can wait on the gather op for long,
+        so Equip does not wait on it (that wait was free-play run 3's
+        "nothing left to equip"). Gather then leaves Equip's arm alone."""
+        w = world()
+        w.armed_code = "pocket_knife"  # Gather's cutter
+        w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(6, "bronze_mallet")]
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["bronze_sword"] = {"gem_price": 15}
+        m = Memory(gather_rearm=("bronze_mallet", "pocket_knife"))
+        out = dispatch(w, ctx(kb, m))
+        self.assertEqual((out.state, out.intents), ("Equip", [{"verb": "Arm", "supply_id": 5}]))
+        w.armed_code = "bronze_sword"
+        w.held_supplies = [InventorySupply(6, "bronze_mallet"), InventorySupply(7, "pocket_knife")]
+        out = dispatch(w, ctx(kb, m, plan=Plan([], dict(PARAM_DEFAULTS))))
+        self.assertNotIn({"verb": "Arm", "supply_id": 6}, out.intents or [])
+        self.assertIsNone(m.gather_rearm)
+
+
 class RefusalTest(unittest.TestCase):
     def setUp(self):
         self.w = world()

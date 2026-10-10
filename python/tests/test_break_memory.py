@@ -12,6 +12,7 @@ from agentrealm_agent.break_memory import (
     attempt_failed,
     attempt_open,
     break_key,
+    cannot_cut,
     capabilities_for_code,
     held_capabilities,
     nominate_on_path,
@@ -49,6 +50,12 @@ class BreakMemoryTest(unittest.TestCase):
         # No substring guessing: a code GAME_NOTES does not name has no class.
         for code in ("iron_sword", "big_bomb", "matchbox", "torch_holder"):
             self.assertEqual(capabilities_for_code(code), frozenset(), code)
+
+    def test_cannot_cut_is_a_known_miss_only(self):
+        for code in ("small_potion", "apple", "bronze_mallet", "matches"):
+            self.assertTrue(cannot_cut(code), code)
+        for code in ("pocket_knife", "bronze_sword", "fake_cleaver", None):
+            self.assertFalse(cannot_cut(code), code)
 
     def test_capability_learned_from_an_opened_break(self):
         kb = KnowledgeBase.empty("sandbox")

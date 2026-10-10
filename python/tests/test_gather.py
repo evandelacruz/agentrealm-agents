@@ -6,6 +6,7 @@ from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
+from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, parse_directives_goal
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
@@ -234,6 +235,74 @@ class GatherActTest(unittest.TestCase):
         w.entities = [Entity("npc", 4, (2, 0), "gnawer")]
         w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         self.assertIsNone(outcome(w, hostile=["npc"]).intents)
+
+
+class GatherArmsACutterTest(unittest.TestCase):
+    """Free-play run 3: Gather cut with a potion armed, and the no-effect cuts
+    marked the ground uncuttable."""
+
+    def test_arms_a_cutting_tool_with_the_cut(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "small_potion"
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        out = outcome(w)
+        self.assertTrue(out.paced, "the Use goes out with the Arm")
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 5}, {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
+        self.assertEqual(out.reason, "arm pocket_knife, cut grass")
+
+    def test_arms_one_for_a_bush_too(self):
+        w = grid([".b."], at=(0, 0))
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        out = outcome(w)
+        self.assertEqual([i["verb"] for i in out.intents], ["Arm", "Use"])
+
+    def test_a_tool_that_cuts_is_kept(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "bronze_sword"
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        out = outcome(w)
+        self.assertEqual(out.intents, [{"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
+        self.assertFalse(out.paced)
+
+    def test_the_weapon_swapped_out_comes_back_once_gathering_is_over(self):
+        """Review on #152: a mallet swapped for the knife was never put back,
+        so every later fight used the knife."""
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "bronze_mallet"
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        m = Memory()
+        out = dispatch(w, ctx(w, ["gather_gems:5"], m))
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual([i["verb"] for i in out.intents], ["Arm", "Use"])
+        self.assertEqual(m.gather_rearm, ("bronze_mallet", "pocket_knife"))
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(6, "bronze_mallet")]
+        out = dispatch(w, ctx(w, [], m))
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 6}])
+        self.assertIsNone(m.gather_rearm)
+
+    def test_an_arm_made_since_is_not_undone(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "bronze_sword"  # Equip's upgrade, after the cut
+        w.held_supplies = [InventorySupply(6, "bronze_mallet"), InventorySupply(5, "pocket_knife")]
+        m = Memory(gather_rearm=("bronze_mallet", "pocket_knife"))
+        self.assertNotEqual(dispatch(w, ctx(w, [], m)).state, "Gather")
+        self.assertIsNone(m.gather_rearm)
+
+    def test_a_potion_swapped_out_is_not_put_back(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "small_potion"
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        m = Memory()
+        outcome(w, m)
+        self.assertIsNone(m.gather_rearm)
+
+    def test_with_nothing_that_cuts_it_cuts_with_what_is_in_hand(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "fake_cleaver"
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        self.assertEqual(outcome(w).intents, [{"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
 
 
 class GatherPathingTest(unittest.TestCase):

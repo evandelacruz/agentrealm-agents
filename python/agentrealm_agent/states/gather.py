@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Callable, Iterable
 
+from ..break_memory import capabilities_for_code, pick_supply_for_capability
 from ..config import Policy
 from ..directives import attack_forbidden
 from ..executor import DEFAULT_TICK_RATE_HZ
@@ -36,6 +37,7 @@ from ..gem_yield import (
     region_corner,
     region_of,
 )
+from ..healing import FOOD_CODES, POTION_CODES
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path, nearest_target
@@ -48,7 +50,8 @@ from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets, safe_default
 from .fight import engage
 from .gather_safe import GATHER_HOSTILE_RADIUS, gather_ground
-from .intents import set_position, take, use_block
+from .intents import arm, arm_and_use, set_position, take, use_block
+from .solve import held_supply
 
 # Authored gem piles spawn as ground supplies (Obs, GAME_NOTES.md Gems).
 # Gem caches (gem_cache_5/7/10) are a different drop and are not piles.
@@ -57,6 +60,7 @@ GEM_PILE_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
 # Bushes are not walkable, so they are cut from a neighbouring cell: the
 # pocket knife's range is 1 (GAME_NOTES.md Olympuff starting kit).
 BUSH_REACH = 1
+CUT = "cut"  # the capability Gather arms for: grass and bushes are cut
 GOAL = "gather"
 OUT = "out"  # ``m.gather_target`` kind: walking off safe ground to field ground or the frontier
 OFF = "off"  # ``m.gather_target`` kind: moving off from a hostile that shadows us
@@ -95,6 +99,9 @@ class GatherState(State):
     """Executor for ``gather_gems``: ``Use`` grass and bushes or ``Take`` gem
     piles until the gem counter reaches the op's count, walking to the
     nearest known one when none is in reach, field cells before safe ones.
+    A cut goes out with a tool that cuts, armed in the same queue when the
+    armed item is not known to cut; the weapon it swapped out is armed again
+    once no ``gather_gems`` op is on top.
     Grass and bushes in a barren region (unless the op names it), or where
     cuts had no effect, are skipped. On safe ground with nothing to cut, it
     heads out to field ground or the frontier;
@@ -109,7 +116,7 @@ class GatherState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        return my_op(ctx, self.name) is not None
+        return my_op(ctx, self.name) is not None or ctx.memory.gather_rearm is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
@@ -117,6 +124,8 @@ class GatherState(State):
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         op = my_op(ctx, self.name)
         m = ctx.memory
+        if op is None:
+            return _rearm_weapon(world, m)
         tick_hz = ctx.plan.tick_hz if ctx.plan is not None else DEFAULT_TICK_RATE_HZ
         shadow = shadowing_hostile(world, m, ctx.policy, tick_hz)
         if shadow is not None:
@@ -344,13 +353,13 @@ def _gather_cells(
 
     if view.tiles.get(here) == "grass" and here in preferred:
         _end_walk_out(m)
-        return StateOutcome([use_block(here)], "cut grass", state=state)
+        return _cut(w, m, knowledge, here, "cut grass", state)
 
     bushes = [p for p in preferred if view.tiles[p] == "bush" and chebyshev(p, here) <= BUSH_REACH]
     if bushes:
         _end_walk_out(m)
         p = min(bushes, key=lambda pos: (chebyshev(pos, here), pos))
-        return StateOutcome([use_block(p)], "cut bush", state=state)
+        return _cut(w, m, knowledge, p, "cut bush", state)
 
     # Follow only a path Gather planned, toward a target that still qualifies.
     if m.goal == GOAL and not _still_wanted(w, m.gather_target, policy, preferred, here in safe):
@@ -363,6 +372,35 @@ def _gather_cells(
         return StateOutcome([set_position(step)], f"gather → {m.path[-1]}", state=state)
 
     return StateOutcome(None, "no gather target", state=state)
+
+
+def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reason: str, state: str) -> StateOutcome:
+    """``Use`` on ``p`` with a tool that cuts: when what is armed is not known
+    to cut (a potion a drink left armed, say), arm a held one that is, in the
+    same paced queue. With none held, cut with what is in hand."""
+    if CUT in capabilities_for_code(w.armed_code or "", knowledge):
+        return StateOutcome([use_block(p)], reason, state=state)
+    tool = pick_supply_for_capability(w, CUT, knowledge)
+    if tool is None or tool.id < 0:
+        return StateOutcome([use_block(p)], reason, state=state)
+    if m.gather_rearm is None and w.armed_code and w.armed_code not in FOOD_CODES | POTION_CODES:
+        m.gather_rearm = (w.armed_code, tool.code)  # food or a potion is Heal's to put back
+    queue = arm_and_use(w, m, tool.id, use_block(p))
+    return StateOutcome(queue, f"arm {tool.code}, {reason}", state=state, paced=True)
+
+
+def _rearm_weapon(w: WorldModel, m: Memory) -> StateOutcome:
+    """Arm the weapon a cut swapped out, once no ``gather_gems`` op is on top.
+
+    Sent once, and only while the cutting tool is still armed: something
+    else arming since (Equip's upgrade, say) is not undone.
+    """
+    weapon, tool = m.gather_rearm or ("", "")
+    m.gather_rearm = None
+    supply = held_supply(w, weapon) if w.armed_code == tool else None
+    if supply is None:
+        return StateOutcome(None, "no gather op", state=GatherState.name)
+    return StateOutcome([arm(supply.id)], f"re-arm {weapon}", state=GatherState.name)
 
 
 def _move_off(

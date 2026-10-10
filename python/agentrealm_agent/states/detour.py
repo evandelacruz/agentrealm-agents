@@ -47,7 +47,7 @@ from ..loot import GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
-from ..survival import effective_retreat_hits, effective_risk, max_hit_damage
+from ..survival import health_floor
 from ..threat import type_key_for_entity
 from ..world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
@@ -224,8 +224,7 @@ def risk_allowed(w: WorldModel, ctx: PlayContext, at: Pos, known: Danger) -> boo
     With no known hostile within ``RISK_RADIUS`` of it (``hostiles_within``),
     or an op that chose to fight (``known.fight``), there is none. Otherwise
     one hit from each of them (the threat table's size for its type) must
-    leave health above Retreat's floor: effective ``retreat_hits`` times the
-    hardest of those hits. Free-play run 8: a detour at 4/10 to a pile 2
+    leave health above Retreat's floor against them (``survival.health_floor``). Free-play run 8: a detour at 4/10 to a pile 2
     cells from a pack ended at 1/10.
     """
     if known.fight:
@@ -235,11 +234,8 @@ def risk_allowed(w: WorldModel, ctx: PlayContext, at: Pos, known: Danger) -> boo
         return True
     if w.health is None:
         return False
-    params = ctx.params
-    eff = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
-    floor = effective_retreat_hits(int(params["retreat_hits"]), eff) * max_hit_damage(near, w.threat)
     volley = sum(w.threat.damage_per_hit(type_key_for_entity(e)) for e in near)
-    return w.health - volley > floor
+    return w.health - volley > health_floor(w, ctx.params, near)
 
 
 def chosen_fight(ctx: PlayContext) -> bool:

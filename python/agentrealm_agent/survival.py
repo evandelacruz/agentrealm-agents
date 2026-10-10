@@ -172,12 +172,6 @@ def max_hit_damage(group: list[Entity], threat: ThreatTable) -> int:
     return max(threat.damage_per_hit(type_key_for_entity(e)) for e in group)
 
 
-def retreat_by_health(health: int | None, retreat_hits: int, hit_damage: int) -> bool:
-    if health is None or hit_damage <= 0:
-        return False
-    return health <= retreat_hits * hit_damage
-
-
 def on_safe_tile(w: WorldModel) -> bool:
     if w.map_id is None or w.pos is None:
         return False
@@ -387,6 +381,12 @@ def at_health_floor(w: WorldModel, params: dict[str, float | int], group: list[E
 
     Retreat runs at or below it, and Flee never picks a fight it would lose there.
     """
+    floor = health_floor(w, params, group)
+    return w.health is not None and floor > 0 and w.health <= floor
+
+
+def health_floor(w: WorldModel, params: dict[str, float | int], group: list[Entity]) -> int:
+    """Retreat's floor against ``group``: effective ``retreat_hits`` times the
+    hardest hit among them (threat table). Detour keeps above it too (A82)."""
     eff = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
-    hits = effective_retreat_hits(int(params["retreat_hits"]), eff)
-    return retreat_by_health(w.health, hits, max_hit_damage(group, w.threat))
+    return effective_retreat_hits(int(params["retreat_hits"]), eff) * max_hit_damage(group, w.threat)

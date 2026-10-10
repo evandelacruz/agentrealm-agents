@@ -452,7 +452,7 @@ def reachable_safe_goal(
 def retreat_safe_goal(
     m: Memory, w: WorldModel, policy: Policy, knowledge: KnowledgeBase | None, avoid: set[Pos], costly: set[Pos]
 ) -> Pos | None:
-    """Where Retreat and Fight's retreat tail walk: the nearest known safe
+    """Where Retreat, Park and Fight's retreat tail walk: the nearest known safe
     cell a path reaches and out of reach of a hostile it is not running from,
     else the town cell (``reachable_safe_goal``).
 

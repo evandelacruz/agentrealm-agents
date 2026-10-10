@@ -731,7 +731,7 @@ Bought, equipped and drank: nothing. `buy` bronze_sword waited for 15 gems from 
 
 | Time | Where | Hostile | Started by | Their swings | Hits | Damage | Ours | Outcome |
 |---|---|---|---|---|---|---|---|---|
-| 285–300 s | (355–368, 394–402), beside its post | npc 240 (gristlewick) | it | 1 | 1 | 2 | 0 | Flee, then Retreat; then Heal (defect 1). |
+| 285–300 s | (355–368, 394–402), beside its post | npc 240 (gristlewick) | the gristlewick | 1 | 1 | 2 | 0 | Flee, then Retreat; then Heal (defect 1). |
 
 - **Count:** 1 encounter, started by the hostile. The agent never sent `Attack`, so the new win estimate (#172) never went into a fight.
 - **Planner:** set `fight: false` on `gather_gems` from 186 s to the end ("with 10 health and 5 lives, a snotling fight isn't worth the risk yet"). The progression arc says an unmeasured type is refused, and every type was unmeasured at the start (defect 3).

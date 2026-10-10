@@ -123,13 +123,11 @@ def attack_forbidden(entity: Entity, never_attack: list[str]) -> bool:
     return False
 
 
-def use_blocked_by_never_attack(
-    intent: dict, entities: list[Entity], never_attack: list[str], self_id: int | None = None
-) -> bool:
+def use_blocked_by_never_attack(intent: dict, entities: list[Entity], never_attack: list[str]) -> bool:
     """Executor guard: drop a Use intent aimed at a forbidden target.
 
-    A Use on the character itself (Heal eating or drinking, A10) is never an
-    attack, so it passes even with `character` in never_attack.
+    A Use on yourself (``{"kind": "self"}``: Heal eating or drinking, A10) is
+    never an attack, so it passes even with `character` in never_attack.
     """
     if intent.get("verb") != "Use" or not never_attack:
         return False
@@ -137,8 +135,6 @@ def use_blocked_by_never_attack(
     kind = target.get("kind")
     if kind == "character":
         cid = target.get("character_id")
-        if self_id is not None and cid == self_id:
-            return False
         for e in entities:
             if e.kind == "character" and e.id == cid:
                 return attack_forbidden(e, never_attack)

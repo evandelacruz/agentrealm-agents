@@ -165,14 +165,16 @@ def best_equip_upgrade(
     """The first slot with a clear upgrade, weapon first, then worn slots in order.
 
     ``armed_owned`` is True while another state (Heal, Solve, Break) holds the armed
-    slot. Those states arm potions and tools on purpose, so the armed
-    slot is only touched while it holds a weapon or nothing.
+    slot. Those states arm potions and tools on purpose, so the armed slot is
+    left to them until they are done. Otherwise a non-weapon in the armed slot
+    (a potion left there by an earlier run, free-play run 4) counts as an empty
+    slot: any held weapon replaces it.
     """
     refused = m.equip_refused
     held = _candidates(w)
 
-    armed = w.armed_code
-    if not armed_owned and (armed is None or is_weapon(armed)):
+    if not armed_owned:
+        armed = w.armed_code if is_weapon(w.armed_code) else None
         weapons = [s for s in held if is_weapon(s.code) and (s.code, ARMED) not in refused]
         s = _best_for_slot(ARMED, armed, weapons, items, threat, "weapon_damage")
         if s is not None:
@@ -200,6 +202,24 @@ def _best_learn_wear(w: WorldModel, m: Memory) -> EquipUpgrade | None:
             continue
         return EquipUpgrade("", s.id, code, learn_slot=True)
     return None
+
+
+def note_last_weapon(m: Memory, w: WorldModel) -> None:
+    """Once per decision: the weapon armed now is the one to re-arm after a drink (A24)."""
+    if is_weapon(w.armed_code):
+        m.last_weapon = w.armed_code
+
+
+def weapon_to_rearm(w: WorldModel, m: Memory) -> str | None:
+    """The weapon to put back after a drink: the one armed now, else the last
+    one armed this run while still held, else any held weapon. Never a potion
+    or a tool, whatever is in the armed slot (free-play run 4)."""
+    if is_weapon(w.armed_code):
+        return w.armed_code
+    held = sorted((s.id, s.code) for s in w.held_supplies if is_weapon(s.code))
+    if any(code == m.last_weapon for _, code in held):
+        return m.last_weapon
+    return held[0][1] if held else None
 
 
 def loadout_signature(w: WorldModel) -> tuple:

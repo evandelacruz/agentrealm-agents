@@ -163,12 +163,26 @@ class UpgradeTest(unittest.TestCase):
         items = {"bronze_sword": {"gem_price": 15}}
         self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory()))
 
-    def test_leaves_deliberately_armed_tool(self):
+    def test_a_non_weapon_left_in_the_armed_slot_is_replaced(self):
+        # Free-play run 4: a potion armed in run 3 stayed armed, and every
+        # equip op finished "nothing to equip". With no state holding the
+        # slot, a potion or tool there counts as an empty slot.
+        for armed in ("small_potion", "torch"):
+            w = world()
+            w.armed_code = armed
+            w.held_supplies = [InventorySupply(5, "bronze_sword")]
+            items = {"bronze_sword": {"gem_price": 15}, "torch": {"gem_price": 100}}
+            up = best_equip_upgrade(w, items, w.threat, Memory())
+            self.assertEqual((up.slot, up.supply_id), ("armed", 5), armed)
+
+    def test_equip_op_arms_the_weapon_over_a_leftover_potion(self):
         w = world()
-        w.armed_code = "torch"  # Solve or Break armed it
-        w.held_supplies = [InventorySupply(5, "bronze_sword")]
-        items = {"bronze_sword": {"gem_price": 15}, "torch": {"gem_price": 10}}
-        self.assertIsNone(best_equip_upgrade(w, items, w.threat, Memory()))
+        w.armed_code = "small_potion"
+        w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(6, "small_potion")]
+        plan = equip_plan()
+        out = dispatch(w, ctx(plan=plan))
+        self.assertEqual((out.state, out.intents), ("Equip", [{"verb": "Arm", "supply_id": 5}]))
+        self.assertIsNotNone(plan.current(), "an upgrade was sent: the op is not finished")
 
     def test_leaves_armed_slot_while_solve_or_break_borrows_it(self):
         w = world()

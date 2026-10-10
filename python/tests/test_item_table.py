@@ -451,7 +451,7 @@ class RunnerItemLearningTest(unittest.TestCase):
         r.world.character_id, r.world.health, r.world.max_health = 1, 5, 20
         r.world.armed_code = "pocket_knife"
         r.world.held_supplies = [it.InventorySupply(1, "pocket_knife"), it.InventorySupply(4, "small_potion")]
-        use = {"verb": "Use", "target": {"kind": "character", "character_id": 1}}
+        use = {"verb": "Use", "target": {"kind": "self"}}
         self._queue(r, [{"verb": "Arm", "supply_id": 4}, use])
         r.apply_intent_results(
             [
@@ -468,7 +468,7 @@ class RunnerItemLearningTest(unittest.TestCase):
         r = self._runner(kb)
         r.world.character_id, r.world.health, r.world.max_health = 1, 5, 20
         r.world.armed_code = "berry"
-        self._queue(r, [{"verb": "Use", "target": {"kind": "character", "character_id": 1}}])
+        self._queue(r, [{"verb": "Use", "target": {"kind": "self"}}])
         r.apply_intent_results([{"queue_id": "q1", "index": 0, "tick": 10, "outcome": "applied"}])
         r.world.health = 7
         absorb_heal_pending(r.mem, r.world, kb, [])

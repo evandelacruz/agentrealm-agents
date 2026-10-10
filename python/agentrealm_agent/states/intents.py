@@ -79,8 +79,22 @@ def compose(supply_ids: list[int]) -> dict:
     return {"verb": "Compose", "supply_ids": list(supply_ids)}
 
 
-def use_self(character_id: int) -> dict:
-    return {"verb": "Use", "target": {"kind": "character", "character_id": character_id}}
+SELF_TARGET = {"kind": "self"}
+
+
+def use_self() -> dict:
+    """``Use`` on yourself: a drink, a chest upgrade, a torch to light (API Use).
+
+    The target is ``{"kind": "self"}``, never a ``character`` target naming
+    our own id: that one is how a weapon strikes a character, and a potion
+    Used on it drank nothing (free-play run 4).
+    """
+    return {"verb": "Use", "target": dict(SELF_TARGET)}
+
+
+def is_self_use(intent: dict | None) -> bool:
+    """Whether ``intent`` is a ``Use`` on yourself."""
+    return bool(intent) and intent.get("verb") == "Use" and intent.get("target") == SELF_TARGET
 
 
 def arm_and_use(w: WorldModel, m: Memory, supply_id: int, use: dict) -> list[dict]:

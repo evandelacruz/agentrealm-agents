@@ -114,7 +114,7 @@ class MilestoneGateTest(unittest.TestCase):
             m,
             w,
             state="Heal",
-            intents=[{"verb": "Use", "target": {"kind": "character", "character_id": 1}}],
+            intents=[{"verb": "Use", "target": {"kind": "self"}}],
         )
         self.assertTrue(m.heal_potion)
 
@@ -124,7 +124,7 @@ class MilestoneGateTest(unittest.TestCase):
         w = world()
         w.armed_code = "bronze_sword"
         w.held_supplies = [InventorySupply(4, "small_potion"), InventorySupply(6, "bronze_sword")]
-        use = {"verb": "Use", "target": {"kind": "character", "character_id": 1}}
+        use = {"verb": "Use", "target": {"kind": "self"}}
         decide(m, w, state="Heal", intents=[{"verb": "Arm", "supply_id": 6}, use])
         self.assertFalse(m.heal_potion)
         decide(m, w, state="Heal", intents=[{"verb": "Arm", "supply_id": 4}, use])

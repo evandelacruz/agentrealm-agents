@@ -21,7 +21,16 @@ from ..memory import Memory, queue_signal
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import bounded_step, grid_params, nav_search, reachable_safe_goal
+from .. import targets as targets_mod
+from ..pathing import (
+    HEAL_TARGET,
+    bounded_step,
+    commit_safe,
+    committed_safe,
+    grid_params,
+    nav_search,
+    reachable_safe_goal,
+)
 from ..survival import hostile_reach, hostiles_in_range, hostiles_reaching, reach_by_hostile, town_cell
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -137,7 +146,11 @@ def _explore_zone(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) ->
     if edge:
         # Off-zone cells are walls for this walk, so it never steps out of the zone.
         outside = {p for p in w.view.tiles if not standing_in_safe_zone(w, p)}
-        target = edge[0][1]
+        cells = {p for _, p in edge}
+        # The edge cell is committed until revealed or given up (A71).
+        target = targets_mod.hold(
+            m, w, goal, lambda: (w.map_id, edge[0][1]), lambda t: t[0] == w.map_id and t[1] in cells
+        )[1]
         if out := _walk_toward(w, m, policy, ctx, target, goal=goal, avoid=outside):
             out.reason = f"heal in safe ground: {out.reason}"
             return out
@@ -178,14 +191,26 @@ def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *,
     """A step toward the first known safe cell a path reaches (near town
     first, then nearest), skipping those a walk gave up on and those in a
     known hostile's reach, else toward the town cell
-    (``pathing.reachable_safe_goal``; free-play run 2, A63 run 4)."""
+    (``pathing.reachable_safe_goal``; free-play run 2, A63 run 4). The cell is
+    committed (``pathing.HEAL_TARGET``, A71): kept while it stays valid, even
+    when another safe cell comes nearer; a walk that gives it up this
+    decision picks the next one at once."""
     reach = reach_by_hostile(w, policy)
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx, set().union(*reach.values()))
     params = grid_params(policy, plan_avoid, plan_costly)
-    target = reachable_safe_goal(m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge), reach)
-    if target is None:
-        return None
-    return _walk_toward(w, m, policy, ctx, target, goal=goal)
+    for _ in range(2):  # a kept cell the walk gives up on this decision is replaced at once
+        target = reachable_safe_goal(
+            m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge), reach, prefer=committed_safe(m, w, HEAL_TARGET)
+        )
+        commit_safe(m, w, HEAL_TARGET, target)
+        if target is None:
+            return None
+        if out := _walk_toward(w, m, policy, ctx, target, goal=goal):
+            return out
+        if not nav_stuck.backed_off(m, goal, w.map_id, target, w.tick):
+            return None
+        commit_safe(m, w, HEAL_TARGET, None)
+    return None
 
 
 def _walk_toward(
@@ -222,6 +247,12 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
     here = w.pos
     assert here is not None
     close = [f for f in food_in_sight(w, m) if chebyshev(f.pos, here) <= FOOD_REACH]
+    # The food it went for first stays first while it is there (A71).
+    c = targets_mod.committed(m, w, "heal_food")
+    kept = [f for f in close if c is not None and f.id == c.target]
+    if not kept:
+        targets_mod.release(m, "heal_food")
+    close = kept + [f for f in close if f not in kept]
     for food in close[:FOOD_CANDIDATES]:
         if chebyshev(food.pos, here) <= 1:
             nav_stuck.finish_in_reach(m, w, "heal_food")
@@ -231,6 +262,7 @@ def _act_food(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> Sta
             return out
         # Walking onto it also picks up food eaten on pickup (golden cap).
         if out := _walk_toward(w, m, policy, ctx, food.pos, goal="heal_food"):
+            targets_mod.commit(m, w, "heal_food", food.id)
             return out
     return None
 

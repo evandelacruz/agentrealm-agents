@@ -23,8 +23,10 @@ from ..navigation import walk as nav_walk
 from ..pathing import grid_params, guided_step, nav_search, next_step
 from ..plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from ..travel.ops import travel_op_from_plan_goal
-from ..travel.resolve import ResolvedDestination, at_destination, resolve_travel
-from ..world import Pos, WorldModel
+from .. import targets as targets_mod
+from ..navigation.rejection import locked_doors_from_kb
+from ..travel.resolve import ResolvedDestination, at_destination, picks_nearest, resolve_travel, still_candidate
+from ..world import DOORS, Pos, WorldModel
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import explore_outcome, plan_sets
 from .intents import set_position
@@ -38,6 +40,8 @@ HUNT_SEARCH_RESUME_SECONDS = 60
 # recently. Decisions came 5–20 s apart in A23 survive-a-fight run 2, so a
 # shorter window left the probes off most of the search.
 HUNT_PROBE_FRESH_SECONDS = 30
+# The commitment of the destination a symbolic ``travel`` op picked (A71).
+TRAVEL_TARGET = "travel"
 # What a hunting-ground search explores: the whole map's frontier.
 HUNT_SEARCH_AREA: GoalOp = {"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE}
 
@@ -69,6 +73,7 @@ class TravelState(State):
         if dest is None:
             return StateOutcome(None, f"travel:{op['to']} not resolved yet", state=self.name)
         if at_destination(world, dest):
+            targets_mod.release(m, TRAVEL_TARGET)
             ctx.plan.finish_current(f"at {dest.label}", memory=m)
             if m.goal == f"travel:{dest.label}":
                 m.path, m.goal = [], ""
@@ -127,16 +132,43 @@ def search_hunting_ground(world: WorldModel, ctx: PlayContext, op: GoalOp) -> St
 
 
 def resolve_destination(w: WorldModel, ctx: PlayContext, op: GoalOp) -> ResolvedDestination | None:
-    """Where the ``travel`` op goes, or None when the knowledge base cannot say yet."""
+    """Where the ``travel`` op goes, or None when the knowledge base cannot say yet.
+
+    A ``to`` that picks the nearest or best of several cells (a shop with no
+    cell, a hunting ground, the nearest unexplored door) commits to its pick
+    (A71): it is kept while it is still a candidate, however near another
+    one comes, until it is reached or stuck detection gives it up.
+    """
+    m = ctx.memory
     t = travel_op_from_plan_goal(op)
+    given_up = m.nav_stuck.given_up_travel
     if t.to == "entrance" and t.x is None:
-        _, blocked, costly = plan_sets(w, ctx.memory, ctx.policy, ctx.knowledge)
-        params = grid_params(ctx.policy, blocked, costly, allow_goal_door=True, m=ctx.memory, w=w, knowledge=ctx.knowledge)
-        path = doors_goal_path(w, ctx.knowledge, params)
-        if not path or w.map_id is None:
-            return None
-        return ResolvedDestination(w.map_id, path[-1], "entrance")
-    return resolve_travel(t, w, ctx.knowledge, ctx.memory.strength, ctx.memory.nav_stuck.given_up_travel)
+
+        def pick_door() -> ResolvedDestination | None:
+            _, blocked, costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
+            params = grid_params(ctx.policy, blocked, costly, allow_goal_door=True, m=m, w=w, knowledge=ctx.knowledge)
+            path = doors_goal_path(w, ctx.knowledge, params)
+            if not path or w.map_id is None:
+                return None
+            return ResolvedDestination(w.map_id, path[-1], "entrance")
+
+        def door_stands(d: ResolvedDestination) -> bool:
+            if d.map_id != w.map_id or w.view.tiles.get(d.pos) not in DOORS:
+                return False
+            locked = locked_doors_from_kb(ctx.knowledge, d.map_id)
+            return d.pos not in locked and (d.map_id, d.pos) not in given_up
+
+        return targets_mod.hold(m, w, TRAVEL_TARGET, pick_door, door_stands, op)
+    if not picks_nearest(t):
+        return resolve_travel(t, w, ctx.knowledge, m.strength, given_up)
+    return targets_mod.hold(
+        m,
+        w,
+        TRAVEL_TARGET,
+        lambda: resolve_travel(t, w, ctx.knowledge, m.strength, given_up),
+        lambda d: still_candidate(t, d, w, ctx.knowledge, m.strength, given_up),
+        op,
+    )
 
 
 def _travel_step(

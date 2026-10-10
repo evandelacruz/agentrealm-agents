@@ -15,10 +15,16 @@ never costs a tick and nothing needs a lock.
 One window, on the tick thread:
 
 1. Move new triggers into the inbox: clue, stuck, death, goal done or
-   dropped, idle (from ``Memory``), and map change, hurt and timer (raised here).
-2. If an answer came back, apply it (see :meth:`Strategist._settle`).
+   dropped, idle (from ``Memory``), and map change, hurt, discovery
+   (:mod:`.discovery`: a new NPC, entrance, affordable item or hostile pack,
+   A71) and timer (raised here).
+2. If an answer came back, apply it (see :meth:`Strategist._settle`). A new
+   head waits for the next action boundary: it is applied once no queue is
+   held, so it never cuts a walk short (A71); the survival reflexes act on
+   the world, not the plan, so they still win at once.
 3. If nothing is in flight, the inbox has triggers and the budget allows it,
-   build the prompt, log it to the trace, and hand it to the background thread.
+   build the prompt, log it to the trace, and hand it to the background
+   thread. A discovery alone starts a call at most every ``DISCOVERY_GAP_S``.
 
 The op table in ``plan.py`` (``OP_FIELDS``) is the contract with the model.
 When the planner needs something the states cannot do, add an op there and
@@ -94,7 +100,8 @@ from typing import Any, Callable, Collection, Protocol
 from .directives import Directives
 from .travel.resolve import travel_dest, travel_given_up
 from .travel.strength import StrengthBracket
-from .knowledge_base import KnowledgeBase, knowledge_items
+from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
+from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import summary as gem_yield_summary
@@ -110,6 +117,8 @@ from .zone_discovery import known_safe
 log = logging.getLogger(__name__)
 
 INBOX_KEPT = 48  # newest triggers kept while waiting for a call
+FINDS_KEPT = 16  # newest finds one discovery trigger carries (A71)
+DEFER_MAX_S = 10.0  # a new head waits at most this long for an action boundary (A71)
 CHARS_PER_TOKEN = 4  # estimate for a call that reports no usage
 BUDGET_WINDOW_S = 60.0  # the budget counts calls and tokens over this much play
 DEFAULT_REPLAN_S = 15.0
@@ -173,7 +182,7 @@ State stall shows how long the character has neither moved, gained or spent gems
 
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
-"wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game.
+"wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game. A "discovery" trigger lists what the character has just found: an NPC not seen before (kind "npc"), a level entrance (kind "entrance"), an item for sale the gems held can now buy (kind "affordable") or a pack of known-hostile NPCs in a part of the map where none was seen (kind "hostile_pack"); replan if it changes what is worth doing. A new head op takes over once the action under way ends (within a few seconds), never in the middle of a walk; the survival states still act at once. The agent keeps each target it picks (a grass cell, a frontier, a safe tile, a shop cell, a door) until it gets there or finds it out of reach, and takes a gem, life or (when hurt) food a few steps off its way before walking on.
 
 Examples:
 {{"goals":[{{"op":"buy","code":"torch","why":"clue mentions darkness"}}],"params":{{"curiosity":0.3}},"notes":"try the cave entrance"}}
@@ -734,14 +743,7 @@ def entrance_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
 def shop_price_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     """Every item seen for sale (``items`` rows with a ``gem_price``, and
     priced supplies in sight), cheapest first, against the gems held."""
-    prices: dict[str, int] = {}
-    for code, row in knowledge_items(knowledge).items():
-        price = row.get("gem_price") if isinstance(row, dict) else None
-        if isinstance(price, int) and price > 0:
-            prices[code] = price
-    for e in w.entities:
-        if e.kind == "supply" and e.code and isinstance(e.gem_price, int) and e.gem_price > 0:
-            prices[e.code] = e.gem_price
+    prices = seen_prices(w, knowledge)
     if not prices:
         return "shop_prices=none seen"
     ordered = dict(sorted(prices.items(), key=lambda t: (t[1], t[0])))
@@ -805,6 +807,8 @@ class Strategist:
     _idle_sent_for_tick: int = -1
     rejected: list[str] = field(default_factory=list)  # what the last reply had dropped or ignored, for the next State
     stall: StallClock = field(default_factory=StallClock)
+    discoveries: Discoveries = field(default_factory=Discoveries)  # what this run has seen, for discovery triggers (A71)
+    deferred: tuple[Plan, dict[str, Any], int, float, dict | None] | None = None  # (plan, record, pinned, since, head it replaces) waiting for an action boundary (A71)
     _requests: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=1), repr=False)
     _answers: queue.Queue = field(default_factory=queue.Queue, repr=False)
     _stop: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -904,6 +908,18 @@ class Strategist:
     def on_window(self, runner: Any) -> None:
         """Collect triggers, apply an answer that came back, maybe send the next call."""
         self._collect(runner)
+        if self.deferred is not None and (
+            runner.mem.held_queue is None or self.clock() - self.deferred[3] >= DEFER_MAX_S
+        ):
+            plan, record, pinned, _, head = self.deferred
+            self.deferred = None
+            # Built against a stack that has since changed (its head finished
+            # or was dropped, a directives op ended): stale, so it is dropped;
+            # the goal_done or goal_failed trigger asks again.
+            if runner.plan.current() is head and same_ops(plan.goals[:pinned], runner.plan.directive_ops()):
+                self._apply(runner, plan, record, pinned)
+            else:
+                runner.log("strategist", "deferred plan dropped: the stack changed while it waited", {"strategist": {"event": "deferred_dropped", **record}})
         try:
             answer = self._answers.get_nowait()
         except queue.Empty:
@@ -926,8 +942,14 @@ class Strategist:
                 self.inbox.append({"trigger": "timer", "tick": runner.world.tick})
         if self.clock() < self.retry_at:
             return  # backing off after a failed call
-        if self.inbox and not self.limit_reached():
+        if self.inbox and not self.limit_reached() and not self._discovery_waits():
             self._send(runner)
+
+    def _discovery_waits(self) -> bool:
+        """The inbox holds only a discovery, and the last call was under ``DISCOVERY_GAP_S`` ago (A71)."""
+        if any(t["trigger"] != "discovery" for t in self.inbox):
+            return False
+        return self.last_call_at is not None and self.clock() - self.last_call_at < DISCOVERY_GAP_S
 
     def token_budget(self) -> int:
         """``tokens_per_min``, or :func:`default_tokens_per_min` when it is unset."""
@@ -947,7 +969,7 @@ class Strategist:
         return ""
 
     def _collect(self, runner: Any) -> None:
-        """Move queued signals into the inbox and raise the map, hurt and idle triggers."""
+        """Move queued signals into the inbox and raise the map, hurt, idle and discovery triggers."""
         w, m = runner.world, runner.mem
         self.stall.note(w)
         where = (w.map_id, w.map_level) if w.map_id is not None else None
@@ -968,6 +990,15 @@ class Strategist:
         if since >= 0 and w.tick - since >= idle_ticks and self._idle_sent_for_tick != since:
             self._idle_sent_for_tick = since
             self.inbox.append({"trigger": "idle", "since_tick": since, "tick": w.tick, "idle_ticks": idle_ticks})
+        finds = self.discoveries.scan(w, runner.knowledge)
+        if finds:
+            # One trigger holds every find not yet sent, so a run of them is one replan.
+            pending = next((t for t in self.inbox if t["trigger"] == "discovery"), None)
+            if pending is None:
+                self.inbox.append({"trigger": "discovery", "finds": finds[-FINDS_KEPT:], "tick": w.tick})
+            else:
+                pending["finds"].extend(finds)
+                del pending["finds"][:-FINDS_KEPT]  # a crowded view or a new map never floods the prompt
         drained = drain_triggers(m)
         if runner.acceptance is not None:
             for trigger in drained:
@@ -1089,6 +1120,7 @@ class Strategist:
             if len(kept) < len(goals):
                 record["given_up_filtered"] = [g for g in goals if g not in kept]
                 goals = kept
+        self.deferred = None  # a newer reply decides
         old = runner.plan
         pinned = old.directive_ops()  # directives ops left: they stay on top
         # A reply that repeats a directives op does not stack it twice, so a
@@ -1104,7 +1136,7 @@ class Strategist:
             old.notes = notes or old.notes
             runner.log("strategist", "same stack; progress kept", {"strategist": {"event": "unchanged", **record}})
             return
-        runner.plan = Plan(
+        new = Plan(
             list(goals),
             dict(old.params),
             notes=notes,
@@ -1112,6 +1144,21 @@ class Strategist:
             tick_hz=runner.tick_hz,
             directive_end=len(pinned),
         )
+        head = old.current()
+        new_head = not (goals and head is not None and same_ops(goals[:1], [head]))
+        if new_head and head is not None and runner.mem.held_queue is not None:
+            # Mid-action: the new head waits for the queue to end (A71).
+            self.deferred = (new, record, len(pinned), self.clock(), head)
+            runner.log("strategist", "new head deferred to the next action boundary", {"strategist": {"event": "deferred", **record}})
+            return
+        self._apply(runner, new, record, len(pinned))
+
+    def _apply(self, runner: Any, new: Plan, record: dict[str, Any], pinned: int) -> None:
+        """Make ``new`` the stack. The same op on top carries on where it was;
+        a new head drops the old head's path and walks (its targets were
+        committed for the old op, so they no longer hold, ``targets``)."""
+        old, goals = runner.plan, new.goals
+        runner.plan = new
         head = old.current()
         if goals and head is not None and same_ops(goals[:1], [head]):
             # Same op on top: it carries on where it was; only the ops below it changed.
@@ -1127,7 +1174,7 @@ class Strategist:
         if not goals:
             runner.log("strategist", "no valid goals; stack cleared (dispatcher safe default)", {"strategist": {"event": "cleared", **record}})
             return
-        below = f", under {len(pinned)} directives op(s)" if pinned else ""
-        runner.log("strategist", f"plan replaced ({len(goals) - len(pinned)} goals{below})", {"strategist": {"event": "applied", **record}})
+        below = f", under {pinned} directives op(s)" if pinned else ""
+        runner.log("strategist", f"plan replaced ({len(goals) - pinned} goals{below})", {"strategist": {"event": "applied", **record}})
         if runner.acceptance is not None:
             runner.acceptance.on_strategist_applied(goals)

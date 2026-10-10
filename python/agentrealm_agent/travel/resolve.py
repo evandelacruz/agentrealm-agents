@@ -72,12 +72,39 @@ def resolve_travel(
     return None
 
 
-def _resolve_hunting(
+def picks_nearest(op: TravelOp) -> bool:
+    """``op`` resolves to the best or nearest of several cells (a ``shop``
+    with no cell, a ``hunting_ground``), so Travel commits to what it picked (A71)."""
+    return (op.to == "shop" and op.x is None) or op.to == "hunting_ground"
+
+
+def still_candidate(
+    op: TravelOp,
+    dest: ResolvedDestination,
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    bracket: StrengthBracket,
+    given_up: Collection[tuple[int, Pos]] = (),
+) -> bool:
+    """``dest`` is still one of the cells ``op`` may pick, whether or not the
+    nearest or best: a committed pick stays while this holds (A71)."""
+    cell = (dest.map_id, dest.pos)
+    if cell in given_up:
+        return False
+    if op.to == "shop":
+        return cell in iter_shop_cells(kb)
+    if op.to == "hunting_ground":
+        return any((mid, pos) == cell for mid, pos, _ in _hunting_candidates(w, kb, bracket, given_up))
+    return False
+
+
+def _hunting_candidates(
     w: WorldModel,
     kb: KnowledgeBase | None,
     bracket: StrengthBracket,
     given_up: Collection[tuple[int, Pos]],
-) -> ResolvedDestination | None:
+) -> list[tuple[int, Pos, int | None]]:
+    """Every hunting cell the bracket may enter, not given up: (map, cell, ceiling)."""
     candidates: list[tuple[int, Pos, int | None]] = []
     for map_id, pos, fact in iter_hunting_cells(kb):
         ceiling = fact.get("strength_ceiling")
@@ -92,6 +119,16 @@ def _resolve_hunting(
             if not bracket.can_enter_ceiling(fact.strength_ceiling) or (w.map_id, pos) in given_up:
                 continue
             candidates.append((w.map_id, pos, fact.strength_ceiling))
+    return candidates
+
+
+def _resolve_hunting(
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    bracket: StrengthBracket,
+    given_up: Collection[tuple[int, Pos]],
+) -> ResolvedDestination | None:
+    candidates = _hunting_candidates(w, kb, bracket, given_up)
     if not candidates:
         return None
     best_ceiling = max((c for _, _, c in candidates if c is not None), default=None)

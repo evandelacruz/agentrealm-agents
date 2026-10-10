@@ -7,14 +7,17 @@ the walker turns round. So a walk keeps the path it chose until one of:
 - it arrives (the path runs out);
 - a step on it is rejected, or newly seen terrain blocks it (a cell on it
   is no longer passable on the cost grid: rejections land in ``avoid``);
-- its target changes (another goal, map or cell). An explore walk's
-  target is a frontier cell, and fog reveals move the frontier nearly every
-  decision, so ``follow_frontier`` keeps it heading for the ground it was
-  exploring instead: while its target is still a frontier cell (or unseen)
-  the walk stands, and once a reveal takes that cell away the walk re-aims
-  at the nearest frontier it can reach without stepping back. A reveal on
-  its own never turns it round;
-- a new plan is cheaper by more than ``SWITCH_GAIN`` of the rest of it.
+- its target changes (another goal, map or cell). Which target a goal
+  walks to is committed separately (``targets``, A71), so a cheaper path to
+  another target never replaces the walk. An explore walk's target is a
+  frontier cell, and fog reveals move the frontier nearly every decision,
+  so ``follow_frontier`` keeps it heading for the ground it was exploring
+  instead: while its target is still a frontier cell (or unseen) the walk
+  stands, and once a reveal takes that cell away the walk re-aims at the
+  nearest frontier it can reach without stepping back. A reveal on its own
+  never turns it round;
+- a new plan to the same target is cheaper by more than ``SWITCH_GAIN`` of
+  the rest of it.
 
 A new path whose first step goes back to the cell the walk just came from
 is taken only when the old one is blocked, or when the new one is cheaper
@@ -116,16 +119,15 @@ def commit(
     target: Pos,
     found: list[Pos] | None,
     params: CostGridParams,
-    *,
-    any_target: bool = False,
 ) -> tuple[list[Pos] | None, Walk | None]:
     """The path to walk (the kept one, or ``found`` toward ``target``) and ``goal``'s walk to remember.
 
     ``params`` must be the grid ``found`` was searched on (module docstring).
-    With ``any_target`` (an explore walk, kept by ``follow_frontier``) the
-    kept walk counts whatever cell ``found`` aims at.
+    Only a walk toward ``target`` itself is kept: which target a goal walks
+    to is its commitment's to say (``targets``, A71), never a cheaper path
+    to another one.
     """
-    on = rest(walk, w, goal, None if any_target else target)
+    on = rest(walk, w, goal, target)
     came_from = None
     if on is not None:
         kept, came_from = on

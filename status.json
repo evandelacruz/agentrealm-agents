@@ -143,5 +143,7 @@
 
   "A69": {"state": "done", "note": "#139: no walk steps onto a priced supply, and a travel to a shop or to any cell with an item for sale arrives beside it; only Shop's Take buys (test_shop.py)."},
 
-  "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."}
+  "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."},
+
+  "A71": {"state": "done", "note": "targets.py commitments (Gather, Explore, Heal, Retreat/Park, Travel, Loot, Level), prerequisite stops (a key before a locked entrance), Detour reflex, discovery triggers and a new head deferred to the next action boundary. No live run yet."}
 }

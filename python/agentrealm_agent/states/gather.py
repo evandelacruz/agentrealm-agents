@@ -90,6 +90,7 @@ REGION_BARREN = "region barren"
 BLOCKED = "blocked by hostile"
 MOVING_OFF = "moving off from a hostile that shadows"
 FIGHTING = "fighting a hostile that shadows"
+WAITING = "way to {} taken, waiting"
 STALLED = "{}, no cut for {} s"
 WALK_TARGETS = {"grass": "grass", "bush": "a bush", "pile": "a gem pile", REGION: "a target region"}
 IN_REGION = "{} (region {},{})"  # any status while Gather works only in a target region
@@ -136,7 +137,7 @@ class GatherState(State):
         out = gather_outcome(
             world, m, ctx.policy, knowledge=ctx.knowledge, op=op, gem_cuts=ctx.gem_cuts, shadow=shadow, tick_hz=tick_hz
         )
-        if out.intents is not None:
+        if out.intents is not None or out.wait:
             return out
         out = safe_default(world, ctx)
         out.state, out.reason = self.name, f"look for gems: {out.reason}"
@@ -234,7 +235,9 @@ def gather_outcome(
     exhausted = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | dead_cells
     out, worked = _gather_step(w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state, shadow, target, named)
     walk = m.gather_target[0] if m.gather_target is not None and m.goal == GOAL else None
-    if out.intents is None:
+    if out.wait and m.gather_target is not None:
+        m.gather_status = WAITING.format(WALK_TARGETS.get(m.gather_target[0], "a cell to cut"))
+    elif out.intents is None:
         if _barred_by_hostile(w, policy, skip | dead_regions, exhausted):
             m.gather_status = BLOCKED
         else:
@@ -323,7 +326,7 @@ def _gather_step(
                 return out, target
     # Field cells first; safe ones only when no field cell is left to cut.
     preferred = {p for p in cuttable if p not in safe} or cuttable
-    return _gather_cells(w, m, policy, here, preferred, safe, knowledge, state, shadow), worked
+    return _gather_cells(w, m, policy, here, preferred, cuttable, safe, knowledge, state, shadow), worked
 
 
 def _gather_cells(
@@ -332,12 +335,19 @@ def _gather_cells(
     policy: Policy,
     here: Pos,
     preferred: set[Pos],
+    cuttable: set[Pos],
     safe: set[Pos],
     knowledge: KnowledgeBase | None,
     state: str,
     shadow: Entity | None,
 ) -> StateOutcome:
-    """Take, cut or walk to the nearest of ``preferred``."""
+    """Take or cut what is in reach, else walk to the committed target (A71),
+    else to the nearest of ``preferred``.
+
+    The target (``m.gather_target``) is Gather's commitment: it is kept until
+    it is reached, gone (cut, taken) or proven out of reach, even when another
+    state walked in between or another cell became nearer (``_still_wanted``,
+    ``_replan_gather``)."""
     view = w.view
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
@@ -361,13 +371,15 @@ def _gather_cells(
         p = min(bushes, key=lambda pos: (chebyshev(pos, here), pos))
         return _cut(w, m, knowledge, p, "cut bush", state)
 
-    # Follow only a path Gather planned, toward a target that still qualifies.
-    if m.goal == GOAL and not _still_wanted(w, m.gather_target, policy, preferred, here in safe):
-        m.path, m.goal, m.gather_target = [], "", None
+    # A target that no longer qualifies is let go, whoever walked last.
+    if not _still_wanted(w, m.gather_target, policy, cuttable, here in safe):
+        if m.goal == GOAL:
+            m.path, m.goal = [], ""
+        m.gather_target = None
     step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
-    if step is None:
-        _replan_gather(w, m, policy, plan_avoid, plan_costly, preferred, safe)
-        step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
+    if step is None and _replan_gather(w, m, policy, plan_avoid, plan_costly, preferred, safe):
+        return StateOutcome(None, f"gather → {m.gather_target[1]}: way taken, waiting", state=state, wait=True, progress=False)
+    step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is not None:
         return StateOutcome([set_position(step)], f"gather → {m.path[-1]}", state=state)
 
@@ -492,13 +504,22 @@ def _walk_to_region(
 
 
 def _still_wanted(
-    w: WorldModel, target: tuple[str, Pos] | None, policy: Policy, preferred: set[Pos], on_safe: bool
+    w: WorldModel, target: tuple[str, Pos] | None, policy: Policy, cuttable: set[Pos], on_safe: bool
 ) -> bool:
+    """The committed target still exists and may still be worked (A71).
+
+    Never a comparison with other cells: a grass cell stays wanted while it
+    is cuttable at all, even once a field cell or a pile turns up nearer. A
+    pile out of sight is kept until a look at its cell shows it gone.
+    """
     if target is None:
         return False
     kind, pos = target
     if kind == "pile":
-        return any(is_gem_pile(e) and e.pos == pos for e in w.entities) and gather_ground(w, pos, policy)
+        here = w.pos
+        seen = here is not None and chebyshev(pos, here) <= w.perception
+        there = any(is_gem_pile(e) and e.pos == pos for e in w.entities)
+        return (there or not seen) and gather_ground(w, pos, policy)
     if kind == REGION:
         return False  # replanned each decision by ``_walk_to_region`` while its region is unseen
     if kind == OUT:
@@ -506,7 +527,14 @@ def _still_wanted(
         # reachable, so re-checking ``preferred`` each tick would only replan
         # it (A15). Off safe ground the field is in view: replan to cut it.
         return on_safe
-    return w.view.tiles.get(pos) == kind and pos in preferred
+    return w.view.tiles.get(pos) == kind and pos in cuttable
+
+
+# Target kinds ``_replan_gather`` walks back to once another state took the path.
+KEPT_KINDS = ("pile", "bush", "grass", OUT)
+# Gather waits this long for a taken first step toward its target (an
+# occupant), then gives the target up (5 s at 10 ticks/s, as a walk's fog hold).
+HOLD_TICKS = 50
 
 
 def _replan_gather(
@@ -517,19 +545,39 @@ def _replan_gather(
     costly: set[Pos],
     preferred: set[Pos],
     safe: set[Pos],
-) -> None:
-    """Plan to the nearest pile, then bush, then grass (``preferred``: field
+) -> bool:
+    """Plan to the committed target (``m.gather_target``) while one is kept,
+    else pick: the nearest pile, then bush, then grass (``preferred``: field
     cells before safe ones), then, on safe ground, out to field ground or the
     frontier; leave ``m.path`` alone if none.
 
-    The nearest ``GATHER_CANDIDATES`` of each kind are tried. A failed plan
+    A kept target is given up only when no path reaches it at all, or its
+    path has started on a taken cell for ``HOLD_TICKS``; until then it is
+    held, and True says so: the caller waits instead of letting the safe
+    default walk away and back (A71). The
+    nearest ``GATHER_CANDIDATES`` of each kind are tried. A failed plan
     keeps another state's path.
     """
-    if m.goal == GOAL:
-        m.path, m.goal, m.gather_target = [], "", None
     params = grid_params(policy, blocked, costly)
     here = w.pos
     assert here is not None
+    kept = m.gather_target
+    if m.goal == GOAL:
+        m.path, m.goal = [], ""
+    m.gather_target = None
+    if kept is not None and kept[0] in KEPT_KINDS:
+        path = _path_to(w, kept, params)
+        if path and next_step(w, blocked, path):
+            m.path, m.goal, m.gather_target = path, GOAL, kept
+            m.gather_hold = None
+            return False
+        if path:
+            if m.gather_hold is None or m.gather_hold[0] != kept:
+                m.gather_hold = (kept, w.tick)
+            if w.tick - m.gather_hold[1] < HOLD_TICKS:
+                m.gather_target = kept
+                return True
+        m.gather_hold = None  # no way there, or the way stayed taken: pick again
 
     piles = [e for e in w.entities if is_gem_pile(e) and gather_ground(w, e.pos, policy)]
     if piles:
@@ -537,7 +585,7 @@ def _replan_gather(
         path = cost_path(w, target, params)
         if next_step(w, blocked, path):
             m.path, m.goal, m.gather_target = path, GOAL, ("pile", target)
-            return
+            return False
 
     bush_at: dict[Pos, Pos] = {}
     for p in sorted(preferred):
@@ -550,17 +598,29 @@ def _replan_gather(
         found = nearest_target(w, _nearest(here, bush_at), params)
         if found and next_step(w, blocked, found[1]):
             m.path, m.goal, m.gather_target = found[1], GOAL, ("bush", bush_at[found[0]])
-            return
+            return False
 
     grass = {p for p in preferred if w.view.tiles[p] == "grass"}
     if grass:
         found = nearest_target(w, _nearest(here, grass), params)
         if found and next_step(w, blocked, found[1]):
             m.path, m.goal, m.gather_target = found[1], GOAL, ("grass", found[0])
-            return
+            return False
 
     if here in safe:
         _plan_out(w, m, policy, blocked, params, safe)
+    return False
+
+
+def _path_to(w: WorldModel, target: tuple[str, Pos], params) -> list[Pos] | None:
+    """A path to a kept target: beside a bush, onto anything else; None when nothing reaches it."""
+    kind, pos = target
+    if kind == "bush":
+        cells = {n for n in w.neighbours(pos) if w.view.walkable(n) and n not in w.occupied()}
+    else:
+        cells = {pos}
+    found = nearest_target(w, cells, params) if cells else None
+    return found[1] if found and found[1] else None
 
 
 def _plan_out(w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos], params, safe: set[Pos]) -> None:

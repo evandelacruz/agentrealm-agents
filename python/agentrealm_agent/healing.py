@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Literal
 
 from .item_table import InventorySupply, merge_heal
 from .world import Entity, Pos, WorldModel, chebyshev
@@ -70,26 +70,36 @@ REACH_CODES = frozenset({"target_not_nearby", "target_out_of_range"})
 HOLD_CODES = frozenset({"would_strand", "carry_capacity_full", "not_allowed_in_safe_zone"})
 
 
+RefusalAction = Literal["arm", "forget", "walk", "wait", "hold"]
+# (map, cell, armed code, held supply ids, max health, the food's cell for a Take)
+Situation = tuple[int | None, Pos | None, str | None, tuple[int, ...], int | None, Pos | None]
+
+
 @dataclass(frozen=True)
 class HealRefusal:
     """The last refusal of one supply's ``Take`` or drink (A80)."""
 
     code: str
-    action: str  # "arm" | "forget" | "walk" | "wait" | "hold"
+    action: RefusalAction
     tick: int
-    situation: tuple  # ``heal_situation`` when it was refused
+    situation: Situation  # ``heal_situation`` when it was refused
 
 
-def heal_situation(w: WorldModel, target: Pos | None = None) -> tuple:
+def heal_situation(w: WorldModel, target: Pos | None = None) -> Situation:
     """What a ``Take`` or drink was decided from: where we stand, what is armed
-    and held, health, and the food's cell for a ``Take``. A held supply is
-    tried again only once one of these differs (a step, a new item, health
-    up or down, the food moved)."""
+    and held, max health, and the food's cell for a ``Take``. A held supply is
+    tried again only once one of these differs (a step, a new item, a new
+    max health, the food moved).
+
+    Health itself is left out: regen, poison or a hit moves it every few
+    ticks without touching anything a refusal depends on, and would resend
+    the same refusal each time.
+    """
     held = tuple(sorted(h.id for h in w.held_supplies))
-    return (w.map_id, w.pos, w.armed_code, held, w.health, w.max_health, target)
+    return (w.map_id, w.pos, w.armed_code, held, w.max_health, target)
 
 
-def refusal_action(rejection: dict, *, verb: str, armed_first: bool, on_target: bool) -> str:
+def refusal_action(rejection: dict, *, verb: str, armed_first: bool, on_target: bool) -> RefusalAction:
     """What to do about one refusal (see ``REARM_CODES`` and the table above).
 
     ``verb`` is the refused intent's. ``armed_first`` says the drink already

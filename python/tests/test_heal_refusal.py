@@ -126,16 +126,28 @@ class DrinkRefusalTest(RefusalTest):
         self.next_tick()
         self.assertEqual(self.decide()[0], {"verb": "Arm", "supply_id": 6}, "carried food first")
         w.held_supplies = [KNIFE, POTION_A]
-        w.health = 5  # health changed
+        w.pos = (3, 4)  # it moved
         self.next_tick()
         self.assertEqual(self.decide()[0], {"verb": "Arm", "supply_id": 4})
+
+    def test_health_moving_alone_does_not_resend_a_held_refusal(self):
+        # Regen, poison or a hit changes health every few ticks; none of it is
+        # what the refusal depends on, so it is not sent again.
+        w = self.r.world
+        w.held_supplies = [KNIFE, POTION_A]
+        self.decide()
+        self.refuse(0, "not_allowed_in_safe_zone", category="invalid", retryability="precondition")
+        for health in (6, 7, 5, 8, 4):
+            w.health = health
+            self.next_tick()
+            self.assertNotIn(USE_SELF, self.decide(), f"health {health}")
 
     def test_no_cap_however_many_refusals(self):
         # Free-play run 5 died holding two potions written off by a cap.
         w = self.r.world
         w.held_supplies = [KNIFE, POTION_A]
         for n in range(10):
-            w.health = 7 - n % 2  # the situation moves on each time
+            w.pos = (3, 3 + n % 2)  # the situation moves on each time
             self.next_tick()
             self.assertEqual(self.decide(), [{"verb": "Arm", "supply_id": 4}, USE_SELF], f"refusal {n}")
             self.refuse(0, "odd_code")

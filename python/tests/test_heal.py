@@ -94,8 +94,8 @@ class HealStateTest(unittest.TestCase):
         note_refusal(m, "take", 8, HealRefusal("odd_code", "hold", w.tick, heal_situation(w, (2, 1))))
         w.tick += 7
         self.assertNotIn("Take", verbs(dispatch(w, ctx(m))), "nothing changed: not sent again")
-        w.health = 4
-        self.assertEqual(verbs(dispatch(w, ctx(m))), ["Take"], "health changed: try again")
+        w.held_supplies = [InventorySupply(3, "bronze_sword")]
+        self.assertEqual(verbs(dispatch(w, ctx(m))), ["Take"], "a new item: try again")
 
     def test_carried_food_before_potion(self):
         w = grid()

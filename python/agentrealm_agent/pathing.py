@@ -489,9 +489,9 @@ def reachable_safe_goal(
     Heal walked to a safe tile beside a hostile pack and died), or seen there
     within ``SAFE_THREATENED_TICKS`` (``Memory.safe_threatened``), since a
     pick that forgot the pack once it left view would turn back toward it; a
-    mark by a hostile still in view counts only while ``reach`` says so. ``town`` is the last resort only among cells
-    outside every hostile's reach. Also a
-    cell ``params`` avoids, one a check found no way to within
+    mark by a hostile still in view counts only while ``reach`` says so.
+    ``town`` is the last resort only among cells outside every hostile's
+    reach. Also a cell ``params`` avoids, one a check found no way to within
     ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), and one a
     Heal walk gave up on and still backs off. The first ``SAFE_GOAL_CHECKS``
     left are searched, then the nearest of the rest; a cell a kept safe

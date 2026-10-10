@@ -88,17 +88,29 @@ class RefugeTest(unittest.TestCase):
         self.assertEqual(out.reason, f"retreat → safe {FAR_SAFE}")
         self.assertGreater(step(out)[0], w.pos[0], "away from the hostile, not back past it")
 
-    def test_with_no_refuge_retreat_steps_away_instead_of_back_to_the_hostile(self):
-        """Every safe cell lies in the hostile's reach: Retreat opens distance,
-        never walks toward the one beside its pursuer."""
+    def test_with_no_refuge_flee_runs_its_escape_without_pacing(self):
+        """Every safe cell lies where the hostile gets first: Retreat sends
+        nothing, so Flee's committed escape runs, decision after decision,
+        opening distance and never stepping back onto a cell (review on
+        #168: a greedy step from Retreat would take over from it)."""
         w, c = world(health=2), ctx()
         apply_zone(w, MAP, FAR_SAFE[0], FAR_SAFE[1], {"safe": False})
         e = gristle()
         w.entities = [e]
-        hit_by(w, e)
-        out = dispatch(w, c)
-        self.assertEqual((out.state, out.reason), ("Retreat", "no refuge outside hostile ground: open distance"))
-        self.assertGreater(chebyshev(step(out), e.pos), chebyshev(w.pos, e.pos))
+        seen = [w.pos]
+        for _ in range(6):
+            hit_by(w, e)
+            c.memory.held_queue = None
+            out = dispatch(w, c)
+            self.assertEqual(out.state, "Flee", out.reason)
+            self.assertTrue(out.intents, out.reason)
+            nxt = step(out)
+            self.assertNotIn(nxt, seen, "no pacing")
+            self.assertGreaterEqual(chebyshev(nxt, e.pos), chebyshev(w.pos, e.pos), out.reason)
+            seen.append(nxt)
+            w.pos = w.terrain_center = nxt
+            w.tick += 5
+        self.assertNotIn(NEAR_SAFE, seen)
 
     def test_with_no_refuge_and_nothing_near_park_sends_nothing(self):
         w, c = world(), ctx()

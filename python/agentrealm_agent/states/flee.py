@@ -123,7 +123,7 @@ def instead_of_fleeing(
     options = []
     if may_hit and (wins or (cornered and above_floor)):
         options.append(lambda: engage(w, ctx, target, FleeState.name))
-    options.append(lambda: retreat_step(w, ctx, FleeState.name, paced, step_away=False))
+    options.append(lambda: retreat_step(w, ctx, FleeState.name, paced))
     hitter_in_reach = is_attacker(w, target) and in_weapon_reach(w, target, ctx.knowledge)
     if may_hit and above_floor and hit_while_fleeing(w, ctx.memory) and hitter_in_reach:
         options.append(lambda: engage(w, ctx, target, FleeState.name))

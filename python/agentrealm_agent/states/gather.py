@@ -336,9 +336,9 @@ def _gather_step(
     """Gather's move, and the target region it works only in (None when it
     works anywhere).
 
-    A gem pile is taken only inside the region the op names, or the target
-    region Gather works only in (free-play run 5: piles outside the named
-    region drew it to a hostile's post)."""
+    While Gather works only in a target region, it walks to gem piles only
+    there (free-play run 5: piles outside the named region drew it to a
+    hostile's post); one in reach is taken wherever it lies."""
     view = w.view
     cuttable = {
         p
@@ -359,8 +359,7 @@ def _gather_step(
                 return out, target
     # Field cells first; safe ones only when no field cell is left to cut.
     preferred = {p for p in cuttable if p not in safe} or cuttable
-    pile_region = target if named else worked
-    out = _gather_cells(w, m, policy, here, preferred, cuttable, safe, knowledge, state, shadow, d, pile_region)
+    out = _gather_cells(w, m, policy, here, preferred, cuttable, safe, knowledge, state, shadow, d, worked)
     return out, worked
 
 
@@ -387,7 +386,7 @@ def _gather_cells(
     state walked in between or another cell became nearer (``_still_wanted``,
     ``_replan_gather``). ``d`` is the decision's ``Danger``: remembered
     hostiles' ground, and whether the op chose to fight for it;
-    ``pile_region`` bounds the piles it takes or walks to."""
+    ``pile_region`` bounds the piles it walks to; one in reach is taken anywhere."""
     view = w.view
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
@@ -400,7 +399,6 @@ def _gather_cells(
         for e in w.entities
         if is_gem_pile(e)
         and chebyshev(e.pos, here) <= 1
-        and _pile_in(e.pos, pile_region)
         and gather_ground(w, e.pos, policy, d)
     ]
     if piles:

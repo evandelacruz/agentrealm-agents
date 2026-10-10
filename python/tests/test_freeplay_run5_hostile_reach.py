@@ -254,25 +254,45 @@ class HeadingOutKeepsClearTest(unittest.TestCase):
 
 
 class PilesHonourTheRegionTest(unittest.TestCase):
-    def test_a_pile_outside_the_named_region_is_not_the_target(self):
+    """The op names region (1, 0); grass at (20, 10) gives Gather a cell to cut there."""
+
+    def worked(self) -> tuple[WorldModel, Memory]:
         w, m = field(perception=30), Memory()
+        w.view.tiles[(20, 10)] = "grass"
+        return w, m
+
+    def test_a_pile_outside_the_named_region_is_not_the_target(self):
+        w, m = self.worked()
         w.entities = [Entity("supply", 50, (5, 10), "gem"), Entity("supply", 51, (25, 12), "gem")]
         gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
         self.assertEqual(m.gather_target, ("pile", (25, 12)))
 
-    def test_with_no_pile_in_the_named_region_none_is_walked_to(self):
-        w, m = field(perception=30), Memory()
+    def test_with_no_pile_in_the_named_region_its_grass_is_worked(self):
+        w, m = self.worked()
         w.entities = [Entity("supply", 50, (5, 10), "gem")]
         gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
-        self.assertNotEqual((m.gather_target or ("",))[0], "pile")
+        self.assertEqual(m.gather_target, ("grass", (20, 10)))
 
     def test_a_kept_pile_outside_a_newly_named_region_is_let_go(self):
-        w, m = field(perception=30), Memory()
+        w, m = self.worked()
         w.entities = [Entity("supply", 50, (5, 10), "gem")]
         gather(w, m, {"op": "gather_gems", "count": 5})
         self.assertEqual(m.gather_target, ("pile", (5, 10)))
         gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
-        self.assertNotEqual(m.gather_target, ("pile", (5, 10)))
+        self.assertEqual(m.gather_target, ("grass", (20, 10)))
+
+    def test_a_pile_in_reach_is_taken_wherever_it_lies(self):
+        w, m = self.worked()
+        w.entities = [Entity("supply", 50, (3, 10), "gem")]
+        out = gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
+        self.assertEqual(out.intents[0].get("verb"), "Take")
+
+    def test_with_nothing_to_cut_in_the_named_region_piles_anywhere_count(self):
+        """Gather works as usual once it knows no cell to cut there, piles included."""
+        w, m = field(perception=30), Memory()
+        w.entities = [Entity("supply", 50, (5, 10), "gem")]
+        gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
+        self.assertEqual(m.gather_target, ("pile", (5, 10)))
 
 
 class DetourKeepsClearTest(unittest.TestCase):

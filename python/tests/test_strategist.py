@@ -279,8 +279,15 @@ class CadenceTest(unittest.TestCase):
         s.on_window(r)
         s.serve_one(timeout=0)
         s.clock.now += 20
-        s.on_window(r)  # the failure lands; its triggers wait out the backoff
-        self.assertEqual(s.last_reply_at, s.clock.now)
+        s.on_window(r)  # the failure lands
+        s.inbox = []  # leave out the triggers it put back, to watch the timer alone
+        s.clock.now += 14.9
+        s.on_window(r)
+        self.assertEqual(s.calls, 1, "the gap is 15 s after the failure, not after the send")
+        s.clock.now += 0.1
+        s.on_window(r)
+        self.assertEqual(s.calls, 2)
+        self.assertEqual(sent_triggers(r, 1), ["timer"])
 
     def test_an_event_still_calls_at_once_after_a_reply(self):
         llm = FakeLLM(WAIT_ANSWER, WAIT_ANSWER)

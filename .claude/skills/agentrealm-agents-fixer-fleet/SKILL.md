@@ -26,9 +26,9 @@ First row that matches decides it:
 |---|---|
 | has `conductor:working` | **skip**: an implementer or fixer holds it and releases it when they finish. Never delete the label to spawn. |
 | draft | **skip**: still being written |
-| `Cursor Automation: Saims Ref Agent Auto Code Review` still running | **skip**: a review is in progress |
+| the Claude Review `review` check still running on the head | **skip**: a review is in progress |
 | `mergeable_state` is `"dirty"` | **spawn**: merge conflict |
-| a CI check run (not the review check) concluded `failure` or `timed_out` | **spawn**: red CI |
+| a CI check run (not the `review` check) concluded `failure` or `timed_out` | **spawn**: red CI |
 | a review requested changes | **spawn**: review |
 | unresolved threads, and not approved | **spawn**: review |
 | approved, only open nit threads | **skip**: nothing blocks the merge |
@@ -40,9 +40,9 @@ Traps that make you spawn at nothing:
 
 - `mergeable_state` reads `"unknown"` on a first fetch. Read it again. `"dirty"` is a conflict; `"unstable"` is a pending or failing check, not a conflict.
 - Still-running, `skipped`, and `neutral` checks are not failure.
-- The automated code review posts a check run of its own. Red there is a review verdict, not a CI job. Read the threads for it.
-- Claude's reviews are always `COMMENTED`. On the current head, one is either an approval or a change request; [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict** states which. A Claude review with findings and no approval is a change request even without the words "do not merge". Check the review bodies, not only the states, or a Cursor-approved pull request goes unfixed.
-- Verdicts come from reviews (Cursor's state, Claude's body), never from labels. [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) states the derivation; keep it in that one place. `conductor:working` is a writer lock shared with Cursor. Do not delete it to "unstick" a pull request.
+- The Claude Review workflow's `review` job is a check run, but not CI. A failed or cancelled one is no blocker to spawn for; the supervisor reports it to Evan.
+- Claude reviews as `reviewer-agent-anth[bot]` with a real `APPROVED` or `CHANGES_REQUESTED` state; [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict** states the rule. Its inline comments come as extra `COMMENTED` reviews; those are threads, not a verdict. Reviews posted as `evandelacruz` or `cursor[bot]` are not a verdict either.
+- Verdicts come from review states, never from labels. [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) states the derivation; keep it in that one place. `conductor:working` is a writer lock shared with Cursor. Do not delete it to "unstick" a pull request.
 
 ## The pass
 

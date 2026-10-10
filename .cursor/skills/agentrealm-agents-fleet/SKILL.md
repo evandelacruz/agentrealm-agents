@@ -10,6 +10,8 @@ description: >-
 
 Batch counterpart to [agentrealm-agents-conductor](../agentrealm-agents-conductor/SKILL.md). Plans and spawns **`n`** agents. Needs `CURSOR_API_KEY`.
 
+**Dormant while Cursor credits are out.** New work goes to [agentrealm-agents-implementer-fleet](../../../.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md) and fixes to [agentrealm-agents-fixer-fleet](../../../.claude/skills/agentrealm-agents-fixer-fleet/SKILL.md). Review verdicts follow [agentrealm-agents-conductor](../agentrealm-agents-conductor/SKILL.md) **Review verdicts**.
+
 Repo: `evandelacruz/agentrealm-agents`.
 
 ## When to use

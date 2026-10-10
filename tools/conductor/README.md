@@ -65,13 +65,14 @@ claim it.
 # Spawn an implementer (defaults to env evandelacruz/agentrealm-agents, auto-PR on)
 npm --prefix tools/conductor run spawn -- \
   --ids A8 \
-  --name "Runtime directives" \
+  --name "A8: Runtime directives" \
   -- "Implement A8 per PLAN.md …"
 
 # Follow up on an existing agent. --pr claims conductor:working first.
 npm --prefix tools/conductor run follow-up -- --agent bc-… --pr https://github.com/evandelacruz/agentrealm-agents/pull/18 -- "Fix unresolved review comments"
 
-# List recent cloud agents (SDK source). Missing statuses are hydrated under
+# List recent cloud agents (SDK source). Implementer names start with their
+# backlog IDs ("A8: …"), so this shows which IDs running agents hold. Missing statuses are hydrated under
 # the same rate-limit pacing as --running-count, so a large --limit is slow,
 # not a failure.
 npm --prefix tools/conductor run status

@@ -2,14 +2,15 @@
 name: agentrealm-agents-implementer-fleet
 description: >
   Spawn one Claude session per ready agentrealm-agents backlog slice, for new
-  backlog work. Use when the agentrealm-agents supervisor dispatches new work,
-  or when Evan asks Claude Code to spawn implementers or run an implementer
-  fleet. Does not implement, review, or merge anything itself.
+  backlog work while the Cursor implementer fleet cannot run (Cursor out of
+  credits). Use when the agentrealm-agents supervisor dispatches new work in
+  Claude mode, or when Evan asks Claude Code to spawn implementers or run an
+  implementer fleet. Does not implement, review, or merge anything itself.
 ---
 
 # agentrealm-agents implementer fleet
 
-Claude counterpart to the Cursor fleet ([agentrealm-agents-fleet](../../../.cursor/skills/agentrealm-agents-fleet/SKILL.md)), which is dormant while Cursor credits are out. New backlog work only. Pick up to `n` ready slices, spawn one session per slice, report. **You implement nothing yourself.**
+Claude fallback for the Cursor fleet ([agentrealm-agents-fleet](../../../.cursor/skills/agentrealm-agents-fleet/SKILL.md)), for new backlog work only. Pick up to `n` ready slices, spawn one session per slice, report. **You implement nothing yourself.**
 
 Repo: `evandelacruz/agentrealm-agents`. Read [`AGENTS.md`](../../../AGENTS.md) before spawning. The briefs you write carry its rules.
 
@@ -17,8 +18,10 @@ It routes no open pull request. Blocked pull requests are the [fixer fleet](../a
 
 ## When to use
 
-- The supervisor's dispatch row for new work ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) step 3), with `n = 10 − open − inflight`.
+- The supervisor's dispatch row for new work in Claude mode ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) **Who implements**), with `n = 10 − open − inflight`.
 - Evan asks Claude Code for implementers directly. `n` is Evan's number.
+
+In Cursor mode the supervisor hands new work to the Cursor fleet instead. Never run both for the same pass.
 
 ## The pass
 
@@ -40,7 +43,7 @@ No `gh` CLI here; GitHub reads go through the MCP tools.
 
 **2. Find ready IDs and in-flight sessions.** Count `inflight` and find **ready** IDs exactly as [agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) defines them: `inflight` in step 2 (**Count**), ready in step 3 (`backlog left`). Do not restate either here; the supervisor and this fleet must agree, or the supervisor keeps dispatching passes with nothing to pick. An ID an in-flight session covers is not ready, so a slice is never spawned twice.
 
-**3. Choose slices.**
+**3. Choose slices**, by the Cursor fleet's **Choosing backlog work** rules, so both fleets pick the same way:
 
 - One PR-sized item per session. If one is still too large, give the session an explicit scope; it leaves the ID `partial`.
 - Respect the **Depends on** column. Prefer work that unlocks other items over leaf work when both are ready.

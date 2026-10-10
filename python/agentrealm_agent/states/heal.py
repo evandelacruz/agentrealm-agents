@@ -308,7 +308,9 @@ def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
     into the same situation: the runner files the refusal's reason
     (``Runner._note_heal_refused``, ``healing.refusal_action``) and
     ``carried_heal`` skips that supply until it no longer applies. A ``Use``
-    refused with nothing armed is sent next time with its ``Arm``.
+    refused with nothing armed is sent next time with its ``Arm``. A drink
+    that applied and drank nothing is held the same way, by its cause
+    (``healing.noop_drink_cause``, A76).
 
     The ``Arm`` never goes out without its ``Use``: a cooldown that does not
     leave room for both in one queue sends nothing yet (``arm_then_use``).
@@ -316,7 +318,9 @@ def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
     item = carried_heal(w, m)
     if item is None:
         return None
-    if w.armed_code == item.code and not must_arm(m, item.id):
+    # Another supply of the same code in the slot is not this one: arm it (A76).
+    in_slot = w.armed_code == item.code and w.armed_id in (None, item.id)
+    if in_slot and not must_arm(m, item.id):
         out = _out([use_self()], f"use {item.code}")
     elif queue := arm_and_use(w, m, item.id, use_self()):
         out = _out(queue, f"arm and use {item.code}")

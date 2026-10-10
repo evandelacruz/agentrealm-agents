@@ -50,12 +50,18 @@ from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, su
 from .healing import (
     FOOD_CODES,
     POTION_CODES,
+    AppliedDrink,
     HealRefusal,
+    NoopDrink,
     absorb_heal_pending,
     clear_refusal,
     code_in_hand,
+    drank,
+    drink_situation,
     heal_situation,
     known_refusal,
+    noop_action,
+    noop_drink_cause,
     note_heal_pending,
     note_refusal,
     refusal_action,
@@ -200,6 +206,7 @@ class Runner:
         self._applied_take_codes: list[str | None] = []  # A47: codes of this response's applied Takes
         self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
         self._heal_refused: list[HealRefused] = []  # A80: refused heal intents, filed at the next decision
+        self._applied_drink: AppliedDrink | None = None  # A76: an applied drink, checked at the next decision
         self.gem_cuts = GemYieldTracker()  # A63: our cuts waiting to see whether a gem came of them
         self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
         self._removed_map: int | None = None  # A18: map the character was on when it was taken off
@@ -691,6 +698,8 @@ class Runner:
         earlier = w.entities
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
+        if self._applied_drink is not None and drank(events, self.cid, self._applied_drink.code):
+            self._applied_drink.used = True
         w.apply_observation(r.get("observation"))
         absorb_heal_pending(m, w, self.knowledge, events)
         self._learn_life_code(lives_before)
@@ -1129,7 +1138,8 @@ class Runner:
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True
             if is_self_use(intent) and m.heal_drink is not None:
-                clear_refusal(m, "use", m.heal_drink)  # the drink went through
+                clear_refusal(m, "use", m.heal_drink)  # it applied; whether it drank is read next (A76)
+                self._note_applied_drink(index, result)
                 m.heal_drink = None
             if intent and intent.get("verb") == "Use":
                 m.last_use_tick = int(result.get("tick", w.tick))
@@ -1268,6 +1278,39 @@ class Runner:
         self._heal_refused.append(HealRefused("use", sid, verb, rejection, tick, armed_first))
         m.heal_drink = None
 
+    def _note_applied_drink(self, index: int, result: dict) -> None:
+        """Keep Heal's applied drink (``Memory.heal_drink``) for
+        ``file_heal_refusals`` to see whether it drank anything (A76)."""
+        w, m = self.world, self.mem
+        sid = m.heal_drink
+        assert sid is not None
+        queue = self._held_intents()
+        code = next((h.code for h in w.held_supplies if h.id == sid), None) or code_in_hand(w, queue, index)
+        armed_first = any(i.get("verb") == "Arm" and i.get("supply_id") == sid for i in queue[:index])
+        self._applied_drink = AppliedDrink(sid, code, int(result.get("tick", w.tick)), armed_first, w.health)
+
+    def file_noop_drink(self) -> None:
+        """An applied drink that left its supply carried drank nothing: file
+        why (``healing.noop_drink_cause``) and what Heal does about it, so the
+        same drink is not resent until something relevant changes (A76).
+
+        Read at the next decision, from the observation after the drink and
+        our own ``SupplyUsed``, never in the held-queue probe.
+        """
+        w, m = self.world, self.mem
+        d, self._applied_drink = self._applied_drink, None
+        if d is None or (cause := noop_drink_cause(w, d)) is None:
+            return
+        action = noop_action(cause, armed_first=d.armed_first)
+        note_refusal(
+            m, "use", d.supply_id, NoopDrink(cause, action, d.tick, drink_situation(w), w.health)
+        )
+        self.log(
+            "heal_noop",
+            f"Use of supply {d.supply_id} ({d.code}) applied and drank nothing ({cause}): {action}",
+            {"supply_id": d.supply_id, "code": d.code, "cause": cause, "action": action, "health": w.health},
+        )
+
     def file_heal_refusals(self) -> None:
         """File the refusals kept since the last decision, and trace each (A80).
 
@@ -1276,9 +1319,11 @@ class Runner:
         not the world before the refused queue ran (its Steps, an applied
         ``Arm``). What Heal does next follows from the code
         (``healing.refusal_action``), never from a count; an unknown code is
-        traced as one. Never called in the held-queue probe.
+        traced as one. An applied drink that drank nothing is filed first
+        (``file_noop_drink``, A76). Never called in the held-queue probe.
         """
         w, m = self.world, self.mem
+        self.file_noop_drink()
         refused, self._heal_refused = self._heal_refused, []
         for r in refused:
             target = None

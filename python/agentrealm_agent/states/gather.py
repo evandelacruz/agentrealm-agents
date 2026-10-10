@@ -247,7 +247,7 @@ def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | N
 
 def _barred_by_hostile(w: WorldModel, policy: Policy, skip: set[tuple[int, int]], exhausted: set[Pos]) -> bool:
     """Known grass or a bush Gather would cut, but for a hostile near it."""
-    if not any(e.kind in policy.hostile for e in w.entities):
+    if not any(is_hostile(w, policy, e) for e in w.entities):
         return False
     return any(
         block in ("grass", "bush")

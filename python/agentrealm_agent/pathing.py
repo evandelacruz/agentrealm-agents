@@ -23,15 +23,8 @@ from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
 from .healing import hurt
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
+from .survival import is_hostile
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
-
-
-def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
-    """Entities of a ``policy.hostile`` kind within ``policy.hostile_range``."""
-    here = w.pos
-    if here is None:
-        return []
-    return [e for e in w.entities if e.kind in policy.hostile and chebyshev(e.pos, here) <= policy.hostile_range]
 
 
 def goto_target(w: WorldModel, policy: Policy) -> tuple[int | None, Pos] | None:
@@ -390,7 +383,7 @@ def grid_params(
     base = CostGridParams(
         avoid=set(avoid),
         costly=set(costly),
-        hostile_kinds=frozenset(policy.hostile),
+        is_hostile=lambda w, e: is_hostile(w, policy, e),
         allow_goal_door=allow_goal_door,
     )
     params = nav_stuck.planning_params(m, base) if m is not None else base

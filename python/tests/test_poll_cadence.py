@@ -48,9 +48,12 @@ class PollCadenceTest(unittest.TestCase):
 
     def test_hostile_within_three_blocks(self):
         w = world(at=(0, 0))
-        w.entities = [Entity("npc", 1, (3, 0))]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
+        w.entities = [Entity("npc", 1, (3, 0), "gnawer")]
         self.assertTrue(hostile_within(w, Policy(hostile=["npc"])))
-        w.entities = [Entity("npc", 1, (4, 0))]
+        w.entities = [Entity("npc", 2, (1, 0), "villager")]
+        self.assertFalse(hostile_within(w, Policy(hostile=["npc"])), "townsfolk are no threat")
+        w.entities = [Entity("npc", 1, (4, 0), "gnawer")]
         self.assertFalse(hostile_within(w, Policy(hostile=["npc"])))
         w.entities = [Entity("character", 1, (1, 0))]
         self.assertFalse(hostile_within(w, Policy(hostile=["npc"])))
@@ -64,7 +67,8 @@ class PollCadenceTest(unittest.TestCase):
 
     def test_urgent_polls_every_tick_inside_the_calm_gap(self):
         w = world(tick=21)
-        w.entities = [Entity("npc", 9, (7, 7))]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
+        w.entities = [Entity("npc", 9, (7, 7), "gnawer")]
         m = calm_mem(last_poll_tick=20, calm_poll_interval=9)
         self.assertEqual(choose_call(w, m, Policy(hostile=["npc"])), "tick")
         self.assertEqual(choose_call(w, m, Policy(hostile=[])), "skip")

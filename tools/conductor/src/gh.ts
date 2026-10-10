@@ -1,6 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { REVIEWER_CHECK_NAMES, WORKING_LABEL } from "./config.js";
+import {
+  CLAUDE_REVIEW_CHECK_NAME,
+  CLAUDE_REVIEW_WORKFLOW,
+  REVIEW_CHECK_NAME,
+  WORKING_LABEL,
+} from "./config.js";
 import { lockHeld, pullRequestNumber } from "./lock.js";
 
 const execFileAsync = promisify(execFile);
@@ -21,6 +26,7 @@ export type OpenPr = {
 /** CheckRun uses `status` + `conclusion`; legacy StatusContext uses `state`. */
 type StatusCheckRollupItem = {
   name?: string;
+  workflowName?: string;
   status?: string;
   state?: string;
   conclusion?: string | null;
@@ -116,8 +122,12 @@ export function hasMergeConflict(pr: Pick<OpenPr, "mergeable" | "mergeStateStatu
   return pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY";
 }
 
+/** Reviewer checks are not CI: their result is the review they post. */
 function isReviewerCheck(c: StatusCheckRollupItem): boolean {
-  return REVIEWER_CHECK_NAMES.includes(c.name ?? "");
+  return (
+    c.name === REVIEW_CHECK_NAME ||
+    (c.name === CLAUDE_REVIEW_CHECK_NAME && c.workflowName === CLAUDE_REVIEW_WORKFLOW)
+  );
 }
 
 /** True while a reviewer check is still running. A label is not involved. */

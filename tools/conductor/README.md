@@ -37,6 +37,11 @@ name with `CONDUCTOR_REVIEW_CHECK`). They are not CI, so they never count
 toward red or green. While one is running, `follow-up` and `spawn --pr`
 refuse to start and `prs` prints `review-check:running`.
 
+`prs` does not know the fixer fleet's "disputed, Evan decides" skip (a
+rejection every blocking thread of which a fixer already answered without
+pushing): it still lists such a pull request under needs-fix. Check the
+threads before following up on one.
+
 "Needs fixer follow-up" lists PRs with a merge conflict, red CI, changes
 requested, or unresolved threads without approval.
 

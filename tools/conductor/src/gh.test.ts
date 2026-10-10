@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLAUDE_REVIEW_CHECK_NAME, REVIEW_CHECK_NAME } from "./config.js";
+import { CLAUDE_REVIEW_CHECK_NAME, CLAUDE_REVIEW_WORKFLOW, REVIEW_CHECK_NAME } from "./config.js";
 import {
   hasMergeConflict,
   headVerdict,
@@ -34,7 +34,7 @@ test("reviewInProgress is a reviewer check while it is running", () => {
 test("reviewInProgress also covers the Claude Review job", () => {
   assert.equal(
     reviewInProgress({
-      statusCheckRollup: [{ name: CLAUDE_REVIEW_CHECK_NAME, status: "QUEUED", conclusion: null }],
+      statusCheckRollup: [{ name: CLAUDE_REVIEW_CHECK_NAME, workflowName: CLAUDE_REVIEW_WORKFLOW, status: "QUEUED", conclusion: null }],
     }),
     true,
   );
@@ -45,7 +45,7 @@ test("rollupOk ignores reviewer checks: a failed review job is not red CI", () =
     rollupOk({
       statusCheckRollup: [
         { name: "python", status: "COMPLETED", conclusion: "SUCCESS" },
-        { name: CLAUDE_REVIEW_CHECK_NAME, status: "COMPLETED", conclusion: "FAILURE" },
+        { name: CLAUDE_REVIEW_CHECK_NAME, workflowName: CLAUDE_REVIEW_WORKFLOW, status: "COMPLETED", conclusion: "FAILURE" },
         { name: REVIEW_CHECK_NAME, status: "COMPLETED", conclusion: "FAILURE" },
       ],
     }),
@@ -53,10 +53,16 @@ test("rollupOk ignores reviewer checks: a failed review job is not red CI", () =
   );
   assert.equal(
     rollupOk({
-      statusCheckRollup: [{ name: CLAUDE_REVIEW_CHECK_NAME, status: "COMPLETED", conclusion: "SUCCESS" }],
+      statusCheckRollup: [{ name: CLAUDE_REVIEW_CHECK_NAME, workflowName: CLAUDE_REVIEW_WORKFLOW, status: "COMPLETED", conclusion: "SUCCESS" }],
     }),
     null,
   );
+});
+
+test("a job named review in another workflow is still CI", () => {
+  const other = { name: CLAUDE_REVIEW_CHECK_NAME, workflowName: "test", status: "COMPLETED", conclusion: "FAILURE" };
+  assert.equal(rollupOk({ statusCheckRollup: [other] }), false);
+  assert.equal(reviewInProgress({ statusCheckRollup: [{ ...other, status: "IN_PROGRESS", conclusion: null }] }), false);
 });
 
 test("rollupOk is null when any CheckRun is still in progress", () => {

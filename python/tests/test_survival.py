@@ -576,6 +576,38 @@ class WinEstimateTest(unittest.TestCase):
 
 
 
+class SwingTest(unittest.TestCase):
+    """A81: every character has attack power 2, so a swing at a hostile hits
+    on 8 or better (65%) and deals 1 up to 2 plus weapon damage."""
+
+    def test_hit_chance_follows_the_published_roll(self):
+        self.assertAlmostEqual(survival.hit_chance(), 0.65)
+        self.assertAlmostEqual(survival.hit_chance(attack_power=0), 0.55)
+        self.assertAlmostEqual(survival.hit_chance(attack_power=30), 0.95, msg="a 1 always misses")
+        self.assertAlmostEqual(survival.hit_chance(defense=30), 0.05, msg="a 20 always hits")
+
+    def test_swing_damage_is_the_hit_chance_times_the_mean_roll(self):
+        self.assertAlmostEqual(survival.swing_damage("pocket_knife"), 0.65 * 2.5)  # 1 to 4
+        self.assertAlmostEqual(survival.swing_damage("bronze_sword"), 0.65 * 3.5)  # 1 to 6
+        self.assertAlmostEqual(survival.swing_damage(None), survival.swing_damage("pocket_knife"))
+        self.assertAlmostEqual(survival.swing_damage("small_potion"), survival.swing_damage("pocket_knife"))
+
+    def test_the_knife_beats_one_weak_measured_hostile_at_full_health(self):
+        """At attack power 0 and 1 damage a swing, this was a loss at the default margin."""
+        w = world(["..."], at=(0, 0))
+        w.health, w.lives, w.armed_code = 10, 10, "pocket_knife"
+        w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
+        w.threat.record(("npc", "snotling"), 1)
+        self.assertFalse(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+
+    def test_a_better_weapon_wins_sooner(self):
+        w = world(["..."], at=(0, 0))
+        w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
+        w.threat.record(("npc", "snotling"), 2)
+        knife = survival.win_ratio(10, w.entities, w.threat, "pocket_knife")
+        self.assertGreater(survival.win_ratio(10, w.entities, w.threat, "bronze_sword"), knife)
+
+
 class TownsfolkTest(unittest.TestCase):
     """A23 survive-a-fight run 2: Flee and Retreat fired on a rumor teller, an
     apothecary and a salvager. Only a hostile is a threat: a type that has

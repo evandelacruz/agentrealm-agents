@@ -19,8 +19,21 @@ if TYPE_CHECKING:
 # until measured"). Only the win estimate reads them; A23 refines it.
 HOSTILE_ATTACK_INTERVAL_TICKS = 15
 OUR_ATTACK_INTERVAL_TICKS = 10
-OUR_DAMAGE_PER_HIT = 1
 UNKILLED_HOSTILE_HEALTH = 10
+# Our swing, by the published roll (GAME_NOTES.md Combat): it hits when d20
+# plus attack power is at least 10 plus the target's defense, which a
+# hostile does not have; a 1 always misses and a 20 always hits. A hit deals
+# 1 up to attack power plus weapon damage. The API serves no attack power
+# (PLAN.md Server gaps), so ours is the world's base: every Olympuff
+# character has 2 (A81), a hit on 8 or better, 65% of swings.
+BASE_ATTACK_POWER = 2
+COMBAT_DIE = 20
+COMBAT_HIT_TARGET = 10
+# Weapon damage from the Manual's Supplies reference, for the weapons
+# GAME_NOTES names (``break_memory.WEAPONS``). Any other armed item swings
+# as the starting knife does.
+WEAPON_DAMAGE = {"pocket_knife": 2, "bronze_sword": 4, "bronze_mallet": 6}
+STARTING_WEAPON = "pocket_knife"
 NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)
 # How long Flee keeps running from a hostile that hit us once it is out of
@@ -272,17 +285,34 @@ def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> f
     return health / dps
 
 
-def ticks_to_kill_them(group: list[Entity]) -> float:
+def hit_chance(attack_power: int = BASE_ATTACK_POWER, defense: int = 0) -> float:
+    """The share of d20 faces that hit a target with ``defense``: 0.65 at
+    attack power 2 against a hostile, never below 1 face nor above 19."""
+    lowest = COMBAT_HIT_TARGET + defense - attack_power  # the lowest face that hits
+    faces = COMBAT_DIE - max(lowest, 2) + 1
+    return min(max(faces, 1), COMBAT_DIE - 1) / COMBAT_DIE
+
+
+def swing_damage(weapon: str | None) -> float:
+    """Expected damage of one swing of ``weapon`` at a hostile: the hit
+    chance times the mean of 1 up to attack power plus weapon damage (the
+    pocket knife: 0.65 × 2.5)."""
+    damage = WEAPON_DAMAGE.get(weapon or "", WEAPON_DAMAGE[STARTING_WEAPON])
+    return hit_chance() * (1 + max(1, BASE_ATTACK_POWER + damage)) / 2
+
+
+def ticks_to_kill_them(group: list[Entity], weapon: str | None = None) -> float:
     if not group:
         return float("inf")
-    return len(group) * UNKILLED_HOSTILE_HEALTH / (OUR_DAMAGE_PER_HIT / OUR_ATTACK_INTERVAL_TICKS)
+    return len(group) * UNKILLED_HOSTILE_HEALTH / (swing_damage(weapon) / OUR_ATTACK_INTERVAL_TICKS)
 
 
-def win_ratio(health: int | None, group: list[Entity], threat: ThreatTable) -> float:
-    """Ticks for them to kill us, over ticks for us to kill them. Higher is better for us."""
+def win_ratio(health: int | None, group: list[Entity], threat: ThreatTable, weapon: str | None = None) -> float:
+    """Ticks for them to kill us, over ticks for us to kill ``group`` with
+    ``weapon`` armed. Higher is better for us."""
     if health is None or not group:
         return float("inf")
-    return ticks_to_kill_us(health, group, threat) / ticks_to_kill_them(group)
+    return ticks_to_kill_us(health, group, threat) / ticks_to_kill_them(group, weapon)
 
 
 def has_unmeasured_type(w: WorldModel, group: list[Entity]) -> bool:
@@ -312,7 +342,7 @@ def would_lose(
     if health is None:
         health = NEW_CHARACTER_HEALTH
     margin = effective_fight_margin(float(params["fight_margin"]), eff_risk)
-    return win_ratio(health, group, w.threat) <= margin
+    return win_ratio(health, group, w.threat, w.armed_code) <= margin
 
 
 def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:

@@ -261,9 +261,10 @@ class NoEffectCutTest(unittest.TestCase):
         self.assertEqual(t.pending_cells(MAP, 100 + gem_yield.REGROW_TICKS), set())
         self.assertEqual(t.pending_cells(MAP + 1, 100), set())
 
-    def test_only_grass_and_bushes_are_held(self):
+    def test_only_grass_is_held(self):
         w, t = world(), GemYieldTracker()
         t.note_no_effect(w, (1, 1), "rock", 100)  # break memory owns other blocks (A28)
+        t.note_no_effect(w, (1, 1), "bush", 100)  # bushes drop berries, not gems (A81)
         self.assertEqual((t.no_effect, t.no_effect_cuts), ([], 0))
 
     def test_gather_moves_on_and_says_cuts_have_no_effect(self):
@@ -314,7 +315,7 @@ class NoEffectCutTest(unittest.TestCase):
         for x in range(gem_yield.NO_EFFECT_ZONE_CUTS - 1):
             t.note_no_effect(w, (x, 0), "grass", w.tick)
         self.assertEqual(t.uncuttable(w), (set(), set()))
-        t.note_no_effect(w, (4, 4), "bush", w.tick)
+        t.note_no_effect(w, (4, 4), "grass", w.tick)
         self.assertEqual(t.uncuttable(w), ({(0, 0)}, set()), "a region, not barren: nothing is filed")
         self.assertEqual(gem_yield.barren_regions(kb(), MAP), set())
 
@@ -346,13 +347,14 @@ class RegionSummaryTest(unittest.TestCase):
     def test_regions_count_cuts_gems_and_last_tick(self):
         k = kb()
         record_cut(k, MAP, (1, 1), "grass", 10, False)
-        record_cut(k, MAP, (3, 4), "bush", 20, True)
+        record_cut(k, MAP, (3, 4), "grass", 20, True)
+        record_cut(k, MAP, (4, 4), "bush", 25, False)  # bushes drop berries, not gems (A81): no region count
         record_cut(k, MAP, (17, 1), "grass", 30, False)
         record_cut(k, MAP, (2, 2), "rock", 40, False)  # not a gather block: no region count
         regions = gem_yield.regions(k, MAP)
         self.assertEqual(regions["0,0"], {"cuts": 2, "gems": 1, "last_tick": 20})
         self.assertEqual(regions["1,0"], {"cuts": 1, "gems": 0, "last_tick": 30})
-        self.assertEqual(len(cuts(k)), 4)
+        self.assertEqual(len(cuts(k)), 5)
 
     def test_barren_needs_the_threshold_and_no_gem(self):
         k = kb()
@@ -373,8 +375,8 @@ class RegionSummaryTest(unittest.TestCase):
             record_cut(k, MAP, (300, 300), "grass", i, False)  # barren, too far to be nearby
         for i, gem in enumerate([True, False, False, False]):
             record_cut(k, MAP, (17, 1), "grass", i, gem)
-        record_cut(k, MAP, (33, 1), "bush", 1, True)
-        record_cut(k, MAP, (200, 200), "bush", 1, True)  # far, still listed
+        record_cut(k, MAP, (33, 1), "grass", 1, True)
+        record_cut(k, MAP, (200, 200), "grass", 1, True)  # far, still listed
         s = gem_yield.summary(world(at=(2, 2)), k)
         self.assertEqual(s["here"], {"x": 0, "y": 0, "cuts": BARREN_MIN_CUTS, "gems": 0})
         self.assertEqual(
@@ -401,7 +403,7 @@ class RegionSummaryTest(unittest.TestCase):
 
     def test_state_includes_gem_yield(self):
         k = kb()
-        record_cut(k, MAP, (1, 1), "bush", 1, True)
+        record_cut(k, MAP, (1, 1), "grass", 1, True)
         messages = build_prompt(
             triggers=[],
             w=world(),
@@ -504,6 +506,32 @@ class GatherSkipsBarrenTest(unittest.TestCase):
     def test_op_validates_region_coordinates(self):
         self.assertIsNotNone(validate_goal_op({"op": "gather_gems", "count": 3, "x": 1, "y": 2}))
         self.assertIsNone(validate_goal_op({"op": "gather_gems", "count": 3, "x": "a", "y": 2}))
+
+
+class DerivedThresholdTest(unittest.TestCase):
+    """A81: barren, poor and good are judged against the map's measured yield,
+    the manual's 20% until our cuts outweigh it."""
+
+    def test_the_prior_is_the_manuals_lowest_grass_rate(self):
+        self.assertAlmostEqual(gem_yield.expected_yield({}), 0.20)
+        self.assertEqual(gem_yield.barren_min_cuts(0.20), 15)  # 0.8**15 < 4%
+        self.assertEqual(BARREN_MIN_CUTS, 15)
+
+    def test_ground_that_drops_nothing_is_left_out_of_the_rate(self):
+        rate = gem_yield.expected_yield({"0,0": {"cuts": 40, "gems": 0}, "1,0": {"cuts": 20, "gems": 6}})
+        self.assertAlmostEqual(rate, (6 + 0.20 * gem_yield.PRIOR_CUTS) / (20 + gem_yield.PRIOR_CUTS))
+
+    def test_richer_ground_calls_barren_sooner(self):
+        self.assertLess(gem_yield.barren_min_cuts(0.40), gem_yield.barren_min_cuts(0.20))
+
+    def test_poor_is_half_the_maps_rate(self):
+        k = kb()
+        for i in range(20):
+            record_cut(k, MAP, (1, 1), "grass", i, i < 3)  # 15%: fair at the prior
+        self.assertEqual(gem_yield.poor_regions(k, MAP), set())
+        for i in range(80):
+            record_cut(k, MAP, (17, 1), "grass", i, i % 2 == 0)  # a region at 50%
+        self.assertEqual(gem_yield.poor_regions(k, MAP), {(0, 0)}, "15% is under half of what this map pays")
 
 
 if __name__ == "__main__":

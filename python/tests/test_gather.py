@@ -188,20 +188,11 @@ class GatherActTest(unittest.TestCase):
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
         self.assertEqual(m.gather_target, ("grass", (0, 0)))
 
-    def test_cuts_adjacent_bush(self):
+    def test_a_bush_is_never_cut(self):
+        """A81: bushes drop berries, not gems."""
         w = grid([".b."], at=(0, 0))
-        safe(w, (0, 0))
         out = outcome(w)
-        self.assertEqual(out.intents[0]["target"], {"kind": "block", "x": 1, "y": 0})
-
-    def test_bush_beyond_one_block_is_walked_to_not_cut(self):
-        # A longer weapon reach does not stretch block Use past adjacent.
-        w = grid(["..b"], at=(0, 0))
-        w.attack_range = 3
-        m = Memory()
-        out = outcome(w, m)
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
-        self.assertEqual(m.gather_target, ("bush", (2, 0)))
+        self.assertFalse(any(i.get("verb") == "Use" for i in out.intents or []))
 
     def test_unlisted_supply_codes_are_not_treated_as_gem_piles(self):
         w = grid(["...", "..."], at=(1, 0))
@@ -250,12 +241,6 @@ class GatherArmsACutterTest(unittest.TestCase):
         self.assertTrue(out.paced, "the Use goes out with the Arm")
         self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 5}, {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
         self.assertEqual(out.reason, "arm pocket_knife, cut grass")
-
-    def test_arms_one_for_a_bush_too(self):
-        w = grid([".b."], at=(0, 0))
-        w.held_supplies = [InventorySupply(5, "pocket_knife")]
-        out = outcome(w)
-        self.assertEqual([i["verb"] for i in out.intents], ["Arm", "Use"])
 
     def test_a_tool_that_cuts_is_kept(self):
         w = grid(["ggg"], at=(1, 0))
@@ -314,12 +299,12 @@ class GatherPathingTest(unittest.TestCase):
         self.assertEqual(out.intents[0], {"verb": "SetPosition", "x": 1, "y": 0})
         self.assertEqual((m.goal, m.gather_target), ("gather", ("grass", (2, 0))))
 
-    def test_walks_beside_a_nearer_bush_before_grass(self):
-        w = grid(["g...b"], at=(2, 0))
+    def test_walks_past_a_nearer_bush_to_grass(self):
+        """A81: a bush beside us is no gem source; the grass further off is."""
+        w = grid(["g..b"], at=(2, 0))
         m = Memory()
         outcome(w, m)
-        self.assertEqual(m.gather_target, ("bush", (4, 0)))
-        self.assertEqual(m.path[-1], (3, 0))
+        self.assertEqual(m.gather_target, ("grass", (0, 0)))
 
     def test_walks_to_a_known_pile_first(self):
         w = grid(["g...."], at=(1, 0))

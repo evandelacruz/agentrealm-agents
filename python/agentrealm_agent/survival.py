@@ -278,10 +278,11 @@ def hostiles_reaching(
 def hostile_swing_damage(damage: int) -> float:
     """Expected damage of one hostile swing at us. A hostile swings with its
     damage number as attack power and no weapon damage (GAME_NOTES.md
-    Combat), so it hits on the same roll ours does and deals 1 up to that
-    number. ``damage`` is the threat table's largest hit, a floor on that
-    number. Our armor is not counted: the agent does not know its defense."""
-    return hit_chance(attack_power=damage) * (1 + max(1, damage)) / 2
+    Combat), so it hits on the same roll ours does. ``damage`` is the threat
+    table's largest hit, only a floor on that number, so each landed hit is
+    priced at it, not at the mean below it. Our armor is not counted: the
+    agent does not know its defense."""
+    return hit_chance(attack_power=damage) * max(1, damage)
 
 
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:

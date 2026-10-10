@@ -607,8 +607,10 @@ class SwingTest(unittest.TestCase):
         self.assertIs(survival.WEAPON_DAMAGE, WEAPON_DAMAGE)
 
     def test_a_hostile_swings_on_the_same_roll(self):
-        """Its damage number is its attack power: 2 hits 65% for 1 to 2, 1 hits 60% for 1."""
-        self.assertAlmostEqual(survival.hostile_swing_damage(2), 0.65 * 1.5)
+        """Its damage number is its attack power: 2 hits 65%, 1 hits 60%. The
+        largest hit seen is a floor on it, so a landed hit is priced at it
+        (review on #172), never at the mean below it."""
+        self.assertAlmostEqual(survival.hostile_swing_damage(2), 0.65 * 2)
         self.assertAlmostEqual(survival.hostile_swing_damage(1), 0.60 * 1.0)
 
     def test_the_knife_takes_one_weak_hostile_but_not_a_pair(self):

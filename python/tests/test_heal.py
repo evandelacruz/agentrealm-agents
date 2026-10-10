@@ -170,7 +170,7 @@ class HealStateTest(unittest.TestCase):
         d = decide(w, Memory(), Policy(kind="scripted"), random.Random(0))
         self.assertEqual(d.state, "Heal")
         self.assertEqual(d.submit_queue, [{"verb": "Arm", "supply_id": 4},
-                                          {"verb": "Use", "target": {"kind": "character", "character_id": 9}}])
+                                          {"verb": "Use", "target": {"kind": "self"}}])
 
     def test_a_drink_waits_out_the_use_cooldown_after_the_arm(self):
         w = grid()
@@ -241,7 +241,7 @@ class HealStateTest(unittest.TestCase):
         r.world, r.mem = grid(), Memory()
         r.world.armed_code = "pocket_knife"
         r.world.held_supplies = [InventorySupply(4, "small_potion")]
-        use = {"verb": "Use", "target": {"kind": "character", "character_id": 9}}
+        use = {"verb": "Use", "target": {"kind": "self"}}
         r.mem.pending_intents = [{"verb": "Arm", "supply_id": 4}, {"verb": "Wait"}, {"verb": "Wait"}, use]
         r._note_heal_intent(use, 3)
         self.assertEqual(r.mem.heal_pending, (5, "small_potion", "use"))
@@ -543,6 +543,70 @@ class HealStateTest(unittest.TestCase):
         w.pos = (0, 0)
         out = dispatch(w, ctx(m))
         self.assertNotEqual(out.state, "Heal")
+
+
+class RearmTheLastWeaponTest(unittest.TestCase):
+    """Free-play run 4: a potion left armed by run 3 was what Heal remembered
+    to re-arm, so Heal re-armed a potion and no weapon came back."""
+
+    def test_drinking_the_armed_potion_rearms_the_held_weapon(self):
+        w = grid()
+        w.armed_code = "small_potion"
+        w.held_supplies = [InventorySupply(1, "bronze_sword"), InventorySupply(4, "small_potion")]
+        m = Memory()
+        out = dispatch(w, ctx(m))
+        self.assertEqual(out.intents, [{"verb": "Use", "target": {"kind": "self"}}])
+        self.assertEqual(m.heal_rearm, "bronze_sword")
+        w.armed_code = None
+        w.held_supplies = [InventorySupply(1, "bronze_sword"), InventorySupply(4, "small_potion")]
+        self.assertEqual(dispatch(w, ctx(m)).intents, [{"verb": "Arm", "supply_id": 1}])
+
+    def test_a_potion_in_the_slot_is_never_the_weapon_to_rearm(self):
+        w = grid()
+        w.armed_code = "large_potion"
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        m = Memory()
+        self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
+        self.assertIsNone(m.heal_rearm, "no weapon held: nothing to re-arm, never the potion")
+
+    def test_the_last_weapon_armed_comes_back_over_another_held_one(self):
+        w = grid()
+        w.health = 10
+        w.armed_code = "bronze_sword"
+        m = Memory()
+        dispatch(w, ctx(m))  # every decision notes the weapon in hand
+        self.assertEqual(m.last_weapon, "bronze_sword")
+        w.health = 5
+        w.armed_code = "torch"  # a tool swapped in since
+        w.held_supplies = [
+            InventorySupply(1, "pocket_knife"),
+            InventorySupply(2, "bronze_sword"),
+            InventorySupply(4, "small_potion"),
+        ]
+        self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
+        self.assertEqual(m.heal_rearm, "bronze_sword")
+
+
+class DrinkTargetsSelfTest(unittest.TestCase):
+    """Free-play run 4: the Use named our own id as a ``character`` target
+    and drank nothing. The API's target for yourself is ``{"kind": "self"}``."""
+
+    def test_the_drink_uses_the_self_target(self):
+        w = grid()
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        out = dispatch(w, ctx())
+        self.assertEqual(out.intents[-1], {"verb": "Use", "target": {"kind": "self"}})
+
+    def test_a_self_use_is_measured(self):
+        from agentrealm_agent.runner import Runner
+
+        r = Runner.__new__(Runner)
+        r.world, r.mem = grid(), Memory()
+        r.world.armed_code = "small_potion"
+        use = {"verb": "Use", "target": {"kind": "self"}}
+        r.mem.pending_intents = [use]
+        r._note_heal_intent(use, 0)
+        self.assertEqual(r.mem.heal_pending, (5, "small_potion", "use"))
 
 
 if __name__ == "__main__":

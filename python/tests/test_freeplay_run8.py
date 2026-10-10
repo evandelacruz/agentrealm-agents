@@ -88,6 +88,26 @@ class GatherKeepsWorkingTest(unittest.TestCase):
         gather_outcome(w, m, POLICY, op=GATHER)
         self.assertEqual(m.gather_target, ("grass", grass))
 
+    def test_a_gem_pile_in_sight_ends_the_walk(self):
+        w, m = self.blocked()
+        gather_outcome(w, m, POLICY, op=GATHER)
+        w.pos = m.path[0]
+        pile = (w.pos[0] + 3, w.pos[1])
+        w.entities.append(Entity("supply", 70, pile, "gem"))
+        gather_outcome(w, m, POLICY, op=GATHER)
+        self.assertEqual(m.gather_target, ("pile", pile))
+
+    def test_a_hostile_that_comes_to_hold_its_cell_ends_the_walk(self):
+        w, m = self.blocked()
+        gather_outcome(w, m, POLICY, op=GATHER)
+        first = m.gather_target[1]
+        w.pos = m.path[0]
+        w.entities.append(beast(10, first))
+        gather_outcome(w, m, POLICY, op=GATHER)
+        self.assertNotEqual(m.gather_target, (CLEAR, first))
+        if m.gather_target is not None:
+            self.assertGreater(chebyshev(m.gather_target[1], first), GATHER_HOSTILE_RADIUS)
+
     def test_with_no_frontier_clear_of_it_it_is_still_blocked(self):
         w, m = self.blocked()
         for x in range(-1, 41):

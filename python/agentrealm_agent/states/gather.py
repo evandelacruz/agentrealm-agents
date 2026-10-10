@@ -616,10 +616,16 @@ def _still_wanted(
     if kind == REGION:
         return False  # replanned each decision by ``_walk_to_region`` while its region is unseen
     if kind == CLEAR:
-        # Kept until a cell to cut comes into sight, or a hostile comes to
-        # hold the cell it walks to.
+        # Kept until a cell to cut or a gem pile it may take comes into
+        # sight, or a hostile comes to hold the cell it walks to.
         here = w.pos
-        sighted = here is not None and any(chebyshev(p, here) <= w.perception for p in cuttable)
+        sighted = here is not None and (
+            any(chebyshev(p, here) <= w.perception for p in cuttable)
+            or any(
+                is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
+                for e in w.entities
+            )
+        )
         return not sighted and _clear_of_hostiles(w, policy, pos, d)
     if kind == OUT:
         # Kept while on safe ground: it was planned because no cut was

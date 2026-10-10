@@ -517,12 +517,21 @@ class DerivedThresholdTest(unittest.TestCase):
         self.assertEqual(gem_yield.barren_min_cuts(0.20), 15)  # 0.8**15 < 4%
         self.assertEqual(BARREN_MIN_CUTS, 15)
 
-    def test_ground_that_drops_nothing_is_left_out_of_the_rate(self):
+    def test_every_cut_counts_whatever_it_dropped(self):
+        """Review on #172: counting only regions that dropped a gem skewed the rate high."""
         rate = gem_yield.expected_yield({"0,0": {"cuts": 40, "gems": 0}, "1,0": {"cuts": 20, "gems": 6}})
-        self.assertAlmostEqual(rate, (6 + 0.20 * gem_yield.PRIOR_CUTS) / (20 + gem_yield.PRIOR_CUTS))
+        self.assertAlmostEqual(rate, (6 + 0.20 * gem_yield.PRIOR_CUTS) / (60 + gem_yield.PRIOR_CUTS))
 
-    def test_richer_ground_calls_barren_sooner(self):
-        self.assertLess(gem_yield.barren_min_cuts(0.40), gem_yield.barren_min_cuts(0.20))
+    def test_barren_is_held_to_the_manuals_rate_not_the_maps(self):
+        """Review on #172: a rich map must not mark unlucky ground barren early."""
+        k = kb()
+        for i in range(60):
+            record_cut(k, MAP, (17, 1), "grass", i, True)  # a region paying every cut
+        for i in range(BARREN_MIN_CUTS - 1):
+            record_cut(k, MAP, (1, 1), "grass", i, False)
+        self.assertEqual(gem_yield.barren_regions(k, MAP), set())
+        record_cut(k, MAP, (1, 1), "grass", 99, False)
+        self.assertEqual(gem_yield.barren_regions(k, MAP), {(0, 0)}, "and its own misses do not put it off")
 
     def test_poor_is_half_the_maps_rate(self):
         k = kb()

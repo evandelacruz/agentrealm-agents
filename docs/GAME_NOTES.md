@@ -232,7 +232,7 @@ Each has a test the agent or a hand session can run.
 | Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? Loot drops held supplies only until this is known (A57; Obs [`A57_live_play.md`](observations/A57_live_play.md)) | `Drop` a stowed supply and read the result (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Is the armed supply also listed in `held`? A67 run 1 suggests not (the armed weapon was missing from `held`, [`A67_free_play_runs.md`](observations/A67_free_play_runs.md)). Loot counts held, worn, armed and stowed separately (A20); Heal's drink candidates and `potion_count` (the M8 potion gate, Shop's reserve) add the armed supply by id when `held` leaves it out (A76) | Compare `inventory` before and after an `Arm` |
 | Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 assumes the Manual §16 cap once a `Take` of the upgrade applies (below), and measuring it is A57 (Obs [`A57_live_play.md`](observations/A57_live_play.md)) | Buy `middle_chest` and fill until `carry_capacity_full` (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
-| Where gems drop from cutting grass. The manual gives only a rate by ring (Items, slots and gear); the agent measures yield per 16×16-block region from its own cuts, judged against the map's measured rate with the manual's 20% as the prior (PLAN.md A63, A81). No region yield is measured yet | Read `gem_yield` in the world knowledge base after field play |
+| Where gems drop from cutting grass. The manual gives only a rate by ring (Items, slots and gear); the agent measures yield per 16×16-block region from its own cuts, barren after 15 cuts with no gem and poor or good against the map's measured rate, with the manual's 20% as the prior (PLAN.md A63, A81). No region yield is measured yet | Read `gem_yield` in the world knowledge base after field play |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 
 ### Assumed until measured
@@ -244,7 +244,7 @@ The win estimate (A9, gated on by **Fight** in A23) uses these until the questio
 | Hostile attack interval | 15 ticks | The two weak hostiles in Combat |
 | Our attack interval | 10 ticks | None: weapon cooldown is unmeasured |
 | Our attack power | 2 | The world's base (M §16); the API serves none, so a permanent gain above it is not counted |
-| Our damage a swing | hit chance (65%) × the mean of 1 up to 2 plus weapon damage: 1.625 with the pocket knife | The published roll (Combat) and weapon damage from the Manual's Supplies reference (`survival.WEAPON_DAMAGE`); an unlisted armed item swings as the knife |
+| Our damage a swing | hit chance (65%) × the mean of 1 up to 2 plus weapon damage: 1.625 with the pocket knife | The published roll (Combat) and weapon damage from the Manual's Supplies reference (`break_memory.WEAPON_DAMAGE`); an unlisted armed item swings as the knife |
 | Health of a hostile type with no kill on record | 10 | A new character's health (PLAYABLE_AGENT_PLAN Combat) |
 | Our health when no observation has served it | 10 | A new character's health (Combat) |
 

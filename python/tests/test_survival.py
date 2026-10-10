@@ -600,6 +600,12 @@ class SwingTest(unittest.TestCase):
         w.threat.record(("npc", "snotling"), 1)
         self.assertFalse(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
 
+    def test_every_weapon_has_a_damage_and_nothing_else_does(self):
+        """Review on #172: one list of weapons, so none swings as the knife unseen."""
+        from agentrealm_agent.break_memory import WEAPON_DAMAGE, WEAPONS
+        self.assertEqual(set(WEAPON_DAMAGE), set(WEAPONS))
+        self.assertIs(survival.WEAPON_DAMAGE, WEAPON_DAMAGE)
+
     def test_a_better_weapon_wins_sooner(self):
         w = world(["..."], at=(0, 0))
         w.entities = [Entity("npc", 5, (1, 0), code="snotling")]

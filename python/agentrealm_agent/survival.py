@@ -6,6 +6,7 @@ import math
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
+from .break_memory import WEAPON_DAMAGE
 from .threat import ThreatTable, type_key_for_entity
 from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
@@ -29,10 +30,8 @@ UNKILLED_HOSTILE_HEALTH = 10
 BASE_ATTACK_POWER = 2
 COMBAT_DIE = 20
 COMBAT_HIT_TARGET = 10
-# Weapon damage from the Manual's Supplies reference, for the weapons
-# GAME_NOTES names (``break_memory.WEAPONS``). Any other armed item swings
-# as the starting knife does.
-WEAPON_DAMAGE = {"pocket_knife": 2, "bronze_sword": 4, "bronze_mallet": 6}
+# Weapon damage is ``break_memory.WEAPON_DAMAGE``, the one list of weapons.
+# An armed item not on it (food, a tool, nothing) swings as the starting knife.
 STARTING_WEAPON = "pocket_knife"
 NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)

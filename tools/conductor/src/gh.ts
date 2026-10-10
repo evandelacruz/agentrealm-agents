@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
-  CLAUDE_REVIEW_CHECK_NAME,
   CLAUDE_REVIEW_WORKFLOW,
   REVIEW_CHECK_NAME,
+  REVIEWERS_FILE,
   WORKING_LABEL,
 } from "./config.js";
 import { lockHeld, pullRequestNumber } from "./lock.js";
@@ -125,8 +125,7 @@ export function hasMergeConflict(pr: Pick<OpenPr, "mergeable" | "mergeStateStatu
 /** Reviewer checks are not CI: their result is the review they post. */
 function isReviewerCheck(c: StatusCheckRollupItem): boolean {
   return (
-    c.name === REVIEW_CHECK_NAME ||
-    (c.name === CLAUDE_REVIEW_CHECK_NAME && c.workflowName === CLAUDE_REVIEW_WORKFLOW)
+    c.name === REVIEW_CHECK_NAME || c.workflowName === CLAUDE_REVIEW_WORKFLOW
   );
 }
 
@@ -162,23 +161,51 @@ export type ReviewNode = {
   commit: { oid: string } | null;
 };
 
+/** The two reviewers every PR needs: the Opus bot and the second one, by login. */
+export type ReviewerPair = { opus: string; second: string };
+
+/** GraphQL drops the `[bot]` suffix that REST keeps; compare without it. */
+function loginKey(login: string): string {
+  return login.replace(/\[bot\]$/, "");
+}
+
+/**
+ * Parse `.github/reviewers`: `key: value` lines, `#` comments. `second` is
+ * `cursor` or `sonnet` and names the line holding that reviewer's login.
+ */
+export function parseReviewers(text: string): ReviewerPair {
+  const fields = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    const m = /^([a-z]+):\s*(\S+)\s*$/.exec(line.trim());
+    if (m) fields.set(m[1], m[2]);
+  }
+  const opus = fields.get("opus");
+  const which = fields.get("second");
+  if (which !== "cursor" && which !== "sonnet") {
+    throw new Error(`${REVIEWERS_FILE}: second must be cursor or sonnet, got ${which ?? "nothing"}.`);
+  }
+  const second = fields.get(which);
+  if (!opus || !second) throw new Error(`${REVIEWERS_FILE}: needs opus and ${which} logins.`);
+  return { opus, second };
+}
+
 /**
  * The review verdict on the current head, per the fixer skill. Labels play
- * no part, and any reviewer counts (the Claude Review bot, Cursor, a person).
- * Each reviewer's latest APPROVED / CHANGES_REQUESTED review on `headSha` is
- * their verdict; COMMENTED reviews are threads. Any rejection wins; otherwise
- * one approval is approved; otherwise it is still waiting on a review.
+ * no part. Each reviewer's latest APPROVED / CHANGES_REQUESTED review on
+ * `headSha` is their verdict; COMMENTED reviews are threads. Any reviewer's
+ * rejection wins, a person's included; otherwise it is approved only when
+ * both of the pair approved; otherwise it is still waiting on a review.
  */
-export function headVerdict(reviews: ReviewNode[], headSha: string): Verdict {
+export function headVerdict(reviews: ReviewNode[], headSha: string, pair: ReviewerPair): Verdict {
   const latest = new Map<string, string>();
   for (const r of reviews) {
     if (r.commit?.oid !== headSha) continue;
     if (r.state !== "APPROVED" && r.state !== "CHANGES_REQUESTED") continue;
-    latest.set(r.author?.login ?? "", r.state);
+    latest.set(loginKey(r.author?.login ?? ""), r.state);
   }
-  const verdicts = [...latest.values()];
-  if (verdicts.includes("CHANGES_REQUESTED")) return "CHANGES_REQUESTED";
-  if (verdicts.includes("APPROVED")) return "APPROVED";
+  if ([...latest.values()].includes("CHANGES_REQUESTED")) return "CHANGES_REQUESTED";
+  const approved = (login: string) => latest.get(loginKey(login)) === "APPROVED";
+  if (approved(pair.opus) && approved(pair.second)) return "APPROVED";
   return null;
 }
 
@@ -230,6 +257,14 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
 
   const owner = await ghText(["repo", "view", "--json", "owner", "--jq", ".owner.login"]);
   const name = await ghText(["repo", "view", "--json", "name", "--jq", ".name"]);
+  const pair = parseReviewers(
+    await ghText([
+      "api",
+      "-H",
+      "Accept: application/vnd.github.raw",
+      `repos/${owner}/${name}/contents/${REVIEWERS_FILE}?ref=main`,
+    ]),
+  );
 
   const summaries: PrCommentSummary[] = [];
   for (const pr of prs) {
@@ -266,7 +301,7 @@ export async function summarizeOpenPrs(): Promise<PrCommentSummary[]> {
       headRefName: pr.headRefName,
       headSha: pr.headRefOid,
       isDraft: pr.isDraft,
-      verdict: headVerdict(detail.reviews.nodes, pr.headRefOid),
+      verdict: headVerdict(detail.reviews.nodes, pr.headRefOid, pair),
       mergeable: pr.mergeable,
       mergeStateStatus: pr.mergeStateStatus,
       hasMergeConflict: hasMergeConflict(pr),

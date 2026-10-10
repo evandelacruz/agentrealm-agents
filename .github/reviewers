@@ -1,0 +1,12 @@
+# The review pair. Every pull request has exactly two reviewers: the Opus bot
+# always, and `second`, which is `cursor` or `sonnet`. The Claude Review
+# workflow reads `second` from the base branch, and the merge rule
+# (.claude/skills/agentrealm-agents-fixer/SKILL.md, The review verdict) reads
+# the logins. Only Evan edits this file.
+#
+# While Cursor is out of credits: set `second: sonnet` and turn off Cursor's
+# review automation. When credits return, reverse both.
+opus: opus-review-agent[bot]
+sonnet: sonnet-review-agent[bot]
+cursor: cursor[bot]
+second: cursor

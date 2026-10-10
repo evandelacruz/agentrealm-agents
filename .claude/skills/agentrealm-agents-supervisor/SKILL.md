@@ -17,7 +17,14 @@ Repo: `evandelacruz/agentrealm-agents`. Read [`AGENTS.md`](../../../AGENTS.md) f
 
 ## Who reviews
 
-The Claude Review workflow (`.github/workflows/claude-review.yml`) reviews every ready pull request as `reviewer-agent-anth[bot]`, with a real `APPROVED` or `CHANGES_REQUESTED` review. It needs repo secrets `CLAUDE_REVIEWER_APP_ID`, `CLAUDE_REVIEWER_APP_PRIVATE_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`, and takes its model from the optional repo variable `CLAUDE_REVIEW_MODEL`. Cursor (`cursor[bot]`, with the `Cursor Automation: Saims Ref Agent Auto Code Review` check) reviews while it has credits, and people may review too. Every reviewer counts the same, by [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict**. Nothing in these skills posts reviews. A `review` check run that failed or was cancelled means no Claude review is coming for that head: name it in the report for Evan and carry on with the pass.
+Every pull request has exactly two reviewers, set in [`.github/reviewers`](../../../.github/reviewers) on `main`: the Opus Review Agent always, and `second:`, either `cursor` (`cursor[bot]`, through its `Cursor Automation: Saims Ref Agent Auto Code Review` check) or `sonnet` (a second Claude app). The Claude Review workflow (`.github/workflows/claude-review.yml`) runs the Opus review, and the Sonnet review when `main` says `sonnet`. People may review too. Who must approve, and whose rejection blocks, is [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict**. Nothing in these skills posts reviews. A Claude Review job that failed or was cancelled means that reviewer's review is not coming for that head: name it in the report for Evan and carry on with the pass.
+
+**The second reviewer follows Cursor's credits, and only Evan flips it.** Never edit `.github/reviewers` or Cursor's settings yourself. Read `second:` from `main` each pass and compare it with the mode (**Who implements**):
+
+- Claude mode (Cursor out of credits) with `second: cursor`: nothing can be approved, since Cursor will not review. Tell Evan, at the top of the report, to set `second: sonnet` in `.github/reviewers` and turn off Cursor's review automation.
+- Cursor mode with `second: sonnet` after a switch back: tell Evan to set `second: cursor` and turn Cursor's review automation back on.
+
+Repeat it every pass until the file matches the mode.
 
 ## Who implements
 
@@ -26,7 +33,7 @@ New backlog work goes to one of two fleets. The mode says which:
 - **Cursor mode** (the default): the Cursor implementer fleet ([agentrealm-agents-fleet](../../../.cursor/skills/agentrealm-agents-fleet/SKILL.md)), handed to one Cursor agent (step 3).
 - **Claude mode**: the Claude implementer fleet ([agentrealm-agents-implementer-fleet](../agentrealm-agents-implementer-fleet/SKILL.md)), run in this session. Never try the conductor `spawn` in this mode.
 
-The mode changes nothing else: not the merge rule, not the fixers, not who reviews.
+The mode changes nothing else: not the merge rule, not the fixers. Who reviews follows it only through `.github/reviewers`, which Evan flips (**Who reviews**).
 
 **Switch to Claude mode** on evidence that Cursor is out of credits. Either one is enough:
 
@@ -39,6 +46,8 @@ Nothing weaker switches it: the Cursor check cancelled or failing without naming
 
 - `cursor[bot]` posted an `APPROVED` or `CHANGES_REQUESTED` review on any pull request after the mode turned on (a `COMMENTED` review does not count);
 - a conductor `spawn` succeeds.
+
+Once Evan has turned Cursor's review automation off, the first can no longer fire and Claude mode never spawns, so Evan usually ends Claude mode by saying so.
 
 **Evan can force either mode** by saying so. A forced mode holds until Evan says otherwise; the evidence above does not override it.
 
@@ -54,8 +63,8 @@ No `gh` CLI here. Reads and the merge go through the GitHub MCP tools, as in [ag
 
 List open pull requests. A pull request is **mergeable** when all of these hold on its **current head commit**:
 
-- CI green: every CI check run on the head has completed, none with `failure` or `timed_out`. Running or queued is not green. `skipped` and `neutral` are fine. A head with no CI run at all is not green; step 2 says why that usually means a conflict. Reviewer check runs (the Claude Review `review` job, the Cursor check) are not CI.
-- The [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Merge rule** holds: approved, no rejection, no review in flight. Beyond that, the merge goes through or GitHub refuses it.
+- CI green: every CI check run on the head has completed, none with `failure` or `timed_out`. Running or queued is not green. `skipped` and `neutral` are fine. A head with no CI run at all is not green; step 2 says why that usually means a conflict. Reviewer check runs (every Claude Review workflow job, the Cursor check) are not CI.
+- The [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Merge rule** holds: both of the pair in `.github/reviewers` on `main` approved, no reviewer rejected, no review in flight. Beyond that, the merge goes through or GitHub refuses it.
 - It changes nothing under `.github/workflows/` or `.github/actions/` (see **Never**).
 - No merge conflict: `mergeable_state` is not `"dirty"`. If it reads `"unknown"`, read again; if it still does, it is not mergeable this pass.
 - No `conductor:working` label.
@@ -126,7 +135,7 @@ Run `npm --prefix tools/conductor install` first if `tools/conductor/node_module
 
 ### 4. Report
 
-One short block. Its first line is the mode (**Who implements**). Then: what you merged, what you left unmerged for Evan to judge and why (workflow changes, failed or cancelled `review` checks, reviewers who disagree and a fixer could not settle), what you dispatched and with what `n`, and `open` / `idle` / `inflight` after the pass.
+One short block. Its first line is the mode (**Who implements**), then the second reviewer from `.github/reviewers`, with the flip Evan needs to make when it does not match the mode (**Who reviews**). Then: what you merged, what you left unmerged for Evan to judge and why (workflow changes, failed or cancelled Claude Review jobs, reviewers who disagree and a fixer could not settle), what you dispatched and with what `n`, and `open` / `idle` / `inflight` after the pass.
 
 ## Stop and tell Evan
 
@@ -148,6 +157,7 @@ A switch of mode on the evidence in **Who implements** is not a stop. Report it 
 - Merge anything that is not mergeable by step 1, or with any merge method but squash.
 - Remove or add labels yourself. `conductor:working` belongs to the writers. The one exception is the lock the fixer fleet claims and releases under its own rules; never remove one you did not claim this pass.
 - Review, approve, comment on, push to, or resolve threads on a pull request. Fixers resolve the threads they fix; nobody else does.
+- Edit `.github/reviewers` or Cursor's review automation. Evan flips them (**Who reviews**).
 - Commit or push to `main`, or brief any agent to. If something seems to need a direct push to `main`, stop and tell Evan.
 - Merge a pull request that changes anything under `.github/workflows/` or `.github/actions/`. Workflows run from the pull request's own files with the repo's secrets, so such a pull request can steer or forge its own Claude review. Leave it for Evan and say so in the report.
 - Decide what a pull request needs, or pick backlog work. The fleet skills, and the Cursor agent you hand the Cursor fleet to, do that.

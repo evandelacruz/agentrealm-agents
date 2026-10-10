@@ -36,7 +36,7 @@ Repo: `evandelacruz/agentrealm-agents`.
    | Condition | Outcome |
    |---|---|
    | `conductor:working` label | skip: an implementer or fixer holds it |
-   | `Cursor Automation: Saims Ref Agent Auto Code Review` still running | skip: a review is in progress |
+   | a reviewer check (any Claude Review workflow job, or `Cursor Automation: Saims Ref Agent Auto Code Review`) still running | skip: a review is in progress |
    | merge conflict, changes requested, or red CI | **fix** |
    | approved with open threads | **polish** |
    | approved, no conflicts, nothing open | skip: Evan merges |
@@ -78,7 +78,7 @@ Repo: `evandelacruz/agentrealm-agents`.
 
    Fix / polish on an existing PR: `spawn --pr <url>` or `follow-up --agent bc-… --pr <url>`.
 
-   Both commands claim `conductor:working` and refuse a PR that already has it. They also refuse while `Cursor Automation: Saims Ref Agent Auto Code Review` is still running. Do not add the label yourself before the command, and do not delete it so the command will accept the PR. The agent that holds the lock removes only that label after the push. Skip a locked PR and skip a PR whose review check is still running. Claude Code uses the same label for review fixes, skips that same check, and does not take new backlog slots or review.
+   Both commands claim `conductor:working` and refuse a PR that already has it. They also refuse while a reviewer check (any Claude Review workflow job, or `Cursor Automation: Saims Ref Agent Auto Code Review`) is still running. Do not add the label yourself before the command, and do not delete it so the command will accept the PR. The agent that holds the lock removes only that label after the push. Skip a locked PR and skip a PR whose reviewer check is still running. Claude Code uses the same label for review fixes, skips that same check, and does not take new backlog slots or review.
 
 7. **Report** to Evan: assignments, agent URLs, skips, and empty slots. Do not merge anything.
 

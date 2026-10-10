@@ -4,6 +4,7 @@ export {
   headVerdict,
   holdLock,
   listOpenPrs,
+  parseReviewers,
   releaseWorkingLock,
   reviewInProgress,
   rollupOk,
@@ -14,6 +15,7 @@ export {
   type OpenPr,
   type PrCommentSummary,
   type ReviewNode,
+  type ReviewerPair,
   type Verdict,
 } from "./gh.js";
 export { lockHeld, lockNote, pullRequestNumber } from "./lock.js";
@@ -22,8 +24,8 @@ export { followUp, type FollowUpOptions } from "./follow-up.js";
 export { listCloudAgents } from "./status.js";
 export {
   REVIEW_CHECK_NAME,
-  CLAUDE_REVIEW_CHECK_NAME,
   CLAUDE_REVIEW_WORKFLOW,
+  REVIEWERS_FILE,
   DEFAULT_ENV_NAME,
   DEFAULT_MODEL,
   DEFAULT_REPO_URL,

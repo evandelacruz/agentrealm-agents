@@ -32,9 +32,11 @@ export const REVIEW_CHECK_NAME =
   process.env.CONDUCTOR_REVIEW_CHECK?.trim() ||
   "Cursor Automation: Saims Ref Agent Auto Code Review";
 
-/** The Claude Review workflow (`.github/workflows/claude-review.yml`) and its job. */
+/** The Claude Review workflow (`.github/workflows/claude-review.yml`). Every job in it is a reviewer check. */
 export const CLAUDE_REVIEW_WORKFLOW = "Claude Review";
-export const CLAUDE_REVIEW_CHECK_NAME = "review";
+
+/** The review pair and the bot logins, read from `main`. See `parseReviewers`. */
+export const REVIEWERS_FILE = ".github/reviewers";
 
 export function requireApiKey(): string {
   const key = process.env.CURSOR_API_KEY?.trim();

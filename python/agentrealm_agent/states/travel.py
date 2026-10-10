@@ -63,7 +63,7 @@ class TravelState(State):
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        m, policy = ctx.memory, ctx.policy
+        m = ctx.memory
         op = my_op(ctx, self.name)
         assert op is not None and ctx.plan is not None
         dest = resolve_destination(world, ctx, op)
@@ -78,30 +78,38 @@ class TravelState(State):
             if m.goal == f"travel:{dest.label}":
                 m.path, m.goal = [], ""
             return StateOutcome(None, f"travel:{dest.label} arrived", state=self.name)
-        if m.goal_op != op:
-            # Another travel op's path carries the same label: never walk it for this one.
-            if m.goal.startswith("travel:"):
-                m.path, m.goal = [], ""
-            m.goal_op = dict(op)
-        _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
-        out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly)
-        if out is not None:
-            return out
-        goal = f"travel:{dest.label}"
-        first = m.path[0] if m.goal == goal and m.path else None
-        if first is not None and not nav_stuck.awaiting_break(m, world, goal):
-            # The route's first step is taken by an occupant, or still unseen on
-            # a path the walk is under way on (A15, A58 run 5): hold while its
-            # window runs, rather than let the safe default step away and back.
-            # A wait is not progress: the op's stall clock runs, so a permanent
-            # occupant cannot pin the stack, and the fog hold ends after
-            # ``walk.FOG_HOLD_TICKS``.
-            if first in world.occupied():
-                return StateOutcome(None, f"{goal}: way taken, waiting", state=self.name, wait=True, progress=False)
-            if first not in world.view.tiles and nav_walk.hold_for_fog(m.walks.get(goal), world):
-                return StateOutcome(None, f"{goal}: next cell unseen, waiting", state=self.name, wait=True, progress=False)
-        # Stuck at step 2: Break, below, opens the way this decision.
-        return StateOutcome(None, f"{goal} blocked", state=self.name)
+        return walk_to(world, ctx, op, dest, self.name)
+
+
+def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDestination, state: str) -> StateOutcome:
+    """One step of the walk to ``dest`` for ``op``: Travel's own, and Shop's
+    walk to a shop out of sight (A21). Stuck detection's give-ups land on the
+    ``travel:<label>`` goal either way."""
+    m, policy = ctx.memory, ctx.policy
+    if m.goal_op != op:
+        # Another travel op's path carries the same label: never walk it for this one.
+        if m.goal.startswith("travel:"):
+            m.path, m.goal = [], ""
+        m.goal_op = dict(op)
+    _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
+    out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly, state)
+    if out is not None:
+        return out
+    goal = f"travel:{dest.label}"
+    first = m.path[0] if m.goal == goal and m.path else None
+    if first is not None and not nav_stuck.awaiting_break(m, world, goal):
+        # The route's first step is taken by an occupant, or still unseen on
+        # a path the walk is under way on (A15, A58 run 5): hold while its
+        # window runs, rather than let the safe default step away and back.
+        # A wait is not progress: the op's stall clock runs, so a permanent
+        # occupant cannot pin the stack, and the fog hold ends after
+        # ``walk.FOG_HOLD_TICKS``.
+        if first in world.occupied():
+            return StateOutcome(None, f"{goal}: way taken, waiting", state=state, wait=True, progress=False)
+        if first not in world.view.tiles and nav_walk.hold_for_fog(m.walks.get(goal), world):
+            return StateOutcome(None, f"{goal}: next cell unseen, waiting", state=state, wait=True, progress=False)
+    # Stuck at step 2: Break, below, opens the way this decision.
+    return StateOutcome(None, f"{goal} blocked", state=state)
 
 
 def search_hunting_ground(world: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
@@ -179,6 +187,7 @@ def _travel_step(
     knowledge: KnowledgeBase | None,
     plan_avoid: set[Pos],
     plan_costly: set[Pos],
+    state: str = "Travel",
 ) -> StateOutcome | None:
     """One step along the route to ``dest``, across maps through known doors (A26).
     None when no step can be planned.
@@ -192,7 +201,7 @@ def _travel_step(
         return None
     note = nav_stuck.level_note(nav_stuck.active(m, w))
     label = m.path[-1] if m.path else step
-    return StateOutcome([set_position(step)], f"{goal} → {label}{note}", state=TravelState.name)
+    return StateOutcome([set_position(step)], f"{goal} → {label}{note}", state=state)
 
 
 def route_step(

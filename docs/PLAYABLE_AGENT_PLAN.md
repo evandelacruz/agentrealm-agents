@@ -100,7 +100,7 @@ States are checked in priority order once per round trip: after each `POST tick`
 | 3 | `Recover` | Our death chest is on a reachable map | Walks next to it (a safe tile next to it is enough), `WithdrawFromChest` |
 | 3 | `Equip` | Carrying something better than what is worn or armed | `Arm`, `Wear`, `Remove`; armor scored by damage it would have saved |
 | 3 | `Loot` | A worthwhile free supply or chest is near enough | Walks, `Take` or `WithdrawFromChest`, `Drop` junk when full |
-| 3 | `Shop` | The plan wants an item that is in sight with a `gem_price` we can pay | Walks onto it or `Take`s it |
+| 3 | `Shop` | The plan wants an item that is in sight with a `gem_price` we can pay | Walks up beside it and `Take`s it. Out of sight, walks to the nearest known shop first, else to town to look for one (A71) |
 | 4 | `Investigate` | The interest list has an item within the curiosity budget (see Curiosity) | `Read`, `Say`, `get_zone`, walk to look; stores text as a clue |
 | 4 | `Break` | The plan names a block to open, or the odd-block detector scores a nearby block high enough | Arms a capability not yet tried on that block, `Use` on the block, records the result per (block, capability) |
 | 4 | `Solve` | The plan holds an action to try (compose, a key at a door, a tool at a block) | Carries out the plan operation and checks the result |

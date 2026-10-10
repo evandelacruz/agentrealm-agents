@@ -71,6 +71,7 @@ from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, Pos, WorldModel, terrain_cells
 from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
 from .states.greet import GREET_STATE
+from .states.intents import is_self_use
 from .investigation import (
     mark_cell_read,
     mark_npc_greeted,
@@ -1174,10 +1175,7 @@ class Runner:
                 if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
                     note_heal_pending(m, w, e.code, "take")
             return
-        if verb != "Use":
-            return
-        target = intent.get("target") or {}
-        if target.get("kind") != "character" or int(target.get("character_id", -1)) != w.character_id:
+        if not is_self_use(intent):
             return
         code = code_in_hand(self.world, self._held_intents(), index)
         if code in FOOD_CODES | POTION_CODES:

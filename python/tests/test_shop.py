@@ -78,8 +78,10 @@ class ShopBuyTest(unittest.TestCase):
         w.gems = 1
         w.entities = [Entity("supply", 5, (1, 2), "torch", gem_price=5)]
         plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
-        out = dispatch(w, ctx(w, plan=plan))
+        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+            out = dispatch(w, ctx(w, plan=plan))
         self.assertNotEqual(out.state, "Shop")
+        self.assertIsNone(plan.current(), "it costs more than the gems held: dropped")
 
     def test_buy_goal_done_when_held(self):
         w = world()
@@ -154,7 +156,7 @@ class ShopBuyTest(unittest.TestCase):
         sync_shop(w, m)
         self.assertIsNone(m.shop_pending)
 
-    def test_buy_op_with_nothing_in_sight_is_dropped_after_stall(self):
+    def test_buy_op_with_no_shop_or_town_known_is_dropped_after_stall(self):
         explore = {"op": "explore_area", "x": 2, "y": 2, "radius": 2}
         plan = Plan([{"op": "buy", "code": "torch"}, explore], dict(PARAM_DEFAULTS))
         m = Memory()
@@ -215,6 +217,95 @@ def walk(w: WorldModel, c: PlayContext, state: str, limit: int = 20) -> tuple[li
             c.memory.path = c.memory.path[1:]  # as the runner does once a Step is queued
         w.tick += 10
     return stepped, out
+
+
+def big_world(at=(0, 0), size=40, perception=5) -> WorldModel:
+    w = WorldModel(character_id=1, map_id=1, pos=at, perception=perception, gems=10)
+    for x in range(size):
+        for y in range(size):
+            w.view.tiles[(x, y)] = "dirt"
+    w.terrain_center, w.terrain_map = at, 1
+    return w
+
+
+class ShopOutOfSightTest(unittest.TestCase):
+    """Free-play run 4: a buy with no shop in sight sent nothing, and the safe
+    default walked about 100 cells away from town into a pack. The shop is a
+    prerequisite of the buy (A71): walk there, or toward town to find one."""
+
+    def plan(self) -> Plan:
+        return Plan([{"op": "buy", "code": "small_potion"}], dict(PARAM_DEFAULTS))
+
+    def test_walks_to_a_known_shop_out_of_sight(self):
+        w = big_world()
+        c = ctx(w, plan=self.plan())
+        record_shop_cell(c.knowledge, 1, (30, 0))
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Shop", out.reason)
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
+        self.assertIn("travel:shop", out.reason)
+
+    def test_keeps_the_shop_it_picked_when_another_comes_nearer(self):
+        w = big_world()
+        c = ctx(w, plan=self.plan())
+        record_shop_cell(c.knowledge, 1, (30, 0))
+        dispatch(w, c)
+        record_shop_cell(c.knowledge, 1, (0, 20))  # nearer now, but the walk is committed (A71)
+        out = dispatch(w, c)
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
+
+    def test_buys_once_the_item_comes_into_sight(self):
+        w = big_world()
+        c = ctx(w, plan=self.plan())
+        record_shop_cell(c.knowledge, 1, (12, 0))
+        stepped, out = walk(w, c, "Shop", limit=6)
+        self.assertTrue(stepped)
+        w.entities = [Entity("supply", 5, (12, 0), "small_potion", gem_price=3)]
+        stepped, out = walk(w, c, "Shop", limit=20)
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}], out.reason)
+
+    def test_dropped_when_no_known_shop_sells_it(self):
+        w = big_world()
+        w.entities = [Entity("supply", 7, (3, 0), "bronze_sword", gem_price=15)]
+        plan = self.plan()
+        c = ctx(w, plan=plan)
+        record_shop_cell(c.knowledge, 1, (3, 0))
+        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+            dispatch(w, c)
+        self.assertIsNone(plan.current())
+
+    def test_dropped_when_it_costs_more_than_the_gems_held(self):
+        w = big_world()
+        w.gems = 1
+        w.entities = [Entity("supply", 5, (3, 0), "small_potion", gem_price=3)]
+        plan = self.plan()
+        c = ctx(w, plan=plan)
+        record_shop_cell(c.knowledge, 1, (30, 0))
+        with self.assertLogs("agentrealm_agent.plan", "WARNING") as logs:
+            dispatch(w, c)
+        self.assertIsNone(plan.current())
+        self.assertIn("cannot afford", "".join(logs.output))
+
+    def test_no_shop_known_walks_to_town(self):
+        w = big_world()
+        c = ctx(w, plan=self.plan())
+        c.knowledge.extra["town"] = {"map_id": 1, "x": 30, "y": 0}
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Shop", out.reason)
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
+        self.assertIn("to town", out.reason)
+
+    def test_no_shop_known_in_town_explores_around_it(self):
+        w = WorldModel(character_id=1, map_id=1, pos=(20, 20), perception=3, gems=10)
+        for x in range(17, 24):
+            for y in range(17, 24):
+                w.view.tiles[(x, y)] = "dirt"  # town seen, the ground round it not yet
+        w.terrain_center, w.terrain_map = (20, 20), 1
+        c = ctx(w, plan=self.plan())
+        c.knowledge.extra["town"] = {"map_id": 1, "x": 20, "y": 20}
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Shop", out.reason)
+        self.assertIn("exploring town", out.reason)
 
 
 class ShopTilesAreNotWalkedTest(unittest.TestCase):

@@ -140,6 +140,7 @@ class Memory:
     heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
     heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times sent
     heal_rearm: str | None = None  # weapon code armed before a drink; restored once, on Heal's next decision (A24)
+    last_weapon: str | None = None  # the last weapon seen armed this run (equip.note_last_weapon): what a drink re-arms
     heal_pending: tuple[int, str, str] | None = None  # (health before, supply code, "take"|"use") awaiting observation
     # Boss (A38): the fight under way, or None. Set and cleared only by states/boss.sync_boss.
     boss: BossFight | None = None

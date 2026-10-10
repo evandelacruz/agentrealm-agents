@@ -622,6 +622,14 @@ class SwingTest(unittest.TestCase):
         w.entities.append(Entity("npc", 6, (1, 1), code="snotling"))
         self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
 
+    def test_an_unmeasured_type_is_still_refused_by_default(self):
+        """Review on #172: the conservative guess for a type never measured is
+        not discounted by the hit chance, so the default profile still refuses it."""
+        w = world(["..."], at=(0, 0))
+        w.health, w.lives, w.armed_code = 10, 10, "pocket_knife"
+        w.entities = [Entity("npc", 5, (1, 0), code="gnawer")]
+        self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+
     def test_a_better_weapon_wins_sooner(self):
         w = world(["..."], at=(0, 0))
         w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
@@ -715,7 +723,7 @@ class RetreatThreatTest(unittest.TestCase):
         return Policy(hostile=["npc"], on_hostile="fight")
 
     def params(self):
-        return {**PARAM_DEFAULTS, "fight_margin": 3.0}  # past the knife's 2.5 against an unmeasured type (A81)
+        return {**PARAM_DEFAULTS, "fight_margin": 2.0}
 
     def test_a_hostile_standing_two_cells_off_is_not_retreated_from(self):
         w = self.standing()

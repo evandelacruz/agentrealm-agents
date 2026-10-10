@@ -7,7 +7,7 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from .break_memory import WEAPON_DAMAGE
-from .threat import ThreatTable, type_key_for_entity
+from .threat import ThreatTable, TypeKey, type_key_for_entity
 from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe, safe_tiles
@@ -285,11 +285,17 @@ def hostile_swing_damage(damage: int) -> float:
     return hit_chance(attack_power=damage) * max(1, damage)
 
 
+def _hostile_damage(threat: ThreatTable, key: TypeKey | None) -> float:
+    """A measured type's expected swing (``hostile_swing_damage``); an
+    unmeasured one's conservative guess lands every swing, undiscounted."""
+    damage = threat.damage_per_hit(key)
+    return hostile_swing_damage(damage) if threat.measured(key) else damage
+
+
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:
     if health <= 0 or not group:
         return float("inf")
-    hits = (threat.damage_per_hit(type_key_for_entity(e)) for e in group)
-    dps = sum(hostile_swing_damage(d) for d in hits) / HOSTILE_ATTACK_INTERVAL_TICKS
+    dps = sum(_hostile_damage(threat, type_key_for_entity(e)) for e in group) / HOSTILE_ATTACK_INTERVAL_TICKS
     if dps <= 0:
         return float("inf")
     return health / dps

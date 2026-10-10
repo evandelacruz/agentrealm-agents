@@ -123,6 +123,19 @@ LOADOUT_VERBS = ("Wear", "Remove", "Drop")
 PROBE_NEVER_KEEPS = ("nav", "nav_stuck", "boss", "greetings")
 
 
+@dataclass(frozen=True)
+class HealRefused:
+    """A refused food ``Take`` or drink, kept until the next decision files it (A80)."""
+
+    kind: str  # "take" | "use"
+    supply_id: int
+    verb: str
+    rejection: dict
+    tick: int
+    armed_first: bool  # the refused drink's queue had already sent its Arm
+    target: Pos | None = None
+
+
 @dataclass
 class Pacer:
     """Paces calls to the front tier's rate-limit windows.
@@ -174,6 +187,7 @@ class Runner:
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
         self._applied_take_codes: list[str | None] = []  # A47: codes of this response's applied Takes
         self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
+        self._heal_refused: list[HealRefused] = []  # A80: refused heal intents, filed at the next decision
         self.gem_cuts = GemYieldTracker()  # A63: our cuts waiting to see whether a gem came of them
         self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
         self._removed_map: int | None = None  # A18: map the character was on when it was taken off
@@ -585,6 +599,7 @@ class Runner:
 
     def tick(self) -> float:
         w, m = self.world, self.mem
+        self.file_heal_refusals()
         self.plan.acted = None  # set again only by a state acting on the head op this round (A36)
         m.walk_skip = set()  # only a walk decided this round sets it
         if m.cancel_queue:
@@ -1200,15 +1215,13 @@ class Runner:
             self.mem.heal_drink = None
 
     def _note_heal_refused(self, index: int, result: dict) -> None:
-        """File why the server refused a food ``Take`` or a drink, and trace it (A80).
+        """Keep a refused food ``Take`` or drink for ``file_heal_refusals`` (A80).
 
-        Only a sent intent the server rejected is filed, never one only
+        Only a sent intent the server rejected is kept, never one only
         decided (free-play run 5: probes whose drink was never sent wrote both
-        potions off). A drink is filed once, against the supply it was decided
+        potions off). A drink is kept once, against the supply it was decided
         for (``Memory.heal_drink``), whether its ``Arm`` or its ``Use`` self was
         rejected; a rejected food ``Take``, from any state, against that food.
-        What Heal does next follows from the code (``healing.refusal_action``),
-        never from a count; an unknown code is traced as one.
         """
         w, m = self.world, self.mem
         intent = self._intent_at(index)
@@ -1216,34 +1229,54 @@ class Runner:
             return
         rejection = result.get("rejection") or {}
         verb = intent.get("verb")
+        tick = int(result.get("tick", w.tick))
         if verb == "Take":
             sid = intent.get("supply_id")
             food = next((e for e in w.entities if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES), None)
-            if food is None:
-                return
-            kind, target, armed_first = "take", food.pos, False
+            if food is not None:
+                self._heal_refused.append(HealRefused("take", sid, verb, rejection, tick, False, food.pos))
+            return
+        queue = self._held_intents()
+        if verb == "Arm" and intent.get("supply_id") == m.heal_drink:
+            after = next((i for i in queue[index + 1 :] if i.get("verb") != "Wait"), None)
+            drink = is_self_use(after)
         else:
-            queue = self._held_intents()
-            if verb == "Arm" and intent.get("supply_id") == m.heal_drink:
-                after = next((i for i in queue[index + 1 :] if i.get("verb") != "Wait"), None)
-                drink = is_self_use(after)
-            else:
-                drink = is_self_use(intent)
-            if not drink or m.heal_drink is None:
-                return
-            sid, target = m.heal_drink, None
-            kind = "use"
-            armed_first = any(i.get("verb") == "Arm" and i.get("supply_id") == sid for i in queue[:index])
-            m.heal_drink = None
-        action = refusal_action(rejection, verb=verb, armed_first=armed_first, on_target=target is not None and w.pos == target)
-        note_refusal(m, kind, sid, HealRefusal(rejection.get("code") or "?", action, int(result.get("tick", w.tick)), heal_situation(w, target)))
-        known = known_refusal(rejection)
-        label = "" if known else "unknown refusal "
-        self.log(
-            "heal_refusal",
-            f"{verb} of supply {sid} refused {label}{rejection.get('code') or '?'}: {action}",
-            {"verb": verb, "supply_id": sid, "rejection": rejection, "action": action, "known": known},
-        )
+            drink = is_self_use(intent)
+        if not drink or m.heal_drink is None:
+            return
+        sid = m.heal_drink
+        armed_first = any(i.get("verb") == "Arm" and i.get("supply_id") == sid for i in queue[:index])
+        self._heal_refused.append(HealRefused("use", sid, verb, rejection, tick, armed_first))
+        m.heal_drink = None
+
+    def file_heal_refusals(self) -> None:
+        """File the refusals kept since the last decision, and trace each (A80).
+
+        Filed here, before the decision and after the observation and any
+        position read, so the situation is the one the next decision sees,
+        not the world before the refused queue ran (its Steps, an applied
+        ``Arm``). What Heal does next follows from the code
+        (``healing.refusal_action``), never from a count; an unknown code is
+        traced as one. Never called in the held-queue probe.
+        """
+        w, m = self.world, self.mem
+        refused, self._heal_refused = self._heal_refused, []
+        for r in refused:
+            target = None
+            if r.kind == "take":
+                food = next((e for e in w.entities if e.kind == "supply" and e.id == r.supply_id), None)
+                target = food.pos if food is not None else r.target
+            action = refusal_action(
+                r.rejection, verb=r.verb, armed_first=r.armed_first, on_target=target is not None and w.pos == target
+            )
+            code = r.rejection.get("code") or "?"
+            note_refusal(m, r.kind, r.supply_id, HealRefusal(code, action, r.tick, heal_situation(w, target)))
+            known = known_refusal(r.rejection)
+            self.log(
+                "heal_refusal",
+                f"{r.verb} of supply {r.supply_id} refused {'' if known else 'unknown refusal '}{code}: {action}",
+                {"verb": r.verb, "supply_id": r.supply_id, "rejection": r.rejection, "action": action, "known": known},
+            )
 
     def _note_investigation(self, intent: dict | None, result: dict) -> None:
         """Remember an applied Read/Say in the knowledge base; count a refused one.

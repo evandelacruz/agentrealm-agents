@@ -92,6 +92,7 @@ class DrinkRefusalsFiledOnceTest(unittest.TestCase):
         r = make_runner(self)
         self.sent(r, [DRINK[0], {"verb": "Wait"}, DRINK[1]])
         r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
+        r.file_heal_refusals()
         self.assertEqual(list(r.mem.heal_refusals), [("use", 4)])
 
     def test_an_applied_drink_files_nothing(self):
@@ -109,6 +110,7 @@ class DrinkRefusalsFiledOnceTest(unittest.TestCase):
         self.assertIsNone(r.mem.heal_drink)
         self.sent(r, DRINK, drink=None)  # the same drink's Use, read after the Arm
         r.on_result({"outcome": "rejected", "rejection": {"code": "y"}}, 1)
+        r.file_heal_refusals()
         self.assertEqual(r.mem.heal_refusals[("use", 4)].code, "x")
 
     def test_a_queue_that_replaces_the_drink_forgets_it(self):
@@ -120,6 +122,7 @@ class DrinkRefusalsFiledOnceTest(unittest.TestCase):
         self.assertIsNone(r.mem.heal_drink)
         self.sent(r, DRINK, drink=None)
         r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 1)
+        r.file_heal_refusals()
         self.assertEqual(r.mem.heal_refusals, {})
 
     def test_the_drink_survives_a_round_that_sends_nothing_or_drinks(self):
@@ -133,6 +136,7 @@ class DrinkRefusalsFiledOnceTest(unittest.TestCase):
         r = make_runner(self)
         self.sent(r, [{"verb": "Arm", "supply_id": 1}])
         r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
+        r.file_heal_refusals()
         self.assertEqual(r.mem.heal_refusals, {})
 
 

@@ -52,6 +52,7 @@ class RefusalTest(unittest.TestCase):
     def decide(self) -> list[dict]:
         """One decision, sent the way the runner sends it."""
         r = self.r
+        r.file_heal_refusals()  # as ``Runner.tick`` does before deciding
         d = r._decide(r.world, r.mem)
         intents = r.intents_for(d) or []
         r._forget_replaced_drink(intents)
@@ -60,6 +61,7 @@ class RefusalTest(unittest.TestCase):
     def refuse(self, index: int, code: str, *, category: str = "", retryability: str = "") -> None:
         rejection = {"code": code, "category": category, "retryability": retryability}
         self.r.on_result({"outcome": "rejected", "rejection": rejection, "tick": self.r.world.tick}, index)
+        self.r.file_heal_refusals()  # the next round trip files it before deciding
 
     def next_tick(self, n: int = 1) -> None:
         self.r.world.tick += n
@@ -166,6 +168,7 @@ class DrinkRefusalTest(RefusalTest):
         r.world.held_supplies = [KNIFE, POTION_A]
         self.decide()
         self.refuse(0, "odd_code")
+        r.file_heal_refusals()
         filed = dict(r.mem.heal_refusals)
         r.mem.held_queue = {"queue_id": "q", "next_index": 0}
         r.mem.pending_intents = [{"verb": "Step", "direction": "north"}] * 5
@@ -216,6 +219,50 @@ class FoodRefusalTest(RefusalTest):
         self.r.mem.pending = {"verb": "Take", "supply_id": 8}
         self.r.on_result({"outcome": "applied"}, 0)
         self.assertEqual(self.r.mem.heal_refusals, {})
+
+
+class FakeClient:
+    def __init__(self, responses):
+        self.responses, self.sent = list(responses), []
+
+    def tick(self, cid, intents, snapshot_version=None):
+        self.sent.append(intents)
+        return self.responses.pop(0)
+
+
+class FiledAfterTheObservationTest(unittest.TestCase):
+    """The situation is the one the next decision sees, not the world before
+    the refused queue ran: an ``Arm`` that applied before its ``Use`` was
+    refused leaves the potion armed, and the hold must be keyed on that."""
+
+    def test_an_applied_arm_then_a_refused_use_is_not_resent(self):
+        armed = {"gems": 0, "armed": {"id": 4, "supply_subtype_code": "small_potion"}, "worn": {}, "chest": [],
+                 "held": [{"id": 4, "supply_subtype_code": "small_potion"}]}
+        refused = {
+            "tick": 12,
+            "queue_id": "q1",
+            "intent_results": [
+                {"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"},
+                {"queue_id": "q1", "index": 1, "tick": 12, "outcome": "rejected", "rejection": {"code": "odd_code"}},
+            ],
+            "events_by_tick": [],
+            "observation": {"version": 2, "delta": {"inventory": armed}},
+        }
+        quiet = {"tick": 13, "intent_results": [], "events_by_tick": []}
+        client = FakeClient([refused, quiet])
+        cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[]), Path("t.toml"))
+        r = Runner(cfg, client, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
+        self.addCleanup(r.trace.close)
+        r.world = hurt_world()
+        r.world.tick, r.world.armed_code, r.world.held_supplies = 10, None, [POTION_A]  # no weapon to put back
+        r.mem = Memory(need_self=False, need_position=False)
+        r.tick()
+        self.assertEqual([i["verb"] for i in client.sent[0]], ["Arm", "Use"])
+        self.assertEqual(r.world.armed_code, "small_potion")
+        r.mem.held_queue = r.mem.pending_intents = r.mem.pending = None
+        r.tick()
+        self.assertNotIn(USE_SELF, client.sent[1] or [], "the same situation: the Use is not sent again")
+        self.assertEqual(r.mem.heal_refusals[("use", 4)].situation[2], "small_potion")
 
 
 class RefusalActionTest(unittest.TestCase):

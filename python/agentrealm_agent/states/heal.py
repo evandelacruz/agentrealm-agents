@@ -22,7 +22,7 @@ from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, reachable_safe_goal
-from ..survival import hostile_reach, hostiles_in_range, hostiles_reaching, town_cell
+from ..survival import hostile_reach, hostiles_in_range, hostiles_reaching, reach_by_hostile, town_cell
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .break_state import break_toward
@@ -178,8 +178,8 @@ def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *,
     first, then nearest), skipping those a walk gave up on and those in a
     known hostile's reach, else toward the town cell
     (``pathing.reachable_safe_goal``; free-play run 2, A63 run 4)."""
-    reach = hostile_reach(w, policy)
-    plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx, reach)
+    reach = reach_by_hostile(w, policy)
+    plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx, set().union(*reach.values()))
     params = grid_params(policy, plan_avoid, plan_costly)
     target = reachable_safe_goal(m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge), reach)
     if target is None:

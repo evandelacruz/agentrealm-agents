@@ -248,6 +248,11 @@ def hostile_reach(
     return out
 
 
+def reach_by_hostile(w: WorldModel, policy: Policy) -> dict[tuple[str, int], set[Pos]]:
+    """Each known hostile in view, (kind, id), with its ``hostile_reach``."""
+    return {(e.kind, e.id): hostile_reach(w, policy, only=e) for e in w.entities if is_hostile(w, policy, e)}
+
+
 def hostiles_reaching(
     w: WorldModel, policy: Policy, cells: Collection[Pos], skip: Collection[tuple[str, int]] = ()
 ) -> set[tuple[str, int]]:

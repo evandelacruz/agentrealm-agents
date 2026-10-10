@@ -171,11 +171,14 @@ def _plan_blocked(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) ->
 
 def _walk_to_safe(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, *, goal: str) -> StateOutcome | None:
     """A step toward the first known safe cell a path reaches (near town
-    first, then nearest), skipping those a walk gave up on, else toward the
-    town cell (``pathing.reachable_safe_goal``; free-play run 2)."""
+    first, then nearest), skipping those a walk gave up on and those in a
+    known hostile's reach, else toward the town cell
+    (``pathing.reachable_safe_goal``; free-play run 2, A63 run 4)."""
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)
     params = grid_params(policy, plan_avoid, plan_costly)
-    target = reachable_safe_goal(m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge))
+    target = reachable_safe_goal(
+        m, w, known_safe_cells(w), params, town_cell(w, ctx.knowledge), hostile_reach(w, policy)
+    )
     if target is None:
         return None
     return _walk_toward(w, m, policy, ctx, target, goal=goal)

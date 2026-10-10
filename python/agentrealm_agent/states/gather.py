@@ -378,8 +378,7 @@ def _gather_cells(
         m.gather_target = None
     step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is None and _replan_gather(w, m, policy, plan_avoid, plan_costly, preferred, safe):
-        kind, pos = m.gather_target
-        return StateOutcome(None, f"gather → {pos}: way taken, waiting", state=state, wait=True, progress=False)
+        return StateOutcome(None, f"gather → {m.gather_target[1]}: way taken, waiting", state=state, wait=True, progress=False)
     step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is not None:
         return StateOutcome([set_position(step)], f"gather → {m.path[-1]}", state=state)

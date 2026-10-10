@@ -543,5 +543,32 @@ class DerivedThresholdTest(unittest.TestCase):
         self.assertEqual(gem_yield.poor_regions(k, MAP), {(0, 0)}, "15% is under half of what this map pays")
 
 
+
+
+class StoreVersionTest(unittest.TestCase):
+    """Review on #172: totals saved before A81 counted bush cuts at the old
+    rates; read now they would mark ground barren that Gather never revisits."""
+
+    def old_store(self) -> KnowledgeBase:
+        k = kb()
+        k.extra["gem_yield"] = {str(MAP): {
+            "cuts": [{"x": 1, "y": 1, "block": "bush", "tick": 5, "gem": False}],
+            "regions": {"0,0": {"cuts": 25, "gems": 0, "last_tick": 5}},
+        }}
+        return k
+
+    def test_an_old_store_reads_as_empty(self):
+        k = self.old_store()
+        self.assertEqual(gem_yield.regions(k, MAP), {})
+        self.assertEqual(gem_yield.barren_regions(k, MAP), set())
+        self.assertEqual(gem_yield.exhausted_cells(k, MAP, 6), set())
+
+    def test_the_next_cut_replaces_it(self):
+        k = self.old_store()
+        record_cut(k, MAP, (2, 2), "grass", 10, True)
+        self.assertEqual(k.extra["gem_yield"]["version"], gem_yield.VERSION)
+        self.assertEqual(gem_yield.regions(k, MAP), {"0,0": {"cuts": 1, "gems": 1, "last_tick": 10}})
+
+
 if __name__ == "__main__":
     unittest.main()

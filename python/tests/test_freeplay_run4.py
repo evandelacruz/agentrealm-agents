@@ -22,7 +22,7 @@ from agentrealm_agent.brain import walkable_prefix
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.executor.movement import direction_between
-from agentrealm_agent.gem_yield import KEY as GEM_YIELD, region_key
+from agentrealm_agent.gem_yield import KEY as GEM_YIELD, VERSION as GEM_YIELD_VERSION, region_key
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
@@ -268,7 +268,7 @@ class GatherRegionKeptTest(unittest.TestCase):
 
     def test_an_exhausted_region_may_move(self):
         s, r = self.settled(self.reply(100, 100))
-        r.knowledge.extra[GEM_YIELD] = {str(r.world.map_id): {"regions": {region_key((10, 10)): {"cuts": 40, "gems": 0}}}}
+        r.knowledge.extra[GEM_YIELD] = {"version": GEM_YIELD_VERSION, str(r.world.map_id): {"regions": {region_key((10, 10)): {"cuts": 40, "gems": 0}}}}
         r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
         round_trip(s, r)
         self.assertEqual((r.plan.current()["x"], r.plan.current()["y"]), (100, 100))
@@ -319,7 +319,7 @@ class GatherRegionKeptTest(unittest.TestCase):
 
     def test_a_poor_region_may_move(self):
         s, r = self.settled(self.reply(100, 100))
-        r.knowledge.extra[GEM_YIELD] = {str(r.world.map_id): {"regions": {region_key((10, 10)): {"cuts": 20, "gems": 0}}}}
+        r.knowledge.extra[GEM_YIELD] = {"version": GEM_YIELD_VERSION, str(r.world.map_id): {"regions": {region_key((10, 10)): {"cuts": 20, "gems": 0}}}}
         r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
         round_trip(s, r)
         self.assertEqual(r.plan.current()["x"], 100)

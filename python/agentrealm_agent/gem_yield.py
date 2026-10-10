@@ -25,8 +25,13 @@ number comes from cuts this agent made.
 
 Stored in the world knowledge base under ``kb.extra["gem_yield"]``::
 
-    {"<map_id>": {"cuts": [{"x", "y", "block", "tick", "gem"}, ...],
+    {"version": VERSION,
+     "<map_id>": {"cuts": [{"x", "y", "block", "tick", "gem"}, ...],
                   "regions": {"<rx>,<ry>": {"cuts", "gems", "last_tick"}}}}
+
+A store of another ``version`` is read as empty and replaced on the next
+cut: totals from before A81 counted bush cuts at the old drop rates, and
+read now they would mark regions barren that Gather would never revisit.
 
 ``cuts`` keeps the latest ``MAX_RECORDS`` per map; ``regions`` keeps every
 total. The planner's State shows :func:`summary`; Gather skips barren
@@ -55,6 +60,9 @@ from .world import Pos, WorldModel, chebyshev
 from .zone_discovery import safe_tiles, safe_zone_of
 
 KEY = "gem_yield"
+# Bumped when what a stored cut or total means changes. 2: A81, grass only
+# (bushes drop berries), at the 20%/25% grass rates.
+VERSION = 2
 # No cut that took effect for this long is a stall: Gather says so in its
 # status, and a planner reply may then move its region (``keep_gather_region``).
 STALL_SECONDS = 30
@@ -291,10 +299,20 @@ class GemYieldTracker:
                 cut.gems_before += 1
 
 
+def _stored_row(kb: KnowledgeBase, map_id: int) -> dict[str, Any] | None:
+    """One map's stored row, or None when there is none or the store is of
+    another ``VERSION``. The caller holds ``kb.lock``."""
+    root = kb.extra.get(KEY)
+    if not isinstance(root, dict) or root.get("version") != VERSION:
+        return None
+    row = root.get(str(map_id))
+    return row if isinstance(row, dict) else None
+
+
 def _map_row(kb: KnowledgeBase, map_id: int) -> dict[str, Any]:
     root = kb.extra.get(KEY)
-    if not isinstance(root, dict):
-        root = kb.extra[KEY] = {}
+    if not isinstance(root, dict) or root.get("version") != VERSION:
+        root = kb.extra[KEY] = {"version": VERSION}
     row = root.get(str(map_id))
     if not isinstance(row, dict):
         row = root[str(map_id)] = {}
@@ -326,9 +344,8 @@ def regions(kb: KnowledgeBase | None, map_id: int | None) -> dict[str, dict[str,
     if kb is None or map_id is None:
         return {}
     with kb.lock:
-        root = kb.extra.get(KEY)
-        row = root.get(str(map_id)) if isinstance(root, dict) else None
-        raw = row.get("regions") if isinstance(row, dict) else None
+        row = _stored_row(kb, map_id)
+        raw = row.get("regions") if row is not None else None
         return {k: dict(v) for k, v in raw.items() if isinstance(v, dict)} if isinstance(raw, dict) else {}
 
 
@@ -419,9 +436,8 @@ def exhausted_cells(
     if kb is None or map_id is None:
         return pending
     with kb.lock:
-        root = kb.extra.get(KEY)
-        row = root.get(str(map_id)) if isinstance(root, dict) else None
-        cuts = row.get("cuts") if isinstance(row, dict) else None
+        row = _stored_row(kb, map_id)
+        cuts = row.get("cuts") if row is not None else None
         recent = [c for c in cuts if isinstance(c, dict) and tick - int(c.get("tick", 0)) < REGROW_TICKS] if isinstance(cuts, list) else []
     return pending | {(int(c["x"]), int(c["y"])) for c in recent if "x" in c and "y" in c}
 

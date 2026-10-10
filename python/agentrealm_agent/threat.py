@@ -1,14 +1,14 @@
 """Damage per hit per hostile type, learned from ``Damaged`` events (A6, M7).
 
 The API serves no NPC's damage. Until a type is measured, callers assume it
-hits as hard as the hardest hostile type already seen; with no measurements
-yet, 2 (the most a weak hostile dealt in M0; docs/GAME_NOTES.md Combat).
+hits at the world's base attack power, 2, the published rules (A85); the
+Manual publishes no hostile's own. The win estimate and the retreat
+threshold both use that one price.
 
 A hit is keyed by the source's type code, looked up among perceived entities
 of the same kind and id. A hit whose source is not perceived, or has no code,
 is not recorded: there is no type to file it under. Trap (keyed by supply
-code) and ``occupy`` damage are recorded but are not hostiles, so they never
-raise the default for an unmeasured hostile.
+code) and ``occupy`` damage are recorded but are not hostiles.
 
 Each hostile type's swings at us are counted too: a hit per ``Damaged``, a
 miss per ``Attacked`` with no ``Damaged`` from the same attacker on its tick
@@ -63,14 +63,10 @@ class ThreatTable:
         return (hits + PRIOR_SWINGS * published) / (hits + misses + PRIOR_SWINGS)
 
     def damage_per_hit(self, key: TypeKey | None) -> int:
-        """Expected damage for one hit from this type (conservative if unknown).
-
-        None (a hostile whose type is unknown) gets the unmeasured default.
-        """
-        if key in self.by_type:
-            return self.by_type[key]
-        hostile = [v for k, v in self.by_type.items() if k[0] in HOSTILE_KINDS]
-        return max(hostile) if hostile else UNMEASURED_DEFAULT
+        """Damage of one hit from this type: its largest measured, else the
+        world's base attack power (``UNMEASURED_DEFAULT``, the published
+        rules; A85). None (a hostile whose type is unknown) gets the same."""
+        return self.by_type.get(key, UNMEASURED_DEFAULT) if key is not None else UNMEASURED_DEFAULT
 
 
 def _find(views: Iterable[list[Any]], kind: str, eid: Any) -> Any | None:

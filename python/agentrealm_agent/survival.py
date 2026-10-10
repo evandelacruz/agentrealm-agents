@@ -7,7 +7,7 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from .supplies import weapon_damage
-from .threat import UNMEASURED_DEFAULT, ThreatTable, TypeKey, type_key_for_entity
+from .threat import ThreatTable, TypeKey, type_key_for_entity
 from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe, safe_tiles
@@ -289,8 +289,7 @@ def _hostile_damage(threat: ThreatTable, key: TypeKey | None) -> float:
     """A type's expected swing (``hostile_swing_damage``): at its largest
     measured hit, or, never measured, at the world's base attack power
     (``UNMEASURED_DEFAULT``, the published rules; A85)."""
-    damage = threat.by_type.get(key, UNMEASURED_DEFAULT) if key is not None else UNMEASURED_DEFAULT
-    return hostile_swing_damage(damage, threat, key)
+    return hostile_swing_damage(threat.damage_per_hit(key), threat, key)
 
 
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:

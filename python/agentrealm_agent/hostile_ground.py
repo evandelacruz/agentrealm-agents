@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 from .navigation.planner import HOSTILE_DANGER_RADIUS
 from .survival import hostile_reach, is_attacker, is_hostile, recently_attacked
-from .world import POST_HOLD_STRENGTH, Entity, Pos, Sighting, WorldModel, chebyshev
+from .world import POST_HOLD_STRENGTH, SIGHTING_TICKS, Entity, Pos, Sighting, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -95,28 +95,41 @@ def held_by_hostile(
     ``GATHER_SHADOW_MARGIN``, round that post, in view or not: it goes back
     there. One out of view also holds its ``gather_bar`` round the cell it
     was last seen on. A post that has faded below ``POST_HOLD_STRENGTH``
-    (``Sighting.strength``, free-play run 9) holds none: ``faded`` lists
-    those posts' zones instead, which only price ground (``faded_reach``).
+    (``Sighting.strength``, free-play run 9) holds neither, unless its guard
+    was seen within ``SIGHTING_TICKS`` somewhere not in sight now: then its
+    last-seen cell holds, as a passer-by's does. ``faded`` lists the faded zones instead, which only
+    price ground (``faded_reach``).
     """
     if w.map_id is None:
         return {}
     in_view = {(e.kind, e.id) for e in w.entities}
     out: dict[HostileKey, list[tuple[Pos, int]]] = {}
     for key, s in w.sightings.items():
-        if s.map_id != w.map_id or not is_hostile(w, policy, s.entity) or _is_faded(s) != faded:
+        if s.map_id != w.map_id or not is_hostile(w, policy, s.entity):
             continue
         zones = []
-        if s.post:
+        if s.post and _post_faded(s) == faded:
             zones.append((s.home, max(policy.hostile_range, min(s.reach, POST_REACH_CAP)) + GATHER_SHADOW_MARGIN))
-        if key not in in_view:
+        if key not in in_view and _last_seen_faded(w, s) == faded:
             zones.append((s.entity.pos, gather_bar(w, s.entity, policy)))
         if zones:
             out[key] = zones
     return out
 
 
-def _is_faded(s: Sighting) -> bool:
+def _post_faded(s: Sighting) -> bool:
+    """``s`` keeps a post that has faded below ``POST_HOLD_STRENGTH``."""
     return s.post and s.strength < POST_HOLD_STRENGTH
+
+
+def _last_seen_faded(w: WorldModel, s: Sighting) -> bool:
+    """The cell ``s`` was last seen on holds no ground: its post has faded,
+    and its guard has not been seen for ``SIGHTING_TICKS`` or that cell is
+    in sight with it gone, as a passer-by is forgotten."""
+    if not _post_faded(s):
+        return False
+    in_sight = w.pos is not None and chebyshev(s.entity.pos, w.pos) < w.perception
+    return in_sight or w.tick - s.tick > SIGHTING_TICKS
 
 
 def faded_reach(w: WorldModel, policy: Policy) -> list[tuple[Pos, int, int]]:
@@ -169,16 +182,18 @@ def ground_by_hostile(w: WorldModel, policy: Policy) -> dict[HostileKey, set[Pos
 def hostiles_within(w: WorldModel, policy: Policy, pos: Pos, radius: int) -> list[Entity]:
     """The known hostiles within ``radius`` of ``pos``: one in view where it
     stands; one remembered (``WorldModel.sightings``) at its post, and out of
-    view also where it was last seen. A faded post is not counted: it holds
-    no ground (``held_by_hostile``, A85)."""
+    view also where it was last seen. Ground a faded post no longer holds is
+    not counted (``held_by_hostile``, A85)."""
     out: dict[HostileKey, Entity] = {
         (e.kind, e.id): e for e in w.entities if is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= radius
     }
     in_view = {(e.kind, e.id) for e in w.entities}
     for key, s in w.sightings.items():
-        if key in out or s.map_id != w.map_id or not is_hostile(w, policy, s.entity) or _is_faded(s):
+        if key in out or s.map_id != w.map_id or not is_hostile(w, policy, s.entity):
             continue
-        cells = ([s.home] if s.post else []) + ([s.entity.pos] if key not in in_view else [])
+        cells = ([s.home] if s.post and not _post_faded(s) else []) + (
+            [s.entity.pos] if key not in in_view and not _last_seen_faded(w, s) else []
+        )
         if any(chebyshev(c, pos) <= radius for c in cells):
             out[key] = s.entity
     return list(out.values())

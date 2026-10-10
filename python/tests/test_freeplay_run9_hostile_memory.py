@@ -21,13 +21,13 @@ import unittest
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.hostile_ground import POST_REACH_CAP, danger, known_reach
+from agentrealm_agent.hostile_ground import POST_REACH_CAP, danger, hostiles_within, known_reach
 from agentrealm_agent.hostile_memory import SIGHTINGS_KEY, load_hostiles, save_hostiles
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.survival import would_lose
-from agentrealm_agent.world import POST_HALF_LIFE_TICKS, Entity, WorldModel
+from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_HALF_LIFE_TICKS, POST_HOLD_STRENGTH, Entity, WorldModel
 
 MAP = 1
 CODE = "fake_gnasher"
@@ -126,6 +126,26 @@ class RememberedPostsFadeTest(unittest.TestCase):
         row = through_json(kb).extra[SIGHTINGS_KEY]["9"]
         self.assertAlmostEqual(row["strength"], 0.5, places=3)
         self.assertEqual(row["noted"], LAST_SEEN + POST_HALF_LIFE_TICKS)
+
+
+class AGuardJustSeenStillHoldsItsCellTest(unittest.TestCase):
+    """Review on #180: the guard was seen off its post seconds ago, then its
+    empty post was looked at until it faded. The post holds nothing; the
+    cell the guard was last seen on, out of sight now, still does."""
+
+    def test_its_last_seen_cell_holds_while_the_post_does_not(self):
+        w = field(at=(17, 10))
+        load_hostiles(kb_with_post(), w)
+        roamed = (17, 2)
+        see(w, [Entity("npc", 9, roamed, CODE)], LAST_SEEN)  # off its post, in view
+        w.pos = (20, 14)  # the post in sight, the roamed cell not
+        for t in range(LAST_SEEN + 1, LAST_SEEN + 1 + 2 * EMPTY_POST_HALF_LIFE_TICKS):
+            see(w, [], t)
+        self.assertLess(w.sightings[("npc", 9)].strength, POST_HOLD_STRENGTH)
+        reach = known_reach(w, policy())
+        self.assertEqual([c for c, _ in reach], [roamed])
+        self.assertEqual(hostiles_within(w, policy(), roamed, 1), [w.sightings[("npc", 9)].entity])
+        self.assertEqual(hostiles_within(w, policy(), POST, 1), [])
 
 
 class FadedGroundIsPricedTest(unittest.TestCase):

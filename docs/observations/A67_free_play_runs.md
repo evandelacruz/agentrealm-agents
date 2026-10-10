@@ -704,10 +704,10 @@ Intents: 868 `Step`, 2,453 `Wait`, 23 `Say`, 20 `Use`, 13 `Read`, 9 `Take`, no `
 | Time | Ops on the stack (top first) | What happened |
 |---|---|---|
 | 0–35 s | `travel` town, `gather_gems:15` | Heal took two apples, then it walked to town. It was at **10/10** by 27 s. |
-| 35–50 s | `gather_gems:15` | Detour took the (413–415, 414) cluster (+3, 5 → 8). |
+| 35–50 s | `gather_gems:15` | Detour and Gather took the (413–415, 414) cluster (+3, 5 → 8). |
 | 50–293 s | `gather_gems:15` (+ `travel` town 95–152 s), then `fight: false`, then `buy` bronze_sword | **No cut in 243 s.** Gather walked to grass at (430, 409), (436, 402), (377, 379) and (399, 430) in turn, and each time fell back to "look for gems: explore". The planner's notes give the reason as "blocked by a gristlewick to the south" and "the NE pack blocks that area" (defect 2). |
 | 285–300 s | `travel` point, `gather_gems:15`, `buy` bronze_sword | Gather made its only cut, at (361, 394), 8 cells from the gristlewick's remembered post (npc 240). Flee stepped away at 285 s. At 299.7 s the gristlewick hit it for 2. Retreat walked it off. |
-| 304–521 s | `travel` town, `gather_gems:15`, `buy` bronze_sword | **Heal circled for 217 s** at 9/10 to measure regen, in a 45-cell loop north-west of town, and never reached a safe tile (defect 1). The planner's `travel` town did not run. |
+| 304–521 s | `travel` town, `gather_gems:15`, `buy` bronze_sword | **Heal circled for 217 s** at 9/10 to measure regen, in a 45-cell loop north-west of town, and never reached a safe tile (defect 1). The planner's `travel` town ran once, at 392 s, for one queue. |
 | 521–546 s | same | It reached the safe zone at (374, 395) and rested 20 s. Health did not rise. |
 | 546–600 s | `gather_gems:15`, `buy` bronze_sword | Back to town, then to Gather. A Detour to an apple brought it to 10/10 at 592 s. No cut. |
 
@@ -769,7 +769,7 @@ Intents: 1,075 `Step`, 2,909 `Wait`, 4 `Take`, 3 `Use`, no `Say`, no `Attack`. C
 
 #### Top 3 defects
 
-1. **Heal walks 217 s at 9/10 to measure regen, round safe tiles it cannot reach** (`states/heal.py:109–116`, `states/heal.py:194–218`). After the hit, health was 9/10 and the knowledge base had no regen answer, so Heal took `heal_measure` and walked for the safe zone. Each goal was a safe tile at (389–392, 393–394). The walk gave one up, then took the next one beside it, which was just as unreachable. The planner read it as "Heal-measure targets are unreachable (bush blocks the path)". It went round the same loop north-west of town about 4 times, from 304 s to 521 s, and its `travel` town op could not run. One rest in the safe zone at the end (20 s) still gave no regen answer. Two fixes are needed. A goal Heal gives up on should rule out the tiles beside it, or fall back to town. And measuring regen should not hold a 9/10 character off the plan for minutes.
+1. **Heal walks 217 s at 9/10 to measure regen, round safe tiles it cannot reach** (`states/heal.py:109–116`, `states/heal.py:194–218`). After the hit, health was 9/10 and the knowledge base had no regen answer, so Heal took `heal_measure` and walked for the safe zone. Each goal was a safe tile at (389–392, 393–394). The walk gave one up, then took the next one beside it, which was just as unreachable. The planner read it as "Heal-measure targets are unreachable (bush blocks the path)". It went round the same loop north-west of town about 4 times, from 304 s to 521 s. Its `travel` town op got one queue in, at 392 s, before Heal took over again. One rest in the safe zone at the end (20 s) still gave no regen answer. Two fixes are needed. A goal Heal gives up on should rule out the tiles beside it, or fall back to town. And measuring regen should not hold a 9/10 character off the plan for minutes.
 
    ```
    304.5 s  @361,395  heal_measure → (389, 393)

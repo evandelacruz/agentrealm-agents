@@ -5,7 +5,8 @@ description: >
   changes, the branch conflicts with main, or CI is red. Use when Evan asks
   Claude Code to send a fixer, fix a PR, fix review comments, fix a conflict,
   or get a PR green. Claims and releases conductor:working. Writes only that
-  label, the push, and a comment on what it deliberately left alone.
+  label, the push, a reply that resolves each thread it fixed, and a reply on
+  each thread it deliberately left open.
 ---
 
 # agentrealm-agents fixer
@@ -26,10 +27,10 @@ The blockers you were handed are symptoms. Before you start typing, work out wha
 
 ## What you write
 
-Three things, and nothing else: the `conductor:working` label, your commits on the pull request's branch, and a comment on anything you deliberately left alone.
+Four things, and nothing else: the `conductor:working` label, your commits on the pull request's branch, a reply that resolves each thread your push fixed, and a reply on each thread you deliberately left alone.
 
 - **No reviews, no approvals.** Never.
-- **No resolving review threads.** You answer one; you do not close it.
+- **Resolve only what your push fixed.** A thread you left alone stays open for the reviewer. Never resolve a thread on a commit you have not pushed.
 - **No merging.**
 - **No re-running CI.** Your push triggers it.
 - **No other labels.** `conductor:working` is the only one you touch.
@@ -37,7 +38,9 @@ Three things, and nothing else: the `conductor:working` label, your commits on t
 
 ### Commenting
 
-Comment on what you did **not** fix, so the next reviewer is not left guessing. One reply on the thread, one or two sentences, saying which of these it is:
+**Threads you fixed.** After the push, reply on the thread with the commit that fixes it (`Fixed in <short SHA>.`, plus one sentence if the fix differs from what was asked), then resolve the thread. That is the whole reply; the diff says the rest.
+
+**Threads you did not fix.** Reply so the next reviewer is not left guessing, and leave the thread open. One reply, one or two sentences, saying which of these it is:
 
 - already addressed by a commit after the review,
 - does not reproduce, or is wrong about the code,
@@ -45,11 +48,9 @@ Comment on what you did **not** fix, so the next reviewer is not left guessing. 
 - needs a decision that is Evan's, not yours,
 - something **you** found that nobody asked about, and chose to leave.
 
-Never comment on what you *did* fix. The diff already says that, and a reply restating it is noise. If you fixed everything, you post nothing.
-
 A thread needing an architecture, legal, or moderation decision, a design decision PLAN.md does not settle, or a server change, is the one case where you both comment and stop: say why on the thread, leave the lock in place, and tell Evan here.
 
-Use `add_reply_to_pull_request_comment` with the thread's comment ID.
+Reply with `add_reply_to_pull_request_comment` and the thread's comment ID. Resolve with `pull_request_review_write` `method: "resolve_thread"` and the thread's node ID (`PRRT_…`, from `get_review_comments`).
 
 ## What you take
 
@@ -60,11 +61,12 @@ A pull request is yours when it is **open**, **not draft**, does **not** have `c
 | Merge conflict | `mergeable_state` is `"dirty"` |
 | Red CI | a **CI** check run completed with conclusion `failure` or `timed_out` |
 | Changes requested | the review verdict, below |
-| Unresolved threads | a thread with `is_resolved: false`, and the verdict is not approved |
 
 Several can be true at once. Clear all of them in the one pass.
 
-Not yours: drafts, and approved pull requests whose only open threads are nits. Nothing blocks those from merging.
+Those three are the only blockers. Open review threads are not one: they are where a `CHANGES_REQUESTED` review spells out what it wants. An open thread on a pull request no reviewer rejected never makes it yours and never holds a merge.
+
+Not yours: drafts, and pull requests none of the three blocks.
 
 One pull request per pass. If asked for several, finish one before locking the next.
 
@@ -89,15 +91,23 @@ Five things these tools do that will mislead you:
 - **`issue_read` does not resolve pull request numbers.** Labels come from `list_pull_requests`.
 - **`mergeable_state` is lazy.** It reads `"unknown"` on a first fetch, so read again. `"dirty"` is a conflict. `"unstable"` is a pending or failing check, **not** a conflict. `"behind"` just means the base moved.
 - **Still-running, `skipped`, and `neutral` checks are not failure.**
-- **Reviewers post check runs of their own,** the Claude Review workflow's `review` job and `Cursor Automation: Saims Ref Agent Auto Code Review`. They are not CI (see **Red CI** below), and running or red, they never keep a fixer off a pull request. Only the supervisor waits on a running one, before a merge.
+- **Reviewers post check runs of their own,** the Claude Review workflow's `review` job and `Cursor Automation: Saims Ref Agent Auto Code Review`. They are not CI (see **Red CI** below), and running or red, they never keep a fixer off a pull request. Only the merge waits on a running one (**Merge rule** below).
 
-**The review verdict.** There is no `reviewDecision` field; read the reviews. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. For each reviewer, take their latest `APPROVED` or `CHANGES_REQUESTED` review on the current head. `COMMENTED` reviews are threads, not a verdict; that includes Claude Code reviews posted as `evandelacruz`. Reviews on an older head do not count.
+**The review verdict.** There is no `reviewDecision` field; read the reviews. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. For each reviewer, take their latest `APPROVED` or `CHANGES_REQUESTED` review on the current head. `COMMENTED` reviews are threads, not a verdict, whatever their body says; that includes Claude Code reviews posted as `evandelacruz`. Reviews on an older head do not count.
 
-- **Changes requested**: any reviewer rejected the current head.
+- **Changes requested**: any reviewer's latest review on the current head rejected it.
 - **Approved**: at least one reviewer approved the current head, and none rejected it.
 - Otherwise it is waiting on a review, not blocked.
 
-Act on rejecting reviews and their threads, whoever posted them. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. No review check has to complete.
+**Merge rule.** The review side of a merge holds when all three are true on the current head:
+
+1. at least one reviewer approved it;
+2. no reviewer's latest review on it requested changes;
+3. no review is in flight: no reviewer check run (the Claude Review workflow's `review` job, `Cursor Automation: Saims Ref Agent Auto Code Review`) is queued or in progress on it.
+
+A reviewer check that finished, in any conclusion, holds nothing. This is the one statement of the rule; every other skill links here. The supervisor applies it, together with its own CI, conflict, lock and workflow-file checks ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md) step 1).
+
+Act on rejecting reviews, whoever posted them; their threads hold the details. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. A fixer waits on no review check; only the merge does.
 
 A rejection clears only when a push gets a fresh review, or when Evan dismisses it. The Claude Review bot runs only on a push, so a reply alone changes nothing. If you push nothing because every blocking finding gets a reply instead, release the lock and tell Evan that the rejection is disputed.
 
@@ -149,7 +159,7 @@ Regenerate rather than hand-edit anything generated: `npm --prefix tools/conduct
 
 Pull the real output before theorizing. Reproduce locally, fix, confirm. Never skip, disable, or quarantine a test to get green. If a test is flaky and you can make it robust inside this slice, do that; otherwise say so and stop.
 
-**Review threads.** Make the changes they ask for. Keep the same backlog item IDs and do not expand the slice. Anything you leave alone gets a reply, per **Commenting** above. Check PLAN.md before deciding a thread needs Evan; most questions are already answered there.
+**Changes requested.** Make the changes the rejecting review and its threads ask for. Keep the same backlog item IDs and do not expand the slice. Anything you leave alone gets a reply, per **Commenting** above. Check PLAN.md before deciding a thread needs Evan; most questions are already answered there.
 
 **Your own pass.** Then read the diff yourself. What you were handed is where to start, not the boundary of what is wrong. A reviewer catches what it catches; you are the one person with the whole change in front of you.
 
@@ -174,6 +184,10 @@ Read all of it, not only the lines the threads point at, and ask:
 ```bash
 git push -u origin <head ref>
 ```
+
+## Resolve
+
+With the push on the remote, reply on and resolve each thread it fixed, per **Commenting** above. Reply on the threads you left alone and leave them open.
 
 ## Unlock
 

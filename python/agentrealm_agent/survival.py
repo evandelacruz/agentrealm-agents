@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from .threat import ThreatTable, type_key_for_entity
@@ -213,6 +214,41 @@ def pursuer_peaks(w: WorldModel, policy: Policy, everyone: bool = False) -> dict
     else:
         chasing = combat_group(w, policy) + [e for e in w.entities if is_attacker(w, e)]
     return {(e.kind, e.id): 0 for e in chasing}
+
+
+def hostile_reach(
+    w: WorldModel, policy: Policy, skip: Collection[tuple[str, int]] = (), only: Entity | None = None
+) -> set[Pos]:
+    """Cells within ``policy.hostile_range`` of a known hostile (``is_hostile``),
+    leaving out those whose (kind, id) is in ``skip``; of ``only`` alone when given.
+
+    Standing there starts Retreat, Flee or Fight, so a Heal or Retreat walk
+    prices them as ``costly`` and a held walk queue that comes to cross one is
+    replanned (A63 run 4: Heal walked a 10-Step queue into a known pack).
+    """
+    reach = policy.hostile_range
+    out: set[Pos] = set()
+    for e in w.entities if only is None else [only]:
+        if (e.kind, e.id) in skip or not is_hostile(w, policy, e):
+            continue
+        hx, hy = e.pos
+        out.update((hx + dx, hy + dy) for dx in range(-reach, reach + 1) for dy in range(-reach, reach + 1))
+    return out
+
+
+def hostiles_reaching(
+    w: WorldModel, policy: Policy, cells: Collection[Pos], skip: Collection[tuple[str, int]] = ()
+) -> set[tuple[str, int]]:
+    """The known hostiles (kind, id), not in ``skip``, with one of ``cells`` in their ``hostile_reach``.
+
+    Hostiles, not cells: one that moves while in reach of a path shifts its
+    reach but is no new threat to it, so a walk that could not go round it is
+    not planned or sent again for every step it takes (A63 run 4).
+    """
+    cells = set(cells)
+    if not cells:
+        return set()
+    return {(e.kind, e.id) for e in w.entities if not cells.isdisjoint(hostile_reach(w, policy, skip, only=e))}
 
 
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:

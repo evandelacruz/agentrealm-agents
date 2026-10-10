@@ -103,6 +103,71 @@ class RetreatTest(unittest.TestCase):
         self.assertEqual(out.state, "Retreat")
         self.assertEqual(step(out), (2, 1))
 
+    def test_a_kept_path_into_another_hostiles_reach_is_planned_again(self):
+        """A63 run 4: a walk to safety goes round a known hostile it is not running from."""
+        w, m = world(["." * 9] * 6, at=(1, 0)), Memory()
+        safe_at(w, (8, 0))
+        w.health, w.lives = 3, 6
+        w.threat.record(("npc", "gnawer"), 5)
+        w.entities = [Entity("npc", 1, (0, 0), code="gnawer"), Entity("npc", 2, (5, 1), code="snotling")]
+        m.state, m.path, m.goal = "Retreat", [(x, 0) for x in range(2, 9)], "safe"
+        c = ctx(m=m, hostile=["npc"])
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Retreat")
+        self.assertEqual(m.path[-1], (8, 0))
+        self.assertTrue(all(chebyshev(p, (5, 1)) > 2 for p in m.path), m.path)
+
+    def test_a_reach_it_cannot_go_round_is_not_replanned_every_decision(self):
+        """Review on #137: a kept path through an unavoidable reach replanned forever."""
+        from agentrealm_agent.states import retreat
+
+        w, m = world(["#" * 11, "#.........#", "#" * 11], at=(2, 1)), Memory()
+        safe_at(w, (9, 1))
+        w.health, w.lives = 3, 6
+        w.threat.record(("npc", "gnawer"), 5)
+        w.entities = [Entity("npc", 1, (1, 1), code="gnawer"), Entity("npc", 2, (6, 3), code="snotling")]
+        c = ctx(m=m, hostile=["npc"])
+        with mock.patch.object(retreat, "cost_path", wraps=retreat.cost_path) as planned:
+            self.assertEqual(dispatch(w, c).state, "Retreat")
+            w.entities[1] = Entity("npc", 2, (7, 3), code="snotling")  # moves, still in reach
+            m.held_queue = None
+            self.assertEqual(dispatch(w, c).state, "Retreat")
+            self.assertEqual(planned.call_count, 1)
+
+    def test_a_losing_retreat_walk_is_planned_without_every_hostile(self):
+        """Review on #137: the runner leaves every hostile a losing Retreat
+        ignored out of its queue's threats (``Memory.walk_skip``)."""
+        from agentrealm_agent.states import retreat
+
+        w, m = world(["." * 9] * 6, at=(1, 0)), Memory()
+        safe_at(w, (8, 0))
+        w.health, w.lives = 3, 6
+        w.threat.record(("npc", "gnawer"), 5)
+        w.entities = [Entity("npc", 1, (0, 0), code="gnawer"), Entity("npc", 2, (5, 4), code="snotling")]
+        c = ctx(m=m, hostile=["npc"])
+        with mock.patch.object(retreat, "losing_ground", return_value=True):
+            out = retreat.retreat_step(w, c, "Retreat")
+        self.assertIn("losing ground", out.reason)
+        self.assertEqual(m.walk_skip, {("npc", 1), ("npc", 2)})
+        m.walk_skip = set()
+        out = retreat.retreat_step(w, c, "Retreat")
+        self.assertEqual(m.walk_skip, {("npc", 1)}, "not losing: only the pursuers")
+
+    def test_no_retreat_step_leaves_walk_skip_alone(self):
+        """Review on #137: with the safe tile unreachable, dispatch falls through
+        to another state's walk, which must not inherit Retreat's skip set."""
+        from agentrealm_agent.states import retreat
+
+        w, m = world(["..#.."], at=(1, 0)), Memory()
+        safe_at(w, (4, 0))
+        w.health, w.lives = 3, 6
+        w.threat.record(("npc", "gnawer"), 5)
+        w.entities = [Entity("npc", 1, (0, 0), code="gnawer")]
+        with mock.patch.object(retreat, "losing_ground", return_value=True):
+            out = retreat.retreat_step(w, ctx(m=m, hostile=["npc"]), "Retreat")
+        self.assertIsNone(out.intents)
+        self.assertEqual(m.walk_skip, set())
+
     def test_threshold_is_retreat_hits_times_the_hit(self):
         # risk 0.5 with lives well above the floor: retreat_hits applies as set.
         params = {"retreat_hits": 2, "risk": 0.5, "lives_floor": 3}

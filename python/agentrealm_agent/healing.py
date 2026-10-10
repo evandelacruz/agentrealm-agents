@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Literal
 
+from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
 from .item_table import InventorySupply, merge_heal
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe, safe_tiles
@@ -59,12 +60,16 @@ def hurt(w: WorldModel) -> bool:
 #   arm     a drink's ``Use`` found nothing armed: the next drink sends ``Arm`` first
 #   forget  the supply is gone, or we do not carry it: never again
 #   walk    a ``Take`` out of reach: walk onto the food, then ``Take``
-#   wait    we, or the world, cannot act now: try again on a later tick
+#   wait    we, or the world, cannot act now: try again ``REFUSAL_WAIT_TICKS`` later
 #   hold    anything else, an unknown code included: not again until the
 #           situation (``heal_situation``) changes
 REARM_CODES = frozenset({"nothing_armed", "not_held"})
 GONE_CODES = frozenset({"supply_gone"})
 REACH_CODES = frozenset({"target_not_nearby", "target_out_of_range"})
+# A "wait" refusal is sent again no sooner than this: one weapon cooldown (1 s
+# at 10 Hz), the longest blocker a transient code names for a Use, so a
+# blocker that persists costs one refused intent a second, not one a tick.
+REFUSAL_WAIT_TICKS = DEFAULT_WEAPON_COOLDOWN_TICKS
 # Codes whose handling is "hold" by what they mean (the situation they need
 # changed is in ``heal_situation``), so the trace does not call them unknown.
 HOLD_CODES = frozenset({"would_strand", "carry_capacity_full", "not_allowed_in_safe_zone"})
@@ -147,7 +152,7 @@ def can_try(m: Memory, w: WorldModel, kind: str, supply_id: int, target: Pos | N
     if r.action == "forget":
         return False
     if r.action == "wait":
-        return w.tick > r.tick and w.alive
+        return w.tick >= r.tick + REFUSAL_WAIT_TICKS and w.alive
     return heal_situation(w, target) != r.situation
 
 

@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.healing import refusal_action
+from agentrealm_agent.healing import REFUSAL_WAIT_TICKS, refusal_action
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
@@ -101,19 +101,22 @@ class DrinkRefusalTest(RefusalTest):
         self.decide()
         self.refuse(0, "character_dead", category="state", retryability="transient")
         self.r.world.alive = False
-        self.next_tick()
+        self.next_tick(REFUSAL_WAIT_TICKS)
         self.assertEqual(self.decide(), [], "downed: nothing to drink")
         self.r.world.alive = True
         self.assertEqual(self.decide()[0], {"verb": "Arm", "supply_id": 4}, "back up: the same potion")
 
-    def test_a_transient_refusal_is_not_retried_on_the_same_tick(self):
+    def test_a_persistent_transient_refusal_is_resent_once_a_cooldown_not_every_tick(self):
         w = self.r.world
-        self.decide()
-        self.refuse(0, "attack_cooldown", category="state", retryability="transient")
         w.held_supplies = [KNIFE, POTION_A]
-        self.assertNotIn(USE_SELF, self.decide(), "same tick: no drink")
-        self.next_tick()
-        self.assertEqual(self.decide()[0], {"verb": "Arm", "supply_id": 4})
+        for _ in range(3):
+            self.decide()
+            self.refuse(0, "store_unavailable", category="state", retryability="transient")
+            for _ in range(REFUSAL_WAIT_TICKS - 1):
+                self.next_tick()
+                self.assertNotIn(USE_SELF, self.decide(), "inside the wait: no drink")
+            self.next_tick()
+            self.assertIn(USE_SELF, self.decide(), "the wait is over: drink again")
 
     def test_an_unknown_code_is_traced_and_held_until_something_changes(self):
         w = self.r.world

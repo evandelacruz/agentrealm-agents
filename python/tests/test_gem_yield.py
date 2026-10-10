@@ -236,6 +236,16 @@ class NoEffectCutTest(unittest.TestCase):
         r.on_result({"outcome": "applied_no_effect", "tick": 100}, 2)
         self.assertEqual(r.gem_cuts.no_effect_cuts, 1, "cut with the knife")
 
+    def test_an_arm_applied_in_an_earlier_response_is_read_from_armed(self):
+        # The observation since moved the potion from held to armed.
+        r = self.runner()
+        r.world.armed_code = "small_potion"
+        r.world.held_supplies = [InventorySupply(1, "pocket_knife")]
+        r.mem.pending_intents = [{"verb": "Arm", "supply_id": 4}, {"verb": "Wait"},
+                                 {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}]
+        r.on_result({"outcome": "applied_no_effect", "tick": 100}, 2)
+        self.assertEqual(r.gem_cuts.no_effect_cuts, 0)
+
     def test_a_cut_with_an_item_not_known_to_cut_or_not_still_counts(self):
         # Only a known miss is ruled out: an unsourced code may cut.
         r = self.runner()

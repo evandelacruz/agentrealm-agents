@@ -48,10 +48,6 @@ Nothing weaker switches it: the Cursor check cancelled or failing without naming
 
 Do the steps in order. Each one reads fresh state; never reuse a count from an earlier step.
 
-### 0. Mode
-
-Read the mode as **Who implements** says. Then check its switch evidence against the reviews and check runs you read in steps 1 and 2, and switch if one fires (not when Evan forced the mode). A switch takes effect for this pass's dispatch.
-
 ### 1. Merge
 
 No `gh` CLI here. Reads and the merge go through the GitHub MCP tools, as in [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Reading the pull request**, including its traps about omitted `labels`, lazy `mergeable_state`, and reviewer check runs.
@@ -83,9 +79,14 @@ Re-list open pull requests and read each one fresh: `pull_request_read` `get` fo
 **A missing CI run means check for a conflict first.** GitHub does not start `pull_request` workflows on a head that conflicts with its base, so a head with no `python` or `conductor` check run (the `test` workflow's jobs) is usually `"dirty"`. Read `mergeable_state` before treating it as a CI outage. `"dirty"` is a merge conflict: the fixer fleet's spawn row, not a stop.
 
 `idle` is the number of pull requests that [agentrealm-agents-fixer-fleet](../agentrealm-agents-fixer-fleet/SKILL.md) **What counts as blocked** marks **spawn**: first matching row of that table, with its traps. Do not restate or adjust that table here; the supervisor and the fixer fleet must agree on what gets a fixer. 
-Also note `open`, the total count of open pull requests, and `inflight`, the Claude implementer sessions still running without a pull request yet. Find them with `list_sessions(tags=["agentrealm-agents-implementer-fleet"])`: a session counts when `get_session` shows its `status_bucket` as `working` or `blocked`, and no open pull request has its branch (the session's `outcome_branch`, `c/<id>-<slug>`) as head. Each fleet session is tagged with its backlog ID too, lower case. Count them in both modes: a session spawned in Claude mode keeps running after the switch back, and it fills a slot just as an open pull request does.
+Also note `open`, the total count of open pull requests, and `inflight`, implementers still running without a pull request yet, from both fleets. Count both in both modes: work spawned in one mode keeps running after a switch, and it fills a slot just as an open pull request does.
+
+- **Claude sessions.** `list_sessions(tags=["agentrealm-agents-implementer-fleet"])`: a session counts when `get_session` shows its `status_bucket` as `working` or `blocked`, and no open pull request has its branch (the session's `outcome_branch`, `c/<id>-<slug>`) as head. Each fleet session is tagged with its backlog ID too, lower case.
+- **Cursor agents.** `npm --prefix tools/conductor run status -- --running-count` gives the running Cursor agents; add it to `inflight`. `npm --prefix tools/conductor run status` lists them by name: a Cursor implementer's name starts with its backlog IDs (`A8: Runtime directives`), and a fleet dispatcher's is `Fleet n=<n>`. A running agent that already opened its pull request is counted twice; that only slows dispatch, which is the safe side. Both need `CURSOR_API_KEY`. Without it, count Claude sessions only and say so in the report; Cursor mode then stops (**Stop and tell Evan**).
 
 ### 3. Dispatch
+
+**Mode first.** Read the mode as **Who implements** says. Check its switch evidence against the reviews and check runs you read in steps 1 and 2, and switch if one fires (not when Evan forced the mode). Then dispatch in that mode.
 
 First match wins:
 
@@ -103,20 +104,20 @@ First match wins:
 - it is not an umbrella item, whose work lives in its child IDs;
 - every ID in its **Depends on** column is `done`;
 - no open pull request covers it (cites the ID in its title or body);
-- no `inflight` session (step 2) covers it (tagged with that ID, lower case).
+- no `inflight` implementer (step 2) covers it: a Claude session tagged with that ID (lower case), or a running Cursor agent whose name starts with it.
 
-Check it fresh every pass (`git show origin/main:status.json` and `git show origin/main:PLAN.md` after `git fetch origin main`). The first five rules are the Cursor fleet's [**Choosing backlog work**](../../../.cursor/skills/agentrealm-agents-fleet/SKILL.md) rules; the last is one only a Claude session can check, so the Cursor brief below passes those IDs as excluded. Fixers keep running in either mode.
+Check it fresh every pass (`git show origin/main:status.json` and `git show origin/main:PLAN.md` after `git fetch origin main`). The first five rules are the Cursor fleet's [**Choosing backlog work**](../../../.cursor/skills/agentrealm-agents-fleet/SKILL.md) rules; the Cursor fleet checks the last for running Cursor agents itself, and the Cursor brief below passes the Claude sessions' IDs, which it cannot see. Fixers keep running in either mode.
 
 Never both in one pass. A pull request the fixer fleet has not locked yet still counts as idle, so an implementer fleet cannot fire over it.
 
-**Handing the Cursor fleet to a Cursor agent.** Do not run `agentrealm-agents-fleet` yourself: it lists pull requests with `gh pr list`, which fails where GitHub GraphQL is blocked, such as a Claude cloud session. Hand it to one Cursor agent, replacing `<n>` in both places and `<ids>` with the backlog IDs of every `inflight` session (step 2), comma-separated. The Cursor agent cannot see Claude sessions, so that line is the only thing that stops it re-spawning an ID one is mid-way through. Drop the line when `inflight` is empty:
+**Handing the Cursor fleet to a Cursor agent.** Hand none while a `Fleet n=` agent from an earlier pass is still running: its implementers may not have started yet, so the count above cannot see them. Report that dispatch is waiting on it. Otherwise, do not run `agentrealm-agents-fleet` yourself: it lists pull requests with `gh pr list`, which fails where GitHub GraphQL is blocked, such as a Claude cloud session. Hand it to one Cursor agent, replacing `<n>` in both places and `<ids>` with the backlog IDs of every in-flight Claude session (step 2), comma-separated. The Cursor agent cannot see Claude sessions, so that line is the only thing that stops it re-spawning an ID one is mid-way through. Drop the line when `inflight` is empty:
 
 ```bash
 npm --prefix tools/conductor run spawn -- --no-pr --name "Fleet n=<n>" -- <<'EOF'
 Run the agentrealm-agents-fleet skill (.cursor/skills/agentrealm-agents-fleet/SKILL.md) with n = <n>, for new backlog work only. The agentrealm-agents supervisor dispatched this pass on Evan's behalf.
 - Skip its step 3. Route no open pull request: no fix, no polish. Open pull requests are not this pass's to send.
 - Run its step 2 to get current, then its steps 4 onward for all n slots.
-- Spawn only with --ids. Never pass --pr, and never run follow-up.
+- Spawn only with --ids, and start each --name with the slice's IDs ("A8: Runtime directives"). Never pass --pr, and never run follow-up.
 - Skip <ids>: Claude sessions hold them.
 EOF
 ```
@@ -134,7 +135,7 @@ Anything that does not fit the pass above: stop, print what you saw and which pu
 - a merge fails or is refused
 - `idle > 0`, but the fixer fleet spawned nothing: the idle pull requests are stuck
 - the Claude implementer fleet row matched, but `create_session` fails
-- in Cursor mode, `CURSOR_API_KEY` is missing, or `spawn` fails for a reason other than credits
+- in Cursor mode, `CURSOR_API_KEY` is missing, `status --running-count` fails, or `spawn` fails for a reason other than credits
 - the Cursor check looks broken without naming credits: `cancelled`, or failed with no `cursor[bot]` review on that head. Name the pull request and ask Evan whether to force Claude mode
 - anything a skill or `AGENTS.md` says to escalate
 

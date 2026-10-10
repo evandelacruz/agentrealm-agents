@@ -69,10 +69,12 @@ Repo: `evandelacruz/agentrealm-agents`.
 6. **Sanity-check, then spawn.** For every new-work ID, confirm it is not already `done` on `origin/main`. Use the brief shape in [implementer-brief.md](../agentrealm-agents-conductor/references/implementer-brief.md).
 
    ```bash
-   npm --prefix tools/conductor run spawn -- --ids A8 --name "Runtime directives" -- <<'EOF'
+   npm --prefix tools/conductor run spawn -- --ids A8 --name "A8: Runtime directives" -- <<'EOF'
    <implementer brief>
    EOF
    ```
+
+   Start `--name` with the slice's IDs, as above. The supervisor and the next fleet read running agents' names to see which IDs are taken.
 
    Fix / polish on an existing PR: `spawn --pr <url>` or `follow-up --agent bc-… --pr <url>`.
 
@@ -88,7 +90,7 @@ Repo: `evandelacruz/agentrealm-agents`.
 
 **Read `note` and `remaining`.** Skip items whose note starts with "Waiting on" or says blocked. Those are Evan's to resolve, not an implementer's. Skip umbrella items, whose work lives in their child IDs.
 
-**Ready items.** Choose work from PLAN.md **Milestones**: any item ID whose `status.json` state is not `done` and whose **Depends on** IDs are all `done`, minus the items the rule above skips and any an open pull request already covers (cites the ID in its title or body). If no ready work is left for a slot, leave it empty. If every slot is empty, spawn nothing and say that ready backlog work is exhausted.
+**Ready items.** Choose work from PLAN.md **Milestones**: any item ID whose `status.json` state is not `done` and whose **Depends on** IDs are all `done`, minus the items the rule above skips and any an open pull request already covers (cites the ID in its title or body) or a running Cursor agent already holds (`npm --prefix tools/conductor run status`: its name starts with the ID). If no ready work is left for a slot, leave it empty. If every slot is empty, spawn nothing and say that ready backlog work is exhausted.
 
 **One reviewable PR per agent.** Split a large item with an explicit scope and leave it `partial`.
 

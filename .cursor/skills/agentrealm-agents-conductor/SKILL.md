@@ -65,7 +65,7 @@ No ticketing system. PLAN.md is the backlog.
 7. **If clear,** spawn 1–2 implementers for the smallest ready slice(s), each with an explicit scope. See [references/implementer-brief.md](references/implementer-brief.md) for the required brief shape.
 
    ```bash
-   npm --prefix tools/conductor run spawn -- --ids A8 --name "Runtime directives" -- <<'EOF'
+   npm --prefix tools/conductor run spawn -- --ids A8 --name "A8: Runtime directives" -- <<'EOF'
    <implementer brief>
    EOF
    ```

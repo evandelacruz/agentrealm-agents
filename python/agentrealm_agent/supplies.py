@@ -18,8 +18,8 @@ Where the table comes from, first that works:
 
 The questions the agent asks of a subtype (is it food, a potion, a weapon;
 what blocks it breaks; how far it reaches) are the functions below. A code
-the table does not list answers "no" / None: learning in play (A18, A28, A46)
-still covers it.
+the table does not list answers "no", with the default reach of one block:
+learning in play (A18, A28, A46) still covers it.
 """
 
 from __future__ import annotations

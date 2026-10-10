@@ -170,9 +170,9 @@ def pick_supply_for_capability(
     for s in held_supplies(w):
         if capability not in capabilities_for_code(s.code, kb):
             continue
-        weapon = 0 if kept_on_break(s.code) else 1
+        used_up = 0 if kept_on_break(s.code) else 1
         armed = 0 if s.code == w.armed_code else 1
-        cands.append(((weapon, armed, s.code), s))
+        cands.append(((used_up, armed, s.code), s))
     if not cands:
         return None
     cands.sort(key=lambda t: t[0])

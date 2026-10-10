@@ -323,7 +323,7 @@ class FleeTest(unittest.TestCase):
         w.entities = [Entity("npc", 5, (0, 1), "gnawer")]
         safe_at(w, (7, 1))
         m = Memory()
-        c = ctx(m=m, hostile_range=6)  # the safe tile lies just outside the gnawer's reach
+        c = ctx(m=m, hostile_range=7)
         out = dispatch(w, c)
         self.assertEqual(out.state, "Flee")
         self.assertEqual(m.flee_path[0], step(out))
@@ -341,7 +341,7 @@ class FleeTest(unittest.TestCase):
         w.entities = [Entity("npc", 5, (2, 0), "gnawer")]
         safe_at(w, (3, 2))
         m = Memory()
-        out = dispatch(w, ctx(m=m, hostile_range=1))
+        out = dispatch(w, ctx(m=m))
         self.assertEqual(step(out), (3, 2))
         self.assertEqual(m.flee_path, [(3, 2)])
 
@@ -349,7 +349,7 @@ class FleeTest(unittest.TestCase):
         w = world([".....", ".....", "....."], at=(2, 1))
         w.entities = [Entity("npc", 5, (2, 0), "gnawer")]
         safe_at(w, (0, 2))
-        self.assertEqual(step(dispatch(w, ctx(hostile_range=1))), (1, 2))
+        self.assertEqual(step(dispatch(w, ctx())), (1, 2))
 
     def test_a_forced_escape_routes_to_safety_around_the_paced_cell(self):
         here, back = (2, 1), (1, 2)

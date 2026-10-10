@@ -26,7 +26,7 @@ from .healing import hurt
 from . import targets as targets_mod
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from .hostile_ground import ground_by_hostile
-from .survival import is_hostile, pursuer_peaks, safe_goals, town_cell
+from .survival import hostiles_in_range, is_hostile, pursuer_peaks, safe_goals, town_cell
 from .executor.movement import step_landing
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
@@ -577,14 +577,14 @@ def retreat_safe_goal(
     runs toward. The nearest known safe cell a path reaches outside the
     ground of every known hostile, in view or remembered
     (``hostile_ground.ground_by_hostile``; the ones it runs from hold only
-    the cells they get to no later than we do), else the town cell
+    the cells they get to before we do), else the town cell
     on the same terms (``reachable_safe_goal``). Once picked, the cell is
     committed (``RETREAT_TARGET``, A71) and kept while it stays valid.
 
-    A safe cell a pursuer gets to no later than we do is no refuge: Retreat
+    A safe cell a pursuer gets to before we do is no refuge: Retreat
     walked back toward one 2 cells from the hostile it ran from while Flee
-    stepped away, 6 hits in 19 s (free-play run 7). One we get to first
-    stays one, however near the pursuer following us: entering it ends the
+    stepped away, 6 hits in 19 s (free-play run 7). One we get to first,
+    or as soon, stays one, however near the pursuer following us: entering it ends the
     chase. One threat picture for both keeps them pulling the same way.
 
     Not read-only: picking commits the cell, and runs the path checks of
@@ -595,14 +595,16 @@ def retreat_safe_goal(
     params = grid_params(policy, avoid, costly)
     ground = ground_by_hostile(w, policy)
     here = w.pos
-    chasing = pursuer_peaks(w, policy)
+    # Those it runs from: the fight's group, the hitter, and every hostile in
+    # range (Flee runs from all of these, ``survival.flee_from``).
+    chasing = set(pursuer_peaks(w, policy)) | {(e.kind, e.id) for e in hostiles_in_range(w, policy)}
     for e in w.entities:
         key = (e.kind, e.id)
         if key in chasing and key in ground and here is not None:
-            # A pursuer holds only the cells it reaches no later than we do: a
-            # refuge we get to first ends the chase (review on #168: one a
-            # step behind otherwise covers every refuge we near).
-            ground[key] = {c for c in ground[key] if chebyshev(e.pos, c) <= chebyshev(here, c)}
+            # One we run from holds only the cells it gets to before we do:
+            # a refuge we reach first, or as soon, ends the chase (review on
+            # #168: one a step behind otherwise covers every refuge we near).
+            ground[key] = {c for c in ground[key] if chebyshev(e.pos, c) < chebyshev(here, c)}
     goal = reachable_safe_goal(
         m,
         w,

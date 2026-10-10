@@ -53,7 +53,7 @@ Use `add_reply_to_pull_request_comment` with the thread's comment ID.
 
 ## What you take
 
-A pull request is yours when it is **open**, **not draft**, does **not** have `conductor:working`, the check `Cursor Automation: Saims Ref Agent Auto Code Review` is not still running, and at least one of these is true:
+A pull request is yours when it is **open**, **not draft**, does **not** have `conductor:working`, and at least one of these is true:
 
 | Blocker | How you know |
 |---|---|
@@ -89,22 +89,19 @@ Five things these tools do that will mislead you:
 - **`issue_read` does not resolve pull request numbers.** Labels come from `list_pull_requests`.
 - **`mergeable_state` is lazy.** It reads `"unknown"` on a first fetch, so read again. `"dirty"` is a conflict. `"unstable"` is a pending or failing check, **not** a conflict. `"behind"` just means the base moved.
 - **Still-running, `skipped`, and `neutral` checks are not failure.**
-- **The automated code review posts a check run of its own,** named `Cursor Automation: Saims Ref Agent Auto Code Review`. While that check is still running, the pull request is not yours. Do not lock it and do not push. Red there, once it has finished, is a review verdict, not a CI job. It is not a workflow run, so it has no job logs to pull; its `html_url` has no `/actions/runs/` in it. Read the threads for it, and never count it as red CI. Today it is the only check this repo runs, so red CI only exists once a GitHub Actions workflow is added.
+- **Reviewers post check runs of their own,** the Claude Review workflow's `review` job and `Cursor Automation: Saims Ref Agent Auto Code Review`. They are not CI (see **Red CI** below), and running or red, they never keep a fixer off a pull request. Only the supervisor waits on a running one, before a merge.
 
-**The review verdict.** There is no `reviewDecision` field. Two reviewers count: Cursor and Claude. Each gives approved, changes requested, or no verdict on the current head. Verdicts come from reviews, never from a label.
+**The review verdict.** There is no `reviewDecision` field; read the reviews. Any reviewer counts: the Claude Review bot (`reviewer-agent-anth[bot]`), `cursor[bot]`, or a person. For each reviewer, take their latest `APPROVED` or `CHANGES_REQUESTED` review on the current head. `COMMENTED` reviews are threads, not a verdict; that includes Claude Code reviews posted as `evandelacruz`. Reviews on an older head do not count.
 
-- **Cursor** (`cursor[bot]`): its most recent review whose state is `APPROVED` or `CHANGES_REQUESTED`, ignoring `COMMENTED`. If its `commit_id` is not the current head, Cursor has no verdict yet. A stale approval never counts after a push.
-- **Claude**: GitHub will not let an account approve or request changes on its own pull request, and pull requests here are opened under Evan's account, so a Claude Code review run as Evan is always `COMMENTED`. Take the latest `evandelacruz` review that has a body and is not only a reply. If its `commit_id` is not the current head, Claude has no verdict yet. Otherwise it is one of two things:
-  - **approved** when its body says in words that it approves or finds nothing blocking ("No blocking issues", "Good to merge", "LGTM", "Approving", "would approve", "treat this as an approval", or the like), with no condition attached and no blocking language anywhere;
-  - **changes requested** otherwise: it lists findings, says "not approving", "do not merge", "treat … as blocking", "requesting changes", "One blocking issue", or anything short of an approval.
+- **Changes requested**: any reviewer rejected the current head.
+- **Approved**: at least one reviewer approved the current head, and none rejected it.
+- Otherwise it is waiting on a review, not blocked.
 
-  An approval attached to a condition ("once", "after", "if", "until", "pending", "assuming", "but …") is not an approval, so it is changes requested. "No blocking issues once the flaky test is fixed" is changes requested. A non-blocking docs note alongside an unconditional "No blocking issues" does not change an approval.
+Act on rejecting reviews and their threads, whoever posted them. When reviewers disagree, address the blocking findings, or reply on the thread saying why a finding does not apply. No review check has to complete.
 
-Never read approving or blocking words from a quoted snippet or a code block.
+A rejection clears only when a push gets a fresh review, or when Evan dismisses it. The Claude Review bot runs only on a push, so a reply alone changes nothing. If you push nothing because every blocking finding gets a reply instead, release the lock and tell Evan that the rejection is disputed.
 
-Combined: either reviewer at changes requested means **changes requested**. Both approved on the current head means **approved**. Anything else has not been reviewed yet: a review is still to come, so it is waiting, not blocked.
-
-Once a push moves the head past a review, from either reviewer, it stops counting. Its inline threads are still threads, and are read like any other.
+A review on an older head still leaves its inline threads, and they are read like any other.
 
 The first review's threads are often resolved while a later review's are not. Read the threads, not just the newest review body.
 
@@ -148,7 +145,7 @@ git merge origin/main
 
 Regenerate rather than hand-edit anything generated: `npm --prefix tools/conductor install` for `tools/conductor/package-lock.json`. In `status.json`, keep both sides' states and take the more advanced one per ID. Stop and ask Evan only when both sides changed the same logic and keeping either loses behavior.
 
-**Red CI.** First check it is actually CI: the automated code review posts a check run too, and red there is a review verdict belonging to the threads below, not a failure to chase. A real CI check has `/actions/runs/<run_id>/job/<job_id>` in its `html_url`; that is also where the run ID comes from.
+**Red CI.** First check it is actually CI. A real CI check has `/actions/runs/<run_id>/job/<job_id>` in its `html_url`; that is also where the run ID comes from. The reviewer checks are not CI: the Cursor check is not a workflow run, and the Claude Review workflow's `review` job runs the reviewer, whose result is the review it posts. A failed or cancelled reviewer check is nothing for you to fix; leave it to the supervisor.
 
 Pull the real output before theorizing. Reproduce locally, fix, confirm. Never skip, disable, or quarantine a test to get green. If a test is flaky and you can make it robust inside this slice, do that; otherwise say so and stop.
 

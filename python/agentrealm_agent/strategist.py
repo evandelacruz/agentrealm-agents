@@ -1137,6 +1137,8 @@ class Strategist:
             )
             if kept is not None:
                 # The region is the head's committed target (A71): no reason to move it.
+                # Said through last_reply_rejected on purpose: that is how the
+                # planner learns a part of its reply was not applied, and why.
                 note = f"gather_gems kept its region at {head['x']}, {head['y']}: it is not exhausted, cuts there still work, and nothing changed"
                 record["region_kept"] = goals[0]
                 self.rejected = [*self.rejected, note]

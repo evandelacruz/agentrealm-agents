@@ -137,6 +137,7 @@ class GemYieldTracker:
     last_no_effect: tuple[int, Pos, int] | None = None
     gems_gained: int = 0  # rises of the gem counter this run, spending not taken off
     last_cut_tick: int | None = None  # tick of this run's latest cut that took effect: Gather's stall clock
+    last_cut_pos: Pos | None = None  # and the cell it cut
 
     def note_cut(self, w: WorldModel, pos: Pos, block: str, tick: int, *, took: bool = False) -> None:
         """Our ``Use`` on ``pos`` applied while it showed ``block``. ``took``: a
@@ -147,7 +148,7 @@ class GemYieldTracker:
         if block in GATHER_BLOCKS:
             self.cuts += 1
             self.last_no_effect = None
-            self.last_cut_tick = tick
+            self.last_cut_tick, self.last_cut_pos = tick, pos
         self.pending.append(
             PendingCut(w.map_id, pos, block, tick, w.gems, {gid for gid, _ in _ground_gems(w)}, took=took)
         )

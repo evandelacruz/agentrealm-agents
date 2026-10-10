@@ -258,6 +258,7 @@ def gather_outcome(
         m.gather_status = WALKING.format(WALK_TARGETS.get(walk or "", "a cell to cut"))
     else:
         m.gather_status = CUTTING
+    _note_in_region(w, m, target, tick_hz)
     idle = _seconds_without_cut(w, m, gem_cuts, tick_hz)
     if m.gather_status != CUTTING and idle >= STALL_SECONDS:
         m.gather_status = STALLED.format(m.gather_status, idle)
@@ -265,6 +266,34 @@ def gather_outcome(
         m.gather_status = IN_REGION.format(m.gather_status, *region_corner(worked))
         out.reason = IN_REGION.format(out.reason, *region_corner(worked))
     return out
+
+
+def _no_cut_there(
+    w: WorldModel, m: Memory, region: tuple[int, int], gem_cuts: GemYieldTracker | None, tick_hz: int
+) -> bool:
+    """Gather has stood in ``region`` for ``STALL_SECONDS`` with no cut there taking effect.
+
+    Counted from arrival (``Memory.gather_in_region``), so a long walk there
+    never counts, and only a cut inside ``region`` resets it."""
+    rec = m.gather_in_region
+    if rec is None or rec[0] != region or w.tick - rec[2] >= STALL_SECONDS * tick_hz:
+        return False
+    since = rec[1]
+    if gem_cuts is not None and gem_cuts.last_cut_pos is not None and region_of(gem_cuts.last_cut_pos) == region:
+        since = max(since, gem_cuts.last_cut_tick or since)
+    return w.tick - since >= STALL_SECONDS * tick_hz
+
+
+def _note_in_region(w: WorldModel, m: Memory, target: tuple[int, int] | None, tick_hz: int) -> None:
+    """Keep ``Memory.gather_in_region``: the clock starts on arrival in the
+    target region, not on the walk there, and starts over after
+    ``STALL_SECONDS`` away from it."""
+    if target is None or w.pos is None or region_of(w.pos) != target:
+        return
+    rec = m.gather_in_region
+    if rec is None or rec[0] != target or w.tick - rec[2] >= STALL_SECONDS * tick_hz:
+        rec = (target, w.tick, w.tick)
+    m.gather_in_region = (target, rec[1], w.tick)
 
 
 def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | None, tick_hz: int) -> int:
@@ -476,9 +505,9 @@ def keep_gather_region(
 
     The region a ``gather_gems`` names is its committed target. It moves
     only for a reason: the region is exhausted (barren or poor), Gather
-    found it impossible (no cut took effect there for ``STALL_SECONDS``),
-    or the situation changed (a death, a new map, a hurt, or a hostile pack
-    seen). Another cell of the same region is the same target. Free-play
+    found it impossible (it stood there ``STALL_SECONDS`` with no cut there
+    taking effect, ``_no_cut_there``), or the situation changed (a death, a
+    new map, a hurt, or a hostile pack seen). Another cell of the same region is the same target. Free-play
     run 4: the planner moved the region 4 times in 50 s. Two ops that differ
     in anything but the region, or that name none, are different goals.
     """
@@ -492,11 +521,8 @@ def keep_gather_region(
         return kept
     if region in barren_regions(knowledge, w.map_id) or region in poor_regions(knowledge, w.map_id):
         return None  # exhausted
-    if m.gather_spell is not None:
-        since, seen = m.gather_spell
-        last_cut = gem_cuts.last_cut_tick if gem_cuts is not None and gem_cuts.last_cut_tick is not None else since
-        if w.tick - seen < STALL_SECONDS * tick_hz and w.tick - max(since, last_cut) >= STALL_SECONDS * tick_hz:
-            return None  # impossible: no cut there
+    if _no_cut_there(w, m, region, gem_cuts, tick_hz):
+        return None  # impossible
     for t in triggers:
         if t.get("trigger") in SITUATION_TRIGGERS:
             return None  # new information

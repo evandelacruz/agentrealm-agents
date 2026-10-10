@@ -234,8 +234,46 @@ class GatherRegionKeptTest(unittest.TestCase):
 
         s, r = self.settled(self.reply(100, 100))
         r.world.tick = 1000
-        r.mem.gather_spell = (1000 - STALL_SECONDS * 10, 995)
+        r.mem.gather_in_region = ((0, 0), 1000 - STALL_SECONDS * 10, 995)  # stood in it 30 s, no cut
         r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["x"], 100)
+
+    def test_a_long_walk_to_the_region_is_not_a_stall(self):
+        """The clock starts on arrival: 60 s of walking there, then 10 s in it, keeps the region."""
+        s, r = self.settled(self.reply(100, 100))
+        r.world.tick = 1000
+        r.mem.gather_spell = (400, 995)  # Gather began 60 s ago, walking
+        r.mem.gather_in_region = ((0, 0), 900, 995)
+        r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["x"], 10)
+
+    def test_a_cut_elsewhere_does_not_reset_the_clock_but_one_there_does(self):
+        from agentrealm_agent.states.gather import STALL_SECONDS
+
+        for cut_at, kept in (((200, 200), False), ((5, 5), True)):
+            with self.subTest(cut_at=cut_at):
+                s, r = self.settled(self.reply(100, 100))
+                r.world.tick = 1000
+                r.mem.gather_in_region = ((0, 0), 1000 - STALL_SECONDS * 10, 995)
+                r.gem_cuts.last_cut_tick, r.gem_cuts.last_cut_pos = 990, cut_at
+                r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
+                round_trip(s, r)
+                self.assertEqual(r.plan.current()["x"], 10 if kept else 100)
+
+    def test_a_poor_region_may_move(self):
+        s, r = self.settled(self.reply(100, 100))
+        r.knowledge.extra[GEM_YIELD] = {str(r.world.map_id): {"regions": {region_key((10, 10)): {"cuts": 20, "gems": 0}}}}
+        r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["x"], 100)
+
+    def test_a_hostile_pack_seen_may_move_it(self):
+        s, r = self.settled(self.reply(100, 100))
+        pack = {"kind": "hostile_pack", "count": 3, "types": ["snarl"], "cell": [12, 12]}
+        r.mem.strategist_signals.append({"trigger": "discovery", "finds": [pack], "tick": 5})
+        r.mem.strategist_signals.append({"trigger": "goal_done", "tick": 5})  # a call now, not after the discovery gap
         round_trip(s, r)
         self.assertEqual(r.plan.current()["x"], 100)
 

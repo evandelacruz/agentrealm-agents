@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import random
 import unittest
+from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
@@ -25,6 +26,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.detour import RISK_RADIUS, DetourState, detour_find, risk_allowed
+from agentrealm_agent.states import gather as gather_module
 from agentrealm_agent.states.gather import BLOCKED, CLEAR, WALKING, WALK_TARGETS, gather_outcome
 from agentrealm_agent.states.gather_safe import route_clear
 from agentrealm_agent.hostile_ground import GATHER_HOSTILE_RADIUS, danger
@@ -96,6 +98,29 @@ class GatherKeepsWorkingTest(unittest.TestCase):
         w.entities.append(Entity("supply", 70, pile, "gem"))
         gather_outcome(w, m, POLICY, op=GATHER)
         self.assertEqual(m.gather_target, ("pile", pile))
+
+    def test_grass_in_sight_it_cannot_reach_keeps_the_walk(self):
+        """Walled-in grass in sight is tried once, then the walk goes on to
+        the same cell, decision after decision (A71)."""
+        w, m = self.blocked()
+        gather_outcome(w, m, POLICY, op=GATHER)
+        kept = m.gather_target
+        w.pos = m.path[0]
+        grass = (w.pos[0] + 3, w.pos[1] + (3 if w.pos[1] < 10 else -3))
+        w.view.tiles[grass] = "grass"
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if (dx, dy) != (0, 0):
+                    w.view.tiles[(grass[0] + dx, grass[1] + dy)] = "wall"
+        out = gather_outcome(w, m, POLICY, op=GATHER)  # tried once
+        self.assertEqual(m.gather_target, kept)
+        searches = mock.Mock(wraps=gather_module.nearest_target)
+        with mock.patch.object(gather_module, "nearest_target", searches):
+            for _ in range(3):
+                w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+                out = gather_outcome(w, m, POLICY, op=GATHER)
+                self.assertEqual(m.gather_target, kept)
+        self.assertEqual(searches.call_count, 0, "not searched again every decision")
 
     def test_a_hostile_that_comes_to_hold_its_cell_ends_the_walk(self):
         w, m = self.blocked()

@@ -439,6 +439,13 @@ def _gather_cells(
         m.gather_target = None
     if m.goal == GOAL and not route_clear(w, policy, m.path, d):
         m.path, m.goal = [], ""  # the way ahead entered a known reach: a way round, or the target goes
+    if (
+        m.goal == GOAL
+        and m.gather_target is not None
+        and m.gather_target[0] == CLEAR
+        and _in_sight(w, policy, preferred, d, pile_region) - m.gather_clear_seen
+    ):
+        m.path, m.goal = [], ""  # something new to cut or take: ``_replan_gather`` tries it before the walk
     step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is None and _replan_gather(w, m, policy, plan_avoid, plan_costly, preferred, safe, d, pile_region, barred):
         return StateOutcome(None, f"gather → {m.gather_target[1]}: way taken, waiting", state=state, wait=True, progress=False)
@@ -616,17 +623,9 @@ def _still_wanted(
     if kind == REGION:
         return False  # replanned each decision by ``_walk_to_region`` while its region is unseen
     if kind == CLEAR:
-        # Kept until a cell to cut or a gem pile it may take comes into
-        # sight, or a hostile comes to hold the cell it walks to.
-        here = w.pos
-        sighted = here is not None and (
-            any(chebyshev(p, here) <= w.perception for p in cuttable)
-            or any(
-                is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
-                for e in w.entities
-            )
-        )
-        return not sighted and _clear_of_hostiles(w, policy, pos, d)
+        # Dropped once a hostile comes to hold the cell it walks to; a cell
+        # to cut or a pile coming into sight is ``_gather_cells``'s to judge.
+        return _clear_of_hostiles(w, policy, pos, d)
     if kind == OUT:
         # Kept while on safe ground: it was planned because no cut was
         # reachable, so re-checking ``preferred`` each tick would only replan
@@ -657,7 +656,9 @@ def _replan_gather(
     """Plan to the committed target (``m.gather_target``) while one is kept,
     else pick: the nearest pile (in ``pile_region`` when set), then the
     nearest bush or grass by walk (``_cut_targets``; ``preferred``: field
-    cells before safe ones), then, on safe ground,
+    cells before safe ones), then a kept walk to ground clear of hostiles
+    (``CLEAR``, tried after the picks: it ends for something it can reach),
+    then, on safe ground,
     out to field ground or the frontier; else, when ``barred()`` (known cells
     to cut held by a hostile), the nearest frontier clear of every known
     hostile (``_plan_clear``); leave ``m.path`` alone if none.
@@ -686,7 +687,7 @@ def _replan_gather(
     if m.goal == GOAL:
         m.path, m.goal = [], ""
     m.gather_target = None
-    if kept is not None and kept[0] in KEPT_KINDS:
+    if kept is not None and kept[0] in KEPT_KINDS and kept[0] != CLEAR:
         path = _path_to(w, kept, params)
         if path and not clear(path):
             path = None  # unsafe: a valid reason to drop it (A71)
@@ -717,9 +718,19 @@ def _replan_gather(
         m.path, m.goal, m.gather_target = found[1], GOAL, cut_at[found[0]]
         return False
 
+    if kept is not None and kept[0] == CLEAR and _clear_of_hostiles(w, policy, kept[1], d):
+        # Nothing in sight could be reached: the walk goes on (A71), and only
+        # something newly in sight stops it to be tried again.
+        m.gather_clear_seen = _in_sight(w, policy, preferred, d, pile_region)
+        path = _path_to(w, kept, params)
+        if path and clear(path) and next_step(w, blocked, path):
+            m.path, m.goal, m.gather_target = path, GOAL, kept
+            return False
+
     if here in safe:
         _plan_out(w, m, policy, blocked, params, safe, clear, d)
     if m.gather_target is None and barred():
+        m.gather_clear_seen = _in_sight(w, policy, preferred, d, pile_region)
         _plan_clear(w, m, policy, blocked, params, clear, d)
     return False
 
@@ -822,6 +833,16 @@ def _plan_clear(
     found = _nearest_clear(w, frontier, params, blocked, clear)
     if found:
         m.path, m.goal, m.gather_target = found[1], GOAL, (CLEAR, found[0])
+
+
+def _in_sight(
+    w: WorldModel, policy: Policy, cells: set[Pos], d: Danger | None, pile_region: tuple[int, int] | None
+) -> frozenset[Pos]:
+    """The cells of ``cells`` within sight, and the gem piles Gather may take."""
+    here = w.pos
+    seen = {p for p in cells if here is not None and chebyshev(p, here) <= w.perception}
+    seen |= {e.pos for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)}
+    return frozenset(seen)
 
 
 def _clear_of_hostiles(w: WorldModel, policy: Policy, p: Pos, d: Danger | None = None) -> bool:

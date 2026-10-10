@@ -1107,6 +1107,8 @@ class Runner:
         """Applies one intent result. True when it was rejected."""
         w, m = self.world, self.mem
         intent = self._intent_at(index)
+        if self.acceptance is not None:
+            self.acceptance.on_intent_result(intent, result)
         note_shop_result(m, intent, result.get("outcome") != "rejected")
         if m.state == "Equip":
             code = (result.get("rejection") or {}).get("code")

@@ -4,12 +4,12 @@
 # (should_retreat) at health 6 against it, three default hits left. It takes
 # that fight only with at least lives_floor * 2 lives (6); with fewer, the
 # effective risk falls and it retreats instead.
-# fight_margin rose from 1.0 to 1.6 with attack power 2 (A81), which made
-# our swings land harder in the win estimate.
+# fight_margin rose from 1.0 to 3.2 with the published roll (A81), which
+# made our swings land harder and hostile swings miss in the win estimate.
 goals = []
 
 [params]
-fight_margin = 1.6
+fight_margin = 3.2
 risk = 1.0
 retreat_hits = 2
 lives_floor = 3

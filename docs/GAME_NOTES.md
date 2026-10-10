@@ -244,6 +244,7 @@ The win estimate (A9, gated on by **Fight** in A23) uses these until the questio
 | Hostile attack interval | 15 ticks | The two weak hostiles in Combat |
 | Our attack interval | 10 ticks | None: weapon cooldown is unmeasured |
 | Our attack power | 2 | The world's base (M §16); the API serves none, so a permanent gain above it is not counted |
+| A hostile's damage a swing | hit chance at its largest measured hit as attack power × the mean of 1 up to that hit: 0.975 for one that hit for 2 | The published roll (Combat: a hostile's damage number is its attack power); our armor is not counted |
 | Our damage a swing | hit chance (65%) × the mean of 1 up to 2 plus weapon damage: 1.625 with the pocket knife | The published roll (Combat) and weapon damage from the Manual's Supplies reference (`break_memory.WEAPON_DAMAGE`); an unlisted armed item swings as the knife |
 | Health of a hostile type with no kill on record | 10 | A new character's health (PLAYABLE_AGENT_PLAN Combat) |
 | Our health when no observation has served it | 10 | A new character's health (Combat) |

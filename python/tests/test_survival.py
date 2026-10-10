@@ -606,6 +606,20 @@ class SwingTest(unittest.TestCase):
         self.assertEqual(set(WEAPON_DAMAGE), set(WEAPONS))
         self.assertIs(survival.WEAPON_DAMAGE, WEAPON_DAMAGE)
 
+    def test_a_hostile_swings_on_the_same_roll(self):
+        """Its damage number is its attack power: 2 hits 65% for 1 to 2, 1 hits 60% for 1."""
+        self.assertAlmostEqual(survival.hostile_swing_damage(2), 0.65 * 1.5)
+        self.assertAlmostEqual(survival.hostile_swing_damage(1), 0.60 * 1.0)
+
+    def test_the_knife_takes_one_weak_hostile_but_not_a_pair(self):
+        w = world([".."], at=(0, 0))
+        w.health, w.lives, w.armed_code = 10, 10, "pocket_knife"
+        w.threat.record(("npc", "snotling"), 1)
+        w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
+        self.assertFalse(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        w.entities.append(Entity("npc", 6, (1, 1), code="snotling"))
+        self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+
     def test_a_better_weapon_wins_sooner(self):
         w = world(["..."], at=(0, 0))
         w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
@@ -699,7 +713,7 @@ class RetreatThreatTest(unittest.TestCase):
         return Policy(hostile=["npc"], on_hostile="fight")
 
     def params(self):
-        return {**PARAM_DEFAULTS, "fight_margin": 2.0}
+        return {**PARAM_DEFAULTS, "fight_margin": 3.0}  # past the knife's 2.5 against an unmeasured type (A81)
 
     def test_a_hostile_standing_two_cells_off_is_not_retreated_from(self):
         w = self.standing()

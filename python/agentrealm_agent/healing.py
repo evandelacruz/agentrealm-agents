@@ -24,10 +24,14 @@ POTION_CODES = frozenset({"small_potion", "large_potion"})
 
 
 def potion_count(w: WorldModel) -> int:
-    """Held and stowed potions (Boss preconditions, Shop reserve, A21, A38)."""
+    """Held, stowed and armed potions (Boss preconditions, Shop reserve, A21,
+    A38). The armed one counts when ``held`` leaves it out, so a drink that
+    moved a potion into the slot and drank nothing is not a potion gone (A76)."""
     codes = POTION_CODES
     n = sum(1 for h in w.held_supplies if h.code in codes)
     n += sum(1 for s in w.chest_supplies if s.code in codes)
+    if w.armed_id is not None and w.armed_code in codes and all(h.id != w.armed_id for h in w.held_supplies):
+        n += 1
     return n
 
 
@@ -84,29 +88,46 @@ HOLD_CODES = frozenset({"would_strand", "carry_capacity_full", "not_allowed_in_s
 #   full_health  health was full when it ran: drink again only once health
 #                is below what it was then ("full")
 #   no_change    armed, hurt, and nothing changed: hold until the drink's
-#                situation (``drink_situation``) changes
+#                situation (``drink_situation``) changes or health falls
+#                below what it was then
+#
+# A hold never outlasts a fall in health: a potion that did nothing at 8/10
+# is tried again at 7/10, so it is never unusable while health falls (A80's
+# run 5 died at 2/10 holding two potions written off).
 #
 # The drink always targets ``{"kind": "self"}`` (A24), so a wrong target,
 # free-play run 4's cause, is not one left to find.
 NOOP_CAUSES = ("not_armed", "full_health", "no_change")
 
 
-RefusalAction = Literal["arm", "forget", "walk", "wait", "hold", "full"]
+RefusalAction = Literal["arm", "forget", "walk", "wait", "hold"]
+NoopAction = Literal["arm", "hold", "full"]
 # (map, cell, armed code, held supply ids, max health, the food's cell for a Take)
 Situation = tuple[int | None, Pos | None, str | None, tuple[int, ...], int | None, Pos | None]
+# (map, every supply id we carry, max health)
+DrinkSituation = tuple[int | None, tuple[int, ...], int | None]
 
 
 @dataclass(frozen=True)
 class HealRefusal:
-    """The last refusal of one supply's ``Take`` or drink (A80), or a drink
-    that applied and drank nothing (``applied``, A76)."""
+    """The last refusal of one supply's ``Take`` or drink (A80)."""
 
-    code: str  # the rejection's code, or the no-op drink's cause
+    code: str
     action: RefusalAction
     tick: int
-    situation: Situation  # ``heal_situation`` when it was refused; ``drink_situation`` when ``applied``
-    applied: bool = False
-    health: int | None = None  # health when it was filed (a "full" drink waits for less)
+    situation: Situation  # ``heal_situation`` when it was refused
+
+
+@dataclass(frozen=True)
+class NoopDrink:
+    """A drink of one supply that applied and drank nothing (A76), filed
+    beside A80's refusals under the same key."""
+
+    cause: str  # one of ``NOOP_CAUSES``
+    action: NoopAction
+    tick: int
+    situation: DrinkSituation  # ``drink_situation`` when it was filed
+    health: int | None  # health when it was filed: a drink waits for less
 
 
 @dataclass
@@ -144,12 +165,13 @@ def carried_ids(w: WorldModel) -> tuple[int, ...]:
     return tuple(sorted(ids))
 
 
-def drink_situation(w: WorldModel) -> Situation:
+def drink_situation(w: WorldModel) -> DrinkSituation:
     """What a drink that drank nothing is held against (A76): the map and what
-    we carry, by id, and max health. Not the cell, the armed slot or health:
-    a walk, the re-arm after every drink, and regen change those without
-    changing what the drink does, and would resend it each time."""
-    return (w.map_id, None, None, carried_ids(w), w.max_health, None)
+    we carry, by id, and max health. Not the cell or the armed slot: a walk
+    and the re-arm after every drink change those without changing what the
+    drink does, and would resend it each time. Health is checked apart, by
+    ``can_try``: only a fall below the filed reading counts."""
+    return (w.map_id, carried_ids(w), w.max_health)
 
 
 def drank(events: list[dict], character_id: int | None, code: str | None) -> bool:
@@ -177,7 +199,7 @@ def noop_drink_cause(w: WorldModel, d: AppliedDrink) -> str | None:
     return "no_change"
 
 
-def noop_action(cause: str, *, armed_first: bool) -> RefusalAction:
+def noop_action(cause: str, *, armed_first: bool) -> NoopAction:
     """What to do about a drink that drank nothing (see ``NOOP_CAUSES``)."""
     if cause == "not_armed":
         return "hold" if armed_first else "arm"
@@ -216,7 +238,7 @@ def known_refusal(rejection: dict) -> bool:
     return code in REARM_CODES | GONE_CODES | REACH_CODES | HOLD_CODES or rejection.get("category") == "state"
 
 
-def note_refusal(m: Memory, kind: str, supply_id: int, refusal: HealRefusal) -> None:
+def note_refusal(m: Memory, kind: str, supply_id: int, refusal: HealRefusal | NoopDrink) -> None:
     """File a refusal of ``supply_id`` (``kind`` is "take" or "use"). Only the
     runner calls it, for a result the server sent, never a probe (A77)."""
     m.heal_refusals[(kind, supply_id)] = refusal
@@ -234,14 +256,13 @@ def can_try(m: Memory, w: WorldModel, kind: str, supply_id: int, target: Pos | N
     r = m.heal_refusals.get((kind, supply_id))
     if r is None or r.action in ("arm", "walk"):
         return True
+    if isinstance(r, NoopDrink):
+        fell = w.health is not None and r.health is not None and w.health < r.health
+        return fell or (r.action == "hold" and drink_situation(w) != r.situation)
     if r.action == "forget":
         return False
     if r.action == "wait":
         return w.tick >= r.tick + REFUSAL_WAIT_TICKS and w.alive
-    if r.action == "full":
-        return w.health is not None and r.health is not None and w.health < r.health
-    if r.applied:
-        return drink_situation(w) != r.situation
     return heal_situation(w, target) != r.situation
 
 
@@ -257,7 +278,7 @@ def must_stand_on(m: Memory, food: Entity) -> bool:
     """A ``Take`` of ``food`` was out of reach from where it was sent: walk onto
     its cell before taking it. Food that moved since is aimed at afresh."""
     r = m.heal_refusals.get(("take", food.id))
-    return r is not None and r.action == "walk" and r.situation[-1] == food.pos
+    return isinstance(r, HealRefusal) and r.action == "walk" and r.situation[-1] == food.pos
 
 
 def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
@@ -270,8 +291,14 @@ def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
 
 
 def carried_heal(w: WorldModel, m: Memory) -> InventorySupply | None:
-    """Carried food first, then a potion (PLAYABLE_AGENT_PLAN.md Heal row)."""
-    usable = [h for h in w.held_supplies if can_try(m, w, "use", h.id)]
+    """Carried food first, then a potion (PLAYABLE_AGENT_PLAN.md Heal row).
+    The armed supply counts too: the snapshot may leave it out of ``held``
+    (GAME_NOTES open questions), and a potion a drink left armed is still one
+    to drink (A76)."""
+    carried = list(w.held_supplies)
+    if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):
+        carried.append(InventorySupply(w.armed_id, w.armed_code))
+    usable = [h for h in carried if can_try(m, w, "use", h.id)]
     for codes in (FOOD_CODES, POTION_CODES):
         for h in usable:
             if h.code in codes:

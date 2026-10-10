@@ -52,6 +52,7 @@ from .healing import (
     POTION_CODES,
     AppliedDrink,
     HealRefusal,
+    NoopDrink,
     absorb_heal_pending,
     clear_refusal,
     code_in_hand,
@@ -1302,7 +1303,7 @@ class Runner:
             return
         action = noop_action(cause, armed_first=d.armed_first)
         note_refusal(
-            m, "use", d.supply_id, HealRefusal(cause, action, d.tick, drink_situation(w), applied=True, health=w.health)
+            m, "use", d.supply_id, NoopDrink(cause, action, d.tick, drink_situation(w), w.health)
         )
         self.log(
             "heal_noop",

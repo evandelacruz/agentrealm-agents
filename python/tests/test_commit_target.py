@@ -143,6 +143,61 @@ class NearerCandidateTest(unittest.TestCase):
         gather_outcome(w, m, Policy(on_hostile="ignore"))
         self.assertEqual(m.gather_target, ("grass", (16, 4)))
 
+    def test_a_frontier_with_no_path_is_let_go_after_miss_limit(self):
+        from unittest import mock
+
+        from agentrealm_agent import pathing
+        from agentrealm_agent.navigation.planner import CostGridParams
+        from agentrealm_agent.navigation.stuck import Leg
+
+        w, m = field(fog=True, at=(10, 4)), Memory()
+        far, near = (19, 4), (1, 4)
+        frontier = {far, near}
+        params = CostGridParams()
+        targets.commit(m, w, "explore", (MAP, far))
+        planner_path = [(9, 4), (8, 4), (7, 4), (6, 4), (5, 4), (4, 4), (3, 4), (2, 4), near]
+        real = pathing.nearest_target
+        cut_off = {"far": True}
+
+        def nearest(w_, cells, params_=None):
+            return None if cells == {far} and cut_off["far"] else real(w_, cells, params_)
+
+        def call():
+            return pathing.commit_explore(m, w, "explore", frontier, Leg(near), planner_path, params)
+
+        with mock.patch.object(pathing, "nearest_target", nearest), mock.patch.object(pathing, "no_way", return_value=False):
+            for _ in range(targets.MISS_LIMIT - 2):
+                self.assertEqual(call(), (None, Leg(far)), "kept: stuck detection escalates it")
+            cut_off["far"] = False  # a way opens: the misses start over
+            path, leg = call()
+            self.assertEqual((path[-1], leg), (far, Leg(far)))
+            self.assertEqual(m.targets["explore"].misses, 0)
+            cut_off["far"] = True
+            m.walks.clear()
+            for _ in range(targets.MISS_LIMIT - 1):
+                self.assertEqual(call(), (None, Leg(far)))
+            path, leg = call()  # the tenth miss in a row
+        self.assertEqual((path[-1], leg), (near, Leg(near)), "the planner's pick takes over")
+        self.assertEqual(m.targets["explore"].target, (MAP, near))
+
+    def test_a_frontier_proven_walled_in_is_let_go_at_once(self):
+        from unittest import mock
+
+        from agentrealm_agent import pathing
+        from agentrealm_agent.navigation.planner import CostGridParams
+        from agentrealm_agent.navigation.stuck import Leg
+
+        w, m = field(fog=True, at=(10, 4)), Memory()
+        far, near = (19, 4), (1, 4)
+        targets.commit(m, w, "explore", (MAP, far))
+        planner_path = [(x, 4) for x in range(9, 0, -1)]
+        real = pathing.nearest_target
+        with mock.patch.object(pathing, "nearest_target", lambda w_, c, p=None: None if c == {far} else real(w_, c, p)), mock.patch.object(
+            pathing, "no_way", return_value=True
+        ):
+            path, leg = pathing.commit_explore(m, w, "explore", {far, near}, Leg(near), planner_path, CostGridParams())
+        self.assertEqual((path[-1], leg), (near, Leg(near)))
+
     def test_a_commitment_lapses_once_nothing_pursues_it(self):
         w, m = field(), Memory()
         self.assertEqual(targets.hold(m, w, "g", lambda: (1, 1), lambda t: True), (1, 1))

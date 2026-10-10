@@ -31,7 +31,7 @@ from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.hostile_ground import danger, known_reach
 from agentrealm_agent.states.gather_safe import gather_ground, route_clear
 from agentrealm_agent.zone_discovery import apply_zone
-from agentrealm_agent.world import POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
+from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
 
 MAP = 1
 GUARD = ("npc", "fake_guard")
@@ -86,11 +86,20 @@ class SightingsTest(unittest.TestCase):
         self.assertEqual(s.home, POST)
         self.assertIn((POST, policy().hostile_range + 1), known_reach(w, policy()))
 
-    def test_a_post_with_the_guard_gone_from_it_is_forgotten(self):
+    def test_a_post_with_the_guard_gone_from_it_fades_fast_and_is_forgotten(self):
+        """Free-play run 9 (A82): a post in sight and empty halves every second looked at."""
         w = field()
         post_seen_then_left(w)
         w.pos = (17, 10)  # the post is in sight and nobody is on it
-        see(w, [], POST_STILL_TICKS + 2)
+        t = POST_STILL_TICKS + 1
+        for _ in range(EMPTY_POST_HALF_LIFE_TICKS):
+            t += 1
+            see(w, [], t)
+        self.assertEqual(known_reach(w, policy()), [], "half strength: it holds no ground")
+        self.assertIn(("npc", 9), w.sightings)
+        for _ in range(3 * EMPTY_POST_HALF_LIFE_TICKS):
+            t += 1
+            see(w, [], t)
         self.assertNotIn(("npc", 9), w.sightings)
 
     def test_a_dead_guard_is_forgotten(self):

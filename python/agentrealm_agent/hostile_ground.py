@@ -7,7 +7,9 @@ still holds ground: round its post, and round the cell it was last seen on
 per hostile.
 
 Gather and Detour keep their targets and routes off this ground
-(``states/gather_safe.py``). Retreat, Park and Heal pick a safe cell only
+(``states/gather_safe.py``). A remembered post fades (``Sighting.strength``,
+free-play run 9): once faded it holds no ground, only prices it, so Gather
+cuts its grass when no free grass is near (``Danger.price``). Retreat, Park and Heal pick a safe cell only
 outside it, and Flee runs toward the cell Retreat picked, so the two never
 pull opposite ways (``pathing.retreat_safe_goal``, free-play run 7).
 """
@@ -19,7 +21,7 @@ from typing import TYPE_CHECKING
 
 from .navigation.planner import HOSTILE_DANGER_RADIUS
 from .survival import hostile_reach, is_attacker, is_hostile, recently_attacked
-from .world import Entity, Pos, WorldModel
+from .world import POST_HOLD_STRENGTH, Entity, Pos, Sighting, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -32,6 +34,14 @@ GATHER_HOSTILE_RADIUS = HOSTILE_DANGER_RADIUS
 # that followed at 4–6 blocks without attacking stopped all cutting for 45 s
 # under the full radius (A63 run 3).
 GATHER_SHADOW_MARGIN = 1
+# A post's reach counts at most this far from it, however far its guard
+# chased us before a hit: a reach learned from a long chase walled off the
+# grass round town (free-play run 9, A82).
+POST_REACH_CAP = GATHER_HOSTILE_RADIUS
+# The most a faded post (below ``POST_HOLD_STRENGTH``) adds to a cell Gather
+# would work inside its ground, in steps of walk: it prices that grass, so
+# free grass this much further off is picked first, and never bars it.
+FADED_POST_STEPS = 6
 
 HostileKey = tuple[str, int]
 
@@ -51,42 +61,73 @@ def gather_bar(w: WorldModel, e: Entity, policy: Policy) -> int:
 @dataclass(frozen=True)
 class Danger:
     """What one decision knows of hostile ground, worked out once (``danger``):
-    ``held``, the ground remembered hostiles hold (``known_reach``), and
-    ``fight``, the op chose to fight for its ground, so remembered ground and
-    routes bar nothing."""
+    ``held``, the ground remembered hostiles hold (``known_reach``),
+    ``priced``, the ground of faded posts with the steps each adds to a cell
+    in it (``faded_reach``), and ``fight``, the op chose to fight for its
+    ground, so remembered ground and routes bar nothing."""
 
     held: tuple[tuple[Pos, int], ...] = ()
+    priced: tuple[tuple[Pos, int, int], ...] = ()
     fight: bool = False
+
+    def price(self, pos: Pos) -> int:
+        """Steps the faded posts whose ground covers ``pos`` add to it: the
+        dearest one's, so it stays at most ``FADED_POST_STEPS``."""
+        return max((steps for (cx, cy), r, steps in self.priced if chebyshev((cx, cy), pos) <= r), default=0)
 
 
 def danger(w: WorldModel, policy: Policy, fight: bool = False) -> Danger:
-    """This decision's ``Danger``: nothing held when ``fight``, else ``known_reach``."""
-    return Danger(fight=True) if fight else Danger(tuple(known_reach(w, policy)))
+    """This decision's ``Danger``: nothing held or priced when ``fight``, else
+    ``known_reach`` and ``faded_reach``."""
+    if fight:
+        return Danger(fight=True)
+    return Danger(tuple(known_reach(w, policy)), tuple(faded_reach(w, policy)))
 
 
-def held_by_hostile(w: WorldModel, policy: Policy) -> dict[HostileKey, list[tuple[Pos, int]]]:
+def held_by_hostile(
+    w: WorldModel, policy: Policy, faded: bool = False
+) -> dict[HostileKey, list[tuple[Pos, int]]]:
     """Ground each remembered hostile holds beyond where it stands in view:
     (centre, radius) zones per (kind, id) (free-play run 5).
 
     One that keeps a post (``Sighting.post``) holds ``policy.hostile_range``,
-    or the reach it hit us from when further, plus ``GATHER_SHADOW_MARGIN``,
-    round that post, in view or not: it goes back there. One out of view
-    also holds its ``gather_bar`` round the cell it was last seen on.
+    or the reach it hit us from when further (up to ``POST_REACH_CAP``), plus
+    ``GATHER_SHADOW_MARGIN``, round that post, in view or not: it goes back
+    there. One out of view also holds its ``gather_bar`` round the cell it
+    was last seen on. A post that has faded below ``POST_HOLD_STRENGTH``
+    (``Sighting.strength``, free-play run 9) holds none: ``faded`` lists
+    those posts' zones instead, which only price ground (``faded_reach``).
     """
     if w.map_id is None:
         return {}
     in_view = {(e.kind, e.id) for e in w.entities}
     out: dict[HostileKey, list[tuple[Pos, int]]] = {}
     for key, s in w.sightings.items():
-        if s.map_id != w.map_id or not is_hostile(w, policy, s.entity):
+        if s.map_id != w.map_id or not is_hostile(w, policy, s.entity) or _is_faded(s) != faded:
             continue
         zones = []
         if s.post:
-            zones.append((s.home, max(policy.hostile_range, s.reach) + GATHER_SHADOW_MARGIN))
+            zones.append((s.home, max(policy.hostile_range, min(s.reach, POST_REACH_CAP)) + GATHER_SHADOW_MARGIN))
         if key not in in_view:
             zones.append((s.entity.pos, gather_bar(w, s.entity, policy)))
         if zones:
             out[key] = zones
+    return out
+
+
+def _is_faded(s: Sighting) -> bool:
+    return s.post and s.strength < POST_HOLD_STRENGTH
+
+
+def faded_reach(w: WorldModel, policy: Policy) -> list[tuple[Pos, int, int]]:
+    """The zones of faded posts (``held_by_hostile`` with ``faded``), each
+    with the steps it adds to a cell in it: ``FADED_POST_STEPS`` scaled by
+    how strong the post still is against ``POST_HOLD_STRENGTH``, at least 1."""
+    out = []
+    for key, zones in held_by_hostile(w, policy, faded=True).items():
+        s = w.sightings[key]
+        steps = max(1, round(FADED_POST_STEPS * s.strength / POST_HOLD_STRENGTH))
+        out.extend((c, r, steps) for c, r in zones)
     return out
 
 

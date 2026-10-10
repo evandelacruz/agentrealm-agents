@@ -615,13 +615,29 @@ class SwingTest(unittest.TestCase):
         w.entities.append(Entity("npc", 6, (1, 1), code="snotling"))
         self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
 
-    def test_an_unmeasured_type_is_still_refused_by_default(self):
-        """Review on #172: the conservative guess for a type never measured is
-        not discounted by the hit chance, so the default profile still refuses it."""
+    def test_an_unmeasured_type_swings_at_the_base_attack_power(self):
+        """Free-play run 9 (A82): a type never measured is priced by the
+        published rules, attack power 2, not refused. The knife takes one
+        alone at full health, not a pair, and not one measured to hit hard."""
         w = world(["..."], at=(0, 0))
         w.health, w.lives, w.armed_code = 10, 10, "pocket_knife"
         w.entities = [Entity("npc", 5, (1, 0), code="gnawer")]
+        self.assertFalse(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        w.entities.append(Entity("npc", 6, (2, 0), code="gnawer"))
         self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        w.entities.pop()
+        w.threat.record(("npc", "gnawer"), 5)
+        self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+
+    def test_a_measured_hit_rate_moves_the_swing_off_the_roll(self):
+        """Counted hits and misses (A82) move a type's chance off the
+        published 65%, which counts as ``PRIOR_SWINGS`` swings."""
+        from agentrealm_agent.threat import PRIOR_SWINGS, ThreatTable
+        t = ThreatTable()
+        t.record(("npc", "gnawer"), 2)
+        self.assertAlmostEqual(survival.hostile_swing_damage(2, t, ("npc", "gnawer")), 0.65 * 2)
+        t.misses[("npc", "gnawer")] = PRIOR_SWINGS
+        self.assertAlmostEqual(survival.hostile_swing_damage(2, t, ("npc", "gnawer")), 0.325 * 2)
 
     def test_a_better_weapon_wins_sooner(self):
         w = world(["..."], at=(0, 0))

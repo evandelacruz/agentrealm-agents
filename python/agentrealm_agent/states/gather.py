@@ -641,6 +641,7 @@ def _replan_gather(
     """
     d = d or danger(w, policy)
     params = grid_params(policy, blocked, costly if d.fight else costly | reach_cells(w, policy, d))
+    params.priced = {p: d.price(p) for p in preferred if d.price(p)}
     here = w.pos
     assert here is not None
 
@@ -676,7 +677,7 @@ def _replan_gather(
             m.path, m.goal, m.gather_target = path, GOAL, ("pile", pile.pos)
             return False
 
-    found = _nearest_clear(w, set(preferred), params, blocked, clear)
+    found = _nearest_clear(w, set(preferred), params, blocked, clear, d)
     if found:
         m.path, m.goal, m.gather_target = found[1], GOAL, ("grass", found[0])
         return False
@@ -692,15 +693,21 @@ def _pile_in(pos: Pos, region: tuple[int, int] | None) -> bool:
 
 
 def _nearest_clear(
-    w: WorldModel, cells: set[Pos], params, blocked: set[Pos], clear: Callable[[list[Pos]], bool]
+    w: WorldModel,
+    cells: set[Pos],
+    params,
+    blocked: set[Pos],
+    clear: Callable[[list[Pos]], bool],
+    d: Danger | None = None,
 ) -> tuple[Pos, list[Pos]] | None:
     """The nearest of ``cells`` a path reaches with a first step open and a
-    ``clear`` route, and that path; up to ``ROUTE_TRIES`` searches."""
+    ``clear`` route, and that path; up to ``ROUTE_TRIES`` searches. A cell
+    in a faded post's ground counts ``d.price`` steps further (A82)."""
     here = w.pos
     assert here is not None
     cells = set(cells)
     for _ in range(ROUTE_TRIES):
-        found = nearest_target(w, _nearest(here, cells), params) if cells else None
+        found = nearest_target(w, _nearest(here, cells, d), params) if cells else None
         if not found or not next_step(w, blocked, found[1]):
             return None
         if clear(found[1]):
@@ -739,6 +746,8 @@ def _plan_out(
             return
 
 
-def _nearest(here: Pos, cells: Iterable[Pos]) -> set[Pos]:
-    """The ``GATHER_CANDIDATES`` cells closest to ``here`` (ties to the smaller cell)."""
-    return set(sorted(cells, key=lambda p: (chebyshev(p, here), p))[:GATHER_CANDIDATES])
+def _nearest(here: Pos, cells: Iterable[Pos], d: Danger | None = None) -> set[Pos]:
+    """The ``GATHER_CANDIDATES`` cells closest to ``here`` (ties to the smaller
+    cell), a cell in a faded post's ground ``d.price`` steps further."""
+    price = d.price if d is not None else (lambda p: 0)
+    return set(sorted(cells, key=lambda p: (chebyshev(p, here) + price(p), p))[:GATHER_CANDIDATES])

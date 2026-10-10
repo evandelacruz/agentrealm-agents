@@ -126,26 +126,33 @@ class RefugeTest(unittest.TestCase):
 
     def test_flee_and_retreat_pull_the_same_way_as_health_crosses_the_floor(self):
         """The run's pattern: Flee, then Retreat once hit low, then Flee again
-        once out of range. Every step opens distance from the hostile."""
+        once out of range, with the hostile a step behind all the way. Every
+        step opens distance from it and closes on the refuge, until the
+        character stands on it (review on #168: a pursuer a step behind must
+        not cover the refuge)."""
         w, c = world(health=10), ctx()
         e = gristle()
         w.entities = [e]
         states = []
-        for health in (10, 2, 2, 10):
-            w.health = health
-            if health == 2:
+        for i in range(20):
+            if w.pos == FAR_SAFE:
+                break
+            w.health = (10, 2, 2, 10)[i % 4]
+            if w.health == 2:
                 hit_by(w, e)
             c.memory.held_queue = None
             out = dispatch(w, c)
             states.append(out.state)
+            self.assertTrue(out.intents, (out.state, out.reason))
             nxt = step(out)
             self.assertGreaterEqual(chebyshev(nxt, e.pos), chebyshev(w.pos, e.pos), (out.state, out.reason))
             self.assertLess(chebyshev(nxt, FAR_SAFE), chebyshev(w.pos, FAR_SAFE), (out.state, out.reason))
-            w.pos = w.terrain_center = nxt
+            e.pos, w.pos = w.pos, nxt  # it keeps pace, a step behind
+            w.terrain_center = nxt
             if c.memory.path[:1] == [nxt]:
                 del c.memory.path[0]  # walked, as the runner trims it
             w.tick += 5
-            e.pos = (e.pos[0] + 1, e.pos[1])  # it follows
+        self.assertEqual(w.pos, FAR_SAFE, states)
         self.assertIn("Flee", states)
         self.assertIn("Retreat", states)
 
@@ -336,6 +343,15 @@ class GatherWalksTest(unittest.TestCase):
         post_ground = {(23 + dx, 1 + dy) for dx in range(-3, 4) for dy in range(-3, 4)}
         self.assertNotIn(m.gather_target[1], post_ground)
         self.assertFalse(set(m.path) & post_ground, m.path)
+
+    def test_moving_off_a_shadow_takes_the_post_ground_when_the_op_fights(self):
+        w, m = field(at=(12, 10)), Memory()
+        guard_post_left_behind(w, post=(23, 1), at=(12, 10))
+        shadow = Entity("npc", 3, (10, 10), HOSTILE[1])
+        w.entities = [shadow]
+        op = {"op": "gather_gems", "count": 99, "fight": True}
+        gather_outcome(w, m, GATHER_POLICY, op=op, shadow=shadow)
+        self.assertEqual(m.gather_target, ("off", (22, 0)), "the nearest far cell, post or not")
 
     def test_the_walk_to_an_unseen_region_takes_the_fight_when_the_op_says(self):
         w, m = field(), Memory()

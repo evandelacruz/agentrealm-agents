@@ -200,8 +200,8 @@ def _no_refuge(w: WorldModel, ctx: PlayContext, state: str, blocked: set[Pos]) -
     (``pathing.flee_step``), as Flee would; nothing when none is near (Park
     with nothing threatening) or no step opens distance (cornered).
 
-    A safe cell beside a pursuer is not taken instead: walking back toward
-    it is the pacing free-play run 7 died of (6 hits in 19 s)."""
+    A safe cell a pursuer gets to first is not taken instead: walking back
+    toward it is the pacing free-play run 7 died of (6 hits in 19 s)."""
     m = ctx.memory
     hostiles = combat_group(w, ctx.policy) + [e for e in w.entities if is_attacker(w, e)]
     step = flee_step(w, hostiles, blocked) if hostiles else None

@@ -592,14 +592,6 @@ class SwingTest(unittest.TestCase):
         self.assertAlmostEqual(survival.swing_damage(None), survival.swing_damage("pocket_knife"))
         self.assertAlmostEqual(survival.swing_damage("small_potion"), survival.swing_damage("pocket_knife"))
 
-    def test_the_knife_beats_one_weak_measured_hostile_at_full_health(self):
-        """At attack power 0 and 1 damage a swing, this was a loss at the default margin."""
-        w = world(["..."], at=(0, 0))
-        w.health, w.lives, w.armed_code = 10, 10, "pocket_knife"
-        w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
-        w.threat.record(("npc", "snotling"), 1)
-        self.assertFalse(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
-
     def test_every_weapon_has_a_damage_and_nothing_else_does(self):
         """Review on #172: one list of weapons, so none swings as the knife unseen."""
         from agentrealm_agent.break_memory import WEAPON_DAMAGE, WEAPONS
@@ -614,6 +606,7 @@ class SwingTest(unittest.TestCase):
         self.assertAlmostEqual(survival.hostile_swing_damage(1), 0.60 * 1.0)
 
     def test_the_knife_takes_one_weak_hostile_but_not_a_pair(self):
+        """At attack power 0 and 1 damage a swing, even one was a loss at the default margin."""
         w = world([".."], at=(0, 0))
         w.health, w.lives, w.armed_code = 10, 10, "pocket_knife"
         w.threat.record(("npc", "snotling"), 1)

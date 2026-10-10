@@ -543,8 +543,6 @@ class DerivedThresholdTest(unittest.TestCase):
         self.assertEqual(gem_yield.poor_regions(k, MAP), {(0, 0)}, "15% is under half of what this map pays")
 
 
-
-
 class StoreVersionTest(unittest.TestCase):
     """Review on #172: totals saved before A81 counted bush cuts at the old
     rates; read now they would mark ground barren that Gather never revisits."""

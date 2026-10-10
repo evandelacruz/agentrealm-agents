@@ -60,6 +60,15 @@ Once Evan has turned Cursor's review automation off, the first can no longer fir
 
 **Record it.** The report's first line is the mode: `Mode: Cursor` or `Mode: Claude since <UTC time>: <evidence>`, with `(forced by Evan)` when it is. If this pass runs from a Routine, keep the same line in its prompt with `update_trigger`. Each pass reads the mode from Evan's latest word in this session, else that prompt line, else the last report in this session. With none of them, it is Cursor mode.
 
+## Models
+
+Evan picks the model for each role. Model names never go in this repo (no commits, files, or pull requests), so they live in Evan's latest word in this session, else this pass's Routine prompt. They are not read from reports. Two lines matter:
+
+- `Implementer model: <model>`: passed to every session the Claude implementer fleet spawns.
+- `Fixer model: <model>`: passed to every session the fixer fleet spawns, whatever it fixes, polish included.
+
+When Evan names or changes one, and this pass runs from a Routine, keep the line in its prompt with `update_trigger`. With no line on record, pass no model: the session inherits this one's. The supervisor runs on this session's own model, and the reviewers on the repo variables `CLAUDE_REVIEW_MODEL` and `CLAUDE_REVIEW2_MODEL`; neither is set here.
+
 ## One pass
 
 Do the steps in order. Each one reads fresh state; never reuse a count from an earlier step.
@@ -74,6 +83,7 @@ List open pull requests. A pull request is **mergeable** when all of these hold 
 - The [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Merge rule** holds: both of the pair in `.github/reviewers` on `main` approved, no trusted reviewer rejected, no review in flight. Beyond that, the merge goes through or GitHub refuses it.
 - It changes nothing under `.github/workflows/` or `.github/actions/`, and does not change `.github/reviewers` (see **Never**).
 - No merge conflict: `mergeable_state` is not `"dirty"`. If it reads `"unknown"`, read again; if it still does, it is not mergeable this pass.
+- Has the `polish-done` label: it had its one polish pass ([agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **Polish**). An approved pull request without it is the fixer fleet's polish row, not mergeable yet.
 - No `conductor:working` label.
 - Not draft.
 
@@ -162,7 +172,7 @@ A switch of mode on the evidence in **Who implements** is not a stop. Report it 
 ## Never
 
 - Merge anything that is not mergeable by step 1, or with any merge method but squash.
-- Remove or add labels yourself. `conductor:working` belongs to the writers. The one exception is the lock the fixer fleet claims and releases under its own rules; never remove one you did not claim this pass.
+- Remove or add labels yourself. `conductor:working` belongs to the writers, and `polish-done` to the fixer that gave the polish pass. The one exception is the lock the fixer fleet claims and releases under its own rules; never remove one you did not claim this pass.
 - Review, approve, comment on, push to, or resolve threads on a pull request. Re-running a Claude Review run after a flip (**Who reviews**) is the one write you make to a pull request's checks. Fixers resolve the threads they fix; nobody else does.
 - Edit `.github/reviewers` or Cursor's review automation. Evan flips them (**Who reviews**).
 - Commit or push to `main`, or brief any agent to. If something seems to need a direct push to `main`, stop and tell Evan.

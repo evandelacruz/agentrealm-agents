@@ -19,6 +19,7 @@ export {
   type ReviewerPair,
   type Verdict,
 } from "./gh.js";
+export { awaitingPolish, mergeReady, type PolishFields } from "./polish.js";
 export { lockHeld, lockNote, pullRequestNumber } from "./lock.js";
 export { spawnImplementer, type SpawnOptions } from "./spawn.js";
 export { followUp, type FollowUpOptions } from "./follow-up.js";
@@ -32,6 +33,7 @@ export {
   DEFAULT_MODEL,
   DEFAULT_REPO_URL,
   DEFAULT_STARTING_REF,
+  POLISH_DONE_LABEL,
   WORKING_LABEL,
   requireApiKey,
 } from "./config.js";

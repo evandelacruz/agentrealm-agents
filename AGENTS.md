@@ -53,9 +53,9 @@ Decided. Do not cross without flagging prominently.
 
 ## Writer lock
 
-`conductor:working` is the writer lock for **implementers and fixers** (Cursor or Claude Code). Reviewers never take it.
+`conductor:working` is the writer lock for **implementers and fixers** (Cursor or Claude Code). Reviewers never take it. `polish-done` marks an approved pull request that has had its one polish pass from a Claude fixer ([`agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) **Polish**); the supervisor merges only pull requests that carry it. Only Claude fixers set it.
 
-- Claim it when you start writing. Release it when you finish (after the push, PR ready) or if the spawn that claimed it failed before the agent started. One exception: a fixer that declines every finding and has nothing to push keeps it and hands the PR to Evan ([`agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) **Declined everything**).
+- Claim it when you start writing. Release it when you finish (after the push, PR ready) or if the spawn that claimed it failed before the agent started. A polish pass releases it and adds `polish-done` in the same label update, even with nothing to push. One exception: a fixer that declines every finding and has nothing to push keeps it and hands the PR to Evan ([`agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) **Declined everything**).
 - The claim is check-then-add, not atomic. Two writers that start at the same moment can both claim it.
 - Skip a PR that already has the label. Do not add a second writer. Do not delete a lock you did not claim in this session.
 - Cursor `status` listing an implementer as `finished` means that worker should already have released. If the label is still on the PR, another worker may hold it (Claude Code fixers use the same label and do not appear in that list) or the holder crashed. Leave the label and tell Evan. Do not treat "Cursor finished" as permission to clear it.
@@ -65,8 +65,8 @@ Decided. Do not cross without flagging prominently.
 | Role | Runs in | Skill |
 |---|---|---|
 | Supervisor: merges what is ready, dispatches fixers or new work (Cursor first, Claude while Cursor is out of credits) | Claude Code | [`.claude/skills/agentrealm-agents-supervisor`](.claude/skills/agentrealm-agents-supervisor/SKILL.md) |
-| Fixer fleet: one Claude session per blocked PR | Claude Code | [`.claude/skills/agentrealm-agents-fixer-fleet`](.claude/skills/agentrealm-agents-fixer-fleet/SKILL.md) |
-| Fixer: one pass on one blocked PR | Claude Code | [`.claude/skills/agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) |
+| Fixer fleet: one Claude session per blocked PR, and one per approved PR due its polish pass | Claude Code | [`.claude/skills/agentrealm-agents-fixer-fleet`](.claude/skills/agentrealm-agents-fixer-fleet/SKILL.md) |
+| Fixer: one pass on one blocked PR, or the one polish pass on an approved PR | Claude Code | [`.claude/skills/agentrealm-agents-fixer`](.claude/skills/agentrealm-agents-fixer/SKILL.md) |
 | Implementer fleet: one Claude session per ready backlog slice, while Cursor is out of credits | Claude Code | [`.claude/skills/agentrealm-agents-implementer-fleet`](.claude/skills/agentrealm-agents-implementer-fleet/SKILL.md) |
 | Reviewers: the Opus Review Agent on every ready PR head, and the Sonnet bot when [`.github/reviewers`](.github/reviewers) says `second: sonnet` | GitHub Actions | [`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml) |
 | Conductor: plans, spawns implementers, watches PRs | Cursor | [`.cursor/skills/agentrealm-agents-conductor`](.cursor/skills/agentrealm-agents-conductor/SKILL.md) |

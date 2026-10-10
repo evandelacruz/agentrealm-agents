@@ -23,7 +23,8 @@ npm --prefix tools/conductor install
 `CURSOR_API_KEY`.
 
 Open PR summaries include merge-conflict state (`merge:conflict` / `merge:ok`)
-and the writer lock (`lock:working` / `lock:none`). Review verdicts come from
+the writer lock (`lock:working` / `lock:none`), and the polish label
+(`polish:done` / `polish:due`). Review verdicts come from
 submitted reviews on the **current head** only, never from labels, per the
 fixer skill's **The review verdict**, each reviewer by their latest
 `APPROVED` / `CHANGES_REQUESTED` review on the head. Only trusted reviews
@@ -37,8 +38,9 @@ bot) are `APPROVED`; anything else is `review:none`. `COMMENTED` reviews do
 not count. If `.github/reviewers` is missing or malformed, `prs` warns and
 takes `cursor` as the second reviewer, as the workflow does, with the bot
 logins from `DEFAULT_REVIEWER_PAIR` in `src/config.ts`, a copy of the file
-that must be kept in sync with it. `conductor:working` is the only label
-with meaning.
+that must be kept in sync with it. Two labels have meaning:
+`conductor:working`, the writer lock, and `polish-done`, which a Claude fixer
+adds after an approved PR's one polish pass.
 
 Reviewer checks are every job of the Claude Review workflow and
 `Cursor Automation: Saims Ref Agent Auto Code Review` (override the Cursor
@@ -53,9 +55,12 @@ needs-fix. Check the threads before following up on one.
 
 "Needs fixer follow-up" lists PRs with a merge conflict, red CI, or a
 changes-requested verdict on the head. Open review threads never put a PR
-there: `unresolved:` is information only. "Ready for Evan to merge" lists
-ready PRs that are approved, green, and conflict-free, open threads or not.
-A PR whose reviewer check is still running is in neither list.
+there: `unresolved:` is information only. "Awaiting the Claude polish pass"
+lists approved, conflict-free PRs without red CI that do not yet carry
+`polish-done`. "Ready to merge" lists approved, green, conflict-free PRs that
+carry `polish-done`, open threads or not. A PR whose reviewer check is still
+running is in none of the lists, and a PR holding `conductor:working` is in
+neither of the last two. The filters live in `src/polish.ts`.
 
 `spawn --pr` and `follow-up` add `conductor:working` before the agent starts
 and refuse a PR that already has `conductor:working`. Implementers and
@@ -117,7 +122,8 @@ Prompt text may be passed as trailing args or on stdin.
 Invoke `/agentrealm-agents-conductor` (or ask for a conductor pass). The skill
 lives at `.cursor/skills/agentrealm-agents-conductor/`.
 
-Each pass watches open PRs for blocking review comments and also re-reads
-**approved but unmerged** PRs for nits and documentation asks worth doing
-before Evan merges. `prs` groups PRs by which of those two paths they need;
-the skill holds the triage rules and the "never merge" policy.
+Each pass watches open PRs for blocking review comments. It never polishes:
+every approved PR gets one polish pass from a Claude fixer, which ends by
+adding the `polish-done` label. `prs` lists approved PRs still awaiting that
+pass, and those ready to merge (approved, green, `polish-done`). The skill
+holds the triage rules and the "never merge" policy.

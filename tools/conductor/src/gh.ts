@@ -8,6 +8,7 @@ import {
   WORKING_LABEL,
 } from "./config.js";
 import { lockHeld, pullRequestNumber } from "./lock.js";
+import { awaitingPolish, mergeReady, type PolishFields } from "./polish.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -252,29 +253,24 @@ export function headVerdict(reviews: ReviewNode[], headSha: string, pair: Review
   return null;
 }
 
-type TriageFields = Pick<
-  PrCommentSummary,
-  "isDraft" | "verdict" | "hasMergeConflict" | "checksOk" | "reviewInProgress"
->;
-
 /**
  * Sort open PRs for `prs`, per conductor skill step 8. Only a merge conflict,
  * red CI, or a reviewer's changes-requested verdict on the head needs a
  * fixer. Open review threads never do. A PR that needs a fixer appears only
- * there, never also as merge-ready. PRs whose review check is still running
- * appear nowhere.
+ * there. An approved PR awaits its one Claude polish pass until it carries
+ * `polish-done`, and only then is merge-ready (see `polish.ts`). PRs whose
+ * review check is still running appear nowhere.
  */
-export function triagePrs<T extends TriageFields>(
+export function triagePrs<T extends PolishFields>(
   summaries: T[],
-): { needsFix: T[]; mergeReady: T[] } {
+): { needsFix: T[]; awaitingPolish: T[]; mergeReady: T[] } {
   const settled = summaries.filter((s) => !s.reviewInProgress);
   const blocked = (s: T) =>
     s.hasMergeConflict || s.checksOk === false || s.verdict === "CHANGES_REQUESTED";
   return {
     needsFix: settled.filter(blocked),
-    mergeReady: settled.filter(
-      (s) => !blocked(s) && !s.isDraft && s.verdict === "APPROVED" && s.checksOk === true,
-    ),
+    awaitingPolish: settled.filter(awaitingPolish),
+    mergeReady: settled.filter(mergeReady),
   };
 }
 

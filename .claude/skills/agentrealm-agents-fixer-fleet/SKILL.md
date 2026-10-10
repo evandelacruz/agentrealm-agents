@@ -2,8 +2,8 @@
 name: agentrealm-agents-fixer-fleet
 description: >
   Spawn one Claude session per blocked agentrealm-agents pull request: a review
-  requested changes, the branch conflicts with main, or CI is red. Use when
-  Evan asks to send fixers at every PR, fan out fixers, or run a fixer
+  requested changes, the branch conflicts with main, or CI is red; and one
+  per approved pull request still due its polish pass. Use when Evan asks to send fixers at every PR, fan out fixers, or run a fixer
   fleet. Claims conductor:working per PR before spawning. Does not fix,
   review, or merge anything itself.
 ---
@@ -18,7 +18,7 @@ For a single pull request, use [agentrealm-agents-fixer](../agentrealm-agents-fi
 
 ## What counts as blocked
 
-`n` is not a number Evan picks. It is however many open pull requests are blocked. Honor a cap if he gives one, longest-blocked first.
+`n` is not a number Evan picks. It is however many open pull requests the table below marks **spawn**: blocked, or approved and due their one polish pass. Honor a cap if he gives one, longest-waiting first.
 
 First row that matches decides it:
 
@@ -30,11 +30,12 @@ First row that matches decides it:
 | a CI check run (not a reviewer's check) concluded `failure` or `timed_out` | **spawn**: red CI |
 | the review verdict is changes requested, and the newest pull request comment whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` starts with `Handed to Evan:` and is newer than the latest rejecting review on the current head | **skip**: a fixer declined every finding and handed it to Evan, even if the label is gone. Evan dismisses the rejection, or comments naming the findings to fix; that later comment ends the skip, and the brief carries it. |
 | the review verdict is changes requested | **spawn**: review |
-| anything else | **skip**: nothing blocks it |
+| the review verdict is approved, no red CI check, not `"dirty"`, and no `polish-done` label | **spawn**: polish |
+| anything else | **skip**: nothing blocks it, and it had its polish pass or is not approved yet |
 
-Open review threads are never a blocker on their own. A pull request no trusted reviewer rejected is not blocked, however many threads are open, and a rejection from anyone else is no reason to spawn.
+Open review threads are never a blocker on their own. A pull request no trusted reviewer rejected is not blocked, however many threads are open, and a rejection from anyone else is no reason to spawn. An approved one gets exactly one polish session, which reads its threads; `polish-done` means it had it.
 
-The three spawn rows are not exclusive. A pull request that conflicts **and** is red **and** was rejected is one session whose brief carries all three.
+The conflict, red CI and review rows are not exclusive. A pull request that conflicts **and** is red **and** was rejected is one session whose brief carries all three.
 
 Traps that make you spawn at nothing:
 
@@ -74,16 +75,19 @@ create_session(
   outcome_branch="<head ref>",
   title="fixer: PR #<n>: <short title>",
   tags=["agentrealm-agents-fixer-fleet", "pr-<n>"],
+  model="<fixer model>",
   prompt="<brief>")
 ```
 
 Both `source_revision` and `outcome_branch` are the pull request's **own head ref**. That puts the session on the branch the pull request tracks and pushes it back there, which is what stops a fixer opening a second pull request.
 
+`model` is the fixer model from the supervisor's **Models** ([agentrealm-agents-supervisor](../agentrealm-agents-supervisor/SKILL.md)), for every kind of fix, polish included. With none on record, omit it and the session inherits this one's.
+
 Omit `environment_id` so the session inherits this one's. Never pass `permission_mode: "plan"`: it blocks on an approval nobody is waiting to give.
 
 One session per pull request, never two. Never spawn for one you skipped.
 
-**4. Report** to Evan: which pull requests got a fixer and what each was blocked on, the session ID for each, and every skip with its reason. Check on them later with `list_sessions(tags=["agentrealm-agents-fixer-fleet"])`.
+**4. Report** to Evan: which pull requests got a fixer and what each was blocked on (or polish), the session ID for each, and every skip with its reason. Check on them later with `list_sessions(tags=["agentrealm-agents-fixer-fleet"])`.
 
 ## The brief
 
@@ -100,9 +104,10 @@ One pass: apply the fixes and push. Write nothing to GitHub except the
 label, a reply naming the fixing commit on each thread your push fixed
 (then resolve that thread), and a reply on each thread you deliberately
 leave unfixed (leave it open). No reviews, no approvals, no merging, no
-re-running CI. The one exception: if you decline every finding and have
+re-running CI. The exceptions: if you decline every finding and have
 nothing to push, follow the skill's Declined everything and post its one
-Handed to Evan: comment.
+Handed to Evan: comment; a polish pass adds polish-done and may post one
+comment listing the larger items it reported.
 
 The conductor:working label is already claimed for you. Do not claim it
 again. After your push, remove only that label, keeping every other one.
@@ -111,7 +116,7 @@ After Declined everything, keep it.
 You are on <head ref>, the PR's own branch. Push there with
 git push -u origin <head ref>. Do not force-push. Do not open a second PR.
 
-Blocking this PR:
+Blocking this PR (or, for an approved one, its polish pass):
 
 [merge conflict] Merge origin/main in and resolve. Never rebase or
 force-push. Regenerate tools/conductor/package-lock.json with npm; never
@@ -124,6 +129,13 @@ Reproduce locally, fix, confirm. Never skip or disable a test.
 [review] <trusted reviewer> requested changes on the head. Its threads:
 - <path>:<line>: <what it asks, one line>
 - …
+
+[polish] Approved and due its one polish pass. Follow the skill's Polish
+section: decide which review comments and threads are worth doing now, fix
+those, make every doc that describes this change agree with it, and post
+the larger items as one PR comment. Finish by removing conductor:working
+and adding polish-done in the same label update, even with nothing to
+push. A polish pass never hands the PR to Evan.
 
 [Evan's call] A fixer handed this PR to Evan, and Evan answered:
 <his comment, quoted>. Fix the findings it names.
@@ -153,5 +165,6 @@ Give the threads and the failing check in the brief rather than sending the sess
 
 - Fixing anything yourself. You spawn; the sessions fix.
 - Merging, reviewing, approving, resolving threads, commenting on a pull request. The fixer sessions resolve the threads they fix; you do not.
-- Backlog work, and pull requests that nothing blocks. An approved one merges as-is.
+- Backlog work.
+- A second polish pass. `polish-done` means the pull request had its one pass.
 - Spawning for a locked or draft pull request.

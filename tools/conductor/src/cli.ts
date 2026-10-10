@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { flagBool, flagString, parseArgs, readPrompt } from "./args.js";
-import { DEFAULT_ENV_NAME, DEFAULT_MODEL, WORKING_LABEL, requireApiKey } from "./config.js";
+import { DEFAULT_ENV_NAME, DEFAULT_MODEL, POLISH_DONE_LABEL, WORKING_LABEL, requireApiKey } from "./config.js";
 import { followUp } from "./follow-up.js";
 import { summarizeOpenPrs, triagePrs } from "./gh.js";
 import { spawnImplementer } from "./spawn.js";
@@ -141,6 +141,10 @@ function lockLabel(labels: string[]): string {
   return "lock:none";
 }
 
+function polishLabel(labels: string[]): string {
+  return labels.includes(POLISH_DONE_LABEL) ? "polish:done" : "polish:due";
+}
+
 async function cmdPrs(): Promise<void> {
   const summaries = await summarizeOpenPrs();
   if (summaries.length === 0) {
@@ -159,6 +163,7 @@ async function cmdPrs(): Promise<void> {
         draft,
         review,
         lockLabel(s.labels),
+        polishLabel(s.labels),
         checks,
         s.reviewInProgress ? "review-check:running" : "review-check:idle",
         s.hasMergeConflict ? "merge:conflict" : "merge:ok",
@@ -171,7 +176,7 @@ async function cmdPrs(): Promise<void> {
     );
   }
 
-  const { needsFix, mergeReady } = triagePrs(summaries);
+  const { needsFix, awaitingPolish, mergeReady } = triagePrs(summaries);
   if (needsFix.length > 0) {
     console.log("\nNeeds fixer follow-up:");
     for (const s of needsFix) {
@@ -179,8 +184,17 @@ async function cmdPrs(): Promise<void> {
     }
   }
 
+  // Every approved PR gets one polish pass from a Claude fixer, which ends by
+  // adding polish-done. The conductor never polishes; it only lists them.
+  if (awaitingPolish.length > 0) {
+    console.log("\nApproved, awaiting the Claude polish pass (not a Cursor follow-up):");
+    for (const s of awaitingPolish) {
+      console.log(`  #${s.number} (${s.unresolvedReviewThreads} open) ${s.url}`);
+    }
+  }
+
   if (mergeReady.length > 0) {
-    console.log("\nReady for Evan to merge (conductor never merges):");
+    console.log("\nReady to merge: approved, green, polished (conductor never merges):");
     for (const s of mergeReady) {
       console.log(`  #${s.number} ${s.title} ${s.url}`);
     }

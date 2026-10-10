@@ -119,10 +119,12 @@ def refusal_action(rejection: dict, *, verb: str, armed_first: bool, on_target: 
         return "hold" if armed_first else "arm"
     if code in REACH_CODES and verb == "Take":
         return "hold" if on_target else "walk"
-    if rejection.get("category") == "state" or (rejection.get("retryability") == "transient" and code not in HOLD_CODES):
-        return "wait"
+    # Retryability first, as the API says: ``character_ended`` and a closed
+    # world's ``world_not_open`` are ``state`` codes that are ``permanent``.
     if rejection.get("retryability") == "permanent":
         return "forget"
+    if rejection.get("retryability") == "transient" or rejection.get("category") == "state":
+        return "wait"
     return "hold"
 
 

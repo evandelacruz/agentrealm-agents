@@ -285,6 +285,7 @@ class RefusalActionTest(unittest.TestCase):
         self.assertEqual(self.action("conflict_lost", category="occupied", retryability="transient"), "wait")
         self.assertEqual(self.action("would_strand", verb="Arm", category="invalid", retryability="precondition"), "hold")
         self.assertEqual(self.action("not_transferable", retryability="permanent"), "forget")
+        self.assertEqual(self.action("character_ended", category="state", retryability="permanent"), "forget")
         self.assertEqual(self.action("brand_new_code"), "hold")
 
 

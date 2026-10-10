@@ -44,7 +44,9 @@ class CostGridParams:
     costly: set[Pos] = field(default_factory=set)  # passable at COSTLY_STEP extra (escape off hazards)
     break_nominated: set[Pos] = field(default_factory=set)  # breakable cells considered for opening
     break_costs: dict[Pos, int] = field(default_factory=dict)  # passable at break time + 1 (+ tool price)
-    hostile_kinds: frozenset[str] = frozenset({"npc"})
+    # Which entities add danger: ``pathing.grid_params`` passes the agent's
+    # one hostility test (``survival.is_hostile``), so townsfolk repel no path.
+    is_hostile: Callable[[WorldModel, Entity], bool] = lambda w, e: e.kind == "npc"
     allow_goal_door: bool = False
     fog_cost: int = FOG  # A15 step 1 raises this to prefer known ground
     # Danger peak per hostile (kind, id), in place of HOSTILE_DANGER: Retreat
@@ -143,7 +145,7 @@ class _Grid:
         else:
             self.occupied = w.occupied()
             self.for_sale = w.for_sale()
-            self.hostiles: list[Entity] = [e for e in w.entities if e.kind in params.hostile_kinds]
+            self.hostiles: list[Entity] = [e for e in w.entities if params.is_hostile(w, e)]
             self._danger: dict[Pos, int] | None = None  # built on first use (``danger_map``)
             # Each non-goal cell's cost, worked out once: a search prices a
             # cell from every neighbour it expands (A23 Run 2). A grid lives
@@ -503,7 +505,7 @@ def path_cost(w: WorldModel, path: list[Pos], goal: Pos, params: CostGridParams 
 def hostile_cost(w: WorldModel, path: list[Pos], params: CostGridParams | None = None) -> int:
     """The hostiles' share of what walking ``path`` costs (``_Grid.danger``)."""
     params = params or CostGridParams()
-    hostiles = [e for e in w.entities if e.kind in params.hostile_kinds]
+    hostiles = [e for e in w.entities if params.is_hostile(w, e)]
     shares = danger_map(hostiles, params.danger_peaks)
     return sum(shares.get(p, 0) for p in path)
 

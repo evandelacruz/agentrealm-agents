@@ -35,9 +35,10 @@ def gather_bar(w: WorldModel, e: Entity) -> int:
 
 
 def hostiles_near(w: WorldModel, pos: Pos, policy: Policy, radius: int | None = None) -> bool:
-    """A hostile in view within ``radius`` of ``pos`` (``policy.hostile_range`` by default)."""
+    """A threat (``is_hostile``) in view within ``radius`` of ``pos``
+    (``policy.hostile_range`` by default). Townsfolk are not one."""
     reach = policy.hostile_range if radius is None else radius
-    return any(e.kind in policy.hostile and chebyshev(e.pos, pos) <= reach for e in w.entities)
+    return any(is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= reach for e in w.entities)
 
 
 def gather_ground(w: WorldModel, pos: Pos, policy: Policy) -> bool:

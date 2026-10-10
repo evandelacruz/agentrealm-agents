@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .config import Policy
+from .survival import is_hostile
 from .world import WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -32,10 +33,11 @@ def calm_poll_interval(last_poll_tick: int, character_id: int) -> int:
 
 
 def hostile_within(w: WorldModel, policy: Policy, blocks: int = THREAT_NEAR_BLOCKS) -> bool:
-    """From the last entity read, which the scheduler refreshes between polls."""
+    """A threat (``survival.is_hostile``) within ``blocks``, from the last entity
+    read, which the scheduler refreshes between polls. Townsfolk are not one."""
     if w.pos is None:
         return False
-    return any(e.kind in policy.hostile and chebyshev(e.pos, w.pos) <= blocks for e in w.entities)
+    return any(is_hostile(w, policy, e) and chebyshev(e.pos, w.pos) <= blocks for e in w.entities)
 
 
 def is_urgent(w: WorldModel, m: Memory, policy: Policy) -> bool:

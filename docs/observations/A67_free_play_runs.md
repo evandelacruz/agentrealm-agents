@@ -209,7 +209,7 @@ Intents outside held queues: 39 `Use` (cuts), 17 greetings, 6 `Take` (5 gems, 1 
 
 - **Code:** `main` at `a227906`, after #154 (A71: commit to the target, the Detour reflex, discovery wakes, new heads deferred to an action boundary) and the run 3 fixes (#146, #147, #149, #151, #152).
 - **Verdict:** exit 0, `PASS` after **601.5 s**, on the short-run gates only. The park found safe ground at once (0.4 s, at (421, 381)). The character started with 10/10 health, 7 lives and **17 gems**, on the overworld 32 cells north-west of the town cell. It held the bronze_sword and the pocket knife, and **small_potion was still armed** from run 3. This was the first run on an empty local state directory, so call 1 wrote the cache.
-- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; gems earned **yes** (from piles only); armor **no**; shop weapon **yes** (the sword it started with); potion reserve **yes**; Heal took ground food **yes**, Heal drank a potion **yes** (gate), though the potion count says the drink did not land (below).
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; gems earned **yes** (from piles only); armor **no**; shop weapon **yes** (the sword it started with); potion reserve **yes**; Heal took ground food **yes**, Heal drank a potion **no**: the gate read yes, but it counts a `Use` sent with a potion armed (`m8_acceptance.py:140–142`), and that `Use` at 228 s consumed nothing (potions 2 → 2, below).
 
 #### Planner ops over time
 

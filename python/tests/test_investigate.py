@@ -1,6 +1,7 @@
 """Investigate: the executor for plan ``read`` and ``say`` ops, and the
 investigation memory it reads from the knowledge base (A30)."""
 
+import json
 import random
 import tempfile
 import threading
@@ -11,7 +12,7 @@ from unittest import mock
 from agentrealm_agent import config
 from agentrealm_agent.brain import choose_call, decide
 from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.investigation import (
     MAX_REJECTIONS,
     SPEECH_RANGE,
@@ -30,6 +31,7 @@ from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
+from agentrealm_agent.strategist import SIGNS_SHOWN, build_prompt
 from agentrealm_agent.scroll_investigation import (
     probed_supply_codes,
     log_supply_codes_seen,
@@ -243,6 +245,41 @@ class InvestigateStateTest(unittest.TestCase):
         dispatch(w, c)
         dispatch(w, c)
         self.assertEqual(before, kb.to_dict(), "only an applied result marks the knowledge base")
+
+
+class StateListsSignsTest(unittest.TestCase):
+    """The planner's State lists the signs and statues seen, unread first, then nearest."""
+
+    def line(self, w, kb):
+        msgs = build_prompt(
+            triggers=[], w=w, plan=Plan([], dict(PARAM_DEFAULTS)), directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=kb
+        )
+        return next(l for l in msgs[1]["content"].splitlines() if l.startswith("signs_seen="))
+
+    def test_unread_first_then_nearest(self):
+        w = WorldModel(character_id=1, map_id=7, pos=(5, 5))
+        for p, block in [((6, 5), "sign"), ((10, 5), "statue"), ((5, 1), "sign")]:
+            w.view.tiles[p] = block
+            w.view.readable[p] = True
+        kb = KnowledgeBase.empty("sandbox")
+        mark_cell_read(kb, 7, (6, 5))
+        line = self.line(w, kb)
+        rows = json.loads(line.split("=", 1)[1].rsplit(" unread=", 1)[0])
+        self.assertEqual([(r["x"], r["y"], r["read"]) for r in rows], [(5, 1, False), (10, 5, False), (6, 5, True)])
+        self.assertEqual(rows[1], {"map_id": 7, "x": 10, "y": 5, "block": "statue", "cells": 5, "dir": "east", "read": False})
+        self.assertTrue(line.endswith(" unread=2"))
+
+    def test_capped(self):
+        w = WorldModel(character_id=1, map_id=7, pos=(0, 0))
+        for x in range(SIGNS_SHOWN + 3):
+            w.view.readable[(x + 1, 0)] = True
+        line = self.line(w, None)
+        rows = json.loads(line.split("=", 1)[1].rsplit(" unread=", 1)[0])
+        self.assertEqual(len(rows), SIGNS_SHOWN)
+        self.assertTrue(line.endswith(f" unread={SIGNS_SHOWN + 3}"))
+
+    def test_none_seen(self):
+        self.assertEqual(self.line(WorldModel(character_id=1, map_id=7, pos=(0, 0)), None), "signs_seen=none on this map")
 
 
 class EntranceKeyTest(unittest.TestCase):

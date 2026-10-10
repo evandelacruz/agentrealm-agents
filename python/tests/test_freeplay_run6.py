@@ -121,7 +121,7 @@ class HostilityKeptAcrossRunsTest(unittest.TestCase):
     def test_detour_skips_a_pile_beside_the_remembered_post(self):
         w = field(at=(17, 10))
         load_hostiles(self.saved(), w)
-        see(w, [Entity("supply", 50, (21, 11), "gem")], 10_000)
+        see(w, [gnasher(), Entity("supply", 50, (21, 11), "gem")], 10_000)  # back on its post
         m = Memory(path=[(16, 10), (15, 10), (14, 10)], goal="explore")
         ctx = PlayContext(m, policy(), random.Random(0), plan=Plan([], dict(PARAM_DEFAULTS)))
         self.assertIsNone(detour_find(w, ctx))

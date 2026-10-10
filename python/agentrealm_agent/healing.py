@@ -75,19 +75,51 @@ REFUSAL_WAIT_TICKS = DEFAULT_WEAPON_COOLDOWN_TICKS
 HOLD_CODES = frozenset({"would_strand", "carry_capacity_full", "not_allowed_in_safe_zone"})
 
 
-RefusalAction = Literal["arm", "forget", "walk", "wait", "hold"]
+# What Heal does after a drink that applied but drank nothing (A76): the
+# supply is still carried and no ``SupplyUsed`` of ours named it. The cause is
+# read from the result and the next observation (``noop_drink_cause``):
+#
+#   not_armed    the armed slot holds something else: the next drink sends
+#                its ``Arm`` ("arm"), or holds when that queue already did
+#   full_health  health was full when it ran: drink again only once health
+#                is below what it was then ("full")
+#   no_change    armed, hurt, and nothing changed: hold until the drink's
+#                situation (``drink_situation``) changes
+#
+# The drink always targets ``{"kind": "self"}`` (A24), so a wrong target,
+# free-play run 4's cause, is not one left to find.
+NOOP_CAUSES = ("not_armed", "full_health", "no_change")
+
+
+RefusalAction = Literal["arm", "forget", "walk", "wait", "hold", "full"]
 # (map, cell, armed code, held supply ids, max health, the food's cell for a Take)
 Situation = tuple[int | None, Pos | None, str | None, tuple[int, ...], int | None, Pos | None]
 
 
 @dataclass(frozen=True)
 class HealRefusal:
-    """The last refusal of one supply's ``Take`` or drink (A80)."""
+    """The last refusal of one supply's ``Take`` or drink (A80), or a drink
+    that applied and drank nothing (``applied``, A76)."""
 
-    code: str
+    code: str  # the rejection's code, or the no-op drink's cause
     action: RefusalAction
     tick: int
-    situation: Situation  # ``heal_situation`` when it was refused
+    situation: Situation  # ``heal_situation`` when it was refused; ``drink_situation`` when ``applied``
+    applied: bool = False
+    health: int | None = None  # health when it was filed (a "full" drink waits for less)
+
+
+@dataclass
+class AppliedDrink:
+    """Heal's drink whose ``Use`` applied, kept until the next decision reads
+    from the observation whether a supply went (A76)."""
+
+    supply_id: int
+    code: str | None
+    tick: int
+    armed_first: bool  # its queue sent the supply's ``Arm`` before the ``Use``
+    health: int | None  # health before the response that carried its result
+    used: bool = False  # our own ``SupplyUsed`` named its code
 
 
 def heal_situation(w: WorldModel, target: Pos | None = None) -> Situation:
@@ -102,6 +134,56 @@ def heal_situation(w: WorldModel, target: Pos | None = None) -> Situation:
     """
     held = tuple(sorted(h.id for h in w.held_supplies))
     return (w.map_id, w.pos, w.armed_code, held, w.max_health, target)
+
+
+def carried_ids(w: WorldModel) -> tuple[int, ...]:
+    """Every supply id we carry: held, stowed in the carried chest, and armed."""
+    ids = {h.id for h in w.held_supplies} | {s.id for s in w.chest_supplies}
+    if w.armed_id is not None:
+        ids.add(w.armed_id)
+    return tuple(sorted(ids))
+
+
+def drink_situation(w: WorldModel) -> Situation:
+    """What a drink that drank nothing is held against (A76): the map and what
+    we carry, by id, and max health. Not the cell, the armed slot or health:
+    a walk, the re-arm after every drink, and regen change those without
+    changing what the drink does, and would resend it each time."""
+    return (w.map_id, None, None, carried_ids(w), w.max_health, None)
+
+
+def drank(events: list[dict], character_id: int | None, code: str | None) -> bool:
+    """Our own ``SupplyUsed`` for ``code`` is among ``events``: it was used up.
+    The event reaches every character in sight, so another's is not ours."""
+    return any(
+        e.get("kind") == "SupplyUsed" and e.get("actor_id") == character_id and e.get("supply_code") == code
+        for e in events
+    )
+
+
+def noop_drink_cause(w: WorldModel, d: AppliedDrink) -> str | None:
+    """Why an applied drink drank nothing, from the observation after it
+    (``NOOP_CAUSES``), or None when it went through: our ``SupplyUsed``
+    named it, we no longer carry it, or health rose."""
+    if d.used or d.supply_id not in carried_ids(w):
+        return None
+    if w.health is not None and d.health is not None and w.health > d.health:
+        return None
+    in_slot = w.armed_id == d.supply_id if w.armed_id is not None else w.armed_code == d.code
+    if not in_slot:
+        return "not_armed"
+    if w.health is not None and w.max_health is not None and w.health >= w.max_health:
+        return "full_health"
+    return "no_change"
+
+
+def noop_action(cause: str, *, armed_first: bool) -> RefusalAction:
+    """What to do about a drink that drank nothing (see ``NOOP_CAUSES``)."""
+    if cause == "not_armed":
+        return "hold" if armed_first else "arm"
+    if cause == "full_health":
+        return "full"
+    return "hold"
 
 
 def refusal_action(rejection: dict, *, verb: str, armed_first: bool, on_target: bool) -> RefusalAction:
@@ -141,7 +223,8 @@ def note_refusal(m: Memory, kind: str, supply_id: int, refusal: HealRefusal) -> 
 
 
 def clear_refusal(m: Memory, kind: str, supply_id: int) -> None:
-    """The ``Take`` or drink went through: what was refused before is over."""
+    """The ``Take`` or drink applied: what was refused before is over. A drink
+    that drank nothing is filed again from the next observation (A76)."""
     m.heal_refusals.pop((kind, supply_id), None)
 
 
@@ -155,12 +238,17 @@ def can_try(m: Memory, w: WorldModel, kind: str, supply_id: int, target: Pos | N
         return False
     if r.action == "wait":
         return w.tick >= r.tick + REFUSAL_WAIT_TICKS and w.alive
+    if r.action == "full":
+        return w.health is not None and r.health is not None and w.health < r.health
+    if r.applied:
+        return drink_situation(w) != r.situation
     return heal_situation(w, target) != r.situation
 
 
 def must_arm(m: Memory, supply_id: int) -> bool:
-    """A drink of ``supply_id`` found nothing armed: send its ``Arm`` whatever
-    ``armed_code`` says (it may trail the server)."""
+    """A drink of ``supply_id`` found nothing armed, or applied with something
+    else in the slot: send its ``Arm`` whatever ``armed_code`` says (it may
+    trail the server)."""
     r = m.heal_refusals.get(("use", supply_id))
     return r is not None and r.action == "arm"
 

@@ -155,7 +155,7 @@
 
   "A75": {"state": "done", "note": "#157: a buy with no shop item in sight walks to the nearest known shop cell out of sight, else to town and explores around it."},
 
-  "A76": {"state": "partial", "note": "Gate fixed: heal_potion counts a Heal potion self-Use only when its result applied and the potion count then dropped, or on our own SupplyUsed for a potion.", "remaining": "Heal does not yet find out why a self-Use that applied drank nothing, nor stop resending one that changes nothing."},
+  "A76": {"state": "done", "note": "Gate fixed in #169. Heal reads why an applied drink drank nothing (something else armed, full health, no change) and re-arms, waits for lower health, or holds the supply until what it carries, the map or max health changes."},
 
   "A77": {"state": "done", "note": "Fixed in #161 (the probe restores memory whole and only server rejections are filed); A80 then removed the try count the probe was spending."},
 

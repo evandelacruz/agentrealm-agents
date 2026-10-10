@@ -255,6 +255,60 @@ class CadenceTest(unittest.TestCase):
         self.assertEqual(llm.calls, 2)
         self.assertEqual(sent_triggers(r, 1), ["goal_done", "goal_failed", "death", "clue", "stuck"])
 
+    def test_a_slow_reply_does_not_set_off_the_timer_at_once(self):
+        """The timer counts from when the last call ended, not when it was sent (A83)."""
+        llm = FakeLLM(WAIT_ANSWER, WAIT_ANSWER)
+        s, r = make(llm, replan_s=15), fake_runner()
+        s.on_window(r)  # the first call goes out
+        s.serve_one(timeout=0)
+        s.clock.now += 20  # the reply took longer than replan_s
+        s.on_window(r)  # and is applied now
+        self.assertEqual(s.calls, 1)
+        self.assertNotIn("timer", [t["trigger"] for t in s.inbox])
+        s.clock.now += 14.9
+        s.on_window(r)
+        self.assertEqual(s.calls, 1, "the gap is 15 s after the reply")
+        s.clock.now += 0.1
+        s.on_window(r)
+        self.assertEqual(s.calls, 2)
+        self.assertEqual(sent_triggers(r, 1), ["timer"])
+
+    def test_a_failed_call_starts_the_gap_too(self):
+        llm = FakeLLM(RuntimeError("boom"), WAIT_ANSWER)
+        s, r = make(llm, replan_s=15), fake_runner()
+        s.on_window(r)
+        s.serve_one(timeout=0)
+        s.clock.now += 20
+        s.on_window(r)  # the failure lands; its triggers wait out the backoff
+        self.assertEqual(s.last_reply_at, s.clock.now)
+
+    def test_an_event_still_calls_at_once_after_a_reply(self):
+        llm = FakeLLM(WAIT_ANSWER, WAIT_ANSWER)
+        s, r = make(llm, replan_s=15), fake_runner()
+        s.on_window(r)
+        s.serve_one(timeout=0)
+        s.clock.now += 20  # a slow reply
+        s.on_window(r)
+        queue_signal(r.mem, {"trigger": "stuck"})
+        s.on_window(r)  # no gap for an event
+        self.assertEqual(s.calls, 2)
+        self.assertEqual(sent_triggers(r, 1), ["stuck"])
+
+    def test_a_discovery_alone_waits_its_gap_after_the_reply(self):
+        llm = FakeLLM(WAIT_ANSWER, WAIT_ANSWER)
+        s, r = make(llm, replan_s=60), fake_runner()
+        s.on_window(r)
+        s.serve_one(timeout=0)
+        s.clock.now += 20  # a slow reply: the send was long ago, the reply is now
+        s.on_window(r)
+        s.inbox.append({"trigger": "discovery", "finds": [], "tick": r.world.tick})
+        s.clock.now += 4.9
+        s.on_window(r)
+        self.assertEqual(s.calls, 1)
+        s.clock.now += 0.1
+        s.on_window(r)
+        self.assertEqual(s.calls, 2)
+
     def test_one_call_in_flight_at_a_time(self):
         llm = FakeLLM(WAIT_ANSWER)
         s, r = make(llm), fake_runner()
@@ -624,7 +678,7 @@ class PlannerViewTest(unittest.TestCase):
         s.on_window(r)
         s.serve_one(timeout=0)
         r.world.tick += STALL_SECONDS * 10
-        s.last_call_at = None
+        s.last_reply_at = None
         s.inbox.append({"trigger": "timer"})
         s.on_window(r)
         s.serve_one(timeout=0)

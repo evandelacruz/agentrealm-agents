@@ -135,7 +135,7 @@ You declined every blocking finding, each with a reply on its thread, and there 
 
 1. **Keep `conductor:working` on the pull request.** Do not release it. It keeps every fleet and the supervisor off the pull request until Evan acts.
 2. **Post one comment on the pull request** with `add_issue_comment`, starting with `Handed to Evan:`, naming the rejecting review, saying in a sentence or two why each finding was declined (link the thread replies), and ending: `Dismiss the rejection, or comment here naming the findings to fix, then remove conductor:working.`
-3. **Tell Evan here** which pull request you handed over.
+3. **Report** which pull request you handed over, if anyone is listening in this session. A fleet-spawned session has no one listening; the `Handed to Evan:` comment is what reaches him.
 
 When a later comment from Evan after a hand-off names findings to fix, fix those: that is Evan's decision, not a reviewer's suggestion.
 

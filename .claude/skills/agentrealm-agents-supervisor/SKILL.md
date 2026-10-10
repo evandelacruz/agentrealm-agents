@@ -115,7 +115,7 @@ Never both in one pass. A pull request the fixer fleet has not locked yet still 
 ```bash
 npm --prefix tools/conductor run spawn -- --no-pr --name "Fleet n=<n>" -- <<'EOF'
 Run the agentrealm-agents-fleet skill (.cursor/skills/agentrealm-agents-fleet/SKILL.md) with n = <n>, for new backlog work only. The agentrealm-agents supervisor dispatched this pass on Evan's behalf.
-- Skip its step 3. Route no open pull request: no fix, no polish. Open pull requests are not this pass's to send.
+- Skip its step 3. Route no open pull request. Open pull requests are not this pass's to send.
 - Run its step 2 to get current, then its steps 4 onward for all n slots.
 - Spawn only with --ids, and start each --name with the slice's IDs ("A8: Runtime directives"). Never pass --pr, and never run follow-up.
 - Skip <ids>: Claude sessions hold them.

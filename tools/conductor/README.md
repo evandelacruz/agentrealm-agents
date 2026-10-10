@@ -42,8 +42,11 @@ refuse to start and `prs` prints `review-check:running`.
 **What counts as blocked**: it still lists such a pull request under
 needs-fix. Check the threads before following up on one.
 
-"Needs fixer follow-up" lists PRs with a merge conflict, red CI, changes
-requested, or unresolved threads without approval.
+"Needs fixer follow-up" lists PRs with a merge conflict, red CI, or a
+changes-requested verdict on the head. Open review threads never put a PR
+there: `unresolved:` is information only. "Ready for Evan to merge" lists
+ready PRs that are approved, green, and conflict-free, open threads or not.
+A PR whose reviewer check is still running is in neither list.
 
 `spawn --pr` and `follow-up` add `conductor:working` before the agent starts
 and refuse a PR that already has `conductor:working`. Implementers and

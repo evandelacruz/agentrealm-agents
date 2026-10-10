@@ -73,7 +73,7 @@ No ticketing system. PLAN.md is the backlog.
 8. **Watch open PRs**, blockers first:
    - Carrying `conductor:working` → skip. A writer already holds it (Cursor or Claude Code). Do not follow up, spawn `--pr`, or delete the label.
    - Changes requested (see [Review verdicts](#review-verdicts)), a merge conflict, or red CI, **and no `conductor:working`** → follow up on the same agent, or spawn a fixer attached to the PR (`--pr <url>`). Open threads without a rejection are not a blocker.
-   - Approved and still unmerged → scan for non-blocking nits and docs requests worth doing before merge. See [Approved PR polish](#approved-pr-polish).
+   - Approved → leave it for Evan to merge as-is. Its open threads are not work: the fixer that fixed a thread resolves it.
 
    Blocker follow-up:
 
@@ -90,7 +90,7 @@ No ticketing system. PLAN.md is the backlog.
 
    `follow-up` and `spawn --pr` claim `conductor:working` before the agent starts, and they refuse a PR that already has `conductor:working`. They also refuse while a reviewer check (the Claude Review `review` job or the Cursor check) is still running, so a fixer does not chase a review that has not landed. Do not add a label for that. Do not add `conductor:working` yourself first; that makes the CLI refuse. Do not delete it so the CLI will accept the PR. The prompt tells the agent that holds the lock to remove only `conductor:working` after the push. A new-work spawn has no PR yet; that prompt tells the agent to add the label as soon as the PR exists and to stop if it is already set.
 
-9. **Report** to Evan: what is in flight, what is blocked and why, what is stacked for merge, and which nits you deliberately deferred. Then wait.
+9. **Report** to Evan: what is in flight, what is blocked and why, and what is stacked for merge. Then wait.
 
 ## Review verdicts
 
@@ -102,24 +102,10 @@ Verdicts come from GitHub review states on the current head, never from labels: 
 
 Implementers and fixers claim `conductor:working` and release it when they finish. Reviewers never take it. The conductor CLI (`follow-up`, `spawn --pr`) and Claude Code fixers both use this label. A crash leaves it on. **Do not clear a lock you did not claim in this session.** Cursor `status` showing the original implementer `finished` means that worker should have released; if the label is still there, a Claude Code fixer may hold it. Leave it and tell Evan. Claude Code fixers do not review; that skill is [`.claude/skills/agentrealm-agents-fixer/SKILL.md`](../../../.claude/skills/agentrealm-agents-fixer/SKILL.md).
 
-## Approved PR polish
-
-Approval is not "ignore the rest of the thread." A reviewer who approves still leaves nits, and they are cheapest to fix before merge.
-
-**Trigger:** an approved open PR with open threads. A PR with changes requested is a blocker and belongs to step 8's first bullet.
-
-1. Read review bodies, issue comments, and threads, including anything marked nit, suggestion, or non-blocking.
-2. Triage what is worth doing now:
-   - **Do now:** small nits, clarity renames, missing docs, test tighten-ups, obvious follow-ups inside the same slice.
-   - **Skip:** drive-by refactors, new features, stack inventions, or anything that should be its own backlog item. Report these instead of spawning.
-3. If there is worthwhile polish and the PR does not have `conductor:working`, `follow-up --agent bc-… --pr <url>` on the agent that wrote the PR. The brief must say: only the listed items, do not reopen the slice, keep the PR ready, halt if a "nit" is actually an architecture question. The CLI claims `conductor:working`. If the label is already set, skip.
-4. **If that agent cannot take follow-up,** do not spawn a fresh agent for polish alone. It has to read the whole slice back in to reword a comment. Report the items as deferred.
-5. Do not let polish block spawning unrelated ready slices.
-
 ## Merge policy
 
 - **You never merge.** Evan merges, and so does the [agentrealm-agents supervisor](../../../.claude/skills/agentrealm-agents-supervisor/SKILL.md).
-- Flag PRs that are approved and CI-green as ready for Evan to merge, after checking polish. Mention deferred nits.
+- Flag PRs that are approved, CI-green, and conflict-free as ready for Evan to merge.
 - Treat moderation, a new dependency, and changes to the call budget or pacing as human-merge surfaces even when review is green.
 
 ## Out of scope

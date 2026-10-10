@@ -333,6 +333,27 @@ class RetreatWindowPausedTest(unittest.TestCase):
                 self.m.retreat_paused = (self.goal, self.w.tick)
         return stuck
 
+    def test_a_losing_retreat_that_drinks_marks_the_pause(self):
+        """Through ``retreat_step``: the drink it sends instead of a step pauses its safe walk's window."""
+        from agentrealm_agent.item_table import InventorySupply
+        from agentrealm_agent.states.retreat import RETREAT_PROBE_TICKS
+        from agentrealm_agent.zone_discovery import apply_zone
+        from tests.test_survival_runs import MAP as SURVIVAL_MAP, ctx as survival_ctx, hit, world
+
+        w, c = world(health=4), survival_ctx(on_hostile="fight")
+        apply_zone(w, SURVIVAL_MAP, -10, 10, {"safe": True})
+        w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
+        hit(w)
+        w.held_supplies = [InventorySupply(5, "small_potion")]
+        first = dispatch(w, c)
+        self.assertEqual(first.state, "Retreat")
+        self.assertIsNone(c.memory.retreat_paused, "walking is not a pause")
+        w.tick += RETREAT_PROBE_TICKS
+        hit(w)
+        out = dispatch(w, c)
+        self.assertTrue(out.reason.startswith("retreat losing ground: arm and use"), out.reason)
+        self.assertEqual(c.memory.retreat_paused, (c.memory.retreat_to, w.tick))
+
     def test_drinking_does_not_run_the_window_out(self):
         self.m.retreat_paused = (self.goal, self.w.tick)
         self.assertFalse(self.pass_time(nav_stuck.PROGRESS_TICK_LIMIT + 50, paused=True))

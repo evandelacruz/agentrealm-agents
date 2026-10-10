@@ -17,10 +17,11 @@ from ..hostile_ground import ground_by_hostile
 from ..memory import Memory
 from ..navigation import cost_path, no_way, oscillation
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
+from ..pathing import flee_step, grid_params, nav_search, next_step, retreat_safe_goal
 from ..survival import (
     LOSING_NAV,
     RETREAT_NAV,
+    combat_group,
     hostiles_reaching,
     is_attacker,
     on_safe_tile,
@@ -56,7 +57,8 @@ class RetreatState(State):
     When it is losing ground, it drinks or
     eats what it carries, fights back a hitter its weapon has hurt and the
     win estimate says it beats, or else replans weighing no hostile at all
-    (``retreat_step``)."""
+    (``retreat_step``). With no refuge outside every known hostile's ground,
+    it steps away from the hostiles near (``_no_refuge``)."""
 
     name = "Retreat"
 
@@ -80,17 +82,21 @@ class RetreatState(State):
         return retreat_step(world, ctx, self.name)
 
 
-def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | None = None) -> StateOutcome:
+def retreat_step(
+    w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | None = None, *, step_away: bool = True
+) -> StateOutcome:
     """A walk queue along a path to the refuge: the nearest safe cell a path
     reaches outside every known hostile's ground, else the town cell
-    (``pathing.retreat_safe_goal``), or no intent when there is none.
+    (``pathing.retreat_safe_goal``). With no refuge it steps away from the
+    hostiles near (``_no_refuge``) when ``step_away``, else sends no intent.
 
     While the queue it sent is still running, it holds the round (``wait``,
     not a reflex), so the runner lets the queue walk. Losing ground
     (``losing_ground``) is the exception: see ``RetreatState``.
 
     **Retreat** runs it, and so does **Flee** when running away is not working
-    (A9); Flee passes the oscillation escape it already took as ``paced``.
+    (A9); Flee passes the oscillation escape it already took as ``paced``,
+    and ``step_away=False``: with no refuge, its own escape runs instead.
 
     A goal the walk gets no nearer to in a stuck window (``no_progress``) is
     ruled out for ``SAFE_UNREACHABLE_TICKS`` and the next one is taken; the
@@ -130,7 +136,9 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     lasting = grid_params(policy, set(plan_avoid), set(plan_costly))  # without this decision's escape: what no_way proves
     plan_avoid |= escape
     if goal is None:
-        return StateOutcome(None, "safe tile unreachable", state=state)
+        if step_away:
+            return _no_refuge(w, ctx, state, plan_avoid)
+        return StateOutcome(None, "no refuge outside hostile ground", state=state)
     losing = losing_ground(w, ctx, goal)
     if losing:
         if out := _turn_on_losing(w, ctx, state):
@@ -183,6 +191,24 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     m.retreat_walk, m.walk_skip = goal, set(pursuers)
     reason = f"retreat → safe {goal}" + (" (losing ground)" if losing else "")
     return StateOutcome([set_position(step)], reason, reflex=True, state=state)
+
+
+def _no_refuge(w: WorldModel, ctx: PlayContext, state: str, blocked: set[Pos]) -> StateOutcome:
+    """No refuge: every safe cell lies in a known hostile's ground or has no
+    way to it (``pathing.retreat_safe_goal``). Open distance from the
+    hostiles in range and the one hitting us, the best single step away
+    (``pathing.flee_step``), as Flee would; nothing when none is near (Park
+    with nothing threatening) or no step opens distance (cornered).
+
+    A safe cell beside a pursuer is not taken instead: walking back toward
+    it is the pacing free-play run 7 died of (6 hits in 19 s)."""
+    m = ctx.memory
+    hostiles = combat_group(w, ctx.policy) + [e for e in w.entities if is_attacker(w, e)]
+    step = flee_step(w, hostiles, blocked) if hostiles else None
+    if step is None:
+        return StateOutcome(None, "no refuge outside hostile ground", state=state)
+    m.path, m.retreat_walk = [], None  # a step away, not a walk to safety
+    return StateOutcome([set_position(step)], "no refuge outside hostile ground: open distance", reflex=True, state=state)
 
 
 def no_progress(w: WorldModel, m: Memory, goal: Pos) -> bool:

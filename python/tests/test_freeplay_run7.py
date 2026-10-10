@@ -32,6 +32,7 @@ from agentrealm_agent.pathing import RETREAT_TARGET, committed_safe, grid_params
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.gather import gather_outcome
+from agentrealm_agent.states.retreat import retreat_step
 from agentrealm_agent.strategist import Asked, Strategist, StrategistConfig
 from agentrealm_agent.world import POST_STILL_TICKS, Entity, WorldModel, chebyshev
 from agentrealm_agent.zone_discovery import apply_zone
@@ -86,6 +87,34 @@ class RefugeTest(unittest.TestCase):
         self.assertEqual(out.state, "Retreat")
         self.assertEqual(out.reason, f"retreat → safe {FAR_SAFE}")
         self.assertGreater(step(out)[0], w.pos[0], "away from the hostile, not back past it")
+
+    def test_with_no_refuge_retreat_steps_away_instead_of_back_to_the_hostile(self):
+        """Every safe cell lies in the hostile's reach: Retreat opens distance,
+        never walks toward the one beside its pursuer."""
+        w, c = world(health=2), ctx()
+        apply_zone(w, MAP, FAR_SAFE[0], FAR_SAFE[1], {"safe": False})
+        e = gristle()
+        w.entities = [e]
+        hit_by(w, e)
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.reason), ("Retreat", "no refuge outside hostile ground: open distance"))
+        self.assertGreater(chebyshev(step(out), e.pos), chebyshev(w.pos, e.pos))
+
+    def test_with_no_refuge_and_nothing_near_park_sends_nothing(self):
+        w, c = world(), ctx()
+        apply_zone(w, MAP, FAR_SAFE[0], FAR_SAFE[1], {"safe": False})
+        guard = gristle(at=(4, 10))
+        w.perception = 4
+        w.pos = (6, 12)
+        w.tick = 0
+        w._set_entities([guard], 0)
+        w.tick = POST_STILL_TICKS
+        w._set_entities([guard], POST_STILL_TICKS)
+        w.pos = w.terrain_center = (9, 10)
+        w.tick = POST_STILL_TICKS + 1
+        w._set_entities([], w.tick)  # its post holds the one safe tile, out of view
+        out = retreat_step(w, c, "Park")
+        self.assertEqual((out.intents, out.reason), (None, "no refuge outside hostile ground"))
 
     def test_flee_runs_toward_the_refuge_retreat_picks(self):
         w, c = world(health=10), ctx()
@@ -294,6 +323,19 @@ class GatherWalksTest(unittest.TestCase):
         out = gather_outcome(w, m, GATHER_POLICY, op={"op": "gather_gems", "count": 99, "x": 40, "y": 10})
         self.assertFalse(set(m.path) & POST_GROUND, (out.reason, m.path))
         self.assertNotEqual((m.gather_target or ("",))[0], "region")
+
+    def test_moving_off_a_shadow_keeps_off_a_remembered_post(self):
+        """The nearest ground far enough from the shadow lies on another
+        hostile's post: the move-off goes elsewhere, by a clear route."""
+        w, m = field(at=(12, 10)), Memory()
+        guard_post_left_behind(w, post=(23, 1), at=(12, 10))  # on the far cell the old walk picked, (22, 0)
+        shadow = Entity("npc", 3, (10, 10), HOSTILE[1])
+        w.entities = [shadow]
+        out = gather_outcome(w, m, GATHER_POLICY, op={"op": "gather_gems", "count": 99}, shadow=shadow)
+        self.assertEqual(m.gather_target[0], "off", out.reason)
+        post_ground = {(23 + dx, 1 + dy) for dx in range(-3, 4) for dy in range(-3, 4)}
+        self.assertNotIn(m.gather_target[1], post_ground)
+        self.assertFalse(set(m.path) & post_ground, m.path)
 
     def test_the_walk_to_an_unseen_region_takes_the_fight_when_the_op_says(self):
         w, m = field(), Memory()

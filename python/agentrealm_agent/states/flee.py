@@ -64,6 +64,10 @@ def flee_escape(
     """
     policy = ctx.policy
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+    # On purpose, the same call Retreat makes, side effects included: it
+    # commits the refuge (``RETREAT_TARGET``) that Retreat then keeps, and
+    # its path checks are the ones Retreat would run. Only when a new escape
+    # is planned, not every decision.
     refuge = retreat_safe_goal(m, w, policy, ctx.knowledge, plan_avoid, plan_costly)
     first = flee_step(w, hostiles, blocked, [refuge] if refuge is not None else ())
     if first is None:
@@ -119,7 +123,7 @@ def instead_of_fleeing(
     options = []
     if may_hit and (wins or (cornered and above_floor)):
         options.append(lambda: engage(w, ctx, target, FleeState.name))
-    options.append(lambda: retreat_step(w, ctx, FleeState.name, paced))
+    options.append(lambda: retreat_step(w, ctx, FleeState.name, paced, step_away=False))
     hitter_in_reach = is_attacker(w, target) and in_weapon_reach(w, target, ctx.knowledge)
     if may_hit and above_floor and hit_while_fleeing(w, ctx.memory) and hitter_in_reach:
         options.append(lambda: engage(w, ctx, target, FleeState.name))

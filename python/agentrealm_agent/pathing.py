@@ -579,6 +579,11 @@ def retreat_safe_goal(
     one 2 cells from the hostile it ran from while Flee stepped away, 6 hits
     in 19 s (free-play run 7). One threat picture for both keeps them
     pulling the same way.
+
+    Not read-only: picking commits the cell, and runs the path checks of
+    ``reachable_safe_goal`` (a few at most; none for a kept cell its walk
+    already ends on). Every caller shares that one commitment, Flee included, so
+    whichever of them runs next heads for the same cell.
     """
     params = grid_params(policy, avoid, costly)
     goal = reachable_safe_goal(

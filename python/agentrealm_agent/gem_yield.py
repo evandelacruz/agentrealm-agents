@@ -359,7 +359,7 @@ def barren(region: dict[str, Any]) -> bool:
 
 
 def poor(region: dict[str, Any], rate: float = PRIOR_YIELD) -> bool:
-    """A fair sample under half the expected ``rate`` (barren ones included)."""
+    """A fair sample under half the expected ``rate`` (a barren one too, once it has that many cuts; one with fewer is skipped as barren)."""
     cuts = int(region.get("cuts", 0))
     return cuts >= FAIR_SAMPLE_CUTS and int(region.get("gems", 0)) < rate / 2 * cuts
 

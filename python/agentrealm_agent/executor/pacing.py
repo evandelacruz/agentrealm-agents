@@ -98,12 +98,12 @@ def arm_then_use(
     cooldown still owes, cut at the horizon.
 
     A state that returns the two unpaced has only its first intent sent
-    (``brain.decide``): the ``Arm`` goes out and the ``Use`` never does.
+    (``brain.decide``): the ``Arm`` goes out and the ``Use`` never does. So
+    the two go together or not at all: when the horizon would cut the
+    ``Use``, the queue is empty and the caller waits for the cooldown.
     """
-    queue = pace_uses([arm, use], ticks_since_last=ticks_since_last_use)[:horizon_ticks]
-    while queue and queue[-1] == wait():
-        queue.pop()
-    return queue
+    queue = pace_uses([arm, use], ticks_since_last=ticks_since_last_use)
+    return queue if len(queue) <= horizon_ticks else []
 
 
 def build_attack_queue(

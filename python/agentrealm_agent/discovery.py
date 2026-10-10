@@ -8,7 +8,9 @@ instead of waiting up to ``replan_s`` for the timer:
 - a level entrance the knowledge base did not hold before;
 - an item seen for sale that the gems held can now buy;
 - a pack of known-hostile NPCs in a part of the map (a ``PACK_CELL`` square)
-  where none was seen before.
+  where none was seen before;
+- a sign or statue (a readable cell, ``MapView.readable``) seen for the first
+  time that the knowledge base has no read of (``cell_was_read``).
 
 What was known when the run started primes the record and raises nothing.
 Each find is raised once a run (an item again only after the gems held
@@ -24,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .investigation import cell_was_read
 from .knowledge_base import KnowledgeBase, knowledge_items
 from .survival import known_hostile
 from .travel.knowledge import iter_entrances
@@ -56,6 +59,7 @@ class Discoveries:
     entrances: set[tuple[int, Pos]] = field(default_factory=set)
     affordable: set[str] = field(default_factory=set)
     packs: set[tuple[int | None, int, int]] = field(default_factory=set)
+    signs: set[tuple[int, Pos]] = field(default_factory=set)
     primed: bool = False
 
     def scan(self, w: WorldModel, knowledge: KnowledgeBase | None) -> list[dict[str, Any]]:
@@ -70,6 +74,7 @@ class Discoveries:
         for e in w.entities:
             if e.kind == "npc" and known_hostile(w, e):
                 packs.setdefault((w.map_id, e.pos[0] // PACK_CELL, e.pos[1] // PACK_CELL), []).append(e)
+        signs = {(mid, pos) for mid, view in w.maps.items() for pos in view.readable}
         finds: list[dict[str, Any]] = []
         if self.primed:
             for i in sorted(npcs.keys() - self.npcs):
@@ -83,9 +88,13 @@ class Discoveries:
                 members = packs[key]
                 types = sorted({e.code for e in members if e.code})
                 finds.append({"kind": "hostile_pack", "count": len(members), "types": types, "cell": list(members[0].pos)})
+            for mid, pos in sorted(signs - self.signs):
+                if not cell_was_read(knowledge, mid, pos):
+                    finds.append({"kind": "sign", "map_id": mid, "cell": list(pos)})
         self.npcs |= npcs.keys()
         self.entrances |= entrances
         self.affordable = set(affordable)  # an item the gems fell short of can be new again
         self.packs |= packs.keys()
+        self.signs |= signs
         self.primed = True
         return finds

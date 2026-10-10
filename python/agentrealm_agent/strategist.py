@@ -16,8 +16,8 @@ One window, on the tick thread:
 
 1. Move new triggers into the inbox: clue, stuck, death, goal done or
    dropped, idle (from ``Memory``), and map change, hurt, discovery
-   (:mod:`.discovery`: a new NPC, entrance, affordable item or hostile pack,
-   A71) and timer (raised here).
+   (:mod:`.discovery`: a new NPC, entrance, affordable item, hostile pack or
+   unread sign, A71, A72) and timer (raised here).
 2. If an answer came back, apply it (see :meth:`Strategist._settle`). A new
    head waits for the next action boundary: it is applied once no queue is
    held, so it never cuts a walk short (A71); the survival reflexes act on
@@ -107,7 +107,7 @@ from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lap
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
-from .investigation import HELPER_STILL_TICKS, greeted_npc_ids, in_sight, spoken_npc_ids
+from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
 from .survival import known_hostile, retreat_goal
 from .travel.knowledge import iter_entrances, town_from_kb
 from .travel.ops import travel_op_from_plan_goal
@@ -176,13 +176,15 @@ Safe ground: hostiles cannot hurt the character only while it stands on safe gro
 
 NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir from here, spoken, greeted, hostile, stays_put); npcs_spoken_to counts the NPCs a say op of yours has spoken to so far, and npcs_greeted those Greet has said hello to. The game does not say which NPCs are helpers and which are monsters. "hostile" true means known hostile: a boss, the last thing that hit the character, or a type that has swung at it, hit it or died in view; false only means none of its type has done so yet, so it may still be a monster. "stays_put" true means it has stood on one cell for a while, as helpers do; judge the rest from its type and the clues. On safe ground (anywhere, if policy.hostile does not name NPCs), Greet says hello once to an NPC in sight that stays put and is not hostile, and marks it greeted; a helper answers any words with the same line, which lands in Clues. A greeting never counts as spoken: a say op to a greeted NPC still says your text. To talk to one further away, or with your own words, use a say op with its npc_id (from nearby_npcs) or its npc_type (any NPC of that type, the nearest first); the character walks within speech range and says your text. A helper's reply is added to Clues as a row of kind "npc".
 
+Signs: State signs_seen lists the signs and statues seen on this map, the unread ones first and then the nearest, each with its map_id, x, y, block, cells (Chebyshev) and dir from here, and "read" true once its text has been read; unread counts the unread ones on this map. The character does not read a sign on its own. To read one, put a read op with its x, y on the stack: the character walks until the sign is in sight and reads it, and the text lands in Clues as a row of kind "sign". Signs often say where to go or what a place holds, so one near the way is usually worth the few steps.
+
 A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows in the stack without them, with "goes_to": the cell it walks to now, which the agent works out itself. It is already on the stack: re-sending it changes nothing.
 
 State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
 
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
-"wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game. A "discovery" trigger lists what the character has just found: an NPC not seen before (kind "npc"), a level entrance (kind "entrance"), an item for sale the gems held can now buy (kind "affordable") or a pack of known-hostile NPCs in a part of the map where none was seen (kind "hostile_pack"); replan if it changes what is worth doing. A new head op takes over once the action under way ends (within a few seconds), never in the middle of a walk; the survival states still act at once. The agent keeps each target it picks (a grass cell, a frontier, a safe tile, a shop cell, a door) until it gets there or finds it out of reach, and takes a gem, life or (when hurt) food a few steps off its way before walking on.
+"wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and every few seconds, so plan the next few steps, not the whole game. A "discovery" trigger lists what the character has just found: an NPC not seen before (kind "npc"), a level entrance (kind "entrance"), an item for sale the gems held can now buy (kind "affordable"), a pack of known-hostile NPCs in a part of the map where none was seen (kind "hostile_pack"), or a sign or statue not read yet (kind "sign"); replan if it changes what is worth doing. A new head op takes over once the action under way ends (within a few seconds), never in the middle of a walk; the survival states still act at once. The agent keeps each target it picks (a grass cell, a frontier, a safe tile, a shop cell, a door) until it gets there or finds it out of reach, and takes a gem, life or (when hurt) food a few steps off its way before walking on.
 
 Examples:
 {{"goals":[{{"op":"buy","code":"torch","why":"clue mentions darkness"}}],"params":{{"curiosity":0.3}},"notes":"try the cave entrance"}}
@@ -549,6 +551,7 @@ def build_prompt(
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
+        *sign_lines(w, knowledge),
         f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
         *_gather_line(plan, gather_status),
         f"gather_run={json.dumps(gather_run or {}, sort_keys=True)}",
@@ -645,6 +648,40 @@ def npc_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     ]
     lines.append(f"nearby_npcs={json.dumps(rows, sort_keys=True)}")
     return lines
+
+
+# The signs and statues State lists.
+SIGNS_SHOWN = 5
+
+
+def sign_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
+    """The signs and statues seen on this map (``MapView.readable``), unread first, then nearest.
+
+    Each: ``map_id``, ``x``, ``y``, ``block``, ``cells`` (Chebyshev) and ``dir``
+    from here, and ``read`` (the knowledge base records its ``Read``,
+    ``cell_was_read``). ``unread`` counts the unread ones on this map, listed or not.
+    """
+    if w.pos is None or w.map_id is None:
+        return []
+    here, map_id = w.pos, w.map_id
+    cells = [(cell_was_read(knowledge, map_id, p), chebyshev(p, here), p) for p in w.view.readable]
+    if not cells:
+        return ["signs_seen=none on this map"]
+    cells.sort()
+    rows = [
+        {
+            "map_id": map_id,
+            "x": p[0],
+            "y": p[1],
+            "block": w.view.tiles.get(p) or None,
+            "cells": dist,
+            "dir": compass(here, p) or "here",
+            "read": read,
+        }
+        for read, dist, p in cells[:SIGNS_SHOWN]
+    ]
+    unread = sum(1 for read, _, _ in cells if not read)
+    return [f"signs_seen={json.dumps(rows, sort_keys=True)} unread={unread}"]
 
 
 def _bearing(w: WorldModel, where: tuple[int, Pos]) -> str:
@@ -1185,6 +1222,7 @@ class Strategist:
             runner.plan.wait_started_tick = old.wait_started_tick
             runner.plan.stalled_since_tick = old.stalled_since_tick
             runner.plan.block_before = old.block_before
+            runner.plan.held_before = old.held_before
         else:
             runner.mem.path, runner.mem.goal, runner.mem.goal_op = [], "", None
             runner.mem.walks.clear()  # the new head walks a path of its own (A15)

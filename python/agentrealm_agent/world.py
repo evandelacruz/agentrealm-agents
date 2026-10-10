@@ -38,6 +38,34 @@ def terrain_cells(t: dict) -> dict:
 Pos = tuple[int, int]
 
 
+# An NPC that stands on one cell this long in view keeps a post there: the
+# same stillness Greet takes for a helper (``investigation.HELPER_STILL_TICKS``).
+POST_STILL_TICKS = 50
+# A hostile out of view that keeps no post is remembered where it was last
+# seen for this long (60 s at 10 ticks/s), on any map.
+SIGHTING_TICKS = 600
+
+
+@dataclass
+class Sighting:
+    """An NPC or character seen this run, kept after it leaves view (free-play run 5).
+
+    ``home`` is its post, the cell an NPC stood on for ``POST_STILL_TICKS``
+    (``post`` True), else the cell it was first seen on, which holds no
+    ground: a roamer keeps to no cell. ``reach`` is the furthest from its
+    post it has hit us from: a guard that leaves its post to hit us shows how
+    far it guards. Whether it is a threat is asked at use
+    (``survival.is_hostile``), so a type found hostile later counts.
+    """
+
+    entity: Entity  # as last seen
+    map_id: int | None
+    tick: int  # last seen
+    home: Pos
+    post: bool = False
+    reach: int = 0
+
+
 @dataclass(frozen=True)
 class ZoneFact:
     """A get_zone answer for one cell (A7)."""
@@ -240,10 +268,15 @@ class WorldModel:
     # NPC id -> (cell, tick it was first seen there): how long each NPC in
     # view has stood still. Helpers stay put (GAME_NOTES NPCs); Greet (A65).
     npc_still: dict[int, tuple[Pos, int]] = field(default_factory=dict)
-    # NPC types that have shown they are hostile this run: one swung at or hit
-    # us, or one died in view (``NPCDied`` names only hostiles). Townsfolk and
-    # helpers never land here, so Flee and Retreat never answer them (A9, A23).
+    # NPC types that have shown they are hostile: one swung at or hit us, or
+    # one died in view (``NPCDied`` names only hostiles), this run or an
+    # earlier one (``hostile_memory``). Townsfolk and helpers never land here,
+    # so Flee and Retreat never answer them (A9, A23).
     hostile_types: set[TypeKey] = field(default_factory=set)
+    # (kind, id) -> where each NPC and character was seen, its post and the
+    # reach it hit us from, kept out of view (``Sighting``, free-play run 5);
+    # hostile NPCs' sightings are kept for later runs (``hostile_memory``).
+    sightings: dict[tuple[str, int], Sighting] = field(default_factory=dict)
     # Where each entity stood before its latest move, and the tick that move
     # was seen: ``survival.approaching`` reads it (A9).
     entity_moves: dict[tuple[str, int], tuple[Pos, int]] = field(default_factory=dict)
@@ -471,6 +504,7 @@ class WorldModel:
             del self.entity_moves[key]
         self.entities = entities
         self._note_npc_cells(tick)
+        self._note_sightings(tick)
 
     def _note_npc_cells(self, tick: int) -> None:
         """Keep ``npc_still`` for the NPCs in view: a moved NPC starts again."""
@@ -481,6 +515,33 @@ class WorldModel:
             seen = self.npc_still.get(e.id)
             still[e.id] = seen if seen is not None and seen[0] == e.pos else (e.pos, tick)
         self.npc_still = still
+
+    def _note_sightings(self, tick: int) -> None:
+        """Keep ``sightings``: refresh the NPCs and characters in view, note a
+        post once one has stood still ``POST_STILL_TICKS``, and forget one
+        whose cell (its post, else where it was last seen) is in sight with it
+        gone, or, keeping no post, unseen for ``SIGHTING_TICKS`` on any map.
+        A post on a map left behind is kept for a return."""
+        in_view = set()
+        for e in self.entities:
+            if e.kind not in ("npc", "character"):
+                continue
+            key = self._entity_key(e)
+            in_view.add(key)
+            s = self.sightings.get(key)
+            if s is None or s.map_id != self.map_id:
+                s = self.sightings[key] = Sighting(e, self.map_id, tick, e.pos)
+            s.entity, s.tick = e, tick
+            if not s.post and e.kind == "npc" and self.npc_still_ticks(e) >= POST_STILL_TICKS:
+                s.home, s.post = e.pos, True
+        for key, s in list(self.sightings.items()):
+            if key in in_view:
+                continue
+            cell = s.home if s.post else s.entity.pos
+            here = self.pos if s.map_id == self.map_id else None
+            gone = here is not None and chebyshev(cell, here) < self.perception
+            if gone or (not s.post and tick - s.tick > SIGHTING_TICKS):
+                del self.sightings[key]
 
     def npc_still_ticks(self, e: Entity) -> int:
         """How long ``e`` has stood on its cell while in view; 0 when it just moved or was never noted."""
@@ -689,6 +750,22 @@ class WorldModel:
             key = hostile_type_from_event(ev, self.entities, earlier)
             if key is not None:
                 self.hostile_types.add(key)
+            self._learn_reach(ev)
+
+    def _learn_reach(self, ev: dict) -> None:
+        """A hit stretches its hitter's ``Sighting.reach`` to where we stand
+        from its post, so ground that far from its post is known to be in its
+        reach; a hitter with no post learns none (its first-seen cell is no
+        ground it keeps). An ``NPCDied`` forgets that NPC (free-play run 5)."""
+        if ev.get("kind") == "NPCDied":
+            self.sightings.pop(("npc", _opt_int(ev.get("npc_id"))), None)
+            return
+        source = hitter(ev)
+        if source is None and ev.get("kind") == "Attacked" and ev.get("actor_kind") in ("npc", "character"):
+            source = (ev["actor_kind"], ev.get("actor_id"))
+        s = self.sightings.get((source[0], _opt_int(source[1]))) if source is not None else None
+        if s is not None and s.post and self.pos is not None and s.map_id == self.map_id:
+            s.reach = max(s.reach, chebyshev(self.pos, s.home))
 
     def apply_observation(self, obs: dict | None) -> None:
         """Folds a tick observation into the model (Manual §7.2).

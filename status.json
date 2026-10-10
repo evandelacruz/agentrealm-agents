@@ -65,7 +65,7 @@
 
   "A21": {"state": "done"},
 
-  "A22": {"state": "done"},
+  "A22": {"state": "done", "note": "Free-play run 5: Gather and Detour keep off ground remembered hostiles hold (posts, last-seen cells, reach learned from hits) and take no target whose route crosses a known hostile's reach, unless the gather_gems op sets fight; while Gather works only in a target region it walks to piles only there. Free-play run 6: hostile NPC types and their sightings are kept in the world knowledge base across runs (hostile_memory), and Gather picks the nearest bush or grass by walk, not any bush before any grass."},
 
   "A23": {"state": "done"},
 
@@ -157,9 +157,11 @@
 
   "A76": {"state": "open", "note": "A67 run 4: the M8 heal_potion gate counts a self-Use with a potion in hand, even one that drank nothing (228 s, potions 2 → 2); count only a Use that uses a potion up."},
 
-  "A77": {"state": "open", "note": "A67 run 5: the held-queue probe counts Heal's drink tries (heal.py:308) without sending the drink and does not restore heal_tries (runner.py:760-783); both starting potions were written off in 6 s and the character died at 2/10 holding them."},
+  "A77": {"state": "done", "note": "Fixed in #161 (the probe restores memory whole and only server rejections are filed); A80 then removed the try count the probe was spending."},
 
   "A78": {"state": "open", "note": "A67 run 5: Gather and Detour picked gem piles beside a roaming gristlewick's post (gather_safe.py:62 checks only a hostile in view near the cell); four trips, 10 -> 3, then the death. Bar a hostile's last-seen post and the route through its reach."},
 
-  "A79": {"state": "open", "note": "A67 run 5: a buy is done once any of the item is held (plan.py:771-772); buy small_potion with 2 held finished at once 8 times."}
+  "A79": {"state": "open", "note": "A67 run 5: a buy is done once any of the item is held (plan.py:771-772); buy small_potion with 2 held finished at once 8 times."},
+
+  "A80": {"state": "done"}
 }

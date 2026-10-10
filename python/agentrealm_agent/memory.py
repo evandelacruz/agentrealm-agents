@@ -13,6 +13,7 @@ from .navigation.walk import Walk
 from .targets import Commitment
 
 if TYPE_CHECKING:
+    from .healing import HealRefusal
     from .states.detour import Detour
 from .travel.strength import StrengthBracket
 from .world import Pos
@@ -154,7 +155,7 @@ class Memory:
     heal_regen_sample: tuple[int, int, int] | None = None
     heal_regen_absent: bool = False
     heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
-    heal_tries: dict[tuple[str, int], int] = field(default_factory=dict)  # ("take"|"use", supply id) -> times the server refused it (A24)
+    heal_refusals: dict[tuple[str, int], HealRefusal] = field(default_factory=dict)  # ("take"|"use", supply id) -> its last refusal and what Heal does about it (A80)
     heal_drink: int | None = None  # supply id of the drink sent, until its Use applies or is refused or another queue replaces it (A24)
     heal_rearm: str | None = None  # weapon code armed before a drink; restored once, on Heal's next decision (A24)
     last_weapon: str | None = None  # the last weapon seen armed this run (equip.note_last_weapon): what a drink re-arms

@@ -30,11 +30,11 @@ First row that matches decides it:
 | a CI check run (not a reviewer's check) concluded `failure` or `timed_out` | **spawn**: red CI |
 | a reviewer rejected the current head, the rejection has inline threads, and a fixer replied on each of them after that review without pushing | **skip**: disputed, Evan decides |
 | a reviewer rejected the current head | **spawn**: review |
-| unresolved threads, and not approved | **spawn**: review |
-| approved, only open nit threads | **skip**: nothing blocks the merge |
-| green, no conflict, no review yet | **skip**: waiting on the reviewer |
+| anything else | **skip**: nothing blocks it |
 
-The three spawn rows are not exclusive. A pull request that conflicts **and** is red **and** has threads is one session whose brief carries all three.
+Open review threads are never a blocker on their own. A pull request no reviewer rejected is not blocked, however many threads are open.
+
+The three spawn rows are not exclusive. A pull request that conflicts **and** is red **and** was rejected is one session whose brief carries all three.
 
 Traps that make you spawn at nothing:
 
@@ -97,8 +97,10 @@ Follow the agentrealm-agents-fixer skill at .claude/skills/agentrealm-agents-fix
 Read AGENTS.md first, then the PLAN.md sections a review thread cites.
 
 One pass: apply the fixes and push. Write nothing to GitHub except the
-label and a comment on anything you deliberately leave unfixed. No reviews,
-no approvals, no resolving threads, no merging, no re-running CI.
+label, a reply naming the fixing commit on each thread your push fixed
+(then resolve that thread), and a reply on each thread you deliberately
+leave unfixed (leave it open). No reviews, no approvals, no merging, no
+re-running CI.
 
 The conductor:working label is already claimed for you. Do not claim it
 again. After your push, remove only that label, keeping every other one.
@@ -116,7 +118,7 @@ hand-edit it. In status.json keep the more advanced state per ID.
 Run <run_id>: pull the output with get_job_logs(failed_only=true).
 Reproduce locally, fix, confirm. Never skip or disable a test.
 
-[review] Unresolved threads:
+[review] <reviewer> requested changes on the head. Its threads:
 - <path>:<line>: <what it asks, one line>
 - …
 
@@ -144,6 +146,6 @@ Give the threads and the failing check in the brief rather than sending the sess
 ## Out of scope
 
 - Fixing anything yourself. You spawn; the sessions fix.
-- Merging, reviewing, approving, resolving threads, commenting on a pull request.
+- Merging, reviewing, approving, resolving threads, commenting on a pull request. The fixer sessions resolve the threads they fix; you do not.
 - Backlog work, and polish on approved pull requests that nothing blocks.
 - Spawning for a locked or draft pull request.

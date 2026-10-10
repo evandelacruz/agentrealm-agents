@@ -41,7 +41,7 @@
 
   "A16": {"state": "done", "note": "Acceptance gate and smoke script shipped; the live hour PASS is A58. Under the planner the target is a pinned directives goal; planner errors or no accepted plan fail every smoke gate. A travel op whose target stuck detection gave up on leaves the stack for good and is unpinned; the gate fails on any return to a given-up target and prints the count (second live Walk run). Free-play run 2: a give-up on town or a shop lapses after 1200 ticks or 16 cells moved, and the planner sees when."},
 
-  "A58": {"state": "partial", "remaining": "Waiting on A9 (run 9 death during flee after goto reached) and A5 (mid-flee interleaving; respawn-window position 409s). #103 (A16) merged and cleared run 8 navigation; run 9 (main 8b30a0b) failed at ~211 s. Regen still unmeasured (hurt but died in Flee); run the A60 regen probe (make probe-regen). Live tests are 5-minute runs (--seconds 300) until the basics pass. Notes in docs/observations/A58_live_play.md."},
+  "A58": {"state": "partial", "remaining": "No live hour has passed. Run 9 (main 8b30a0b) died at ~211 s; its fixes (A9, A5 in #107) and the later survival and walk fixes (#119, #125, #137, #140) have no live M7 rerun yet. The planner-on Walk runs 3 and 4 (docs/observations/A16_walk_planner_runs.md) died at 132 s and 75 s. Regen is still unmeasured: run the A60 regen probe (make probe-regen) first. Live tests are 5-minute runs (--seconds 300) until the basics pass. Done when a live hour exits 0 on the A16 gate and docs/acceptance/m7_olympuff_PASS.transcript is committed. Notes in docs/observations/A58_live_play.md."},
 
   "A59": {"state": "done"},
 
@@ -71,11 +71,11 @@
 
   "A24": {"state": "done"},
 
-  "A25": {"state": "partial", "remaining": "Live M8 pass on Olympuff (gate shipped; depends on A58 and M8 behavior PRs A19–A24)"},
+  "A25": {"state": "partial", "remaining": "Live M8 pass on Olympuff (gate shipped in #97); waits on A58's live pass."},
 
   "A26": {"state": "done"},
 
-  "A27": {"state": "partial", "remaining": "A23 run 2 (at 8966752): ring zone reads starved hunt_probes; #126 now skips terrain-safe cells, so what stays open is the ring cells no terrain read has covered yet still outranking hunt_probes, and probe_until (5 s) lapsing between slow decisions (A64). Confirm with a rerun."},
+  "A27": {"state": "done", "note": "A23 run 2's ring-starved hunt_probes fixed in #131: hunt_probe runs ahead of the respawn ring and HUNT_PROBE_FRESH_SECONDS went 5 to 30 s (test_zone_discovery.py). Not yet rerun live. #139: a travel to a cell with an item for sale arrives beside it."},
 
   "A28": {"state": "done"},
 
@@ -129,7 +129,7 @@
 
   "A53": {"state": "done"},
 
-  "A63": {"state": "partial", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield, gather_status and gather_run; Gather skips barren regions unless the op names one. Run 1 made no cut (Gather bar was safe zones only); run 2 cut one town cell 168 times with no effect. Both fixed (field cells first, no-effect cells held out, 3 no-effect cuts mark a region or safe zone uncuttable). Run 3 (11 gems, then a flee step into lava): stale-position Step guard, lone intents held as queues, narrower hostile bar with fight-or-move-off for a shadowing hostile, walking/blocked/stall gather_status, best regions at any distance, smoke runs play on after a death. Run 4 (600 s): 20 gems by 257 s, one death (A10 Heal walk). Free-play run 2: gather_gems x, y names a target region Gather walks to and works in; Gather leaves a poor region (20 cuts, under 0.05 gems a cut) for a better known one within 64 blocks.", "remaining": "Run 4 defects (docs/observations/A63_gem_gathering_runs.md): (2) the Pickup reflex re-sends a held lone Take, so 10 of 13 supplies took a duplicate Take: held_step_matches (runner.py:785) keeps a held queue only for a SetPosition reflex, so pickup.py:33 replaces the held Take with the same Take; (3) Gather and Retreat paced for 34 s: gather_bar (states/gather_safe.py:31) lets Gather target grass 2 cells from a hostile, where should_retreat (survival.py:270) turns it back to the safe tile."},
+  "A63": {"state": "done", "note": "Cut records, region yield and barren mark in kb.extra gem_yield; planner State gem_yield, gather_status and gather_run; Gather skips barren regions unless the op names one. Run 1 made no cut (Gather bar was safe zones only); run 2 cut one town cell 168 times with no effect. Both fixed (field cells first, no-effect cells held out, 3 no-effect cuts mark a region or safe zone uncuttable). Run 3 (11 gems, then a flee step into lava): stale-position Step guard, lone intents held as queues, narrower hostile bar with fight-or-move-off for a shadowing hostile, walking/blocked/stall gather_status, best regions at any distance, smoke runs play on after a death. Run 4 (600 s): 20 gems by 257 s, one death (A10 Heal walk). Free-play run 2: gather_gems x, y names a target region Gather walks to and works in; Gather leaves a poor region (20 cuts, under 0.05 gems a cut) for a better known one within 64 blocks. Run 4 defects fixed in #137: a reflex that asks for the held queue's own intents (a Take included) leaves it running (held_queue_matches, test_runner.py), and Gather's bar is a step past weapon reach or hostile_range, so it never picks a cell where Retreat fires (test_gather.py)."},
 
   "A64": {"state": "partial", "note": "nearest_target: one flood to the cheapest target, then one A* (#132). Danger: one danger_map per search, only known-hostile NPC types. Held-queue probe runs only dispatch.PROBE_STATES (reflexes but Greet, Boss in a boss fight), no executor. Tests bound a decision on the 30k-cell map with 400 known hostiles, and the probe.", "remaining": "Live check: a run logs no window gap above 1 s outside network time."},
 
@@ -137,11 +137,11 @@
 
   "A66": {"state": "done", "note": "Park phase on stop (time limit, SIGINT, SIGTERM): survival reflexes plus Park walk to safe ground for up to --park-seconds (60), then an empty tick clears the queue. Not counted by acceptance gates. Free-play run 2 timed out on a walled-off safe tile; Park now picks the nearest one a path reaches, else town. Free-play run 3: Park sat 60 s two cells from a safe tile it never got nearer; a Park or Retreat walk with no progress in a stuck window now rules the tile out for 300 ticks and moves on, else town."},
 
-  "A67": {"state": "open", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 filed: accidental sword buy, 0 gems, 370 s Break Arm loop; short-run gates only. Rerun after A68-A70."},
+  "A67": {"state": "partial", "note": "Free-play scenario (M8 smoke, planner on, empty directives). Run 1 (#138): accidental sword buy, 0 gems, 370 s Break Arm loop; its defects A68, A69 and A70 are fixed (#139, #146). Run 3 (#150, 600 s at bd5aeff): no deaths, gems from piles only, no armor or potions; short-run gates only. Its top defects are fixed: Heal's drink sends its Use and Gather cuts only with a cutter (#152, A24, A22), and a Park or Retreat walk that gets no nearer a safe tile rules it out (#151, A9, A66).", "remaining": "Rerun on main with the run 3 fixes and record it in docs/observations/A67_free_play_runs.md. Run 2 (fixes in #140) has no notes in the doc."},
 
   "A68": {"state": "done", "note": "Armed supply is a candidate and wins a tie (#139); Break steps toward its block and arms only once in reach, so the step is never dropped behind an Arm."},
 
-  "A69": {"state": "open", "note": "A67 run 1: travel to shop ends on the item cell and takes (buys) it."},
+  "A69": {"state": "done", "note": "#139: no walk steps onto a priced supply, and a travel to a shop or to any cell with an item for sale arrives beside it; only Shop's Take buys (test_shop.py)."},
 
   "A70": {"state": "done", "note": "#139: State shows stall (30 s with no change, with the last decision) and level_entrances; a symbolic travel shows without 0, 0, with goes_to."}
 }

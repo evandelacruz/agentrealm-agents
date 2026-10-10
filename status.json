@@ -163,5 +163,7 @@
 
   "A79": {"state": "done", "note": "Fixed in #161: a buy is done once one more is held or stowed than the fewest since it reached the top (Plan.held_before)."},
 
-  "A80": {"state": "done"}
+  "A80": {"state": "done"},
+
+  "A82": {"state": "done"}
 }

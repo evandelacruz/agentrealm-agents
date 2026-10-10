@@ -33,7 +33,7 @@ from ..pathing import (
 )
 from ..plan import GoalOp
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
-from ..survival import is_hostile
+from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .gather_safe import hostiles_near, is_safe_ish
@@ -85,7 +85,9 @@ def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:
 
 def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateOutcome | None:
     """One step that takes us further from the known hostiles within
-    ``CAUTION_RADIUS``, safe-ish ground first, else hold; None with none near.
+    ``CAUTION_RADIUS``, safe-ish ground first, else hold while one of them
+    is closing in (``survival.approaching``); None with none near, or with
+    no step away from a hostile that is not closing.
 
     Free-play run 6: the character started hurt beside a hostile's post, and
     before the planner's first reply the safe default walked ten steps
@@ -93,7 +95,9 @@ def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateO
     above this; it covers the ground between them, a hostile near but not in
     range. A hold lasts at most ``KEEP_AWAY_HOLD_TICKS``, then the safe
     default explores again, still away from hostiles, so a hostile that
-    stays put never holds it for good.
+    stays put never holds it for good. One that is not closing holds
+    nothing: standing off it is idle (A82, free-play run 8: Gather, blocked
+    by a hostile 10–13 cells off, fell back here and stood off it for 177 s).
     """
     m = ctx.memory
     near = [e for e in w.entities if is_hostile(w, ctx.policy, e) and chebyshev(e.pos, w.pos) <= CAUTION_RADIUS]
@@ -107,6 +111,9 @@ def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateO
     blocked, _, _ = plan_sets(w, ctx.memory, ctx.policy, ctx.knowledge)
     options = [p for p in w.open_neighbours(w.pos, blocked) if gap(p) > gap(w.pos)]
     if not options:
+        if not any(approaching(w, e) for e in near):
+            m.keep_away_hold = None
+            return None
         if m.keep_away_hold is None:
             m.keep_away_hold = w.tick
         if w.tick - m.keep_away_hold >= KEEP_AWAY_HOLD_TICKS:

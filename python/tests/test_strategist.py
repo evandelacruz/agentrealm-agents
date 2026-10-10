@@ -482,7 +482,7 @@ class ProgressTest(unittest.TestCase):
             round_trip(s, r)
             self.assertIs(r.plan, before, reply)
             self.assertEqual((r.mem.path, r.mem.goal), ([(1, 1), (2, 2)], "explore"), reply)
-            self.assertEqual(logged_events(r), ["ask", "unchanged"], reply)
+            self.assertEqual(logged_events(r), ["ask", "error" if reply == "not json" else "unchanged"], reply)
 
     def test_reworded_why_does_not_restart_a_wait(self):
         s, r = make(FakeLLM({"goals": [{"op": "wait", "seconds": 20, "why": "boss is about to spawn"}, {"op": "buy", "code": "rope"}]})), fake_runner()
@@ -650,12 +650,6 @@ class SafeDefaultTest(unittest.TestCase):
     def test_empty_goals_clear_the_stack(self):
         self.assert_cleared({"goals": []})
 
-    def test_reply_that_is_not_json_clears_the_stack(self):
-        self.assert_cleared("I think you should explore")
-
-    def test_reply_that_is_not_an_object_clears_the_stack(self):
-        self.assert_cleared([{"op": "wait", "seconds": 1, "why": "x"}])
-
     def test_long_or_unexplained_wait_is_not_a_plan(self):
         self.assert_cleared({"goals": [{"op": "wait", "seconds": 600, "why": "rest"}, {"op": "wait", "seconds": 5}]})
 
@@ -669,6 +663,37 @@ class SafeDefaultTest(unittest.TestCase):
         s, r = make(FakeLLM({"goals": []})), fake_runner(goals=["gather_gems:5"])
         round_trip(s, r)
         self.assertEqual(r.plan.current()["op"], "gather_gems")
+
+
+class UnreadableReplyTest(unittest.TestCase):
+    """A82, free-play run 8: a reply that was not JSON cleared gather_gems and
+    buy for the safe default. A reply that is not a JSON object is no plan:
+    the stack and its walk stay, and the call is retried after the backoff."""
+
+    STACK = [{"op": "gather_gems", "count": 5}, {"op": "buy", "code": "small_potion"}]
+
+    def assert_kept(self, raw):
+        s, r = make(FakeLLM(raw, WAIT_ANSWER)), fake_runner()
+        r.plan = Plan([dict(g) for g in self.STACK], dict(PARAM_DEFAULTS))
+        r.mem.path, r.mem.goal = [(1, 1)], "gather"
+        s.inbox.append({"trigger": "timer"})
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals, self.STACK)
+        self.assertEqual((r.mem.path, r.mem.goal), ([(1, 1)], "gather"))
+        self.assertEqual(logged_events(r), ["ask", "error"])
+        self.assertIn("timer", [t["trigger"] for t in s.inbox])  # put back for the retry
+        self.assertEqual(s.failures_in_a_row, 1)
+        s.on_window(r)
+        self.assertEqual(logged_events(r), ["ask", "error"], "no retry inside the backoff")
+        s.clock.now += BACKOFF_BASE_S
+        round_trip(s, r)
+        self.assertEqual(r.plan.current()["op"], "wait", "the retry's reply applies")
+
+    def test_a_reply_that_is_not_json_keeps_the_stack(self):
+        self.assert_kept("I think you should explore")
+
+    def test_a_reply_that_is_not_an_object_keeps_the_stack(self):
+        self.assert_kept([{"op": "wait", "seconds": 1, "why": "x"}])
 
 
 class ParamsTest(unittest.TestCase):

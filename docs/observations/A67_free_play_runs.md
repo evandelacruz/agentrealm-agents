@@ -294,3 +294,87 @@ Decisions outside held queues: 61 cuts (44 bush, 17 grass), 42 Gather walks, 25 
    ```
 
 **Minor:** Travel paced between two cells twice (above, `states/travel.py:242–245`). #158 fixed it: the window search now ranks cells by the corridor tree. The Use at 228 s on a just-bought potion at 8/10 consumed nothing, yet the M8 potion gate counted it (A76). The planner retargeted `gather_gems` four times in 50 s on 4–17-cut samples, though Gather already relocates itself after 20 cuts.
+
+### Run 5: run 4's fixes hold, but the probe uses up Heal's tries on both potions, and a gristlewick kills it with both still held
+
+- **Code:** `main` at `40e82f1`, after #158 (A71, A13, A9: detour priced from the route ahead, the travel window ranked by the corridor tree, the gather region kept, the Retreat window) and #157 (A19, A21, A24, A74, A75: a non-weapon in the armed slot replaced, Heal's re-arm always a weapon, the drink targets `self`, a `buy` walks to the shop).
+- **Verdict:** exit 0, `PASS` after **601.9 s**, on the short-run gates only. The park **timed out** after 60.3 s at (430, 378), with "Heal: no safe-zone regen this run; Park: safe tile unreachable" on every decision, and cleared the queue. The character started with 7/10 health, 7 lives and **14 gems**, on the overworld 24 cells north-east of the town cell. It held the pocket knife and **two small_potions** left from run 4, with the bronze_sword armed. The local state directory was empty again.
+- **Gate summary:** deaths **1**; API errors **0**; fights below the health floor 0; gems earned **yes**; armor **no**; shop weapon **yes** (the sword it started with, lost at the death); potion reserve **yes**; Heal took ground food **yes**, Heal drank a potion **yes** (the one bought after the death; the drink went through). Planner: 52 calls, 50 plans accepted, 2 errors (prose replies, "payload is not an object").
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–97 s | `travel` town, `say` elder and rumor tellers, `buy` small_potion, `explore_area` town r25 | Heal explored the safe zone at 7/10 for 25 s instead of drinking (defect 1). Travel walked to town, and Greet said hello to 19 NPCs on the way and in town; 10 gave clues. |
+| 97–168 s | `explore_area`, `gather_gems` 25, `buy` matches (for the "potato patch, take matches" clue) | Detour took the (413–415, 414) pile (+3). Shop walked to the matches in sight and bought them (**17 → 12**). |
+| 168–300 s | `gather_gems` 60 (region (416, 384) from 238 s), `buy` small_potion ×6, `travel` town | 13 cuts, 2 gems. Gather and Detour went for the piles at (439–441, 360) and (428, 366) four times, and each time the gristlewick near (430, 370) hit it (10 → 3) (defect 2). Each `buy` small_potion finished at once, since 2 were held (defect 3). |
+| 300–346 s | `travel` town / point, `buy` small_potion, `gather_gems` | At 3/10, Travel to town escalated to Break at (429, 385), and the town walk was given up. The Explore safe default then walked north, and Detour went for a gem at (429, 351) past the gristlewick (→ 2/10). Break armed matches beside it, Explore walked north again, and it was **killed at 346 s** at (436, 369), still holding both potions. |
+| 352–415 s | `buy` small_potion, `gather_gems` 60 at (416, 384) | Respawned in town with the pocket knife. Shop walked to the potion in sight and bought it (**14 → 4**). Detour took the (439–441, 360) pile (+3). A snotling hit it at 9/10, and Heal drank the new potion (9 → 10) and re-armed the knife. |
+| 415–600 s | `gather_gems`, `travel` point (429, 370) / town, `wait` 15–30 s | The gristlewick hit it 10 → 4 again around (430, 370). Travel to the point and to town were each given up by stuck detection. 35 decisions sat on planner `wait` ops at 5/10. |
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **14** | **7** (+8 earned, −5 for matches, −10 for one small_potion) |
+| Armed | bronze_sword | pocket_knife (the sword was lost at the death) |
+| Worn | `{}` | `{}` |
+| Held | pocket_knife, small_potion ×2 | none |
+| Potions | 2 | 0 (both lost at the death; the one bought after it was drunk) |
+
+Bought: matches (5) and one small_potion (10), each by a `buy` op, each walking straight to the item in sight. Equipped: no `equip` op was needed or sent. Break armed the matches at 313 s and 339 s to burn a block, and Retreat re-armed the sword in between. Drank: one small_potion at 414 s; `SupplyUsed` came back and health went 9 → 10. The death at 346 s dropped the sword, the matches and both starting potions into a chest at (436, 369).
+
+#### Gems earned
+
+**8**: the (413–415, 414) pile +3 at 137–141 s and the (439–441, 360) pile +3 at 405–409 s, both by Detour, and 2 from cuts ((431, 391) at 208 s and (430, 392) at 273 s; 23 cuts in all, none with no effect). The pile at (428, 366) and the gem at (429, 351) sat by the gristlewick's post and were never taken. Piles at (377–379, 377), (359–361, 440) and (439–441, 440) never came within 10 cells of a walk.
+
+#### Deaths
+
+**1** (lives 7 → 6), at 346 s, killed by the gristlewick (npc 217) at (436, 369). It hit 12 times for 16 damage over the run, all within about 12 cells of (430, 370). A snotling hit once. The death came at the end of four trips back to its post (below), at 3/10 and then 2/10, holding two potions it could no longer drink (defect 1).
+
+#### Run 4 fixes, checked
+
+| Run 4 defect | Run 5 | |
+|---|---|---|
+| Detour pricing (A73, #158) | **Fixed.** No gem pile was passed within Detour's reach and left. 7 gem detours started. They took 2 piles (6 gems), and 4 were broken off by the gristlewick, not by pricing. | Run 4: 2 triples missed. |
+| Travel pacing (#158) | **Fixed.** 0 Travel oscillations. The guard fired once, on Break ↔ Flee at (430, 371) ↔ (430, 372) at 482 s. | Run 4: 2. |
+| Gather region churn (#158) | **Fixed.** The planner named 1 region, (416, 384), and kept it or left x, y out. Gather's own target still left the region for gem piles (defect 2). | Run 4: 4 regions in 50 s. |
+| Potion in slot, equip no-ops (A74, #157) | **Fixed.** 0 `equip` no-ops, and no potion stayed armed: after the drink the slot was empty for 5 s, then Heal re-armed the knife (1 of 1). | Run 4: 15 no-ops, a potion re-armed. |
+| The drink (A24, #157) | **Fixed.** 1 drink sent, 1 went through (`SupplyUsed`, 9 → 10). | Run 4: 0 of 1. |
+| Shop drift (A75, #157) | **Fixed, untested out of sight.** Both buys walked straight to an item in sight; 0 drift. No `buy` came up with the shop out of sight, so the walk to an unseen shop did not run. | Run 4: ~100 cells off. |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 147,773, output 17,327, cache write 100,917, cache read 7,064,190 |
+
+#### Decision mix
+
+Decisions outside held queues: 54 no state (the park), 35 planner waits, 32 Detour, 28 Gather walks and 23 cuts (13 bush, 10 grass), 19 Explore, 19 Retreat, 18 Flee, 14 Travel, 21 Break, 19 greetings, 13 respawn syncs, 5 Heal walks, 1 drink and 1 re-arm, 5 `take gem`, 4 shop walks and 2 buys. Intents: 923 `Step`, 2,510 `Wait`, 32 `Use`, 19 `Say`, 10 `Take`, 5 `Arm`. Call mix: 796 `tick`, 257 `zone`, 238 `entities`, 123 `strategist`, 60 `self`, 37 `terrain`, 34 `position`.
+
+#### Top 3 defects
+
+1. **The held-queue probe uses up Heal's tries without sending the drink, so both starting potions were written off in the first 6 s.** `reflex_while_held` (`runner.py:584`) runs the reflexes, Heal among them (`states/dispatch.py:113`), on every "queue held" poll. Heal's `use_carried_heal` counts a try (`note_try`, `states/heal.py:308`) before anything is sent. Heal's drink is not marked a reflex (`_out`, `heal.py:174`), so the runner drops it (`runner.py:775`) and the walk queue runs on. The probe saves and restores the plan, path, targets and `heal_rearm` (`runner.py:760–783`), but not `m.heal_tries`. After the first walk at 1.5 s, 6 polls (2 potions × `HEAL_MAX_TRIES` = 3, `healing.py:43`) left neither potion usable (`tries_left`, `healing.py:55`; `carried_heal`, `:73`). From 6 s Heal explored the safe zone at 7/10 instead of drinking. At 288–346 s Heal could not run with the gristlewick in range (`_wants_heal`, `heal.py:90–92`), and Retreat's losing-ground drink (`_turn_on_losing`, `retreat.py:216–218`) found nothing usable either. It died at 2/10 holding both. The potion bought after the death had a fresh id and was drunk in a decision window. The probe should save and restore `heal_tries`, or count a try only once the intents are sent.
+
+   ```
+   1.5 s   @421,380  explore → (417, 405)          10×Step 27×Wait
+   2.1–5.8 s  queue held ×6                          probe: Heal picks a potion, note_try, dropped
+   6.4 s   @414,390  heal in safe ground: heal_explore   7/10, small_potion ×2 held
+   301 s   health 3/10, 338 s 2/10                   gristlewick in range: Heal off, Retreat finds no usable potion
+   346 s   Died (killed) at (436, 369)               dropped: bronze_sword, matches, small_potion ×2
+   414 s   arm and use small_potion (new id)         SupplyUsed, 9 → 10
+   ```
+
+2. **Gather and Detour send it to gem piles beside a known hostile's post** (A22, A73). `gather_ground` (`states/gather_safe.py:62`) bars a cell only for a hostile in view within its bar of that cell. The gristlewick roams near (430, 370) (`stays_put: false`), and is often out of view. The piles at (439–441, 360) and (428, 366) and the gem at (429, 351) lie 5–15 cells from it, and the way to them runs past it. Detour checks the same thing (`states/detour.py:191`), and its walk only prices hostile reach as costly (`:219`). Four trips (Detour at 216 s, 228 s, 281 s and 322 s, and Gather's "gather → (440, 360)" and "(429, 351)") each ended in hits, 10 → 3 and then the death. Gather's pile target also ignored the named region: "gather → (440, 360) (region 416,384)". A hostile that has hit us should bar its last-seen post, and the route there, not just the target cell, for some time after it drops out of view.
+
+   ```
+   216 s  @430,381  detour → gem at (428, 366)       222 s hit (gristlewick)
+   224 s  @430,372  gather → (440, 360)              231–233 s hit ×2, 9 → 7
+   281 s  @434,382  detour → gem at (441, 360)       288–294 s hit ×3, 7 → 3
+   322 s  @438,376  detour → gem at (429, 351)       326 s hit → 2; 346 s killed
+   ```
+
+3. **A `buy` op counts as done once any of the item is held** (A21). `goal_done` returns true for `buy` when a matching supply is held or stowed (`plan.py:771–772`). With 2 small_potions held, each `buy` small_potion finished at once: 8 times between 95 s and 300 s, each re-sent by the planner ("the potion count is still 2, so it did not complete"). Raising `potion_reserve` to 3 at 287 s changed nothing. A `buy` should be done when the count it found on top has gone up by one, or when the held count reaches `potion_reserve` for a potion.
+
+**Minor:** Travel to town was given up twice mid-walk (at 3/10 near 316 s, after an escalation to Break at (429, 385), and at 540 s). Each time the Explore safe default then walked north toward the gristlewick. `explore_area` (399, 406) r12 finished at once 6 times. A Detour to a berry at (449, 370) alternated "stop, the step may land on a blocked cell" and one step for 12 decisions. The park found no reachable safe tile from (430, 378) and sent nothing for 60 s. Break armed matches at 2/10 beside the gristlewick.

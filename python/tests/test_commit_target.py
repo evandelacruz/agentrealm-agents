@@ -2,8 +2,8 @@
 
 Once a state picks a target it keeps it until it reaches it, proves it
 impossible, or meets a prerequisite, which becomes a stop before it. Another
-candidate coming nearer never re-picks. A valuable a few steps off the walk
-is a detour stop, and the walk resumes after it. New information wakes the
+candidate coming nearer never re-picks. A valuable worth the steps it adds
+to the walk is a detour stop, and the walk resumes after it. New information wakes the
 planner at once, but only once, and a new head waits for the action under way.
 """
 

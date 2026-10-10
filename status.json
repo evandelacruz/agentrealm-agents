@@ -169,5 +169,15 @@
 
   "A82": {"state": "done"},
 
-  "A83": {"state": "done"}
+  "A83": {"state": "done"},
+
+  "A84": {"state": "done"},
+
+  "A85": {"state": "todo"},
+
+  "A86": {"state": "todo"},
+
+  "A87": {"state": "todo"},
+
+  "A88": {"state": "todo"}
 }

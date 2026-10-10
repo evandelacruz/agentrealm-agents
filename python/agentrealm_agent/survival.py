@@ -288,7 +288,7 @@ def hostile_swing_damage(damage: int, threat: ThreatTable | None = None, key: Ty
 def _hostile_damage(threat: ThreatTable, key: TypeKey | None) -> float:
     """A type's expected swing (``hostile_swing_damage``): at its largest
     measured hit, or, never measured, at the world's base attack power
-    (``UNMEASURED_DEFAULT``, the published rules; A84)."""
+    (``UNMEASURED_DEFAULT``, the published rules; A85)."""
     damage = threat.by_type.get(key, UNMEASURED_DEFAULT) if key is not None else UNMEASURED_DEFAULT
     return hostile_swing_damage(damage, threat, key)
 

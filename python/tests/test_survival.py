@@ -618,7 +618,7 @@ class SwingTest(unittest.TestCase):
         self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
 
     def test_an_unmeasured_type_swings_at_the_base_attack_power(self):
-        """Free-play run 9 (A84): a type never measured is priced by the
+        """Free-play run 9 (A85): a type never measured is priced by the
         published rules, attack power 2, not refused. The knife takes one
         alone at full health, not a pair, and not one measured to hit hard."""
         w = world(["..."], at=(0, 0))
@@ -632,7 +632,7 @@ class SwingTest(unittest.TestCase):
         self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
 
     def test_a_measured_hit_rate_moves_the_swing_off_the_roll(self):
-        """Counted hits and misses (A84) move a type's chance off the
+        """Counted hits and misses (A85) move a type's chance off the
         published 65%, which counts as ``PRIOR_SWINGS`` swings."""
         from agentrealm_agent.threat import PRIOR_SWINGS, ThreatTable
         t = ThreatTable()

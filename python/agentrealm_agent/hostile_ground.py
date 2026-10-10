@@ -36,7 +36,7 @@ GATHER_HOSTILE_RADIUS = HOSTILE_DANGER_RADIUS
 GATHER_SHADOW_MARGIN = 1
 # A post's reach counts at most this far from it, however far its guard
 # chased us before a hit: a reach learned from a long chase walled off the
-# grass round town (free-play run 9, A84).
+# grass round town (free-play run 9, A85).
 POST_REACH_CAP = GATHER_HOSTILE_RADIUS
 # The most a faded post (below ``POST_HOLD_STRENGTH``) adds to a cell Gather
 # would work inside its ground, in steps of walk: it prices that grass, so
@@ -170,7 +170,7 @@ def hostiles_within(w: WorldModel, policy: Policy, pos: Pos, radius: int) -> lis
     """The known hostiles within ``radius`` of ``pos``: one in view where it
     stands; one remembered (``WorldModel.sightings``) at its post, and out of
     view also where it was last seen. A faded post is not counted: it holds
-    no ground (``held_by_hostile``, A84)."""
+    no ground (``held_by_hostile``, A85)."""
     out: dict[HostileKey, Entity] = {
         (e.kind, e.id): e for e in w.entities if is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= radius
     }

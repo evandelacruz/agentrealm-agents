@@ -97,7 +97,7 @@ class HostilityKeptAcrossRunsTest(unittest.TestCase):
         return through_json(kb)
 
     def test_a_type_that_hit_us_is_written_to_npc_types(self):
-        """With what it measured: its largest hit and its swings that hit (A84)."""
+        """With what it measured: its largest hit and its swings that hit (A85)."""
         self.assertEqual(self.saved().npc_types, {CODE: {"hostile": True, "max_hit": 2, "hits": 1}})
 
     def test_the_next_run_knows_the_type_hostile_before_it_swings(self):

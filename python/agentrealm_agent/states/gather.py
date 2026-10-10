@@ -756,7 +756,7 @@ def _nearest_clear(
 ) -> tuple[Pos, list[Pos]] | None:
     """The nearest of ``cells`` a path reaches with a first step open and a
     ``clear`` route, and that path; up to ``ROUTE_TRIES`` searches. A cell
-    in a faded post's ground counts ``d.price`` steps further (A84)."""
+    in a faded post's ground counts ``d.price`` steps further (A85)."""
     here = w.pos
     assert here is not None
     cells = set(cells)

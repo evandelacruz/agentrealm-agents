@@ -44,7 +44,7 @@ class CostGridParams:
     costly: set[Pos] = field(default_factory=set)  # passable at COSTLY_STEP extra (escape off hazards)
     break_nominated: set[Pos] = field(default_factory=set)  # breakable cells considered for opening
     break_costs: dict[Pos, int] = field(default_factory=dict)  # passable at break time + 1 (+ tool price)
-    priced: dict[Pos, int] = field(default_factory=dict)  # passable at this many steps extra (a faded post's ground, A84)
+    priced: dict[Pos, int] = field(default_factory=dict)  # passable at this many steps extra (a faded post's ground, A85)
     # Which entities add danger: ``pathing.grid_params`` passes the agent's
     # one hostility test (``survival.is_hostile``), so townsfolk repel no path.
     is_hostile: Callable[[WorldModel, Entity], bool] = lambda w, e: e.kind == "npc"

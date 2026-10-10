@@ -7,6 +7,7 @@
 # While Cursor is out of credits: set `second: sonnet` and turn off Cursor's
 # review automation. When credits return, reverse both.
 opus: opus-review-agent[bot]
+# TODO(Evan): replace with the Sonnet app's real login.
 sonnet: sonnet-review-agent[bot]
 cursor: cursor[bot]
 second: cursor

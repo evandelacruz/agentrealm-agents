@@ -1,8 +1,10 @@
 """Character files are checked on load, so a typo fails at start and not mid-run."""
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from agentrealm_agent import config
 
@@ -31,3 +33,17 @@ class ConfigTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateDirTest(unittest.TestCase):
+    """``AGENTREALM_STATE_DIR`` moves traces and the knowledge base (A84)."""
+
+    def test_env_overrides_state_dir(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {config.STATE_DIR_ENV: tmp}):
+            self.assertEqual(config.state_dir(), Path(tmp).resolve())
+
+    def test_default_is_python_dot_state(self):
+        env = {k: v for k, v in os.environ.items() if k != config.STATE_DIR_ENV}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(config.state_dir(), config.DEFAULT_STATE_DIR)
+        self.assertEqual(config.DEFAULT_STATE_DIR, Path(config.__file__).resolve().parent.parent / ".state")

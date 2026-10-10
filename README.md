@@ -27,7 +27,7 @@ python3 -m agentrealm_agent metrics characters/wren.toml --character-id ID   # o
 python3 -m agentrealm_agent compare-metrics baseline.trace.jsonl candidate.trace.jsonl
 ```
 
-The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample profiles use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` prints a character id. `run` and `status` pick the character from `--character-id` or `--character-name`, else `AGENTREALM_CHARACTER_ID`; an explicit flag always overrides the environment. `run` plays until Ctrl-C (or SIGTERM) and appends a trace under `python/.state/<profile>.<character_id>.trace.jsonl`. A trace from before A59 (`<profile>.trace.jsonl`) is left as is: pass its path to `metrics`, or rename it to `<profile>.<character_id>.trace.jsonl` so new runs append to it. Run one `run` process per world at a time.
+The default API is `https://api.agentrealm.gg` (`AGENTREALM_BASE_URL` overrides it). Sample profiles use `world = "sandbox"` (free practice); set another world code to play live, where lives are permanent. `create` prints a character id. `run` and `status` pick the character from `--character-id` or `--character-name`, else `AGENTREALM_CHARACTER_ID`; an explicit flag always overrides the environment. `run` plays until Ctrl-C (or SIGTERM) and appends a trace under `python/.state/<profile>.<character_id>.trace.jsonl` (`AGENTREALM_STATE_DIR` moves the whole state dir: traces, world knowledge bases and the Supplies cache). A trace from before A59 (`<profile>.trace.jsonl`) is left as is: pass its path to `metrics`, or rename it to `<profile>.<character_id>.trace.jsonl` so new runs append to it. Run one `run` process per world at a time.
 
 ### Stopping a run
 
@@ -96,7 +96,7 @@ From the repo root:
 make test
 ```
 
-Tests never fetch the Supplies reference: `python/tests/__init__.py` turns the fetch and its cache off, and `make test` discovers the tests as that package (`-t .`) so it always runs. A bare `python3 -m unittest discover -s tests` skips it and fetches the live table.
+Tests never fetch the Supplies reference and never touch `python/.state` (A84): `python/tests/__init__.py` turns the fetch and its cache off and points `AGENTREALM_STATE_DIR` at a temp dir, so traces and knowledge bases written in tests land there and your saved knowledge base is safe. A last check fails the run if anything under `python/.state` changed. `make test` discovers the tests as that package (`-t .`) so it always runs. A bare `python3 -m unittest discover -s tests` skips it, fetches the live table and writes into `python/.state`.
 
 `make conductor-test` covers [`tools/conductor`](tools/conductor/README.md) (Node 22+). CI runs both on every pull request.
 

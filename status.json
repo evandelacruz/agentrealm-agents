@@ -27,7 +27,7 @@
 
   "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats."},
 
-  "A10": {"state": "partial", "note": "Live Walk run fix: Heal rests in the safe zone instead of walking out mid-sample; once regen is no it stops sampling and raises heal_supplies for the planner. Free-play run 2: Heal, Retreat and Park walk to the nearest safe tile a path reaches, else town.", "remaining": "A63 run 4 death: _walk_to_safe (states/heal.py) picks a safe tile with no hostile check on the target, unlike heal_explore (hostiles_near), and walked a 10-Step heal_measure queue into a known-hostile pack beside the safe tile."},
+  "A10": {"state": "done"},
 
   "A11": {"state": "done"},
 

@@ -24,7 +24,7 @@ from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
 from .healing import hurt
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
-from .survival import is_hostile, safe_goals, town_cell
+from .survival import is_hostile, pursuer_peaks, reach_by_hostile, safe_goals, town_cell
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -368,18 +368,36 @@ def commit_explore(
 SAFE_GOAL_CHECKS = 4
 # A safe cell a path check found no way to is skipped this long, then tried again.
 SAFE_UNREACHABLE_TICKS = nav_stuck.BACKOFF_BASE_TICKS
+# A safe cell seen in a known hostile's reach is skipped this long, so the
+# pick does not turn back for it the moment the pack drops out of view.
+SAFE_THREATENED_TICKS = nav_stuck.BACKOFF_BASE_TICKS
 # Heal's walks to safe ground: a cell either gave up on is skipped by every safe walk.
 SAFE_WALK_GOALS = ("heal_rest", "heal_measure")
 # Paths to safe ground: one of these that ends on a cell needs no search to it.
 SAFE_PATH_GOALS = ("safe", *SAFE_WALK_GOALS)
 
 
-def reachable_safe_goal(m: Memory, w: WorldModel, candidates: list[Pos], params: CostGridParams, town: Pos | None) -> Pos | None:
+def reachable_safe_goal(
+    m: Memory,
+    w: WorldModel,
+    candidates: list[Pos],
+    params: CostGridParams,
+    town: Pos | None,
+    reach: dict[tuple[str, int], set[Pos]] | None = None,
+    skip: Collection[tuple[str, int]] = (),
+) -> Pos | None:
     """The first of ``candidates`` (in the caller's order) a path reaches,
     else ``town`` when a path reaches it, else None. The cell we stand on is
     taken as is.
 
-    Skipped: a cell ``params`` avoids, one a check found no way to within
+    Skipped: a cell in the ``reach`` of a known hostile not in ``skip``
+    (``survival.reach_by_hostile``; A63 run 4: Heal walked to a safe tile
+    beside a hostile pack and died), or seen there within
+    ``SAFE_THREATENED_TICKS`` (``Memory.safe_threatened``, kept per hostile so
+    a caller's ``skip`` also covers the marks), since ``w.entities`` holds only
+    what is in view and a pick that forgot the pack once it left view would
+    turn back toward it; ``town`` is still the last resort. Also a
+    cell ``params`` avoids, one a check found no way to within
     ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), and one a
     Heal walk gave up on and still backs off. The first ``SAFE_GOAL_CHECKS``
     left are searched, then the nearest of the rest; a cell a kept safe
@@ -392,6 +410,10 @@ def reachable_safe_goal(m: Memory, w: WorldModel, candidates: list[Pos], params:
     if w.pos in candidates:
         return w.pos
     mid = w.map_id
+
+    for key, cells in (reach or {}).items():
+        for p in cells.intersection(candidates):
+            m.safe_threatened.setdefault((mid, p), {})[key] = w.tick
 
     def skipped(p: Pos) -> bool:
         if p in params.avoid:
@@ -409,7 +431,18 @@ def reachable_safe_goal(m: Memory, w: WorldModel, candidates: list[Pos], params:
             return False
         return True
 
-    left = [p for p in candidates if not skipped(p)]
+    def recently_threatened(p: Pos) -> bool:
+        marks = m.safe_threatened.get((mid, p))
+        if not marks:
+            return False
+        live = {key: seen for key, seen in marks.items() if w.tick - seen < SAFE_THREATENED_TICKS}
+        if live:
+            m.safe_threatened[(mid, p)] = live
+        else:
+            del m.safe_threatened[(mid, p)]  # lapsed marks are dropped, so a long run does not pile them up
+        return any(key not in skip for key in live)
+
+    left = [p for p in candidates if not recently_threatened(p) and not skipped(p)]
     here = w.pos
     first = left[:SAFE_GOAL_CHECKS]
     rest = left[SAFE_GOAL_CHECKS:]
@@ -426,10 +459,18 @@ def reachable_safe_goal(m: Memory, w: WorldModel, candidates: list[Pos], params:
 def retreat_safe_goal(
     m: Memory, w: WorldModel, policy: Policy, knowledge: KnowledgeBase | None, avoid: set[Pos], costly: set[Pos]
 ) -> Pos | None:
-    """Where Retreat, Park and Fight's retreat tail walk: the nearest known
-    safe cell a path reaches, else the town cell (``reachable_safe_goal``)."""
+    """Where Retreat, Park and Fight's retreat tail walk: the nearest known safe
+    cell a path reaches and out of reach of a hostile it is not running from,
+    else the town cell (``reachable_safe_goal``).
+
+    The hostiles it runs from (``pursuer_peaks``) do not rule a cell out:
+    they follow anyway, and are usually right beside the nearest safe cell.
+    """
     params = grid_params(policy, avoid, costly)
-    return reachable_safe_goal(m, w, safe_goals(w, knowledge), params, town_cell(w, knowledge))
+    reach = reach_by_hostile(w, policy)
+    return reachable_safe_goal(
+        m, w, safe_goals(w, knowledge), params, town_cell(w, knowledge), reach, skip=pursuer_peaks(w, policy)
+    )
 
 
 def nav_search(m: Memory, w: WorldModel, plan: str, goal: Pos) -> NavSearchState:

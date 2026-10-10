@@ -40,7 +40,7 @@ Traps that make you spawn at nothing:
 
 - `mergeable_state` reads `"unknown"` on a first fetch. Read it again. `"dirty"` is a conflict; `"unstable"` is a pending or failing check, not a conflict.
 - Still-running, `skipped`, and `neutral` checks are not failure.
-- Reviewer check runs (the Claude Review `review` job, the Cursor check) are not CI. Running, failed or cancelled, they are no reason to spawn or to skip.
+- Reviewer check runs (every Claude Review workflow job, the Cursor check) are not CI. Running, failed or cancelled, they are no reason to spawn or to skip.
 - Verdicts come from review states, never from labels. [agentrealm-agents-fixer](../agentrealm-agents-fixer/SKILL.md) **The review verdict** states the rule; keep it in that one place. `conductor:working` is a writer lock shared with Cursor. Do not delete it to "unstick" a pull request.
 
 ## The pass
@@ -147,5 +147,5 @@ Give the threads and the failing check in the brief rather than sending the sess
 
 - Fixing anything yourself. You spawn; the sessions fix.
 - Merging, reviewing, approving, resolving threads, commenting on a pull request. The fixer sessions resolve the threads they fix; you do not.
-- Backlog work, and polish on approved pull requests that nothing blocks.
+- Backlog work, and pull requests that nothing blocks. An approved one merges as-is.
 - Spawning for a locked or draft pull request.

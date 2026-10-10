@@ -171,27 +171,16 @@ async function cmdPrs(): Promise<void> {
     );
   }
 
-  const { needsFix, needsPolish, mergeReady } = triagePrs(summaries);
+  const { needsFix, mergeReady } = triagePrs(summaries);
   if (needsFix.length > 0) {
     console.log("\nNeeds fixer follow-up:");
     for (const s of needsFix) {
-      console.log(`  #${s.number} (${s.unresolvedReviewThreads} unresolved) ${s.url}`);
-    }
-  }
-
-  if (needsPolish.length > 0) {
-    console.log("\nApproved with open threads — polish, not a fixer spawn:");
-    for (const s of needsPolish) {
-      console.log(`  #${s.number} (${s.unresolvedReviewThreads} open) ${s.url}`);
+      console.log(`  #${s.number} ${s.title} ${s.url}`);
     }
   }
 
   if (mergeReady.length > 0) {
-    // This filter cannot see the nits an approving reviewer left behind, so
-    // the heading defers to the skill's polish pass rather than reading clean.
-    console.log(
-      "\nPossibly ready for Evan to merge, after an approved-PR polish check (conductor never merges):",
-    );
+    console.log("\nReady for Evan to merge (conductor never merges):");
     for (const s of mergeReady) {
       console.log(`  #${s.number} ${s.title} ${s.url}`);
     }

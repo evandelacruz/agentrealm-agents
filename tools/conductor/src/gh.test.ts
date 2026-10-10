@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLAUDE_REVIEW_CHECK_NAME, CLAUDE_REVIEW_WORKFLOW, REVIEW_CHECK_NAME } from "./config.js";
+import { CLAUDE_REVIEW_WORKFLOW, REVIEW_CHECK_NAME } from "./config.js";
 import {
   hasMergeConflict,
   headVerdict,
   holdLock,
+  parseReviewers,
   type ReviewNode,
   reviewInProgress,
   rollupOk,
@@ -31,13 +32,15 @@ test("reviewInProgress is a reviewer check while it is running", () => {
   assert.equal(reviewInProgress({ statusCheckRollup: null }), false);
 });
 
-test("reviewInProgress also covers the Claude Review job", () => {
-  assert.equal(
-    reviewInProgress({
-      statusCheckRollup: [{ name: CLAUDE_REVIEW_CHECK_NAME, workflowName: CLAUDE_REVIEW_WORKFLOW, status: "QUEUED", conclusion: null }],
-    }),
-    true,
-  );
+test("reviewInProgress covers every Claude Review job", () => {
+  for (const name of ["pair", "review (opus)", "review (sonnet)"]) {
+    assert.equal(
+      reviewInProgress({
+        statusCheckRollup: [{ name, workflowName: CLAUDE_REVIEW_WORKFLOW, status: "QUEUED", conclusion: null }],
+      }),
+      true,
+    );
+  }
 });
 
 test("rollupOk ignores reviewer checks: a failed review job is not red CI", () => {
@@ -45,7 +48,7 @@ test("rollupOk ignores reviewer checks: a failed review job is not red CI", () =
     rollupOk({
       statusCheckRollup: [
         { name: "python", status: "COMPLETED", conclusion: "SUCCESS" },
-        { name: CLAUDE_REVIEW_CHECK_NAME, workflowName: CLAUDE_REVIEW_WORKFLOW, status: "COMPLETED", conclusion: "FAILURE" },
+        { name: "review (opus)", workflowName: CLAUDE_REVIEW_WORKFLOW, status: "COMPLETED", conclusion: "FAILURE" },
         { name: REVIEW_CHECK_NAME, status: "COMPLETED", conclusion: "FAILURE" },
       ],
     }),
@@ -53,14 +56,14 @@ test("rollupOk ignores reviewer checks: a failed review job is not red CI", () =
   );
   assert.equal(
     rollupOk({
-      statusCheckRollup: [{ name: CLAUDE_REVIEW_CHECK_NAME, workflowName: CLAUDE_REVIEW_WORKFLOW, status: "COMPLETED", conclusion: "SUCCESS" }],
+      statusCheckRollup: [{ name: "review (opus)", workflowName: CLAUDE_REVIEW_WORKFLOW, status: "COMPLETED", conclusion: "SUCCESS" }],
     }),
     null,
   );
 });
 
 test("a job named review in another workflow is still CI", () => {
-  const other = { name: CLAUDE_REVIEW_CHECK_NAME, workflowName: "test", status: "COMPLETED", conclusion: "FAILURE" };
+  const other = { name: "review", workflowName: "test", status: "COMPLETED", conclusion: "FAILURE" };
   assert.equal(rollupOk({ statusCheckRollup: [other] }), false);
   assert.equal(reviewInProgress({ statusCheckRollup: [{ ...other, status: "IN_PROGRESS", conclusion: null }] }), false);
 });
@@ -136,37 +139,63 @@ function review(login: string, state: string, oid: string, body = ""): ReviewNod
   return { state, body, author: { login }, commit: { oid } };
 }
 
-test("headVerdict: one approval on the head is approved, whoever posts it", () => {
-  assert.equal(headVerdict([review("reviewer-agent-anth[bot]", "APPROVED", HEAD)], HEAD), "APPROVED");
-  assert.equal(headVerdict([review("cursor", "APPROVED", HEAD)], HEAD), "APPROVED");
-  assert.equal(headVerdict([review("someone", "APPROVED", HEAD)], HEAD), "APPROVED");
-  assert.equal(headVerdict([], HEAD), null);
+const OPUS = "opus-review-agent[bot]";
+const PAIR = { opus: OPUS, second: "cursor[bot]" };
+
+test("parseReviewers picks the second reviewer's login", () => {
+  const file = "# comment\nopus: o[bot]\nsonnet: s[bot]\ncursor: cursor[bot]\nsecond: cursor\n";
+  assert.deepEqual(parseReviewers(file), { opus: "o[bot]", second: "cursor[bot]" });
+  assert.deepEqual(parseReviewers(file.replace("second: cursor", "second: sonnet")), {
+    opus: "o[bot]",
+    second: "s[bot]",
+  });
+  assert.throws(() => parseReviewers(file.replace("second: cursor", "second: both")));
+  assert.throws(() => parseReviewers("opus: o[bot]\nsecond: sonnet\n"));
 });
 
-test("headVerdict: any rejection on the head wins", () => {
+test("headVerdict: approved only when both of the pair approved the head", () => {
+  assert.equal(headVerdict([review(OPUS, "APPROVED", HEAD)], HEAD, PAIR), null);
+  assert.equal(headVerdict([review("cursor", "APPROVED", HEAD)], HEAD, PAIR), null);
   assert.equal(
-    headVerdict(
-      [review("reviewer-agent-anth[bot]", "APPROVED", HEAD), review("cursor", "CHANGES_REQUESTED", HEAD)],
-      HEAD,
-    ),
-    "CHANGES_REQUESTED",
+    headVerdict([review(OPUS, "APPROVED", HEAD), review("evandelacruz", "APPROVED", HEAD)], HEAD, PAIR),
+    null,
   );
+  assert.equal(
+    headVerdict([review(OPUS, "APPROVED", HEAD), review("cursor[bot]", "APPROVED", HEAD)], HEAD, PAIR),
+    "APPROVED",
+  );
+  assert.equal(headVerdict([], HEAD, PAIR), null);
+});
+
+test("headVerdict compares logins with or without the [bot] suffix", () => {
+  const reviews = [review("opus-review-agent", "APPROVED", HEAD), review("cursor", "APPROVED", HEAD)];
+  assert.equal(headVerdict(reviews, HEAD, PAIR), "APPROVED");
+});
+
+test("headVerdict: any reviewer's rejection on the head wins, a person's included", () => {
+  const both = [review(OPUS, "APPROVED", HEAD), review("cursor", "APPROVED", HEAD)];
+  assert.equal(headVerdict([...both, review("evandelacruz", "CHANGES_REQUESTED", HEAD)], HEAD, PAIR), "CHANGES_REQUESTED");
+  assert.equal(headVerdict([...both, review("sonnet-review-agent", "CHANGES_REQUESTED", HEAD)], HEAD, PAIR), "CHANGES_REQUESTED");
 });
 
 test("headVerdict ignores reviews on an older head", () => {
-  assert.equal(headVerdict([review("cursor[bot]", "CHANGES_REQUESTED", "old")], HEAD), null);
-  assert.equal(headVerdict([review("reviewer-agent-anth[bot]", "APPROVED", "old")], HEAD), null);
+  assert.equal(headVerdict([review("cursor[bot]", "CHANGES_REQUESTED", "old")], HEAD, PAIR), null);
+  assert.equal(
+    headVerdict([review(OPUS, "APPROVED", "old"), review("cursor", "APPROVED", HEAD)], HEAD, PAIR),
+    null,
+  );
 });
 
 test("headVerdict uses each reviewer's latest verdict and skips COMMENTED and PENDING", () => {
   const reviews = [
-    review("reviewer-agent-anth[bot]", "CHANGES_REQUESTED", HEAD),
-    review("reviewer-agent-anth[bot]", "APPROVED", HEAD),
-    review("reviewer-agent-anth[bot]", "COMMENTED", HEAD, "inline"),
+    review(OPUS, "CHANGES_REQUESTED", HEAD),
+    review(OPUS, "APPROVED", HEAD),
+    review(OPUS, "COMMENTED", HEAD, "inline"),
+    review("cursor", "APPROVED", HEAD),
     review("evandelacruz", "COMMENTED", HEAD, "Not approving."),
     review("someone", "PENDING", HEAD),
   ];
-  assert.equal(headVerdict(reviews, HEAD), "APPROVED");
+  assert.equal(headVerdict(reviews, HEAD, PAIR), "APPROVED");
 });
 
 test("holdLock releases when body fails before the agent starts", async () => {
@@ -232,7 +261,6 @@ function pr(overrides: Partial<Parameters<typeof triagePrs>[0][number]> & { n: n
     isDraft: false,
     verdict: "APPROVED" as const,
     hasMergeConflict: false,
-    unresolvedReviewThreads: 0,
     checksOk: true as boolean | null,
     reviewInProgress: false,
     ...overrides,
@@ -244,40 +272,42 @@ function numbers(list: Array<{ n: number }>): number[] {
 }
 
 test("triagePrs sends an approved, green PR with a merge conflict only to the fixer list", () => {
-  const t = triagePrs([
-    pr({ n: 1, hasMergeConflict: true }),
-    pr({ n: 2, hasMergeConflict: true, unresolvedReviewThreads: 2 }),
-  ]);
+  const t = triagePrs([pr({ n: 1, hasMergeConflict: true })]);
+  assert.deepEqual(numbers(t.needsFix), [1]);
+  assert.deepEqual(numbers(t.mergeReady), []);
+});
+
+test("triagePrs routes red CI and changes requested to the fixer list", () => {
+  const t = triagePrs([pr({ n: 1, checksOk: false }), pr({ n: 2, verdict: "CHANGES_REQUESTED" })]);
   assert.deepEqual(numbers(t.needsFix), [1, 2]);
-  assert.deepEqual(numbers(t.needsPolish), []);
   assert.deepEqual(numbers(t.mergeReady), []);
 });
 
-test("triagePrs routes red CI, changes requested, and unapproved threads to the fixer list", () => {
+test("triagePrs: open threads never need a fixer; approved and green is merge-ready", () => {
+  // `prs` passes the open-thread count along; it never blocks a PR.
   const t = triagePrs([
-    pr({ n: 1, checksOk: false, unresolvedReviewThreads: 1 }),
-    pr({ n: 2, verdict: "CHANGES_REQUESTED" }),
-    pr({ n: 3, verdict: null, unresolvedReviewThreads: 1 }),
+    { ...pr({ n: 1 }), unresolvedReviewThreads: 3 },
+    { ...pr({ n: 2, verdict: null }), unresolvedReviewThreads: 1 },
   ]);
-  assert.deepEqual(numbers(t.needsFix), [1, 2, 3]);
-  assert.deepEqual(numbers(t.needsPolish), []);
-  assert.deepEqual(numbers(t.mergeReady), []);
+  assert.deepEqual(numbers(t.needsFix), []);
+  assert.deepEqual(numbers(t.mergeReady), [1]);
 });
 
-test("triagePrs: approved with open threads is polish; approved, clean, green is merge-ready", () => {
-  const t = triagePrs([pr({ n: 1, unresolvedReviewThreads: 1 }), pr({ n: 2 })]);
+test("triagePrs: not merge-ready without an approval, while CI is pending, or as a draft", () => {
+  const t = triagePrs([
+    pr({ n: 1, verdict: null }),
+    pr({ n: 2, checksOk: null }),
+    pr({ n: 3, isDraft: true }),
+  ]);
   assert.deepEqual(numbers(t.needsFix), []);
-  assert.deepEqual(numbers(t.needsPolish), [1]);
-  assert.deepEqual(numbers(t.mergeReady), [2]);
+  assert.deepEqual(numbers(t.mergeReady), []);
 });
 
 test("triagePrs leaves out PRs whose review check is still running", () => {
   const t = triagePrs([
     pr({ n: 1, reviewInProgress: true, hasMergeConflict: true }),
     pr({ n: 2, reviewInProgress: true }),
-    pr({ n: 3, reviewInProgress: true, unresolvedReviewThreads: 1 }),
   ]);
   assert.deepEqual(numbers(t.needsFix), []);
-  assert.deepEqual(numbers(t.needsPolish), []);
   assert.deepEqual(numbers(t.mergeReady), []);
 });

@@ -169,11 +169,11 @@ class NeverAttackTest(unittest.TestCase):
 
     def test_executor_keeps_self_use(self):
         # Heal's Use on itself is eating or drinking, not an attack (A10).
-        own = {"verb": "Use", "target": {"kind": "character", "character_id": 7}}
+        own = {"verb": "Use", "target": {"kind": "self"}}
         other = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
         ents = [Entity("character", 5, (0, 0))]
-        self.assertFalse(use_blocked_by_never_attack(own, ents, ["character"], self_id=7))
-        self.assertTrue(use_blocked_by_never_attack(other, ents, ["character"], self_id=7))
+        self.assertFalse(use_blocked_by_never_attack(own, ents, ["character"]))
+        self.assertTrue(use_blocked_by_never_attack(other, ents, ["character"]))
 
 
 if __name__ == "__main__":

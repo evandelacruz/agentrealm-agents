@@ -131,7 +131,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   | `small_potion` | 10 |
 
 - **Gems and lives are counters.** Gems and hearts (extra lives) are consumed on pickup into counters and leave nothing in the chest, so they take no slot; lives cap at 20 ever gained (M §11; API). Manual §16 documents **gem** drops from cutting Olympuff grass and bushes (10% in ring 1, 15% farther); it documents gems and hearts from **sandbox** field grass and bushes when broken. The ground `supply_subtype_code` for a life on Olympuff is not observed yet (Obs: [`docs/observations/A20_live_play.md`](observations/A20_live_play.md)).
-- **Food.** Olympuff's golden cap heals 6 and is eaten on pickup (M §16). Potions are drunk with `Arm` + `Use` on self; swapping what is armed costs a tick (API Use). Small potion +10, large +30 (M §16).
+- **Food.** Olympuff's golden cap heals 6 and is eaten on pickup (M §16). Potions are drunk with `Arm` + `Use` on self, target `{"kind": "self"}` (M Intents, Use targets); a `character` target naming our own id drank nothing in free-play run 4. Swapping what is armed costs a tick (API Use). Small potion +10, large +30 (M §16).
 - **Gear tiers:** bronze in town, iron at waystations, adamant at the Last Camp and from bosses (M §16).
 - **Gems come from** cutting grass and bushes (10% in ring 1, 15% farther), felling trees, gem piles that return on an interval, and gem caches. Field work earns about 3 gems a minute (M §16). Gems are kept on death.
 - **Food and gems on the ground.** Apples, berries and gem piles lie around town, free to pick up (Obs).

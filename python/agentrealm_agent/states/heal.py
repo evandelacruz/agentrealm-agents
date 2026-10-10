@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from ..break_memory import nominate_on_path
 from ..config import Policy
+from ..equip import weapon_to_rearm
 from ..healing import (
     carried_heal,
     food_in_sight,
@@ -294,20 +295,22 @@ def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
     paced queue so both are sent. Retreat runs it too, when it is losing
     ground (A9).
 
-    The weapon armed before the drink is remembered in ``heal_rearm`` and put
-    back by ``_rearm_weapon`` on Heal's next decision, the drink done or not
-    (A24). A rejected ``Use`` is retried at most ``HEAL_MAX_TRIES`` times per
-    supply.
+    The weapon to put back is remembered in ``heal_rearm`` and re-armed by
+    ``_rearm_weapon`` on Heal's next decision, the drink done or not (A24). It
+    is always a weapon (``equip.weapon_to_rearm``): the one armed now, else
+    the last one armed this run, never the potion or tool in the slot (free-play
+    run 4 re-armed a potion). A rejected ``Use`` is retried at most
+    ``HEAL_MAX_TRIES`` times per supply.
     """
     item = carried_heal(w, m)
     if item is None:
         return None
     note_try(m, "use", item.id)
+    if m.heal_rearm is None:
+        m.heal_rearm = weapon_to_rearm(w, m)
     if w.armed_code == item.code:
-        return _out([use_self(w.character_id)], f"use {item.code}")
-    if m.heal_rearm is None and w.armed_code is not None:
-        m.heal_rearm = w.armed_code
-    out = _out(arm_and_use(w, m, item.id, use_self(w.character_id)), f"arm and use {item.code}")
+        return _out([use_self()], f"use {item.code}")
+    out = _out(arm_and_use(w, m, item.id, use_self()), f"arm and use {item.code}")
     out.paced = True
     return out
 

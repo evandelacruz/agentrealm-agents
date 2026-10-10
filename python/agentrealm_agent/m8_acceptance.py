@@ -39,6 +39,7 @@ from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .survival import combat_group, would_lose
 from .threat import UNMEASURED_DEFAULT, type_key_for_entity
+from .states.intents import is_self_use
 from .world import WorldModel
 
 TARGET_SECONDS = 3600.0
@@ -137,7 +138,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
                 for e in w.entities:
                     if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
                         self.heal_food_take = True
-            if intent.get("verb") == "Use" and _is_self_use(intent, w):
+            if is_self_use(intent):
                 if code_in_hand(w, intents, i) in POTION_CODES:
                     self.heal_potion = True
 
@@ -219,19 +220,11 @@ def _is_armor(code: str, w: WorldModel) -> bool:
     return slot is not None and slot != "accessory"
 
 
-def _is_self_use(intent: dict, w: WorldModel) -> bool:
-    target = intent.get("target") or {}
-    return target.get("kind") == "character" and target.get("character_id") == w.character_id
-
-
 def _is_attack_use(intent: dict, w: WorldModel) -> bool:
+    """A ``Use`` at a character, an NPC or a block; a self ``Use`` is a drink."""
     if intent.get("verb") != "Use":
         return False
-    target = intent.get("target") or {}
-    kind = target.get("kind")
-    if kind == "character":
-        return target.get("character_id") != w.character_id
-    return kind in ("npc", "block")
+    return (intent.get("target") or {}).get("kind") in ("character", "npc", "block")
 
 
 def _lone_weak_group(w: WorldModel, group: list, npc_id: int) -> bool:

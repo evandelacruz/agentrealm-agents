@@ -121,9 +121,16 @@ class SafeIshTest(unittest.TestCase):
     def test_hostile_in_range_disqualifies(self):
         w = grid(["ggg"], at=(1, 0))
         safe(w, (1, 0))
-        w.entities = [Entity("npc", 1, (2, 0))]
+        w.entities = [Entity("npc", 1, (2, 0), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         pol = Policy(hostile=["npc"], hostile_range=2)
         self.assertFalse(is_safe_ish(w, (1, 0), pol))
+
+    def test_townsfolk_in_range_do_not_disqualify(self):
+        w = grid(["ggg"], at=(1, 0))
+        safe(w, (1, 0))
+        w.entities = [Entity("npc", 1, (2, 0), "villager")]
+        self.assertTrue(is_safe_ish(w, (1, 0), Policy(hostile=["npc"], hostile_range=2)))
 
     def test_respawn_ring_qualifies_without_zone(self):
         w = grid(["ggg"], at=(2, 0))

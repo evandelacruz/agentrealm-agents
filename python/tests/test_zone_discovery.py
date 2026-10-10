@@ -137,7 +137,8 @@ class ZoneDiscoveryTest(unittest.TestCase):
         record_respawn_anchor(w, 7, (5, 5))
         w.tick = w.entities_tick = 12
         hostile = Policy(hostile=["npc"])
-        w.entities = [Entity("npc", 9, (6, 5))]
+        w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
+        w.entities = [Entity("npc", 9, (6, 5), "gnawer")]
         self.assertEqual(choose_call(w, calm_mem(), hostile), "tick")
         w.entities = []
         self.assertEqual(choose_call(w, calm_mem(hurt_last_poll=True), Policy()), "tick")

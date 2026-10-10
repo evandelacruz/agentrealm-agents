@@ -96,7 +96,7 @@ From the repo root:
 make test
 ```
 
-Tests never fetch the Supplies reference and never touch `python/.state` (A84): `python/tests/__init__.py` turns the fetch and its cache off and points `AGENTREALM_STATE_DIR` at a temp dir, so traces and knowledge bases written in tests land there and your saved knowledge base is safe. A last check fails the run if anything under `python/.state` changed. `make test` discovers the tests as that package (`-t .`) so it always runs. A bare `python3 -m unittest discover -s tests` skips it, fetches the live table and writes into `python/.state`.
+Tests never fetch the Supplies reference and never touch `python/.state` (A84): `python/tests/__init__.py` turns the fetch and its cache off and points `AGENTREALM_STATE_DIR` at a temp dir, so traces and knowledge bases written in tests land there and your saved knowledge base is safe. A last check fails the run if any test opened, wrote or removed anything under `python/.state`; it watches only the test process, so a `run` writing there at the same time does not fail it. `make test` discovers the tests as that package (`-t .`) so it always runs. A bare `python3 -m unittest discover -s tests` skips it, fetches the live table and writes into `python/.state`.
 
 `make conductor-test` covers [`tools/conductor`](tools/conductor/README.md) (Node 22+). CI runs both on every pull request.
 

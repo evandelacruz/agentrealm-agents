@@ -69,7 +69,7 @@ class CostGridTest(unittest.TestCase):
     def test_hostile_danger_biases_away(self):
         w = grid([".....", ".....", "....."], at=(0, 1))
         w.entities = [Entity("npc", 1, (2, 1))]
-        p = cost_path(w, (4, 1), CostGridParams(hostile_kinds=frozenset({"npc"})))
+        p = cost_path(w, (4, 1), CostGridParams())
         self.assertIsNotNone(p)
         self.assertNotIn((2, 1), p)
 

@@ -52,10 +52,11 @@ def random_world(rng: random.Random, size: int = 14) -> WorldModel:
 
 def random_params(rng: random.Random, w: WorldModel) -> CostGridParams:
     cells = list(w.view.tiles)
+    kinds = frozenset(rng.choice([["npc"], ["npc", "character"], []]))
     params = CostGridParams(
         avoid=set(rng.sample(cells, rng.randint(0, 6))),
         costly=set(rng.sample(cells, rng.randint(0, 6))),
-        hostile_kinds=frozenset(rng.choice([["npc"], ["npc", "character"], []])),
+        is_hostile=lambda w, e: e.kind in kinds,
         allow_goal_door=rng.random() < 0.5,
         fog_cost=rng.choice([2, 2, 4]),
     )

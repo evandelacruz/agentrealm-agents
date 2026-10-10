@@ -25,7 +25,7 @@
 
   "A8": {"state": "done"},
 
-  "A9": {"state": "partial", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing.", "remaining": "A23 run 2: with hostile = [\"npc\"], Retreat and Flee fire on townsfolk (rumor_teller, apothecary, salvager): combat_group takes every NPC in hostile_range, and would_lose counts each as an unmeasured threat."},
+  "A9": {"state": "done", "note": "A58 run 9: Flee keeps a hostile that hit it past hostile_range and fights back or retreats when the gap stalls over 30 ticks or it is hit while fleeing. Every threat check (Flee, Retreat, Fight, Gather, Heal, Explore, the planner danger cost, the urgent poll rate) uses survival.is_hostile, so townsfolk are never threats."},
 
   "A10": {"state": "done", "note": "Live Walk run fix: Heal rests in the safe zone instead of walking out mid-sample; once regen is no it stops sampling and raises heal_supplies for the planner."},
 

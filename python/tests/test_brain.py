@@ -262,7 +262,11 @@ class SchedulerTest(unittest.TestCase):
              dict(terrain_center=(0, 0), pos=(3, 0), perception=5, entities_tick=10, tick=12), "terrain"),
             ("a hostile within 3 blocks polls inside the gap",
              dict(need_self=False, need_position=False, last_poll_tick=10, calm_poll_interval=7),
-             dict(entities=[Entity("npc", 9, (3, 0))], entities_tick=10, tick=11), "tick"),
+             dict(entities=[Entity("npc", 9, (3, 0), "gnawer")], hostile_types={("npc", "gnawer")}, entities_tick=10, tick=11),
+             "tick"),
+            ("a townsperson within 3 blocks does not",
+             dict(need_self=False, need_position=False, last_poll_tick=10, calm_poll_interval=7),
+             dict(entities=[Entity("npc", 9, (3, 0), "villager")], entities_tick=10, tick=11), "skip"),
             ("otherwise tick", dict(need_self=False, need_position=False),
              dict(entities_tick=10, tick=12), "tick"),
         ]

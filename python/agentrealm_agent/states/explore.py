@@ -76,7 +76,9 @@ def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:
 
     Hurt with a known hostile near, it explores nothing: it steps away from
     the hostile, or holds when no step gets further (``keep_away``)."""
-    if hurt(world) and (out := keep_away(world, ctx)) is not None:
+    if not hurt(world):
+        ctx.memory.keep_away_hold = None  # healed: a later hold starts afresh
+    elif (out := keep_away(world, ctx)) is not None:
         return out
     return explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None)
 

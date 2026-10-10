@@ -498,9 +498,8 @@ def reachable_safe_goal(
     walk (``SAFE_PATH_GOALS``) already ends on needs no search. "No way" is a
     search that proved it (``navigation.no_way``): one cut short by its
     budget still counts as a way, since it walks toward the cell. A Retreat
-    or Park walk also marks a cell its search proved no path to, or one it
-    found no step toward for a stuck window (``retreat_step``), the town
-    cell too.
+    or Park walk also marks a cell it found no step toward for a stuck
+    window (``retreat_step``), the town cell too.
     """
     if w.pos is None or w.map_id is None:
         return None

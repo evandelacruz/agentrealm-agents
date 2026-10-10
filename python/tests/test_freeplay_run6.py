@@ -106,41 +106,6 @@ class PlannerLeavesNoPocketTest(unittest.TestCase):
         self.assertEqual(w.pos, TOWN)
 
 
-class NoPathProvenTest(unittest.TestCase):
-    """``cost_path`` says no path is proven only when its search ran out of cells."""
-
-    def walled_goal(self) -> WorldModel:
-        w = WorldModel(character_id=1, map_id=MAP, pos=(1, 1), perception=8)
-        for x in range(12):
-            for y in range(12):
-                wall = max(abs(x - 8), abs(y - 8)) == 1  # a ring round the goal at (8, 8)
-                w.view.tiles[(x, y)] = "wall" if wall else "dirt"
-        return w
-
-    def test_a_walled_in_goal_is_proven(self):
-        w, nav = self.walled_goal(), NavSearchState(goal=(8, 8), map_id=MAP)
-        self.assertIsNone(cost_path(w, (8, 8), CostGridParams(), nav=nav))
-        self.assertTrue(nav.no_path_proven)
-
-    def test_no_step_found_on_a_budget_is_not_proven(self):
-        w, nav = field(), NavSearchState(goal=TOWN, map_id=MAP)
-        with mock.patch.object(planner, "_fine_path", return_value=None):
-            self.assertIsNone(cost_path(w, TOWN, CostGridParams(), nav=nav))
-        self.assertFalse(nav.no_path_proven)
-
-    def test_a_path_found_clears_it(self):
-        w, nav = self.walled_goal(), NavSearchState(goal=(8, 8), map_id=MAP)
-        cost_path(w, (8, 8), CostGridParams(), nav=nav)
-        self.assertTrue(cost_path(w, (4, 4), CostGridParams(), nav=nav))
-        self.assertFalse(nav.no_path_proven)
-
-    def test_standing_on_the_goal_clears_it(self):
-        w, nav = self.walled_goal(), NavSearchState(goal=(8, 8), map_id=MAP)
-        cost_path(w, (8, 8), CostGridParams(), nav=nav)
-        self.assertEqual(cost_path(w, w.pos, CostGridParams(), nav=nav), [])
-        self.assertFalse(nav.no_path_proven)
-
-
 class ParkWalksOutTest(unittest.TestCase):
     """Run 6's park, through the dispatcher: Park walks to town (A66)."""
 
@@ -164,10 +129,11 @@ class ParkWalksOutTest(unittest.TestCase):
         self.assertEqual(w.pos, TOWN)
 
 
-def no_path_proven(w, goal, params=None, *, nav=None, **_):
-    """``cost_path`` whose search ran out of cells: no path at all."""
-    nav.no_path_proven = True
-    return None
+def walled_in():
+    """No path, proven from the goal's side (``no_way``): the goal is walled in."""
+    return mock.patch.multiple(
+        "agentrealm_agent.states.retreat", cost_path=mock.Mock(return_value=None), no_way=mock.Mock(return_value=True)
+    )
 
 
 class NoStepRulesTheCellOutTest(unittest.TestCase):
@@ -182,7 +148,7 @@ class NoStepRulesTheCellOutTest(unittest.TestCase):
 
     def test_the_nearest_safe_cell_is_ruled_out_and_the_next_is_taken(self):
         w, c = self.stuck()
-        with mock.patch("agentrealm_agent.states.retreat.cost_path", no_path_proven):
+        with walled_in():
             out = retreat_step(w, c, "Park")
         self.assertIsNone(out.intents)
         self.assertEqual(out.reason, "safe (390, 369): no path, ruled out")
@@ -207,7 +173,7 @@ class NoStepRulesTheCellOutTest(unittest.TestCase):
 
     def test_a_ruled_out_cell_is_tried_again_once_the_mark_lapses(self):
         w, c = self.stuck()
-        with mock.patch("agentrealm_agent.states.retreat.cost_path", no_path_proven):
+        with walled_in():
             retreat_step(w, c, "Park")
         w.tick += SAFE_UNREACHABLE_TICKS
         pick = retreat_safe_goal(c.memory, w, c.policy, c.knowledge, set(), set())
@@ -228,10 +194,23 @@ class NoStepRulesTheCellOutTest(unittest.TestCase):
             retreat_step(w, c, "Park")
         self.assertIn((MAP, TOWN), c.memory.safe_unreachable, "a stuck window with no step rules town out")
 
+    def test_a_one_decision_block_round_us_rules_nothing_out(self):
+        # Shut in for this decision only (learned rejections round us): the
+        # search from our side runs out of cells, which proves nothing about
+        # the goal (review on #165).
+        w, c = self.stuck()
+        x, y = w.pos
+        shut = {(x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)} - {w.pos}
+        blocked = (shut, set(shut), set())
+        with mock.patch("agentrealm_agent.states.retreat.plan_sets", return_value=blocked):
+            out = retreat_step(w, c, "Park")
+        self.assertEqual(out.reason, f"safe {TOWN}: no step found")
+        self.assertNotIn((MAP, TOWN), c.memory.safe_unreachable)
+
     def test_the_town_cell_is_ruled_out_too(self):
         w, c = self.stuck()
         c.memory.safe_unreachable[(MAP, (390, 369))] = w.tick
-        with mock.patch("agentrealm_agent.states.retreat.cost_path", no_path_proven):
+        with walled_in():
             out = retreat_step(w, c, "Park")
         self.assertEqual(out.reason, f"safe {TOWN}: no path, ruled out")
         self.assertIn((MAP, TOWN), c.memory.safe_unreachable)
@@ -262,7 +241,7 @@ class ParkEndsWithNoPathLeftTest(unittest.TestCase):
         r.pacer.wait_next_window = s.wait
         now = iter(range(1000))
         r.clock = lambda: float(next(now))
-        with mock.patch("agentrealm_agent.states.retreat.cost_path", no_path_proven):
+        with walled_in():
             report = r.park()
         self.assertEqual(report.outcome, PARK_NO_PATH)
         self.assertLess(report.seconds, 10, "not the whole minute")
@@ -310,6 +289,13 @@ class CautiousSafeDefaultTest(unittest.TestCase):
         self.assertEqual(dispatch(w, c).reason, "hurt, hostile near: hold")
         w.tick += KEEP_AWAY_HOLD_TICKS
         self.assertNotIn("hostile near", dispatch(w, c).reason, "it explores again")
+
+    def test_healing_clears_a_hold_so_a_later_one_starts_afresh(self):
+        w, c = hurt_beside((13, 10))
+        c.memory.keep_away_hold = w.tick - 10 * KEEP_AWAY_HOLD_TICKS  # left from an earlier hurt spell
+        w.health = 10
+        dispatch(w, c)
+        self.assertIsNone(c.memory.keep_away_hold)
 
     def test_at_full_health_it_explores(self):
         w, c = hurt_beside((13, 10))

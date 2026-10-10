@@ -26,9 +26,10 @@ from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.states import PlayContext
-from agentrealm_agent.states.detour import detour_find, straight_line
+from agentrealm_agent.states.detour import DetourState, detour_find, straight_line
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.states.gather_safe import danger, gather_ground, known_reach, route_clear
+from agentrealm_agent.zone_discovery import apply_zone
 from agentrealm_agent.world import POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
 
 MAP = 1
@@ -230,6 +231,28 @@ class GatherKeepsClearTest(unittest.TestCase):
         self.assertIsNone(m.gather_target)
 
 
+class HeadingOutKeepsClearTest(unittest.TestCase):
+    def test_no_walk_out_of_safe_ground_through_reach(self):
+        """Every field cell lies past the post: Gather does not head out through its reach."""
+        w, m = field(), Memory()
+        for x in range(-1, 41):
+            for y in range(-1, 41):
+                if y != 10 or x in (-1, 40):
+                    w.view.tiles[(x, y)] = "wall"
+        for x in range(18):
+            apply_zone(w, MAP, x, 10, {"safe": True, "brightness": 1})
+        w.view.tiles[(20, 9)] = "dirt"
+        w.pos = (14, 10)
+        see(w, [guard((20, 9))], 0)
+        see(w, [guard((20, 9))], POST_STILL_TICKS)
+        w.pos = (2, 10)
+        see(w, [], POST_STILL_TICKS + 1)
+        gather(w, m, {"op": "gather_gems", "count": 5})
+        self.assertIsNone(m.gather_target)
+        gather(w, m, {"op": "gather_gems", "count": 5, "fight": True})
+        self.assertEqual(m.gather_target, ("out", (18, 10)))
+
+
 class PilesHonourTheRegionTest(unittest.TestCase):
     def test_a_pile_outside_the_named_region_is_not_the_target(self):
         w, m = field(perception=30), Memory()
@@ -272,6 +295,20 @@ class DetourKeepsClearTest(unittest.TestCase):
         find = detour_find(w, self.ctx(m, [{"op": "gather_gems", "count": 5, "fight": True}]))
         self.assertIsNotNone(find)
         self.assertEqual(find.id, 70)
+
+    def test_a_hit_on_the_way_ends_the_detour(self):
+        w, m = field(at=(14, 12)), Memory()
+        w.hostile_types.clear()
+        m.goal, m.path = "travel", [(x, 12) for x in range(15, 35)]
+        gem = Entity("supply", 70, PILE, "gem")
+        see(w, [guard(), gem], 0)
+        see(w, [guard(), gem], POST_STILL_TICKS)  # a post, not yet known hostile
+        c = self.ctx(m, [{"op": "travel", "to": "point", "x": 35, "y": 12}])
+        DetourState().act(w, c)
+        self.assertIsNotNone(m.detour)
+        ReachFromHitsTest().hit(w, (14, 12), POST_STILL_TICKS + 1)  # 6 from its post: the find is in its reach
+        DetourState().act(w, c)
+        self.assertIsNone(m.detour)
 
     def test_the_straight_way_goes_diagonally_first(self):
         self.assertEqual(straight_line((0, 0), (3, 1)), [(1, 1), (2, 1), (3, 1)])

@@ -678,7 +678,7 @@ def _replan_gather(
         return False
 
     if here in safe:
-        _plan_out(w, m, policy, blocked, params, safe, d)
+        _plan_out(w, m, policy, blocked, params, safe, clear, d)
     return False
 
 
@@ -717,19 +717,25 @@ def _path_to(w: WorldModel, target: tuple[str, Pos], params) -> list[Pos] | None
 
 
 def _plan_out(
-    w: WorldModel, m: Memory, policy: Policy, blocked: set[Pos], params, safe: set[Pos], d: Danger | None = None
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    blocked: set[Pos],
+    params,
+    safe: set[Pos],
+    clear: Callable[[list[Pos]], bool],
+    d: Danger | None = None,
 ) -> None:
-    """Head off safe ground: to the nearest known walkable field cell, else the nearest frontier."""
+    """Head off safe ground: to the nearest known walkable field cell, else the
+    nearest frontier, by a ``clear`` route (``_nearest_clear``)."""
     here = w.pos
     assert here is not None
     view = w.view
     field = {p for p in view.tiles if p not in safe and view.walkable(p) and gather_ground(w, p, policy, d)}
     frontier = {p for p in view.frontier() if p != here and gather_ground(w, p, policy, d)}
     for cells in (field, frontier):
-        if not cells:
-            continue
-        found = nearest_target(w, _nearest(here, cells), params)
-        if found and next_step(w, blocked, found[1]):
+        found = _nearest_clear(w, cells, params, blocked, clear)
+        if found:
             m.path, m.goal, m.gather_target = found[1], GOAL, (OUT, found[0])
             return
 

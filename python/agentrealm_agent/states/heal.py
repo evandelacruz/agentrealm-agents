@@ -27,7 +27,7 @@ from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .break_state import break_toward
 from .gather_safe import hostiles_near
-from .intents import arm, set_position, take, use_self
+from .intents import arm_and_use, set_position, take, use_self
 from ..executor.intents import wait
 
 # Food lying in sight that Heal tries to path to, nearest first.
@@ -53,9 +53,10 @@ class HealState(State):
     ``heal_supplies`` trigger) and sends nothing, so the plan's executor or
     the safe default moves.
 
-    Heal also runs, even at full health or with a hostile in range, while the
-    weapon a drink swapped out is still to be re-armed (A24). That is one
-    ``Arm``, sent once."""
+    A drink is ``Arm`` and ``Use`` in one paced queue. Heal runs on the next
+    decision after it, even at full health or with a hostile in range, to
+    re-arm the weapon the drink swapped out (A24): one ``Arm``, sent once,
+    before anything else, so ``heal_rearm`` never outlives a drink."""
 
     name = "Heal"
 
@@ -68,8 +69,11 @@ class HealState(State):
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
+        # A drink went out: the weapon goes back before anything else.
+        if ctx.memory.heal_rearm is not None and (out := _rearm_weapon(world, ctx.memory)).intents:
+            return out
         if not _wants_heal(world, ctx):
-            return _rearm_weapon(world, ctx.memory)
+            return _out(None, "not hurt, or a hostile in range")
         return _choose(world, ctx)
 
 
@@ -89,9 +93,6 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     if out := use_carried_heal(w, m):
         m.heal_regen_sample = None
         return out
-    # Nothing left to drink: put the weapon back before walking.
-    if m.heal_rearm is not None:
-        return _rearm_weapon(w, m)
 
     known = regen_known(ctx.knowledge, m)
     if known == "no":
@@ -251,13 +252,14 @@ def _cut_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at: 
 
 
 def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
-    """``Arm`` + ``Use`` self on carried food or a potion (API Use). Retreat
-    runs it too, when it is losing ground (A9).
+    """``Arm`` + ``Use`` self on carried food or a potion (API Use), one
+    paced queue so both are sent. Retreat runs it too, when it is losing
+    ground (A9).
 
-    The weapon armed before the first drink is remembered in ``heal_rearm``
-    and put back by ``_rearm_weapon`` once there is nothing left to drink
-    (A24), so a second potion does not cost a re-arm in between. A rejected
-    ``Use`` is retried at most ``HEAL_MAX_TRIES`` times per supply.
+    The weapon armed before the drink is remembered in ``heal_rearm`` and put
+    back by ``_rearm_weapon`` on Heal's next decision, the drink done or not
+    (A24). A rejected ``Use`` is retried at most ``HEAL_MAX_TRIES`` times per
+    supply.
     """
     item = carried_heal(w, m)
     if item is None:
@@ -267,7 +269,9 @@ def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
         return _out([use_self(w.character_id)], f"use {item.code}")
     if m.heal_rearm is None and w.armed_code is not None:
         m.heal_rearm = w.armed_code
-    return _out([arm(item.id), use_self(w.character_id)], f"arm and use {item.code}")
+    out = _out(arm_and_use(w, m, item.id, use_self(w.character_id)), f"arm and use {item.code}")
+    out.paced = True
+    return out
 
 
 def _rearm_weapon(w: WorldModel, m: Memory) -> StateOutcome:

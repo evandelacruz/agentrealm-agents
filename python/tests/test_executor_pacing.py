@@ -5,6 +5,7 @@ import unittest
 from agentrealm_agent.executor import (
     DEFAULT_WEAPON_COOLDOWN_TICKS,
     SPEECH_INTERVAL_TICKS,
+    arm_then_use,
     build_attack_queue,
     pace_speech,
     pace_uses,
@@ -52,6 +53,20 @@ class PaceUsesTest(unittest.TestCase):
         arm = {"verb": "Arm", "item_id": 1}
         q = pace_uses([use_block(0, 0), arm, use_block(0, 0)])
         self.assertEqual(q, [use_block(0, 0), arm] + waits_then_use(8))
+
+
+class ArmThenUseTest(unittest.TestCase):
+    ARM = {"verb": "Arm", "supply_id": 4}
+
+    def test_use_follows_the_arm_when_ready(self):
+        self.assertEqual(arm_then_use(self.ARM, use_block(0, 0), horizon_ticks=HORIZON), [self.ARM, use_block(0, 0)])
+
+    def test_the_arm_counts_toward_the_cooldown(self):
+        queue = arm_then_use(self.ARM, use_block(0, 0), horizon_ticks=HORIZON, ticks_since_last_use=3)
+        self.assertEqual(queue, [self.ARM] + waits_then_use(DEFAULT_WEAPON_COOLDOWN_TICKS - 3 - 1))
+
+    def test_a_use_past_the_horizon_leaves_the_arm_alone(self):
+        self.assertEqual(arm_then_use(self.ARM, use_block(0, 0), horizon_ticks=3, ticks_since_last_use=1), [self.ARM])
 
 
 class PaceSpeechTest(unittest.TestCase):

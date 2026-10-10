@@ -6,6 +6,7 @@ from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
+from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, parse_directives_goal
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
@@ -234,6 +235,40 @@ class GatherActTest(unittest.TestCase):
         w.entities = [Entity("npc", 4, (2, 0), "gnawer")]
         w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         self.assertIsNone(outcome(w, hostile=["npc"]).intents)
+
+
+class GatherArmsACutterTest(unittest.TestCase):
+    """Free-play run 3: Gather cut with a potion armed, and the no-effect cuts
+    marked the ground uncuttable."""
+
+    def test_arms_a_cutting_tool_with_the_cut(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "small_potion"
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        out = outcome(w)
+        self.assertTrue(out.paced, "the Use goes out with the Arm")
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 5}, {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
+        self.assertEqual(out.reason, "arm pocket_knife, cut grass")
+
+    def test_arms_one_for_a_bush_too(self):
+        w = grid([".b."], at=(0, 0))
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        out = outcome(w)
+        self.assertEqual([i["verb"] for i in out.intents], ["Arm", "Use"])
+
+    def test_a_tool_that_cuts_is_kept(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "bronze_sword"
+        w.held_supplies = [InventorySupply(5, "pocket_knife")]
+        out = outcome(w)
+        self.assertEqual(out.intents, [{"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
+        self.assertFalse(out.paced)
+
+    def test_with_nothing_that_cuts_it_cuts_with_what_is_in_hand(self):
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "fake_cleaver"
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        self.assertEqual(outcome(w).intents, [{"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
 
 
 class GatherPathingTest(unittest.TestCase):

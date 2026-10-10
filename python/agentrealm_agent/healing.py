@@ -164,19 +164,20 @@ def known_safe_cells(w: WorldModel) -> list[Pos]:
     return sorted(safe_tiles(w, map_id), key=order)
 
 
-def self_use_code(w: WorldModel, before: dict | None) -> str | None:
-    """The code a self-``Use`` drinks or eats, given the intent queued just before it.
+def code_in_hand(w: WorldModel, before: dict | None) -> str | None:
+    """The code a ``Use`` was made with, given the last intent other than a
+    ``Wait`` queued before it: what a self-``Use`` drinks or eats, or what a
+    cut cut with.
 
-    Heal sends ``[Arm item, Use self]`` in one queue, and both results are
-    applied before the observation updates ``armed_code``. So an ``Arm``
-    just before the ``Use`` names the item; with no ``Arm`` there, the item
-    was already armed.
+    Heal and Gather send ``[Arm item, Wait…, Use]`` in one queue, and its
+    results are applied before the observation updates ``armed_code``. So an
+    ``Arm`` before the ``Use`` names the item while it is still held; with
+    none, or once an observation shows it armed, it is ``armed_code``.
     """
     if before and before.get("verb") == "Arm":
         for h in w.held_supplies:
             if h.id == before.get("supply_id"):
                 return h.code
-        return None
     return w.armed_code
 
 

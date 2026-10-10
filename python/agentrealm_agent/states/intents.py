@@ -6,7 +6,9 @@ Field names match https://agentrealm.gg/docs/api — wrong shapes are rejected a
 
 from __future__ import annotations
 
-from ..world import Entity, Pos
+from ..executor import arm_then_use, queue_horizon_intents
+from ..memory import Memory
+from ..world import Entity, Pos, WorldModel
 
 
 def set_position(p: Pos) -> dict:
@@ -79,3 +81,10 @@ def compose(supply_ids: list[int]) -> dict:
 
 def use_self(character_id: int) -> dict:
     return {"verb": "Use", "target": {"kind": "character", "character_id": character_id}}
+
+
+def arm_and_use(w: WorldModel, m: Memory, supply_id: int, use: dict) -> list[dict]:
+    """``Arm`` ``supply_id``, then ``use`` behind its cooldown Waits: a paced
+    queue (``StateOutcome.paced``), so the ``Use`` is sent with the ``Arm``."""
+    since = max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None
+    return arm_then_use(arm(supply_id), use, horizon_ticks=queue_horizon_intents(), ticks_since_last_use=since)

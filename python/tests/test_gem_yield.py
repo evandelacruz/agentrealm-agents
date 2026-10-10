@@ -9,6 +9,7 @@ from agentrealm_agent import gem_yield
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.gem_yield import BARREN_MIN_CUTS, GEM_WINDOW_TICKS, GemYieldTracker, record_cut
+from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, validate_goal_op
@@ -208,6 +209,40 @@ class NoEffectCutTest(unittest.TestCase):
         r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}
         r.on_result({"outcome": "applied_no_effect", "tick": 100}, 0)
         self.assertEqual((r.gem_cuts.no_effect, r.gem_cuts.no_effect_cuts), ([], 0))
+
+    def test_a_cut_made_with_a_potion_marks_nothing(self):
+        """Free-play run 3: cuts with a potion left armed marked ground uncuttable."""
+        r = self.runner()
+        r.world.armed_code = "small_potion"
+        for x in range(gem_yield.NO_EFFECT_ZONE_CUTS):
+            r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": x, "y": 1}}
+            r.on_result({"outcome": "applied_no_effect", "tick": 100}, 0)
+        self.assertEqual((r.gem_cuts.no_effect, r.gem_cuts.no_effect_cuts), ([], 0))
+        self.assertEqual(r.gem_cuts.uncuttable(r.world), (set(), set()))
+
+    def test_the_item_armed_in_the_same_queue_is_what_cut(self):
+        # [Arm, Wait…, Use]: the observation has not shown the Arm yet.
+        r = self.runner()
+        r.world.armed_code = "pocket_knife"
+        r.world.held_supplies = [InventorySupply(4, "small_potion")]
+        r.mem.pending_intents = [{"verb": "Arm", "supply_id": 4}, {"verb": "Wait"},
+                                 {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}]
+        r.on_result({"outcome": "applied_no_effect", "tick": 100}, 2)
+        self.assertEqual(r.gem_cuts.no_effect_cuts, 0, "cut with the potion")
+        r.world.armed_code = "small_potion"
+        r.world.held_supplies = [InventorySupply(1, "pocket_knife")]
+        r.mem.pending_intents = [{"verb": "Arm", "supply_id": 1}, {"verb": "Wait"},
+                                 {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}]
+        r.on_result({"outcome": "applied_no_effect", "tick": 100}, 2)
+        self.assertEqual(r.gem_cuts.no_effect_cuts, 1, "cut with the knife")
+
+    def test_a_cut_with_an_item_not_known_to_cut_or_not_still_counts(self):
+        # Only a known miss is ruled out: an unsourced code may cut.
+        r = self.runner()
+        r.world.armed_code = "fake_cleaver"
+        r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}
+        r.on_result({"outcome": "applied_no_effect", "tick": 100}, 0)
+        self.assertEqual(r.gem_cuts.no_effect_cuts, 1)
 
     def test_the_hold_lapses_after_regrow_ticks(self):
         w, t = world(), GemYieldTracker()

@@ -3,7 +3,9 @@
 import random
 import unittest
 
+from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
+from agentrealm_agent.executor import DEFAULT_WEAPON_COOLDOWN_TICKS
 from agentrealm_agent.healing import (
     HEAL_MAX_TRIES,
     REGEN_KEY,
@@ -145,14 +147,64 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(out.state, "Heal")
         self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 1}])
 
-    def test_second_potion_is_drunk_before_the_rearm(self):
+    def test_the_weapon_goes_back_before_a_second_potion(self):
+        # Free-play run 3: heal_rearm held from 191 s to the end. It never
+        # outlives one drink now, so Equip is never kept waiting on it.
         w = grid()
         w.armed_code = "small_potion"
         w.held_supplies = [InventorySupply(1, "pocket_knife"), InventorySupply(4, "small_potion")]
         m = Memory(heal_rearm="pocket_knife")
         out = dispatch(w, ctx(m))
-        self.assertEqual(verbs(out), ["Use"])
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 1}])
+        self.assertIsNone(m.heal_rearm)
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
         self.assertEqual(m.heal_rearm, "pocket_knife")
+
+    def test_a_drink_sends_the_use_with_the_arm(self):
+        """Free-play run 3: the drink's Arm went out and its Use never did."""
+        w = grid()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(1, "pocket_knife"), InventorySupply(4, "small_potion")]
+        d = decide(w, Memory(), Policy(kind="scripted"), random.Random(0))
+        self.assertEqual(d.state, "Heal")
+        self.assertEqual(d.submit_queue, [{"verb": "Arm", "supply_id": 4},
+                                          {"verb": "Use", "target": {"kind": "character", "character_id": 9}}])
+
+    def test_a_drink_waits_out_the_use_cooldown_after_the_arm(self):
+        w = grid()
+        w.tick = 100
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        out = dispatch(w, ctx(Memory(last_use_tick=96)))
+        self.assertTrue(out.paced)
+        self.assertEqual(verbs(out), ["Arm"] + ["Wait"] * (DEFAULT_WEAPON_COOLDOWN_TICKS - 5) + ["Use"])
+
+    def test_the_reflex_probe_leaves_the_rearm_due(self):
+        # While the drink's queue is held, the runner's reflex probe runs
+        # Heal; the re-arm must still be due when the queue is done.
+        import threading
+        from pathlib import Path
+
+        from agentrealm_agent.config import CharacterConfig
+        from agentrealm_agent.runner import Runner
+
+        cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[]), Path("t.toml"))
+        r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
+        self.addCleanup(r.trace.close)
+        r.world = grid()
+        r.world.armed_code = "small_potion"
+        r.world.held_supplies = [InventorySupply(1, "pocket_knife")]
+        r.mem = Memory(need_self=False, need_position=False, heal_rearm="pocket_knife")
+        self.assertIsNone(r.reflex_while_held())
+        self.assertEqual(r.mem.heal_rearm, "pocket_knife")
+
+    def test_a_drink_with_nothing_armed_leaves_nothing_to_rearm(self):
+        w = grid()
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        m = Memory()
+        self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
+        self.assertIsNone(m.heal_rearm)
 
     def test_weapon_gone_clears_rearm(self):
         w = grid()
@@ -180,6 +232,19 @@ class HealStateTest(unittest.TestCase):
         absorb_heal_pending(m, w, kb, [])
         self.assertEqual(kb.items["apple"]["heal_amount"], 3)
         self.assertTrue(kb.items["apple"]["heal_on_pickup"])
+
+    def test_a_drink_behind_cooldown_waits_is_measured(self):
+        # The potion is named by the Arm before the Use, Waits aside.
+        from agentrealm_agent.runner import Runner
+
+        r = Runner.__new__(Runner)
+        r.world, r.mem = grid(), Memory()
+        r.world.armed_code = "pocket_knife"
+        r.world.held_supplies = [InventorySupply(4, "small_potion")]
+        use = {"verb": "Use", "target": {"kind": "character", "character_id": 9}}
+        r.mem.pending_intents = [{"verb": "Arm", "supply_id": 4}, {"verb": "Wait"}, {"verb": "Wait"}, use]
+        r._note_heal_intent(use, 3)
+        self.assertEqual(r.mem.heal_pending, (5, "small_potion", "use"))
 
     def test_nothing_learned_at_full_health(self):
         # Loot also Takes food; at full health it cannot show a heal.

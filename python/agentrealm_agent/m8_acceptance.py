@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from .acceptance_run import FULL_RUN_FRACTION, TimedRunHooks  # FULL_RUN_FRACTION: re-exported for the smoke script
 from .config import Policy
 from .equip import is_consumable, is_weapon, wear_slot
-from .healing import FOOD_CODES, POTION_CODES, potion_count, self_use_code
+from .healing import FOOD_CODES, POTION_CODES, potion_count, code_in_hand
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .survival import combat_group, would_lose
@@ -138,7 +138,8 @@ class M8AcceptanceMetrics(TimedRunHooks):
                     if e.kind == "supply" and e.id == sid and e.code in FOOD_CODES:
                         self.heal_food_take = True
             if intent.get("verb") == "Use" and _is_self_use(intent, w):
-                if self_use_code(w, intents[i - 1] if i > 0 else None) in POTION_CODES:
+                before = next((x for x in reversed(intents[:i]) if x.get("verb") != "Wait"), None)
+                if code_in_hand(w, before) in POTION_CODES:
                     self.heal_potion = True
 
     def _note_fight(

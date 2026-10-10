@@ -180,6 +180,8 @@ One profile per invocation; several characters means several commands. `create` 
 | No NPC is labeled helper or hostile on any read | **Greet** (A65) takes an NPC for a helper only when it stands still in view and has not hit us, and greets none off safe ground while `policy.hostile` names NPCs; the planner's State shows `hostile` (known hostile only) and `stays_put`, not a served kind. A helper that walks, or a monster that idles on safe ground, is misjudged. | None |
 | Our own strength is served only on the owner watch sheet, not on a character route | The agent brackets its strength from `over_strength_ceiling` rejections and does not read the watch sheet, which sits outside the character call budget. | None |
 
+Footnote, low priority and deferred by Evan (not a backlog row): the agent's seed item tables are world content hardcoded as starting knowledge: `healing.py` `FOOD_CODES` and `POTION_CODES`, `break_memory.py` `MANUAL_CAPABILITIES` and `WEAPONS`, `loot.py` `NON_TRANSFERABLE` and `FOOD_CODES`, and the range-1 starting weapon `states/gather.py` assumes (`BUSH_REACH`). The runtime item table already learns these from the server (A18), so a later cleanup could drop the seeds and read the weapon's range from the server.
+
 ## Milestones
 
 This table is the backlog. Each row is one PR-sized item with a stable ID; IDs are never reused. Cite the ID in commits and PR bodies. Per-ID state lives in [`status.json`](status.json), which is not a source of truth: where it disagrees with this file, status is wrong. An item is ready when its state is not `done`, every ID in **Depends on** is `done`, its note does not start with "Waiting on", and no open pull request already covers it.

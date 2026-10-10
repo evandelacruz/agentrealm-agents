@@ -159,7 +159,7 @@ issue_write(method="update", owner="evandelacruz", repo="agentrealm-agents",
 
 Read the labels again. If `conductor:working` was already set by someone else, stop without editing and say so. Never remove a lock you did not just claim.
 
-When the fleet spawned you, the lock is already claimed for you. Do not claim it again. Still release it at the end.
+When the fleet spawned you, the lock is already claimed for you. Do not claim it again. Still release it at the end, unless you stop with it in place (**Unlock** below) or hand off under **Declined everything**.
 
 ## The pass
 

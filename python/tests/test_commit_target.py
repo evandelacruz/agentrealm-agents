@@ -16,6 +16,7 @@ from agentrealm_agent import targets
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.healing import standing_in_safe_zone
+from agentrealm_agent.investigation import mark_cell_read
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
@@ -522,6 +523,37 @@ class DiscoveryTest(unittest.TestCase):
         r.world.gems = 5
         s._collect(r)
         self.assertEqual(s.inbox[-1]["finds"], [{"kind": "affordable", "code": "small_potion", "price": 5, "gems": 5}])
+
+    def test_a_new_unread_sign(self):
+        s, r = make(), fake_runner()
+        r.knowledge = KnowledgeBase("sandbox")
+        r.world.view.readable[(3, 3)] = True
+        s._collect(r)  # primes: known at the start
+        r.world.view.readable[(9, 2)] = True
+        r.world.view.readable[(9, 5)] = True
+        mark_cell_read(r.knowledge, MAP, (9, 5))  # already read on an earlier run
+        s._collect(r)
+        self.assertEqual(s.inbox[-1]["finds"], [{"kind": "sign", "map_id": MAP, "cell": [9, 2]}])
+        s.inbox.clear()
+        s._collect(r)  # seen again: raised once
+        self.assertEqual(s.inbox, [])
+
+    def test_a_new_sign_triggers_one_replan(self):
+        llm = FakeLLM(WAIT_ANSWER, WAIT_ANSWER, WAIT_ANSWER)
+        s, r = make(llm, replan_s=60), fake_runner()
+        r.knowledge = KnowledgeBase("sandbox")
+        round_trip(s, r)
+        s.clock.now += 1  # inside the gap: the find waits for it
+        r.world.view.readable[(4, 1)] = True
+        round_trip(s, r)
+        self.assertEqual(llm.calls, 1)
+        s.clock.now += DISCOVERY_WAIT
+        for _ in range(3):
+            round_trip(s, r)
+            s.clock.now += 1
+        self.assertEqual(llm.calls, 2, "one replan, before the timer")
+        asks = [c.args[2]["strategist"] for c in r.log.call_args_list if c.args[2]["strategist"]["event"] == "ask"]
+        self.assertEqual(asks[1]["triggers"][0]["finds"], [{"kind": "sign", "map_id": MAP, "cell": [4, 1]}])
 
     def test_a_new_head_waits_for_the_walk_under_way(self):
         travel = {"op": "travel", "to": "town", "x": 0, "y": 0}

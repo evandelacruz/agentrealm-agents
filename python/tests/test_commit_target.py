@@ -316,6 +316,58 @@ class NearerCandidateTest(unittest.TestCase):
         self.assertEqual(r.mem.gather_target, ("grass", (1, 1)))
 
 
+class BalloonedWalkTest(unittest.TestCase):
+    """A committed walk whose price balloons is priced again against the
+    other cut targets, and let go past a clear margin (A109)."""
+
+    def detour(self, gap_y: int, nearer=None) -> tuple[WorldModel, Memory]:
+        """Commit to grass at (12, 4), then find a wall at x=8 open only at ``gap_y``."""
+        w = field(width=21, height=21, at=(2, 4))
+        w.view.tiles[(12, 4)] = "grass"
+        m = Memory()
+        gather_outcome(w, m, Policy(on_hostile="ignore"))
+        self.assertEqual(m.gather_target, ("grass", (12, 4)))
+        walk_off(w, m, (5, 4))
+        for y in range(1, 20):
+            if y != gap_y:
+                w.view.tiles[(8, y)] = "wall"
+        if nearer is not None:
+            w.view.tiles[nearer] = "grass"
+        gather_outcome(w, m, Policy(on_hostile="ignore"))
+        return w, m
+
+    def test_a_long_way_round_gives_way_to_nearer_grass(self):
+        _, m = self.detour(gap_y=19, nearer=(4, 4))
+        self.assertEqual(m.gather_target, ("grass", (4, 4)))
+
+    def test_a_long_way_round_with_nothing_cheaper_is_kept(self):
+        _, m = self.detour(gap_y=19)
+        self.assertEqual(m.gather_target, ("grass", (12, 4)))
+        self.assertEqual(m.path[-1], (12, 4))
+
+    def test_a_short_way_round_is_kept_inside_the_margin(self):
+        _, m = self.detour(gap_y=10, nearer=(5, 10))  # 12 steps on against 6: under OUTPRICE_STEPS
+        self.assertEqual(m.gather_target, ("grass", (12, 4)))
+
+    def test_nearer_grass_alone_never_prices_the_walk_again(self):
+        w, m = self.detour(gap_y=4)  # the wall leaves the straight way open: no rise
+        w.view.tiles[(6, 4)] = "grass"
+        walk_off(w, m, (6, 3))
+        gather_outcome(w, m, Policy(on_hostile="ignore"))
+        self.assertEqual(m.gather_target, ("grass", (12, 4)))
+
+    def test_outpriced_needs_a_rise_and_both_margins(self):
+        def never():
+            raise AssertionError("alternatives priced without a rise")
+
+        self.assertFalse(targets.outpriced(30, None, never))
+        self.assertFalse(targets.outpriced(30, 30, never))
+        self.assertTrue(targets.outpriced(31, 30, lambda: 10))
+        self.assertFalse(targets.outpriced(31, 30, lambda: 25), "under OUTPRICE_RATIO")
+        self.assertFalse(targets.outpriced(14, 10, lambda: 7), "under OUTPRICE_STEPS")
+        self.assertFalse(targets.outpriced(31, 30, lambda: None))
+
+
 class PrerequisiteTest(unittest.TestCase):
     """A prerequisite is a stop inserted before the target, which stays."""
 

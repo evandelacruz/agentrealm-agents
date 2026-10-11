@@ -99,6 +99,7 @@ class Memory:
     corridors: dict[str, NavSearchState] = field(default_factory=dict)  # plan ("chest", "goto") -> its corridor search, resumed across replans (A13)
     gather_target: tuple[str, Pos] | None = None  # ("pile" | "grass" | "out" | "off" | "region" | "clear" | "frontier", cell) Gather is walking toward (A22)
     gather_hold: tuple[tuple[str, Pos], int] | None = None  # (target, tick) Gather began waiting on a taken first step (A71)
+    gather_price: tuple[tuple[str, Pos], int] | None = None  # (target, price of the walk ahead) when Gather last priced its cut target (A109)
     gather_clear_seen: frozenset[Pos] = frozenset()  # cells to cut and piles in sight when Gather last chose a "clear" walk (A82)
     gather_status: str = ""  # Gather's last decision, e.g. cutting, walking to grass, blocked by hostile (planner State)
     # Gather's stall clock: (tick this spell of Gather began, tick of its latest decision) (A63 run 3).
@@ -193,7 +194,7 @@ class Memory:
         their next decision, against everything else, instead of kept."""
         if self.goal in ("gather", "detour"):
             self.path, self.goal = [], ""
-        self.gather_target = self.gather_hold = self.detour = None
+        self.gather_target = self.gather_hold = self.gather_price = self.detour = None
 
     def snapshot(self) -> Memory:
         """A deep copy, for :meth:`restore` after a probe that must leave no trace.

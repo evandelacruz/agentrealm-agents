@@ -12,9 +12,14 @@ a safe tile, a shop cell, a door, a supply) it keeps it until one of:
   decision or a walk that lost its path to another state;
 - the plan op it serves changes (a new head is new information);
 - nothing pursued it for ``LAPSE_TICKS``: the episode it served (a
-  retreat, a heal) is over, and the next one picks afresh.
+  retreat, a heal) is over, and the next one picks afresh;
+- the walk to it ballooned: its price rose since it was last priced (a wall
+  found ahead, a long way round) and it now costs more than the cheapest
+  other candidate by a clear margin (``outpriced``).
 
-Another candidate becoming nearer is never a reason. A prerequisite that
+Another candidate becoming nearer is never a reason on its own: a walk is
+priced against the others again only when its own price rose, and let go
+only past both margins, so two candidates near in price never trade places. A prerequisite that
 comes up on the way (a key before a locked entrance) is a *stop* inserted
 before the target, never a new target: the target stays committed while the
 stop is walked, and the walk resumes toward it after. A short detour to a
@@ -61,6 +66,11 @@ LAPSE_TICKS = 300
 # Decisions in a row with no path to the target, though not proven walled in,
 # before it is let go: a backstop for a search that can neither find nor rule out a way.
 MISS_LIMIT = 10
+# A committed walk whose price rose is let go only when it costs more than
+# the cheapest other candidate by both margins: this many times its price,
+# and this many steps more (``outpriced``).
+OUTPRICE_RATIO = 1.5
+OUTPRICE_STEPS = 8
 
 
 @dataclass
@@ -138,6 +148,20 @@ def commit(m: Memory, w: WorldModel, goal: str, target: Hashable, op: dict | Non
         c.seen = w.tick
         return
     m.targets[goal] = Commitment(goal, _op_key(op), target, w.tick, w.tick)
+
+
+def outpriced(ahead: float, last: float | None, cheapest: Callable[[], float | None]) -> bool:
+    """The committed walk, priced ``ahead`` now and ``last`` when last priced
+    (None: never), rose in price and costs more than the cheapest other
+    candidate (``cheapest()``, None when there is none) by ``OUTPRICE_RATIO``
+    and ``OUTPRICE_STEPS``. The alternatives are priced only on a rise.
+
+    The price is of the walk still ahead, priced as the state prices its
+    picks: the steps already walked are spent either way."""
+    if last is None or ahead <= last:
+        return False
+    other = cheapest()
+    return other is not None and ahead > other * OUTPRICE_RATIO and ahead - other >= OUTPRICE_STEPS
 
 
 def release(m: Memory, goal: str, target: Hashable | None = None) -> None:

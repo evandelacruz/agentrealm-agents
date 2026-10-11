@@ -557,6 +557,36 @@ class ProgressTest(unittest.TestCase):
         self.assertEqual(r.mem.path, [(1, 0)])
         self.assertEqual(logged_events(r), ["ask", "applied"])
 
+    def test_same_head_keeps_every_progress_field(self):
+        # Each field Plan keeps for its head op survives a reply that changes only the ops below.
+        from agentrealm_agent.plan import HEAD_PROGRESS
+
+        head = {"op": "use_block", "x": 3, "y": 0, "code": "key"}
+        s, r = make(FakeLLM({"goals": [head, {"op": "buy", "code": "rope"}]})), fake_runner()
+        r.plan = Plan([head, {"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
+        kept = {name: f"kept {name}" for name in HEAD_PROGRESS}
+        for name, value in kept.items():
+            setattr(r.plan, name, value)
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals[1]["code"], "rope")
+        self.assertEqual({name: getattr(r.plan, name) for name in HEAD_PROGRESS}, kept)
+
+    def test_an_npc_type_fight_stays_pinned_across_a_reply_that_keeps_it_on_top(self):
+        from agentrealm_agent.plan import op_npc
+
+        head = {"op": "fight", "npc_type": "snotling"}
+        s, r = make(FakeLLM({"goals": [head, {"op": "buy", "code": "rope"}]})), fake_runner()
+        r.world.entities = [Entity("npc", 5, (1, 0), "snotling"), Entity("npc", 6, (3, 0), "snotling")]
+        r.plan = Plan([head, {"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
+        r.plan.advance(r.world)
+        self.assertEqual(r.plan.fight_npc, 5)
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals[1]["code"], "rope")
+        r.world.entities = [Entity("npc", 5, (2, 0), "snotling"), Entity("npc", 6, (1, 0), "snotling")]
+        r.plan.advance(r.world)
+        self.assertEqual(r.plan.fight_npc, 5)
+        self.assertEqual(op_npc(r.plan.current(), r.world, r.plan.fight_npc).id, 5)
+
     def test_empty_stack_and_empty_reply_keep_the_fallback_walk(self):
         for reply in ({"goals": []}, {"goals": [{"op": "nonsense"}]}, "not json"):
             s, r = make(FakeLLM(reply)), fake_runner()

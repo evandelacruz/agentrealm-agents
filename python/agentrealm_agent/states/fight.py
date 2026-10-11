@@ -1,4 +1,10 @@
-"""Fight: win-estimate gated combat with retreat queued behind attacks (A23)."""
+"""Fight: win-estimate gated combat with retreat queued behind attacks (A23).
+
+Also the executor for the plan's ``fight`` op (A114): the planner names an
+NPC to fight, and Fight closes on it and swings. No attack is made from a
+safe zone, so a swing is only ever sent from a cell outside one: on a safe
+tile, Fight's move is the step off it toward the target.
+"""
 
 from __future__ import annotations
 
@@ -13,9 +19,11 @@ from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step, plan_sets, retreat_safe_goal
 from ..reach import weapon_reach
 from ..engagement import Engagement, fights, held_members
-from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks
+from ..survival import RETREAT_NAV, at_health_floor, combat_group, is_hostile, on_safe_tile, pursuer_peaks
+from ..plan import op_npc
 from ..world import Entity, Pos, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome
+from ..zone_discovery import known_safe
+from .base import PlayContext, State, StateOutcome, my_op
 from .intents import set_position, use_npc, use_on
 
 
@@ -107,6 +115,22 @@ def retreat_tail(
     return out
 
 
+def off_safe_step(w: WorldModel, target: Entity, blocked: set[Pos], reach: int) -> Pos | None:
+    """From a safe tile, one step onto a cell outside the safe zone toward
+    ``target``: one within ``reach`` of it first, else the nearest to it.
+    None when no open step leaves the safe zone without moving away."""
+    here = w.pos
+    if here is None or w.map_id is None:
+        return None
+    dist = chebyshev(here, target.pos)
+    options = [
+        p for p in w.open_neighbours(here, blocked) if not known_safe(w, w.map_id, p) and chebyshev(p, target.pos) <= dist
+    ]
+    if not options:
+        return None
+    return min(options, key=lambda p: (chebyshev(p, target.pos) > reach, chebyshev(p, target.pos), p))
+
+
 def close_step(w: WorldModel, target: Entity, blocked: set[Pos]) -> Pos | None:
     """One step closer to ``target`` when out of weapon reach."""
     here = w.pos
@@ -131,11 +155,49 @@ def held_target(world: WorldModel, ctx: PlayContext, engagement: Engagement) -> 
 
 
 def can_engage(world: WorldModel, target: Entity, ctx: PlayContext) -> bool:
-    """In weapon reach, or one open step brings us closer."""
+    """In weapon reach off safe ground, or one open step brings us closer
+    (or, on a safe tile, off it toward the target)."""
+    blocked, _, _ = plan_sets(world, ctx.memory, ctx.policy, ctx.knowledge)
+    if on_safe_tile(world):
+        return off_safe_step(world, target, blocked, weapon_reach(world, ctx.knowledge)) is not None
     if in_weapon_reach(world, target, ctx.knowledge):
         return True
-    blocked, _, _ = plan_sets(world, ctx.memory, ctx.policy, ctx.knowledge)
     return close_step(world, target, blocked) is not None
+
+
+def held_on_safe_ground(world: WorldModel, ctx: PlayContext, target: Entity) -> bool:
+    """On a safe tile at the health floor against ``target`` and the hostiles
+    in range (``survival.at_health_floor``): no step off it is taken, or
+    Retreat walks back and the step off follows, round after round (A114)."""
+    return on_safe_tile(world) and at_health_floor(world, ctx.params, combat_group(world, ctx.policy, also=target))
+
+
+def op_refusal(world: WorldModel, ctx: PlayContext, op: dict) -> str | None:
+    """Why Fight cannot carry out the ``fight`` op, or None to go on: its NPC
+    is not in view (and was not since the op reached the top, or it would be
+    done), is a boss (``fight_boss``'s), the directives forbid attacking
+    it, we stand on safe ground at the health floor
+    (``held_on_safe_ground``), or no swing or step can reach it
+    (``can_engage``), so the planner makes the call. Reads only; ``act``
+    drops the op with it."""
+    target = op_npc(op, world, _pinned(ctx))
+    if target is None:
+        named = f"npc {op['npc_id']}" if "npc_id" in op else op.get("npc_type")
+        return f"no {named} in view"
+    if target.is_boss:
+        return f"{target.code or 'npc'} {target.id} is a boss: fight_boss fights it"
+    if attack_forbidden(target, ctx.never_attack):
+        return f"the directives forbid attacking {target.code or 'npc'} {target.id}"
+    if held_on_safe_ground(world, ctx, target):
+        return f"at the health floor on safe ground: not stepping off toward {target.code or 'npc'} {target.id}"
+    if not can_engage(world, target, ctx):
+        return f"no swing or open step reaches {target.code or 'npc'} {target.id}"
+    return None
+
+
+def _pinned(ctx: PlayContext) -> int | None:
+    """The NPC the head ``fight`` op settled on (``Plan.fight_npc``), if any."""
+    return ctx.plan.fight_npc if ctx.plan is not None else None
 
 
 def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
@@ -163,12 +225,27 @@ class FightState(State):
     name = "Fight"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
-        return should_fight(world, ctx)
+        return should_fight(world, ctx) or self._has_op(world, ctx)
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
-        return not should_fight(world, ctx)
+        return not self.guard(world, ctx)
+
+    @staticmethod
+    def _has_op(world: WorldModel, ctx: PlayContext) -> bool:
+        """The plan's top op is a ``fight`` (reads only: ``act`` drops it when it cannot go on)."""
+        if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
+            return False
+        return my_op(ctx, FightState.name) is not None
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
+        op = my_op(ctx, self.name) if self._has_op(world, ctx) else None
+        if op is not None:
+            refusal = op_refusal(world, ctx, op)
+            if refusal is None:
+                return engage(world, ctx, op_npc(op, world, _pinned(ctx)), self.name)
+            if ctx.plan is not None:
+                ctx.plan.drop_current(refusal, memory=ctx.memory)
+                return StateOutcome(None, f"fight dropped: {refusal}", state=self.name)
         target = fight_target(world, ctx.policy, ctx.never_attack, ctx.memory.engagement)
         if target is None or world.pos is None:
             ctx.memory.path = []
@@ -180,9 +257,20 @@ def engage(w: WorldModel, ctx: PlayContext, target: Entity, state: str) -> State
     """Swing at ``target`` with a retreat tail queued behind, or step closer when out of weapon reach.
 
     **Fight** runs it, and so does **Flee** when running away is not working (A9).
+    No swing is sent from a safe tile, where no attack can be made: the move
+    there is the step off it toward ``target`` (A114), never taken at the
+    health floor (``held_on_safe_ground``).
     """
     m, policy = ctx.memory, ctx.policy
     m.path = []
+    if on_safe_tile(w):
+        if held_on_safe_ground(w, ctx, target):
+            return StateOutcome(None, "at the health floor: staying on safe ground", state=state)
+        blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
+        off = off_safe_step(w, target, blocked, weapon_reach(w, ctx.knowledge))
+        if off is None:
+            return StateOutcome(None, "no step off safe ground toward it", state=state)
+        return StateOutcome([set_position(off)], f"off safe ground toward {target.kind} {target.id}", reflex=True, state=state)
     if not in_weapon_reach(w, target, ctx.knowledge):
         blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
         toward = close_step(w, target, blocked)

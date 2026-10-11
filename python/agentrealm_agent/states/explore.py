@@ -7,9 +7,11 @@ off hazards, away from hostiles, and, when hurt, inside safe zones first so
 the character heals while it looks around. Once that ground is all explored
 or out of reach, it pushes the boundary: the nearest frontier outside, still
 off hazards and away from hostiles, with the survival reflexes above it.
-Only with no reachable frontier at all does it step to a safe neighbour
-("look around"), so a decision with nothing to do is never idle. Stuck
-detection escalates and gives up a walk that goes nowhere (A15); cells Step
+With no reachable frontier at all, the ground in reach is all seen and the
+way on is the planner's call (which block to open, which hostile to fight or
+pass, which clue to follow): it never steps in place and never parks beside
+a hostile; it raises a ``no_way_on`` trigger and sends nothing (A114).
+Stuck detection escalates and gives up a walk that goes nowhere (A15); cells Step
 rejections ruled out and ``avoid_blocks`` hazards stay out of the path (A14).
 """
 
@@ -20,7 +22,7 @@ import random
 from ..config import Policy
 from ..healing import hurt
 from ..knowledge_base import KnowledgeBase
-from ..memory import Memory
+from ..memory import Memory, queue_signal
 from ..navigation import stuck as nav_stuck
 from ..pathing import (
     plan_sets,
@@ -36,7 +38,7 @@ from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
-from .gather_safe import hostiles_near, is_safe_ish
+from .gather_safe import is_safe_ish
 from .intents import set_position
 
 # Hurt, the safe default keeps away from a known hostile this close: the
@@ -44,6 +46,8 @@ from .intents import set_position
 CAUTION_RADIUS = HOSTILE_DANGER_RADIUS
 # How long it holds with no step away before it explores again (10 s at 10 ticks/s).
 KEEP_AWAY_HOLD_TICKS = 100
+# Why the safe default had no step: the ground in reach is all seen.
+NOTHING_TO_EXPLORE = "nothing left to explore"
 
 
 class ExploreState(State):
@@ -72,15 +76,40 @@ class ExploreState(State):
 
 
 def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:
-    """The safe default: explore safe ground, then push past it (never idle).
+    """The safe default: explore safe ground, then push past it.
 
     Hurt with a known hostile near, it explores nothing: it steps away from
-    the hostile, or holds when no step gets further (``keep_away``)."""
+    the hostile, or holds when no step gets further (``keep_away``). With
+    nothing left to explore it asks the planner (``ask_the_planner``)."""
     if not hurt(world):
         ctx.memory.keep_away_hold = None  # healed: a later hold starts afresh
     elif (out := keep_away(world, ctx)) is not None:
         return out
-    return explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None)
+    out = explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None)
+    if out.intents:
+        ctx.memory.no_way_on = None  # ground to explore again: a later ask is new
+    if out.reason != NOTHING_TO_EXPLORE:
+        return out
+    return ask_the_planner(world, ctx)
+
+
+def ask_the_planner(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateOutcome:
+    """The ground in reach is all seen: the way on is the planner's (A114).
+
+    It never steps in place, and never parks because a hostile stands next
+    to it: it raises one ``no_way_on`` trigger for this cell and holds the
+    decision with nothing sent. The planner reads State ``map`` (the ground round the character,
+    blocks, hostiles, signs and doors by cell), what each held item does and
+    the clues, and opens a block with ``break_block``, fights, or goes on.
+    """
+    m = ctx.memory
+    if w.pos is not None and w.map_id is not None and m.no_way_on != (w.map_id, w.pos):
+        m.no_way_on = (w.map_id, w.pos)
+        queue_signal(
+            m,
+            {"trigger": "no_way_on", "map_id": w.map_id, "x": w.pos[0], "y": w.pos[1], "tick": w.tick, "why": NOTHING_TO_EXPLORE},
+        )
+    return StateOutcome(None, f"{NOTHING_TO_EXPLORE}: asked the planner", state=state, wait=True)
 
 
 def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateOutcome | None:
@@ -137,8 +166,10 @@ def explore_outcome(
 ) -> StateOutcome:
     """One step toward the ``explore_area`` ``op``, or with no op the safe default's.
 
-    With an op and no step, sends nothing. The safe default always sends a
-    step, or waits only when boxed in with no open safe neighbour.
+    With no step, sends nothing. With no op and no frontier to walk to at
+    all, its reason is ``NOTHING_TO_EXPLORE``, and the safe default asks the
+    planner (``ask_the_planner``); a frontier whose first step is only taken
+    for now, or that stuck detection is still escalating, is not that.
     """
     if w.pos is None:
         return StateOutcome(None, "position unknown", state=state)
@@ -162,19 +193,13 @@ def explore_outcome(
         label = m.path[-1] if m.path else att.target if att else step
         note = nav_stuck.level_note(att) if att is not None and att.goal == m.goal else ""
         return StateOutcome([set_position(step)], f"{m.goal} → {label}{note}", state=state)
-    if op is not None:
-        return StateOutcome(None, "no explore_area step", state=state)
-    return _look_around(w, policy, rng, plan_avoid, state)
-
-
-def _look_around(w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], state: str) -> StateOutcome:
-    """No reachable frontier at all: step to a safe neighbour rather than stand idle."""
-    options = [p for p in w.open_neighbours(w.pos, blocked) if not hostiles_near(w, p, policy)]
-    if hurt(w):
-        options = [p for p in options if is_safe_ish(w, p, policy)] or options
-    if not options:
-        return StateOutcome(None, "boxed in", state=state, wait=True)
-    return StateOutcome([set_position(rng.choice(sorted(options)))], "look around: nothing left to explore", state=state)
+    if op is None and missed is None:
+        # No frontier the safe default may walk to at all, not one whose step is only taken now.
+        return StateOutcome(None, NOTHING_TO_EXPLORE, state=state)
+    if op is None:
+        # A frontier is there, its step only taken for now or its walk escalating: hold, never step in place.
+        return StateOutcome(None, "no explore step yet", state=state, wait=True)
+    return StateOutcome(None, "no explore_area step", state=state)
 
 
 def _missed_step(

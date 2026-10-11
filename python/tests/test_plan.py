@@ -223,6 +223,7 @@ class GoalStackTest(unittest.TestCase):
         # Break owns `break_block`: dispatch leaves it on the stack (A36)
         # until it has stalled as long as any other op.
         w = open_world()
+        w.view.tiles[(3, 3)] = "tree"  # matches burn hedges, and hedges are trees
         w.held_supplies = [InventorySupply(4, "matches")]
         brk = {"op": "break_block", "x": 3, "y": 3, "capability": "burn"}
         plan = Plan([brk, {"op": "wait", "seconds": 5, "why": "t"}], dict(PARAM_DEFAULTS), tick_hz=10)

@@ -81,14 +81,16 @@ class FleeSwingBackTest(unittest.TestCase):
         self.assertEqual(out.state, "Flee")
         self.assertFalse(uses(out), out.reason)
 
-    def test_no_fight_when_cornered_at_the_floor(self):
+    def test_cornered_at_the_floor_it_swings_rather_than_take_free_hits(self):
+        # No step at all and no potion: standing still only takes hits (A114).
         for x in range(9, 12):
             for y in range(9, 12):
                 if (x, y) not in ((10, 10), (11, 10)):
                     self.w.view.tiles[(x, y)] = "wall"
         flee_gave_up(self.w, self.c)
         out = dispatch(self.w, self.c)
-        self.assertFalse(uses(out), out.reason)
+        self.assertTrue(uses(out), out.reason)
+        self.assertTrue(out.reason.startswith("cornered: fight npc 7"), out.reason)
 
     def test_swings_back_above_the_floor(self):
         self.w.health = 10

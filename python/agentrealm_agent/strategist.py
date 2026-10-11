@@ -15,7 +15,7 @@ never costs a tick and nothing needs a lock.
 One window, on the tick thread:
 
 1. Move new triggers into the inbox: clue, stuck, death, goal done or
-   dropped, idle (from ``Memory``), and map change, hurt, discovery
+   dropped, no way on (A114), idle (from ``Memory``), and map change, hurt, discovery
    (:mod:`.discovery`: a new NPC, entrance, affordable item, hostile pack or
    unread sign, A71, A72) and timer (raised here).
 2. If an answer came back, reconcile it with what changed since its prompt
@@ -135,7 +135,18 @@ from .break_memory import capabilities_for_code
 from .pack import reserved_supplies
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
 from .stalled import StalledOp, below_progress, find as find_stalled, target_of
-from .survival import STARTING_WEAPON, known_hostile, retreat_goal
+from .survival import (
+    HOSTILE_ATTACK_INTERVAL_TICKS,
+    OUR_ATTACK_INTERVAL_TICKS,
+    STARTING_WEAPON,
+    UNKILLED_HOSTILE_HEALTH,
+    hostile_swing_damage,
+    known_hostile,
+    retreat_goal,
+    swing_damage,
+    worn_defense,
+)
+from .threat import type_key_for_entity
 from .travel.knowledge import iter_entrances, iter_shop_cells, town_from_kb
 from .travel.ops import travel_op_from_plan_goal
 from .world import Pos, WorldModel, chebyshev
@@ -155,6 +166,7 @@ PREFIX_BUDGET_FACTOR = 1.5
 DEFAULT_HURT_FRACTION = 0.5
 DEFAULT_IDLE_MINUTES = 10
 STALL_SECONDS = 30  # State shows a stall once nothing has changed for this long
+MAP_RADIUS = 15  # State map: the cells this far round the character each way (A114)
 # After a failed call the next waits BACKOFF_BASE_S, doubling per failure in a row, at most BACKOFF_CAP_S.
 BACKOFF_BASE_S = 2.0
 BACKOFF_CAP_S = 120.0
@@ -202,6 +214,8 @@ The survival params ("params" under State, set by "params" or a set_param op). S
 Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first.
 
 NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir from here, spoken, greeted, hostile, stays_put); npcs_spoken_to counts the NPCs a say op of yours has spoken to so far, and npcs_greeted those Greet has said hello to. The game does not say which NPCs are helpers and which are monsters. "hostile" true means known hostile: a boss, the last thing that hit the character, or a type that has swung at it, hit it or died in view, in this run or an earlier one; false only means none of its type has done so yet, so it may still be a monster. "stays_put" true means it has stood on one cell for a while, as helpers do; judge the rest from its type and the clues. On safe ground (anywhere, if policy.hostile does not name NPCs), Greet says hello once to an NPC in sight that stays put and is not hostile, and marks it greeted; a helper answers any words with the same line, which lands in Clues. A greeting never counts as spoken: a say op to a greeted NPC still says your text. To talk to one further away, or with your own words, use a say op with its npc_id (from nearby_npcs) or its npc_type (any NPC of that type, the nearest first); the character walks within speech range and says your text. A helper's reply is added to Clues as a row of kind "npc".
+
+Map: State map draws the ground round the character, {MAP_RADIUS} cells each way, one character per cell: rows by y (the number at the left), x by the ruler above (read a column's digits top to bottom), and a legend of the marks used. It shows what the character's reads have shown on this map (? where none has) and what is in view now, so read exact cells off it: a block to break, a sign, a door, a hostile, the way round something. A block is destroyed only by a Use with an item whose capability opens its type (held lists each item's use: cut, chop, smash, burn, blast); a break_block names the cell (x, y) and the capability, and is dropped if that cell holds no block, or a block whose type's known openers exclude the capability; a type with no known opener is still tried, so its opener is learned. A destroyed block may grow back. No attack can be made from a safe zone, and nothing can hurt the character there. When the ground the character can walk to is all seen and it has nothing to do, it sends a no_way_on trigger and does nothing until you give it a way on. To fight an NPC (a hostile that blocks the way, one worth its gems), put a fight op on it: the character goes for it whatever its own fight-or-flee judgement says, stepping off safe ground to swing (never at the health floor: the op is dropped then), so weigh nearby_npcs (each one's cell and swing at us, measured or not) against our_swing, health and potions first. A cornered trigger means fleeing found no step that opens distance from the hostiles in range, no heal was due and no hostile was in weapon reach: the character holds where it is, taking any hits that land. Answer it with a way out: a fight op on the hostile, a use_item potion, a travel or explore_area another way, or a wait only on safe ground.
 
 Signs: State signs_seen lists the signs and statues seen on this map, the unread ones first and then the nearest, each with its map_id, x, y, block, cells (Chebyshev) and dir from here, and "read" true once its text has been read; unread counts the unread ones on this map. The character does not read a sign on its own. To read one, put a read op with its x, y on the stack: the character walks until the sign is in sight and reads it, and the text lands in Clues as a row of kind "sign". Signs often say where to go or what a place holds, so one near the way is usually worth the few steps.
 
@@ -587,6 +601,7 @@ def build_prompt(
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
         *sign_lines(w, knowledge),
+        *map_lines(w),
         f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
         *_gather_line(plan, gather_status),
         f"gather_run={json.dumps(gather_run or {}, sort_keys=True)}",
@@ -673,10 +688,20 @@ def npc_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     ``greeted`` (Greet's hello was, ``greeted_npcs``), ``hostile`` (``survival.known_hostile``:
     a boss, our last hitter, or a type that has swung at us, hit us or died in view) and ``stays_put`` (on
     one cell for ``HELPER_STILL_TICKS`` in view, as helpers do). The API names
-    no helpers, so these are the only hints.
+    no helpers, so these are the only hints. Each also gives its cell (``x``,
+    ``y``) and its swing at us as the engagement prices it (A114:
+    ``swing``, expected damage per swing through our armor, ``measured``
+    when its type has hit us before, and ``health`` the API serves only for
+    a boss), next to ours (``our_swing``), so the planner can judge a fight.
     """
     spoken, greeted = spoken_npc_ids(knowledge), greeted_npc_ids(knowledge)
-    lines = [f"npcs_spoken_to={len(spoken)} npcs_greeted={len(greeted)}"]
+    ours = {
+        "expected_damage": round(swing_damage(w.armed_code), 2),
+        "every_ticks": OUR_ATTACK_INTERVAL_TICKS,
+        "hostile_health_assumed": UNKILLED_HOSTILE_HEALTH,
+    }
+    lines = [f"npcs_spoken_to={len(spoken)} npcs_greeted={len(greeted)} our_swing={json.dumps(ours, sort_keys=True)}"]
+    armor = worn_defense(w)
     if w.pos is None or w.map_id is None:
         return lines
     here, map_id = w.pos, w.map_id
@@ -694,11 +719,26 @@ def npc_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
             "greeted": e.id in greeted,
             "hostile": known_hostile(w, e),
             "stays_put": w.npc_still_ticks(e) >= HELPER_STILL_TICKS,
+            "x": e.pos[0],
+            "y": e.pos[1],
+            **_their_swing(w, e, armor),
         }
         for e in npcs
     ]
     lines.append(f"nearby_npcs={json.dumps(rows, sort_keys=True)}")
     return lines
+
+
+def _their_swing(w: WorldModel, e: Any, armor: int) -> dict[str, Any]:
+    """An NPC's swing at us as the engagement prices it (``survival.hostile_swing_damage``)."""
+    key = type_key_for_entity(e)
+    swing = hostile_swing_damage(w.threat.damage_per_hit(key), w.threat, key, armor)
+    row: dict[str, Any] = {
+        "swing": {"expected_damage": round(swing, 2), "every_ticks": HOSTILE_ATTACK_INTERVAL_TICKS, "measured": w.threat.measured(key)}
+    }
+    if e.health is not None:
+        row["health"] = e.health
+    return row
 
 
 # The signs and statues State lists.
@@ -733,6 +773,112 @@ def sign_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     ]
     unread = sum(1 for read, _, _ in cells if not read)
     return [f"signs_seen={json.dumps(rows, sort_keys=True)} unread={unread}"]
+
+
+# What each block type shows as on the State map; a type not listed shows as OTHER_BLOCK.
+MAP_BLOCKS = {
+    "dirt": ".",
+    "tile": ".",
+    "grass": ",",
+    "fire": "!",
+    "lava": "!",
+    "water": "~",
+    "bush": "b",
+    "tree": "T",
+    "rock": "o",
+    "mountain": "M",
+    "wall": "#",
+    "framed_door": "D",
+    "rock_entry": "D",
+}
+OTHER_BLOCK = "X"
+# The legend, in the order it is printed; only the marks on the map are listed.
+MAP_LEGEND = {
+    "@": "you",
+    "H": "known hostile",
+    "B": "boss",
+    "N": "other NPC",
+    "C": "other character",
+    "$": "gem",
+    "i": "item on the ground",
+    "+": "item for sale",
+    "c": "chest",
+    "S": "sign or statue (readable)",
+    "L": "locked door",
+    "D": "door",
+    ".": "ground",
+    ",": "grass",
+    "!": "fire or lava (hurts)",
+    "~": "water",
+    "b": "bush",
+    "T": "tree (hedges are trees)",
+    "o": "rock",
+    "M": "mountain",
+    "#": "wall",
+    OTHER_BLOCK: "other block",
+    "_": "no ground",
+    "?": "not seen",
+}
+
+
+def _entity_mark(w: WorldModel, e: Any) -> str:
+    if e.kind == "npc":
+        return "B" if e.is_boss else "H" if known_hostile(w, e) else "N"
+    if e.kind == "character":
+        return "C"
+    if e.kind == "chest":
+        return "c"
+    if e.gem_price is not None:
+        return "+"
+    return "$" if e.code == "gem" else "i"
+
+
+def map_lines(w: WorldModel) -> list[str]:
+    """The ground round the character as one character per cell (A114):
+    ``MAP_RADIUS`` cells each way, rows by y top to bottom, a ruler of x
+    above (read each column's digits top to bottom), and a legend of the
+    marks used. Terrain is what this map's reads have shown, ``?`` where
+    none has; entities in view are drawn over it, and the character over
+    everything. So the planner can name an exact cell (a block to break, a
+    sign, a door) and see what lies between."""
+    if w.pos is None or w.map_id is None:
+        return []
+    cx, cy = w.pos
+    xs = range(cx - MAP_RADIUS, cx + MAP_RADIUS + 1)
+    ys = range(cy - MAP_RADIUS, cy + MAP_RADIUS + 1)
+    marks: dict[Pos, str] = {}
+    for e in w.entities:
+        if e.pos not in marks or e.kind == "npc":  # an NPC shows over an item on its cell
+            marks[e.pos] = _entity_mark(w, e)
+    marks[w.pos] = "@"
+    used: set[str] = set()
+
+    def cell(p: Pos) -> str:
+        if p in marks:
+            return marks[p]
+        block = w.view.tiles.get(p)
+        if block is None:
+            return "?"
+        if w.view.readable.get(p):
+            return "S"
+        if not block:
+            return "_"
+        mark = MAP_BLOCKS.get(block, OTHER_BLOCK)
+        return "L" if mark == "D" and w.view.locked.get(p) else mark
+
+    rows = []
+    for y in ys:
+        row = "".join(cell((x, y)) for x in xs)
+        used.update(row)
+        rows.append(f"{y:>5} {row}")
+    width = max(len(str(x)) for x in xs)
+    ruler = ["x".rjust(5) + " " + "".join(str(x).rjust(width)[i] for x in xs) for i in range(width)]
+    legend = ", ".join(f"{mark} {what}" for mark, what in MAP_LEGEND.items() if mark in used)
+    head = (
+        f"map (map {w.map_id}, x {xs[0]}..{xs[-1]} left to right, y {ys[0]}..{ys[-1]} top to bottom, "
+        f"one character per cell; legend: {legend}):"
+    )
+    return [head, *ruler, *rows]
 
 
 def _bearing(w: WorldModel, where: tuple[int, Pos]) -> str:
@@ -1598,11 +1744,7 @@ class Strategist:
             # Same op on top: it carries on where it was; only the ops below it changed.
             # Keep the old op itself (its `why` too), so the path set for it stays owned.
             runner.plan.goals[0] = head
-            runner.plan.wait_started_tick = old.wait_started_tick
-            runner.plan.stalled_since_tick = old.stalled_since_tick
-            runner.plan.block_before = old.block_before
-            runner.plan.held_before = old.held_before
-            runner.plan.paid_from = old.paid_from
+            runner.plan.carry_head_progress(old)
         else:
             # The safe default's walk serves no op, so its queue is cut at its
             # next step, not run out (free-play run 6: the walk queued before

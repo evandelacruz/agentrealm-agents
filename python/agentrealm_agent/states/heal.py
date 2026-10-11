@@ -23,6 +23,7 @@ from ..healing import (
     note_regen_sample,
     potion_count,
     regen_known,
+    regen_per_tick,
     save_regen_yes,
     standing_in_safe_zone,
 )
@@ -142,11 +143,13 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
             # up: tell the planner. A step held this decision keeps the cell.
             _ask_for_supplies(w, m, safe_ground="unreachable")
         return _out(None, "no reachable safe tile")
-    if known is None:
+    # A "yes" saved with no rate is measured again on the next rest, so the
+    # planner's rest estimate (A124) comes to every world that has regen.
+    if known is None or regen_per_tick(ctx.knowledge) is None:
         verdict = note_regen_sample(m, w)
         if verdict == "yes":
             save_regen_yes(ctx.knowledge, m.heal_regen_per_tick)
-        elif verdict == "no":
+        elif verdict == "no" and known is None:
             m.heal_regen_absent = True  # this run only: never saved (one noisy window)
             _ask_for_supplies(w, m)
             return _out(None, "no safe-zone regen this run")

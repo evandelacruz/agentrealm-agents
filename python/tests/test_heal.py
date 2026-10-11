@@ -368,6 +368,24 @@ class HealStateTest(unittest.TestCase):
         # A124: the window's rate is kept, for the planner's rest estimate.
         self.assertEqual(regen_per_tick(kb), 1 / 7)
 
+    def test_a_saved_yes_with_no_rate_is_measured_again(self):
+        # A124 review: a world saved with regen "yes" before the rate was kept
+        # measures it on its next rest; a quiet window there stays "yes".
+        w = grid(at=(0, 0))
+        m, kb = Memory(), KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        for t in range(0, REGEN_MEASURE_TICKS + 1, 10):
+            w.tick = t
+            self.assert_heals_in_zone(dispatch(w, ctx(m, kb)))
+        self.assertFalse(m.heal_regen_absent, "a saved yes is never undone by one quiet window")
+        self.assertEqual(regen_known(kb, Memory()), "yes")
+        self.assertIsNone(regen_per_tick(kb))
+        w.tick += 10
+        dispatch(w, ctx(m, kb))
+        w.tick, w.health = w.tick + 10, 6
+        dispatch(w, ctx(m, kb))
+        self.assertEqual(regen_per_tick(kb), 1 / 10)
+
     def test_regen_absent_is_kept_for_this_run_only(self):
         w = grid(at=(0, 0))
         m, kb = Memory(), KnowledgeBase.empty("sandbox")
@@ -408,11 +426,11 @@ class HealStateTest(unittest.TestCase):
     def test_rests_when_regen_known(self):
         w = grid(at=(0, 0))
         kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
+        save_regen_yes(kb, 0.05)
         m = Memory()
         out = dispatch(w, ctx(m, kb=kb))
         self.assert_heals_in_zone(out)
-        self.assertIsNone(m.heal_regen_sample)  # known: no sample taken
+        self.assertIsNone(m.heal_regen_sample)  # known, with its rate: no sample taken
 
     def test_no_regen_stops_the_measure_walk_flip_flop(self):
         # Live: at 3/10, no food, no regen, Heal swapped between `heal_measure`

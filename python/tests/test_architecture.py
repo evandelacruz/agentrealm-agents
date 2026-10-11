@@ -245,30 +245,32 @@ class A58PacingPairsTest(unittest.TestCase):
         self.assertEqual(set(moved[first_explore:]), {"Explore"}, moved)
 
 
-# A84: rules, not run patches. Comments in agent source state the rule in game
+# A87: rules, not run patches. Comments in agent source state the rule in game
 # terms; the run that found it is cited in PLAN.md and docs/observations. This
 # count only falls: lower it in the PR that removes the citations.
-RUN_CITATION_CEILING = 102
-RUN_CITATION = re.compile(r"\brun \d+\b")
-AGENT_SRC = Path(__file__).resolve().parents[1] / "agentrealm_agent"
+RUN_CITATION_CEILING = 114
+# ``run 4``, ``Run 4``, ``runs 3, 4``: any form that names a live run.
+RUN_CITATION = re.compile(r"\bruns? \d+\b", re.IGNORECASE)
+PYTHON_DIR = Path(__file__).resolve().parents[1]
+AGENT_SOURCE = [*(PYTHON_DIR / "agentrealm_agent").rglob("*.py"), PYTHON_DIR / "starter_agent.py"]
 
 
 class RulesNotRunPatchesTest(unittest.TestCase):
     def test_run_citations_in_agent_source_only_fall(self):
         hits = sorted(
-            (str(f.relative_to(AGENT_SRC)), n)
-            for f in AGENT_SRC.rglob("*.py")
+            (str(f.relative_to(PYTHON_DIR)), n)
+            for f in AGENT_SOURCE
             if (n := sum(1 for line in f.read_text().splitlines() if RUN_CITATION.search(line)))
         )
         total = sum(n for _, n in hits)
         self.assertLessEqual(
             total,
             RUN_CITATION_CEILING,
-            "A84: a fix from a live run generalizes a rule or goes to the planner; cite the run in "
+            "A87: a fix from a live run generalizes a rule or goes to the planner; cite the run in "
             f"PLAN.md and docs/observations, not in code. Citations by file: {hits}",
         )
         if total < RUN_CITATION_CEILING:
-            self.fail(f"A84: {total} run citations; lower RUN_CITATION_CEILING to match.")
+            self.fail(f"A87: {total} run citations; lower RUN_CITATION_CEILING to match.")
 
 
 if __name__ == "__main__":

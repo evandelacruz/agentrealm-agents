@@ -173,11 +173,13 @@
 
   "A84": {"state": "done"},
 
-  "A85": {"state": "todo"},
+  "A87": {"state": "done"},
 
-  "A86": {"state": "todo"},
+  "A88": {"state": "todo"},
 
-  "A87": {"state": "todo"},
+  "A89": {"state": "todo"},
 
-  "A88": {"state": "todo"}
+  "A90": {"state": "todo"},
+
+  "A91": {"state": "todo"}
 }

@@ -51,6 +51,19 @@ def hurt(w: WorldModel) -> bool:
     return w.health < w.max_health
 
 
+# Health at or below this share of max is low: only then does Heal's safe
+# ground (the walk there, the rest, the regen sample) outrank a plan op in
+# progress (free-play run 9: a regen measure at 9/10 held off ``travel``).
+LOW_HEALTH_SHARE = 0.5
+
+
+def health_low(w: WorldModel) -> bool:
+    """Health is at or below ``LOW_HEALTH_SHARE`` of max."""
+    if w.health is None or w.max_health is None:
+        return False
+    return w.health <= w.max_health * LOW_HEALTH_SHARE
+
+
 # What Heal does after the server refuses a food ``Take`` or a drink, by the
 # rejection's code (API rules, Tick Rejection Reasons). There is no count of
 # tries: each refusal changes what Heal sends next, or holds that supply until
@@ -313,9 +326,11 @@ def standing_in_safe_zone(w: WorldModel, pos: Pos | None = None) -> bool:
 
 def note_heal_window(m: Memory, w: WorldModel) -> None:
     """Once per decision, whatever state runs: a full heal re-arms the
-    ``heal_supplies`` ask, so the next hurt spell asks the planner again."""
+    ``heal_supplies`` ask, so the next hurt spell asks the planner again, and
+    lets the next hurt spell walk to safe ground again (``heal_safe_given_up``)."""
     if w.health is not None and not hurt(w):
         m.heal_supplies_asked = False
+        m.heal_safe_given_up = None
 
 
 def regen_known(knowledge: KnowledgeBase | None, m: Memory) -> str | None:

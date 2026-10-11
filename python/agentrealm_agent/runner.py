@@ -28,6 +28,7 @@ from .navigation.stuck import on_break_opened, on_break_tried
 from .navigation.stuck import on_rejection as nav_on_rejection
 from .navigation.stuck import on_step as nav_on_step
 from .client import ApiError, Client
+from .pacer import WINDOW_MARGIN, Pacer, pacer_of
 from .config import CharacterConfig
 from .directives import DirectivesWatch, use_blocked_by_never_attack
 from .pathing import goto_satisfied
@@ -124,9 +125,6 @@ from .survival import retreat_goal
 from .memory import queue_signal
 from .strategist import Strategist, same_ops
 
-# Land a little after a window opens, so a clock skew of a few ms does not put
-# two calls in one window.
-WINDOW_MARGIN = 0.05
 # Ticks past a queue's own length to wait for its finished_queue before giving up.
 QUEUE_RESULT_SLACK = 2
 # Applied verbs that can change what is worn: Wear(supplyId) and Remove(slot)
@@ -151,22 +149,6 @@ class HealRefused:
     tick: int
     armed_first: bool  # the refused drink's queue had already sent its Arm
     target: Pos | None = None
-
-
-@dataclass
-class Pacer:
-    """Paces calls to the front tier's rate-limit windows.
-
-    The limiter buckets wall-clock time as epoch / tick interval
-    (internal/api/ratelimit.go), so the agent does the same.
-    """
-
-    window: float
-
-    def wait_next_window(self, not_before: float = 0.0) -> None:
-        now = time.time()
-        next_open = (int(now / self.window) + 1) * self.window + WINDOW_MARGIN
-        time.sleep(max(next_open, not_before) - now)
 
 
 class Runner:
@@ -215,7 +197,9 @@ class Runner:
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
         self.rng = random.Random(seed)
-        self.pacer = Pacer(1.0)
+        # The one call budget: the client spends every call from it, and the
+        # loop waits out its windows (pacer.py).
+        self.pacer: Pacer = pacer_of(client, character_id)
         self.tick_hz = DEFAULT_TICK_RATE_HZ
         self.queue_horizon_ticks = QUEUE_HORIZON_INTENTS
         # The latest tick a server response reported. w.tick also counts
@@ -350,7 +334,7 @@ class Runner:
         self.tick_hz = self.plan.tick_hz = hz
         horizon_s = max(1, int(world.get("queue_horizon_seconds", DEFAULT_QUEUE_HORIZON_SECONDS)))
         self.queue_horizon_ticks = queue_horizon_intents(tick_rate_hz=hz, horizon_seconds=horizon_s)
-        self.pacer = Pacer(1.0 / hz)
+        self.pacer.window = 1.0 / hz
         apply_town(self.world, world.get("town"))
         if isinstance(world.get("level_count"), int):
             self.world.level_count = world["level_count"]
@@ -1597,7 +1581,7 @@ class Runner:
         if e.paused or e.network:
             return time.time() + (e.retry_after or 1.0)
         if e.rate_limited:
-            return 0.0
+            return 0.0  # the client's pacer emptied and waits out the refill (pacer.py)
         if e.code in ("not_on_map", "character_not_live"):
             # Waiting to be placed, or dead and waiting to respawn.
             self.mem.need_self = self.mem.need_position = True

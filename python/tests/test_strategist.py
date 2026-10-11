@@ -31,6 +31,7 @@ from agentrealm_agent.knowledge_maps import record_hunting_zone
 from agentrealm_agent.travel.knowledge import entrance_key, sync_town
 from agentrealm_agent.gem_yield import RATE_MIN_SECONDS
 from agentrealm_agent.strategist import (
+    NO_GEMS_EARNED,
     READY_HEALTH_FRACTION,
     READY_POTIONS,
     STALL_SECONDS,
@@ -856,6 +857,9 @@ class PlannerViewTest(unittest.TestCase):
             },
         )
         self.assertEqual(self.readiness()["stage_2"]["to_close"]["better_weapon_armed"], {"gems_short": 10}, "no rate measured: no minutes")
+        zero = self.readiness(gather_run={"gems_per_min": 0.0})["stage_2"]["to_close"]
+        self.assertEqual(zero["better_weapon_armed"], {"gems_short": 10, "minutes": NO_GEMS_EARNED}, "a gather that earned nothing: no time closes it")
+        self.assertEqual(zero["armor_worn"], {"gems_short": 0, "minutes": 0.0}, "nothing short: no time needed")
         self.kb.items.clear()
         self.assertNotIn("potions_at_bar", self.readiness()["stage_2"]["to_close"], "no potion seen for sale: no price")
 
@@ -865,6 +869,7 @@ class PlannerViewTest(unittest.TestCase):
         prompt = system_prompt()
         self.assertIn("The readiness bars are guidance you weigh, not a gate", prompt)
         self.assertIn("A bar whose cost in time outweighs what it is worth may be skipped: move on, and name the trade in the why", prompt)
+        self.assertIn(f'"{NO_GEMS_EARNED}" when that rate is 0', prompt)
         self.assertIn(f"Once the current gather_gems has been on top for {RATE_MIN_SECONDS} s, gather_run also shows its measured rate", prompt)
         self.assertIn(f"at least {READY_POTIONS} potions are held", prompt)
 

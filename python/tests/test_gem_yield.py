@@ -1,11 +1,16 @@
 """A63: gem yield per region, learned from the agent's own cuts. Fake maps and cells only."""
 
 import random
+import tempfile
 import threading
 import unittest
+from pathlib import Path
+from unittest import mock
 from types import SimpleNamespace
 
-from agentrealm_agent import gem_yield
+from agentrealm_agent import config, gem_yield
+from agentrealm_agent.brain import Decision
+from agentrealm_agent.config import CharacterConfig
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.gem_yield import BARREN_MIN_CUTS, GEM_WINDOW_TICKS, RATE_MIN_SECONDS, GemYieldTracker, record_cut
@@ -18,6 +23,7 @@ from agentrealm_agent.states import gather_outcome
 from agentrealm_agent.states import gather as gather_mod
 from agentrealm_agent.strategist import build_prompt
 from agentrealm_agent.world import Entity, WorldModel
+from tests.test_loot import FakeClient as LootFakeClient, scripted, world as loot_world
 
 MAP = 7
 
@@ -360,6 +366,34 @@ class NoEffectCutTest(unittest.TestCase):
         self.assertEqual(t.gather_rate(9000, 10), (0.4, 5.0))
         t.note_gathering(9000, True)
         self.assertIsNone(t.gather_rate(9010, 10), "a new gather measures afresh")
+
+
+class RunnerGatherRateTest(unittest.TestCase):
+    """A121 through the runner's full tick: the head op opens and ends the gather."""
+
+    def test_a_gather_on_top_is_measured_and_another_op_on_top_ends_it(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        responses = [{"tick": t, "observation": {"version": v}} for v, t in enumerate([100, 100 + RATE_MIN_SECONDS * 10, 800], 2)]
+        cfg = CharacterConfig("T", "sandbox", scripted(goals=[]), Path("t.toml"))
+        r = Runner(cfg, LootFakeClient(responses), 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase("sandbox"))
+        self.addCleanup(r.trace.close)
+        r.world = loot_world(["....."], at=(1, 0))
+        r.world.gems = 5
+        r.mem = Memory(need_self=False, need_position=False)
+        r.plan = Plan([{"op": "gather_gems", "count": 50}], dict(PARAM_DEFAULTS))
+        r.intents_for = lambda _d: []
+        with mock.patch("agentrealm_agent.runner.decide", return_value=Decision(None, "test")):
+            r.tick()
+            r.world.gems = 7  # two gems in the gather's first minute
+            r.tick()
+            self.assertEqual(r.gem_cuts.gather_rate(r.world.tick, r.tick_hz), (2.0, 1.0))
+            r.plan = Plan([{"op": "buy", "code": "small_potion"}, {"op": "gather_gems", "count": 50}], dict(PARAM_DEFAULTS))
+            r.tick()
+        self.assertEqual(r.gem_cuts.gather_to, (800, 2), "a buy on top ends the gather; its rate stays shown")
 
 
 class RegionSummaryTest(unittest.TestCase):

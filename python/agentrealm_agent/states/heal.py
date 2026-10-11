@@ -15,6 +15,7 @@ from ..healing import (
     must_arm,
     must_stand_on,
     note_regen_sample,
+    potion_count,
     rearm_after_drink,
     regen_known,
     save_regen_yes,
@@ -189,14 +190,22 @@ def _explore_zone(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) ->
 
 
 def _ask_for_supplies(w: WorldModel, m: Memory, *, safe_ground: str | None = None) -> None:
-    """Hurt, nothing to eat or drink, and no regen, or (``safe_ground``) no
-    safe ground to rest on: ask the planner for food and potions (a
-    ``fetch_item`` or ``buy``), once until health is full again
-    (``note_heal_window`` re-arms it)."""
+    """Hurt, nothing to eat and no potion due (``healing.spend_potion``), and
+    no regen, or (``safe_ground``) no safe ground to rest on: ask the planner
+    for food and potions (a ``fetch_item`` or ``buy``), once until health is
+    full again (``note_heal_window`` re-arms it). The ask carries the potions
+    held: a reserve held back above the low line, which the planner weighs
+    before buying more (A96)."""
     if m.heal_supplies_asked:
         return
     m.heal_supplies_asked = True
-    signal = {"trigger": "heal_supplies", "health": w.health, "max_health": w.max_health, "tick": w.tick}
+    signal = {
+        "trigger": "heal_supplies",
+        "health": w.health,
+        "max_health": w.max_health,
+        "potions": potion_count(w),
+        "tick": w.tick,
+    }
     if safe_ground is None:
         signal["regen"] = "no"
     else:

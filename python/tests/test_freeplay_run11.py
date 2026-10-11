@@ -47,6 +47,14 @@ class HealKeepsTheReserveTest(unittest.TestCase):
         w, c = in_town(5)
         self.assertEqual(verbs(dispatch(w, c)), ["Arm", "Use"])
 
+    def test_the_supplies_ask_counts_the_potions_held_back(self):
+        w, c = in_town(7)
+        c.memory.heal_regen_absent = True  # no rest to be had
+        out = dispatch(w, c)
+        self.assertNotIn("Use", verbs(out))
+        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "heal_supplies"]
+        self.assertEqual([(a["health"], a["potions"]) for a in asks], [(7, 1)])
+
     def test_carried_food_is_eaten_whatever_the_health(self):
         w, c = in_town(9)
         w.held_supplies = [POTION, BERRY]
@@ -122,7 +130,9 @@ class DrinkInAFightTest(unittest.TestCase):
 
 class PlannerSeesTheRuleTest(unittest.TestCase):
     def test_the_prompt_states_the_rule(self):
-        self.assertIn(POTION_RULE, system_prompt())
+        prompt = system_prompt()
+        self.assertIn(POTION_RULE, prompt)
+        self.assertIn("A heal_supplies trigger", prompt)
 
     def test_state_shows_the_line_and_the_count(self):
         w, _ = in_town(7)

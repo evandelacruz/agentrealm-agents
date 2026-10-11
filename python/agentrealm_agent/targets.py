@@ -15,15 +15,15 @@ a safe tile, a shop cell, a door, a supply) it keeps it until one of:
   retreat, a heal) is over, and the next one picks afresh;
 - the walk to it ballooned: its price rose over the rest of the walk it was
   last priced on (a wall found ahead, a long way round; another state
-  walking the character off that walk is no rise) and it now costs more than the cheapest
-  other candidate by a clear margin (``outpriced``).
+  walking the character off that walk is no rise) and it now costs more
+  than the cheapest other candidate by a clear margin (``outpriced``).
 
 Another candidate becoming nearer is never a reason on its own: a walk is
 priced against the others again only when its own price rose, and let go
-only past both margins, so two candidates near in price never trade places. A prerequisite that
-comes up on the way (a key before a locked entrance) is a *stop* inserted
-before the target, never a new target: the target stays committed while the
-stop is walked, and the walk resumes toward it after. A short detour to a
+only past both margins, so two candidates near in price never trade
+places. A prerequisite that comes up on the way (a key before a locked
+entrance) is a *stop* inserted before the target, never a new target: the
+target stays committed while the stop is walked, and the walk resumes toward it after. A short detour to a
 valuable in view (``states/detour.py``) needs no stop: it is a reflex with
 its own record (``Memory.detour``), and the walk it interrupted resumes
 because its target is still committed here.

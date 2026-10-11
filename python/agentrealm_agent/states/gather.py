@@ -822,8 +822,9 @@ def _outpriced(
     wall found ahead, a long way round), and more than the cheapest other
     known cut target, pile or grass, by a clear margin (``targets.outpriced``,
     A109). The other targets are priced only on such a rise. Standing off
-    that walk (another state walked the character away) is no rise: the walk
-    from here is the new price to measure against."""
+    that walk (another state walked the character away) is no rise. Either
+    way it records the walk on ``path`` in ``m.gather_walk``: the price the
+    next replan measures against."""
     ahead = _cut_price(kept[0], path, params)
     walk = m.gather_walk[1] if m.gather_walk is not None and m.gather_walk[0] == kept else ()
     m.gather_walk = _walk_from_here(kept, path, w)

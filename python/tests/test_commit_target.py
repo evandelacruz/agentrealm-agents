@@ -320,9 +320,10 @@ class BalloonedWalkTest(unittest.TestCase):
     """A committed walk whose price balloons is priced again against the
     other cut targets, and let go past a clear margin (A109)."""
 
-    def detour(self, gap_y: int, nearer=None) -> tuple[WorldModel, Memory]:
+    def detour(self, gap_y: int, nearer=None, pile=None) -> tuple[WorldModel, Memory]:
         """Commit to grass at (12, 4), walk three steps on, then find a wall at
-        x=8 open only at ``gap_y``; ``nearer``: grass that far from there."""
+        x=8 open only at ``gap_y``; ``nearer``: grass that far from there,
+        ``pile``: a gem pile."""
         w = field(width=21, height=21, at=(2, 4))
         w.view.tiles[(12, 4)] = "grass"
         m = Memory()
@@ -335,12 +336,18 @@ class BalloonedWalkTest(unittest.TestCase):
                 w.view.tiles[(8, y)] = "wall"
         if nearer is not None:
             w.view.tiles[(w.pos[0] + nearer[0], w.pos[1] + nearer[1])] = "grass"
+        if pile is not None:
+            w.entities = [Entity("supply", 9, (w.pos[0] + pile[0], w.pos[1] + pile[1]), "gem")]
         gather_outcome(w, m, Policy(on_hostile="ignore"))
         return w, m
 
     def test_a_long_way_round_gives_way_to_nearer_grass(self):
         w, m = self.detour(gap_y=19, nearer=(-1, 0))
         self.assertEqual(m.gather_target, ("grass", (w.pos[0] - 1, w.pos[1])))
+
+    def test_a_long_way_round_gives_way_to_a_nearer_pile(self):
+        w, m = self.detour(gap_y=19, pile=(0, 4))
+        self.assertEqual(m.gather_target, ("pile", (w.pos[0], w.pos[1] + 4)))
 
     def test_a_long_way_round_with_nothing_cheaper_is_kept(self):
         _, m = self.detour(gap_y=19)

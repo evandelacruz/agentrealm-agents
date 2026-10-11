@@ -85,13 +85,39 @@ class DrinkInAFightTest(unittest.TestCase):
         w, c = self.engaged(6, 2)  # a pair beats us at 6/10 and at 10/10
         self.assertFalse(spend_potion(w, c.memory, c.policy, c.params, POTION.code))
 
+    def test_each_potion_held_is_asked_for_its_own_heal(self):
+        # Three biters at 51/100: 10 more health changes nothing, 30 more makes it a fight.
+        w, c = self.engaged(51, 3)
+        w.max_health = 100
+        sync_engagement(w, c.memory, c.policy, c.params)
+        large = InventorySupply(5, "large_potion")
+        w.held_supplies = [POTION, large]
+        self.assertFalse(spend_potion(w, c.memory, c.policy, c.params, POTION.code))
+        self.assertEqual(carried_heal(w, c.memory, c.policy, c.params), large)
+
     def test_retreat_losing_ground_reads_the_same_rule(self):
         w, c = self.engaged(6, 2)
         self.assertIsNone(_turn_on_losing(w, c, "Retreat"), "no drink, and no fight to turn to")
-        w, c = self.engaged(6, 1)
+        # A pair at 21/40 loses (ratio under break-even); 10 more health wins it.
+        w, c = self.engaged(21, 2)
+        w.max_health = 40
+        sync_engagement(w, c.memory, c.policy, c.params)
         out = _turn_on_losing(w, c, "Retreat")
         self.assertEqual(verbs(out), ["Arm", "Use"])
         self.assertEqual(c.memory.heal_drink, POTION.id)
+
+    def test_retreat_weighs_the_drink_once_running_is_found_not_to_work(self):
+        # A pair at 26/40: under the fight margin (1.5) but above break-even. Once
+        # running cannot open distance the bar is break-even, so it is a fight
+        # already and a drink turns nothing.
+        w, c = self.engaged(26, 2)
+        w.max_health = 40
+        sync_engagement(w, c.memory, c.policy, c.params)
+        self.assertFalse(c.memory.engagement.fight)
+        out = _turn_on_losing(w, c, "Retreat")
+        self.assertTrue(c.memory.engagement.cannot_outrun and c.memory.engagement.fight)
+        self.assertNotIn("Use", verbs(out) if out else [])
+        self.assertIsNone(c.memory.heal_drink)
 
 
 class PlannerSeesTheRuleTest(unittest.TestCase):

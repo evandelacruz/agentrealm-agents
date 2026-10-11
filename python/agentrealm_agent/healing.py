@@ -347,9 +347,10 @@ def carried_heal(
     for h in usable:
         if is_food(h.code):
             return h
+    # Each code heals its own amount, so each is asked: a bigger heal may turn a fight a smaller one does not.
     for h in usable:
-        if is_potion(h.code):
-            return h if spend_potion(w, m, policy, params, h.code) else None
+        if is_potion(h.code) and spend_potion(w, m, policy, params, h.code):
+            return h
     return None
 
 

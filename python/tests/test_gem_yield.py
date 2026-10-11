@@ -570,3 +570,24 @@ class StoreVersionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RegionYieldTest(unittest.TestCase):
+    """A105: a region's yield, pulled toward the map's, prices Gather's walks."""
+
+    def test_unsampled_ground_is_worth_the_maps_rate(self):
+        self.assertAlmostEqual(gem_yield.region_yield(None, 0.3), 0.3)
+        self.assertAlmostEqual(gem_yield.region_yield({"cuts": 0, "gems": 0}, 0.3), 0.3)
+
+    def test_measured_cuts_move_it_toward_their_own_rate(self):
+        rich = gem_yield.region_yield({"cuts": 40, "gems": 20}, 0.2)
+        self.assertGreater(rich, 0.2)
+        self.assertLess(rich, 0.5)
+
+    def test_region_yields_keys_by_region(self):
+        k = kb()
+        for i in range(10):
+            record_cut(k, MAP, (17, 1), "grass", i, True)
+        rate, by_region = gem_yield.region_yields(k, MAP)
+        self.assertEqual(set(by_region), {(1, 0)})
+        self.assertGreater(by_region[(1, 0)], rate)

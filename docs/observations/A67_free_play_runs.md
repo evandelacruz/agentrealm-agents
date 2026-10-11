@@ -1217,3 +1217,9 @@ Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 a
 3. **The gather op under a stalled head never runs** (`strategist.py:146` and `:199`, the stall rule, and `StallClock` at `strategist.py:956`). `gather_gems` sat below `travel`, `break_block` and `equip` all run. The planner's notes said the head was stuck at 168 s, 210 s, 348 s and 553 s, and each reply re-sent a target that had just failed (the given-up (380, 376), the same rock). It earned 0 gems in 600 s, against 36 in run 13 from the same start. **Rule:** a head op that stalls past the stall window goes below the next op that can work, until a new reason (new terrain, a new tool, a new route) to try it again appears. (Addressed in A104: `stalled.py`, `Plan.demote_current`, State `stalled_ops`.)
 
 **Minor:** The hollow rock at (379, 375) did not open to the mallet's smash. Either it needs another capability, or the clue means something else. Break memory now holds 47 results, among them `smash` failed on (379, 375) and all four tools failed on each of the 10 cells.
+
+### Run 15
+
+Reported defect only; the full run write-up is not filed here.
+
+**Gather walked back to its old region instead of working the ground where it stood** (`states/gather.py`, `_replan_gather`). After a level entrance was given up about 100 cells from the old gem region, the planner sent `gather_gems` with no x, y ("gather where the character is") and `explore_area` nearby. Gather picked the nearest known grass, which was the old region about 100 cells back, and walked there: it weighed unexplored ground only on safe ground or with every known cell held by a hostile. Rule (A105, under A87): with no region named, Gather prices the known grass and the nearest unexplored ground alike, each its walk plus a cut for each gem still needed at the yield there (measured, or the map's `expected_yield` on unsampled ground); far known grass wins only when its yield advantage outweighs the walk.

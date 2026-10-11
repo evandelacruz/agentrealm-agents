@@ -107,7 +107,7 @@ def clear_the_way(
     if break_due(w, m, state):
         m.break_yield = m.nav_stuck.decision
         return StateOutcome(None, why, state=state)
-    key = _shut_key(w, state, op, at)
+    key = _shut_key(w, m, state, op, at)
     if at is not None and m.way_shut != key:
         if (out := open_the_way(w, ctx, at, state)) is not None:
             m.way_shut = None
@@ -120,12 +120,14 @@ def clear_the_way(
     return ask_the_planner(w, ctx, why, state, op, blocked_by=blocked, tried=tried)
 
 
-def _shut_key(w: WorldModel, state: str, op: GoalOp | None, at: Pos | None) -> tuple:
+def _shut_key(w: WorldModel, m: Memory, state: str, op: GoalOp | None, at: Pos | None) -> tuple:
     """What a shut way was found under: the executor, its op, the map, the
-    cell, the target, the map's tiles (``Tiles.revision``) and what is held."""
+    cell, the target, the map's tiles (``Tiles.revision``), what is held, and
+    the blocks backed off from (A90), whose backoff lapses by time alone."""
     held = tuple(sorted((s.code or "") for s in w.held_supplies)) + (w.armed_code or "",)
     op_key = tuple(sorted((k, repr(v)) for k, v in op.items())) if op is not None else None
-    return (state, op_key, w.map_id, w.pos, at, w.view.tiles.revision, held)
+    backed_off = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
+    return (state, op_key, w.map_id, w.pos, at, w.view.tiles.revision, held, backed_off)
 
 
 def _tried(w: WorldModel, ctx: PlayContext) -> str:

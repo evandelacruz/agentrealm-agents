@@ -189,7 +189,7 @@ class Memory:
     # default with nothing left to explore, or an executor whose way is shut (``states.ask``).
     no_way_on: tuple[int, Pos, str] | None = None
     # What an executor's shut way was last found under (``way.clear_the_way``, A120): while the
-    # state, op, map, cell, tiles and what is held stay the same, the way is still shut and its
+    # state, op, map, cell, tiles, what is held and the blocks backed off from (A90) stay the same, the way is still shut and its
     # searches are not run again on every held decision.
     way_shut: tuple | None = None
     # The decision (``NavStuckMemory.decision``) an executor last left the round to Break at

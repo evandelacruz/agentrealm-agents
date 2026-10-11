@@ -284,6 +284,23 @@ class ShutWayIsNotSearchedAgainTest(unittest.TestCase):
             self.assertEqual((opened.call_count, blocks.call_count), (2, 1), "the ask itself is not repeated")
 
 
+    def test_a_block_backed_off_is_tried_again_once_its_backoff_lapses(self):
+        # A way shut only because its block was given up (A90) opens again on time alone.
+        from agentrealm_agent.break_memory import BREAK_GOAL
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w = corridor("T")
+        w.pos = (2, 1)  # beside the tree
+        c = ctx(buy(w))  # Shop opens the way only through clear_the_way, so it reads the cache
+        key = nav_stuck.goal_key(BREAK_GOAL, w.map_id, BLOCK)
+        rec = nav_stuck.remember_give_up(c.memory.nav_stuck, key, BREAK_GOAL, w.tick)
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.intents, out.wait), ("Shop", None, True), out.reason)
+        w.tick = rec.until  # the backoff lapses; nothing else changes
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.intents), ("Shop", [TREE_OPENED]), out.reason)
+
+
 class SurvivalDuringTheHoldTest(unittest.TestCase):
     def hostile_beside(self, w: WorldModel, c: PlayContext) -> None:
         w.health, w.lives = 500, 10

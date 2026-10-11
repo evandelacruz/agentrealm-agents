@@ -285,6 +285,27 @@ class GatherArmsACutterTest(unittest.TestCase):
         outcome(w, m)
         self.assertIsNone(m.gather_rearm)
 
+    def test_the_cutter_is_picked_by_the_one_weapon_rule(self):
+        """A99: Gather arms the cutter Equip's rule ranks best (within the
+        hunting ceiling, then damage), not the first that cuts."""
+        w = grid(["ggg"], at=(1, 0))
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        m = Memory()
+        out = outcome(w, m)
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 5}, {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
+        self.assertIsNone(m.gather_rearm, "the knife cuts: it was only bettered, not swapped out")
+
+    def test_a_cutter_over_the_hunting_ceiling_is_not_armed_to_cut(self):
+        w = grid(["ggg"], at=(1, 0))
+        apply_zone(w, w.map_id, 40, 40, {"safe": False, "brightness": 1, "strength_ceiling": 7})
+        w.armed_code = "bronze_sword"  # 2 + 4 = 6
+        w.held_supplies = [InventorySupply(5, "iron_sword")]  # 2 + 8 = 10
+        self.assertEqual(outcome(w).intents, [{"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
+        w.armed_code = "bronze_mallet"  # cannot cut: the cutter within the ceiling is armed
+        w.held_supplies = [InventorySupply(5, "iron_sword"), InventorySupply(6, "bronze_sword")]
+        self.assertEqual(outcome(w).intents[0], {"verb": "Arm", "supply_id": 6})
+
     def test_with_nothing_that_cuts_it_cuts_with_what_is_in_hand(self):
         w = grid(["ggg"], at=(1, 0))
         w.armed_code = "fake_cleaver"

@@ -13,12 +13,15 @@ from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.equip import (
     best_equip_upgrade,
     compare,
+    hunting_ceiling,
+    loadout_strength,
     note_equip_result,
     sync_refusals,
     wear_slot,
 )
 from agentrealm_agent.item_table import FragmentMeta, InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.knowledge_maps import record_hunting_zone
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
@@ -238,6 +241,7 @@ class UpgradeTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(6, "bronze_mallet")]
         kb = KnowledgeBase.empty("sandbox")
         kb.items["bronze_sword"] = {"gem_price": 15}
+        record_hunting_zone(kb, 7, (40, 40), 7)  # the mallet would shut it (A99)
         m = Memory(gather_rearm=("bronze_mallet", "pocket_knife"))
         out = dispatch(w, ctx(kb, m))
         self.assertEqual((out.state, out.intents), ("Equip", [{"verb": "Arm", "supply_id": 5}]))
@@ -246,6 +250,91 @@ class UpgradeTest(unittest.TestCase):
         out = dispatch(w, ctx(kb, m, plan=Plan([], dict(PARAM_DEFAULTS))))
         self.assertNotIn({"verb": "Arm", "supply_id": 6}, out.intents or [])
         self.assertIsNone(m.gather_rearm)
+
+
+class HuntingCeilingRuleTest(unittest.TestCase):
+    """A99: one best-weapon rule for Equip and the planner. A weapon that keeps
+    strength within the highest hunting ceiling known beats one that does not;
+    then published damage. An equip op naming a code arms exactly that."""
+
+    def setUp(self):
+        self.kb = KnowledgeBase.empty("sandbox")
+        record_hunting_zone(self.kb, 7, (40, 40), 7)
+
+    def held(self, *codes: str) -> list[InventorySupply]:
+        return [InventorySupply(5 + i, code) for i, code in enumerate(codes)]
+
+    def test_strength_and_ceiling(self):
+        w = world()
+        self.assertIsNone(hunting_ceiling(w, KnowledgeBase.empty("sandbox")))
+        self.assertEqual(hunting_ceiling(w, self.kb), 7)
+        w.worn_codes = {"body": "bronze_mail"}
+        self.assertEqual(loadout_strength(w, "bronze_sword"), 2 + 4 + 1)
+        self.assertEqual(loadout_strength(w, "bronze_mallet"), 2 + 6 + 1)
+
+    def test_a_weapon_over_the_ceiling_does_not_replace_one_within(self):
+        w = world()
+        w.armed_code = "bronze_sword"
+        w.held_supplies = self.held("bronze_mallet")
+        self.assertIsNone(best_equip_upgrade(w, {"bronze_mallet": {"gem_price": 25}}, w.threat, Memory(), ceiling=7))
+        c = ctx(self.kb)
+        c.knowledge.items["bronze_mallet"] = {"gem_price": 25}
+        self.assertNotEqual(dispatch(w, c).intents, [{"verb": "Arm", "supply_id": 5}])
+        self.assertIsNone(c.plan.current(), "nothing to equip: the op finishes")
+
+    def test_one_within_the_ceiling_replaces_one_over_it(self):
+        w = world()
+        w.armed_code = "bronze_mallet"
+        w.held_supplies = self.held("bronze_sword", "pocket_knife")
+        up = best_equip_upgrade(w, {}, w.threat, Memory(), ceiling=7)
+        self.assertEqual((up.slot, up.code), ("armed", "bronze_sword"))
+
+    def test_an_empty_or_non_weapon_slot_counts_as_bare_hands(self):
+        # Review on #191: bare hands are within the ceiling, so a weapon over
+        # it is not armed into an empty slot or over a leftover potion.
+        for armed in (None, "small_potion"):
+            w = world()
+            w.armed_code = armed
+            w.held_supplies = self.held("bronze_mallet")
+            self.assertIsNone(best_equip_upgrade(w, {}, w.threat, Memory(), ceiling=7), armed)
+            w.held_supplies = self.held("bronze_mallet", "bronze_sword")
+            self.assertEqual(best_equip_upgrade(w, {}, w.threat, Memory(), ceiling=7).code, "bronze_sword", armed)
+
+    def test_with_no_ceiling_known_damage_decides(self):
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = self.held("bronze_sword", "bronze_mallet")
+        # The sword has a price and the mallet none: price no longer ranks weapons.
+        up = best_equip_upgrade(w, {"bronze_sword": {"gem_price": 15}}, w.threat, Memory())
+        self.assertEqual(up.code, "bronze_mallet")
+
+    def test_a_named_code_is_armed_whatever_the_rule_says(self):
+        w = world()
+        w.armed_code = "bronze_sword"
+        w.held_supplies = self.held("bronze_mallet")
+        c = ctx(self.kb, plan=equip_plan(code="bronze_mallet"))
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Arm", "supply_id": 5}])
+        w.armed_code, w.held_supplies = "bronze_mallet", self.held("bronze_sword")
+        self.assertNotEqual(dispatch(w, c).state, "Equip")
+        self.assertIsNone(c.plan.current(), "the named weapon is armed: done")
+        # A later equip with no code applies the rule again.
+        c = ctx(self.kb)
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Arm", "supply_id": 5}])
+
+    def test_a_named_item_of_unknown_slot_gets_its_own_learn_wear(self):
+        # Review on #191: a lower-id item of unknown slot must not stand in for it.
+        w = world()
+        w.armed_code = "bronze_sword"
+        w.held_supplies = [InventorySupply(5, "fake_hat"), InventorySupply(6, "fake_ring")]
+        c = ctx(self.kb, plan=equip_plan(code="fake_ring"))
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Wear", "supply_id": 6}])
+
+    def test_a_named_armor_is_worn_in_its_slot(self):
+        w = world()
+        w.worn_codes = {"body": "bronze_mail"}
+        w.held_supplies = self.held("iron_mail")
+        c = ctx(self.kb, plan=equip_plan(code="iron_mail"))
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Remove", "slot": "body"}, {"verb": "Wear", "supply_id": 5}])
 
 
 class RefusalTest(unittest.TestCase):
@@ -484,7 +573,7 @@ class DispatchTest(unittest.TestCase):
         self.assertEqual(out.yielded, ["Equip: nothing to equip"])
         self.assertIsNone(c.plan.current())
 
-    def test_op_with_a_code_finishes_when_that_code_is_not_the_upgrade(self):
+    def test_op_with_a_code_finishes_when_that_code_is_not_held(self):
         w = world()
         w.armed_code = "pocket_knife"
         w.held_supplies = [InventorySupply(5, "bronze_sword")]

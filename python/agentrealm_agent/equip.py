@@ -1,4 +1,4 @@
-"""Equip scoring and upgrade selection (A19, A55, M8).
+"""Equip scoring and upgrade selection (A19, A55, M8, A99).
 
 Only sourced facts decide what goes where:
 
@@ -11,12 +11,25 @@ Only sourced facts decide what goes where:
   a consumable, a gem) is never worn. Only a subtype whose slot neither gives
   gets one ``Wear`` to find it (A55), reading which slot ``worn`` shows.
 
-Each slot compares like with like, never across units: learned per-NPC-type
-hits (``weapon_damage`` for weapons, ``damage_saved`` for armor) on the hostile
-types both items have measured, weighted by the threat table; failing that,
-``gem_price`` when both have one. The non-transferable starting kit has no shop
-price and counts as 0 gems. Items with nothing comparable are left alone. A
-swap needs a clear gain (``MIN_GAIN_RATIO``), so ties and noise never swap.
+**The weapon to arm** is one rule, :func:`weapon_to_arm`, by the job at hand
+(A99): fighting, which Equip arms for and the planner's ``upgrades_for_sale``
+lists by, or cutting grass, which Gather arms for (a cutter a cut does not use
+up first). Both order by :func:`weapon_rank`: a weapon that keeps the
+character within the highest hunting-ground strength ceiling known beats one
+that does not, and among those alike, more published ``damage`` wins (the
+Supplies reference; damage adds to attack power on every swing). Strength is
+attack power plus the armed weapon's damage plus worn armor's defense
+(:func:`loadout_strength`). With no ceiling known, damage alone decides. An
+``equip`` op that names a code arms or wears that item whatever the rule says
+(:func:`named_equip`): the planner's call, for a fight the hunting ground does
+not decide.
+
+Each worn slot compares like with like, never across units: learned
+per-NPC-type ``damage_saved`` on the hostile types both items have measured,
+weighted by the threat table; failing that, ``gem_price`` when both have one.
+The non-transferable starting kit has no shop price and counts as 0 gems.
+Items with nothing comparable are left alone. A swap needs a clear gain
+(``MIN_GAIN_RATIO``), so ties and noise never swap.
 
 A refused ``Arm``, ``Wear`` or ``Remove`` marks its (subtype, slot) pair, and
 Equip does not try that pair again until the loadout or inventory changes.
@@ -29,16 +42,23 @@ Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Collection
 
+from .break_memory import capabilities_for_code, held_supplies
 from .item_table import InventorySupply
+from .knowledge_base import KnowledgeBase
 from .loot import NON_TRANSFERABLE
-from .supplies import heals, is_weapon, worn, worn_slot
+from .supplies import heals, is_weapon, kept_on_break, weapon_damage, worn, worn_armor_defense, worn_slot
 from .memory import Memory
+from .survival import BASE_ATTACK_POWER
 from .threat import ThreatTable
+from .travel.knowledge import iter_hunting_cells
 from .world import WorldModel
 
 ARMED = "armed"
+# The jobs a weapon is armed for (A99): fighting (Equip) and cutting grass (Gather).
+FIGHT = "fight"
+CUT = "cut"
 WEAR_SLOTS = ("head", "body", "legs", "feet", "accessory")
 NOT_WEARABLE = "not_wearable"
 
@@ -160,14 +180,103 @@ def _best_for_slot(
     return max(ranked, key=lambda r: r[:2])[2] if ranked else None
 
 
+def hunting_ceiling(w: WorldModel, kb: KnowledgeBase | None) -> int | None:
+    """The highest strength ceiling of any hunting ground known, this run's
+    zone reads and the knowledge base's together; None while none is known."""
+    ceilings = [fact.get("strength_ceiling") for _, _, fact in iter_hunting_cells(kb)]
+    ceilings += [fact.strength_ceiling for facts in w.zones.values() for fact in facts.values()]
+    known = [c for c in ceilings if isinstance(c, int) and not isinstance(c, bool)]
+    return max(known, default=None)
+
+
+def loadout_strength(w: WorldModel, weapon: str | None) -> int:
+    """Hunting-ground strength with ``weapon`` armed and what is worn now:
+    attack power, the weapon's damage and worn armor's defense (Supplies
+    reference; GAME_NOTES Hunting grounds)."""
+    return BASE_ATTACK_POWER + (weapon_damage(weapon) or 0) + worn_armor_defense(w.worn_codes.values())
+
+
+def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[bool, int]:
+    """The one rule for which weapon is better (A99): keeping strength within
+    ``ceiling`` first (always true with none known), then published damage.
+    Compare ranks with ``>``: a higher one is a better weapon."""
+    fits = ceiling is None or loadout_strength(w, code) <= ceiling
+    return fits, weapon_damage(code) or 0
+
+
+def does_job(code: str | None, job: str, kb: KnowledgeBase | None = None) -> bool:
+    """``code`` can do ``job``: a weapon (Supplies class) fights; a supply
+    whose sourced capabilities include ``cut`` cuts."""
+    if job == CUT:
+        return bool(code) and CUT in capabilities_for_code(code or "", kb)
+    return is_weapon(code)
+
+
+def weapon_to_arm(
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    job: str,
+    ceiling: int | None,
+    refused: Collection[tuple[str | None, str]] = (),
+) -> InventorySupply | None:
+    """The one weapon-to-arm rule (A99): of the held and armed supplies that
+    do ``job``, the one to have armed. For cutting, one a cut does not use up
+    comes first; then :func:`weapon_rank` (within ``ceiling`` first, then
+    damage), so a cutter is also the best weapon to be caught with. The armed
+    one wins a tie, so the arm never flips. An armed result has id -1 when
+    it is not also held. None when nothing carried does the job (for
+    fighting, nothing beats bare hands with no weapon armed); a refused
+    ``Arm`` is skipped until the loadout changes, and a compose fragment is
+    never armed."""
+    best: tuple[tuple, InventorySupply | None] | None = None
+    if job == FIGHT and not is_weapon(w.armed_code):
+        # No weapon armed fights bare-handed: a weapon must beat that, so one
+        # over the ceiling is never armed into an empty slot either.
+        best = ((weapon_rank(None, w, ceiling), True, 0), None)
+    for s in held_supplies(w):
+        armed = s.code == w.armed_code
+        if s.fragment is not None or not does_job(s.code, job, kb) or (not armed and (s.code, ARMED) in refused):
+            continue
+        rank = weapon_rank(s.code, w, ceiling)
+        key = ((kept_on_break(s.code), rank) if job == CUT else rank, armed, -s.id)
+        if best is None or key > best[0]:
+            best = (key, s)
+    return best[1] if best is not None else None
+
+
+def named_equip(w: WorldModel, m: Memory, code: str, armed_owned: bool = False) -> EquipUpgrade | None:
+    """Arm or wear held ``code`` as the planner named it, whatever the rule
+    ranks it; None once it is on, or when it is not held or was refused, or
+    is a weapon while another state holds the armed slot (``armed_owned``)."""
+    if code == w.armed_code or code in w.worn_codes.values():
+        return None
+    if armed_owned and is_weapon(code):
+        return None
+    s = next((h for h in sorted(_candidates(w), key=lambda h: h.id) if h.code == code), None)
+    if s is None:
+        return None
+    if is_weapon(code):
+        return None if (code, ARMED) in m.equip_refused else EquipUpgrade(ARMED, s.id, code)
+    slot = wear_slot(code, w)
+    if slot is None:
+        if never_worn(code) or code in m.equip_not_wearable or code in m.equip_try_refused:
+            return None
+        return EquipUpgrade("", s.id, code, learn_slot=True)
+    if (code, slot) in m.equip_refused or (w.worn_codes.get(slot) is not None and (None, slot) in m.equip_refused):
+        return None
+    return EquipUpgrade(slot, s.id, code, remove_first=w.worn_codes.get(slot) is not None)
+
+
 def best_equip_upgrade(
     w: WorldModel,
     items: dict[str, dict[str, Any]],
     threat: ThreatTable,
     m: Memory,
     armed_owned: bool = False,
+    ceiling: int | None = None,
 ) -> EquipUpgrade | None:
-    """The first slot with a clear upgrade, weapon first, then worn slots in order.
+    """The first slot with a clear upgrade, weapon first (by :func:`weapon_rank`
+    under ``ceiling``, :func:`hunting_ceiling`), then worn slots in order.
 
     ``armed_owned`` is True while another state (Heal, Solve, Break) holds the armed
     slot. Those states arm potions and tools on purpose, so the armed slot is
@@ -179,10 +288,8 @@ def best_equip_upgrade(
     held = _candidates(w)
 
     if not armed_owned:
-        armed = w.armed_code if is_weapon(w.armed_code) else None
-        weapons = [s for s in held if is_weapon(s.code) and (s.code, ARMED) not in refused]
-        s = _best_for_slot(ARMED, armed, weapons, items, threat, "weapon_damage")
-        if s is not None:
+        s = weapon_to_arm(w, None, FIGHT, ceiling, refused)
+        if s is not None and s.code != w.armed_code:
             return EquipUpgrade(ARMED, s.id, s.code)
 
     for slot in WEAR_SLOTS:

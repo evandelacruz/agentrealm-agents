@@ -215,6 +215,7 @@ class Clock:
 def runner(goals: list[dict]) -> SimpleNamespace:
     w = WorldModel(character_id=1, map_id=7, pos=(0, 0), tick=10)
     w.alive, w.gems = True, 3
+    w.self_read = w.inventory_read = True
     return SimpleNamespace(
         world=w,
         mem=Memory(),

@@ -1747,7 +1747,7 @@ Intents: 454 `Step`, 858 `Wait`, 132 `Use` (130 on grass: 126 cuts that took eff
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize.
+Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 are A124 (every unmet readiness check shows how it closes and what that costs, health included, and an upgrade the plan saves toward shows its minutes at the measured gather rate), in flight in #223, which brings its PLAN.md row. Defect 3 is queued: a new row (a detour find given up short is not picked again until something about it changes) to be filed once A120 (#220) merges.
 
 1. **An unmet health check comes with no way to close it, so the plan assumes one** (`strategist.py:1174–1209`, `cost_to_close`, which leaves health out; `states/heal.py:129–131`, Heal yields to the plan's op above `low_health`). Health was 7/10 against a bar of 8 from 159 s to the end. The planner wrote "the health bar recovers while gathering", but every zone read was `safe: false` and health never moved. Heal does not rest above `low_health` while an op is on top, so nothing closed the check, and the stage stayed unmet for 440 s. **Rule:** every unmet readiness check shows how it closes and what that costs: health by resting on safe ground (minutes at the known regen) or a potion. The plan never relies on a check closing by itself.
 

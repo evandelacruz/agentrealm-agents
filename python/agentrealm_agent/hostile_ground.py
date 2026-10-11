@@ -7,9 +7,9 @@ still holds ground: round its post, and round the cell it was last seen on
 per hostile.
 
 Gather and Detour keep their targets and routes off this ground
-(``states/gather_safe.py``). A remembered post fades (``Sighting.strength``,
-free-play run 9): once faded it holds no ground, only prices it, so Gather
-cuts its grass when no free grass is near (``Danger.price``). Retreat, Park
+(``states/gather_safe.py``). A remembered post fades (``Sighting.strength``):
+once faded it holds no ground, only prices it, so Gather cuts its grass when
+no free grass is near (``Danger.price``). Retreat, Park
 and Heal pick a safe cell only outside it, and Flee runs toward the cell
 Retreat picked, so the two never pull opposite ways
 (``pathing.retreat_safe_goal``, free-play run 7).
@@ -37,7 +37,7 @@ GATHER_HOSTILE_RADIUS = HOSTILE_DANGER_RADIUS
 GATHER_SHADOW_MARGIN = 1
 # A post's reach counts at most this far from it, however far its guard
 # chased us before a hit: a reach learned from a long chase walled off the
-# grass round town (free-play run 9, A85).
+# grass round town (A85).
 POST_REACH_CAP = GATHER_HOSTILE_RADIUS
 # The most a faded post (below ``POST_HOLD_STRENGTH``) adds to a cell Gather
 # would work inside its ground, in steps of walk: it prices that grass, so
@@ -96,7 +96,7 @@ def held_by_hostile(
     ``GATHER_SHADOW_MARGIN``, round that post, in view or not: it goes back
     there. One out of view also holds its ``gather_bar`` round the cell it
     was last seen on. A post that has faded below ``POST_HOLD_STRENGTH``
-    (``Sighting.strength``, free-play run 9) holds neither, unless its guard
+    (``Sighting.strength``) holds neither, unless its guard
     was seen within ``SIGHTING_TICKS`` somewhere not in sight now: then its
     last-seen cell holds, as a passer-by's does. ``faded`` lists the faded zones instead, which only
     price ground (``faded_reach``).

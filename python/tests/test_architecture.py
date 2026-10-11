@@ -9,7 +9,9 @@ character (the A58 runs 3–7 pacing), and a decision is never idle.
 from __future__ import annotations
 
 import random
+import re
 import unittest
+from pathlib import Path
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
@@ -241,6 +243,35 @@ class A58PacingPairsTest(unittest.TestCase):
         first_explore = moved.index("Explore")
         self.assertEqual(set(moved[:first_explore]), {"Travel"})
         self.assertEqual(set(moved[first_explore:]), {"Explore"}, moved)
+
+
+# A87: rules, not run patches. Comments in agent source state the rule in game
+# terms; the run that found it is cited in PLAN.md and docs/observations. This
+# count is of citations, not lines, and only falls: lower it in the PR that
+# removes some.
+RUN_CITATION_CEILING = 114
+# ``run 4``, ``Run 4``, ``runs 3, 4``: any form that names a live run.
+RUN_CITATION = re.compile(r"\bruns? \d+\b", re.IGNORECASE)
+PYTHON_DIR = Path(__file__).resolve().parents[1]
+AGENT_SOURCE = [*(PYTHON_DIR / "agentrealm_agent").rglob("*.py"), PYTHON_DIR / "starter_agent.py"]
+
+
+class RulesNotRunPatchesTest(unittest.TestCase):
+    def test_run_citations_in_agent_source_only_fall(self):
+        hits = sorted(
+            (str(f.relative_to(PYTHON_DIR)), n)
+            for f in AGENT_SOURCE
+            if (n := len(RUN_CITATION.findall(f.read_text())))
+        )
+        total = sum(n for _, n in hits)
+        self.assertLessEqual(
+            total,
+            RUN_CITATION_CEILING,
+            "A87: a fix from a live run generalizes a rule or goes to the planner; cite the run in "
+            f"PLAN.md and docs/observations, not in code. Citations by file: {hits}",
+        )
+        if total < RUN_CITATION_CEILING:
+            self.fail(f"A87: {total} run citations; lower RUN_CITATION_CEILING to match.")
 
 
 if __name__ == "__main__":

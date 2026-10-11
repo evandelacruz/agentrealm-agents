@@ -673,6 +673,7 @@ def _replan_gather(
     """
     d = d or danger(w, policy)
     params = grid_params(policy, blocked, costly if d.fight else costly | reach_cells(w, policy, d))
+    params.priced = {p: steps for p in preferred if (steps := d.price(p))}
     here = w.pos
     assert here is not None
 
@@ -749,12 +750,13 @@ def _nearest_clear(
     w: WorldModel, cells: set[Pos], params, blocked: set[Pos], clear: Callable[[list[Pos]], bool]
 ) -> tuple[Pos, list[Pos]] | None:
     """The nearest of ``cells`` a path reaches with a first step open and a
-    ``clear`` route, and that path; up to ``ROUTE_TRIES`` searches."""
+    ``clear`` route, and that path; up to ``ROUTE_TRIES`` searches. A cell
+    in a faded post's ground counts its ``params.priced`` steps further (A85)."""
     here = w.pos
     assert here is not None
     cells = set(cells)
     for _ in range(ROUTE_TRIES):
-        found = nearest_target(w, _nearest(here, cells), params) if cells else None
+        found = nearest_target(w, _nearest(here, cells, params.priced), params) if cells else None
         if not found or not next_step(w, blocked, found[1]):
             return None
         if clear(found[1]):
@@ -831,6 +833,8 @@ def _clear_of_hostiles(w: WorldModel, policy: Policy, p: Pos, d: Danger | None =
     return gather_ground(w, p, policy, d) and (bool(d and d.fight) or not hostiles_within(w, policy, p, GATHER_HOSTILE_RADIUS))
 
 
-def _nearest(here: Pos, cells: Iterable[Pos]) -> set[Pos]:
-    """The ``GATHER_CANDIDATES`` cells closest to ``here`` (ties to the smaller cell)."""
-    return set(sorted(cells, key=lambda p: (chebyshev(p, here), p))[:GATHER_CANDIDATES])
+def _nearest(here: Pos, cells: Iterable[Pos], priced: dict[Pos, int] | None = None) -> set[Pos]:
+    """The ``GATHER_CANDIDATES`` cells closest to ``here`` (ties to the smaller
+    cell), a cell in a faded post's ground its ``priced`` steps further."""
+    priced = priced or {}
+    return set(sorted(cells, key=lambda p: (chebyshev(p, here) + priced.get(p, 0), p))[:GATHER_CANDIDATES])

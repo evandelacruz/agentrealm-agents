@@ -34,7 +34,7 @@ from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.hostile_ground import known_reach
 from agentrealm_agent.states.gather_safe import gather_ground
 from agentrealm_agent.survival import hostiles_in_range, known_hostile
-from agentrealm_agent.world import POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
+from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
 
 MAP = 1
 CODE = "fake_gnasher"
@@ -97,7 +97,8 @@ class HostilityKeptAcrossRunsTest(unittest.TestCase):
         return through_json(kb)
 
     def test_a_type_that_hit_us_is_written_to_npc_types(self):
-        self.assertEqual(self.saved().npc_types, {CODE: {"hostile": True}})
+        """With what it measured: its largest hit and its swings that hit (A85)."""
+        self.assertEqual(self.saved().npc_types, {CODE: {"hostile": True, "max_hit": 2, "hits": 1}})
 
     def test_the_next_run_knows_the_type_hostile_before_it_swings(self):
         w = field(at=(18, 10))
@@ -137,9 +138,9 @@ class HostilityKeptAcrossRunsTest(unittest.TestCase):
 
     def test_other_rows_of_npc_types_are_kept(self):
         kb = KnowledgeBase.empty("fake-world")
-        kb.npc_types[CODE] = {"damage_per_hit": 2}
+        kb.npc_types[CODE] = {"name": "Fake Gnasher"}
         save_hostiles(kb, run_five())
-        self.assertEqual(kb.npc_types[CODE], {"damage_per_hit": 2, "hostile": True})
+        self.assertEqual(kb.npc_types[CODE], {"name": "Fake Gnasher", "hostile": True, "max_hit": 2, "hits": 1})
 
 
 class LoadedSightingsTest(unittest.TestCase):
@@ -162,7 +163,8 @@ class LoadedSightingsTest(unittest.TestCase):
         kb = self.kb(post=True)
         w = field(at=(17, 10))
         loaded = load_hostiles(kb, w)
-        see(w, [], 5000)  # the post is in sight, with nobody on it
+        for t in range(5000, 5000 + 4 * EMPTY_POST_HALF_LIFE_TICKS):
+            see(w, [], t)  # the post is in sight, with nobody on it
         self.assertEqual(w.sightings, {})
         save_hostiles(kb, w, loaded)
         self.assertNotIn(SIGHTINGS_KEY, kb.extra)
@@ -221,7 +223,9 @@ class RunnerKeepsHostilityTest(unittest.TestCase):
             self.assertIn(("npc", 9), r.world.sightings)
             r.world.hostile_types.add(("npc", "fake_biter"))
             r.run()
-        self.assertEqual(kb.npc_types, {CODE: {"hostile": True}, "fake_biter": {"hostile": True}})
+        self.assertEqual(
+            kb.npc_types, {CODE: {"hostile": True, "max_hit": 2, "hits": 1}, "fake_biter": {"hostile": True}}
+        )
         self.assertIn("9", kb.extra[SIGHTINGS_KEY])
 
 

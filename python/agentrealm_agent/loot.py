@@ -213,11 +213,22 @@ def learn_life_code(
     return code
 
 
+def full_bound(intent: dict, used: int) -> int:
+    """The most the pack can hold, from a ``carry_capacity_full`` refusal with
+    ``used`` slots carried. Taking is all or nothing: a ``Take``, or a
+    ``WithdrawFromChest`` with no ``supply_ids`` (refused only when not even
+    one fits), shows no room for one more; one naming ``n`` supplies shows
+    only that ``n`` more did not fit (API WithdrawFromChest)."""
+    ids = intent.get("supply_ids") if intent.get("verb") == "WithdrawFromChest" else None
+    extra = len(ids) if isinstance(ids, list) and ids else 1
+    return used + extra - 1
+
+
 def learn_loot_rejection(w: WorldModel, intent: dict | None, code: str | None) -> None:
     """What a refused pickup or drop says about carry space (A20).
 
-    ``carry_capacity_full`` on ``Take`` or ``WithdrawFromChest`` means the pack
-    is full now, so capacity is at most what we carry. ``not_transferable`` on
+    ``carry_capacity_full`` on ``Take`` or ``WithdrawFromChest`` bounds
+    capacity by what did not fit (``full_bound``). ``not_transferable`` on
     ``Drop`` marks that supply as one never to drop again.
     """
     if not intent:
@@ -226,9 +237,9 @@ def learn_loot_rejection(w: WorldModel, intent: dict | None, code: str | None) -
     if code == "carry_capacity_full" and verb in ("Take", "WithdrawFromChest"):
         used = carry_slots_used(w)
         if used:  # an empty model has not read the inventory yet: nothing to learn
-            w.full_at = used
-            if (chest_capacity(w.carried_chest) or DEFAULT_CARRY_CAPACITY) > used:
-                w.carried_chest = None  # full below its size: not the chest we thought we carry
+            w.full_at = full_bound(intent, used)
+            if (chest_capacity(w.carried_chest) or DEFAULT_CARRY_CAPACITY) > w.full_at:
+                w.carried_chest = None  # refused below its size: not the chest we thought we carry
             w.sync_carry_capacity()
     elif code == "not_transferable" and verb == "Drop" and intent.get("supply_id") is not None:
         w.undroppable.add(int(intent["supply_id"]))

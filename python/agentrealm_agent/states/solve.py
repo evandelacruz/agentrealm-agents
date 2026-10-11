@@ -17,6 +17,8 @@ from .explore import plan_sets
 from .intents import arm, compose, set_position, use_block
 
 GOAL = "solve"
+
+
 def held_supply(w: WorldModel, code: str) -> InventorySupply | None:
     """A supply of ``code`` in hand. One only in the carried chest does not count:
     Solve does not withdraw it, so the op stalls and is dropped (A39)."""

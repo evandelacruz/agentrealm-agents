@@ -300,8 +300,9 @@ class WorldModel:
     # Carry capacity is derived, never assumed (A115; ``sync_carry_capacity``):
     # the server serves no capacity and no carried chest's subtype, so it is the
     # size of the chest we applied (``carried_chest``, None for the blue chest a
-    # character starts with), bounded by what a carry_capacity_full refusal
-    # showed full (``full_at``) and never below the slots the inventory carries.
+    # character starts with), bounded by the most a carry_capacity_full refusal
+    # left room for (``full_at``, ``loot.full_bound``) and never below the slots
+    # the inventory carries.
     carried_chest: str | None = None
     full_at: int | None = None
     carry_capacity: int = DEFAULT_CARRY_CAPACITY
@@ -903,7 +904,7 @@ class WorldModel:
     def sync_carry_capacity(self) -> None:
         """Carry capacity from what the server tells us, at every inventory
         sync (A115): the carried chest's Supplies reference ``chest_capacity``,
-        no more than a ``carry_capacity_full`` refusal showed full, and never
+        no more than a ``carry_capacity_full`` refusal left room for, and never
         less than the slots the inventory carries now."""
         size = chest_capacity(self.carried_chest) or DEFAULT_CARRY_CAPACITY
         if self.full_at is not None:

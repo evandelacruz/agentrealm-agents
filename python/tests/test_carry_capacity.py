@@ -78,6 +78,32 @@ class DerivedCapacityTest(unittest.TestCase):
         self.assertIsNone(w.carried_chest)
         self.assertEqual(w.carry_capacity, 12)
 
+    def test_a_refused_withdraw_of_many_bounds_by_what_did_not_fit(self):
+        # All or nothing: 26 ids refused with 4 carried shows room for at most 29.
+        w = WorldModel(character_id=1)
+        learn_chest_upgrade(w, "middle_chest")
+        sync(w, 3)
+        withdraw = {"verb": "WithdrawFromChest", "chest_id": 50, "supply_ids": list(range(200, 226))}
+        learn_loot_rejection(w, withdraw, "carry_capacity_full")
+        self.assertEqual(w.full_at, 29)
+        self.assertIsNone(w.carried_chest, "29 is below the middle chest's 30")
+        self.assertEqual(w.carry_capacity, DEFAULT_CARRY_CAPACITY, "back to the blue chest, not pinned at 4")
+
+    def test_a_refused_withdraw_that_fits_the_recorded_chest_keeps_it(self):
+        w = WorldModel(character_id=1)
+        learn_chest_upgrade(w, "middle_chest")
+        sync(w, 9)
+        withdraw = {"verb": "WithdrawFromChest", "chest_id": 50, "supply_ids": list(range(200, 230))}
+        learn_loot_rejection(w, withdraw, "carry_capacity_full")
+        self.assertEqual(w.carried_chest, "middle_chest")
+        self.assertEqual(w.carry_capacity, 30)
+
+    def test_a_refused_withdraw_of_everything_shows_no_room_for_one(self):
+        w = WorldModel(character_id=1)
+        sync(w, 7)
+        learn_loot_rejection(w, {"verb": "WithdrawFromChest", "chest_id": 50}, "carry_capacity_full")
+        self.assertEqual(w.carry_capacity, 8)
+
     def test_an_applied_chest_lifts_an_earlier_full_bound(self):
         w = WorldModel(character_id=1)
         sync(w, 9)

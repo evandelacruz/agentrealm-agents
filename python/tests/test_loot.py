@@ -156,13 +156,22 @@ class LootPriorityTest(unittest.TestCase):
 
 
 class FullPackTest(unittest.TestCase):
-    def test_drop_junk_before_take_when_full(self):
+    def test_reflex_never_drops_to_make_room(self):
+        # What to give up is the planner's call (A102), however cheap the held items look.
         w = world(["...", "...", "..."], at=(1, 1))
         full_inventory(w)
         w.entities = [Entity("supply", 99, (1, 2), "bronze_sword")]
-        out = dispatch(w, ctx(kb=priced(bronze_sword=15)))
-        self.assertEqual(out.state, "Pickup")
-        self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": 1}])
+        out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
+        self.assertNotEqual(out.state, "Pickup")
+        self.assertTrue(no_loot_intent(out.intents), out.intents)
+
+    def test_fetch_drops_what_the_op_names_before_take_when_full(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        full_inventory(w)
+        w.entities = [Entity("supply", 99, (1, 2), "bronze_sword")]
+        out = dispatch(w, ctx(kb=priced(bronze_sword=15), plan=fetch("bronze_sword", drop="torch")))
+        self.assertEqual(out.state, "Loot")
+        self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": 1}, {"verb": "Take", "supply_id": 99}])
 
     def test_full_pack_skips_junk_and_explore_runs(self):
         # Regression: Loot used to claim the round and send nothing ("carry full").
@@ -245,13 +254,13 @@ class ChestTest(unittest.TestCase):
         self.assertEqual(out.state, "Pickup")
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 50, "supply_ids": [71]}])
 
-    def test_full_pack_drops_junk_before_withdraw(self):
+    def test_full_pack_never_drops_for_a_withdraw(self):
         w = world(["...", "...", "..."], at=(1, 1))
         full_inventory(w)
         w.entities = [Entity("chest", 50, (2, 1))]
         w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
-        out = dispatch(w, ctx(kb=priced(bronze_sword=15)))
-        self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": 1}])
+        out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
+        self.assertTrue(no_loot_intent(out.intents), out.intents)
 
     def test_full_pack_skips_chest_of_junk(self):
         w = world(["...", "...", "..."], at=(1, 1))
@@ -339,14 +348,14 @@ class RejectionTest(unittest.TestCase):
         self.assertIn(1, w.undroppable)
         self.assertEqual(worst_droppable(w, {}).id, 2)
 
-    def test_refused_drop_moves_on_to_the_next_junk(self):
+    def test_refused_drop_moves_on_to_the_next_of_the_named_code(self):
         w = world(["...", "...", "..."], at=(1, 1))
         full_inventory(w)
         w.entities = [Entity("supply", 99, (1, 2), "bronze_sword")]
-        c = ctx(kb=priced(bronze_sword=15))
-        self.assertEqual(dispatch(w, c).intents, [{"verb": "Drop", "supply_id": 1}])
+        c = ctx(kb=priced(bronze_sword=15), plan=fetch("bronze_sword", drop="torch"))
+        self.assertEqual(dispatch(w, c).intents[0], {"verb": "Drop", "supply_id": 1})
         learn_loot_rejection(w, {"verb": "Drop", "supply_id": 1}, "not_transferable")
-        self.assertEqual(dispatch(w, c).intents, [{"verb": "Drop", "supply_id": 2}])
+        self.assertEqual(dispatch(w, c).intents[0], {"verb": "Drop", "supply_id": 2})
 
     def test_carry_capacity_full_lowers_capacity_to_what_is_carried(self):
         w = world(["..."], at=(1, 0))

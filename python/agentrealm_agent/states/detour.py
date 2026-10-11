@@ -49,7 +49,7 @@ from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_wit
 from ..knowledge_base import knowledge_items
 from ..memory import Memory
 from ..loot import GEM_PILE_STEPS, GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score
-from ..pack import DROP, TAKE
+from ..pack import TAKE
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
@@ -127,13 +127,13 @@ class DetourState(State):
 
 
 def valuable(w: WorldModel, e: Entity, items: dict, ctx: PlayContext) -> bool:
-    """A free ground supply worth a detour that the pack rule takes, dropping
-    junk if need be (``pack.make_room``): a gem, a life, or food while hurt."""
+    """A free ground supply worth a detour that fits by the pack rule
+    (``pack.make_room``): a gem, a life, or food while hurt."""
     if e.kind != "supply" or e.gem_price is not None or not e.code:
         return False
     if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code, items) or (hurt(w) and is_food(e.code))):
         return False
-    return room_for(w, ctx, Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items))).kind in (TAKE, DROP)
+    return room_for(w, ctx, Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items))).kind == TAKE
 
 
 def allowance(w: WorldModel, e: Entity, finds: list[Entity], items: dict) -> int:

@@ -13,12 +13,11 @@ a walk. The rule:
   or on one in sight now. A supply dropped there came back for sale
   (docs/observations); the Manual does not say so. A pickup that needs a drop
   there steps off first (``MOVE``).
-- The drop is obvious only when the pack holds junk: a droppable supply
-  ``loot_score`` rates lowest (no price seen, no heal), which the pickup
-  outscores. The lowest id of those goes.
-- Otherwise which held supply to give up is the planner's call (``ASK``): a
-  ``buy`` or ``fetch_item`` op names it with ``drop``. A pickup no op asked
-  for (the reflexes) is skipped instead.
+- Which held supply to give up is always the planner's call: no code ranks
+  a carried item as useless (a tool unused so far still smashes, burns or
+  fights). A ``buy`` or ``fetch_item`` op names it with ``drop``; one that
+  names nothing it may drop goes back to the planner (``ASK``) with the
+  choices. A pickup no op asked for (the reflexes) is skipped instead.
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ from .break_memory import capabilities_for_code
 from .healing import supply_matches
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase, knowledge_items
-from .loot import UNKNOWN_SCORE, Pickup, carry_slots_used, droppable_supplies, inventory_full, is_counter_supply, loot_score
+from .loot import Pickup, carry_slots_used, droppable_supplies, inventory_full, is_counter_supply
 from .supplies import kept_on_break
 from .travel.knowledge import iter_shop_cells
 from .world import NEIGHBOURS, Pos, WorldModel, chebyshev
@@ -97,11 +96,6 @@ def drop_makes_stock(w: WorldModel, knowledge: KnowledgeBase | None, pos: Pos | 
     return pos in w.for_sale() or (w.map_id, pos) in set(iter_shop_cells(knowledge))
 
 
-def is_junk(code: str | None, items: dict[str, dict[str, Any]]) -> bool:
-    """Nothing known makes it worth a slot: no price seen and no heal (``loot_score``'s floor)."""
-    return loot_score(code, items) <= UNKNOWN_SCORE
-
-
 def make_room(
     w: WorldModel,
     p: Pickup,
@@ -120,15 +114,11 @@ def make_room(
     reserved = {s.id for s in reserved_supplies(w, plan_ops, knowledge)}
     free = [s for s in droppable_supplies(w) if s.id not in reserved]
     full = f"pack full ({carry_slots_used(w)}/{w.carry_capacity})"
-    if named:
-        shed = next((s for s in free if s.code == named), None)
-        if shed is None:
-            return Room(ASK, why=f"{full}: drop={named} is not held, cannot be dropped, or the plan reserves it; {_choices(free)}")
-    else:
-        junk = sorted((s for s in free if is_junk(s.code, items)), key=lambda s: s.id)
-        if not junk or p.score <= loot_score(junk[0].code, items):
-            return Room(ASK, why=f"{full}: name what to drop for {p.code} with drop; {_choices(free)}")
-        shed = junk[0]
+    if not named:
+        return Room(ASK, why=f"{full}: name what to drop for {p.code} with drop; {_choices(free)}")
+    shed = next((s for s in free if s.code == named), None)
+    if shed is None:
+        return Room(ASK, why=f"{full}: drop={named} is not held, cannot be dropped, or the plan reserves it; {_choices(free)}")
     if drop_makes_stock(w, knowledge):
         return Room(MOVE, shed, f"{full}: not dropping {shed.code} on a shop cell")
     return Room(DROP, shed, f"drop {shed.code or shed.id} for {p.code}")

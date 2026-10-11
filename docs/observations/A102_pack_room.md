@@ -25,6 +25,9 @@ the planner could have chosen to give up.
 
 ## Fix
 
-One rule, `pack.make_room`, for every state that picks up; State `pack`
-shows slots used and total and the items the plan reserves; `buy` and
-`fetch_item` name what to drop with `drop` when nothing held is plain junk.
+One rule, `pack.make_room`, for every state that picks up. What to drop is
+always the planner's call, never a code ranking: an item unused in a run is
+not junk (a mallet smashes rocks and fights; matches burn). State `pack`
+shows slots used and total and the items the plan reserves, `held` shows
+what each item does, and `buy` and `fetch_item` name what to drop with
+`drop`. No drop takes a reserved item or lands on a shop cell.

@@ -126,7 +126,7 @@ class ShopBuyTest(unittest.TestCase):
         w.carry_capacity = 1
         w.held_supplies = [InventorySupply(9, "stick")]
         w.entities = [Entity("supply", 5, (1, 2), "torch", gem_price=3)]
-        plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
+        plan = Plan([{"op": "buy", "code": "torch", "drop": "stick"}], dict(PARAM_DEFAULTS))
         m = Memory(equip_not_wearable={"stick"})  # Equip already tried the stick on (A55)
         out = dispatch(w, ctx(w, m=m, plan=plan))
         self.assertEqual(out.state, "Shop")

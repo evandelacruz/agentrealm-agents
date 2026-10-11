@@ -5,10 +5,8 @@ from __future__ import annotations
 from ..config import Policy
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase, knowledge_items
-from ..loot import Pickup, carry_slots_used, loot_score
+from ..loot import carry_slots_used, loot_score
 from ..memory import Memory
-from ..pack import DROP, make_room
-from ..plan import GoalOp
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, guided_step, nav_search
@@ -16,7 +14,7 @@ from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
-from .intents import drop, set_position, withdraw, withdraw_all
+from .intents import set_position, withdraw, withdraw_all
 
 
 def _map_view(w: WorldModel, map_id: int):
@@ -54,28 +52,24 @@ def _chest_supplies(contents: list) -> list[InventorySupply]:
 
 
 def death_chest_recover_intents(
-    w: WorldModel, chest_id: int, contents: list, knowledge: KnowledgeBase | None, plan_ops: list[GoalOp]
+    w: WorldModel, chest_id: int, contents: list, items: dict
 ) -> list[dict] | None:
-    """``WithdrawFromChest`` when there is room; when full, ``Drop`` what the
-    pack rule drops here for the best supply in it (``pack.make_room``, A102); else skip (A20).
+    """``WithdrawFromChest`` when there is room; with a full pack, skip: what to
+    give up is the planner's call, never a reflex's (``pack``, A102; A20).
 
     When only some fit, withdraw the best by id: a bare withdraw takes the
     lowest ids first (B117), which could be junk instead of what the drop was for.
     """
     supplies = _chest_supplies(contents)
-    if not supplies or w.pos is None:
+    if not supplies:
         return None
-    items = knowledge_items(knowledge)
     room = w.carry_capacity - carry_slots_used(w)
     if room >= len(supplies):
         return [withdraw_all(chest_id)]
     if room > 0:
         best_first = sorted(supplies, key=lambda s: (-loot_score(s.code, items), s.id))
         return [withdraw(chest_id, [s.id for s in best_first[:room]])]
-    best = min(supplies, key=lambda s: (-loot_score(s.code, items), s.id))
-    p = Pickup(best.id, best.code, w.pos, chest_id, loot_score(best.code, items))
-    made = make_room(w, p, plan_ops=plan_ops, knowledge=knowledge)
-    return [drop(made.drop.id)] if made.kind == DROP and made.drop is not None else None
+    return None
 
 
 def recover_outcome(
@@ -86,7 +80,6 @@ def recover_outcome(
     plan_costly: set[Pos],
     *,
     knowledge: KnowledgeBase | None = None,
-    plan_ops: list[GoalOp] | None = None,
     state: str = "Recover",
 ) -> StateOutcome | None:
     """Path to the death chest and withdraw when adjacent (A11, reflex 4b).
@@ -107,15 +100,10 @@ def recover_outcome(
     if chebyshev(at, here) <= 1:
         contents = w.chest_contents.get(chest_id)
         if contents:
-            intents = death_chest_recover_intents(w, chest_id, contents, knowledge, plan_ops or [])
+            items = knowledge_items(knowledge)
+            intents = death_chest_recover_intents(w, chest_id, contents, items)
             if intents is not None:
-                verb = intents[0]["verb"]
-                reason = (
-                    f"recover from chest {chest_id}"
-                    if verb == "WithdrawFromChest"
-                    else f"drop for chest {chest_id}"
-                )
-                return StateOutcome(intents, reason, reflex=True, state=state)
+                return StateOutcome(intents, f"recover from chest {chest_id}", reflex=True, state=state)
         if contents is None:
             return StateOutcome(None, f"open chest {chest_id}", state=state, wait=True)
 
@@ -162,14 +150,7 @@ class RecoverState(State):
         m, policy = ctx.memory, ctx.policy
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
         out = recover_outcome(
-            world,
-            m,
-            policy,
-            plan_avoid,
-            plan_costly,
-            knowledge=ctx.knowledge,
-            plan_ops=ctx.plan.ops_left() if ctx.plan is not None else [],
-            state=self.name,
+            world, m, policy, plan_avoid, plan_costly, knowledge=ctx.knowledge, state=self.name
         )
         if out is not None:
             return out

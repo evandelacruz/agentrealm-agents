@@ -1,8 +1,9 @@
 """A102: one rule for making room in a full pack (``pack.make_room``).
 
-Reserved items are never dropped, nothing is dropped on a shop cell, junk
-goes on its own, and any other choice is the planner's (``drop`` on ``buy``
-and ``fetch_item``). Shop, Loot and the Pickup reflex share it.
+Reserved items are never dropped, nothing is dropped on a shop cell, and
+what to drop is always the planner's choice (``drop`` on ``buy`` and
+``fetch_item``): no code ranks a held item as useless. Shop, Loot and the
+Pickup reflex share it.
 """
 
 import json
@@ -101,13 +102,12 @@ class MakeRoomTest(unittest.TestCase):
         w.held_supplies.pop()
         self.assertEqual(make_room(w, self.potion(), knowledge=kb()).kind, TAKE)
 
-    def test_junk_is_the_obvious_drop(self):
+    def test_even_an_unpriced_unknown_item_is_not_dropped_unasked(self):
         w = world()
         full_pack(w, spare="bent_spoon")
-        room = make_room(w, self.potion(), knowledge=kb())
-        self.assertEqual((room.kind, room.drop.id), (DROP, 4))
+        self.assertEqual(make_room(w, self.potion(), knowledge=kb()).kind, ASK)
 
-    def test_no_junk_is_the_planners_call(self):
+    def test_what_to_drop_is_the_planners_call(self):
         w = world()
         full_pack(w)
         room = make_room(w, self.potion(), plan_ops=CLUE_BURNS, knowledge=kb())
@@ -127,11 +127,11 @@ class MakeRoomTest(unittest.TestCase):
         room = make_room(w, self.potion(), plan_ops=CLUE_BURNS, knowledge=kb(), named="matches")
         self.assertEqual(room.kind, ASK)
 
-    def test_reserved_junk_is_kept_and_the_next_junk_goes(self):
+    def test_a_named_code_skips_its_reserved_copies(self):
         w = world()
-        full_pack(w, spare="bent_spoon")
-        ops = [{"op": "use_block", "x": 1, "y": 1, "code": "bent_spoon"}]
-        self.assertEqual(make_room(w, self.potion(), plan_ops=ops, knowledge=kb()).drop.id, 5)
+        full_pack(w)
+        ops = [{"op": "use_block", "x": 1, "y": 1, "code": "rope"}]
+        self.assertEqual(make_room(w, self.potion(), plan_ops=ops, knowledge=kb(), named="rope").drop.id, 5)
 
     def test_no_drop_on_a_shop_cell(self):
         w = world()
@@ -220,6 +220,9 @@ class PlanTest(unittest.TestCase):
         row = {"reserved": {"matches": 2}, "slots_total": 10, "slots_used": 10}
         self.assertIn(f"pack={json.dumps(row, sort_keys=True)}", messages[1]["content"])
         self.assertIn("Pack room:", messages[0]["content"])
+        held = json.loads(messages[1]["content"].split("held=", 1)[1].split("\n", 1)[0])
+        self.assertIn("burn", held["matches"]["use"])
+        self.assertIn("smash", held["bronze_mallet"]["use"])
 
 
 if __name__ == "__main__":

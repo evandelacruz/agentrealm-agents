@@ -28,9 +28,9 @@ def room_for(w: WorldModel, ctx: PlayContext, p: Pickup, *, named: str | None = 
 
 def planned_take(w: WorldModel, ctx: PlayContext, p: Pickup, state: str) -> StateOutcome:
     """``Take`` the supply the top op (``buy``, ``fetch_item``) wants, in reach,
-    making room by the pack rule: ``Drop`` then ``Take``; a step off a shop
-    cell first; or, when which supply to drop is not obvious and the op names
-    none it may drop, the op goes back to the planner with the choices."""
+    making room by the pack rule: ``Drop`` what the op's ``drop`` names, then
+    ``Take``; a step off a shop cell first; or, when the op names nothing it
+    may drop, the op goes back to the planner with the choices."""
     op = top_op(ctx)
     named = op.get("drop") if op is not None else None
     room = room_for(w, ctx, p, named=named)
@@ -51,10 +51,10 @@ def planned_take(w: WorldModel, ctx: PlayContext, p: Pickup, state: str) -> Stat
 
 
 def pickup_outcome(w: WorldModel, ctx: PlayContext, *, state: str) -> StateOutcome | None:
-    """``Drop`` junk, ``Take``, or ``WithdrawFromChest`` one supply; None when nothing in reach is worth it.
+    """``Take`` or ``WithdrawFromChest`` one supply that fits; None when nothing in reach does.
 
-    A reflex never asks the planner or walks: a pickup the pack rule would
-    hand to the planner, or drop for only off this cell, is skipped."""
+    A reflex never drops: with a full pack what to give up is the planner's
+    (the pack rule), so a pickup that does not fit is skipped."""
     here = w.pos
     if here is None:
         return None
@@ -63,12 +63,10 @@ def pickup_outcome(w: WorldModel, ctx: PlayContext, *, state: str) -> StateOutco
     found.sort(key=lambda p: (-p.score, chebyshev(p.pos, here), p.supply_id))
     for p in found:
         room = room_for(w, ctx, p)
-        if room.kind not in (TAKE, DROP):
+        if room.kind != TAKE:
             continue
         label = p.code or str(p.supply_id)
-        if room.drop is not None:
-            intent, reason = drop(room.drop.id), room.why
-        elif p.chest_id is None:
+        if p.chest_id is None:
             intent, reason = take(p.supply_id), f"take {label}"
         else:
             intent, reason = withdraw(p.chest_id, [p.supply_id]), f"withdraw {label} from chest {p.chest_id}"

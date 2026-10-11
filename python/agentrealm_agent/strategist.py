@@ -1743,11 +1743,7 @@ class Strategist:
             # Same op on top: it carries on where it was; only the ops below it changed.
             # Keep the old op itself (its `why` too), so the path set for it stays owned.
             runner.plan.goals[0] = head
-            runner.plan.wait_started_tick = old.wait_started_tick
-            runner.plan.stalled_since_tick = old.stalled_since_tick
-            runner.plan.block_before = old.block_before
-            runner.plan.held_before = old.held_before
-            runner.plan.paid_from = old.paid_from
+            runner.plan.carry_head_progress(old)
         else:
             # The safe default's walk serves no op, so its queue is cut at its
             # next step, not run out (free-play run 6: the walk queued before

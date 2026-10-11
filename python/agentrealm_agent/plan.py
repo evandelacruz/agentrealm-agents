@@ -555,6 +555,11 @@ def apply_set_param(
     return apply_strategist_params(floor, current, {op["name"]: op["value"]})
 
 
+# The progress a Plan keeps for its head op, all None for a new head: kept
+# across a reply that leaves the same op on top, reset when the head changes.
+HEAD_PROGRESS = ("wait_started_tick", "stalled_since_tick", "block_before", "held_before", "paid_from", "used_id", "fight_npc")
+
+
 @dataclass
 class Plan:
     """Validated goal stack plus effective params (A34).
@@ -738,8 +743,14 @@ class Plan:
 
     def _new_head(self) -> None:
         """Forget the progress kept for the old head op: a new one starts its own."""
-        self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = self.paid_from = self.used_id = None
-        self.fight_npc = None
+        for name in HEAD_PROGRESS:
+            setattr(self, name, None)
+
+    def carry_head_progress(self, old: Plan) -> None:
+        """Keep ``old``'s progress on the head op: a reply that leaves the same
+        op on top changed only the ops below it (``Strategist._apply``)."""
+        for name in HEAD_PROGRESS:
+            setattr(self, name, getattr(old, name))
 
     @classmethod
     def from_directives(

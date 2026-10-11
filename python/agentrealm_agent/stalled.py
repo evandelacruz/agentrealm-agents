@@ -87,36 +87,49 @@ def retry_reason(record: StalledOp, now: RetryBasis) -> str:
     return ""
 
 
+def map_local(target: dict[str, Any]) -> bool:
+    """``target``'s x, y name a cell on the map it runs on: it has x and y and
+    no ``map_id`` of its own (a ``break_block``, a ``travel`` to a point here).
+    Only such a target's record is its map's (A111); any other (a ``buy``,
+    ``gather_gems`` with no region, ``equip``, a ``travel`` that names its map)
+    stalled wherever it runs, and a new map is no reason to retry it (A104)."""
+    return isinstance(target.get("x"), int) and isinstance(target.get("y"), int) and "map_id" not in target
+
+
+def _same(record: StalledOp, target: dict[str, Any], map_id: int | None) -> bool:
+    """``record`` is ``target``'s, read on ``map_id``: the same target, and for a
+    map-local one the same map (either map unknown counts as the same)."""
+    if record.target != target:
+        return False
+    if not map_local(target):
+        return True
+    return record.map_id is None or map_id is None or record.map_id == map_id
+
+
 def remember(
     records: list[StalledOp], op: dict[str, Any], why: str, tick: int, basis: RetryBasis, map_id: int | None = None
 ) -> None:
     """Record ``op`` as stalled on ``map_id``, replacing an older record of the
-    same target on the same map: a block at the same cell on another map keeps
-    its own record."""
+    same target (on the same map, for a map-local one: a block at the same
+    cell on another map keeps its own record)."""
     target = target_of(op)
-    records[:] = [r for r in records if r.target != target or r.map_id != map_id]
+    records[:] = [r for r in records if not (r.target == target and (not map_local(target) or r.map_id == map_id))]
     records.append(StalledOp(target, why, tick, basis, map_id))
     del records[:-STALLED_KEPT]
 
 
-def _on_map(record: StalledOp, map_id: int | None) -> bool:
-    """``record`` speaks for ``map_id``: the same map, or either one unknown."""
-    return record.map_id is None or map_id is None or record.map_id == map_id
-
-
 def forget(records: list[StalledOp], op: dict[str, Any], map_id: int | None = None) -> None:
-    """``op`` finished on ``map_id``: it is no longer a stalled target there.
-    A record of the same target on another map stays (A111)."""
+    """``op`` finished on ``map_id``: it is no longer a stalled target. A
+    map-local target's record on another map stays (A111)."""
     target = target_of(op)
-    records[:] = [r for r in records if r.target != target or not _on_map(r, map_id)]
+    records[:] = [r for r in records if not _same(r, target, map_id)]
 
 
 def find(records: list[StalledOp], op: dict[str, Any], map_id: int | None = None) -> StalledOp | None:
-    """The record of ``op``'s target on ``map_id``, or None when it has not
-    stalled there. An op's x, y name a cell on the map it runs on, so a record
-    from another map is not this op's (A111)."""
+    """The record of ``op``'s target, or None when it has not stalled. A
+    map-local target's record counts only on its own map (A111)."""
     target = target_of(op)
-    return next((r for r in records if r.target == target and _on_map(r, map_id)), None)
+    return next((r for r in records if _same(r, target, map_id)), None)
 
 
 def break_cells(records: list[StalledOp], map_id: int | None) -> frozenset[tuple[int, int]]:

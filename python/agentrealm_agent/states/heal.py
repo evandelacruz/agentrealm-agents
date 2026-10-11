@@ -56,8 +56,9 @@ FOOD_REACH = 3
 class HealState(State):
     """Reflex, above Fight. Hurt and out of combat: food within ``FOOD_REACH`` (cutting
     through a block the weapon opens when nothing else leads there), then carried
-    food, then a carried potion when health is low (``healing.spend_potion``,
-    A96: the reserve is kept otherwise), then safe ground. Every walk, to food or a safe tile, is
+    food, then a carried potion when health is low or the drink turns the
+    fight (``healing.spend_potion``, A96: the reserve is kept otherwise), then
+    safe ground. Every walk, to food or a safe tile, is
     bounded by stuck detection (``bounded_step``): one that goes nowhere gives
     its target up.
 
@@ -67,7 +68,7 @@ class HealState(State):
     back, and a long rest leaves stuck detection untouched.
     Once this run has measured no regen, Heal never samples or walks to a
     safe zone again: it asks the planner once for food and potions (a
-    ``heal_supplies`` trigger) and sends nothing, so the plan's executor or
+    ``heal_supplies`` trigger, counting the potions held back) and sends nothing, so the plan's executor or
     the safe default moves.
 
     Safe ground (the walk, the rest, the regen sample) outranks a plan op in

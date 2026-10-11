@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -11,8 +12,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .pacer import Pacers
+
 # One intent object as sent on the wire (`{"verb": "Step", ...}`).
 Intent = dict[str, Any]
+# The routes that spend a character's call budget (manual §7.4).
+CHARACTER_ROUTE = re.compile(r"^/characters/(\d+)/")
 
 
 @dataclass
@@ -45,12 +50,38 @@ class ApiError(Exception):
 
 
 class Client:
-    def __init__(self, base_url: str, api_key: str, timeout: float = 10.0):
+    """Every request goes through ``_call``, and every character route spends
+    from that character's pacer first (``pacer.py``): the call budget holds
+    whichever caller sends."""
+
+    def __init__(self, base_url: str, api_key: str, timeout: float = 10.0, pacers: Pacers | None = None):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        self.pacers = pacers if pacers is not None else Pacers()
 
     def _call(self, method: str, path: str, body: Any = None, query: dict | None = None) -> Any:
+        route = CHARACTER_ROUTE.match(path)
+        if route is None:
+            return self._send(method, path, body, query)
+        pacer = self.pacers.get(int(route.group(1)))
+        pacer.spend()
+        try:
+            answer = self._send(method, path, body, query)
+        except ApiError as e:
+            if e.rate_limited:
+                pacer.drain(e.retry_after)
+            raise
+        if isinstance(answer, dict):
+            hz = answer.get("tick_rate_hz")
+            if isinstance(hz, int) and hz > 0:
+                pacer.window = 1.0 / hz
+            if path.endswith(("/self", "/tick")):
+                # A round trip carries asleep only while asleep.
+                pacer.asleep = bool(answer.get("asleep"))
+        return answer
+
+    def _send(self, method: str, path: str, body: Any = None, query: dict | None = None) -> Any:
         url = self.base_url + path
         if query:
             url += "?" + urllib.parse.urlencode(query)

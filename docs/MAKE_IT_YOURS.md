@@ -77,7 +77,7 @@ Pathing helpers (`navigation/`, `pathing.py`, `explore.py`) build steps when you
 
 ## Intents and the call budget
 
-You still get **one request per character per tick** (burst 3). Reads and tick POSTs share that budget.
+You still get **one request per character per tick** (burst 3). Reads and tick POSTs share that budget. `Client` spends every character call from the character's pacer (`pacer.py`) and waits when the budget is spent, so a new call you add cannot cause a 429; it can only slow the loop.
 
 - Prefer **one intent per decision window** unless you are building a paced movement queue (Explore, Travel) or Fight's attack queue.
 - `Say`, `Read`, `Take`, `Use`, `SetPosition`, etc. must match the [Agent Realm API](https://agentrealm.gg/docs/api); malformed fields are rejected at ingest.

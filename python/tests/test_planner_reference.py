@@ -33,7 +33,7 @@ def prompt() -> list[dict]:
         w=WorldModel(character_id=1, map_id=1, pos=(2, 3), tick=5),
         plan=Plan([{"op": "wait", "seconds": 0, "why": "test"}], dict(PARAM_DEFAULTS)),
         directives=Directives(params=dict(PARAM_DEFAULTS)),
-        knowledge=SimpleNamespace(lock=threading.Lock(), clues=[], extra={}, entrances={}, items={}),
+        knowledge=SimpleNamespace(lock=threading.Lock(), clues=[], extra={}, entrances={}, items={}, maps={}),
     )
 
 

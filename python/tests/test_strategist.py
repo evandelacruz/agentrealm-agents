@@ -26,6 +26,7 @@ from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.knowledge_maps import record_hunting_zone
 from agentrealm_agent.travel.knowledge import entrance_key, sync_town
 from agentrealm_agent.strategist import (
     STALL_SECONDS,
@@ -86,6 +87,7 @@ def fake_runner(goals: list[str] | None = None) -> SimpleNamespace:
     """The parts of a Runner the strategist reads and writes."""
     w = WorldModel(character_id=1, map_id=7, pos=(0, 0), tick=10)
     w.alive = True
+    w.self_read = w.inventory_read = True  # synced: the planner asks only once both are read (A100)
     plan = Plan.from_directives(directive_goals=goals or [], directive_params=dict(PARAM_DEFAULTS))
     return SimpleNamespace(
         world=w,
@@ -228,6 +230,24 @@ class CadenceTest(unittest.TestCase):
         s.on_window(r)
         self.assertEqual(sent_triggers(r), ["map", "timer"])
 
+    def test_no_ask_until_self_and_inventory_are_read(self):
+        """A100: before the first full sync, armed, held and gems read as
+        empty, so a plan made then buys what the character already has."""
+        llm = FakeLLM(WAIT_ANSWER)
+        s, r = make(llm), fake_runner()
+        w = r.world
+        w.self_read = w.inventory_read = False
+        s.on_window(r)
+        self.assertEqual(llm.calls + s._requests.qsize(), 0)
+        w.apply_self({"alive": True, "lives": 3})
+        s.on_window(r)
+        self.assertEqual(llm.calls + s._requests.qsize(), 0, "inventory not read yet")
+        inventory = {"gems": 40, "armed": {"id": 3, "supply_subtype_code": "bronze_sword"}, "worn": {}, "held": [], "chest": []}
+        w.apply_observation({"complete": True, "snapshot": {"inventory": inventory}})
+        self.assertTrue(w.synced)
+        s.on_window(r)
+        self.assertEqual(sent_triggers(r), ["map", "timer"])
+
     def test_timer_replans_after_replan_s_without_events(self):
         llm = FakeLLM(WAIT_ANSWER, WAIT_ANSWER, WAIT_ANSWER)
         s, r = make(llm, replan_s=15), fake_runner()
@@ -343,7 +363,7 @@ class AnswerTest(unittest.TestCase):
         self.assertIn({"trigger": "death", "tick": 3}, ask["triggers"])
 
     def test_prompt_has_whole_plan_every_clue_and_the_op_table(self):
-        kb = SimpleNamespace(lock=threading.Lock(), clues=[{"kind": "sign", "text": f"clue {i}"} for i in range(20)], extra={}, entrances={}, items={})
+        kb = SimpleNamespace(lock=threading.Lock(), clues=[{"kind": "sign", "text": f"clue {i}"} for i in range(20)], extra={}, entrances={}, items={}, maps={})
         plan = Plan([{"op": "wait", "seconds": 0, "why": "test"}, {"op": "explore_area", "x": 3, "y": 4, "radius": 5}], dict(PARAM_DEFAULTS))
         messages = build_prompt(
             triggers=[{"trigger": "clue", "text": "torch"}],
@@ -710,6 +730,30 @@ class PlannerViewTest(unittest.TestCase):
         self.kb.items["bronze_sword"] = {"gem_price": 15}
         self.assertIn("upgrades_for_sale=none seen", state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb))
 
+    def test_weapon_upgrades_follow_equips_hunting_ceiling_rule(self):
+        # A99: with the sword armed and a hunting ground of ceiling 7 known,
+        # the mallet (2 + 6 = 8) is no upgrade; with no ceiling known it is.
+        self.w.gems = 30
+        self.w.armed_code = "bronze_sword"
+        self.kb.items["bronze_mallet"] = {"gem_price": 25}
+
+        def upgrades() -> str:
+            return next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("upgrades_for_sale="))
+
+        self.assertIn('"code": "bronze_mallet", "gains": "damage 4 -> 6"', upgrades())
+        record_hunting_zone(self.kb, 7, (50, 50), 7)
+        self.assertEqual(upgrades(), "upgrades_for_sale=none seen")
+        self.assertIn('hunting_strength={"ceiling": 7, "strength": 6}', state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb))
+        # Armed over the ceiling, a weapon that fits again is the upgrade.
+        self.w.armed_code = "bronze_mallet"
+        self.kb.items["bronze_sword"] = {"gem_price": 15}
+        self.assertIn('"gains": "damage 6 -> 4, back within the hunting ceiling"', upgrades())
+
+    def test_prompt_states_the_best_weapon_rule(self):
+        prompt = system_prompt()
+        self.assertIn("Weapons and the hunting ground", prompt)
+        self.assertIn("an equip with a code arms or wears exactly that held item", prompt)
+
     def test_stall_shows_after_nothing_changes(self):
         self.w.held_supplies = [InventorySupply(6, "pocket_knife")]
         clock = StallClock()
@@ -872,6 +916,7 @@ class RunnerParamsTest(unittest.TestCase):
                 w.view.tiles[(x, y)] = "dirt"
         w.terrain_center, w.terrain_map = (2, 0), 7
         w.health, w.max_health, w.lives, w.alive = 12, 20, 6, True
+        w.self_read = w.inventory_read = True
         w.entities = [Entity("npc", 1, (3, 0), code="gnawer")]
         w.threat.record(("npc", "gnawer"), 5)
         apply_zone(w, 7, 0, 2, {"safe": True, "brightness": 1})

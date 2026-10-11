@@ -116,7 +116,8 @@ from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
-from .supplies import armor_defense, weapon_damage, worn_slot, what_it_does
+from .equip import hunting_ceiling, loadout_strength, weapon_rank
+from .supplies import armor_defense, is_weapon, weapon_damage, worn_slot, what_it_does
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
@@ -196,6 +197,8 @@ State stall shows how long the character has neither moved, gained or spent gems
 
 Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage or defense, and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed). Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held.
 
+Weapons and the hunting ground: an equip with no code arms the best weapon held, and upgrades_for_sale lists weapons, by one rule. A weapon that keeps strength within the highest hunting-ground ceiling known beats one that would put it over; among those alike, more damage wins; with no ceiling known, damage alone decides. State hunting_strength gives the strength as armed and worn now (attack power 2, plus the armed weapon's damage, plus worn armor's defense) and that ceiling. So a weapon that would put strength over the ceiling is not armed while a held weapon keeps it within, and one armed over it is swapped back. To arm or wear an item the rule does not pick (a stronger weapon for a level boss, say), name it: an equip with a code arms or wears exactly that held item, and a later equip with no code applies the rule again.
+
 Potions: {POTION_RULE} State potions counts the potions held and stowed. Plan a reserve (potion_reserve) by that rule: the character will not drink one to top up a scratch. A heal_supplies trigger (hurt, with no food, no potion due and no rest to be had) also counts potions: any held are that reserve, kept back until health is low, so weigh food, a rest elsewhere or waiting before buying more.
 
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
@@ -213,7 +216,7 @@ PROGRESSION = """# Progression
 The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. Move on only when its readiness is met; drop back a stage when it no longer is (after a death, say). The thresholds are guidance for you to apply, not rules the code checks.
 
 1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known.
-2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip the best (gather_gems, break_block, fetch_item, buy, equip). Ready when health is at least 80% of max, at least 3 potions are held, a weapon better than the starting weapon is armed, and armor is worn (State: health, held, armed, worn).
+2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip them (gather_gems, break_block, fetch_item, buy, equip; equip arms the best weapon by the rule under Weapons and the hunting ground, so a weapon that would shut the hunting ground stays unarmed unless named). Ready when health is at least 80% of max, at least 3 potions are held, a weapon better than the starting weapon is armed, and armor is worn (State: health, held, armed, worn).
 3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). A boss has no defense, so swings hit it 65% of the time for up to the weapon's damage plus 2; bosses were tuned for a tier's gear before that base, so the stage 2 bar leaves a margin. Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar.
 4. Beat the world. Clear every level to transcend: done when levels_cleared holds level_count levels.
 
@@ -577,6 +580,7 @@ def build_prompt(
         *entrance_lines(w, knowledge),
         shop_price_line(w, knowledge),
         upgrade_line(w, knowledge),
+        hunting_strength_line(w, knowledge),
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
@@ -839,12 +843,17 @@ UPGRADES_SHOWN = 3
 def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     """The gear seen for sale that beats the best owned for its slot, cheapest
     first, with its price and the gems still short (A92). Owned is armed, worn,
-    held or stowed; a weapon must have more ``damage`` than any owned, armor more
-    ``defense`` than any owned for its slot (Supplies reference). An item already
-    owned is not listed. The first is what gems save toward."""
+    held or stowed; a weapon must rank above every owned one by Equip's own
+    best-weapon rule (``equip.weapon_rank``, A99: keeping within the highest
+    hunting-ground ceiling known first, then ``damage``), armor have more
+    ``defense`` than any owned for its slot (Supplies reference). An item
+    already owned is not listed. The first is what gems save toward."""
     carried = [s.code for s in w.held_supplies + w.chest_supplies]
     owned = {c for c in [*carried, w.armed_code, *w.worn_codes.values()] if c}
-    best_damage = max((weapon_damage(c) or 0 for c in owned), default=0)
+    ceiling = hunting_ceiling(w, knowledge)
+    best_weapon = max((c for c in owned if is_weapon(c)), key=lambda c: weapon_rank(c, w, ceiling), default=None)
+    best_rank = weapon_rank(best_weapon, w, ceiling) if best_weapon is not None else (False, 0)
+    best_damage = weapon_damage(best_weapon) or 0
 
     def best_defense(slot: str) -> int:
         return max((armor_defense(c) or 0 for c in owned if worn_slot(c) == slot), default=0)
@@ -855,8 +864,11 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
         if code in owned:
             continue
         damage, defense, slot = weapon_damage(code), armor_defense(code), worn_slot(code)
-        if damage is not None and damage > best_damage:
+        rank = weapon_rank(code, w, ceiling)
+        if damage is not None and is_weapon(code) and rank > best_rank:
             gain = f"damage {best_damage} -> {damage}"
+            if rank[0] and not best_rank[0]:
+                gain += ", back within the hunting ceiling"
         elif defense is not None and slot and defense > best_defense(slot):
             gain = f"{slot} defense {best_defense(slot)} -> {defense}"
         else:
@@ -866,6 +878,14 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
         return "upgrades_for_sale=none seen"
     rows.sort(key=lambda e: (e["price"], e["code"]))
     return f"upgrades_for_sale={json.dumps(rows[:UPGRADES_SHOWN], sort_keys=True)}"
+
+
+def hunting_strength_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
+    """Strength as armed and worn now against the highest hunting-ground
+    ceiling known (A99), the numbers Equip's best-weapon rule weighs."""
+    ceiling = hunting_ceiling(w, knowledge)
+    row = {"strength": loadout_strength(w, w.armed_code if is_weapon(w.armed_code) else None), "ceiling": ceiling}
+    return f"hunting_strength={json.dumps(row, sort_keys=True)}"
 
 
 @dataclass
@@ -1112,8 +1132,10 @@ class Strategist:
                 )
                 self.inbox = []
             return
-        if self.in_flight is not None or runner.world.pos is None:
-            return  # one call at a time, and nothing to plan from before the first position read
+        if self.in_flight is not None or runner.world.pos is None or not runner.world.synced:
+            # One call at a time, and nothing to plan from before position, self
+            # and inventory have each been read: an unread loadout reads as empty.
+            return
         if self.last_reply_at is None or self.clock() - self.last_reply_at >= self.config.replan_s:
             if not any(t["trigger"] == "timer" for t in self.inbox):
                 self.inbox.append({"trigger": "timer", "tick": runner.world.tick})

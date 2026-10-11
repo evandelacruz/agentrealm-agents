@@ -441,7 +441,7 @@ class RegionSummaryTest(unittest.TestCase):
         self.assertIn("never re-send an otherwise unchanged gather_gems just to change x, y", system)
 
     def test_state_without_knowledge_has_empty_gem_yield(self):
-        kb_fake = SimpleNamespace(lock=threading.Lock(), clues=[], extra={}, entrances={}, items={})
+        kb_fake = SimpleNamespace(lock=threading.Lock(), clues=[], extra={}, entrances={}, items={}, maps={})
         messages = build_prompt(
             triggers=[], w=world(), plan=Plan([], dict(PARAM_DEFAULTS)), directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=kb_fake
         )

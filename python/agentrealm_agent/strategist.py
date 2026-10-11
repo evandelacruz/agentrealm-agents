@@ -211,12 +211,16 @@ Examples:
 """
 
 
-PROGRESSION = """# Progression
+# The stage 2 readiness bar (PROGRESSION, stage 2).
+READY_HEALTH_FRACTION = 0.8
+READY_POTIONS = 3
+
+PROGRESSION = f"""# Progression
 
 The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. State readiness shows each stage's readiness check by check, and whether it is met. A stage whose readiness is met is done: move on to the next stage. Stay only for a concrete, reachable reason, and name it in the why: an upgrade listed under upgrades_for_sale whose gems_short the gems will cover soon, say. Saving for gear that is not listed there is not a reason: an item not known to be for sale cannot be bought, however much it would help, so with upgrades_for_sale none seen there is nothing to save toward and a met stage moves on. Drop back a stage when its readiness no longer is met (after a death, say). Applying this is yours: the code does not switch stages.
 
-1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known. To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door in sight not yet visited, and does nothing while none is in sight; so explore_area out past the town toward ground not yet seen, read the signs and ask the NPCs where the levels are, and travel to a door once one shows. A later stage that needs an entrance and knows none comes back here to find one.
-2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip them (gather_gems, break_block, fetch_item, buy, equip; equip arms the best weapon by the rule under Weapons and the hunting ground, so a weapon that would shut the hunting ground stays unarmed unless named). Ready when health is at least 80% of max, at least 3 potions are held, a weapon better than the starting weapon is armed, and armor is worn (State readiness stage_2). Better gear helps in levels, but once these are met, more gems are worth gathering only toward an upgrade listed under upgrades_for_sale.
+1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known. To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and does nothing while no door has been seen here; so explore_area out past the town toward ground not yet seen, read the signs and ask the NPCs where the levels are, and travel to a door once one shows. A later stage that needs an entrance and knows none comes back here to find one.
+2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip them (gather_gems, break_block, fetch_item, buy, equip; equip arms the best weapon by the rule under Weapons and the hunting ground, so a weapon that would shut the hunting ground stays unarmed unless named). Ready when health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions are held, a weapon better than the starting weapon by the rule under Weapons and the hunting ground is armed, and armor is worn (State readiness stage_2). Better gear helps in levels, but once these are met, more gems are worth gathering only toward an upgrade listed under upgrades_for_sale.
 3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). A boss has no defense, so swings hit it 65% of the time for up to the weapon's damage plus 2; bosses were tuned for a tier's gear before that base, so the stage 2 bar leaves a margin. Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar.
 4. Beat the world. Clear every level to transcend: done when levels_cleared holds level_count levels.
 
@@ -892,25 +896,23 @@ def hunting_strength_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str
     return f"hunting_strength={json.dumps(row, sort_keys=True)}"
 
 
-# The stage 2 readiness bar (PROGRESSION, stage 2).
-READY_HEALTH_FRACTION = 0.8
-READY_POTIONS = 3
-
-
 def readiness(w: WorldModel, knowledge: KnowledgeBase | None) -> dict[str, dict[str, Any]]:
     """Each stage's readiness check by check, and whether it is met
-    (PROGRESSION). The planner reads it to judge when a stage is done; the
+    (PROGRESSION). Stage 2's bar is ``READY_HEALTH_FRACTION`` of max health,
+    ``READY_POTIONS`` potions, a weapon better than the starting one by the
+    one weapon rule (``equip.weapon_rank``, A99) armed, and armor worn. The planner reads it to judge when a stage is done; the
     code switches no stage itself."""
     shop_known = bool(iter_shop_cells(knowledge) or seen_prices(w, knowledge))
     entrance_known = bool(iter_entrances(knowledge))
     stage_1 = {"shop_known": shop_known, "entrance_known": entrance_known}
     health_ok = bool(w.max_health) and (w.health or 0) >= READY_HEALTH_FRACTION * w.max_health
+    ceiling = hunting_ceiling(w, knowledge)
     armed = w.armed_code if is_weapon(w.armed_code) else None
-    better_weapon = (weapon_damage(armed) or 0) > (weapon_damage(STARTING_WEAPON) or 0)
+    better_weapon = armed is not None and weapon_rank(armed, w, ceiling) > weapon_rank(STARTING_WEAPON, w, ceiling)
     armor_worn = any((armor_defense(c) or 0) > 0 for c in w.worn_codes.values())
     stage_2 = {
-        "health_at_least_80_percent": health_ok,
-        "potions_at_least_3": potion_count(w) >= READY_POTIONS,
+        "health_at_bar": health_ok,
+        "potions_at_bar": potion_count(w) >= READY_POTIONS,
         "better_weapon_armed": better_weapon,
         "armor_worn": armor_worn,
     }

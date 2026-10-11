@@ -29,6 +29,8 @@ from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_hunting_zone
 from agentrealm_agent.travel.knowledge import entrance_key, sync_town
 from agentrealm_agent.strategist import (
+    READY_HEALTH_FRACTION,
+    READY_POTIONS,
     STALL_SECONDS,
     StallClock,
     repeats_pinned,
@@ -787,8 +789,21 @@ class PlannerViewTest(unittest.TestCase):
         self.assertTrue(ready["stage_1"]["met"])
         self.assertEqual(
             ready["stage_2"],
-            {"armor_worn": True, "better_weapon_armed": True, "health_at_least_80_percent": True, "met": True, "potions_at_least_3": True},
+            {"armor_worn": True, "better_weapon_armed": True, "health_at_bar": True, "met": True, "potions_at_bar": True},
         )
+
+    def test_better_weapon_follows_the_one_weapon_rule(self):
+        # A99: a mallet that puts strength over the hunting ceiling is no
+        # better than the starting knife, so stage 2 is not met with it armed.
+        self.w.armed_code = "bronze_mallet"
+        self.assertTrue(self.readiness()["stage_2"]["better_weapon_armed"])
+        record_hunting_zone(self.kb, 7, (50, 50), 7)
+        self.assertFalse(self.readiness()["stage_2"]["better_weapon_armed"])
+        self.w.armed_code = "bronze_sword"
+        self.assertTrue(self.readiness()["stage_2"]["better_weapon_armed"])
+
+    def test_stage_2_bar_in_the_arc_matches_the_readiness_constants(self):
+        self.assertIn(f"health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions", system_prompt())
 
     def test_a_met_stage_with_no_upgrade_for_sale_has_nothing_to_save_toward(self):
         # A101: readiness met and no better gear known for sale; State says
@@ -808,7 +823,7 @@ class PlannerViewTest(unittest.TestCase):
 
     def test_arc_says_how_to_find_an_entrance(self):
         prompt = system_prompt()
-        self.assertIn('To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door in sight', prompt)
+        self.assertIn('To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door seen on this map', prompt)
         self.assertIn("explore_area out past the town", prompt)
 
     def test_stall_shows_after_nothing_changes(self):

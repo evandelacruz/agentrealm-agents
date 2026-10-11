@@ -187,5 +187,7 @@
 
   "A91": {"state": "todo"},
 
-  "A92": {"state": "done"}
+  "A92": {"state": "done"},
+
+  "A93": {"state": "done"}
 }

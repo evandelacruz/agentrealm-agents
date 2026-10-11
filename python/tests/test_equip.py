@@ -58,26 +58,51 @@ def rats(amount: int = 5) -> ThreatTable:
 
 
 class SlotTest(unittest.TestCase):
-    def test_slot_only_from_served_worn(self):
+    def test_slot_from_served_worn_else_the_supplies_reference(self):
         w = world()
-        # Substring look-alikes and unseen codes have no slot.
-        for code in ("bronze_mail", "waxed_cloth", "elbow_pad", "legend_map", "bronze_helm"):
+        # Unlisted codes, look-alikes included, have no slot until seen worn.
+        for code in ("waxed_cloth", "elbow_pad", "legend_map", "bronze_helm"):
             self.assertIsNone(wear_slot(code, w))
-        w.apply_observation(snapshot({"worn": {"body": {"id": 3, "supply_subtype_code": "bronze_mail"}}}))
+        # Listed armor and accessories take the reference's slot.
         self.assertEqual(wear_slot("bronze_mail", w), "body")
+        self.assertEqual(wear_slot("goggles", w), "accessory")
+        w.apply_observation(snapshot({"worn": {"head": {"id": 3, "supply_subtype_code": "waxed_cloth"}}}))
+        self.assertEqual(wear_slot("waxed_cloth", w), "head")
         self.assertIsNone(wear_slot("small_potion", w))
         self.assertIsNone(wear_slot("bronze_sword", w))
         # Kept for the run once taken off.
-        w.apply_observation(snapshot({"worn": {}, "held": [{"id": 3, "supply_subtype_code": "bronze_mail"}]}))
-        self.assertEqual(wear_slot("bronze_mail", w), "body")
+        w.apply_observation(snapshot({"worn": {}, "held": [{"id": 3, "supply_subtype_code": "waxed_cloth"}]}))
+        self.assertEqual(wear_slot("waxed_cloth", w), "head")
 
     def test_unknown_slot_triggers_learn_wear(self):
         w = world()
-        w.held_supplies = [InventorySupply(8, "iron_mail")]
-        items = {"iron_mail": {"gem_price": 60}}
+        w.held_supplies = [InventorySupply(8, "waxed_cloth")]
+        items = {"waxed_cloth": {"gem_price": 60}}
         up = best_equip_upgrade(w, items, w.threat, Memory())
         assert up is not None
-        self.assertEqual((up.learn_slot, up.supply_id, up.code), (True, 8, "iron_mail"))
+        self.assertEqual((up.learn_slot, up.supply_id, up.code), (True, 8, "waxed_cloth"))
+
+    def test_listed_armor_is_worn_in_its_reference_slot_untried(self):
+        w = world()
+        w.held_supplies = [InventorySupply(8, "iron_mail")]
+        up = best_equip_upgrade(w, {"iron_mail": {"gem_price": 60}}, w.threat, Memory())
+        assert up is not None
+        self.assertEqual((up.learn_slot, up.slot, up.code), (False, "body", "iron_mail"))
+
+    def test_tools_and_consumables_are_never_tried_on(self):
+        """Matches, a torch, a chest or a scroll: the reference says what each is
+        for, and none is worn, so Equip never sends Wear for one."""
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [
+            InventorySupply(i, code)
+            for i, code in enumerate(("matches", "torch", "lantern", "red_chest", "teleport_scroll", "gem"), 1)
+        ]
+        self.assertIsNone(best_equip_upgrade(w, {}, w.threat, Memory()))
+        w.held_supplies.append(InventorySupply(9, "looted_helm"))
+        up = best_equip_upgrade(w, {}, w.threat, Memory())
+        assert up is not None
+        self.assertEqual((up.learn_slot, up.code), (True, "looted_helm"))
 
     def test_only_sourced_weapons_are_armed(self):
         w = world()
@@ -331,9 +356,9 @@ class LearnWearTest(unittest.TestCase):
     def test_dispatch_learn_wear_without_remove(self):
         w = world()
         w.armed_code = "pocket_knife"
-        w.held_supplies = [InventorySupply(8, "iron_mail")]
+        w.held_supplies = [InventorySupply(8, "waxed_cloth")]
         kb = KnowledgeBase.empty("sandbox")
-        kb.items["iron_mail"] = {"gem_price": 60}
+        kb.items["waxed_cloth"] = {"gem_price": 60}
         out = dispatch(w, ctx(kb))
         self.assertEqual(out.state, "Equip")
         self.assertEqual(out.intents, [{"verb": "Wear", "supply_id": 8}])
@@ -355,13 +380,13 @@ class LearnWearTest(unittest.TestCase):
     def test_transient_try_refusal_cleared_on_inventory_change(self):
         m = Memory()
         w = world()
-        w.held_supplies = [InventorySupply(8, "iron_mail")]
-        items = {"iron_mail": {"gem_price": 60}}
+        w.held_supplies = [InventorySupply(8, "waxed_cloth")]
+        items = {"waxed_cloth": {"gem_price": 60}}
         note_equip_result(m, w, {"verb": "Wear", "supply_id": 8}, rejected=True, rejection_code="worn_slot_occupied")
         sync_refusals(m, w)
-        self.assertIn("iron_mail", m.equip_try_refused)
+        self.assertIn("waxed_cloth", m.equip_try_refused)
         self.assertIsNone(best_equip_upgrade(w, items, w.threat, m))
-        w.held_supplies = [InventorySupply(8, "iron_mail"), InventorySupply(9, "apple")]
+        w.held_supplies = [InventorySupply(8, "waxed_cloth"), InventorySupply(9, "apple")]
         sync_refusals(m, w)
         up = best_equip_upgrade(w, items, w.threat, m)
         assert up is not None
@@ -378,19 +403,19 @@ class LearnWearTest(unittest.TestCase):
     def test_learned_slot_then_scores_like_a19(self):
         w = world()
         w.armed_code = "pocket_knife"
-        w.held_supplies = [InventorySupply(8, "iron_mail")]
-        items = {"bronze_mail": {"gem_price": 20}, "iron_mail": {"gem_price": 60}}
+        w.held_supplies = [InventorySupply(8, "waxed_cloth")]
+        items = {"waxed_vest": {"gem_price": 20}, "waxed_cloth": {"gem_price": 60}}
         self.assertTrue(best_equip_upgrade(w, items, w.threat, Memory()).learn_slot)
-        w.apply_observation(snapshot({"worn": {"body": {"id": 8, "supply_subtype_code": "iron_mail"}}}))
+        w.apply_observation(snapshot({"worn": {"body": {"id": 8, "supply_subtype_code": "waxed_cloth"}}}))
         w.apply_observation(
-            snapshot({"worn": {}, "held": [{"id": 8, "supply_subtype_code": "iron_mail"}]})
+            snapshot({"worn": {}, "held": [{"id": 8, "supply_subtype_code": "waxed_cloth"}]})
         )
-        self.assertEqual(wear_slot("iron_mail", w), "body")
-        w.worn_codes = {"body": "bronze_mail"}
-        w.worn_slots["bronze_mail"] = "body"
+        self.assertEqual(wear_slot("waxed_cloth", w), "body")
+        w.worn_codes = {"body": "waxed_vest"}
+        w.worn_slots["waxed_vest"] = "body"
         up = best_equip_upgrade(w, items, w.threat, Memory())
         assert up is not None
-        self.assertEqual((up.slot, up.code, up.remove_first), ("body", "iron_mail", True))
+        self.assertEqual((up.slot, up.code, up.remove_first), ("body", "waxed_cloth", True))
 
     def test_weapon_upgrade_before_learn_wear(self):
         w = world()

@@ -50,6 +50,8 @@ FETCH_TIMEOUT_SECONDS = 5.0
 # and water open none (docs/GAME_NOTES.md Breaking blocks). ``plan`` takes its
 # ``break_block`` capabilities from here.
 CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
+# The classes that go in a worn slot; every other class is armed, used or carried.
+WORN_CLASSES = frozenset({"armor", "accessory"})
 
 
 @dataclass(frozen=True)
@@ -228,10 +230,19 @@ def armor_defense(code: str | None) -> int | None:
     return r.defense if r is not None and r.supply_class == "armor" else None
 
 
-def armor_slot(code: str | None) -> str:
-    """The slot listed armor is worn in (``body``, ``head``, …), or ``""``."""
+def worn(code: str | None) -> bool | None:
+    """Whether the reference says a subtype is worn: True for ``armor`` and
+    ``accessory``, False for every other class it lists (weapons, tools,
+    consumables, gems: armed, used or carried, never worn), None when the
+    reference does not list it."""
     r = row(code)
-    return r.slot if r is not None and r.supply_class == "armor" else ""
+    return None if r is None else r.supply_class in WORN_CLASSES
+
+
+def worn_slot(code: str | None) -> str:
+    """The slot listed armor or an accessory is worn in (``body``, ``accessory``, …), or ``""``."""
+    r = row(code)
+    return r.slot if r is not None and r.supply_class in WORN_CLASSES else ""
 
 
 def what_it_does(code: str | None) -> dict[str, Any]:

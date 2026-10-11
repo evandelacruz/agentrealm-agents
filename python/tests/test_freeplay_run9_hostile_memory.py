@@ -4,10 +4,10 @@ Run 9 was the first run to start from a knowledge base earlier runs had
 filled. Two things it carried, or failed to carry, stopped the agent:
 
 1. Remembered hostile posts never expired: posts from earlier runs held the
-   grass round town, and Gather made 1 cut all run. A post now fades with
-   world time unseen, fast while in sight with nobody on it, and stays
-   strong for longer when seen again and again. A faded post only prices
-   its ground; its reach counts only so far from it.
+   grass round town, and Gather made 1 cut all run. A post now fades while
+   it is in sight with nobody on it, slower when seen again and again; one
+   nobody looked at keeps its strength, however long the break (A95). A
+   faded post only prices its ground; its reach counts only so far from it.
 2. The threat table was not saved, so every run started with every type
    unmeasured, and the win estimate refused every unmeasured type. Each
    type's largest hit and its hits and misses are now saved and loaded, and
@@ -26,7 +26,7 @@ from agentrealm_agent.hostile_memory import SIGHTINGS_KEY, load_hostiles, save_h
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states.gather import gather_outcome
-from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_HALF_LIFE_TICKS, POST_HOLD_STRENGTH, Entity, WorldModel
+from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_FORGET_STRENGTH, POST_HOLD_STRENGTH, Entity, WorldModel
 
 MAP = 1
 CODE = "fake_gnasher"
@@ -86,6 +86,20 @@ def through_json(kb: KnowledgeBase) -> KnowledgeBase:
 POST_GRASS = {(POST[0] + dx, POST[1] + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
 
 
+# Ticks in a break of 2.4 hours at 10 ticks/s.
+LONG_BREAK = 86400
+# Where the guard was last seen after chasing us off its post, 10 cells away.
+CHASED = (10, 18)
+
+
+def look_at_empty_post(w: WorldModel, start: int, ticks: int) -> int:
+    """Stand with the post in sight and nobody on it for ``ticks``, one look a tick; the last tick."""
+    w.pos = (20, 14)
+    for t in range(start + 1, start + 1 + ticks):
+        see(w, [], t)
+    return start + ticks
+
+
 class RememberedPostsFadeTest(unittest.TestCase):
     def gather_at(self, tick: int, **row) -> Memory:
         w = field(grass=POST_GRASS)
@@ -100,25 +114,49 @@ class RememberedPostsFadeTest(unittest.TestCase):
         m = self.gather_at(LAST_SEEN + 10)
         self.assertEqual(m.gather_target[0], "clear")
 
-    def test_an_aged_post_no_longer_blocks_gather(self):
-        m = self.gather_at(LAST_SEEN + 2 * POST_HALF_LIFE_TICKS)
+    def test_a_post_nobody_looked_at_keeps_its_strength_over_a_long_break(self):
+        """A95: time away is no evidence the guard has gone."""
+        m = self.gather_at(LAST_SEEN + LONG_BREAK)
+        self.assertEqual(m.gather_target[0], "clear")
+        w = field()
+        load_hostiles(kb_with_post(strength=0.8, noted=LAST_SEEN), w)
+        see(w, [], LAST_SEEN + LONG_BREAK)
+        self.assertAlmostEqual(w.sightings[("npc", 9)].strength, 0.8)
+
+    def test_a_faded_post_no_longer_blocks_gather(self):
+        m = self.gather_at(LAST_SEEN + LONG_BREAK, strength=0.25)
         self.assertEqual(m.gather_target[0], "grass")
         self.assertIn(m.gather_target[1], POST_GRASS)
 
-    def test_a_post_from_long_ago_is_forgotten(self):
+    def test_an_empty_post_looked_at_for_a_few_seconds_is_forgotten(self):
         w = field()
         load_hostiles(kb_with_post(), w)
-        see(w, [], LAST_SEEN + 4 * POST_HALF_LIFE_TICKS)
+        look_at_empty_post(w, LAST_SEEN + LONG_BREAK, 4 * EMPTY_POST_HALF_LIFE_TICKS)
         self.assertEqual(w.sightings, {})
 
-    def test_a_post_seen_on_many_spells_stays_strong_for_longer(self):
-        m = self.gather_at(LAST_SEEN + 2 * POST_HALF_LIFE_TICKS, spells=3)
-        self.assertEqual(m.gather_target[0], "clear")
+    def test_the_time_between_looks_is_no_evidence(self):
+        """The first look after a long break counts as one look, not the break."""
+        w = field()
+        load_hostiles(kb_with_post(), w)
+        w.pos = (20, 14)
+        see(w, [], LAST_SEEN + LONG_BREAK)
+        self.assertAlmostEqual(w.sightings[("npc", 9)].strength, 0.5)
+
+    def test_a_post_seen_on_many_spells_takes_longer_looking_to_fade(self):
+        def strength(spells: int) -> float:
+            w = field()
+            load_hostiles(kb_with_post(spells=spells), w)
+            look_at_empty_post(w, LAST_SEEN, 2 * EMPTY_POST_HALF_LIFE_TICKS)
+            return w.sightings[("npc", 9)].strength
+
+        self.assertLess(strength(1), POST_HOLD_STRENGTH)
+        self.assertGreaterEqual(strength(3), POST_HOLD_STRENGTH)
+        self.assertGreater(strength(3), POST_FORGET_STRENGTH)
 
     def test_seeing_the_guard_again_makes_its_post_strong_again(self):
         w = field(at=(17, 10))
-        load_hostiles(kb_with_post(), w)
-        t = LAST_SEEN + 2 * POST_HALF_LIFE_TICKS
+        load_hostiles(kb_with_post(strength=0.3), w)
+        t = LAST_SEEN + LONG_BREAK
         see(w, [Entity("npc", 9, POST, CODE)], t)
         w.pos = (2, 10)
         see(w, [], t + 1)
@@ -140,11 +178,11 @@ class RememberedPostsFadeTest(unittest.TestCase):
         kb = kb_with_post()
         w = field()
         loaded = load_hostiles(kb, w)
-        see(w, [], LAST_SEEN + POST_HALF_LIFE_TICKS)
+        t = look_at_empty_post(w, LAST_SEEN, EMPTY_POST_HALF_LIFE_TICKS)
         save_hostiles(kb, w, loaded)
         row = through_json(kb).extra[SIGHTINGS_KEY]["9"]
         self.assertAlmostEqual(row["strength"], 0.5, places=3)
-        self.assertEqual(row["noted"], LAST_SEEN + POST_HALF_LIFE_TICKS)
+        self.assertEqual(row["noted"], t)
 
 
 class AGuardJustSeenStillHoldsItsCellTest(unittest.TestCase):
@@ -167,13 +205,40 @@ class AGuardJustSeenStillHoldsItsCellTest(unittest.TestCase):
         self.assertEqual(hostiles_within(w, policy(), POST, 1), [])
 
 
+class AGuardsLastSeenCellLetsGoTest(unittest.TestCase):
+    """A95 review: a strong post's guard seen off its post holds its last-seen
+    cell only as a passer-by would, so that cell never holds ground for good."""
+
+    def chased_off_its_post(self) -> WorldModel:
+        w = field(at=(2, 30))
+        load_hostiles(kb_with_post(), w)
+        see(w, [Entity("npc", 9, CHASED, CODE)], LAST_SEEN)
+        w.pos = (2, 30)  # neither its post nor that cell in sight
+        return w
+
+    def test_its_last_seen_cell_holds_for_a_while_then_only_its_post(self):
+        w = self.chased_off_its_post()
+        see(w, [], LAST_SEEN + 1)
+        self.assertIn(CHASED, [c for c, _ in known_reach(w, policy())])
+        see(w, [], LAST_SEEN + LONG_BREAK)
+        self.assertEqual([c for c, _ in known_reach(w, policy())], [POST])
+        self.assertGreater(w.sightings[("npc", 9)].strength, 0.99)
+
+    def test_its_last_seen_cell_in_sight_and_empty_holds_nothing(self):
+        w = self.chased_off_its_post()
+        w.pos = (CHASED[0], CHASED[1] + 3)  # that cell in sight, the post not
+        see(w, [], LAST_SEEN + 1)
+        self.assertEqual([c for c, _ in known_reach(w, policy())], [POST])
+        self.assertEqual(hostiles_within(w, policy(), CHASED, 1), [])
+
+
 class FadedGroundIsPricedTest(unittest.TestCase):
     """A faded post adds a bounded price to its grass, never a bar."""
 
     def pick(self, free: tuple[int, int]) -> tuple[int, int]:
         w = field(at=(17, 10), grass=POST_GRASS | {free}, perception=12)
-        load_hostiles(kb_with_post(), w)
-        see(w, [], LAST_SEEN + 2 * POST_HALF_LIFE_TICKS)  # strength 0.25: faded
+        load_hostiles(kb_with_post(strength=0.25), w)
+        see(w, [], LAST_SEEN + LONG_BREAK)  # faded: looked at empty in an earlier run
         self.assertGreater(danger(w, policy()).price((POST[0] - 1, POST[1])), 0)
         m = Memory()
         gather_outcome(w, m, policy(), op=OP)

@@ -116,7 +116,7 @@ from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import entrance_routes
 from .gem_yield import RATE_MIN_SECONDS, keep_gather_region, summary as gem_yield_summary
-from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
+from .healing import POTION_RULE, low_health_line, potion_count, regen_per_tick, supply_matches
 from .equip import CUT, damage_per_second, does_job, hunting_ceiling, loadout_strength, weapon_rank
 from .supplies import (
     armor_defense,
@@ -125,6 +125,7 @@ from .supplies import (
     eaten_on_pickup,
     is_potion,
     is_weapon,
+    row as supply_row,
     sold_codes,
     weapon_damage,
     worn_slot,
@@ -161,6 +162,7 @@ from .threat import type_key_for_entity
 from .travel.knowledge import iter_entrances, iter_shop_cells, town_from_kb
 from .travel.ops import travel_op_from_plan_goal
 from .world import Pos, WorldModel, chebyshev
+from .executor import DEFAULT_TICK_RATE_HZ
 from .zone_discovery import known_safe
 
 log = logging.getLogger(__name__)
@@ -222,7 +224,7 @@ State lists the current stack, each op marked "pinned" or "planner". Pinned ops 
 The survival params ("params" under State, set by "params" or a set_param op). Survival params may only tighten past params_floor; a change that loosens one is ignored:
 {_param_table()}
 
-Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first.
+Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first. Safe ground only stops damage: health does not come back by itself, on safe ground or off it, while gathering or while resting. The game's documentation gives no regeneration; health comes back only from a heal, food eaten (Heal eats carried food whenever hurt) or a potion drunk, or from a respawn, which is at full health. A rest heals only where readiness to_close health_at_bar lists rest, which it does once safe-zone regen is a confirmed yes on this world with a rate measured. So an op that leaves health below a bar leaves it there until something heals it: to_close health_at_bar shows the ways that close it. To drink a carried potion before health is low, put a use_item with its code on the stack (or raise low_health, which makes Heal drink one and rest sooner); to rest, travel to the safe tile it names and wait there.
 
 NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir from here, spoken, greeted, hostile, stays_put); npcs_spoken_to counts the NPCs a say op of yours has spoken to so far, and npcs_greeted those Greet has said hello to. The game does not say which NPCs are helpers and which are monsters. "hostile" true means known hostile: a boss, the last thing that hit the character, or a type that has swung at it, hit it or died in view, in this run or an earlier one; false only means none of its type has done so yet, so it may still be a monster. "stays_put" true means it has stood on one cell for a while, as helpers do; judge the rest from its type and the clues. On safe ground (anywhere, if policy.hostile does not name NPCs), Greet says hello once to an NPC in sight that stays put and is not hostile, and marks it greeted; a helper answers any words with the same line, which lands in Clues. A greeting never counts as spoken: a say op to a greeted NPC still says your text. To talk to one further away, or with your own words, use a say op with its npc_id (from nearby_npcs) or its npc_type (any NPC of that type, the nearest first); the character walks within speech range and says your text. A helper's reply is added to Clues as a row of kind "npc".
 
@@ -234,7 +236,7 @@ A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows i
 
 State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. An op on top that makes no progress for {PLAN_STALL_SECONDS} s is moved just below the next op on the stack that can make progress, or dropped when none can (a goal_stalled trigger with the op and the op it is now_below, or goal_failed), and State stalled_ops lists it with why. It never comes back on top when the ops above it end, either: it is moved below again, or dropped. It stays there until a new item is held, a new clue comes in or a new way is known (a door's warp learned, a level entrance): until then a reply that puts it back on top has it moved below again, or left out when nothing in the reply can make progress, and last_reply_rejected says so. So put work that can make progress (gather_gems, say) above it, or give it a reason to work: get the item that opens it, or find another way to it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id), each on this map with its route by what is known of the map and steps, the cells of the route found (an estimate that can run up to 3 times the shortest walk, so compare steps loosely): path_known (known ground reaches it), frontier_only (known ground does not reach it; the way runs through unexplored ground, unexplored of those cells not seen yet, so it may be walled off), known_blocked (what is known walls it off from here: it takes a break or another way in) or not_searched (not checked within this look's search budget; steps is the route through unexplored ground when one was found, else the straight line); other_map for one on another map. shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names. A buy needs a seller: no_seller_known lists the items the Supplies reference prices for sale (in some world) that no shop known sells, that are not owned, and that are not in sight now (lying, or in a ground chest within reach): one seen earlier and out of view is listed, so go back for it if you know where it lies. A gem price in the Supplies reference is not a seller. A buy of one is dropped, and gems saved toward one buy nothing until a seller or the item itself is found. When a goal needs one (a tool to reach a door, say), go and find it: travel to a place a clue or an NPC names, explore_area new ground, ask NPCs with say, read signs; or work on a goal that is reachable now. Do not gather gems toward it.
 
-Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage, defense (armor protects only while worn, never in hand; worn, it lowers both how often and how hard a hostile hits), and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed); none seen means no better gear is known for sale anywhere, so there is no upgrade to save gems toward until a shop shows one. Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held. A chest shows as class chest with carry_slots, the pack size it gives, and applied true once the pack has those slots (State pack slots_total). Holding a chest gives nothing: it is applied by a Use on yourself, like a potion, which uses it up. The character applies a bigger chest by itself as soon as one is held; a use_item op names a held potion or chest to use now. An equip arms or wears only (a weapon, armor), so an equip of a potion or chest is dropped. Buying a chest no bigger than the pack has adds nothing. State ops_ended_recently lists the ops that finished (outcome done) or were dropped (outcome dropped, with why) in the last few minutes, newest first, with seconds_ago, even after their goal_done or goal_failed trigger has gone out with an earlier call. A done op is done: leave it off the stack unless you mean to do it again (a second buy buys a second one). A buy is done once its gems are spent and the item is held, or for a chest once the pack has its slots, or for an item eaten on pickup once it is taken. for_sale_eaten_on_pickup lists the items seen for sale that are eaten on pickup, with price and what they do: one applies the moment it is taken and is never held, so a heal eaten on pickup heals at once, and bought at full health it heals nothing and its gems are wasted.
+Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage, defense (armor protects only while worn, never in hand; worn, it lowers both how often and how hard a hostile hits), and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains, gems_short (the gems still needed) and minutes (how long gems_short takes at gather_run gems_per_min, the same as readiness to_close; none before a rate is measured); none seen means no better gear is known for sale anywhere, so there is no upgrade to save gems toward until a shop shows one. Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held. A chest shows as class chest with carry_slots, the pack size it gives, and applied true once the pack has those slots (State pack slots_total). Holding a chest gives nothing: it is applied by a Use on yourself, like a potion, which uses it up. The character applies a bigger chest by itself as soon as one is held; a use_item op names a held potion or chest to use now. An equip arms or wears only (a weapon, armor), so an equip of a potion or chest is dropped. Buying a chest no bigger than the pack has adds nothing. State ops_ended_recently lists the ops that finished (outcome done) or were dropped (outcome dropped, with why) in the last few minutes, newest first, with seconds_ago, even after their goal_done or goal_failed trigger has gone out with an earlier call. A done op is done: leave it off the stack unless you mean to do it again (a second buy buys a second one). A buy is done once its gems are spent and the item is held, or for a chest once the pack has its slots, or for an item eaten on pickup once it is taken. for_sale_eaten_on_pickup lists the items seen for sale that are eaten on pickup, with price and what they do: one applies the moment it is taken and is never held, so a heal eaten on pickup heals at once, and bought at full health it heals nothing and its gems are wasted.
 
 Pack room: State pack gives the carry slots used and the total (held, stowed, worn and armed each take one; gems and lives take none) and reserved, the carried items the stack's ops will use (a use_block's, equip's or use_item's code, a fight_boss's armed and worn, a compose's fragments, a break_block's tool). Making room never drops a reserved item, and never drops on a shop cell, where a dropped item turns into shop stock. The character never picks what to drop on its own: when a buy or fetch_item needs a slot and the pack is full, it drops only what the op names in drop, and an op that names nothing it may drop comes back to you as dropped, with the items it could drop. A bigger carried chest is the other way to make room: upgrades_for_sale lists any chest seen for sale with more slots than the pack has (carry slots now -> with it), so weigh its price against giving an item up. So before a buy into a full pack, weigh what each held item is good for (held: its use, such as attack, cut, smash or burn, and its damage, defense and heal) against the purchase, and name what to give up in drop. An item not used yet is not worthless: a mallet smashes rocks and fights, matches burn.
 
@@ -262,7 +264,7 @@ NO_GEMS_EARNED = "never at gems_per_min 0"
 
 PROGRESSION = f"""# Progression
 
-The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. State readiness shows each stage's readiness check by check, and whether it is met. A stage whose readiness is met is done: move on to the next stage. Stay only for a concrete, reachable reason, and name it in the why: an upgrade listed under upgrades_for_sale whose gems_short the gems will cover soon, say. Saving for gear that is not listed there is not a reason: an item not known to be for sale cannot be bought, however much it would help, so with upgrades_for_sale none seen there is nothing to save toward and a met stage moves on. The same holds for anything a goal needs, at any stage: an item under no_seller_known is no reason to gather gems. A goal that waits on one finds a seller or the item first (travel to a named place, explore, ask NPCs, read signs), or the stage works on a goal reachable now (another level entrance, say). Drop back a stage when its readiness no longer is met (after a death, say), except for a check skipped for its cost (below). The readiness bars are guidance you weigh, not a gate: readiness stage_2 to_close shows, for each unmet check a purchase closes, the gems_short and the minutes it takes at gather_run gems_per_min, this gather's measured rate ("{NO_GEMS_EARNED}" when that rate is 0; no minutes before a rate is measured). A bar whose cost in time outweighs what it is worth may be skipped: move on, and name the trade in the why (the minutes a check costs against what it buys, say). A check whose minutes still outweigh what it buys stays skipped: by itself it sends the character back to no stage and calls for no restock; weigh it again when its minutes fall (gems gained, a cheaper seller, a better region). Applying this is yours: the code does not switch stages.
+The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. State readiness shows each stage's readiness check by check, and whether it is met. A stage whose readiness is met is done: move on to the next stage. Stay only for a concrete, reachable reason, and name it in the why: an upgrade listed under upgrades_for_sale whose gems_short the gems will cover soon (its minutes say how soon), say. Saving for gear that is not listed there is not a reason: an item not known to be for sale cannot be bought, however much it would help, so with upgrades_for_sale none seen there is nothing to save toward and a met stage moves on. The same holds for anything a goal needs, at any stage: an item under no_seller_known is no reason to gather gems. A goal that waits on one finds a seller or the item first (travel to a named place, explore, ask NPCs, read signs), or the stage works on a goal reachable now (another level entrance, say). Drop back a stage when its readiness no longer is met (after a death, say), except for a check skipped for its cost (below). The readiness bars are guidance you weigh, not a gate: readiness stage_2 to_close shows, for each unmet check a purchase closes, the gems_short and the minutes it takes at gather_run gems_per_min, this gather's measured rate ("{NO_GEMS_EARNED}" when that rate is 0; no minutes before a rate is measured). For health_at_bar it shows health_short and the ways it closes: drink (a carried potion and its heal), buy (the cheapest potion for sale, with none carried: its gems_short and minutes) and rest (only once safe-zone regen is confirmed and its rate measured: the nearest safe tile, the walk_seconds there and rest_minutes_estimate, a rough figure from the regen measured between health rises while resting). With none of these listed, nothing the character has or can see for sale closes it: health stays where it is, so find food or a potion seller, or move on and name it in the why. A bar whose cost in time outweighs what it is worth may be skipped: move on, and name the trade in the why (the minutes a check costs against what it buys, say). A check whose minutes still outweigh what it buys stays skipped: by itself it sends the character back to no stage and calls for no restock; weigh it again when its minutes fall (gems gained, a cheaper seller, a better region). Applying this is yours: the code does not switch stages.
 
 1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known. To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and does nothing while no door has been seen here; so explore_area out past the town toward ground not yet seen, read the signs and ask the NPCs where the levels are, and travel to a door once one shows. A later stage that needs an entrance and knows none comes back here to find one.
 2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip them (gather_gems, break_block, fetch_item, buy, equip; equip arms the best weapon by the rule under Weapons and the hunting ground, so a weapon that would shut the hunting ground stays unarmed unless named). Ready when health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions are held, a weapon better than the starting weapon by the rule under Weapons and the hunting ground is armed, and armor is worn (State readiness stage_2), each weighed against its minutes under to_close. Better gear helps in levels, but once these are met, more gems are worth gathering only toward an upgrade listed under upgrades_for_sale.
@@ -627,9 +629,9 @@ def build_prompt(
         shop_price_line(w, knowledge),
         eaten_on_pickup_line(w, knowledge),
         no_seller_line(w, knowledge),
-        upgrade_line(w, knowledge),
+        upgrade_line(w, knowledge, (gather_run or {}).get("gems_per_min")),
         hunting_strength_line(w, knowledge),
-        readiness_line(w, knowledge, (gather_run or {}).get("gems_per_min")),
+        readiness_line(w, knowledge, (gather_run or {}).get("gems_per_min"), plan.tick_hz),
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
@@ -1114,9 +1116,10 @@ def pack_line(w: WorldModel, plan: Plan, knowledge: KnowledgeBase | None) -> str
 UPGRADES_SHOWN = 3
 
 
-def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
+def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None) -> str:
     """The gear seen for sale that beats the best owned for its slot, cheapest
-    first, with its price and the gems still short (A92). Owned is armed, worn,
+    first, with its price, the gems still short (A92) and the minutes those
+    take at the current gather's gems a minute (A124, :func:`minutes_at`). Owned is armed, worn,
     held or stowed; a weapon must rank above every owned one by Equip's own
     best-weapon rule (``equip.weapon_rank``, A99: keeping within the highest
     hunting-ground ceiling known first, then damage a second,
@@ -1156,7 +1159,11 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
             gain = f"carry slots {w.carry_capacity} -> {capacity}"
         else:
             continue
-        rows.append({"code": code, "price": price, "gains": gain, "gems_short": max(0, price - gems), **extra})
+        short = max(0, price - gems)
+        minutes = minutes_at(short, gems_per_min)
+        if minutes is not None:
+            extra["minutes"] = minutes
+        rows.append({"code": code, "price": price, "gains": gain, "gems_short": short, **extra})
     if not rows:
         return "upgrades_for_sale=none seen"
     rows.sort(key=lambda e: (e["price"], e["code"]))
@@ -1171,14 +1178,16 @@ def hunting_strength_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str
     return f"hunting_strength={json.dumps(row, sort_keys=True)}"
 
 
-def readiness(w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None) -> dict[str, dict[str, Any]]:
+def readiness(
+    w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None, tick_hz: int = DEFAULT_TICK_RATE_HZ
+) -> dict[str, dict[str, Any]]:
     """Each stage's readiness check by check, and whether it is met
     (PROGRESSION). Stage 2's bar is ``READY_HEALTH_FRACTION`` of max health,
     ``READY_POTIONS`` potions, a weapon better than the starting one by the
     one weapon rule (``equip.weapon_rank``, A99) armed, and armor worn. The
     planner reads it to judge when a stage is done; the code switches no
-    stage itself. Stage 2's ``to_close`` prices each unmet check a purchase
-    closes (A121, :func:`cost_to_close`)."""
+    stage itself. Stage 2's ``to_close`` prices each unmet check (A121, A124,
+    :func:`cost_to_close`)."""
     shop_known = bool(iter_shop_cells(knowledge) or seen_prices(w, knowledge))
     entrance_known = bool(iter_entrances(knowledge))
     stage_1 = {"shop_known": shop_known, "entrance_known": entrance_known}
@@ -1195,7 +1204,7 @@ def readiness(w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: floa
     }
     row_2: dict[str, Any] = {**stage_2, "met": all(stage_2.values())}
     unmet = [check for check, ok in stage_2.items() if not ok]
-    to_close = cost_to_close(w, knowledge, unmet, gems_per_min)
+    to_close = cost_to_close(w, knowledge, unmet, gems_per_min, tick_hz)
     if to_close:
         row_2["to_close"] = to_close
     return {
@@ -1205,15 +1214,18 @@ def readiness(w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: floa
 
 
 def cost_to_close(
-    w: WorldModel, knowledge: KnowledgeBase | None, unmet: Collection[str], gems_per_min: float | None
+    w: WorldModel,
+    knowledge: KnowledgeBase | None,
+    unmet: Collection[str],
+    gems_per_min: float | None,
+    tick_hz: int = DEFAULT_TICK_RATE_HZ,
 ) -> dict[str, dict[str, Any]]:
-    """What each unmet stage 2 check a purchase closes costs (A121): the gems
-    still short of the cheapest seen for sale that closes it (none for gear
-    carried, which an equip closes), each alone, and the minutes that takes
-    at the current gather's gems a minute: left out with no rate measured, and
-    ``NO_GEMS_EARNED`` while the rate shown is 0 and gems are still short. A
-    check with nothing seen for sale that closes it, or that no purchase
-    closes (health), is left out."""
+    """What each unmet stage 2 check costs (A121): for a check a purchase
+    closes, the gems still short of the cheapest seen for sale that closes it
+    (none for gear carried, which an equip closes), each alone, and the
+    minutes that takes (:func:`minutes_at`). A check with nothing seen for
+    sale that closes it is left out. Health is always shown, with the ways
+    it closes (A124, :func:`health_to_close`)."""
     prices = seen_prices(w, knowledge)
     # Gear already carried closes its check with an equip: no gems.
     carried = {s.code for s in w.held_supplies + w.chest_supplies if s.code}
@@ -1231,19 +1243,73 @@ def cost_to_close(
     if "armor_worn" in unmet and armor is not None:
         closes["armor_worn"] = (armor, 1)
     rows: dict[str, dict[str, Any]] = {}
+    if "health_at_bar" in unmet and w.max_health:
+        rows["health_at_bar"] = health_to_close(w, knowledge, prices, gems_per_min, tick_hz)
     for check, (price, count) in closes.items():
         short = max(0, price * count - (w.gems or 0))
         row: dict[str, Any] = {"gems_short": short}
-        if gems_per_min is not None and gems_per_min > 0:
-            row["minutes"] = round(short / gems_per_min, 1)
-        elif gems_per_min is not None:
-            row["minutes"] = NO_GEMS_EARNED if short else 0.0
+        minutes = minutes_at(short, gems_per_min)
+        if minutes is not None:
+            row["minutes"] = minutes
         rows[check] = row
     return rows
 
 
-def readiness_line(w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None) -> str:
-    return f"readiness={json.dumps(readiness(w, knowledge, gems_per_min), sort_keys=True)}"
+def minutes_at(gems_short: int, gems_per_min: float | None) -> float | str | None:
+    """The minutes ``gems_short`` takes at the current gather's gems a minute
+    (A121, A124): None with no rate measured, and ``NO_GEMS_EARNED`` while the
+    rate shown is 0 and gems are still short."""
+    if gems_per_min is None:
+        return None
+    if gems_per_min > 0:
+        return round(gems_short / gems_per_min, 1)
+    return NO_GEMS_EARNED if gems_short else 0.0
+
+
+def health_to_close(
+    w: WorldModel, knowledge: KnowledgeBase | None, prices: Mapping[str, int], gems_per_min: float | None, tick_hz: int
+) -> dict[str, Any]:
+    """How an unmet ``health_at_bar`` closes, and roughly what that costs
+    (A124). Health comes back only from a heal (food, a potion) or a respawn
+    (the published docs give no regen), so: ``drink``, a potion carried and
+    its heal (the smallest that closes the gap, else the largest); with none
+    carried, ``buy``, the cheapest potion seen for sale, its ``gems_short``
+    and minutes; and ``rest`` only once regen is a confirmed "yes" with a
+    rate measured on this world: the nearest known safe tile, the walk there
+    in seconds (straight line at the character's speed) and the rest in
+    minutes at that rate, a rough estimate (``healing.regen_per_tick``).
+    Carried food is left out: Heal eats it whenever hurt."""
+    short = math.ceil(READY_HEALTH_FRACTION * (w.max_health or 0)) - (w.health or 0)
+    row: dict[str, Any] = {"health_short": short}
+    carried = [s.code for s in w.held_supplies + w.chest_supplies] + [w.armed_code]
+    potions = {c: (supply_row(c).heal or 0) for c in carried if c and is_potion(c)}
+    if potions:
+        closing = [c for c in sorted(potions) if potions[c] >= short]
+        code = min(closing, key=potions.__getitem__) if closing else max(sorted(potions), key=potions.__getitem__)
+        row["drink"] = {"code": code, "heals": potions[code]}
+    elif sale := sorted((p, c) for c, p in prices.items() if is_potion(c)):
+        price, code = sale[0]
+        buy: dict[str, Any] = {"code": code, "gems_short": max(0, price - (w.gems or 0))}
+        minutes = minutes_at(buy["gems_short"], gems_per_min)
+        if minutes is not None:
+            buy["minutes"] = minutes
+        row["buy"] = buy
+    regen = regen_per_tick(knowledge)
+    # Known safe tiles only, never the town cell: Heal rests only on a safe tile.
+    safe = retreat_goal(w, None) if regen is not None else None
+    if regen is not None and safe is not None and w.pos is not None:
+        row["rest"] = {
+            "safe": f"{w.map_id}:{safe[0]},{safe[1]}",
+            "walk_seconds": round(chebyshev(w.pos, safe) * 1000 / max(1, w.movement_speed)),
+            "rest_minutes_estimate": round(short / (regen * tick_hz * 60), 1),
+        }
+    return row
+
+
+def readiness_line(
+    w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None, tick_hz: int = DEFAULT_TICK_RATE_HZ
+) -> str:
+    return f"readiness={json.dumps(readiness(w, knowledge, gems_per_min, tick_hz), sort_keys=True)}"
 
 
 @dataclass

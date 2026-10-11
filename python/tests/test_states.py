@@ -329,7 +329,12 @@ class DispatcherFallThroughTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertIn("Equip: the armed slot is busy: pocket_knife waits", out.yielded)
         self.assertEqual((out.state, out.intents, out.wait), ("Explore", None, True), out.reason)
-        self.assertEqual(out.reason, "Equip holds its walk")
+        # Equip sent nothing and asked no one: the hold asks for it, once (A120).
+        self.assertEqual(out.reason, "equip: Equip has no move: asked the planner")
+        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "no_way_on"]
+        self.assertEqual([(s["why"], s["op"]["op"]) for s in asks], [("equip: Equip has no move", "equip")])
+        out = dispatch(w, c)
+        self.assertEqual(len([s for s in c.memory.strategist_signals if s["trigger"] == "no_way_on"]), 1, "asked once")
 
     def test_travel_walled_off_asks_the_planner_and_holds(self):
         # Travel keeps its walk: the safe default never stands in for it (A120).

@@ -26,7 +26,6 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from ..navigation import oscillation
-from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import end_decision
 from ..engagement import sync_engagement
 from ..equip import note_last_weapon
@@ -65,6 +64,7 @@ from .sync import SyncState
 from .travel import TravelState
 from .use_item import UseItemState
 from .wait import WaitState
+from .way import break_due
 
 # Act on what is happening now (PLAYABLE_AGENT_PLAN.md State machine). Sync
 # and Downed only wait, the forced waits. Escape, Retreat and Heal (A10)
@@ -292,7 +292,7 @@ def _note_op_progress(
         return
     if out.state != owner and any(out.state == s.name for s in REFLEXES):
         return
-    if out.state == BreakState.name != owner and out.intents and _breaking_for(owner, m, world):
+    if out.state == BreakState.name != owner and out.intents and break_due(world, m, owner):
         # Break opening the block the owner's own stuck walk nominated (A15):
         # a step toward it is the walk's progress, and a Use try leaves the
         # clock alone, so the op is not dropped mid-break.
@@ -303,31 +303,6 @@ def _note_op_progress(
         why = f"{owner}: no progress for {PLAN_STALL_SECONDS}s"
         remember_stalled(m.stalled_ops, op, why, world.tick, retry_basis(world, knowledge), world.map_id)
         plan.demote_current(why, memory=m)
-
-
-# The ``Memory.goal`` labels each executor's walks carry. Only
-# ``_breaking_for`` reads them, to tell Break working the top op's own stuck
-# walk from any other stuck walk, so that break counts as the op's progress
-# (the safe default's ``explore`` is never the op's). The paced-op stall does
-# not use them (A90). Travel's search for a
-# hunting ground walks under ``explore_area`` (A27). Investigate's and
-# Loot's walks are ``bounded_step`` walks, which give up rather than escalate
-# to Break, so they need no entry.
-OWNER_WALKS: dict[str, tuple[str, ...]] = {
-    "Travel": ("travel:", "explore_area"),
-    "Shop": ("travel:", "explore_area"),  # its walk to a shop or town, and its search round town
-    "Explore": ("explore_area",),
-    "Level": ("level:",),
-    "Boss": ("boss:",),
-}
-
-
-def _breaking_for(owner: str | None, m: Memory, world: WorldModel) -> bool:
-    """Break is at stuck step 2 of a walk that belongs to ``owner``'s op."""
-    att = nav_stuck.active(m, world)
-    if owner is None or att is None or att.level != nav_stuck.BREAK:
-        return False
-    return att.goal.startswith(OWNER_WALKS.get(owner, ()))
 
 
 def _states(ctx: PlayContext) -> tuple[State, ...]:

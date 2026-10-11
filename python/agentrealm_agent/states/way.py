@@ -26,6 +26,7 @@ from __future__ import annotations
 from ..break_memory import choice_at, given_up_blocks, held_capabilities
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
+from ..memory import Memory
 from ..pathing import grid_params, plan_sets
 from ..plan import GoalOp
 from ..world import Pos, WorldModel
@@ -34,10 +35,32 @@ from .base import PlayContext, StateOutcome
 from .break_state import break_toward
 
 
-def break_due(w: WorldModel, ctx: PlayContext) -> bool:
-    """A walk is at stuck step 2: Break, below every walking executor, works its nominated block (A15)."""
-    att = nav_stuck.active(ctx.memory, w)
-    return att is not None and att.level == nav_stuck.BREAK
+# The ``Memory.goal`` labels each executor's walks on the stuck ladder carry
+# (A15). ``break_due`` reads them, to tell Break working the op's own stuck
+# walk from any other stuck walk: only the op's own is left to Break, and
+# only that break counts as the op's progress (dispatch); the safe default's
+# ``explore`` or an earlier op's walk is never the op's (A120). The paced-op
+# stall does not use them (A90). Travel's search for a hunting ground, and
+# Shop's round town, walk under ``explore_area`` (A27). Loot's, Investigate's
+# and Solve's walks are ``bounded_step`` walks or their own, which give up
+# rather than escalate to Break, so they need no entry.
+OWNER_WALKS: dict[str, tuple[str, ...]] = {
+    "Travel": ("travel:", "explore_area"),
+    "Shop": ("travel:", "explore_area"),  # its walk to a shop or town, and its search round town
+    "Explore": ("explore_area",),
+    "Level": ("level:",),
+    "Boss": ("boss:",),
+}
+
+
+def break_due(w: WorldModel, m: Memory, owner: str | None) -> bool:
+    """``owner``'s own walk is at stuck step 2: Break, below every walking
+    executor, works its nominated block (A15). A walk of anyone else's at
+    step 2 is not the op's way, so it never stands in for the op's ask."""
+    att = nav_stuck.active(m, w)
+    if owner is None or att is None or att.level != nav_stuck.BREAK:
+        return False
+    return att.goal.startswith(OWNER_WALKS.get(owner, ()))
 
 
 def open_the_way(w: WorldModel, ctx: PlayContext, at: Pos, state: str) -> StateOutcome | None:
@@ -78,14 +101,29 @@ def clear_the_way(
     Break, below, opens the nominated block this decision; the safe default
     holds meanwhile (``explore.HOLD_THEIR_WALK``).
     """
-    if break_due(w, ctx):
+    m = ctx.memory
+    if break_due(w, m, state):
+        m.break_yield = m.nav_stuck.decision
         return StateOutcome(None, why, state=state)
-    if at is not None and (out := open_the_way(w, ctx, at, state)) is not None:
-        out.reason = f"{why}: {out.reason}"
-        return out
-    blocked = what_blocks(w, ctx, at) if at is not None else None
-    tried = _tried(w, ctx) if at is not None else None
+    key = _shut_key(w, state, op, at)
+    if at is not None and m.way_shut != key:
+        if (out := open_the_way(w, ctx, at, state)) is not None:
+            m.way_shut = None
+            out.reason = f"{why}: {out.reason}"
+            return out
+        m.way_shut = key  # still shut until something it was found under changes
+    blocked = tried = None
+    if at is not None and m.no_way_on != (w.map_id, w.pos, why):
+        blocked, tried = what_blocks(w, ctx, at), _tried(w, ctx)  # only for an ask that goes out
     return ask_the_planner(w, ctx, why, state, op, blocked_by=blocked, tried=tried)
+
+
+def _shut_key(w: WorldModel, state: str, op: GoalOp | None, at: Pos | None) -> tuple:
+    """What a shut way was found under: the executor, its op, the map, the
+    cell, the target, the map's tiles (``Tiles.revision``) and what is held."""
+    held = tuple(sorted((s.code or "") for s in w.held_supplies)) + (w.armed_code or "",)
+    op_key = tuple(sorted((k, repr(v)) for k, v in op.items())) if op is not None else None
+    return (state, op_key, w.map_id, w.pos, at, w.view.tiles.revision, held)
 
 
 def _tried(w: WorldModel, ctx: PlayContext) -> str:

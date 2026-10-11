@@ -41,9 +41,10 @@ from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
 from .ask import ask_the_planner
-from .base import PlayContext, State, StateOutcome, my_op, top_executor
+from .base import PlayContext, State, StateOutcome, my_op, top_executor, top_op
 from .gather_safe import is_safe_ish
 from .intents import set_position
+from .way import break_due
 
 # Hurt, the safe default keeps away from a known hostile this close: the
 # planner's danger radius (``navigation.planner``).
@@ -81,10 +82,26 @@ class ExploreState(State):
                 return out
         owner = top_executor(ctx)
         if owner in HOLD_THEIR_WALK:
-            return StateOutcome(None, f"{owner} holds its walk", state=self.name, wait=True, progress=False)
+            return hold_for(world, ctx, owner)
         out = safe_default(world, ctx)
         out.progress = False  # it moves for no op: the top op, if any, still stalls
         return out
+
+
+def hold_for(world: WorldModel, ctx: PlayContext, owner: str) -> StateOutcome:
+    """Hold for the op ``owner`` executes, which sent nothing this decision (A120).
+
+    Every op whose executor cannot act asks the planner once: an executor
+    that asked from this cell already (``Memory.no_way_on``), or that left
+    this decision to Break at stuck step 2 of its own walk
+    (``Memory.break_yield``), is left to it; any other is asked for here, so
+    no op waits on its stall clock unheard.
+    """
+    m, op = ctx.memory, top_op(ctx)
+    asked = m.no_way_on is not None and m.no_way_on[:2] == (world.map_id, world.pos)
+    if op is None or asked or m.break_yield == m.nav_stuck.decision or break_due(world, m, owner):
+        return StateOutcome(None, f"{owner} holds its walk", state=ExploreState.name, wait=True, progress=False)
+    return ask_the_planner(world, ctx, f"{op['op']}: {owner} has no move", ExploreState.name, op)
 
 
 def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:

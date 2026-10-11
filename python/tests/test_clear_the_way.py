@@ -207,6 +207,62 @@ def _no_move():
     return StateOutcome(None, "cannot close", state=FightState.name)
 
 
+class OnlyTheOpsOwnWalkTest(unittest.TestCase):
+    def test_another_walks_step_two_never_stands_in_for_the_ask(self):
+        # A stuck attempt at step 2 left by another walk (the safe default's) is not the op's way:
+        # Loot asks rather than leave the round to Break, which would open that walk's block.
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w = corridor("#")
+        c = ctx(fetch(w))
+        att = nav_stuck.track(c.memory, w, "explore", nav_stuck.Leg((1, LENGTH)))
+        att.level = nav_stuck.BREAK
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.intents, out.wait), ("Loot", None, True), out.reason)
+        self.assertEqual(len(asks(c)), 1)
+
+
+class EveryIdleOpAsksTest(unittest.TestCase):
+    def test_an_executor_that_sends_nothing_and_asks_no_one_is_asked_for_once(self):
+        # Equip waits for a busy armed slot, sending nothing: the hold asks for it.
+        w = corridor(".")
+        w.held_supplies.append(InventorySupply(3, "pocket_knife"))
+        c = ctx({"op": "equip", "code": "pocket_knife"})
+        c.memory.solve_rearm = "fake_torch"
+        for _ in range(3):
+            c.memory.solve_rearm = "fake_torch"  # Solve still holds the slot
+            out = dispatch(w, c)
+            self.assertEqual((out.state, out.intents, out.wait), ("Explore", None, True), out.reason)
+        self.assertEqual([a["why"] for a in asks(c)], ["equip: Equip has no move"], "asked once")
+
+    def test_wait_and_use_item_act_on_their_op_and_ask_no_one(self):
+        # A planner's wait is its own hold, and use_item uses, waits out a cooldown or drops with why.
+        w = corridor(".")
+        c = ctx({"op": "wait", "seconds": 20, "why": "fake reason"})
+        self.assertEqual(dispatch(w, c).state, "Wait")
+        w.held_supplies.append(InventorySupply(7, "small_potion"))
+        c2 = ctx({"op": "use_item", "code": "small_potion"})
+        out = dispatch(w, c2)
+        self.assertEqual(out.state, "UseItem", out.reason)
+        self.assertEqual(asks(c) + asks(c2), [])
+
+
+class ShutWayIsNotSearchedAgainTest(unittest.TestCase):
+    def test_the_hold_reuses_the_shut_way_until_the_ground_changes(self):
+        from agentrealm_agent.states import way
+
+        w = corridor("#")
+        c = ctx(fetch(w))
+        with mock.patch.object(way, "open_the_way", wraps=way.open_the_way) as opened, mock.patch.object(
+            way, "what_blocks", wraps=way.what_blocks
+        ) as blocks:
+            play(w, c, 3)
+            self.assertEqual((opened.call_count, blocks.call_count), (1, 1), "searched once, then held")
+            w.view.tiles[(LENGTH, 0)] = "wall"  # new ground in view: look again
+            play(w, c, 1)
+            self.assertEqual((opened.call_count, blocks.call_count), (2, 1), "the ask itself is not repeated")
+
+
 class SurvivalDuringTheHoldTest(unittest.TestCase):
     def hostile_beside(self, w: WorldModel, c: PlayContext) -> None:
         w.health, w.lives = 500, 10

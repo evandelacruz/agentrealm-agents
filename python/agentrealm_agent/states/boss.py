@@ -10,6 +10,7 @@ from ..memory import BossFight, Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, guided_step, nav_search, next_step
 from ..plan import GoalOp, Plan
+from ..engagement import fights
 from ..survival import should_retreat
 from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -205,7 +206,7 @@ class BossState(State):
                 return StateOutcome(None, "boss forbidden", state=self.name)
             door = boss_door_pos(m.boss.op)
             if (
-                should_retreat(world, policy, ctx.params)
+                should_retreat(world, policy, ctx.params, fights(m))
                 and not should_commit(world, ctx, door)
             ):
                 return _walk_to_door(world, m, policy, door, plan_avoid, plan_costly, "retreat out")

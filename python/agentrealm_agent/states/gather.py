@@ -51,11 +51,13 @@ from ..supplies import heals
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase
+from ..loot import GEM_PILE_STEPS
 from ..memory import Memory
-from ..navigation import cost_path, nearest_target
+from ..navigation import CostGridParams, cost_path, nearest_target
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
-from ..survival import is_attacker, is_hostile, recently_attacked, would_lose
+from ..engagement import would_fight
+from ..survival import is_attacker, is_hostile, recently_attacked
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
@@ -186,12 +188,13 @@ def shadowing_hostile(w: WorldModel, m: Memory, policy: Policy, tick_hz: int) ->
 
 def fight_shadow(w: WorldModel, ctx: PlayContext, e: Entity) -> StateOutcome | None:
     """Close on and swing at the shadowing ``e`` when ``on_hostile = fight``,
-    it may be attacked, and the win estimate (counting it as in range) passes;
+    it may be attacked, and the decision an engagement with it would start
+    with is to fight (``engagement.would_fight``);
     else None."""
     policy = ctx.policy
     if policy.on_hostile != "fight" or attack_forbidden(e, ctx.never_attack) or w.pos is None:
         return None
-    if would_lose(w, policy, ctx.params, also=e):
+    if not would_fight(w, policy, ctx.params, also=e):
         return None
     out = engage(w, ctx, e, GatherState.name)
     if not out.intents:
@@ -651,18 +654,28 @@ def _replan_gather(
     barred: Callable[[], bool] = lambda: False,
 ) -> bool:
     """Plan to the committed target (``m.gather_target``) while one is kept,
-    else pick: the nearest pile (in ``pile_region`` when set), then the
-    nearest grass by walk (``preferred``: field cells before safe ones),
+    else pick: the pile (in ``pile_region`` when set) and the grass
+    (``preferred``: field cells before safe ones) each cheapest by path cost
+    (``_nearest_clear``), then the cheaper of the two by ``_price``, a pile
+    counting ``GEM_PILE_STEPS`` cheaper: it is a gem for sure;
     then a kept walk to ground clear of hostiles (``CLEAR``, tried after the
     picks: it ends for something it can reach), then, on safe ground,
     out to field ground or the frontier; else, when ``barred()`` (known cells
     to cut held by a hostile), the nearest frontier clear of every known
     hostile (``_plan_clear``); leave ``m.path`` alone if none.
 
-    Unless ``d.fight``, every walk prices known hostiles' reach as costly
-    (``reach_cells``) and a target whose path still crosses it is not taken
-    (``route_clear``): a kept one is let go at once, and the next nearest is
-    tried, up to ``ROUTE_TRIES`` per kind (free-play run 5).
+    A target's price is its walk with the danger on it (``_price``): known
+    hostiles' reach is costly unless ``d.fight`` (``reach_cells``), and
+    ground near what a hostile holds or where one stands, and faded posts'
+    ground, add their steps to each cell (``Danger.priced_cells``), on the
+    path and at the target alike. A target whose path still crosses known
+    reach is not taken (``route_clear``): a kept one is let go at once, and
+    the next cheapest is tried, up to ``ROUTE_TRIES`` per kind. A hostile
+    that comes out to fight us stretches the ground it holds, and the ground
+    priced round it, out to where it did (``WorldModel.note_came_for_us``),
+    and the fight has every committed target priced again
+    (``Memory.reprice_targets``), so a target it turned us back from costs
+    more from then on.
 
     A kept target is given up only when no path reaches it at all, or its
     path has started on a taken cell for ``HOLD_TICKS``; until then it is
@@ -673,7 +686,7 @@ def _replan_gather(
     """
     d = d or danger(w, policy)
     params = grid_params(policy, blocked, costly if d.fight else costly | reach_cells(w, policy, d))
-    params.priced = {p: steps for p in preferred if (steps := d.price(p))}
+    params.priced = d.priced_cells()
     here = w.pos
     assert here is not None
 
@@ -692,18 +705,16 @@ def _replan_gather(
         if held is not None:
             return held
 
-    piles = [
-        e for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
-    ]
-    for pile in sorted(piles, key=lambda e: (chebyshev(e.pos, here), e.id))[:ROUTE_TRIES]:
-        path = cost_path(w, pile.pos, params)
-        if next_step(w, blocked, path) and clear(path):
-            m.path, m.goal, m.gather_target = path, GOAL, ("pile", pile.pos)
-            return False
-
-    found = _nearest_clear(w, set(preferred), params, blocked, clear)
-    if found:
-        m.path, m.goal, m.gather_target = found[1], GOAL, ("grass", found[0])
+    piles = {
+        e.pos for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
+    }
+    pile = _nearest_clear(w, piles, params, blocked, clear)
+    grass = _nearest_clear(w, set(preferred), params, blocked, clear)
+    if pile and (grass is None or _price(pile[1], params) - GEM_PILE_STEPS <= _price(grass[1], params)):
+        m.path, m.goal, m.gather_target = pile[1], GOAL, ("pile", pile[0])
+        return False
+    if grass:
+        m.path, m.goal, m.gather_target = grass[1], GOAL, ("grass", grass[0])
         return False
 
     if kept is not None and kept[0] == CLEAR and _clear_of_hostiles(w, policy, kept[1], d):
@@ -741,17 +752,24 @@ def _keep(w: WorldModel, m: Memory, kept: tuple[str, Pos], path: list[Pos] | Non
     return None
 
 
+def _price(path: list[Pos], params: CostGridParams) -> int:
+    """A walk's price: its steps, and the steps priced ground adds to each
+    cell of it, the target's included (``Danger.priced_cells``)."""
+    return len(path) + sum(params.priced.get(p, 0) for p in path)
+
+
 def _pile_in(pos: Pos, region: tuple[int, int] | None) -> bool:
     """A pile at ``pos`` lies in ``region``, or no region bounds the piles."""
     return region is None or region_of(pos) == region
 
 
 def _nearest_clear(
-    w: WorldModel, cells: set[Pos], params, blocked: set[Pos], clear: Callable[[list[Pos]], bool]
+    w: WorldModel, cells: set[Pos], params: CostGridParams, blocked: set[Pos], clear: Callable[[list[Pos]], bool]
 ) -> tuple[Pos, list[Pos]] | None:
-    """The nearest of ``cells`` a path reaches with a first step open and a
+    """The cheapest of ``cells`` by path cost (``nearest_target``) a path reaches with a first step open and a
     ``clear`` route, and that path; up to ``ROUTE_TRIES`` searches. A cell
-    in a faded post's ground counts its ``params.priced`` steps further (A85)."""
+    in priced ground (near a hostile's, or a faded post's) counts its
+    ``params.priced`` steps further (``Danger.priced_cells``)."""
     here = w.pos
     assert here is not None
     cells = set(cells)
@@ -835,6 +853,6 @@ def _clear_of_hostiles(w: WorldModel, policy: Policy, p: Pos, d: Danger | None =
 
 def _nearest(here: Pos, cells: Iterable[Pos], priced: dict[Pos, int] | None = None) -> set[Pos]:
     """The ``GATHER_CANDIDATES`` cells closest to ``here`` (ties to the smaller
-    cell), a cell in a faded post's ground its ``priced`` steps further."""
+    cell), a cell in priced ground its ``priced`` steps further."""
     priced = priced or {}
     return set(sorted(cells, key=lambda p: (chebyshev(p, here) + priced.get(p, 0), p))[:GATHER_CANDIDATES])

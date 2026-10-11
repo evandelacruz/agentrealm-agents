@@ -16,12 +16,31 @@ from agentrealm_agent.survival import (
     effective_retreat_hits,
     effective_risk,
     should_retreat,
-    would_lose,
 )
 from agentrealm_agent.pathing import FLEE_RUN_STEPS, flee_run, outruns
 from agentrealm_agent.world import Entity, WorldModel, chebyshev
 from agentrealm_agent.zone_discovery import apply_zone
 
+
+
+def loses(w, policy, params) -> bool:
+    """With hostiles in range, an engagement under ``on_hostile = fight`` would not start as a fight."""
+    import dataclasses
+
+    from agentrealm_agent.engagement import would_fight
+    from agentrealm_agent.survival import combat_group
+
+    fight = dataclasses.replace(policy, on_hostile="fight")
+    return bool(combat_group(w, fight)) and not would_fight(w, fight, params)
+
+
+def retreats(w, policy, params) -> bool:
+    """``should_retreat`` with the engagement's decision, as Retreat reads it."""
+    from agentrealm_agent.engagement import fights, sync_engagement
+
+    m = Memory()
+    sync_engagement(w, m, policy, params)
+    return should_retreat(w, policy, params, fights(m))
 
 def world(rows: list[str], at=(0, 0)) -> WorldModel:
     glyph = {".": "dirt", "#": "wall", "~": "lava"}
@@ -171,8 +190,8 @@ class RetreatTest(unittest.TestCase):
     def test_threshold_is_retreat_hits_times_the_hit(self):
         # risk 0.5 with lives well above the floor: retreat_hits applies as set.
         params = {"retreat_hits": 2, "risk": 0.5, "lives_floor": 3}
-        self.assertTrue(should_retreat(self.hurt(health=10, damage=5), Policy(hostile=["npc"]), {**PARAM_DEFAULTS, **params}))
-        self.assertFalse(should_retreat(self.hurt(health=11, damage=5), Policy(hostile=["npc"]), {**PARAM_DEFAULTS, **params}))
+        self.assertTrue(retreats(self.hurt(health=10, damage=5), Policy(hostile=["npc"]), {**PARAM_DEFAULTS, **params}))
+        self.assertFalse(retreats(self.hurt(health=11, damage=5), Policy(hostile=["npc"]), {**PARAM_DEFAULTS, **params}))
 
     def test_params_move_the_threshold(self):
         w = self.hurt(health=12, damage=5)
@@ -183,7 +202,7 @@ class RetreatTest(unittest.TestCase):
     def test_not_without_a_hostile_in_range(self):
         w = self.hurt(health=1)
         w.entities = []
-        self.assertFalse(should_retreat(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        self.assertFalse(retreats(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
         self.assertEqual(dispatch(w, ctx(hostile=["npc"])).state, "Explore")
 
     def test_not_without_a_known_safe_tile(self):
@@ -553,14 +572,14 @@ class WinEstimateTest(unittest.TestCase):
         w = world(["..."], at=(0, 0))
         w.health, w.lives = 10, 3
         w.entities = [Entity("npc", 5, (1, 0), code="gnawer")]
-        self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        self.assertTrue(loses(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
 
     def test_lone_weak_measured_type_at_full_health_wins(self):
         w = world(["..."], at=(0, 0))
         w.health, w.lives = 500, 10
         w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
         w.threat.record(("npc", "snotling"), 1)
-        self.assertFalse(would_lose(w, Policy(hostile=["npc"]), {**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1}))
+        self.assertFalse(loses(w, Policy(hostile=["npc"]), {**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1}))
 
     def test_unknown_health_is_a_new_characters_not_a_hostiles(self):
         w = world(["..."], at=(0, 0))
@@ -572,7 +591,7 @@ class WinEstimateTest(unittest.TestCase):
         for hostile_health in (10, 1000):
             with mock.patch.object(survival, "UNKILLED_HOSTILE_HEALTH", hostile_health):
                 self.assertEqual(survival.win_ratio(10, w.entities, w.threat) <= 1.0,
-                                 would_lose(w, Policy(hostile=["npc"]), params))
+                                 loses(w, Policy(hostile=["npc"]), params))
 
 
 
@@ -613,9 +632,9 @@ class SwingTest(unittest.TestCase):
         w.health, w.lives, w.armed_code = 10, 10, "pocket_knife"
         w.threat.record(("npc", "snotling"), 1)
         w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
-        self.assertFalse(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        self.assertFalse(loses(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
         w.entities.append(Entity("npc", 6, (1, 1), code="snotling"))
-        self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        self.assertTrue(loses(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
 
     def test_an_unmeasured_type_swings_at_the_base_attack_power(self):
         """Free-play run 9 (A85): a type never measured is priced by the
@@ -624,12 +643,12 @@ class SwingTest(unittest.TestCase):
         w = world(["..."], at=(0, 0))
         w.health, w.lives, w.armed_code = 10, 10, "pocket_knife"
         w.entities = [Entity("npc", 5, (1, 0), code="gnawer")]
-        self.assertFalse(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        self.assertFalse(loses(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
         w.entities.append(Entity("npc", 6, (2, 0), code="gnawer"))
-        self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        self.assertTrue(loses(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
         w.entities.pop()
         w.threat.record(("npc", "gnawer"), 5)
-        self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        self.assertTrue(loses(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
 
     def test_a_measured_hit_rate_moves_the_swing_off_the_roll(self):
         """Counted hits and misses (A85) move a type's chance off the
@@ -666,8 +685,8 @@ class TownsfolkTest(unittest.TestCase):
         policy = Policy(hostile=["npc"], on_hostile="fight")
         self.assertFalse(survival.is_hostile(w, policy, w.entities[0]))
         self.assertEqual(survival.hostiles_in_range(w, policy), [])
-        self.assertFalse(should_retreat(w, policy, dict(PARAM_DEFAULTS)))
-        self.assertFalse(would_lose(w, policy, dict(PARAM_DEFAULTS)))
+        self.assertFalse(retreats(w, policy, dict(PARAM_DEFAULTS)))
+        self.assertFalse(loses(w, policy, dict(PARAM_DEFAULTS)))
 
     def test_no_flee_retreat_or_fight_on_a_townsperson(self):
         for on_hostile in ("flee", "fight"):
@@ -719,7 +738,7 @@ class TownsfolkTest(unittest.TestCase):
 
 class RetreatThreatTest(unittest.TestCase):
     """A23 survive-a-fight run 2: Retreat started three times at 10/10 from
-    ``would_lose`` alone. A fight we would lose sends us to safety only when
+    the estimate alone. A fight we would lose sends us to safety only when
     a hostile is coming for us; one that stands nearby is avoided."""
 
     def standing(self, at=(3, 0)):
@@ -727,7 +746,7 @@ class RetreatThreatTest(unittest.TestCase):
         safe_at(w, (6, 0))
         w.health, w.max_health, w.lives = 10, 10, 6
         w.tick = 100
-        w.entities = [Entity("npc", 240, at, "gnawer")]  # unmeasured: would_lose at the default risk
+        w.entities = [Entity("npc", 240, at, "gnawer")]  # unmeasured: a lost fight at the default risk
         return w
 
     def policy(self):
@@ -738,13 +757,13 @@ class RetreatThreatTest(unittest.TestCase):
 
     def test_a_hostile_standing_two_cells_off_is_not_retreated_from(self):
         w = self.standing()
-        self.assertTrue(would_lose(w, self.policy(), self.params()))
-        self.assertFalse(should_retreat(w, self.policy(), self.params()))
+        self.assertTrue(loses(w, self.policy(), self.params()))
+        self.assertFalse(retreats(w, self.policy(), self.params()))
         self.assertNotEqual(dispatch(w, ctx(params=self.params(), on_hostile="fight")).state, "Retreat")
 
     def test_a_hostile_in_reach_is(self):
         w = self.standing(at=(2, 0))
-        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+        self.assertTrue(retreats(w, self.policy(), self.params()))
 
     def test_a_hostile_approaching_is(self):
         w = self.standing(at=(4, 0))
@@ -752,31 +771,31 @@ class RetreatThreatTest(unittest.TestCase):
         w.tick = 104
         w.apply_entities({"tick": 104, "npcs": [{"id": 240, "x": 3, "y": 0, "npc_type_code": "gnawer"}]})
         self.assertTrue(survival.approaching(w, w.entities[0]))
-        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+        self.assertTrue(retreats(w, self.policy(), self.params()))
 
     def test_an_old_approach_is_forgotten(self):
         w = self.standing(at=(4, 0))
         w.apply_entities({"tick": 100, "npcs": [{"id": 240, "x": 4, "y": 0, "npc_type_code": "gnawer"}]})
         w.apply_entities({"tick": 101, "npcs": [{"id": 240, "x": 3, "y": 0, "npc_type_code": "gnawer"}]})
         w.tick = 101 + survival.THREAT_MEMORY_TICKS + 1
-        self.assertFalse(should_retreat(w, self.policy(), self.params()))
+        self.assertFalse(retreats(w, self.policy(), self.params()))
 
     def test_a_hostile_moving_away_is_not(self):
         w = self.standing(at=(2, 0))
         w.apply_entities({"tick": 100, "npcs": [{"id": 240, "x": 2, "y": 0, "npc_type_code": "gnawer"}]})
         w.apply_entities({"tick": 101, "npcs": [{"id": 240, "x": 3, "y": 0, "npc_type_code": "gnawer"}]})
         self.assertFalse(survival.approaching(w, w.entities[0]))
-        self.assertFalse(should_retreat(w, self.policy(), self.params()))
+        self.assertFalse(retreats(w, self.policy(), self.params()))
 
     def test_the_hostile_hitting_us_is(self):
         w = self.standing()
         w.attacker, w.attacked_tick = ("npc", 240), w.tick
-        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+        self.assertTrue(retreats(w, self.policy(), self.params()))
 
     def test_the_health_floor_still_retreats_from_a_standing_hostile(self):
         w = self.standing()
         w.health = 1
-        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+        self.assertTrue(retreats(w, self.policy(), self.params()))
 
 if __name__ == "__main__":
     unittest.main()

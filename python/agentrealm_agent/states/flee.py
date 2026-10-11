@@ -8,20 +8,13 @@ from ..directives import attack_forbidden
 from ..memory import Memory
 from ..navigation import cost_path, oscillation
 from ..pathing import flee_run, flee_step, grid_params, outruns, retreat_safe_goal, step_open
-from ..survival import (
-    at_health_floor,
-    combat_group,
-    flee_from,
-    hostiles_in_range,
-    is_attacker,
-    on_safe_tile,
-    would_lose,
-)
+from ..engagement import cannot_outrun, fights
+from ..survival import at_health_floor, combat_group, flee_from, is_attacker, on_safe_tile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .explore import plan_sets
-from .fight import can_engage, engage, fight_target, in_weapon_reach, weapon_has_hurt
+from .fight import can_engage, engage, fight_target, in_weapon_reach
 from .intents import set_position
 from .retreat import retreat_step
 
@@ -96,43 +89,48 @@ def not_outrunning(w: WorldModel, m: Memory) -> bool:
 
 
 def instead_of_fleeing(
-    w: WorldModel, ctx: PlayContext, target: Entity, hostiles: list[Entity], blocked: set[Pos], paced: set[Pos]
+    w: WorldModel,
+    ctx: PlayContext,
+    target: Entity,
+    hostiles: list[Entity],
+    blocked: set[Pos],
+    paced: set[Pos],
+    fight: bool,
 ) -> StateOutcome | None:
-    """Fight back or retreat once running away has failed (A9), or None to keep running.
+    """Once running away cannot open distance: carry out the engagement's
+    decision (``fight``, ``engagement.cannot_outrun``), or None to keep running.
 
-    In order: fight back when we win, or when there is no step away
-    (cornered) and health is above the floor; walk toward safety, Retreat's
-    way; swing back anyway when ``target`` is the one hitting us, in weapon
-    reach, and health is above the floor, since running and retreating both
-    failed. We win only against a type our weapon has hurt
-    (``weapon_has_hurt``) when the win estimate clears. At or below the
-    health floor (``at_health_floor``), a fight we do not win is never
-    picked (A16 Walk run 4). A target ``never_attack`` forbids is never
+    Fight: swing at or close on ``target``. Flee: walk toward safety,
+    Retreat's way. With no move away at all (no step from the hostiles, no
+    Retreat walk), standing still only takes free hits, so it swings at
+    ``target`` when it is the hitter, in weapon reach, and health is above
+    the floor (``at_health_floor``). A ``never_attack`` target is never
     fought. ``paced`` is the oscillation guard's escape, already taken this
     decision (A15).
     """
-    policy = ctx.policy
     may_hit = not attack_forbidden(target, ctx.never_attack)
-    cornered = flee_step(w, hostiles, blocked) is None
-    wins = (
-        bool(hostiles_in_range(w, policy))
-        and weapon_has_hurt(w, target, ctx.knowledge)
-        and not would_lose(w, policy, ctx.params)
-    )
-    above_floor = not at_health_floor(w, ctx.params, combat_group(w, policy) or hostiles)
-    options = []
-    if may_hit and (wins or (cornered and above_floor)):
-        options.append(lambda: engage(w, ctx, target, FleeState.name))
-    options.append(lambda: retreat_step(w, ctx, FleeState.name, paced))
-    hitter_in_reach = is_attacker(w, target) and in_weapon_reach(w, target, ctx.knowledge)
-    if may_hit and above_floor and hit_while_fleeing(w, ctx.memory) and hitter_in_reach:
-        options.append(lambda: engage(w, ctx, target, FleeState.name))
-    for option in options:
-        out = option()
-        if out.intents or out.wait:
-            out.reason = f"not outrunning {target.kind} {target.id}: {out.reason}"
-            return out
+    if fight and may_hit:
+        out = engage(w, ctx, target, FleeState.name)
+    else:
+        out = retreat_step(w, ctx, FleeState.name, paced)
+        if not (out.intents or out.wait) and may_hit and _no_move_but_to_swing(w, ctx, target, hostiles, blocked):
+            out = engage(w, ctx, target, FleeState.name)
+    if out.intents or out.wait:
+        out.reason = f"not outrunning {target.kind} {target.id}: {out.reason}"
+        return out
     return None
+
+
+def _no_move_but_to_swing(
+    w: WorldModel, ctx: PlayContext, target: Entity, hostiles: list[Entity], blocked: set[Pos]
+) -> bool:
+    """No step opens distance, ``target`` is hitting us from weapon reach, and
+    health is above the floor against the hostiles in range."""
+    if flee_step(w, hostiles, blocked) is not None:
+        return False
+    if not (is_attacker(w, target) and in_weapon_reach(w, target, ctx.knowledge)):
+        return False
+    return not at_health_floor(w, ctx.params, combat_group(w, ctx.policy) or hostiles)
 
 
 def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
@@ -140,8 +138,9 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
 
     ``flee`` flees every hostile in range, and a pursuer that hit us
     recently even out of range (``flee_from``); ``fight`` flees when there is no
-    swingable target (``never_attack``), the win estimate says we lose, or
-    the target is out of weapon reach with no open step closer; ``ignore``
+    swingable target (``never_attack``), the engagement's decision is not to
+    fight (``engagement.fights``), or the target is out of weapon reach with
+    no open step closer; ``ignore``
     never flees. On a known safe tile, nothing can hurt us, so it stays.
     """
     policy = ctx.policy
@@ -156,7 +155,7 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
     if policy.on_hostile == "flee":
         return True
     target = fight_target(world, policy, ctx.never_attack)
-    if target is None or would_lose(world, policy, ctx.params):
+    if target is None or not fights(ctx.memory):
         return True
     return not can_engage(world, target, ctx)
 
@@ -173,8 +172,9 @@ class FleeState(State):
     stands still.
 
     Running must work: once a hostile hits us after Flee began, or the gap
-    to it has not grown over ``FLEE_PROBE_TICKS`` ticks, Flee fights back
-    or retreats instead (``instead_of_fleeing``) until it stops (A9)."""
+    to it has not grown over ``FLEE_PROBE_TICKS`` ticks, the engagement is decided again on that
+    (``engagement.cannot_outrun``), and Flee carries the decision out
+    (``instead_of_fleeing``): it fights back, or walks Retreat's way (A9)."""
 
     name = "Flee"
 
@@ -192,7 +192,7 @@ class FleeState(State):
         target = min(hostiles, key=lambda e: (chebyshev(e.pos, w.pos), e.id))
         blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
         if m.state != self.name:
-            m.flee_gaps, m.flee_since, m.flee_failed = [], w.tick, False
+            m.flee_gaps, m.flee_since = [], w.tick
         m.flee_gaps.append((w.tick, chebyshev(target.pos, w.pos)))
         # Keep one sample at or before the probe window's start, nothing older.
         while len(m.flee_gaps) > 1 and m.flee_gaps[1][0] <= w.tick - FLEE_PROBE_TICKS:
@@ -200,9 +200,11 @@ class FleeState(State):
         # Read once per decision: the oscillation guard caught Flee/Retreat
         # pacing (A15), and whichever escape runs below must keep off these cells.
         paced = oscillation.take_escape(m, w)
-        if m.flee_failed or not_outrunning(w, m):
-            m.flee_failed = True
-            instead = instead_of_fleeing(w, ctx, target, hostiles, blocked, paced)
+        e = m.engagement
+        if e is not None and not e.cannot_outrun and not_outrunning(w, m):
+            e = cannot_outrun(w, m, policy, ctx.params)
+        if e is not None and e.cannot_outrun:
+            instead = instead_of_fleeing(w, ctx, target, hostiles, blocked, paced, e.fight)
             if instead is not None:
                 return instead
         # Start over when Flee did not run last decision (the threat was

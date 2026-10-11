@@ -647,7 +647,7 @@ class GatherShadowTest(unittest.TestCase):
     def test_fights_a_long_shadow_when_the_profile_fights_and_wins(self):
         w, c = self.shadowed("fight")
         self.follow(w, c, gather_mod.SHADOW_SECONDS)
-        with mock.patch.object(gather_mod, "would_lose", return_value=False):
+        with mock.patch.object(gather_mod, "would_fight", return_value=True):
             out = dispatch(w, c)
         self.assertEqual(out.state, "Gather")
         self.assertEqual(out.intents[0]["verb"], "SetPosition", "closes on it")
@@ -657,7 +657,7 @@ class GatherShadowTest(unittest.TestCase):
     def test_moves_off_instead_when_the_fight_would_be_lost(self):
         w, c = self.shadowed("fight")
         self.follow(w, c, gather_mod.SHADOW_SECONDS)
-        with mock.patch.object(gather_mod, "would_lose", return_value=True):
+        with mock.patch.object(gather_mod, "would_fight", return_value=False):
             dispatch(w, c)
         self.assertEqual(c.memory.gather_status, gather_mod.MOVING_OFF)
 

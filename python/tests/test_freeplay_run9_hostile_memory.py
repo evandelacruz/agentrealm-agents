@@ -26,7 +26,6 @@ from agentrealm_agent.hostile_memory import SIGHTINGS_KEY, load_hostiles, save_h
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states.gather import gather_outcome
-from agentrealm_agent.survival import would_lose
 from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_HALF_LIFE_TICKS, POST_HOLD_STRENGTH, Entity, WorldModel
 
 MAP = 1
@@ -34,6 +33,17 @@ CODE = "fake_gnasher"
 POST = (20, 10)
 LAST_SEEN = 1000  # the tick an earlier run last saw the guard on its post
 OP = {"op": "gather_gems", "count": 5}
+
+
+def loses(w, policy, params) -> bool:
+    """With hostiles in range, an engagement under ``on_hostile = fight`` would not start as a fight."""
+    import dataclasses
+
+    from agentrealm_agent.engagement import would_fight
+    from agentrealm_agent.survival import combat_group
+
+    fight = dataclasses.replace(policy, on_hostile="fight")
+    return bool(combat_group(w, fight)) and not would_fight(w, fight, params)
 
 
 def policy() -> Policy:
@@ -234,7 +244,7 @@ class ThreatKeptAcrossRunsTest(unittest.TestCase):
         load_hostiles(through_json(kb), w)
         self.assertTrue(w.threat.measured(self.WEAK))
         see(w, [Entity("npc", 4, (6, 5), self.WEAK[1])], 100)
-        self.assertFalse(would_lose(w, policy(), dict(PARAM_DEFAULTS)))
+        self.assertFalse(loses(w, policy(), dict(PARAM_DEFAULTS)))
 
     def test_a_type_measured_to_hit_hard_is_still_refused(self):
         kb = KnowledgeBase.empty("fake-world")
@@ -243,7 +253,7 @@ class ThreatKeptAcrossRunsTest(unittest.TestCase):
         w.armed_code = "pocket_knife"
         load_hostiles(kb, w)
         see(w, [Entity("npc", 4, (6, 5), "fake_brute")], 100)
-        self.assertTrue(would_lose(w, policy(), dict(PARAM_DEFAULTS)))
+        self.assertTrue(loses(w, policy(), dict(PARAM_DEFAULTS)))
 
     def test_two_characters_add_their_own_counts(self):
         """The knowledge base is shared: each save adds only what its run counted."""

@@ -19,7 +19,6 @@ from agentrealm_agent import config
 from agentrealm_agent.brain import UNPLACED_SELF_REFRESH, choose_call
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
@@ -49,11 +48,9 @@ def ctx(on_hostile: str = "flee") -> PlayContext:
     return PlayContext(Memory(), policy, random.Random(0), params=dict(PARAM_DEFAULTS))
 
 
-def weapon_hurt_pursuer(w: WorldModel, c: PlayContext) -> None:
-    """The armed weapon has landed a hit on the pursuer's type before (A18 ``weapon_damage``)."""
-    w.armed_code = "test_blade"
-    c.knowledge = KnowledgeBase("sandbox")
-    c.knowledge.items["test_blade"] = {"weapon_damage": {"pursuer": 1}}
+def pursuer_wins(w: WorldModel) -> None:
+    """The threat table has seen the pursuer's type hit hard: the estimate says it beats us."""
+    w.threat.record(("npc", "pursuer"), 30)
 
 
 def hit(w: WorldModel, npc_id: int = 7, amount: int = 2) -> None:
@@ -115,7 +112,8 @@ class PursuerNotOutrunTest(unittest.TestCase):
     def test_safe_tile_known_retreats_to_it(self):
         w, c = world(), ctx()
         w.health = w.max_health = 100  # healthy: Retreat's own health rule stays quiet
-        c.params["risk"] = 0.0  # cautious: an unmeasured pursuer is one we would lose to
+        c.params["risk"] = 0.0
+        pursuer_wins(w)
         apply_zone(w, 1, -20, -20, {"safe": True})
         reasons = [o.reason for _, o in pursue(w, c, npc_every=STEP_TICKS)]
         self.assertTrue(any("retreat → safe (-20, -20)" in r for r in reasons), reasons)
@@ -124,7 +122,6 @@ class PursuerNotOutrunTest(unittest.TestCase):
         w, c = world(), ctx()
         w.health = w.max_health = 100
         c.params["risk"] = 1.0  # bold: the win estimate decides
-        weapon_hurt_pursuer(w, c)
         apply_zone(w, 1, -20, -20, {"safe": True})
         reasons = [o.reason for _, o in pursue(w, c, npc_every=STEP_TICKS)]
         given_up = [r for r in reasons if r.startswith("not outrunning")]
@@ -132,32 +129,47 @@ class PursuerNotOutrunTest(unittest.TestCase):
         self.assertEqual(given_up[0], "not outrunning npc 7: fight npc 7")
         self.assertFalse(any("retreat" in r for r in reasons), reasons)
 
-    def test_a_hitter_out_of_weapon_reach_is_not_walked_back_to(self):
-        """Running failed, we would lose, no safe tile: swing back only at the hitter in reach, never close in (review on #107)."""
+    def test_a_hitter_we_lose_to_is_neither_closed_on_nor_fought(self):
+        """Running failed, the estimate says we lose, no safe tile: keep running, in reach or not."""
         w, c = world(), ctx()
         w.health = w.max_health = 100
         c.params["risk"] = 0.0
+        pursuer_wins(w)
         w.entities = [Entity("npc", 7, (12, 10), code="pursuer")]  # in range, two cells: out of weapon reach
         m = c.memory
-        m.state, m.flee_since, m.flee_failed, m.flee_gaps = "Flee", w.tick, True, [(w.tick, 2)]
+        m.state, m.flee_since, m.flee_gaps = "Flee", w.tick, [(w.tick, 2)]
         w.tick += 5
         hit(w, npc_id=7)
         out = dispatch(w, c)
         self.assertEqual(out.state, "Flee")
         self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
         self.assertNotIn("close on", out.reason)
+        self.assertTrue(m.engagement.cannot_outrun)
         w.entities[0].pos = (11, 10)  # now in reach
         w.tick += 1
         hit(w, npc_id=7)
-        self.assertEqual(dispatch(w, c).reason, "not outrunning npc 7: fight npc 7")
+        out = dispatch(w, c)
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
 
-    def test_a_hostile_in_reach_that_is_not_the_hitter_is_not_fought(self):
+    def test_a_hitter_we_beat_is_closed_on_once_running_fails(self):
+        """The same decision Fight would make: we win, so fight, closing in when out of reach."""
+        w, c = world(), ctx()
+        w.health = w.max_health = 100
+        w.entities = [Entity("npc", 7, (12, 10), code="pursuer")]
+        m = c.memory
+        m.state, m.flee_since, m.flee_gaps = "Flee", w.tick, [(w.tick, 2)]
+        w.tick += 5
+        hit(w, npc_id=7)
+        self.assertEqual(dispatch(w, c).reason, "not outrunning npc 7: close on npc 7")
+
+    def test_a_group_we_lose_to_is_not_fought(self):
         w, c = world(), ctx()
         w.health = w.max_health = 100
         c.params["risk"] = 0.0
+        w.threat.record(("npc", "bystander"), 30)
         w.entities = [Entity("npc", 9, (11, 10), code="bystander")]  # adjacent; npc 7 hits from out of view
         m = c.memory
-        m.state, m.flee_since, m.flee_failed, m.flee_gaps = "Flee", w.tick, True, [(w.tick, 1)]
+        m.state, m.flee_since, m.flee_gaps = "Flee", w.tick, [(w.tick, 1)]
         w.tick += 5
         hit(w, npc_id=7)
         out = dispatch(w, c)
@@ -177,7 +189,7 @@ class PursuerNotOutrunTest(unittest.TestCase):
         apply_zone(w, 1, 0, 0, {"safe": True})  # walled in: unreachable
         w.entities = [Entity("npc", 7, (11, 10), code="pursuer")]
         m = c.memory
-        m.state, m.flee_since, m.flee_failed, m.flee_gaps = "Flee", w.tick, True, [(w.tick, 1)]
+        m.state, m.flee_since, m.flee_gaps = "Flee", w.tick, [(w.tick, 1)]
         here, back = (10, 10), (9, 9)  # Flee has been pacing between these (A15 guard)
         m.flee_path = [back]
         m.nav_stuck.cells_map = w.map_id
@@ -196,10 +208,11 @@ class PursuerNotOutrunTest(unittest.TestCase):
     def test_flees_retreat_keeps_off_the_paced_cell(self):
         """Running failed and the safe tile is straight west: Retreat's step keeps off the paced cell (A15)."""
         w, c = world(), ctx()
+        pursuer_wins(w)
         apply_zone(w, 1, 4, 10, {"safe": True})
         w.entities = [Entity("npc", 7, (11, 10), code="pursuer")]
         m = c.memory
-        m.state, m.flee_since, m.flee_failed, m.flee_gaps = "Flee", w.tick, True, [(w.tick, 1)]
+        m.state, m.flee_since, m.flee_gaps = "Flee", w.tick, [(w.tick, 1)]
         here, back = (10, 10), (9, 9)  # (9, 9) is Retreat's first step with nothing paced
         m.nav_stuck.cells_map = w.map_id
         m.nav_stuck.recent_cells = [back, here, back, here, back]
@@ -214,7 +227,6 @@ class PursuerNotOutrunTest(unittest.TestCase):
         w, c = world(), ctx()
         w.health = w.max_health = 100
         c.params["risk"] = 1.0
-        weapon_hurt_pursuer(w, c)
         start = w.tick
         outs = pursue(w, c, npc_every=STEP_TICKS, start_gap=2, swings=False)
         self.assertLessEqual(len(c.memory.flee_gaps), FLEE_PROBE_TICKS + 1, "kept to the probe window")

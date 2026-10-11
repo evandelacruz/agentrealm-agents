@@ -17,6 +17,7 @@ from .executor.movement import step_landing
 from .healing import regen_known
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
+from .engagement import fights
 from .survival import should_retreat
 from .world import Pos, WorldModel
 from .zone_discovery import safe_tiles
@@ -62,7 +63,7 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
         track_regen: bool = False,
     ) -> str | None:
         """Shared ``before_tick`` survival checks. Returns regen verdict when tracked."""
-        if should_retreat(w, policy, params) and state not in self.survival_states:
+        if should_retreat(w, policy, params, fights(m)) and state not in self.survival_states:
             self.retreat_misses += 1
         if intents and state == "Heal":
             self.heal_actions += 1

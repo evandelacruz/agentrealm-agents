@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import random
 import unittest
+from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
@@ -357,8 +358,10 @@ class DetourKeepsClearTest(unittest.TestCase):
         see(w, [find], POST_STILL_TICKS + 1)
         m.goal, m.path = "travel", [(x, 10) for x in range(13, 36)]
         c = self.ctx(m, [{"op": "travel", "to": "point", "x": 35, "y": 10}])
-        self.assertEqual(detour_find(w, c), find)  # its ground is clear
-        DetourState().act(w, c)
+        # Only the route is under test: ground near the post is not priced here.
+        with mock.patch("agentrealm_agent.hostile_ground.near_reach", return_value=[]):
+            self.assertEqual(detour_find(w, c), find)  # its ground is clear
+            DetourState().act(w, c)
         self.assertIsNone(m.detour)
         self.assertIn(70, m.detour_skipped)
 

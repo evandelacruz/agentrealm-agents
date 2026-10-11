@@ -333,30 +333,17 @@ def win_ratio(health: int | None, group: list[Entity], threat: ThreatTable, weap
     return ticks_to_kill_us(health, group, threat) / ticks_to_kill_them(group, weapon)
 
 
-def would_lose(
-    w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity | None = None
-) -> bool:
-    """True when the win estimate is below the effective fight margin.
-
-    **Fight** (A23) and **Flee** gate on this; **Retreat** also fires when
-    the group outclasses us. ``also`` counts one more hostile as in range,
-    for a fight Gather would start on one further off (A63 run 3).
-    """
-    group = combat_group(w, policy, also)
-    if not group:
-        return False
-    eff_risk = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
+def estimate_health(w: WorldModel) -> int:
+    """The health the win estimate counts: live health, else max, else a new character's."""
     health = w.health if w.health is not None else w.max_health
-    if health is None:
-        health = NEW_CHARACTER_HEALTH
-    margin = effective_fight_margin(float(params["fight_margin"]), eff_risk)
-    return win_ratio(health, group, w.threat, w.armed_code) <= margin
+    return NEW_CHARACTER_HEALTH if health is None else health
 
 
-def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:
+def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int], fight: bool) -> bool:
     """The next effective ``retreat_hits`` hits from the hostiles in range could
     kill, or (``on_hostile = "fight"``) we would lose to a group that is
-    ``threatening`` us.
+    ``threatening`` us: ``fight`` is the engagement's fight-or-flee decision
+    (``engagement.fights``), the one Fight and Flee read too.
 
     A hit's size comes from what is attacking (the threat table), so with no
     hostile in range there is nothing to retreat from. A fight we would lose
@@ -369,7 +356,7 @@ def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]
     group = combat_group(w, policy)
     if not group:
         return False
-    if policy.on_hostile == "fight" and would_lose(w, policy, params) and threatening(w, group):
+    if policy.on_hostile == "fight" and not fight and threatening(w, group):
         return True
     return at_health_floor(w, params, group)
 

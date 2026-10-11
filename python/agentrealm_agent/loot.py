@@ -39,6 +39,9 @@ if TYPE_CHECKING:
 NON_TRANSFERABLE = frozenset({"pocket_knife"})
 # Observed on the wire (GAME_NOTES.md, docs/observations/A20_live_play.md).
 GEM_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
+# Steps of walk a gem pile is worth: a sure gem, where a cut may drop none.
+# Detour's allowance for one, and its edge over grass in Gather's pick (A73, A94).
+GEM_PILE_STEPS = 8
 # A life's ground code once live play confirms it (A47). Until then the item
 # table's ``life_on_pickup`` rows, learned by ``learn_life_code``, stand in.
 LIFE_SUPPLY_CODES: frozenset[str] = frozenset()

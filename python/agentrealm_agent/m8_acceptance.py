@@ -25,10 +25,11 @@ module checks for each clause:
   at most the world's base attack power (2): the price the win estimate gives
   it, measured or not. Deaths fail the run immediately.
 - Never starts a fight below its health floor: the first attack ``Use`` after
-  entering **Fight** must not come while ``would_lose`` holds (the group's
-  expected damage against health plus ``fight_margin``; PLAYABLE_AGENT
-  Combat). Swings later in the same fight are not judged: taking hits is what
-  a fight does.
+  entering **Fight** must not come while the win estimate is at or below the
+  lowest bar the fight-or-flee decision uses (``engagement.fight_bar`` once
+  running cannot open distance: ``fight_margin`` or break-even, whichever is
+  lower; PLAYABLE_AGENT Combat). Swings later in the same fight are not
+  judged: taking hits is what a fight does.
 
 On a run shorter than 95% of the target duration, only deaths, fight-floor
 violations and API errors fail the run; the milestone checks above are judged
@@ -46,7 +47,8 @@ from .healing import code_in_hand, hurt, potion_count
 from .supplies import is_food, is_potion
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .survival import combat_group, would_lose
+from .engagement import fight_bar
+from .survival import combat_group, estimate_health, win_ratio
 from .threat import UNMEASURED_DEFAULT, type_key_for_entity
 from .states.intents import is_self_use
 from .world import WorldModel
@@ -268,7 +270,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
         attacks = [i for i in intents if _is_attack_use(i, w)]
         if not attacks:
             return
-        if not self._fighting and would_lose(w, policy, params):
+        if not self._fighting and _below_every_bar(w, policy, params):
             self.fight_below_floor += 1
         self._fighting = True
 
@@ -287,7 +289,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
         out = list(self.base_failures())
         if self.fight_below_floor:
             out.append(
-                f"{self.fight_below_floor} fight(s) started below the health floor (would_lose)"
+                f"{self.fight_below_floor} fight(s) started below the health floor (win estimate under every fight bar)"
             )
         if not full_run:
             return out
@@ -342,3 +344,12 @@ def _lone_weak_group(w: WorldModel, group: list, npc_id: int) -> bool:
     if len(group) != 1 or group[0].kind != "npc" or group[0].id != npc_id:
         return False
     return w.threat.damage_per_hit(type_key_for_entity(group[0])) <= UNMEASURED_DEFAULT
+
+
+def _below_every_bar(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:
+    """The win estimate against the group in range is at or below the lowest
+    bar a fight-or-flee decision may use: no decision would start this fight."""
+    group = combat_group(w, policy)
+    if not group:
+        return False
+    return win_ratio(estimate_health(w), group, w.threat, w.armed_code) <= fight_bar(w, policy, params, outrun_failed=True)

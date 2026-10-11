@@ -17,7 +17,11 @@ a life is worth ``LIFE_STEPS``; food while hurt ``FOOD_STEPS``. Hostile
 safety is Gather's: the find must be on ground ``gather_ground`` allows
 (off hazards, clear of every known hostile's bar, in view or remembered),
 the path walked there must stay out of every known hostile's reach
-(``route_clear``), and the survival reflexes above it still win. A find
+(``route_clear``), faded ground the find lies in counts its steps against
+the allowance (``Danger.price``), and the survival reflexes above it
+still win. A hostile that came out to fight us holds the ground out to
+where it did (``WorldModel.note_came_for_us``), so a find it turned us
+back from is no longer on ground Gather may work. A find
 is priced by risk too (``risk_allowed``): one within ``RISK_RADIUS`` of a
 known hostile, in view or remembered, is taken only while one hit from
 each of them would leave health above Retreat's floor. A detour is
@@ -44,7 +48,7 @@ from ..supplies import is_food
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from ..knowledge_base import knowledge_items
 from ..memory import Memory
-from ..loot import GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_room
+from ..loot import GEM_PILE_STEPS, GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_room
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
@@ -56,9 +60,8 @@ from .gather_safe import gather_ground, route_clear
 from .intents import set_position
 
 GOAL = "detour"
-# The most steps going by a find may add to the walk, by kind (A73; free-play
-# run 4 walked past a gem triple 5 cells off that cost about 7).
-GEM_PILE_STEPS = 8
+# The most steps going by a find may add to the walk, by kind (A73): a gem
+# pile is worth ``loot.GEM_PILE_STEPS``.
 # Each gem pile next to the find adds this much: one stop takes them all.
 GEM_CLUSTER_STEPS = 4
 # A cluster counts at most this many piles.
@@ -194,7 +197,9 @@ def extra_steps(w: WorldModel, here: Pos, find: Pos, route: list[Pos], limit: in
 
 def detour_find(w: WorldModel, ctx: PlayContext, known: Danger | None = None) -> Entity | None:
     """The valuable worth a detour off the walk under way, on ground Gather
-    may work (``known``, this decision's ``Danger``): fewest extra steps, then id."""
+    may work (``known``, this decision's ``Danger``): fewest extra steps, then
+    id. Faded ground a find lies in counts its steps (``Danger.price``)
+    against the find's allowance, as it does for Gather's picks."""
     m = ctx.memory
     here = w.pos
     if here is None or m.goal in ("", GOAL):
@@ -211,9 +216,11 @@ def detour_find(w: WorldModel, ctx: PlayContext, known: Danger | None = None) ->
             continue  # in reach is Pickup's
         if not risk_allowed(w, ctx, e.pos, known):
             continue
-        extra = extra_steps(w, here, e.pos, route, allowance(w, e, finds, items), ctx.policy.avoid_blocks)
+        price = known.price(e.pos)
+        extra = extra_steps(w, here, e.pos, route, allowance(w, e, finds, items) - price, ctx.policy.avoid_blocks)
         if extra is None:
             continue
+        extra += price
         if best is None or (extra, e.id) < best[:2]:
             best = (extra, e.id, e)
     return best[2] if best is not None else None

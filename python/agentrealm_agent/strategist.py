@@ -138,9 +138,9 @@ from .plan import (
     PARAM_MEANINGS,
     PLAN_STALL_SECONDS,
     Plan,
+    accepts_plan,
     builtin_way_on,
     collect_rejections,
-    is_plan_payload,
     parse_plan_payload,
 )
 from .loot import carry_slots_used
@@ -544,30 +544,62 @@ def tokens_used(usage: dict[str, Any]) -> int | None:
 
 
 def json_objects(raw: str) -> list[dict[str, Any]]:
-    """Every top-level JSON object in ``raw``, in order, skipping the text between."""
-    decoder, found, i = json.JSONDecoder(), [], raw.find("{")
+    """Every top-level JSON object in ``raw``, in order, skipping the text between.
+
+    A span is from a ``{`` to the ``}`` that balances it, braces inside strings
+    not counted. A span that is not valid JSON is skipped whole, never searched
+    for objects nested in it; an unclosed one ends the search.
+    """
+    found: list[dict[str, Any]] = []
+    i = raw.find("{")
     while i >= 0:
+        end = _balanced_end(raw, i)
+        if end is None:
+            break
         try:
-            obj, end = decoder.raw_decode(raw, i)
+            obj = json.loads(raw[i:end])
         except ValueError:
-            i = raw.find("{", i + 1)
-            continue
-        found.append(obj)
+            obj = None
+        if isinstance(obj, dict):
+            found.append(obj)
         i = raw.find("{", end)
     return found
+
+
+def _balanced_end(raw: str, start: int) -> int | None:
+    """The index just past the ``}`` that closes the ``{`` at ``start``, or None."""
+    depth, in_string, escaped = 0, False, False
+    for j in range(start, len(raw)):
+        c = raw[j]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == '"':
+                in_string = False
+        elif c == '"':
+            in_string = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return j + 1
+    return None
 
 
 def parse_reply(raw: str) -> Any:
     """The JSON object in a reply; a model without a JSON mode may wrap it in a code fence.
 
     A reply holding several objects (a plan, then a correction) gives the last
-    one :func:`parse_plan_payload` reads as a plan: the planner's final word.
+    one :func:`parse_plan_payload` accepts (:func:`accepts_plan`): the planner's final word.
     """
     try:
         return json.loads(raw)
     except ValueError:
         objects = json_objects(raw)
-        plans = [obj for obj in objects if is_plan_payload(obj)]
+        plans = [obj for obj in objects if accepts_plan(obj)]
         if len(objects) > 1:
             log.info("planner reply held %d JSON objects, %d plans; using the last plan", len(objects), len(plans))
         if plans:

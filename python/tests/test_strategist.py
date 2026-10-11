@@ -1681,6 +1681,14 @@ class ParseReplyTest(unittest.TestCase):
         raw = '{"goals": [{"op": "wait"}]}\nCorrection: {"goals": [], "reason": "rest first"}'
         self.assertEqual(parse_reply(raw), {"goals": [], "reason": "rest first"})
 
+    def test_correction_with_null_params_still_wins(self):
+        raw = '{"goals": [{"op": "wait"}]}\nCorrection: {"goals": [], "params": null}'
+        self.assertEqual(parse_reply(raw), {"goals": [], "params": None})
+
+    def test_malformed_outer_object_is_skipped_whole(self):
+        raw = '{"goals": [{"op": "wait"}]}\nCorrection: {"draft": {"goals": []}, oops}'
+        self.assertEqual(parse_reply(raw), {"goals": [{"op": "wait"}]})
+
     def test_prose_between_and_around(self):
         raw = 'Plan:\n```json\n{"goals": []}\n```\nOn second thought, rest first.\n```json\n{"goals": [{"op": "wait"}], "notes": "rest"}\n```\nDone.'
         self.assertEqual(parse_reply(raw), {"goals": [{"op": "wait"}], "notes": "rest"})

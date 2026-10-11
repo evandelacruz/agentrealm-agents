@@ -466,15 +466,31 @@ def parse_directives_goals(lines: list[str]) -> list[GoalOp]:
 PLAN_FIELDS: dict[str, tuple[type, str]] = {"goals": (list, "a list"), "params": (dict, "an object"), "notes": (str, "a string")}
 
 
-def is_plan_payload(raw: object) -> bool:
-    """Whether :func:`parse_plan_payload` reads ``raw`` as a plan: an object
-    carrying at least one reply key, each it carries of its type. Other keys
-    are dropped there, not refused, so they do not count against it."""
-    return (
-        isinstance(raw, dict)
-        and any(k in raw for k in PLAN_FIELDS)
-        and all(isinstance(raw[k], t) for k, (t, _) in PLAN_FIELDS.items() if k in raw)
-    )
+def plan_fields(raw: object, reject: Callable[[str], None] = _reject) -> dict[str, Any] | None:
+    """The reply keys :func:`parse_plan_payload` keeps from ``raw``, or None
+    when ``raw`` is not an object. Unknown keys and a key of the wrong type are
+    dropped with a refusal; ``"params": null`` counts as omitted."""
+    if not isinstance(raw, dict):
+        reject("payload is not an object")
+        return None
+    extra = set(raw) - set(PLAN_FIELDS)
+    if extra:
+        reject(f"dropped unknown top-level keys {sorted(extra)}")
+    kept: dict[str, Any] = {}
+    for key, (kind, name) in PLAN_FIELDS.items():
+        if key not in raw or (key == "params" and raw[key] is None):
+            continue
+        if isinstance(raw[key], kind):
+            kept[key] = raw[key]
+        else:
+            reject(f"`{key}` must be {name}")
+    return kept
+
+
+def accepts_plan(raw: object) -> bool:
+    """Whether :func:`parse_plan_payload` takes something from ``raw``: an
+    object with at least one reply key it keeps."""
+    return bool(plan_fields(raw, reject=lambda _message: None))
 
 
 def parse_plan_payload(
@@ -490,18 +506,10 @@ def parse_plan_payload(
     bounded by ``floor_params``.
     """
     current = dict(floor_params if current_params is None else current_params)
-    if not isinstance(raw, dict):
-        _reject("payload is not an object")
+    fields = plan_fields(raw)
+    if fields is None:
         return [], current, ""
-    extra = set(raw) - set(PLAN_FIELDS)
-    if extra:
-        _reject(f"dropped unknown top-level keys {sorted(extra)}")
-    raw = dict(raw)
-    for key, (kind, name) in PLAN_FIELDS.items():
-        if key in raw and not isinstance(raw[key], kind):
-            _reject(f"`{key}` must be {name}")
-            del raw[key]
-    goals_raw = raw.get("goals", [])
+    goals_raw = fields.get("goals", [])
     goals: list[GoalOp] = []
     for item in goals_raw:
         op = validate_goal_op(item)
@@ -512,9 +520,9 @@ def parse_plan_payload(
                 continue
         if op is not None:
             goals.append(op)
-    notes = raw.get("notes", "")
+    notes = fields.get("notes", "")
     params = current
-    incoming = raw.get("params")
+    incoming = fields.get("params")
     if incoming is not None:
         params = apply_strategist_params(floor_params, params, incoming)
     return goals, params, notes

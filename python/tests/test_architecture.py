@@ -247,7 +247,8 @@ class A58PacingPairsTest(unittest.TestCase):
 
 # A87: rules, not run patches. Comments in agent source state the rule in game
 # terms; the run that found it is cited in PLAN.md and docs/observations. This
-# count only falls: lower it in the PR that removes the citations.
+# count is of citations, not lines, and only falls: lower it in the PR that
+# removes some.
 RUN_CITATION_CEILING = 114
 # ``run 4``, ``Run 4``, ``runs 3, 4``: any form that names a live run.
 RUN_CITATION = re.compile(r"\bruns? \d+\b", re.IGNORECASE)
@@ -260,7 +261,7 @@ class RulesNotRunPatchesTest(unittest.TestCase):
         hits = sorted(
             (str(f.relative_to(PYTHON_DIR)), n)
             for f in AGENT_SOURCE
-            if (n := sum(1 for line in f.read_text().splitlines() if RUN_CITATION.search(line)))
+            if (n := len(RUN_CITATION.findall(f.read_text())))
         )
         total = sum(n for _, n in hits)
         self.assertLessEqual(

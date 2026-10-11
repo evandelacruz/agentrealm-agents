@@ -1218,8 +1218,79 @@ Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 a
 
 **Minor:** The hollow rock at (379, 375) did not open to the mallet's smash. Either it needs another capability, or the clue means something else. Break memory now holds 47 results, among them `smash` failed on (379, 375) and all four tools failed on each of the 10 cells.
 
-### Run 15
+### Run 15: the middle chest bought with a planner-chosen drop, then a level entrance given up 50 cells short
 
-Reported defect only; the full run write-up is not filed here.
+- **Code:** `main` at `1fb8e72`. Since run 14: A103 (#198, pacing between states drops the op that cannot get nearer; Break and the stuck ladder try only a known opener) and A104 (a stalled op moves below work that can progress, and its failure is remembered).
+- **Knowledge base:** kept from run 14. Region (432, 400): 603 cuts, 122 gems. 47 break results. 8 level entrances.
+- **Verdict:** exit 0, `PASS` after **601.7 s**, on the short-run gates only. The park **parked safe** at (428, 398) after 28.4 s (it started 100 cells out). The character started at **10/10**, 5 lives and **29 gems** at (402, 374), with the bronze_sword armed, the bronze_mail worn and the pack full (10/10).
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; kills **0**; gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **yes**; food taken while hurt **no**; Heal drank a potion **no**. Planner: 39 calls, 39 plans accepted, 0 errors.
 
-**Gather walked back to its old region instead of working the ground where it stood** (`states/gather.py`, `_replan_gather`). After a level entrance was given up about 100 cells from the old gem region, the planner sent `gather_gems` with no x, y ("gather where the character is") and `explore_area` nearby. Gather picked the nearest known grass, which was the old region about 100 cells back, and walked there: it weighed unexplored ground only on safe ground or with every known cell held by a hostile. Rule (A105, under A87): with no region named, Gather prices the known grass and the nearest unexplored ground alike, each its walk plus a cut for each gem still needed at the yield there (measured, or the map's `expected_yield` on unsampled ground); far known grass wins only when its yield advantage outweighs the walk.
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–410 s | `gather_gems` (432, 400), `buy` middle_chest | "Stage 2 is met. The only upgrade for sale is the middle chest (gems_short 21). Gather in the best region …, then buy it." Cut grass in (432, 400), 29 → 50. |
+| 410–437 s | `buy` middle_chest (drop: pocket_knife, then bronze_mallet), `travel` entrance (532, 311) | Call 22 named the knife as the drop. Call 25 changed it: "dropping the mallet since the knife cannot be dropped." Shop dropped the **bronze_mallet** and bought the **middle_chest** at 432 s (**50 → 0**). The pack went from 10 to 30 slots. |
+| 437–472 s | `gather_gems`, `buy` middle_chest, `travel` entrance | Call 26 kept the `buy` after the purchase had landed (defect 2). Call 27 dropped it as "redundant", and call 28 dropped the gather: "the clues point to a thicket of archers in the north-east hills, near the 532,311 entrance." |
+| 472–563 s | `travel` entrance (532, 311) | Walked north-east to (535, 361), 50 cells short. Break made one try, a chop at (488, 348) at 536 s. Stuck detection gave up the entrance at about 560 s: "blocked by bush, tree, wall and water" (defect 3). |
+| 563–600 s | `gather_gems` (no region), `explore_area` (535, 340), later `gather_gems` (432, 400) | The planner asked to "gather gems where the character is, then explore north for another approach". With no region named, Gather walked back toward (432, 408), 100 cells off (defect 1). The run ended on that walk. |
+
+#### Stage, level attempts and stalls
+
+- **Stage:** 3, from the first call (`readiness` met for stages 1 and 2). The plan went for a level only after buying the middle chest, its one upgrade for sale.
+- **Level attempts:** none. The north-east entrance (532, 311) was given up 50 cells short. Run 14 gave up the north-west one (300, 316) the same way.
+- **Stalls and how they resolved:**
+  - **No pacing loop** (A103), and **no every-tool probing**: a single chop at (488, 348), not every tool in turn.
+  - **The given-up entrance left the stack at once.** The next reply moved to gathering and exploring. `stall` stayed `none`.
+  - **A stale `buy`:** it stayed for 22 s after the purchase, until the planner dropped it.
+
+#### Drops and chests
+
+- **The middle_chest** (50 gems, `chest_capacity` 30) was the planner's one target for the run, and it bought it at 432 s. The pack went from 10 to 30 slots.
+- **The drop was the planner's choice** (A102). Its first pick, the pocket_knife, cannot be dropped, so it changed to the bronze_mallet. Shop sent `Drop` on the mallet, then `Take` on the chest.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **29** | **3** (+24 earned, −50 spent) |
+| Armed | bronze_sword | bronze_sword |
+| Worn | bronze_mail | bronze_mail |
+| Held | 10/10 slots, among them the bronze_mallet | 10/30 slots (middle_chest), no mallet |
+| Potions | 3 | 3 |
+
+#### Gems earned
+
+**24** in 600 s, **2.4 a minute** (about 3.1 a minute over the 410 s of gathering). All 24 came from grass, in 146 cuts, all in region (432, 400). No pile and no kill.
+
+#### Fights
+
+None. A new snotling pack showed at (468, 401) late in the run, and the planner kept `fight: false`.
+
+#### Run 14 defects, checked
+
+| Defect | Run 15 | |
+|---|---|---|
+| Two states pace for 306 s (A103) | **Gone.** No oscillation event. | |
+| Every tool on every blocking cell (A103) | **Gone.** One chop, at (488, 348). | |
+| The gather op under a stalled head never runs (A104) | **Gone.** The gather ran 410 s, and the given-up travel left the stack at once. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 154,210, output 7,502, cache write 105,974, cache read 4,027,012 |
+
+#### Decision mix
+
+Intents: 541 `Step`, 1,068 `Wait`, 147 `Use` (146 cuts, 1 chop), 26 `Take`, 1 `Drop`. Call mix: 829 `tick`, 237 `entities`, 193 `zone`, 83 `strategist`, 56 `self`, 22 `terrain`, 5 `position`.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A105 (with no region named, Gather prices a frontier near it against known grass far off; branch `c/run15-gather-near`); defect 2 is A106 (State lists the ops finished since the last reply, a `buy` is done once its gems are spent, and a chest shows as carry slots); defect 3 is A107 (State says whether a known path reaches each level entrance). A106 and A107 are on branch `c/run15-planner-state`. Their PLAN.md rows come with those pull requests.
+
+1. **With no region named, Gather walks to far-off known grass over the ground it stands on** (`states/gather.py:644–735`, `_replan_gather`). After the entrance was given up at (535, 361), the planner asked for `gather_gems` with no region, "where the character is, then explore north". Gather's pick takes known grass before the frontier, and the nearest known grass was the old region, 100 cells back. It walked there for the rest of the run, and the park then needed 28 s to reach safe ground. **Rule:** Gather prices a frontier near it against known grass far off by the same steps. Cutting nearby unknown ground beats a 100-cell walk to ground it knows.
+
+2. **A `buy` stays on the stack after its purchase lands** (the strategist's State; shop sync at `shop.py:100`). The middle chest was bought at 432.4 s. Call 26, at 437.9 s, still held `buy` middle_chest. Its own note said the purchase was "not needed" and called the held chest "a consumable", and call 27 dropped it 17 s later. **Rule:** a `buy` is done once its gems are spent, and the next State says which ops finished since the last reply, so the planner does not re-send them.
+
+3. **A level entrance is chosen by distance, and its route is found out only by walking it** (the `level_entrances` State line; Travel). Both entrances tried in runs 14 and 15 were 105–127 cells off, into ground the map did not show as passable. In each run, stuck detection gave up after 90–160 s of walking, against bush, tree, wall and water. **Rule:** the planner sees, for each entrance, whether a known path reaches it or only the frontier does. Travel to an entrance with no known route goes by way of exploring toward it, so it can be given up early, not after the walk.

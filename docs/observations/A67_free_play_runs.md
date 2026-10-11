@@ -1520,7 +1520,7 @@ Intents: 1,086 `Step`, 2,881 `Wait`, 6 `Take` (2 gems; 4 apples, 1 taken and 3 r
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize. Backlog: defect 1 is covered by A90 (the stuck escalation and the pacing guard rewritten under A87, subsuming A103 and A111; branch `c/a90-stuck-under-a87`); defect 2 is A114 (queued); defect 3 is A116 (a `Take` sent from a position the server has not confirmed). The pack shown at 10 slots after run 17 applied the middle_chest is A115. A115 and A116 are on branch `c/run18-capacity-pickup`.
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is covered by A90 (the stuck escalation and the pacing guard rewritten under A87, subsuming A103 and A111; branch `c/a90-stuck-under-a87`); defect 2 is A114 (#212); defect 3 is A116 (a `Take` sent from a position the server has not confirmed). The pack shown at 10 slots after run 17 applied the middle_chest is A115. A115 and A116 are on branch `c/run18-capacity-pickup`.
 
 1. **The pacing give-up still misses a stuck-ladder Break target** (`navigation/oscillation.py:203–220`, `walk_attempt`; `_give_up_walks` at 145–180). Under `travel` entrance, Break walked toward (367, 368) and Explore walked back toward (409, 419), about 9 steps each, for about 300 s in all. The three oscillation events had states `Break` and `Explore` but named only `explore` in `goals` and carried no `breaks`. So the Break walk was not attributed to a stuck attempt, (367, 368) was never filed as a stalled `break_block`, and Break kept nominating it. It was cut only after `explore_area` led the character round to its north side. **Rule:** every walk that took part in pacing is given up, whichever state or ladder level sent it and whichever attempt is active when the guard fires.
 
@@ -1600,7 +1600,7 @@ Intents: 140 `Step`, 420 `Wait`, 50 `Use` (30 match `Use`s on non-blocks, 10 cut
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize.
+Per A87, each names the rule a fix should generalize. Backlog: all three fold into A114 (#212): defect 1 as Flee waiting under attack at "nowhere to flee" with potions held, defect 2 as `use_block` and `break_block` re-sending `Use` on a cell with no block, defect 3 as Explore standing "boxed in" with a hostile adjacent. The A114 PLAN.md row comes with #212.
 
 1. **Flee with no escape waits while it is hit** (`states/flee.py:219–220`). From 531 s, two snotlings were adjacent and Flee found no escape cell. It returned "nowhere to flee" with `wait=True` 8 times and took 4 hits to 0. It held 2 potions, and the potion threshold is health ≤ 5. **Rule:** a decision under attack never ends in a wait while an action can still change the outcome. Drink, swing, or step, in that order of what the health floor needs.
 

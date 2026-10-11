@@ -358,6 +358,17 @@ class PrerequisiteTest(unittest.TestCase):
         out = dispatch(w, ctx(m, plan, self.kb(), pickup=False))
         self.assertEqual((out.state, m.path[-1]), ("Level", (18, 4)), out.reason)
 
+    def test_a_full_pack_gives_the_stop_up_without_a_drop(self):
+        w = field(at=(7, 5))
+        w.view.tiles[(18, 4)] = "framed_door"
+        w.entities = [Entity("supply", 51, (6, 6), "key")]
+        w.held_supplies = [InventorySupply(i, "rope") for i in range(100, 100 + w.carry_capacity)]
+        m = Memory()
+        plan = Plan([{"op": "enter_level", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
+        out = dispatch(w, ctx(m, plan, self.kb(), pickup=False))
+        self.assertFalse(any(i.get("verb") in ("Drop", "Take") for i in out.intents or []), out.intents)
+        self.assertEqual((out.state, m.path[-1]), ("Level", (18, 4)), out.reason)
+
     def test_no_stop_when_the_item_is_carried(self):
         w = field(at=(10, 4))
         w.view.tiles[(18, 4)] = "framed_door"

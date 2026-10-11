@@ -107,6 +107,17 @@ class ReservedTest(unittest.TestCase):
         self.assertEqual((room.kind, room.drop.id), (DROP, 6))
 
 
+    def test_compose_reserves_held_fragments_as_solve_composes_them(self):
+        w = world()
+        full_pack(w)
+        w.held_supplies[3:5] = [
+            InventorySupply(14, "key_half", FragmentMeta(composes_into="gate_key", piece_count=2, slot=1, missing_slots=(2,))),
+            InventorySupply(15, "key_half", FragmentMeta(composes_into="gate_key", piece_count=2, slot=2, missing_slots=(1,))),
+        ]
+        w.chest_supplies = [InventorySupply(4, "key_half", FragmentMeta(composes_into="gate_key", piece_count=2, slot=1, missing_slots=(2,)))]
+        ops = [{"op": "compose", "composes_into": "gate_key"}]
+        self.assertEqual(sorted(s.id for s in reserved_supplies(w, ops, kb())), [14, 15])
+
 class MakeRoomTest(unittest.TestCase):
     def potion(self) -> Pickup:
         return Pickup(POTION.id, POTION.code, POTION.pos, None, 503)

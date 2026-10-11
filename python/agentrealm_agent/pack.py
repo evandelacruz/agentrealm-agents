@@ -60,8 +60,8 @@ class Room:
 def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: KnowledgeBase | None) -> list[InventorySupply]:
     """Held and stowed supplies the plan will use, one per op that needs one:
     ``use_block``'s ``code``, ``equip``'s ``code``, ``fight_boss``'s ``armed``
-    and ``worn``, ``compose``'s fragments (one per slot, as Solve composes
-    them), and ``break_block``'s tool for its ``capability`` (none when the
+    and ``worn``, ``compose``'s held fragments (one per slot, from what is held,
+    as Solve composes them), and ``break_block``'s tool for its ``capability`` (none when the
     armed supply has it, one kept for every break when a break does not use it
     up, else one per op). An op is matched to the lowest id not yet reserved."""
     pool = sorted(w.held_supplies + w.chest_supplies, key=lambda s: s.id)
@@ -80,8 +80,9 @@ def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: K
             claim(lambda s, c=code: supply_matches(c, s.code))
         elif kind == "compose" and isinstance(op.get("composes_into"), str):
             taken = {s.id for s in out}
-            ids = set(compose_supply_ids([s for s in pool if s.id not in taken], op["composes_into"]))
-            out.extend(s for s in pool if s.id in ids)
+            held = sorted((s for s in w.held_supplies if s.id not in taken), key=lambda s: s.id)
+            ids = set(compose_supply_ids(held, op["composes_into"]))
+            out.extend(s for s in held if s.id in ids)
         elif kind == "fight_boss":
             worn = op.get("worn") if isinstance(op.get("worn"), list) else []
             for code in [op.get("armed"), *worn]:

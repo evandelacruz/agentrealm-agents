@@ -16,8 +16,7 @@ from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
 from .stalled import below_progress, find as find_stalled, forget as forget_stalled
-from .item_table import DEFAULT_CARRY_CAPACITY
-from .supplies import CAPABILITIES, chest_capacity
+from .supplies import CAPABILITIES, chest_applied
 from .travel.ops import parse_travel_string, travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
 
@@ -854,9 +853,7 @@ def bought(op: GoalOp, world: WorldModel, memory: Memory | None) -> bool:
         return False
     code, gems_before = got
     spent = gems_before is None or (world.gems is not None and world.gems < gems_before)
-    slots = chest_capacity(code)
-    applied = slots is not None and slots > DEFAULT_CARRY_CAPACITY and world.carry_capacity >= slots
-    return spent and (count_held(world, op["code"]) > 0 or applied)
+    return spent and (count_held(world, op["code"]) > 0 or chest_applied(code, world.carry_capacity))
 
 
 def _forget_purchase(memory: Memory | None, top: GoalOp | None) -> None:

@@ -36,7 +36,7 @@ MACRO_SIZE = 16
 # Node budgets per replan so search never stalls a tick (A13). Read at call
 # time, so a caller's override (or a test's patch) takes effect.
 COARSE_NODE_BUDGET = 48  # cache tiles expanded by the corridor search
-FINE_NODE_BUDGET = 400  # cells expanded by each cell-level search
+FINE_NODE_BUDGET = 400  # cells expanded by each cell-level search; ``entrance_routes`` shares one across every entrance
 
 
 @dataclass
@@ -656,12 +656,18 @@ def entrance_routes(w: WorldModel, goals: Iterable[Pos], budget: int = FINE_NODE
     them, so the check costs no more than one cell-level search.
 
     First a route over any ground but walls, priced as a walk prices it
-    (fog dearer than known ground); one that crosses no fog is a known path. One that does is
-    tried again over known ground only; failing that, it is frontier only.
+    (fog dearer than known ground); one that crosses no fog is a known path.
+    One that does is tried again over known ground only: a route found
+    there is a known path, none (the known ground searched to its end) is
+    frontier only, and a retry the budget cut short is not searched, with
+    the fog route's steps.
     A goal in a pocket of at most ``POCKET_CELLS`` cells that known walls
     close off, or with no route even through fog, is known blocked: it
     takes a break or another way. A goal the budget did not reach is not
-    searched, with its straight-line distance.
+    searched, with its straight-line distance. ``steps`` is the route found
+    by a goal-first search (``ROUTE_WEIGHT``): an estimate at most that many
+    times the cheapest, not the shortest walk. With the default budget the
+    nearest few entrances are checked, and far ones are often not searched.
     Hostiles add nothing: this is whether the ground joins, not how safe it is.
     """
     assert w.pos is not None
@@ -692,13 +698,18 @@ def entrance_routes(w: WorldModel, goals: Iterable[Pos], budget: int = FINE_NODE
             out[goal] = Route(NOT_SEARCHED if found.budget_hit else KNOWN_BLOCKED, straight)
             continue
         unexplored = sum(1 for p in found.path if p not in w.view.tiles)
-        if unexplored and left > 0:
-            known = _astar(grid(goal, known_only), left, ROUTE_WEIGHT)
-            left -= known.expanded
-            if known.path is not None:
-                found, unexplored = known, 0
-        assert found.path is not None
-        out[goal] = Route(FRONTIER_ONLY if unexplored else PATH_KNOWN, len(found.path), unexplored)
+        if not unexplored:
+            out[goal] = Route(PATH_KNOWN, len(found.path))
+            continue
+        known = _astar(grid(goal, known_only), max(left, 0), ROUTE_WEIGHT)
+        left -= known.expanded
+        if known.path is not None:
+            out[goal] = Route(PATH_KNOWN, len(known.path))
+        else:
+            # Frontier only once known ground is shown not to reach it; a check
+            # the budget cut short says nothing either way.
+            kind = NOT_SEARCHED if known.budget_hit else FRONTIER_ONLY
+            out[goal] = Route(kind, len(found.path), unexplored)
     return out
 
 

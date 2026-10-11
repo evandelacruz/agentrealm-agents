@@ -13,7 +13,11 @@ Stored per character, since a chest is its dropper's to come back for::
                                                        "died", "contents"}}}
 
 ``contents`` is the subtype codes last seen in it, absent until it was seen
-in reach.
+in reach. The ids of chests seen empty or gone are kept too, the latest
+``GONE_KEPT`` per character, so a served ``death_chest`` that still names one
+never brings it back in a later run::
+
+    "death_chests_gone": {"<character id>": [<chest id>, ...]}   # oldest first
 """
 
 from __future__ import annotations
@@ -24,6 +28,10 @@ from . import KnowledgeBase
 from ..world import DeathChest, WorldModel
 
 DEATH_CHESTS_KEY = "death_chests"
+DEATH_CHESTS_GONE_KEY = "death_chests_gone"
+# Gone chest ids kept per character. The server names only our latest death
+# chest, so only the latest few gone ones can ever be named again.
+GONE_KEPT = 8
 
 
 def load_death_chests(kb: KnowledgeBase | None, w: WorldModel) -> None:
@@ -31,31 +39,47 @@ def load_death_chests(kb: KnowledgeBase | None, w: WorldModel) -> None:
     if kb is None:
         return
     with kb.lock:
-        raw = kb.extra.get(DEATH_CHESTS_KEY)
-        rows = raw.get(str(w.character_id)) if isinstance(raw, dict) else None
+        rows = _of_character(kb, DEATH_CHESTS_KEY, w)
         rows = dict(rows) if isinstance(rows, dict) else {}
+        gone = _of_character(kb, DEATH_CHESTS_GONE_KEY, w)
+        gone = list(gone) if isinstance(gone, list) else []
+    for chest_id in gone:
+        if isinstance(chest_id, int) and not isinstance(chest_id, bool) and chest_id not in w.death_chests_gone:
+            w.death_chests_gone.append(chest_id)
     for key, row in rows.items():
         parsed = _chest(key, row)
-        if parsed is not None and parsed[0] not in w.death_chests:
+        if parsed is not None and parsed[0] not in w.death_chests and parsed[0] not in w.death_chests_gone:
             w.death_chests[parsed[0]] = parsed[1]
 
 
 def save_death_chests(kb: KnowledgeBase | None, w: WorldModel) -> None:
-    """Write this character's remembered death chests into ``kb``, replacing its rows; none removes them."""
+    """Write this character's remembered death chests and the latest ``GONE_KEPT``
+    gone ids into ``kb``, replacing its rows; none removes them."""
     if kb is None:
         return
     rows = {str(chest_id): _row(c) for chest_id, c in sorted(w.death_chests.items())}
     with kb.lock:
-        raw = kb.extra.get(DEATH_CHESTS_KEY)
-        by_character: dict[str, Any] = dict(raw) if isinstance(raw, dict) else {}
-        if rows:
-            by_character[str(w.character_id)] = rows
-        else:
-            by_character.pop(str(w.character_id), None)
-        if by_character:
-            kb.extra[DEATH_CHESTS_KEY] = by_character
-        else:
-            kb.extra.pop(DEATH_CHESTS_KEY, None)
+        _set_of_character(kb, DEATH_CHESTS_KEY, w, rows)
+        _set_of_character(kb, DEATH_CHESTS_GONE_KEY, w, w.death_chests_gone[-GONE_KEPT:])
+
+
+def _of_character(kb: KnowledgeBase, key: str, w: WorldModel) -> Any:
+    raw = kb.extra.get(key)
+    return raw.get(str(w.character_id)) if isinstance(raw, dict) else None
+
+
+def _set_of_character(kb: KnowledgeBase, key: str, w: WorldModel, value: Any) -> None:
+    """This character's ``value`` under ``key``; an empty one removes it, and the key once no character has one."""
+    raw = kb.extra.get(key)
+    by_character: dict[str, Any] = dict(raw) if isinstance(raw, dict) else {}
+    if value:
+        by_character[str(w.character_id)] = value
+    else:
+        by_character.pop(str(w.character_id), None)
+    if by_character:
+        kb.extra[key] = by_character
+    else:
+        kb.extra.pop(key, None)
 
 
 def _row(c: DeathChest) -> dict[str, Any]:

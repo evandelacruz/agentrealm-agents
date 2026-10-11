@@ -8,7 +8,13 @@ from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_base.death_chests import DEATH_CHESTS_KEY, load_death_chests, save_death_chests
+from agentrealm_agent.knowledge_base.death_chests import (
+    DEATH_CHESTS_GONE_KEY,
+    DEATH_CHESTS_KEY,
+    GONE_KEPT,
+    load_death_chests,
+    save_death_chests,
+)
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
@@ -128,6 +134,25 @@ class PersistTest(unittest.TestCase):
         w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": [{"id": 80, "x": 0, "y": 0, "contents": []}]}}})
         save_death_chests(kb, w)
         self.assertNotIn(DEATH_CHESTS_KEY, kb.extra)
+
+    def test_a_chest_seen_gone_stays_gone_after_a_reload(self):
+        kb = KnowledgeBase("sandbox")
+        w = world(at=(1, 0))
+        die(w, 5, 80, 0)
+        w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": [{"id": 80, "x": 0, "y": 0, "contents": []}]}}})
+        save_death_chests(kb, w)
+
+        fresh = world()
+        load_death_chests(reloaded(kb), fresh)
+        fresh.apply_observation({"complete": True, "snapshot": {"death_chest": {"chest_id": 80, "map_id": MAP, "x": 0, "y": 0}}})
+        self.assertEqual(fresh.death_chests, {})
+
+    def test_only_the_latest_gone_ids_are_kept(self):
+        kb = KnowledgeBase("sandbox")
+        w = world()
+        w.death_chests_gone = list(range(1, GONE_KEPT + 3))
+        save_death_chests(kb, w)
+        self.assertEqual(kb.extra[DEATH_CHESTS_GONE_KEY]["1"], list(range(3, GONE_KEPT + 3)))
 
 
 class StateLineTest(unittest.TestCase):

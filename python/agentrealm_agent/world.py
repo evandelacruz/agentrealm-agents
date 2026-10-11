@@ -361,9 +361,10 @@ class WorldModel:
     # One is dropped once seen empty or gone: a dropped chest leaves the world
     # when its last supply is withdrawn (B116).
     death_chests: dict[int, DeathChest] = field(default_factory=dict)
-    # Death chests seen empty or gone this run: never remembered again, though
-    # a served ``death_chest`` still names one (A122).
-    death_chests_gone: set[int] = field(default_factory=set)
+    # Death chest ids seen empty or gone, oldest first: never remembered again,
+    # though a served ``death_chest`` still names one. Kept across runs, the
+    # latest ``death_chests.GONE_KEPT`` (A122).
+    death_chests_gone: list[int] = field(default_factory=list)
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[InventorySupply]] = field(default_factory=dict)
@@ -704,7 +705,7 @@ class WorldModel:
             gone = chebyshev(chest.pos, here) <= 1 and contents is None
             if gone or contents == []:
                 del self.death_chests[chest_id]
-                self.death_chests_gone.add(chest_id)
+                self.death_chests_gone.append(chest_id)
             elif contents is not None:
                 chest.contents = [s.code for s in contents]
 

@@ -78,7 +78,7 @@ class AskThePlannerTest(unittest.TestCase):
         w, m = garden(), Memory()
         c = ctx(m)
         dispatch(w, c)
-        self.assertEqual(m.no_way_on, (17, (2, 2)))
+        self.assertEqual(m.no_way_on, (17, (2, 2), "nothing left to explore"))
         w.view.tiles[(1, 3)] = "dirt"  # a gap in the wall onto ground not seen: frontier in reach again
         w.view.tiles.pop((0, 3))
         out = dispatch(w, c)

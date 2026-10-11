@@ -567,7 +567,7 @@ class Plan:
 
     ``params`` holds the effective survival params the states read (A9): the
     directives' values, tightened by ``set_param`` or the strategist (A35). ``current`` and ``goal_done`` only read;
-    ``advance``, ``drop_current``, ``demote_current`` and ``finish_current`` are the only calls that move the stack.
+    ``advance``, ``drop_current``, ``demote_current``, ``finish_current`` and ``push`` are the only calls that move the stack.
     """
 
     goals: list[GoalOp]
@@ -725,6 +725,14 @@ class Plan:
                 forget_stalled(memory.stalled_ops, op, self.map_id)
         self._pop_current()
 
+    def push(self, op: GoalOp, reason: str) -> None:
+        """Put ``op`` on top, above the head; among the directives ops when the head is one (A35)."""
+        log.info("plan: pushed op %r: %s", op, reason)
+        if self.index < self.directive_end:
+            self.directive_end += 1
+        self.goals = self.goals[: self.index] + [dict(op)] + self.goals[self.index :]
+        self._new_head()
+
     def note_progress(self) -> None:
         """The state that owns the head op acted on it this decision: a step
         toward it, a Take or a Use for it. Resets the stall clock (A34) and
@@ -809,6 +817,29 @@ def builtin_goals(policy: Policy, *, goto_satisfied: bool = False) -> list[GoalO
                 op["map_id"] = policy.goto_map
             ops.append(op)
     return ops
+
+
+# How far round a ``no_way_on`` ask the built-in planner explores (A120): the
+# reach of State ``map`` (``strategist.MAP_RADIUS``), the ground the AI planner
+# reads the way on from.
+BUILTIN_EXPLORE_RADIUS = 15
+
+
+def builtin_way_on(plan: Plan, trigger: dict, world: WorldModel) -> None:
+    """The built-in planner's answer to a ``no_way_on`` the head op raised (A120).
+
+    The ``--no-planner`` test mode has no planner to name a way on, so an op
+    that holds and asks would hold for good. Its answer is to explore: the
+    ground round the cell it asked from while any of it is unexplored, else
+    anywhere, on top of the op, which runs again once that is explored.
+    """
+    op = trigger.get("op")
+    if op is None or plan.current() != op:
+        return
+    area: GoalOp = {"op": "explore_area", "x": trigger["x"], "y": trigger["y"], "radius": BUILTIN_EXPLORE_RADIUS}
+    if not explore_targets(area, world):
+        area = {"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE}
+    plan.push(area, f"no way on: {trigger.get('why', '')}")
 
 
 def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:

@@ -11,6 +11,8 @@ With no reachable frontier at all, the ground in reach is all seen and the
 way on is the planner's call (which block to open, which hostile to fight or
 pass, which clue to follow): it never steps in place and never parks beside
 a hostile; it raises a ``no_way_on`` trigger and sends nothing (A114).
+It never stands in for Travel: under a ``travel`` op Travel keeps its walk,
+and with no step it asks the planner itself and holds (A120).
 Stuck detection escalates and gives up a walk that goes nowhere (A15); cells Step
 rejections ruled out and ``avoid_blocks`` hazards stay out of the path (A14).
 """
@@ -22,7 +24,7 @@ import random
 from ..config import Policy
 from ..healing import hurt
 from ..knowledge_base import KnowledgeBase
-from ..memory import Memory, queue_signal
+from ..memory import Memory
 from ..navigation import stuck as nav_stuck
 from ..pathing import (
     plan_sets,
@@ -37,7 +39,8 @@ from ..plan import GoalOp
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome, my_op
+from .ask import ask_the_planner
+from .base import PlayContext, State, StateOutcome, my_op, top_executor
 from .gather_safe import is_safe_ish
 from .intents import set_position
 
@@ -48,13 +51,20 @@ CAUTION_RADIUS = HOSTILE_DANGER_RADIUS
 KEEP_AWAY_HOLD_TICKS = 100
 # Why the safe default had no step: the ground in reach is all seen.
 NOTHING_TO_EXPLORE = "nothing left to explore"
+# The executors whose op the safe default never stands in for (A120): each
+# holds its own walk, and with no step asks the planner and holds. The rule
+# is every executor's; today Travel only, the rest still fall through to the
+# safe default (PLAN.md A120, partial).
+HOLD_THEIR_WALK = frozenset({"Travel"})
 
 
 class ExploreState(State):
     """Last state for a scripted character: the executor for ``explore_area``,
     and otherwise the safe default. It runs whenever no reflex or executor
     sent an intent: no plan op, or the top op's executor had nothing to do
-    this decision (that op's stall clock then runs, A34)."""
+    this decision (that op's stall clock then runs, A34). Under an op whose
+    executor holds its own walk (``HOLD_THEIR_WALK``) it holds too, sending
+    nothing, so it never walks the character off that op's way (A120)."""
 
     name = "Explore"
 
@@ -70,6 +80,9 @@ class ExploreState(State):
             out = explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=op)
             if out.intents:
                 return out
+        owner = top_executor(ctx)
+        if owner in HOLD_THEIR_WALK:
+            return StateOutcome(None, f"{owner} holds its walk", state=self.name, wait=True, progress=False)
         out = safe_default(world, ctx)
         out.progress = False  # it moves for no op: the top op, if any, still stalls
         return out
@@ -90,26 +103,7 @@ def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:
         ctx.memory.no_way_on = None  # ground to explore again: a later ask is new
     if out.reason != NOTHING_TO_EXPLORE:
         return out
-    return ask_the_planner(world, ctx)
-
-
-def ask_the_planner(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateOutcome:
-    """The ground in reach is all seen: the way on is the planner's (A114).
-
-    It never steps in place, and never parks because a hostile stands next
-    to it: it raises one ``no_way_on`` trigger for this cell and holds the
-    decision with nothing sent. The planner reads State ``map`` (the ground round the character,
-    blocks, hostiles, signs and doors by cell), what each held item does and
-    the clues, and opens a block with ``break_block``, fights, or goes on.
-    """
-    m = ctx.memory
-    if w.pos is not None and w.map_id is not None and m.no_way_on != (w.map_id, w.pos):
-        m.no_way_on = (w.map_id, w.pos)
-        queue_signal(
-            m,
-            {"trigger": "no_way_on", "map_id": w.map_id, "x": w.pos[0], "y": w.pos[1], "tick": w.tick, "why": NOTHING_TO_EXPLORE},
-        )
-    return StateOutcome(None, f"{NOTHING_TO_EXPLORE}: asked the planner", state=state, wait=True)
+    return ask_the_planner(world, ctx, NOTHING_TO_EXPLORE, "Explore")
 
 
 def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateOutcome | None:

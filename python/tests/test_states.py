@@ -317,12 +317,15 @@ class DispatcherFallThroughTest(unittest.TestCase):
         self.assertEqual(out.state, "Explore")
         self.assertIsNotNone(out.intents)
 
-    def test_travel_walled_off_falls_through_to_safe_default(self):
+    def test_travel_walled_off_asks_the_planner_and_holds(self):
+        # Travel keeps its walk: the safe default never stands in for it (A120).
         w = world(["#####", "#.#.#", "#####"], at=(1, 1))
-        out = dispatch(w, ctx(w, plan=plan_of({"op": "travel", "to": "point", "x": 3, "y": 1})))
-        self.assert_yielded(out, "Travel")
-        self.assertIn("blocked", out.yielded[0])
-        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, NO_WAY_ON, True))
+        c = ctx(w, plan=plan_of({"op": "travel", "to": "point", "x": 3, "y": 1}))
+        out = dispatch(w, c)
+        why = "travel:point 3,1: no step toward it"
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Travel", None, f"{why}: asked the planner", True))
+        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "no_way_on"]
+        self.assertEqual([(s["why"], s["op"]["op"]) for s in asks], [(why, "travel")])
 
     def test_explore_area_with_no_step_falls_through_to_safe_default(self):
         # The op's frontier (column 3) is walled off.

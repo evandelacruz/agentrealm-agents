@@ -14,7 +14,10 @@ from agentrealm_agent.break_memory import (
     break_key,
     cannot_cut,
     capabilities_for_code,
+    break_costs_for_planning,
     held_capabilities,
+    known_openers,
+    no_break_reason,
     nominate_on_path,
     pick_supply_for_capability,
     record_attempt,
@@ -76,7 +79,7 @@ class BreakMemoryTest(unittest.TestCase):
 
 
 def _sword_world(rows: list[str], at) -> WorldModel:
-    glyph = {".": "dirt", "b": "bush", "#": "wall", "~": "lava"}
+    glyph = {".": "dirt", "b": "bush", "r": "rock", "#": "wall", "~": "lava"}
     w = WorldModel(character_id=1, map_id=7, pos=at, perception=5)
     for y, row in enumerate(rows):
         for x, g in enumerate(row):
@@ -118,6 +121,108 @@ class NominateOnPathTest(unittest.TestCase):
         w = _sword_world([".bb.."], at=(0, 0))
         self.assertEqual(nominate_on_path(w, kb, (0, 0), (4, 0)).pos, (1, 0))
         self.assertIsNone(nominate_on_path(w, kb, (1, 0), (4, 0)), "only (2, 0) is ahead, and it failed")
+
+
+class KnownOpenersTest(unittest.TestCase):
+    """A block is tried only with a capability known to open it (A103)."""
+
+    def test_documented_openers_by_block_type(self):
+        w = _sword_world(["brb#."], at=(4, 0))
+        w.view.tiles[(1, 1)] = "tree"
+        self.assertEqual(known_openers(w, None, (0, 0)), {"cut", "burn"})
+        self.assertEqual(known_openers(w, None, (1, 0)), {"smash", "blast"})
+        self.assertEqual(known_openers(w, None, (1, 1)), {"chop", "burn"})
+        self.assertEqual(known_openers(w, None, (3, 0)), {"blast"})
+        self.assertEqual(known_openers(w, None, (4, 0)), set(), "dirt is opened by nothing")
+
+    def test_a_break_that_opened_the_cell_is_a_known_opener(self):
+        kb = KnowledgeBase.empty("sandbox")
+        w = _sword_world(["#...."], at=(4, 0))
+        record_attempt(kb, map_id=7, pos=(0, 0), capability="cut", result="opened", code="bronze_sword")
+        self.assertEqual(known_openers(w, kb, (0, 0)), {"blast", "cut"})
+
+    def test_a_block_nothing_held_opens_is_routed_around_not_tried(self):
+        # A sword cuts and chops; a rock needs smash or blast: nothing to try.
+        w = _sword_world([".r..."], at=(0, 0))
+        self.assertIsNone(nominate_on_path(w, None, (0, 0), (4, 0)))
+        self.assertEqual(no_break_reason(w, None, (0, 0), (4, 0)), "no_known_opener")
+        self.assertEqual(break_costs_for_planning(w, None, (4, 0)), {}, "the planner prices no break through it")
+
+    def test_only_the_opener_is_armed_not_every_tool(self):
+        w = _sword_world([".r..."], at=(0, 0))
+        w.held_supplies = [
+            InventorySupply(5, "bronze_sword"),
+            InventorySupply(6, "matches"),
+            InventorySupply(7, "bronze_mallet"),
+        ]
+        choice = nominate_on_path(w, None, (0, 0), (4, 0))
+        self.assertEqual((choice.capability, choice.supply.code), ("smash", "bronze_mallet"))
+        self.assertIn((1, 0), break_costs_for_planning(w, None, (4, 0)))
+
+    def test_a_failed_opener_is_not_tried_again_and_the_next_one_is(self):
+        kb = KnowledgeBase.empty("sandbox")
+        w = _sword_world([".b..."], at=(0, 0))
+        w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(6, "matches"), InventorySupply(7, "bronze_mallet")]
+        self.assertEqual(nominate_on_path(w, kb, (0, 0), (4, 0)).capability, "cut")
+        record_attempt(kb, map_id=7, pos=(1, 0), capability="cut", result="applied_no_effect")
+        self.assertEqual(nominate_on_path(w, kb, (0, 0), (4, 0)).capability, "burn", "never chop or smash a bush")
+        record_attempt(kb, map_id=7, pos=(1, 0), capability="burn", result="applied_no_effect")
+        self.assertIsNone(nominate_on_path(w, kb, (0, 0), (4, 0)))
+        self.assertEqual(no_break_reason(w, kb, (0, 0), (4, 0)), "no_known_opener")
+
+    def test_no_breakable_on_the_route_is_no_break(self):
+        w = _sword_world(["....."], at=(0, 0))
+        self.assertEqual(no_break_reason(w, None, (0, 0), (4, 0)), "no_break")
+
+
+class StuckLadderOpenersTest(unittest.TestCase):
+    def test_a_rock_with_no_held_opener_moves_the_ladder_on(self):
+        # Stuck step 2 behind a rock holding only a sword: no Arm, no Use,
+        # the ladder moves on to the reveal around it (A103).
+        w = _sword_world([".r..."], at=(0, 0))
+        m = Memory()
+        att = nav_stuck.track(m, w, "goto", (4, 0))
+        att.level = nav_stuck.BREAK
+        c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
+        out = BreakState().act(w, c)
+        self.assertIsNone(out.intents)
+        self.assertEqual(att.level, nav_stuck.REVEAL)
+        self.assertEqual(att.reasons, ["no_known_opener"])
+
+
+class BreakOpRefusalTest(unittest.TestCase):
+    """A break_block op the block's openers rule out is dropped with the reason (A103)."""
+
+    def run_op(self, op, kb=None):
+        w = _sword_world([".b.r."], at=(0, 0))
+        w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(7, "bronze_mallet")]
+        plan = Plan([op], dict(PARAM_DEFAULTS))
+        c = PlayContext(Memory(), Policy(kind="scripted", goals=[], pickup=False), random.Random(0), knowledge=kb, plan=plan)
+        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+            out = BreakState().act(w, c)
+        self.assertIsNone(out.intents)
+        self.assertIsNone(plan.current())
+        return [s["reason"] for s in c.memory.strategist_signals if s.get("trigger") == "goal_failed"]
+
+    def test_a_capability_not_known_to_open_the_block(self):
+        reasons = self.run_op({"op": "break_block", "x": 1, "y": 0, "capability": "smash"})
+        self.assertEqual(reasons, ["smash is not known to open bush (opened by burn, cut)"])
+
+    def test_a_capability_that_already_failed_there(self):
+        kb = KnowledgeBase.empty("sandbox")
+        record_attempt(kb, map_id=7, pos=(3, 0), capability="smash", result="applied_no_effect")
+        reasons = self.run_op({"op": "break_block", "x": 3, "y": 0, "capability": "smash"}, kb)
+        self.assertEqual(reasons, ["smash already failed on the rock at 3,0"])
+
+    def test_the_opener_is_walked_to(self):
+        w = _sword_world([".b.r."], at=(1, 1))
+        w.view.tiles.update({(x, 1): "dirt" for x in range(5)})
+        w.held_supplies = [InventorySupply(7, "bronze_mallet")]
+        plan = Plan([{"op": "break_block", "x": 3, "y": 0, "capability": "smash"}], dict(PARAM_DEFAULTS))
+        c = PlayContext(Memory(), Policy(kind="scripted", goals=[], pickup=False), random.Random(0), plan=plan)
+        out = BreakState().act(w, c)
+        self.assertTrue(out.intents)
+        self.assertEqual(plan.current()["capability"], "smash")
 
 
 class EscapeNeverBreaksTest(unittest.TestCase):
@@ -395,7 +500,7 @@ class BreakRearmTest(unittest.TestCase):
         self.kb = KnowledgeBase.empty("sandbox")
         r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=self.kb)
         self.addCleanup(r.trace.close)
-        w = _sword_world(["..b.."], at=(1, 0))
+        w = _sword_world(["..r.."], at=(1, 0))
         w.held_supplies = [InventorySupply(5, "bronze_mallet"), InventorySupply(9, "bronze_sword")]
         w.armed_code = "bronze_sword"
         r.world, r.mem = w, Memory(need_self=False, need_position=False)
@@ -493,7 +598,7 @@ class BreakRearmTest(unittest.TestCase):
         w = self.r.world
         w.pos = (0, 0)
         w.view.tiles[(2, 0)] = "dirt"
-        w.view.tiles[(4, 0)] = "bush"
+        w.view.tiles[(4, 0)] = "rock"
         plan = Plan([{"op": "break_block", "x": 4, "y": 0, "capability": "smash"}], dict(PARAM_DEFAULTS))
         plan.stalled_since_tick = 0
         self.ctx.plan = plan

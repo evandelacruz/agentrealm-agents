@@ -135,18 +135,24 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
 
     The oscillation guard is a safety net: it checks whether the character
     is pacing between two cells, whichever states are doing it, and gives up
-    the target it walks to (``navigation/oscillation.py``, A15).
+    the target it walks to (``navigation/oscillation.py``, A15), and the top
+    op too when its executor was one of the pacers: it stalled, so it is
+    remembered and moved below as A104 does (``_stall_paced_op``, A103).
     """
     m = ctx.memory
     m.nav_stuck.decision += 1
     yielded: list[str] = []
-    if oscillation.check(m, world) is not None:
+    paced = oscillation.check(m, world)
+    if paced is not None:
         yielded.append("oscillation: paced between two cells")
     note_goto_reached(world, m, ctx.policy)
     note_heal_window(m, world)
     note_last_weapon(m, world)
     if ctx.plan is not None:
+        paced_op = ctx.plan.current()  # the op on top while it paced, before settling pops any
         _settle_plan(ctx.plan, world, m)
+        if paced is not None and paced_op is not None:
+            _stall_paced_op(ctx.plan, paced_op, paced, world, m, ctx.knowledge)
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
     if ctx.policy.kind == "scripted":
@@ -171,6 +177,39 @@ def _settle_plan(plan: Plan, world: WorldModel, m: Memory) -> None:
     while (op := plan.current()) is not None and OP_STATE.get(op["op"]) is None:
         plan.drop_current("no executor state", memory=m)
         plan.advance(world, m)
+
+
+def _stall_paced_op(
+    plan: Plan, op: dict, paced: dict, world: WorldModel, m: Memory, knowledge: KnowledgeBase | None
+) -> None:
+    """The guard caught pacing that the top op's executor took part in: the op stalled (A103, A104).
+
+    Each of the pacing states sends a sensible step, so the op's stall clock
+    keeps resetting while it goes nowhere; giving up only the walk being
+    walked leaves the op to pace again with the next one. So the op is
+    treated as stalled at once: remembered in ``Memory.stalled_ops`` with why
+    and what was known then, and moved below the next op that can make
+    progress, or dropped when none can (``Plan.demote_current``). The why
+    names the executor, the cells and the other pacers. The op stays when the
+    walk the guard gave up was its own (``OWNER_WALKS``): it then picks
+    another target, or drops itself as Travel does.
+
+    ``op`` is the op that was on top while the character paced. Settling the
+    plan may have popped it since (done, or no executor); then nothing moves,
+    so the next op never pays for pacing it took no part in.
+    """
+    owner = OP_STATE.get(op["op"])
+    if plan.current() is not op or owner is None or owner not in paced["states"] or paced.get("escape"):
+        return
+    if paced.get("goal", "").startswith(OWNER_WALKS.get(owner, ())):
+        return
+    others = [s for s in paced["states"] if s != owner]
+    cells = " and ".join(f"{x},{y}" for x, y in paced["cells"])
+    with_whom = f" with {', '.join(others)}" if others else ""
+    paced["op"] = dict(op)
+    why = f"{owner} paced between {cells}{with_whom}: no way forward"
+    remember_stalled(m.stalled_ops, op, why, world.tick, retry_basis(world, knowledge))
+    plan.demote_current(why, memory=m)
 
 
 def _note_op_progress(

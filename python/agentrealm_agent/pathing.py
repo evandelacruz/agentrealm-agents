@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Callable, Collection
 
-from .break_memory import break_costs_for_planning, nominate_on_path
+from .break_memory import break_costs_for_planning, no_break_reason, nominate_on_path
 from .clues import direction_hint, nearest_explore_target, on_hint_side
 from .config import Policy
 from .knowledge_base import KnowledgeBase
@@ -758,7 +758,8 @@ def escalation_step(
             if choice is not None:
                 att.break_x, att.break_y, att.break_cap = choice.pos[0], choice.pos[1], choice.capability
             else:
-                if not nav_stuck.escalate(m, w, att, "no_break"):
+                why = no_break_reason(w, knowledge, w.pos, att.target) if w.pos else "no_break"
+                if not nav_stuck.escalate(m, w, att, why):
                     return None
                 continue
             return None

@@ -801,11 +801,14 @@ class WorldModel:
         into ``hostile_types``.
 
         Call after apply_observation, so a source first listed in the same
-        response resolves to its type. A hit is filed gross of the armor worn
-        now (``threat.absorb_damaged``): the loadout this response leaves. A source that left view in that
+        response resolves to its type. A source that left view in that
         response is looked up in earlier, the entities before it. There is
         no entity list per event tick, so a source seen in neither is not
         recorded.
+
+        A hit is filed gross of the armor worn now (``threat.absorb_damaged``),
+        the loadout this response leaves: a hit landed before a swap in the
+        same response is filed off by the armor swapped.
         """
         count_swings(self.threat, events, self.entities, earlier)
         armor = worn_armor_defense(self.worn_codes.values())

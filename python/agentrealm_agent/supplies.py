@@ -242,9 +242,10 @@ def worn_armor_defense(worn_codes: Iterable[str]) -> int:
 
 
 def chest_capacity(code: str | None) -> int | None:
-    """The carry capacity ``Use`` on a listed chest makes the carried chest
-    when that is larger (the blue chest, 10, is the size a character starts
-    with), or None for anything that is not a chest."""
+    """The carry capacity a listed chest gives the carried chest when that is
+    larger (the blue chest, 10, is the size a character starts with), or None
+    for anything that is not a chest. The Manual raises it on ``Use``; Loot
+    assumes it on the ``Take`` (``loot.learn_chest_upgrade``)."""
     r = row(code)
     return r.chest_capacity if r is not None else None
 

@@ -94,7 +94,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
   - Die size, hit target and minimum are per-world settings (API Use).
   - Every Olympuff character has permanent attack power 2, existing characters included; permanent defense stays 0 (M §16, CL). A d20 roll of 8+ hits a hostile, which has no defense: 65%. Damage is 1 up to 2 plus weapon damage: the pocket knife deals 1–4, a bronze sword 1–6. The world's hit target stays 10, so hostiles' swings at characters are unchanged.
   - The API serves no attack power (PLAN.md **Server gaps**); the agent's win estimate uses the base of 2 (`survival.BASE_ATTACK_POWER`).
-  - `Damaged.amount` is what got through: a hit armor absorbs whole is `Damaged` with 0 (API Events, B131). The threat table adds back the defense of the armor worn when a hit lands, so it holds the hostile's own number, and the win estimate and Retreat's floor take the armor worn now off it once (`threat.absorb_damaged`, `survival.worn_defense`, A97).
+  - `Damaged.amount` is what got through: a hit armor absorbs whole is `Damaged` with 0 (API Events, B131). The threat table adds back the defense of the armor worn when a hit lands, so it holds the hostile's own number, and the win estimate and Retreat's floor take the armor worn now off it once (`threat.absorb_damaged`, `survival.worn_defense`, A97). The armor added back is the loadout a response leaves, so a hit landed before an armor swap in the same response is filed off by the armor swapped; accepted as rare.
 - **Hostiles.** A hostile, trap or boss uses its damage number as attack power, with no weapon damage. Hostiles use the same move and attack accumulators as characters (API Use, Movement).
 - **What two weak hostiles did** (Obs 1836771–1836830):
 

@@ -48,7 +48,7 @@ from .supplies import is_food, is_potion
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .engagement import fight_bar
-from .survival import combat_group, estimate_health, win_ratio, worn_defense
+from .survival import combat_group, estimate_health, hit_damage, win_ratio, worn_defense
 from .threat import UNMEASURED_DEFAULT, type_key_for_entity
 from .states.intents import is_self_use
 from .world import WorldModel
@@ -340,10 +340,10 @@ def _is_attack_use(intent: dict, w: WorldModel) -> bool:
 def _lone_weak_group(w: WorldModel, group: list, npc_id: int) -> bool:
     """``npc_id`` is the whole group, and hits no harder than the world's base
     attack power at the price the win estimate gives it (a type never
-    measured is priced at that base)."""
+    measured is priced at that base), through the armor worn (``survival.hit_damage``)."""
     if len(group) != 1 or group[0].kind != "npc" or group[0].id != npc_id:
         return False
-    return w.threat.damage_per_hit(type_key_for_entity(group[0])) <= UNMEASURED_DEFAULT
+    return hit_damage(w.threat, type_key_for_entity(group[0]), worn_defense(w)) <= UNMEASURED_DEFAULT
 
 
 def _below_every_bar(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:

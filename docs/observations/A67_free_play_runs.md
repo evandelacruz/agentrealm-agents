@@ -1201,7 +1201,7 @@ Intents: 986 `Step`, 2,742 `Wait`, 42 `Use` (all break attempts, 0 cuts), 34 `Ar
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize.
+Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 are A103 (the oscillation give-up, and a stuck ladder that tries only known openers); defect 3 is A104 (a stalled head op yields).
 
 1. **Two states pace between each other for 306 s, and the oscillation guard gives up the wrong one** (`navigation/oscillation.py:117–120`, `states/break_state.py:61–110`). With `break_block` (379, 375) on top, Break walked west toward the rock, could not get nearer, and handed the next decision to Explore, the safe default. Explore walked east toward a frontier. Then Break took over again. The guard saw the pacing (states `Break` and `Explore`, cells (391, 375) and (401, 375)). It gave up only the active walk's target, Explore's frontier (424, 371), so Explore picked (424, 372) next time, and the loop went on. **Rule:** when two states pace between each other, the one serving an op that cannot get nearer is given up. The planner is then told that op stalled. Giving up one cell of a frontier is not a give-up.
 

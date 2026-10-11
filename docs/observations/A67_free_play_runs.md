@@ -1834,3 +1834,86 @@ Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A126,
 2. **A planner reply with two JSON objects is dropped whole** (`strategist.py:543–551`, `parse_reply`). At 488 s the planner wrote a plan, then "Correction: a wait away from safe ground leaves the character exposed, so I'm putting a travel first.", then a second plan. Slicing from the first `{` to the last `}` spans both objects and fails to parse, so call 28 was lost, and with it the rest on safe ground. **Rule:** a reply holding several JSON objects is read for the last one the plan parser accepts, an object with at least one of `goals`, `params` or `notes` it keeps (the planner's final word, so a correction wins). A reply with none is read as before. (A127)
 
 3. **Travel's legs circle without bringing the destination nearer** (`states/travel.py:206–229`, `_travel_step`, and `route_step` below it). From 547 s the walk to (300, 316) took six legs around the ground south of town where run 18 paced. It went south, east, north-west and north-east, and ended 85 cells off against 80 at the start, then held. **Rule:** a travel walk is judged by how much nearer its destination it gets over its last few legs. Legs that net no progress count as stuck, so the ladder escalates or the planner is asked.
+
+### Run 23: a death to a three-hostile pack beside the north-east entrance walk, a new town in the east, and the first death chest reclaimed
+
+- **Code:** `main` at `c6f78bb`. Since run 22: A120 complete (every op keeps its own walk and clears its own way: route round, open or break, fight; otherwise `no_way_on`), A124 (State shows how an unmet health check closes and an upgrade's minutes), A126 (an old-shape Supplies cache is stale), A127 (a reply with several JSON objects keeps the last plan the parser accepts).
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile, `--seconds 600`.
+- **Knowledge base:** kept from run 22.
+- **Supplies reference:** **served**, 49 subtypes, in the `capabilities` row shape (A126 replaced the old-shape cache at start). Weapon cooldowns parse as served: pocket_knife 800 ms, bronze_sword 1000, bronze_mallet 1300.
+- **Verdict:** exit 0, `PASS` (M10) after **601.3 s**. The park **parked safe** at (427, 398) after 3.3 s. The character started at **10/10**, 4 lives and **1 gem** at (385, 375), with the bronze_sword armed, the bronze_mail worn, 4 potions, matches and 30 pack slots (8 used).
+- **Gate summary (M10):** deaths **1**; API errors **0**; readable cells seen 11 (unread 0); NPCs seen 40 (never spoken 14); duplicate break attempts 0. Planner: 44 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–240 s | `gather_gems` (432, 400), 50 | Cut grass, **1 → 17**. At 222 s a `buy` middle_chest was added and dropped: "the pack already has 30 slots". |
+| 240–296 s | `travel` entrance (532, 311), `explore_area` (532, 311) | "Stage 2 is met … no upgrade is for sale." Travel went north-east from (436, 406) to (532, 347). |
+| 293–310 s | `travel` entrance | A **bogmaw, wartlurch and grubhulk** came into view about 8 cells south-east at 293 s. Travel went on `[cautious]` past them to (547, 359). Hits landed from 301 s. Retreat waited twice on "the step may land on a blocked cell", drank a potion at 307 s, fled one step, then Fight **closed on the wartlurch** at 308.6 s. **Died** at 310.4 s: bogmaw 2, grubhulk **6**, from 6/10 (defect 1). Death chest 484929 at (544, 359), 6 supplies. |
+| 315–443 s | `buy` small_potion, `gather_gems` | Respawned at (610, 396): a **second town** in the east, with potion and gear sellers, a rumor teller and a lake fisher ("Raft, thirty gems"). Bought a potion (17 → 7), gathered. At 413 s a retreat and a second potion. |
+| 443–471 s | `travel` point (544, 359), then `travel` town | Walked back and **reclaimed death chest 484929** (`WithdrawFromChest`, 452 s). The sword, mail and potions were back. Equipped them at 471 s: **stage 2 met** again. |
+| 471–515 s | `equip`, `travel` entrance (532, 311) | Cut a bush at (497, 353) on the way. At 511 s Travel sent **`no_way_on`**: "no step toward it", `blocked_by` "tree at 521,352", `tried` "a way round, then opening a block on the way with a held item" (defect 2). The planner answered `explore_area` (510, 340) radius 12 and `gather_gems` 30. |
+| 515–600 s | `gather_gems` | The explore ended at once (`goal_done` at 515 s), and Gather walked back to region (432, 400). Travel's give-up lapsed at 541 s with no op to retry it. Fight **killed snotling 247** with one swing at 586 s. |
+
+#### Pack, stage, entrance and level attempts
+
+- **Pack slots:** **30** (8 used) at the start; **10** (7 used) from the death to the end (defect 3).
+- **Stage:** 2 met at the start, lost at the death (no weapon or armor), **met again at 471 s** after the chest was reclaimed.
+- **Entrance choice:** north-east, (532, 311), from 240 s and again from 471 s. Neither walk got nearer than 36 cells.
+- **Level attempts:** none.
+- **Death chests:** this run's chest 484929 was **reclaimed** 142 s after the death, the first reclaim (A122). Run 19's chest at map 17 (1, 10) stayed listed, unreached.
+- **`no_way_on` asks:** one, at 511 s, above.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **1** | **12** (+21 earned, −10 spent) |
+| Health | 10/10 | 9/10 |
+| Lives | 4 | 3 |
+| Armed | bronze_sword | bronze_sword (reclaimed) |
+| Worn | bronze_mail | bronze_mail (reclaimed) |
+| Pack | 8/30 slots | 7/10 slots |
+| Potions | 4 | 3 |
+
+Bought: one small_potion (10) at the east town.
+
+#### Gems earned
+
+**21**: 16 from grass at region (432, 400) before 240 s, 5 at the east town and back at (432, 400) after the death. The one kill dropped nothing.
+
+#### Fights
+
+| Time | Hostile | Started by | Outcome |
+|---|---|---|---|
+| 301–310 s | wartlurch 226, bogmaw 228, grubhulk 227 | them | **Died.** We swung once (2). |
+| 584–586 s | snotling 247 | us | **Killed**, one swing (6). |
+
+#### Run 22 defects, checked
+
+| Defect | Run 23 | |
+|---|---|---|
+| An old-shape cache counts as fresh (A126) | **Gone.** Served, `capabilities` shape. | |
+| A reply with two JSON objects is dropped (A127) | **Not tested.** No multi-object reply. | |
+| Travel's legs circle without progress (A120) | **Changed.** Travel now asks with `no_way_on` (511 s) instead of circling. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 311,632, output 10,132, cache write 111,749, cache read 5,475,701 |
+
+#### Decision mix
+
+Intents: 643 `Step`, 1,450 `Wait`, 102 `Use`, 23 `Take`, 5 `Arm`, 4 `Say`, 1 `Wear`, 1 `WithdrawFromChest`. Call mix: 748 `tick`, 411 `zone`, 227 `entities`, 94 `strategist`, 49 `self`, 30 `terrain`, 20 `position`, 1 `stuck` (travel's give-up lapsing).
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize.
+
+1. **A walk carries on through a seen hostile pack, and the fight it ends in is weighed against one of three** (`states/travel.py:99–129`, `walk_to`, and `_travel_step` at 198; `engagement.py:160–176` `decide`, and `drink_turns_fight` at 199). Three hostiles came into view at 293 s, 8 cells off the route. Travel kept walking `[cautious]` beside them for 17 s, through the first hits, to (547, 359). After a potion, Fight closed on the wartlurch while the grubhulk (measured `max_hit` 6) and the bogmaw were also in reach, and the next exchange killed the character from 6/10. **Rule:** a walk's route keeps out of the reach of hostiles in view, as Gather's does. The fight-or-flee estimate counts every hostile in reach, not only the one the engagement began with.
+
+2. **`no_way_on` says opening a block was tried when it was not** (`states/way.py:136–139`, `_tried`; `open_the_way` at 66–92). The ask named "tree at 521,352" and "tried … opening a block on the way with a held item". No `Use` went to (521, 352), and the knowledge base has no break record there, though the armed bronze_sword chops. `_tried` reports from what is held, not what was done. `open_the_way` prices a path to the target with breaks, and with (532, 311) past unexplored ground no such path is found, so no break is chosen. **Rule:** `tried` lists what was actually attempted. An op whose target lies past unexplored ground opens a block on the straight route toward it when a held item opens it, before asking.
+
+3. **Pack capacity reads 10 after the death, down from the applied chest's 30** (`world.py:960–968`, `sync_carry_capacity`). The middle_chest was used up when applied in run 22, so it was not among the 6 supplies dropped at death. From the first State after respawn to the end, `pack` showed `slots_total` 10. Whether the server drops the capacity at death or the agent's derivation from the carried chest loses it is not shown by the trace. **Rule:** carry capacity is the server's number. Where it is derived, the derivation survives a death and a reclaim the same way the server's does.

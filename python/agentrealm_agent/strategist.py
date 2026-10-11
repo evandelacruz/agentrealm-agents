@@ -124,7 +124,7 @@ from .loot import carry_slots_used
 from .break_memory import capabilities_for_code
 from .pack import reserved_supplies
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
-from .stalled import StalledOp, below_progress, find as find_stalled
+from .stalled import StalledOp, below_progress, find as find_stalled, target_of
 from .survival import STARTING_WEAPON, known_hostile, retreat_goal
 from .travel.knowledge import iter_entrances, iter_shop_cells, town_from_kb
 from .travel.ops import travel_op_from_plan_goal
@@ -516,10 +516,7 @@ def same_ops(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> bool:
     """Whether two stacks are the same plan: equal ops, ignoring each op's
     free-text ``why``, so a reworded reason does not restart a ``wait``."""
 
-    def key(op: dict[str, Any]) -> dict[str, Any]:
-        return {k: v for k, v in op.items() if k != "why"}
-
-    return len(a) == len(b) and all(key(x) == key(y) for x, y in zip(a, b))
+    return len(a) == len(b) and all(target_of(x) == target_of(y) for x, y in zip(a, b))
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:

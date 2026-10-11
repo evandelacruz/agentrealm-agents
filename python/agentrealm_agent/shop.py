@@ -107,8 +107,10 @@ def shop_pending_stale(w: WorldModel, pending: tuple) -> bool:
 def sync_shop(w: WorldModel, m: Memory, plan: Plan | None = None) -> None:
     """A gem drop since the Take was sent is the purchase landing (A21).
 
-    A stale Take is forgotten first, and the head buy has paid nothing, so a
-    later unrelated gem drop does not count as a purchase (A112). A loadout,
+    The gem drop is read before staleness, so a Take that landed is never
+    unpaid by the same read that sees it go stale. A stale Take with no gem
+    drop is forgotten, and the head buy has paid nothing, so a later unrelated
+    gem drop does not count as a purchase (A112). A loadout,
     gem or map change clears the refusal counts.
     """
     key = (loadout_key(w), w.gems, w.map_id)
@@ -118,10 +120,8 @@ def sync_shop(w: WorldModel, m: Memory, plan: Plan | None = None) -> None:
     pending = m.shop_pending
     if pending is None:
         return
+    if pending[2] is not None and w.gems is not None and w.gems < pending[2]:
+        m.shop_pending = None
+        return
     if shop_pending_stale(w, pending):
         _take_failed(m, plan)
-        return
-    if pending[2] is None or w.gems is None:
-        return
-    if w.gems < pending[2]:
-        m.shop_pending = None

@@ -106,6 +106,15 @@ class BuyDoneTest(unittest.TestCase):
         plan.advance(w, m)
         self.assertIsNone(plan.current())
 
+    def test_a_take_first_seen_landed_as_it_goes_stale_stays_paid(self):
+        plan = self.paid_plan("golden_cap", gems=20)
+        w, m = self.took(plan, 20)
+        w.gems = 12  # the purchase landed...
+        w.pos = (9, 9)  # ...and we walked off the cell before the next read
+        sync_shop(w, m, plan)
+        plan.advance(w, m)
+        self.assertIsNone(plan.current())
+
     def test_an_item_eaten_on_pickup_is_not_done_unpaid(self):
         plan = self.paid_plan("golden_cap", gems=20)
         plan.advance(world(gems=20), Memory())

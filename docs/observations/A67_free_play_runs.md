@@ -1452,3 +1452,78 @@ Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A111 
 2. **A buy of an item eaten on pickup never counts as done** (`shop.py:99`, `sync_shop`; `states/shop.py`). At 206.4 s the `Take` on the golden_cap landed and gems fell 35 → 27. The cap is eaten on pickup, so nothing was held, and the `buy` op stayed. Shop walked 100 s east toward another golden_cap seller, away from the entrance it had nearly reached, until the planner dropped the op at 303 s. The planner had also bought a heal-on-pickup at full health. **Rule:** a buy is done when its `Take` lands and its price is paid, whether the item stays held or is used up on pickup.
 
 3. **Travel and Fight take turns against a hostile at its post** (`engagement.py:66–113`, `sync_engagement` and `decide`). From 306 s, Travel's walk passed gristlewick 240 at (369, 400). Fight closed in and swung once, then Travel took the next decision and stepped on, and the gristlewick came back into reach. That happened 6 times in 20 s. **Rule:** an engagement, once decided, holds until the fight ends or the retreat rule fires. A walking op does not take a decision in between.
+
+### Run 18: the plan reaches the north-west entrance and enters the hedge garden (map 17), after 300 s of Break and Explore pacing south of town
+
+- **Code:** `main` at `f6476de`. Since run 17: A111 (pacing gives up every walk that took part and remembers a stuck break target), A112 (#206, a paid buy of an item eaten on pickup is done), A113 (a fight once decided holds until it ends).
+- **Knowledge base:** kept from run 17.
+- **Verdict:** exit 0, `PASS` after **602.5 s**, on the short-run gates only. The park **parked safe** at (9, 10) on map 17 after 0.3 s. The character started at **10/10**, 5 lives and **30 gems** at (389, 380), with the bronze_sword armed and the bronze_mail worn.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; kills **0** (lone weak 0); gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **yes**; food taken while hurt **no**; Heal drank a potion **no**. Planner: 40 calls, 40 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–54 s | `read` sign (379, 375), `travel` entrance (300, 316) | "Stage 2 is met … Head for the nearest entrance and explore along the way." The sign `Read` was sent 3 times. Travel went `[cautious]` past gristlewick 240 at (369, 400) and the pack at (361–364, 405–408). |
+| 54–194 s | `travel` entrance (300, 316) | **Break and Explore paced** between (375, 387) and (383, 393): Break toward its stuck-ladder target (367, 368), Explore toward (409, 419). Oscillation events at 159 s and 190 s. Each gave up only `explore` (defect 1). |
+| 194–291 s | `explore_area` (340, 350), `travel` entrance | "Stuck pacing at a wall … explore the woods around a different approach." The walk went south to (371, 426), back north to (374, 371), then `[break]` again. |
+| 291–359 s | `travel` entrance | "Let travel path-find directly toward the NW entrance." The same pacing came back, with a third oscillation event at 355 s, again giving up only `explore`. |
+| 359–507 s | `explore_area` (330, 340), `travel` entrance | The walk went east to (424, 371), then round the north. A detour took the gem pile at (360, 360) (+3, 30 → 33) at 420–424 s, then the walk went on west to (302, 349). Break then walked to (367, 368) **from the north** (336, 334 → 366, 367). |
+| 507–555 s | `travel` entrance (300, 316) | It **cut (367, 368)** at 507 s (`BlockChanged` to dirt) and walked (341, 356) → (318, 334) → (300, 316). It **entered map 17 at 555 s**. |
+| 555–600 s | `say` scarecrow, `read` (3, 3), `explore_area` | The scarecrow said hedges burn with a match and the sign said green walls burn. Then **45 s of random steps** within (5–11, 8–10) on "look around: nothing left to explore" (defect 2), until the park. |
+
+#### Pack, stage, entrance and level attempts
+
+- **Pack slots:** the State gave **10 slots, 9 used**, all run, and listed the middle_chest (10 → 30) as an upgrade for sale, 20 gems short. Run 17 had applied a middle_chest for 30 slots.
+- **Stage:** 3. The first call read stage 2 as met.
+- **Entrance choice:** north-west, (300, 316), at 4.6 s, kept by every later plan. The planner named it Demitater's hedge garden and noted that its walls burn and 3 matches were held.
+- **Level attempts:** **one, entered.** It was on map 17 (16 × 12 cells, all 192 seen) from 555 s. Two snotlings were 2–6 cells off and never engaged. The way on was not found: no break was nominated, and the 3 matches were never armed.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **30** | **33** (+3 earned) |
+| Armed | bronze_sword | bronze_sword |
+| Worn | bronze_mail | bronze_mail |
+| Pack | 9/10 slots | 9/10 slots |
+| Potions | 3 | 3 |
+| Matches | 3 | 3 |
+
+Bought: nothing.
+
+#### Gems earned
+
+**3** in 600 s, **0.3 a minute**, all from the gem pile at (360, 360). There was no grass cutting and no kill.
+
+#### Fights
+
+None. Health stayed 10/10 all run.
+
+#### Run 17 defects, checked
+
+| Defect | Run 18 | |
+|---|---|---|
+| The pacing give-up misses a stuck-ladder Break target (A111) | **Still there.** 3 oscillation events, each naming only `explore`, none with a `breaks` entry. Break went back to (367, 368) after each. | |
+| A buy of an item eaten on pickup never counts as done (A112) | **Not tested.** No buy. | |
+| Travel and Fight take turns mid-engagement (A113) | **Not tested.** No fight. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 192,080, output 7,734, cache write 107,495, cache read 4,622,285 |
+
+#### Decision mix
+
+Intents: 1,086 `Step`, 2,881 `Wait`, 6 `Take` (2 gems; 4 apples, 1 taken and 3 refused as `target_not_nearby`), 4 `Read`, 1 `Use` (the break), 1 `Say`. Call mix: 656 `tick`, 349 `zone`, 257 `entities`, 84 `strategist`, 51 `self`, 47 `terrain`, 16 `position`, 3 `heal_refusal`, and 3 `oscillation` events.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is covered by A90 (the stuck escalation and the pacing guard rewritten under A87, subsuming A103 and A111; branch `c/a90-stuck-under-a87`); defect 2 is A114 (queued); defect 3 is A116 (a `Take` sent from a position the server has not confirmed). The pack shown at 10 slots after run 17 applied the middle_chest is A115. A115 and A116 are on branch `c/run18-capacity-pickup`.
+
+1. **The pacing give-up still misses a stuck-ladder Break target** (`navigation/oscillation.py:203–220`, `walk_attempt`; `_give_up_walks` at 145–180). Under `travel` entrance, Break walked toward (367, 368) and Explore walked back toward (409, 419), about 9 steps each, for about 300 s in all. The three oscillation events had states `Break` and `Explore` but named only `explore` in `goals` and carried no `breaks`. So the Break walk was not attributed to a stuck attempt, (367, 368) was never filed as a stalled `break_block`, and Break kept nominating it. It was cut only after `explore_area` led the character round to its north side. **Rule:** every walk that took part in pacing is given up, whichever state or ladder level sent it and whichever attempt is active when the guard fires.
+
+2. **A fully seen map leaves Explore stepping at random** (`states/explore.py:165–177`, `_look_around`). On map 17 every cell was seen, so `explore_area` had no target and Explore took a random safe step each decision for 45 s. Both the scarecrow and the sign said the hedges burn, and 3 matches were held, but nothing nominated a hedge. **Rule:** when nothing is left to explore and the goal is still out of reach, the walk opens a block a held item is known to open, or reports the goal stalled. It does not wander.
+
+3. **A pickup `Take` sent out of reach** (`states/pickup.py:23–44`, `pickup_outcome`). Pickup sent `take apple` three times at full health, and all three were refused `target_not_nearby`. Twice it was the apple at (391, 385) with the trace at (389, 384), 2 cells off. Pickup takes only within 1 cell by the world model's position, so that position was most likely a step behind the server's while a move queue was still running. **Rule:** a reflex that needs reach acts on a position the server has confirmed, not on one a running move queue may already have left.

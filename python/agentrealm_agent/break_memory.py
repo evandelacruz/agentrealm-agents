@@ -245,6 +245,14 @@ def _route(start: Pos, goal: Pos) -> Iterator[Pos]:
         yield p
 
 
+def choice_at(
+    w: WorldModel, kb: KnowledgeBase | None, pos: Pos, skip: frozenset[Pos] = frozenset()
+) -> BreakChoice | None:
+    """How to open the block at ``pos`` with what is held (``_choice_at``),
+    for a walk whose priced way crosses that block."""
+    return _choice_at(w, kb, pos, held_capabilities(w, kb), skip)
+
+
 def _choice_at(
     w: WorldModel, kb: KnowledgeBase | None, pos: Pos, held: set[str], skip: frozenset[Pos] = frozenset()
 ) -> BreakChoice | None:

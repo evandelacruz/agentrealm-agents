@@ -3,6 +3,13 @@
 Types, limits and paced Step/Wait queue building (``movement``), used by the
 runner, and attack and speech pacing (``pacing``), used for ``Use`` and
 ``Say``/``Broadcast`` in the runner.
+
+Two layers. The modules this package exports build intents and queues and
+read nothing of the world. ``supply_refusals`` (A89) is the one that reads
+the world and memory: what is sent after the server refuses a food ``Take``
+or a ``Use`` on yourself, or a ``Use`` does nothing. The runner files results
+into it and states ask it before they send; it is not exported here, so
+importing the package stays free of the world model.
 """
 
 from .constants import (

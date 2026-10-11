@@ -6,7 +6,7 @@ import unittest
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.healing import HealRefusal, NoopDrink, can_try, drink_situation, heal_situation
+from agentrealm_agent.executor.supply_refusals import NoopUse, Refusal, can_try, noop_situation, refusal_situation
 from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
@@ -72,8 +72,8 @@ class ApplyChestTest(unittest.TestCase):
         self.assertEqual(out.state, "UseItem")
         self.assertEqual(out.intents[0], {"verb": "Arm", "supply_id": 9})
         self.assertEqual(out.intents[-1], USE_SELF)
-        self.assertEqual(c.memory.heal_drink, 9)
-        self.assertEqual(c.memory.heal_rearm, "bronze_sword", "the weapon goes back after, as after a drink")
+        self.assertEqual(c.memory.self_use, 9)
+        self.assertEqual(c.memory.self_use_rearm, "bronze_sword", "the weapon goes back after, as after a drink")
 
     def test_the_biggest_chest_goes_first(self):
         w = world()
@@ -90,19 +90,19 @@ class ApplyChestTest(unittest.TestCase):
         w = world()
         w.held_supplies = [InventorySupply(9, "middle_chest")]
         m = Memory()
-        m.heal_refusals[("use", 9)] = HealRefusal("bad_target", "hold", 5, heal_situation(w))
+        m.supply_refusals[("use", 9)] = Refusal("bad_target", "hold", 5, refusal_situation(w))
         self.assertIsNone(chest_to_apply(w, m))
 
     def test_a_chest_whose_use_did_nothing_is_not_retried_after_a_hit(self):
         w = world()
         w.held_supplies = [InventorySupply(9, "middle_chest")]
         m = Memory()
-        m.heal_refusals[("use", 9)] = NoopDrink("no_change", "hold", 5, drink_situation(w), 10)
+        m.supply_refusals[("use", 9)] = NoopUse("no_change", "hold", 5, noop_situation(w), 10)
         w.health = 6  # hit since: a reason to drink again, not to use a chest again
         self.assertIsNone(chest_to_apply(w, m))
         # A potion in the same spot is drunk again once health fell.
         w.held_supplies = [InventorySupply(9, "potion")]
-        m.heal_refusals[("use", 9)] = NoopDrink("no_change", "hold", 5, drink_situation(w), 10)
+        m.supply_refusals[("use", 9)] = NoopUse("no_change", "hold", 5, noop_situation(w), 10)
         self.assertTrue(can_try(m, w, "use", 9))
 
     def test_not_with_a_hostile_in_range(self):
@@ -136,7 +136,7 @@ class UseItemOpTest(unittest.TestCase):
         self.assertEqual(out.intents[-1], USE_SELF)
         self.assertEqual(c.plan.used_id, 9)
         # Drunk: the potion is gone, the weapon still armed.
-        w.held_supplies, c.memory.heal_rearm = [], None
+        w.held_supplies, c.memory.self_use_rearm = [], None
         dispatch(w, c)
         self.assertIsNone(c.plan.current())
         done = [s for s in c.memory.strategist_signals if s.get("trigger") == "goal_done"]
@@ -152,7 +152,7 @@ class UseItemOpTest(unittest.TestCase):
         w = world()
         w.held_supplies = [InventorySupply(9, "potion")]
         m = Memory()
-        m.heal_refusals[("use", 9)] = HealRefusal("bad_target", "forget", 5, ())
+        m.supply_refusals[("use", 9)] = Refusal("bad_target", "forget", 5, ())
         c = ctx(plan({"op": "use_item", "code": "potion"}), m)
         dispatch(w, c)
         self.assertIsNone(c.plan.current())

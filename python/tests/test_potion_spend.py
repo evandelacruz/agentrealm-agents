@@ -1,10 +1,9 @@
 """A96: one rule for when a carried potion is spent, read by Heal, Retreat and the planner.
 
-Free-play run 11: the planner bought a potion for the reserve and Heal drank
-it a second later at 7/10 in town, so the reserve never built. A potion is
-now drunk only when health is low (``healing.health_low``) or the win
-estimate says the drink turns the fight under way; otherwise Heal eats food
-or rests, and the planner's prompt and State say the same.
+A potion is drunk only when health is low (``healing.health_low``, at or
+below the planner's ``low_health`` share of max) or the win estimate says the
+drink turns the fight under way; otherwise Heal eats food or rests, so a
+reserve the planner buys is kept. The planner's prompt and State say the same.
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ class HealKeepsTheReserveTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual(out.state, "Heal")
         self.assertNotIn("Use", verbs(out))
-        self.assertIsNone(c.memory.heal_drink)
+        self.assertIsNone(c.memory.self_use)
 
     def test_low_drinks_it(self):
         w, c = in_town(5)
@@ -112,7 +111,7 @@ class DrinkInAFightTest(unittest.TestCase):
         sync_engagement(w, c.memory, c.policy, c.params)
         out = _turn_on_losing(w, c, "Retreat")
         self.assertEqual(verbs(out), ["Arm", "Use"])
-        self.assertEqual(c.memory.heal_drink, POTION.id)
+        self.assertEqual(c.memory.self_use, POTION.id)
 
     def test_retreat_weighs_the_drink_once_running_is_found_not_to_work(self):
         # A pair at 26/40: under the fight margin (1.5) but above break-even. Once
@@ -125,7 +124,7 @@ class DrinkInAFightTest(unittest.TestCase):
         out = _turn_on_losing(w, c, "Retreat")
         self.assertTrue(c.memory.engagement.cannot_outrun and c.memory.engagement.fight)
         self.assertNotIn("Use", verbs(out) if out else [])
-        self.assertIsNone(c.memory.heal_drink)
+        self.assertIsNone(c.memory.self_use)
 
 
 class PlannerSeesTheRuleTest(unittest.TestCase):
@@ -137,7 +136,8 @@ class PlannerSeesTheRuleTest(unittest.TestCase):
     def test_state_shows_the_line_and_the_count(self):
         w, _ = in_town(7)
         w.held_supplies = [POTION, InventorySupply(6, "small_potion")]
-        self.assertEqual(potion_line(w), "potions=2 potion_drunk_at=health<=5")
+        self.assertEqual(potion_line(w, PARAM_DEFAULTS), "potions=2 potion_drunk_at=health<=5")
+        self.assertEqual(potion_line(w, {**PARAM_DEFAULTS, "low_health": 0.8}), "potions=2 potion_drunk_at=health<=8")
         msgs = build_prompt(triggers=[], w=w, plan=Plan([], dict(PARAM_DEFAULTS)), directives=Directives(), knowledge=None)
         self.assertIn("potions=2 potion_drunk_at=health<=5", msgs[-1]["content"])
 

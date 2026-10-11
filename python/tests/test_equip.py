@@ -227,7 +227,7 @@ class UpgradeTest(unittest.TestCase):
         # Heal (priority 1) puts its weapon back before Equip looks (A24).
         w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(6, "bronze_mallet")]
         c = ctx(kb)
-        c.memory.heal_rearm = "bronze_mallet"
+        c.memory.self_use_rearm = "bronze_mallet"
         out = dispatch(w, c)
         self.assertEqual((out.state, out.intents), ("Heal", [{"verb": "Arm", "supply_id": 6}]))
 

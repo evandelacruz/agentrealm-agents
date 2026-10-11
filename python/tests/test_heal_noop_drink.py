@@ -3,7 +3,7 @@
 A drink applied when its result is ``applied`` or ``applied_no_effect``; it
 drank something only if the supply then leaves what we carry, our own
 ``SupplyUsed`` names it, or health rises. Otherwise the next decision files
-the cause (``healing.noop_drink_cause``): something else armed re-arms, full
+the cause (``healing.noop_cause``): something else armed re-arms, full
 health waits for less, and anything else holds that supply until what we
 carry, the map or max health changes, or health falls below what it was:
 a potion is never unusable while health falls. Free-play run 4: a drink
@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import unittest
 
-from agentrealm_agent.healing import drank, potion_count
+from agentrealm_agent.executor.supply_refusals import used_up
+from agentrealm_agent.healing import potion_count
 from agentrealm_agent.item_table import InventorySupply
 
 from tests.test_heal_refusal import KNIFE, POTION_A, USE_SELF, RefusalTest
@@ -37,9 +38,9 @@ class NoopDrinkTest(RefusalTest):
         self.assertEqual(sent[-1], USE_SELF)
         for index, intent in enumerate(sent):
             self.r.on_result({"outcome": "applied" if intent["verb"] == "Arm" else outcome, "tick": self.r.world.tick}, index)
-        if events and self.r._applied_drink is not None:
+        if events and self.r._applied_self_use is not None:
             # As Runner.tick does with the response's events.
-            self.r._applied_drink.used = drank(events, self.r.cid, self.r._applied_drink.code)
+            self.r._applied_self_use.used = used_up(events, self.r.cid, self.r._applied_self_use.code)
         return sent
 
     def potion_armed(self) -> None:
@@ -61,7 +62,7 @@ class NoopDrinkTest(RefusalTest):
         w.held_supplies, w.armed_code, w.armed_id = [KNIFE], None, None
         self.next_tick()
         self.decide()
-        self.assertNotIn(("use", 4), self.r.mem.heal_refusals)
+        self.assertNotIn(("use", 4), self.r.mem.supply_refusals)
 
     def test_our_supply_used_event_counts_as_drunk(self):
         # The inventory delta may lag; our own SupplyUsed says it was drunk.
@@ -69,14 +70,14 @@ class NoopDrinkTest(RefusalTest):
         self.potion_armed()
         self.next_tick()
         self.decide()
-        self.assertNotIn(("use", 4), self.r.mem.heal_refusals)
+        self.assertNotIn(("use", 4), self.r.mem.supply_refusals)
 
     def test_another_characters_supply_used_is_not_ours(self):
         self.drink(events=[{"kind": "SupplyUsed", "actor_id": 999, "supply_code": "small_potion"}])
         self.potion_armed()
         self.next_tick()
         self.decide()
-        self.assertEqual(self.r.mem.heal_refusals[("use", 4)].cause, "no_change")
+        self.assertEqual(self.r.mem.supply_refusals[("use", 4)].cause, "no_change")
 
     def test_health_rising_counts_as_drunk(self):
         self.drink()
@@ -84,14 +85,14 @@ class NoopDrinkTest(RefusalTest):
         self.r.world.health = 9
         self.next_tick()
         self.decide()
-        self.assertNotIn(("use", 4), self.r.mem.heal_refusals)
+        self.assertNotIn(("use", 4), self.r.mem.supply_refusals)
 
     def test_armed_and_hurt_and_nothing_changed_holds_until_what_we_carry_changes(self):
         self.drink()
         self.potion_armed()
         self.next_tick()
         self.assertNotIn(USE_SELF, self.decide(), "the same drink is not resent")
-        self.assertTrue(any("drank nothing (no_change): hold" in line for line in self.lines))
+        self.assertTrue(any("did nothing (no_change): hold" in line for line in self.lines))
         w = self.r.world
         # The re-arm, a walk and regen change nothing the drink depends on.
         self.knife_rearmed()
@@ -127,7 +128,7 @@ class NoopDrinkTest(RefusalTest):
         self.potion_armed()
         self.next_tick()
         self.assertNotIn(USE_SELF, self.decide())
-        self.assertEqual(self.r.mem.heal_refusals[("use", 4)].cause, "no_change")
+        self.assertEqual(self.r.mem.supply_refusals[("use", 4)].cause, "no_change")
 
     def test_another_supply_is_still_drunk(self):
         w = self.r.world
@@ -146,13 +147,13 @@ class NoopDrinkTest(RefusalTest):
         self.knife_rearmed()
         self.next_tick()
         self.assertEqual(self.decide(), [ARM_A, USE_SELF])
-        self.assertEqual(self.r.mem.heal_refusals[("use", 4)].cause, "not_armed")
+        self.assertEqual(self.r.mem.supply_refusals[("use", 4)].cause, "not_armed")
 
     def test_something_else_armed_after_its_own_arm_holds(self):
         self.assertEqual(self.drink(), [ARM_A, USE_SELF])
         self.next_tick()  # the knife is still in the slot: the Arm took no hold
         self.assertNotIn(USE_SELF, self.decide())
-        self.assertEqual(self.r.mem.heal_refusals[("use", 4)].action, "hold")
+        self.assertEqual(self.r.mem.supply_refusals[("use", 4)].action, "hold")
 
     def test_full_health_waits_for_health_below_it(self):
         self.drink()
@@ -162,7 +163,7 @@ class NoopDrinkTest(RefusalTest):
         w.max_health = 7
         self.next_tick()
         self.decide()
-        r = self.r.mem.heal_refusals[("use", 4)]
+        r = self.r.mem.supply_refusals[("use", 4)]
         self.assertEqual((r.cause, r.action), ("full_health", "full"))
         w.max_health = 20  # hurt again by this reading, health not below 7
         self.next_tick()
@@ -181,9 +182,9 @@ class NoopDrinkTest(RefusalTest):
         # Only a server result keeps a drink to check; a probe decides and sends nothing.
         self.decide()
         self.next_tick()
-        self.r.file_heal_refusals()
-        self.assertIsNone(self.r._applied_drink)
-        self.assertNotIn(("use", 4), self.r.mem.heal_refusals)
+        self.r.file_supply_refusals()
+        self.assertIsNone(self.r._applied_self_use)
+        self.assertNotIn(("use", 4), self.r.mem.supply_refusals)
 
 
 if __name__ == "__main__":

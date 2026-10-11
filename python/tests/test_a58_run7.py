@@ -150,15 +150,14 @@ def fetch_ctx() -> PlayContext:
 
 
 class UnreachableFoodTest(unittest.TestCase):
-    def test_heal_gives_the_food_up_instead_of_pacing(self):
-        # Within Heal's FOOD_REACH the planner sees the whole pond: no path.
+    def test_food_no_walk_reaches_is_no_target(self):
+        # Within Heal's FOOD_REACH the planner sees the whole pond: no path,
+        # so the food has no price and is never walked to (A89).
         w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"], pickup=False))
         w.pos = (400, 608)
         outs = play(w, c, 80)
         signals = c.memory.nav_stuck.stuck_signals
-        # Given up at once, retried once when the 300-tick backoff ends,
-        # given up again (now backed off 600).
-        self.assertEqual([(s["goal"], s["target"], s["reason"]) for s in signals], [("heal_food", list(FOOD), "no_path")] * 2)
+        self.assertNotIn("heal_food", [s["goal"] for s in signals])
         self.assertEqual(c.memory.nav_stuck.oscillations, [], "no pacing at all")
         self.assertFalse(any(o.reason.startswith("heal_food") for o in outs), "never walked toward it")
 
@@ -203,7 +202,13 @@ class HealWalkBoundedTest(unittest.TestCase):
         w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"], pickup=False))
         w.pos = (403, 608)  # both cells within Heal's FOOD_REACH of the food
         flip = {(403, 608): (402, 608), (402, 608): (403, 608)}
-        with mock.patch("agentrealm_agent.states.heal.cost_path", lambda w, *a, **k: [flip[w.pos]]):
+        # The walk's plan steps to the other cell; the price sees a way to the food.
+        def plan(w, goal, params=None, nav=None, **k):
+            if w.pos not in flip:
+                return None
+            return [flip[w.pos]] if nav is not None else [flip[w.pos], FOOD]
+
+        with mock.patch("agentrealm_agent.states.heal.cost_path", plan):
             outs = play(w, c, 20)
         events = c.memory.nav_stuck.oscillations
         self.assertEqual([(e.get("goal"), e["states"]) for e in events], [("heal_food", ["Heal"])])
@@ -359,8 +364,8 @@ class HealWalkBoundedTest(unittest.TestCase):
         self.assertNotIn(loot_key, c.memory.nav_stuck.attempts)
 
     def test_heal_gives_safe_ground_up_with_its_one_safe_tile(self):
-        # Free-play run 9: moving on to the next safe tile chained unreachable
-        # tiles into a 217 s loop. One give-up ends safe ground until healed.
+        # Moving on to the next safe tile would chain unreachable tiles into
+        # a loop: one give-up ends safe ground while it backs off (A89).
         w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"]))
         w.entities = []
         w.zones[1] = {(404, 600): ZoneFact(safe=True), (410, 605): ZoneFact(safe=True), (404, 605): ZoneFact(safe=False)}
@@ -369,7 +374,7 @@ class HealWalkBoundedTest(unittest.TestCase):
         nav_stuck.give_up(c.memory, w, nav_stuck.active(c.memory, w), "time")
         out = dispatch(w, c)
         self.assertNotEqual(out.state, "Heal")
-        self.assertIn((1, (404, 600)), c.memory.safe_unreachable)
+        self.assertTrue(nav_stuck.backed_off(c.memory, "heal_measure", 1, (404, 600), w.tick))
 
 
 if __name__ == "__main__":

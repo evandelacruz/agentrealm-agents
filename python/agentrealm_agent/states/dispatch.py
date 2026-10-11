@@ -256,9 +256,11 @@ def _note_op_progress(
         plan.demote_current(why, memory=m)
 
 
-# The ``Memory.goal`` labels each executor's walks carry, so dispatch can
-# tell Break working the top op's own stuck walk from any other stuck walk
-# (the safe default's ``explore`` is never the op's). Travel's search for a
+# The ``Memory.goal`` labels each executor's walks carry. Only
+# ``_breaking_for`` reads them, to tell Break working the top op's own stuck
+# walk from any other stuck walk, so that break counts as the op's progress
+# (the safe default's ``explore`` is never the op's). The paced-op stall does
+# not use them (A90). Travel's search for a
 # hunting ground walks under ``explore_area`` (A27). Investigate's and
 # Loot's walks are ``bounded_step`` walks, which give up rather than escalate
 # to Break, so they need no entry.

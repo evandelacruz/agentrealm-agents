@@ -14,7 +14,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.poll_cadence import hostile_within
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.explore import _look_around
-from agentrealm_agent.states.gather import _barred_by_hostile
+from agentrealm_agent.states.gather import _barred_by_hostile, ground
 from agentrealm_agent.states.gather_safe import gather_ground, hostiles_near
 from agentrealm_agent.states.greet import threat_near
 from agentrealm_agent.states.heal import _wants_heal
@@ -49,10 +49,10 @@ class TownsfolkAreNoThreatTest(unittest.TestCase):
         w = world(["ggggg", "ggggg", "ggggg"])
         w.entities = [townsperson((3, 1))]
         self.assertTrue(gather_ground(w, (4, 1), POLICY))
-        self.assertFalse(_barred_by_hostile(w, POLICY, set(), set()))
+        self.assertFalse(_barred_by_hostile(w, POLICY, ground(w, Memory(), POLICY, None, None, None)))
         w.entities = [monster((3, 1))]
         self.assertFalse(gather_ground(w, (4, 1), POLICY))
-        self.assertTrue(_barred_by_hostile(w, POLICY, set(), set()))
+        self.assertTrue(_barred_by_hostile(w, POLICY, ground(w, Memory(), POLICY, None, None, None)))
 
     def test_a_townsperson_adds_no_path_danger(self):
         w = world([".......", ".......", "......."], at=(0, 1))

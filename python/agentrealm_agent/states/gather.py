@@ -1,78 +1,83 @@
-"""Gather: carry out the plan's ``gather_gems`` op from grass and gem piles (A22, A81).
+"""Gather: carry out the plan's ``gather_gems`` op from grass and gem piles (A22, A88).
 
-Bushes drop berries, not gems (GAME_NOTES.md Gems), so Gather never cuts
-one; food is Heal's and Loot's.
+Gems come from cutting grass, which drops one some of the time, and from
+gem piles on the ground, a gem for sure. Bushes drop berries, not gems
+(GAME_NOTES.md Gems), so Gather never cuts one; food is Heal's and Loot's.
 
-It works any known ground off hazards with no known hostile near
-(``gather_ground``), the open field and safe zones alike, but cuts field
-cells (not known safe) ahead of safe ones: a cut on town grass was seen to
-have no effect (A63 run 2). With nothing to cut while standing on safe
-ground it walks out to the nearest known field ground, else the nearest
-frontier. With every known cell to cut held by a hostile, it walks on to
-the nearest frontier clear of every known hostile rather than stand off one
-(A82). Grass in a region our own cuts showed barren is left
-alone (A63), unless the op names that region with ``x, y``, and so are cells
-it cut too recently to have grown back, cells whose last ``Use`` had no
-effect, and regions or safe zones where cuts keep having none
-(``GemYieldTracker.uncuttable``).
+Each decision Gather runs one search for the place to work next:
 
-A target region is worked before anything else: the one the op names with
-``x, y``, else, while Gather stands in a poor region (a fair sample, low
-yield), the best better region known nearby (``gem_yield.better_region``).
-Gather walks to it and cuts only there while it has a cell to cut; poor
-regions are left alone while a better one is known. With nothing known to
-cut there, a named region it has not seen is walked toward, and otherwise
-Gather works as if there were no target (free-play run 2).
+- **Where it may work** (``Ground``): ground ``gather_ground`` allows (known,
+  off hazards, clear of every known hostile's bar, out of ground a
+  remembered hostile holds). For cutting, not a region its cuts showed
+  barren, nor ground where cuts keep having no effect
+  (``GemYieldTracker.uncuttable``), nor a cell cut too recently to have
+  grown back (``gem_yield.exhausted_cells``).
+- **What it may go for there** (``_targets``): grass to cut, gem piles to
+  take, and the edge of unexplored ground, where more grass may lie; only
+  inside the op's target region while Gather works one.
+- **What each costs**: the walk there (``_price``: its steps, and the
+  steps ground near a hostile adds), plus the work there (``GemOdds.work``):
+  the actions that get the gems the op still needs at the yield there
+  (``gem_yield.region_yield``, the map's ``expected_yield`` on unsampled
+  ground): a cut for each gem a cut is expected to drop; a pile is one
+  ``Take`` for a sure gem, then cuts for the rest; an edge first pays the
+  steps past it to grass. The cheapest wins. No walk crosses a known
+  hostile's reach (``route_bar``).
+- **Commitment** (A71): the target picked is kept until it is reached, is
+  no longer a target, has no way there, or its first step stays taken for
+  ``HOLD_TICKS``, and let go for its price only by the one rule
+  (``targets.outpriced``, A109).
 
-Working anywhere, the cheapest grass is weighed against the nearest
-unexplored ground (``_explore_instead``), each priced as its walk plus a cut
-for each gem the op still needs at the yield there (``GemOdds``): known
-grass far off wins only when its yield outweighs the walk (A105)."""
+What is in reach (a gem pile beside it, the grass it stands on) costs no
+walk, so it is worked unless the walk Gather would take costs less in all.
+
+The calls that depend on the situation are the planner's. Which region:
+a ``gather_gems`` with ``x, y`` names a target region; Gather works only
+there while it has a target there that a way reaches (its middle while no
+cell of it is known), and works anywhere otherwise. Whether to
+work near a hostile: ``fight`` lifts the remembered ground and the route
+bar. Gather itself only keeps clear: a hostile that stays near without
+attacking bars the cells near it, and the price sends Gather to other grass.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cache
-from typing import Callable, Iterable
+from typing import Callable
 
 from .. import targets as targets_mod
 from ..config import Policy
-from ..directives import attack_forbidden
 from ..executor import DEFAULT_TICK_RATE_HZ
 from ..gem_yield import (
     GATHER_BLOCKS,
     REGION_SIZE,
+    STALL_SECONDS,
     GemYieldTracker,
     barren_regions,
-    better_region,
-    exhausted_cells,
-    poor_regions,
-    region_yields,
-    STALL_SECONDS,
     blocks_to_region,
     cut_or_since,
+    exhausted_cells,
     region_corner,
     region_of,
+    region_yields,
 )
 from ..supplies import heals
-from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
+from ..hostile_ground import Danger, danger, reach_cells
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase
-from ..loot import GEM_PILE_STEPS
 from ..memory import Memory
 from ..navigation import CostGridParams, cost_path, nearest_target
 from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
-from ..engagement import would_fight
 from ..equip import CUT, does_job, hunting_ceiling, weapon_to_arm
-from ..survival import is_attacker, is_hostile, recently_attacked
+from ..survival import is_hostile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets, safe_default
-from .fight import engage
-from .gather_safe import gather_ground, route_clear
+from .gather_safe import gather_ground, route_bar, route_clear
 from .intents import arm, arm_and_use, set_position, take, use_block
 from .solve import held_supply
 
@@ -81,64 +86,46 @@ from .solve import held_supply
 # A priced supply with the same code is shop stock: taking it is a purchase.
 GEM_PILE_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
 GOAL = "gather"
-OUT = "out"  # ``m.gather_target`` kind: walking off safe ground to field ground or the frontier
-OFF = "off"  # ``m.gather_target`` kind: moving off from a hostile that shadows us
-REGION = "region"  # ``m.gather_target`` kind: walking toward a target region with no cuttable cell seen yet
-CLEAR = "clear"  # ``m.gather_target`` kind: walking to the frontier clear of hostiles, every known cell to cut barred by one
-FRONTIER = "frontier"  # ``m.gather_target`` kind: walking to unexplored ground priced cheaper than the known grass
-# Known targets tried per replan, nearest first: bounds the searches when the
-# closest ones turn out unreachable (across water, say).
+# ``m.gather_target`` kinds: what Gather walks to.
+GRASS = "grass"
+PILE = "pile"
+FRONTIER = "frontier"  # the edge of unexplored ground
+REGION = "region"  # the middle of a target region no cell of which is known yet
+# Targets of one price searched for per search, nearest first: bounds the
+# search when the closest ones turn out unreachable (across water, say).
 GATHER_CANDIDATES = 16
-# Paths planned per target kind before giving up on that kind, when the
-# nearest targets can only be reached through a known hostile's reach.
-ROUTE_TRIES = 3
-# A hostile within GATHER_HOSTILE_RADIUS this long without hitting us is
-# shadowing us: Gather fights it or moves well off (A63 run 3: one followed
-# at 4–6 blocks and cutting stalled for 45 s).
-SHADOW_SECONDS = 15
-# Gather not seeing the shadow near for this long (another state ran, or it
-# left) restarts its clock.
-SHADOW_GAP_SECONDS = 5
-# Moving off goes to cells at least this far from the shadowing hostile, in one walk.
-MOVE_OFF_DISTANCE = 2 * GATHER_HOSTILE_RADIUS
+# Gather waits this long for a taken first step toward its target (an
+# occupant), then gives the target up (5 s at 10 ticks/s, as a walk's fog hold).
+HOLD_TICKS = 50
 # Gather's last decision, for the planner's State (``Memory.gather_status``).
 CUTTING = "cutting"
 TAKING = "taking a gem"
-WALKING = "walking to {}"  # grass, a gem pile
+WALKING = "walking to {}"
 NO_EFFECT = "cuts have no effect here"
-HEADING_OUT = "heading out of safe ground"
 NONE_CUTTABLE = "no cuttable cell in view"
 REGION_BARREN = "region barren"
 BLOCKED = "blocked by hostile"
-MOVING_OFF = "moving off from a hostile that shadows"
-FIGHTING = "fighting a hostile that shadows"
 WAITING = "way to {} taken, waiting"
 STALLED = "{}, no cut for {} s"
 WALK_TARGETS = {
-    "grass": "grass",
-    "pile": "a gem pile",
+    GRASS: "grass",
+    PILE: "a gem pile",
     REGION: "a target region",
-    CLEAR: "ground clear of hostiles",
     FRONTIER: "unexplored ground",
 }
 IN_REGION = "{} (region {},{})"  # any status while Gather works only in a target region
 
+Target = tuple[str, Pos]
+
 
 class GatherState(State):
-    """Executor for ``gather_gems``: ``Use`` grass or ``Take`` gem
-    piles until the gem counter reaches the op's count, walking to the
-    nearest known one when none is in reach, field cells before safe ones.
-    A cut goes out with a tool that cuts, armed in the same queue when the
-    armed item is not known to cut; the weapon it swapped out is armed again
-    once no ``gather_gems`` op is on top.
-    Grass in a barren region (unless the op names it), or where
-    cuts had no effect, are skipped. On safe ground with nothing to cut, it
-    heads out to field ground or the frontier;
-    with nowhere to head, it explores (the safe default) to reveal more.
-
-    A hostile that stays near for ``SHADOW_SECONDS`` without hitting us is
-    fought when ``on_hostile = fight`` and the win estimate passes, else
-    Gather moves well off from it in one walk (A63 run 3)."""
+    """Executor for ``gather_gems``: ``Use`` grass or ``Take`` gem piles
+    until the gem counter reaches the op's count, walking to the cheapest
+    place to work when nothing is in reach. A cut goes out with a tool that
+    cuts, armed in the same queue when the armed item is not known to cut;
+    the weapon it swapped out is armed again once no ``gather_gems`` op is
+    on top. With nowhere to go, it explores (the safe default) to reveal
+    more."""
 
     name = "Gather"
 
@@ -152,18 +139,11 @@ class GatherState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         op = my_op(ctx, self.name)
-        m = ctx.memory
         if op is None:
-            return _rearm_weapon(world, m)
+            return _rearm_weapon(world, ctx.memory)
         tick_hz = ctx.plan.tick_hz if ctx.plan is not None else DEFAULT_TICK_RATE_HZ
-        shadow = shadowing_hostile(world, m, ctx.policy, tick_hz)
-        if shadow is not None:
-            fight = fight_shadow(world, ctx, shadow)
-            if fight is not None:
-                m.gather_status = FIGHTING
-                return fight
         out = gather_outcome(
-            world, m, ctx.policy, knowledge=ctx.knowledge, op=op, gem_cuts=ctx.gem_cuts, shadow=shadow, tick_hz=tick_hz
+            world, ctx.memory, ctx.policy, knowledge=ctx.knowledge, op=op, gem_cuts=ctx.gem_cuts, tick_hz=tick_hz
         )
         if out.intents is not None or out.wait:
             return out
@@ -172,59 +152,122 @@ class GatherState(State):
         return out
 
 
-def shadowing_hostile(w: WorldModel, m: Memory, policy: Policy, tick_hz: int) -> Entity | None:
-    """The hostile that has stayed within ``GATHER_HOSTILE_RADIUS`` of us for
-    ``SHADOW_SECONDS`` without hitting us, else None (A63 run 3).
-
-    Tracks one threat (``is_hostile``) at a time in ``m.gather_shadow``: the
-    nearest, until it leaves the radius. Its clock starts again when it hits
-    us (the survival states handle that), or when Gather has not seen it near
-    for ``SHADOW_GAP_SECONDS``.
-    """
-    here = w.pos
-    if here is None:
-        return None
-    near = {
-        e.id: e for e in w.entities if is_hostile(w, policy, e) and chebyshev(e.pos, here) <= GATHER_HOSTILE_RADIUS
-    }
-    tracked = m.gather_shadow
-    if tracked is None or tracked[0] not in near or w.tick - tracked[2] >= SHADOW_GAP_SECONDS * tick_hz:
-        nearest = min(near.values(), key=lambda e: (chebyshev(e.pos, here), e.id), default=None)
-        m.gather_shadow = (nearest.id, w.tick, w.tick) if nearest is not None else None
-        return None
-    e, since = near[tracked[0]], tracked[1]
-    if is_attacker(w, e) and w.attacked_tick is not None and w.attacked_tick >= since:
-        since = w.attacked_tick  # it hit us: "without hitting us" starts over
-    m.gather_shadow = (e.id, since, w.tick)
-    if recently_attacked(w) and is_attacker(w, e):
-        return None
-    return e if w.tick - since >= SHADOW_SECONDS * tick_hz else None
-
-
-def fight_shadow(w: WorldModel, ctx: PlayContext, e: Entity) -> StateOutcome | None:
-    """Close on and swing at the shadowing ``e`` when ``on_hostile = fight``,
-    it may be attacked, and the decision an engagement with it would start
-    with is to fight (``engagement.would_fight``);
-    else None."""
-    policy = ctx.policy
-    if policy.on_hostile != "fight" or attack_forbidden(e, ctx.never_attack) or w.pos is None:
-        return None
-    if not would_fight(w, policy, ctx.params, also=e):
-        return None
-    out = engage(w, ctx, e, GatherState.name)
-    if not out.intents:
-        return None
-    out.reason = f"{e.kind} {e.id} shadows us: {out.reason}"
-    return out
-
-
 def is_gem_pile(e: Entity) -> bool:
     """A free ground gem: an authored pile, or one a grass cut or a kill dropped."""
-    return (
-        e.kind == "supply"
-        and e.code in GEM_PILE_SUPPLY_CODES
-        and e.gem_price is None
-    )
+    return e.kind == "supply" and e.code in GEM_PILE_SUPPLY_CODES and e.gem_price is None
+
+
+@dataclass(frozen=True)
+class GemOdds:
+    """What a place to work costs beyond the walk there: the gems the op
+    still needs, the gems a cut drops in each region of this map
+    (``gem_yield.region_yield``; the map's ``expected_yield`` where no cut
+    was made), and the steps past an edge of unexplored ground to grass."""
+
+    need: int
+    rate: float
+    by_region: dict[tuple[int, int], float]
+    past_edge: float = 0.0
+
+    def work(self, kind: str, at: Pos) -> float:
+        """The actions at ``at`` that get the gems still needed, each priced
+        like a step: a cut for each gem a cut there is expected to drop; a
+        pile is one ``Take`` for a sure gem, then cuts for the rest; an edge
+        first pays the steps past it to grass."""
+        per_gem = 1 / max(self.by_region.get(region_of(at), self.rate), 1e-6)
+        if kind == PILE:
+            return 1 + (self.need - 1) * per_gem
+        return self.need * per_gem + (self.past_edge if kind == FRONTIER else 0)
+
+
+@dataclass
+class Ground:
+    """Where Gather may work this decision, worked out once (``ground``).
+
+    ``danger``: known hostiles' ground, and whether the op chose to fight
+    for it. ``skip``: regions not cut (barren, unless the op names it, or
+    where cuts have no effect). ``spent``: cells not cut now (cut too
+    recently, or held out after a cut with no effect). ``dead_regions`` and
+    ``dead_cells``: ground where cuts keep having no effect
+    (``_cut_ground``). ``named``: the region the op names, if any;
+    ``region``: the target region Gather works only in, else None.
+    ``targets``: every place it may go for, by kind and cell, with its work
+    (``GemOdds.work``); ``anywhere``: the same with no region bound
+    (``lift_region``)."""
+
+    danger: Danger
+    skip: set[tuple[int, int]]
+    spent: set[Pos]
+    dead_regions: set[tuple[int, int]]
+    dead_cells: set[Pos]
+    named: tuple[int, int] | None
+    region: tuple[int, int] | None
+    odds: GemOdds
+    targets: dict[Target, float]
+    anywhere: dict[Target, float]
+
+    def lift_region(self) -> None:
+        """Work anywhere: nothing in the target region can be reached."""
+        self.region, self.targets = None, self.anywhere
+
+
+def ground(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    knowledge: KnowledgeBase | None,
+    op: GoalOp | None,
+    gem_cuts: GemYieldTracker | None,
+) -> Ground:
+    """This decision's ``Ground``."""
+    d = danger(w, policy, bool(op.get("fight")) if op is not None else False)
+    named = region_of((op["x"], op["y"])) if op is not None and "x" in op and "y" in op else None
+    safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
+    dead_regions, dead_cells = gem_cuts.uncuttable(w, safe) if gem_cuts is not None else (set(), set())
+    skip = (barren_regions(knowledge, w.map_id) - {named}) | dead_regions
+    spent = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts)
+    rate, by_region = region_yields(knowledge, w.map_id)
+    need = max(1, int(op["count"]) - (w.gems or 0)) if op is not None and "count" in op else 1
+    odds = GemOdds(need, rate, by_region, _steps_to_grass(w))
+    g = Ground(d, skip, spent, dead_regions, dead_cells, named, None, odds, {}, {})
+    found = g.anywhere = _targets(w, m, policy, g)
+    if named is not None and not _seen_region(w, named):
+        x0, y0 = region_corner(named)
+        middle = (x0 + REGION_SIZE // 2, y0 + REGION_SIZE // 2)
+        g.region, found = named, {(REGION, middle): odds.work(GRASS, middle)}
+    elif named is not None and any(region_of(p) == named for _, p in found):
+        g.region, found = named, {t: v for t, v in found.items() if region_of(t[1]) == named}
+    g.targets = found
+    return g
+
+
+def _targets(w: WorldModel, m: Memory, policy: Policy, g: Ground) -> dict[Target, float]:
+    """Every place Gather may go for, with its work: grass to cut and edges
+    of unexplored ground (off skipped regions and ground where cuts have no
+    effect), and gem piles, all on ``gather_ground``. A pile out of sight
+    that Gather is walking to stays one until a look at its cell shows it
+    gone. An edge the explorers' stuck detection gave up on and still backs
+    off is not one (``nav_stuck.filter_frontiers``)."""
+    here = w.pos
+    assert here is not None
+
+    def may_work(p: Pos) -> bool:
+        return gather_ground(w, p, policy, g.danger)
+
+    def may_cut(p: Pos) -> bool:
+        return _cut_ground(g, p) and may_work(p)
+
+    out: list[Target] = [
+        (GRASS, p) for p, block in w.view.tiles.items() if block in GATHER_BLOCKS and p not in g.spent and may_cut(p)
+    ]
+    piles = {e.pos for e in w.entities if is_gem_pile(e)}
+    kept = m.gather_target
+    if kept is not None and kept[0] == PILE and chebyshev(kept[1], here) > w.perception:
+        piles.add(kept[1])
+    out += [(PILE, p) for p in piles if may_work(p)]
+    edges = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier(), w.tick)
+    out += [(FRONTIER, p) for p in edges if p != here and may_cut(p)]
+    return {t: g.odds.work(*t) for t in out}
 
 
 def gather_outcome(
@@ -236,69 +279,53 @@ def gather_outcome(
     op: GoalOp | None = None,
     gem_cuts: GemYieldTracker | None = None,
     state: str = "Gather",
-    shadow: Entity | None = None,
     tick_hz: int = DEFAULT_TICK_RATE_HZ,
 ) -> StateOutcome:
     """Gather's move this decision, or no intents with nothing to work.
 
-    ``shadow`` is a hostile that shadows us (``shadowing_hostile``): Gather
-    walks to ground ``MOVE_OFF_DISTANCE`` from it before anything else.
-
     Sets ``m.gather_status`` from results, not intents alone. With intents:
-    ``HEADING_OUT`` when walking off safe ground; ``MOVING_OFF`` when moving
-    off from ``shadow``; ``TAKING`` for a pile ``Take``, ``WALKING`` to a
-    pile; else ``NO_EFFECT`` when standing where cuts are known not to work,
-    or the latest cut had no effect in this region and none worked since;
-    else ``WALKING`` and the target for any other walk; else ``CUTTING``.
-    With none, ``BLOCKED`` when known grass is barred only by a
-    hostile near it, ``REGION_BARREN`` when standing in a skipped barren
-    region, else ``NONE_CUTTABLE``. Any status but ``CUTTING`` adds how long
-    it has been when no cut has taken effect for ``STALL_SECONDS`` (``STALLED``).
+    ``TAKING`` for a pile ``Take``, ``WALKING`` to a pile; else ``NO_EFFECT``
+    when standing where cuts are known not to work, or the latest cut had no
+    effect in this region and none worked since; else ``WALKING`` and the
+    target for any other walk; else ``CUTTING``. With none, ``BLOCKED`` when
+    known grass is barred only by a hostile near it, ``REGION_BARREN`` when
+    standing in a skipped barren region, else ``NONE_CUTTABLE``. Any status
+    but ``CUTTING`` adds how long it has been when no cut has taken effect
+    for ``STALL_SECONDS`` (``STALLED``).
     """
     here = w.pos
     if here is None:
         return StateOutcome(None, "position unknown", state=state)
-    skip, target, named = _regions(w, knowledge, op)
-    d = danger(w, policy, bool(op.get("fight")) if op is not None else False)
-    safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
-    dead_regions, dead_cells = gem_cuts.uncuttable(w, safe) if gem_cuts is not None else (set(), set())
-    exhausted = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | dead_cells
-    barred = cache(lambda: _barred_by_hostile(w, policy, skip | dead_regions, exhausted, d))
-    odds = cache(lambda: gem_odds(w, knowledge, op, skip | dead_regions))
-    out, worked = _gather_step(
-        w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state, shadow, target, named, d, barred, odds
-    )
+    g = ground(w, m, policy, knowledge, op, gem_cuts)
+    out = _work(w, m, policy, knowledge, g, state)
     walk = m.gather_target[0] if m.gather_target is not None and m.goal == GOAL else None
+    verb = out.intents[0].get("verb") if out.intents else None
     if out.wait and m.gather_target is not None:
-        m.gather_status = WAITING.format(WALK_TARGETS.get(m.gather_target[0], "a cell to cut"))
+        m.gather_status = WAITING.format(WALK_TARGETS[m.gather_target[0]])
     elif out.intents is None:
-        if barred():
+        if _barred_by_hostile(w, policy, g):
             m.gather_status = BLOCKED
         else:
-            m.gather_status = REGION_BARREN if region_of(here) in skip else NONE_CUTTABLE
-    elif out.intents[0].get("verb") == "SetPosition" and walk == OUT:
-        m.gather_status = HEADING_OUT
-    elif out.intents[0].get("verb") == "SetPosition" and walk == OFF:
-        m.gather_status = MOVING_OFF
-    elif out.intents[0].get("verb") == "Take":
+            m.gather_status = REGION_BARREN if region_of(here) in g.skip - g.dead_regions else NONE_CUTTABLE
+    elif verb == "Take":
         m.gather_status = TAKING
-    elif walk == "pile":
-        m.gather_status = WALKING.format(WALK_TARGETS["pile"])
-    elif here in dead_cells or region_of(here) in dead_regions or (
+    elif walk == PILE:
+        m.gather_status = WALKING.format(WALK_TARGETS[PILE])
+    elif here in g.dead_cells or region_of(here) in g.dead_regions or (
         gem_cuts is not None and gem_cuts.no_effect_near(w.map_id, here, w.tick)
     ):
         m.gather_status = NO_EFFECT
-    elif out.intents[0].get("verb") == "SetPosition":
+    elif verb == "SetPosition":
         m.gather_status = WALKING.format(WALK_TARGETS.get(walk or "", "a cell to cut"))
     else:
         m.gather_status = CUTTING
-    _note_in_region(w, m, target, tick_hz)
+    _note_in_region(w, m, g.named, tick_hz)
     idle = _seconds_without_cut(w, m, gem_cuts, tick_hz)
     if m.gather_status != CUTTING and idle >= STALL_SECONDS:
         m.gather_status = STALLED.format(m.gather_status, idle)
-    if worked is not None:
-        m.gather_status = IN_REGION.format(m.gather_status, *region_corner(worked))
-        out.reason = IN_REGION.format(out.reason, *region_corner(worked))
+    if g.region is not None:
+        m.gather_status = IN_REGION.format(m.gather_status, *region_corner(g.region))
+        out.reason = IN_REGION.format(out.reason, *region_corner(g.region))
     return out
 
 
@@ -327,9 +354,7 @@ def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | N
     return max(0, w.tick - cut_or_since(gem_cuts, since)) // max(1, tick_hz)
 
 
-def _barred_by_hostile(
-    w: WorldModel, policy: Policy, skip: set[tuple[int, int]], exhausted: set[Pos], d: Danger | None = None
-) -> bool:
+def _barred_by_hostile(w: WorldModel, policy: Policy, g: Ground) -> bool:
     """Known grass Gather would cut, but for a hostile near it, in view or remembered."""
     if not any(is_hostile(w, policy, e) for e in w.entities) and not any(
         is_hostile(w, policy, s.entity) for s in w.sightings.values()
@@ -337,143 +362,267 @@ def _barred_by_hostile(
         return False
     return any(
         block in GATHER_BLOCKS
-        and p not in exhausted
-        and region_of(p) not in skip
+        and p not in g.spent
+        and _cut_ground(g, p)
         and block not in policy.avoid_blocks
-        and not gather_ground(w, p, policy, d)
+        and not gather_ground(w, p, policy, g.danger)
         for p, block in w.view.tiles.items()
     )
 
 
-def _gather_step(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    here: Pos,
-    skip: set[tuple[int, int]],
-    exhausted: set[Pos],
-    safe: set[Pos],
-    knowledge: KnowledgeBase | None,
-    state: str,
-    shadow: Entity | None = None,
-    target: tuple[int, int] | None = None,
-    named: bool = False,
-    d: Danger | None = None,
-    barred: Callable[[], bool] = lambda: False,
-    odds: Callable[[], GemOdds] | None = None,
-) -> tuple[StateOutcome, tuple[int, int] | None]:
-    """Gather's move, and the target region it works only in (None when it
-    works anywhere).
-
-    While Gather works only in a target region, it walks to gem piles only
-    there (free-play run 5: piles outside the named region drew it to a
-    hostile's post); one in reach is taken wherever it lies. Working
-    anywhere, it weighs the grass it knows against unexplored ground by
-    ``odds()`` (``_explore_instead``)."""
-    view = w.view
-    cuttable = {
-        p
-        for p, block in view.tiles.items()
-        if block in GATHER_BLOCKS
-        and p not in exhausted
-        and region_of(p) not in skip
-        and gather_ground(w, p, policy, d)
-    }
-    worked = None
-    if target is not None:
-        there = {p for p in cuttable if region_of(p) == target}
-        if there:
-            cuttable, worked = there, target
-        elif named and shadow is None and region_of(here) != target and not _seen_region(w, target):
-            out = _walk_to_region(w, m, policy, knowledge, target, state, d)
-            if out is not None:
-                return out, target
-    # Field cells first; safe ones only when no field cell is left to cut.
-    preferred = {p for p in cuttable if p not in safe} or cuttable
-    out = _gather_cells(
-        w, m, policy, here, preferred, cuttable, safe, knowledge, state, shadow, d, worked, barred,
-        odds if worked is None else None,
-    )
-    return out, worked
+def _cut_ground(g: Ground, p: Pos) -> bool:
+    """``p`` lies where cutting is worth it: not a skipped region, nor ground
+    where cuts keep having no effect."""
+    return region_of(p) not in g.skip and p not in g.dead_cells
 
 
-def _gather_cells(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    here: Pos,
-    preferred: set[Pos],
-    cuttable: set[Pos],
-    safe: set[Pos],
-    knowledge: KnowledgeBase | None,
-    state: str,
-    shadow: Entity | None,
-    d: Danger | None = None,
-    pile_region: tuple[int, int] | None = None,
-    barred: Callable[[], bool] = lambda: False,
-    odds: Callable[[], GemOdds] | None = None,
+def _work(
+    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None, g: Ground, state: str
 ) -> StateOutcome:
-    """Take or cut what is in reach, else walk to the committed target (A71),
-    else to the nearest of ``preferred``; ``barred()``: known cells to cut are
-    held by a hostile, so with none of ``preferred`` reachable it walks on
-    to ground clear of hostiles (``_replan_gather``).
-
-    The target (``m.gather_target``) is Gather's commitment: it is kept until
-    it is reached, gone (cut, taken), proven out of reach, or found unsafe (in
-    a known hostile's reach, or reached only through one), even when another
-    state walked in between or another cell became nearer (``_still_wanted``,
-    ``_replan_gather``), unless the walk to it balloons past a cheaper cut
-    target (``_outpriced``). ``d`` is the decision's ``Danger``: remembered
-    hostiles' ground, and whether the op chose to fight for it;
-    ``pile_region`` bounds the piles it walks to; one in reach is taken anywhere;
-    ``odds()`` weighs the grass against unexplored ground (``_explore_instead``)."""
-    view = w.view
-
-    _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    if shadow is not None:
-        off = _move_off(w, m, policy, shadow, plan_avoid, plan_costly, preferred, state, d)
-        if off is not None:
-            return off
-    piles = [
-        e
-        for e in w.entities
-        if is_gem_pile(e)
-        and chebyshev(e.pos, here) <= 1
-        and gather_ground(w, e.pos, policy, d)
-    ]
-    if piles:
-        _end_walk_out(m)
-        s = min(piles, key=lambda e: (chebyshev(e.pos, here), e.id))
-        return StateOutcome([take(s.id)], f"take {s.code or s.id}", state=state)
-
-    if view.tiles.get(here) == "grass" and here in preferred:
-        _end_walk_out(m)
-        return _cut(w, m, knowledge, here, "cut grass", state)
-
-    # A target that no longer qualifies is let go, whoever walked last.
-    if not _still_wanted(w, m.gather_target, policy, cuttable, here in safe, d, pile_region, odds):
+    """Take or cut what is in reach when no walk is cheaper (``_in_reach``),
+    else take a step toward the target: the committed one while it is kept
+    (A71), else the cheapest."""
+    here = w.pos
+    assert here is not None
+    _, blocked, costly = plan_sets(w, m, policy, knowledge)
+    params = cache(lambda: _walk_params(w, policy, g, blocked, costly))
+    if g.region is not None and not _reaches_region(w, m, g, params(), blocked):
+        g.lift_region()  # the region holds Gather only while a way reaches something there
+    if m.gather_target not in g.targets:  # a target that no longer qualifies is let go, whoever walked last
         if m.goal == GOAL:
             m.path, m.goal = [], ""
         m.gather_target = None
-    if m.goal == GOAL and not route_clear(w, policy, m.path, d):
+    if m.goal == GOAL and not route_clear(w, policy, m.path, g.danger):
         m.path, m.goal = [], ""  # the way ahead entered a known reach: a way round, or the target goes
-    if (
-        m.goal == GOAL
-        and m.gather_target is not None
-        and m.gather_target[0] == CLEAR
-        and _in_sight(w, policy, preferred, d, pile_region) - m.gather_clear_seen
-    ):
-        m.path, m.goal = [], ""  # something new to cut or take: ``_replan_gather`` tries it before the walk
-    step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
-    if step is None and _replan_gather(
-        w, m, policy, plan_avoid, plan_costly, preferred, safe, d, pile_region, barred, odds
-    ):
-        return StateOutcome(None, f"gather → {m.gather_target[1]}: way taken, waiting", state=state, wait=True, progress=False)
-    step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
+    near = _in_reach(w, m, g, params, blocked)
+    if near is not None and near[0] == PILE:
+        pile = min((e for e in w.entities if is_gem_pile(e) and e.pos == near[1]), key=lambda e: e.id)
+        return StateOutcome([take(pile.id)], f"take {pile.code or pile.id}", state=state)
+    if near is not None:
+        return _cut(w, m, knowledge, here, "cut grass", state)
+    step = next_step(w, blocked, m.path) if m.goal == GOAL else None
+    if step is None:
+        if _replan(w, m, g, params(), blocked):
+            assert m.gather_target is not None
+            return StateOutcome(None, f"gather → {m.gather_target[1]}: way taken, waiting", state=state, wait=True, progress=False)
+        step = next_step(w, blocked, m.path) if m.goal == GOAL else None
     if step is not None:
         return StateOutcome([set_position(step)], f"gather → {m.path[-1]}", state=state)
-
     return StateOutcome(None, "no gather target", state=state)
+
+
+def _reaches_region(w: WorldModel, m: Memory, g: Ground, params: CostGridParams, blocked: set[Pos]) -> bool:
+    """A target in the target region is in reach or a way reaches it: the
+    committed one, or any other there."""
+    if _reach(w, g):
+        return True
+    kept = m.gather_target
+    if kept in g.targets and ((m.goal == GOAL and next_step(w, blocked, m.path)) or _path_to(w, kept, params)):
+        return True
+    return _cheapest(w, g, params, blocked) is not None
+
+
+def _walk_params(w: WorldModel, policy: Policy, g: Ground, blocked: set[Pos], costly: set[Pos]) -> CostGridParams:
+    """The grid every Gather walk is planned on: known hostiles' reach is a
+    wall (``route_bar``) and costly, and ground near a hostile adds its steps
+    (``Danger.priced_cells``)."""
+    params = grid_params(policy, blocked | route_bar(w, policy, g.danger), costly | reach_cells(w, policy, g.danger))
+    params.priced = g.danger.priced_cells()
+    return params
+
+
+def _in_reach(
+    w: WorldModel, m: Memory, g: Ground, params: Callable[[], CostGridParams], blocked: set[Pos]
+) -> Target | None:
+    """The target in reach (a gem pile beside the character, the grass it
+    stands on) to work now, or None. It costs no walk, so it is worked
+    unless the walk Gather would take, the committed one or else the
+    cheapest, costs less in all: poor grass underfoot is not cut on the way
+    to better ground. Every target costs at least a step per cell of
+    straight-line distance, so the walk is priced only when that could be
+    cheaper."""
+    here = w.pos
+    assert here is not None
+    reach = _reach(w, g)
+    if not reach:
+        return None
+    best = min(reach, key=lambda t: (reach[t], t))
+    floor = min((v + max(1, chebyshev(t[1], here)) for t, v in g.targets.items() if t not in reach), default=None)
+    if floor is None or reach[best] <= floor:
+        return best
+    walk = _walk_price(w, m, g, params(), blocked)
+    return best if walk is None or reach[best] <= walk else None
+
+
+def _reach(w: WorldModel, g: Ground) -> dict[Target, float]:
+    """The targets in reach, with their work: a gem pile beside the character, the grass it stands on."""
+    here = w.pos
+    assert here is not None
+    return {t: v for t, v in g.targets.items() if (t[0] == PILE and chebyshev(t[1], here) <= 1) or t == (GRASS, here)}
+
+
+def _walk_price(w: WorldModel, m: Memory, g: Ground, params: CostGridParams, blocked: set[Pos]) -> float | None:
+    """The price of the walk Gather would take: to its committed target, else
+    to the cheapest one; None with no walk."""
+    kept = m.gather_target
+    if kept is not None:
+        path = m.path if m.goal == GOAL and m.path else _path_to(w, kept, params)
+        if path:
+            return _price(path, params) + g.targets[kept]
+    found = _cheapest(w, g, params, blocked)
+    return found[2] if found is not None else None
+
+
+def _replan(w: WorldModel, m: Memory, g: Ground, params: CostGridParams, blocked: set[Pos]) -> bool:
+    """Plan to the committed target while it is kept, else commit to the
+    cheapest (``_cheapest``); leave ``m.path`` alone with none.
+
+    A kept target is given up when no way reaches it, when its walk was let
+    go for its price (``_outpriced``, A109), or when its first step has been
+    taken for ``HOLD_TICKS``; until then it is held, and True says so: the
+    caller waits instead of letting the safe default walk away and back
+    (A71). A failed plan keeps another state's path.
+    """
+    kept = m.gather_target
+    if m.goal == GOAL:
+        m.path, m.goal = [], ""
+    m.gather_target = None
+    if kept is not None:
+        path = _path_to(w, kept, params)
+        if path and _outpriced(w, m, g, kept, path, params, blocked):
+            path = None
+        held = _keep(w, m, kept, path, blocked)
+        if held is not None:
+            return held
+    found = _cheapest(w, g, params, blocked)
+    if found is not None:
+        m.path, m.goal, m.gather_target = found[1], GOAL, found[0]
+        m.gather_walk = (found[0], (w.pos, *found[1]))
+    return False
+
+
+def _cheapest(
+    w: WorldModel, g: Ground, params: CostGridParams, blocked: set[Pos], leave_out: Target | None = None
+) -> tuple[Target, list[Pos], float] | None:
+    """The cheapest target, its path and its price: its walk (``_price``)
+    plus its work (``GemOdds.work``).
+
+    Targets of one work (one kind in one region) differ only in their walk,
+    so each such set is searched once for its cheapest walk (``_nearest``).
+    A walk takes at least a step per cell of straight-line distance, so the
+    sets go cheapest that floor first, and the search stops once no floor
+    left can beat the best price."""
+    here = w.pos
+    assert here is not None
+    by_work: dict[float, dict[Pos, Target]] = {}
+    for t, work in g.targets.items():
+        if t != leave_out and t[1] != here:
+            by_work.setdefault(work, {}).setdefault(t[1], t)
+    floors = sorted((work + min(chebyshev(p, here) for p in cells), work) for work, cells in by_work.items())
+    best: tuple[Target, list[Pos], float] | None = None
+    for floor, work in floors:
+        if best is not None and floor >= best[2]:
+            break
+        cells = by_work[work]
+        found = _nearest(w, cells, params, blocked)
+        if found is None:
+            continue
+        price = _price(found[1], params) + work
+        if best is None or price < best[2]:
+            best = (cells[found[0]], found[1], price)
+    return best
+
+
+def _nearest(
+    w: WorldModel, cells: dict[Pos, Target], params: CostGridParams, blocked: set[Pos]
+) -> tuple[Pos, list[Pos]] | None:
+    """The cheapest of ``cells`` to walk to, and its path, when its first
+    step is open; the ``GATHER_CANDIDATES`` nearest are searched, a cell in
+    priced ground its ``params.priced`` steps further."""
+    here = w.pos
+    assert here is not None
+    if any(t[0] == REGION for t in cells.values()):
+        (goal,) = cells
+        path = cost_path(w, goal, params)
+        return (goal, path) if path and next_step(w, blocked, path) else None
+    priced = params.priced
+    near = set(sorted(cells, key=lambda p: (chebyshev(p, here) + priced.get(p, 0), p))[:GATHER_CANDIDATES])
+    found = nearest_target(w, near, params)
+    return found if found and next_step(w, blocked, found[1]) else None
+
+
+def _path_to(w: WorldModel, target: Target, params: CostGridParams) -> list[Pos] | None:
+    """A path onto a kept target; None when nothing reaches it."""
+    if target[0] == REGION:
+        return cost_path(w, target[1], params) or None
+    found = nearest_target(w, {target[1]}, params)
+    return found[1] if found and found[1] else None
+
+
+def _price(path: list[Pos], params: CostGridParams) -> int:
+    """A walk's price: its steps, and the steps priced ground adds to each
+    cell of it, the target's included (``Danger.priced_cells``)."""
+    return len(path) + sum(params.priced.get(p, 0) for p in path)
+
+
+def _outpriced(
+    w: WorldModel, m: Memory, g: Ground, kept: Target, path: list[Pos], params: CostGridParams, blocked: set[Pos]
+) -> bool:
+    """The kept target's price on ``path`` is more than the rest of the walk
+    it was last priced on, from the cell the character stands on (a wall
+    found ahead, a long way round), and more than the cheapest other target
+    by a clear margin (``targets.outpriced``, A109). The others are priced
+    only on such a rise. Standing off that walk (another state walked the
+    character away) is no rise. Either way the walk on ``path`` becomes the
+    price the next replan measures against (``m.gather_walk``)."""
+    work = g.targets[kept]
+    walk = m.gather_walk[1] if m.gather_walk is not None and m.gather_walk[0] == kept else ()
+    m.gather_walk = (kept, (w.pos, *path))
+    here = w.pos
+    last = _price(list(walk[walk.index(here) + 1 :]), params) + work if here in walk else None
+
+    def cheapest() -> float | None:
+        found = _cheapest(w, g, params, blocked, leave_out=kept)
+        return found[2] if found is not None else None
+
+    return targets_mod.outpriced(_price(path, params) + work, last, cheapest)
+
+
+def _keep(w: WorldModel, m: Memory, kept: Target, path: list[Pos] | None, blocked: set[Pos]) -> bool | None:
+    """Keep ``kept`` on ``path`` (a way to it, or None): commit to it with
+    its first step open (False), hold it while that step stays taken for
+    under ``HOLD_TICKS`` (True, A71); None to pick again."""
+    if path and next_step(w, blocked, path):
+        m.path, m.goal, m.gather_target = path, GOAL, kept
+        m.gather_hold = None
+        return False
+    if path:
+        if m.gather_hold is None or m.gather_hold[0] != kept:
+            m.gather_hold = (kept, w.tick)
+        if w.tick - m.gather_hold[1] < HOLD_TICKS:
+            m.gather_target = kept
+            return True
+    m.gather_hold = None  # no way there, or the way stayed taken: pick again
+    return None
+
+
+def _steps_to_grass(w: WorldModel) -> float:
+    """Steps past the edge of unexplored ground to grass: grass is expected
+    there as often as on the ground known, one cell in (walkable cells + 1)
+    / (grass cells + 1) of this map. An edge stops being one once Gather
+    walks up to it: the terrain read there fills every cell of the
+    perception window, ground or none (``WorldModel.apply_terrain``)."""
+    view = w.view
+    walkable = sum(1 for p in view.tiles if view.walkable(p))
+    grass = sum(1 for block in view.tiles.values() if block in GATHER_BLOCKS)
+    return (walkable + 1) / (grass + 1)
+
+
+def _seen_region(w: WorldModel, region: tuple[int, int]) -> bool:
+    """Any cell of ``region`` known."""
+    x0, y0 = region_corner(region)
+    tiles = w.view.tiles
+    return any((x0 + dx, y0 + dy) in tiles for dx in range(REGION_SIZE) for dy in range(REGION_SIZE))
 
 
 def _cut_tool(w: WorldModel, knowledge: KnowledgeBase | None) -> InventorySupply | None:
@@ -513,530 +662,3 @@ def _rearm_weapon(w: WorldModel, m: Memory) -> StateOutcome:
     if supply is None:
         return StateOutcome(None, "no gather op", state=GatherState.name)
     return StateOutcome([arm(supply.id)], f"re-arm {weapon}", state=GatherState.name)
-
-
-def _move_off(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    shadow: Entity,
-    blocked: set[Pos],
-    costly: set[Pos],
-    preferred: set[Pos],
-    state: str,
-    d: Danger | None = None,
-) -> StateOutcome | None:
-    """One step of a single walk to ground ``MOVE_OFF_DISTANCE`` from ``shadow``,
-    grass there first, rather than inching to the nearest cell it does not
-    cover (A63 run 3). None once there, or with nowhere to go: the shadow's
-    clock restarts and Gather carries on. It moves off onto no other known
-    hostile's ground, and by a route clear of its reach, as Gather's other
-    walks do (free-play run 7).
-    """
-    here = w.pos
-    assert here is not None
-    d = d or danger(w, policy)
-    if not (m.goal == GOAL and m.gather_target is not None and m.gather_target[0] == OFF):
-        m.path, m.goal, m.gather_target = [], "", None
-        reach = set() if d.fight else reach_cells(w, policy, d)
-        params = grid_params(policy, blocked, costly | reach)
-        shut = blocked | reach
-        far = {p for p in w.view.tiles if chebyshev(p, shadow.pos) >= MOVE_OFF_DISTANCE and w.view.walkable(p) and p not in shut}
-        for cells in ({p for p in far if p in preferred}, far):
-            found = _nearest_clear(w, cells, params, blocked, lambda path: route_clear(w, policy, path, d))
-            if found:
-                m.path, m.goal, m.gather_target = found[1], GOAL, (OFF, found[0])
-                break
-    step = next_step(w, blocked, m.path) if m.goal == GOAL else None
-    if step is None or m.gather_target is None or m.gather_target[0] != OFF:
-        if m.goal == GOAL:
-            m.path, m.goal, m.gather_target = [], "", None
-        m.gather_shadow = None
-        return None
-    return StateOutcome([set_position(step)], f"move off {shadow.kind} {shadow.id} → {m.path[-1]}", state=state)
-
-
-def _end_walk_out(m: Memory) -> None:
-    """Something to cut or take turned up: a walk out of safe ground is over."""
-    if m.goal == GOAL and m.gather_target is not None and m.gather_target[0] == OUT:
-        m.path, m.goal, m.gather_target = [], "", None
-
-
-def _regions(
-    w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None
-) -> tuple[set[tuple[int, int]], tuple[int, int] | None, bool]:
-    """The regions Gather skips, its target region, if any, and whether the op named it.
-
-    Skipped: barren regions of this map (A63), and poor ones while a better
-    region is known nearby. The target is the region the op names with
-    ``x, y``, never skipped; else, standing in a poor region, the better one.
-    """
-    skip = barren_regions(knowledge, w.map_id)
-    if op is not None and "x" in op and "y" in op:
-        named = region_of((op["x"], op["y"]))
-        skip.discard(named)
-        return skip, named, True
-    assert w.pos is not None
-    better = better_region(knowledge, w.map_id, w.pos)
-    if better is None:
-        return skip, None, False
-    poor = poor_regions(knowledge, w.map_id)
-    return skip | poor, better if region_of(w.pos) in poor else None, False
-
-
-def _seen_region(w: WorldModel, region: tuple[int, int]) -> bool:
-    """Any cell of ``region`` known."""
-    x0, y0 = region_corner(region)
-    tiles = w.view.tiles
-    return any((x0 + dx, y0 + dy) in tiles for dx in range(REGION_SIZE) for dy in range(REGION_SIZE))
-
-
-def _walk_to_region(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    knowledge: KnowledgeBase | None,
-    region: tuple[int, int],
-    state: str,
-    d: Danger | None = None,
-) -> StateOutcome | None:
-    """A step toward the middle of a named region no cell of which is known yet.
-
-    Like every Gather walk, it prices known hostiles' reach as costly and
-    takes no path that still crosses it, unless ``d.fight`` (free-play run
-    7: Gather walked toward a pack); a kept path whose way ahead comes to
-    cross it is planned again."""
-    d = d or danger(w, policy)
-    x0, y0 = region_corner(region)
-    middle = (x0 + REGION_SIZE // 2, y0 + REGION_SIZE // 2)
-    _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    kept = m.goal == GOAL and m.gather_target == (REGION, middle) and next_step(w, plan_avoid, m.path)
-    if not (kept and route_clear(w, policy, m.path, d)):
-        if m.goal == GOAL:
-            m.path, m.goal, m.gather_target = [], "", None
-        costly = plan_costly if d.fight else plan_costly | reach_cells(w, policy, d)
-        path = cost_path(w, middle, grid_params(policy, plan_avoid, costly))
-        if not next_step(w, plan_avoid, path) or not route_clear(w, policy, path, d):
-            return None
-        m.path, m.goal, m.gather_target = path, GOAL, (REGION, middle)
-    step = next_step(w, plan_avoid, m.path)
-    return StateOutcome([set_position(step)], f"gather → region {x0},{y0}", state=state) if step is not None else None
-
-
-def _still_wanted(
-    w: WorldModel,
-    target: tuple[str, Pos] | None,
-    policy: Policy,
-    cuttable: set[Pos],
-    on_safe: bool,
-    d: Danger | None = None,
-    pile_region: tuple[int, int] | None = None,
-    odds: Callable[[], GemOdds] | None = None,
-) -> bool:
-    """The committed target still exists and may still be worked (A71).
-
-    Never a comparison with other cells: a grass cell stays wanted while it
-    is cuttable at all, even once a field cell or a pile turns up nearer. A
-    pile out of sight is kept until a look at its cell shows it gone, while
-    it lies in ``pile_region`` (when set) and on ``gather_ground``: a hit
-    taken on the way that shows its ground held by a hostile drops it.
-    """
-    if target is None:
-        return False
-    kind, pos = target
-    if kind == "pile":
-        here = w.pos
-        seen = here is not None and chebyshev(pos, here) <= w.perception
-        there = any(is_gem_pile(e) and e.pos == pos for e in w.entities)
-        return (there or not seen) and _pile_in(pos, pile_region) and gather_ground(w, pos, policy, d)
-    if kind == REGION:
-        return False  # replanned each decision by ``_walk_to_region`` while its region is unseen
-    if kind == CLEAR:
-        # Dropped once a hostile comes to hold the cell it walks to; a cell
-        # to cut or a pile coming into sight is ``_gather_cells``'s to judge.
-        return _clear_of_hostiles(w, policy, pos, d)
-    if kind == FRONTIER:
-        # Kept until its cell is no longer unexplored ground's edge (what the
-        # walk revealed is then priced again), and only while it would still
-        # be priced: Gather works anywhere (``odds``, None once it works only
-        # in a target region) and the edge's region is not skipped.
-        return (
-            odds is not None
-            and region_of(pos) not in odds().skip
-            and pos in w.view.frontier()
-            and gather_ground(w, pos, policy, d)
-        )
-    if kind == OUT:
-        # Kept while on safe ground: it was planned because no cut was
-        # reachable, so re-checking ``preferred`` each tick would only replan
-        # it (A15). Off safe ground the field is in view: replan to cut it.
-        return on_safe
-    return w.view.tiles.get(pos) == kind and pos in cuttable
-
-
-# Target kinds ``_replan_gather`` walks back to once another state took the path.
-KEPT_KINDS = ("pile", "grass", OUT, CLEAR, FRONTIER)
-# Kept target kinds a cut is made at: priced again against each other when the walk to one ballooned (A109).
-CUT_KINDS = ("pile", "grass")
-# Gather waits this long for a taken first step toward its target (an
-# occupant), then gives the target up (5 s at 10 ticks/s, as a walk's fog hold).
-HOLD_TICKS = 50
-
-
-def _replan_gather(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    blocked: set[Pos],
-    costly: set[Pos],
-    preferred: set[Pos],
-    safe: set[Pos],
-    d: Danger | None = None,
-    pile_region: tuple[int, int] | None = None,
-    barred: Callable[[], bool] = lambda: False,
-    odds: Callable[[], GemOdds] | None = None,
-) -> bool:
-    """Plan to the committed target (``m.gather_target``) while one is kept,
-    else pick: the pile (in ``pile_region`` when set) and the grass
-    (``preferred``: field cells before safe ones) each cheapest by path cost
-    (``_nearest_clear``), then the cheaper of the two by ``_price``, a pile
-    counting ``GEM_PILE_STEPS`` cheaper: it is a gem for sure; the grass only
-    when, by ``odds()``, it is no dearer than the nearest unexplored ground
-    (``_explore_instead``), else that ground (``FRONTIER``);
-    then a kept walk to ground clear of hostiles (``CLEAR``, tried after the
-    picks: it ends for something it can reach), then, on safe ground,
-    out to field ground or the frontier; else, when ``barred()`` (known cells
-    to cut held by a hostile), the nearest frontier clear of every known
-    hostile (``_plan_clear``); leave ``m.path`` alone if none.
-
-    A target's price is its walk with the danger on it (``_price``): known
-    hostiles' reach is costly unless ``d.fight`` (``reach_cells``), and
-    ground near what a hostile holds or where one stands, and faded posts'
-    ground, add their steps to each cell (``Danger.priced_cells``), on the
-    path and at the target alike. A target whose path still crosses known
-    reach is not taken (``route_clear``): a kept one is let go at once, and
-    the next cheapest is tried, up to ``ROUTE_TRIES`` per kind. A hostile
-    that comes out to fight us stretches the ground it holds, and the ground
-    priced round it, out to where it did (``WorldModel.note_came_for_us``),
-    and the fight has every committed target priced again
-    (``Memory.reprice_targets``), so a target it turned us back from costs
-    more from then on.
-
-    A kept target is given up only when no path reaches it at all, its
-    path has started on a taken cell for ``HOLD_TICKS``, or, for a pile or
-    grass, its walk rose in price since last priced and another known cut
-    target is cheaper by a clear margin (``_outpriced``, A109); until then
-    it is held, and True says so: the caller waits instead of letting the
-    safe default walk away and back (A71). The
-    nearest ``GATHER_CANDIDATES`` of each kind are tried. A failed plan
-    keeps another state's path.
-    """
-    d = d or danger(w, policy)
-    params = grid_params(policy, blocked, costly if d.fight else costly | reach_cells(w, policy, d))
-    params.priced = d.priced_cells()
-    here = w.pos
-    assert here is not None
-
-    def clear(path: list[Pos]) -> bool:
-        return route_clear(w, policy, path, d)
-
-    kept = m.gather_target
-    if m.goal == GOAL:
-        m.path, m.goal = [], ""
-    m.gather_target = None
-    piles = {
-        e.pos for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
-    }
-    if kept is not None and kept[0] in KEPT_KINDS and kept[0] != CLEAR:
-        path = _path_to(w, kept, params)
-        if path and not clear(path):
-            path = None  # unsafe: a valid reason to drop it (A71)
-        if path and kept[0] in CUT_KINDS and _outpriced(w, m, kept, path, params, piles, preferred, blocked, clear):
-            path = None  # its walk ballooned past a cheaper cut target: pick again (A109)
-        held = _keep(w, m, kept, path, blocked)
-        if held is not None:
-            return held
-
-    pile = _nearest_clear(w, piles, params, blocked, clear)
-    grass = _nearest_clear(w, set(preferred), params, blocked, clear)
-    if pile and (grass is None or _cut_price("pile", pile[1], params) <= _cut_price("grass", grass[1], params)):
-        _commit_cut(w, m, "pile", pile)
-        return False
-    if grass:
-        explore = _explore_instead(w, m, policy, grass, params, blocked, clear, safe, odds(), d) if odds else None
-        if explore:
-            m.path, m.goal, m.gather_target = explore[1], GOAL, (FRONTIER, explore[0])
-        else:
-            _commit_cut(w, m, "grass", grass)
-        return False
-
-    if kept is not None and kept[0] == CLEAR and _clear_of_hostiles(w, policy, kept[1], d):
-        # Nothing in sight could be reached: the walk goes on (A71), and only
-        # something newly in sight stops it to be tried again.
-        m.gather_clear_seen = _in_sight(w, policy, preferred, d, pile_region)
-        path = _path_to(w, kept, params)
-        held = _keep(w, m, kept, path if path and clear(path) else None, blocked)
-        if held is not None:
-            return held
-
-    if here in safe:
-        _plan_out(w, m, policy, blocked, params, safe, clear, d)
-    if m.gather_target is None and barred():
-        m.gather_clear_seen = _in_sight(w, policy, preferred, d, pile_region)
-        _plan_clear(w, m, policy, blocked, params, clear, d)
-    return False
-
-
-def _commit_cut(w: WorldModel, m: Memory, kind: str, found: tuple[Pos, list[Pos]]) -> None:
-    """Commit to the cut target ``found`` (a cell and its path), and remember
-    the walk it was priced on (``_outpriced``)."""
-    m.path, m.goal, m.gather_target = found[1], GOAL, (kind, found[0])
-    m.gather_walk = _walk_from_here(m.gather_target, m.path, w)
-
-
-def _walk_from_here(target: tuple[str, Pos], path: list[Pos], w: WorldModel) -> tuple[tuple[str, Pos], tuple[Pos, ...]]:
-    """``target`` and the walk to it on ``path``, from the cell the character stands on."""
-    assert w.pos is not None
-    return target, (w.pos, *path)
-
-
-def _cut_price(kind: str, path: list[Pos], params: CostGridParams) -> int:
-    """A walk to a cut target priced as Gather picks one: ``_price``, a pile
-    ``GEM_PILE_STEPS`` cheaper, for it is a gem for sure."""
-    return _price(path, params) - (GEM_PILE_STEPS if kind == "pile" else 0)
-
-
-def _outpriced(
-    w: WorldModel,
-    m: Memory,
-    kept: tuple[str, Pos],
-    path: list[Pos],
-    params: CostGridParams,
-    piles: set[Pos],
-    grass: set[Pos],
-    blocked: set[Pos],
-    clear: Callable[[list[Pos]], bool],
-) -> bool:
-    """The kept cut target's walk on ``path`` costs more than the rest of the
-    walk it was last priced on, from the cell the character stands on (a
-    wall found ahead, a long way round), and more than the cheapest other
-    known cut target, pile or grass, by a clear margin (``targets.outpriced``,
-    A109). The other targets are priced only on such a rise. Standing off
-    that walk (another state walked the character away) is no rise. Either
-    way it records the walk on ``path`` in ``m.gather_walk``: the price the
-    next replan measures against."""
-    ahead = _cut_price(kept[0], path, params)
-    walk = m.gather_walk[1] if m.gather_walk is not None and m.gather_walk[0] == kept else ()
-    m.gather_walk = _walk_from_here(kept, path, w)
-    here = w.pos
-    last = _cut_price(kept[0], list(walk[walk.index(here) + 1 :]), params) if here in walk else None
-
-    def cheapest() -> int | None:
-        found = ((kind, _nearest_clear(w, cells - {kept[1]}, params, blocked, clear)) for kind, cells in (("pile", piles), ("grass", grass)))
-        return min((_cut_price(kind, f[1], params) for kind, f in found if f), default=None)
-
-    return targets_mod.outpriced(ahead, last, cheapest)
-
-
-def _keep(w: WorldModel, m: Memory, kept: tuple[str, Pos], path: list[Pos] | None, blocked: set[Pos]) -> bool | None:
-    """Keep ``kept`` on ``path`` (a clear way to it, or None): commit to it
-    with its first step open (False), hold it while that step stays taken
-    for under ``HOLD_TICKS`` (True, A71); None to pick again."""
-    if path and next_step(w, blocked, path):
-        m.path, m.goal, m.gather_target = path, GOAL, kept
-        m.gather_hold = None
-        return False
-    if path:
-        if m.gather_hold is None or m.gather_hold[0] != kept:
-            m.gather_hold = (kept, w.tick)
-        if w.tick - m.gather_hold[1] < HOLD_TICKS:
-            m.gather_target = kept
-            return True
-    m.gather_hold = None  # no way there, or the way stayed taken: pick again
-    return None
-
-
-@dataclass(frozen=True)
-class GemOdds:
-    """What Gather weighs a walk against: the gems the op still needs, and
-    the gems a cut drops in each region of this map (``gem_yield.region_yield``,
-    the map's ``expected_yield`` where no cut was made), and the regions
-    Gather skips."""
-
-    need: int
-    rate: float
-    by_region: dict[tuple[int, int], float]
-    skip: frozenset[tuple[int, int]]
-
-    def cost(self, walk: int, at: Pos) -> float:
-        """A target's price: the walk to it, then a cut, an action like a
-        step, for each gem a cut there is expected to drop, until the op has
-        its count."""
-        return walk + self.need / max(self.by_region.get(region_of(at), self.rate), 1e-6)
-
-
-def gem_odds(
-    w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None, skip: set[tuple[int, int]]
-) -> GemOdds:
-    """``GemOdds`` for this decision."""
-    rate, by_region = region_yields(knowledge, w.map_id)
-    need = max(1, int(op["count"]) - (w.gems or 0)) if op is not None and "count" in op else 1
-    return GemOdds(need, rate, by_region, frozenset(skip))
-
-
-def _steps_to_grass(w: WorldModel) -> float:
-    """Steps past the edge of unexplored ground to grass: grass is expected
-    there as often as on the ground known, one cell in (walkable cells + 1)
-    / (grass cells + 1) of this map."""
-    view = w.view
-    walkable = sum(1 for p in view.tiles if view.walkable(p))
-    grass = sum(1 for block in view.tiles.values() if block in GATHER_BLOCKS)
-    return (walkable + 1) / (grass + 1)
-
-
-def _explore_instead(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    grass: tuple[Pos, list[Pos]],
-    params: CostGridParams,
-    blocked: set[Pos],
-    clear: Callable[[list[Pos]], bool],
-    safe: set[Pos],
-    odds: GemOdds,
-    d: Danger | None = None,
-) -> tuple[Pos, list[Pos]] | None:
-    """The nearest edge of unexplored ground and its path, when it is the
-    cheaper place to work than ``grass``, else None.
-
-    Both are priced alike (``GemOdds.cost``): the walk by ``_price``, then the
-    cuts for the gems still needed at the yield there, measured or the map's
-    ``expected_yield`` on unsampled ground. The edge also pays the steps past
-    it to grass (``_steps_to_grass``). So known grass far off wins
-    only when its yield makes up for the longer walk, and grass as near as
-    the edge always wins. Edges on safe ground (no gems), in a skipped
-    region, or off ``gather_ground`` are not priced, nor are edges the
-    explorers' stuck detection gave up on and still backs off
-    (``nav_stuck.filter_frontiers``). An edge cannot stay one once Gather
-    walks up to it: the terrain read there fills every cell of the
-    perception window, ground or none (``WorldModel.apply_terrain``)."""
-    here = w.pos
-    edges = {
-        p
-        for p in nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier(), w.tick)
-        if p != here
-        and p not in safe
-        and region_of(p) not in odds.skip
-        and gather_ground(w, p, policy, d)
-    }
-    edge = _nearest_clear(w, edges, params, blocked, clear) if edges else None
-    if edge is None:
-        return None
-    there = odds.cost(_price(edge[1], params), edge[0]) + _steps_to_grass(w)
-    return edge if there < odds.cost(_price(grass[1], params), grass[0]) else None
-
-
-def _price(path: list[Pos], params: CostGridParams) -> int:
-    """A walk's price: its steps, and the steps priced ground adds to each
-    cell of it, the target's included (``Danger.priced_cells``)."""
-    return len(path) + sum(params.priced.get(p, 0) for p in path)
-
-
-def _pile_in(pos: Pos, region: tuple[int, int] | None) -> bool:
-    """A pile at ``pos`` lies in ``region``, or no region bounds the piles."""
-    return region is None or region_of(pos) == region
-
-
-def _nearest_clear(
-    w: WorldModel, cells: set[Pos], params: CostGridParams, blocked: set[Pos], clear: Callable[[list[Pos]], bool]
-) -> tuple[Pos, list[Pos]] | None:
-    """The cheapest of ``cells`` by path cost (``nearest_target``) a path reaches with a first step open and a
-    ``clear`` route, and that path; up to ``ROUTE_TRIES`` searches. A cell
-    in priced ground (near a hostile's, or a faded post's) counts its
-    ``params.priced`` steps further (``Danger.priced_cells``)."""
-    here = w.pos
-    assert here is not None
-    cells = set(cells)
-    for _ in range(ROUTE_TRIES):
-        found = nearest_target(w, _nearest(here, cells, params.priced), params) if cells else None
-        if not found or not next_step(w, blocked, found[1]):
-            return None
-        if clear(found[1]):
-            return found
-        cells.discard(found[0])
-    return None
-
-
-def _path_to(w: WorldModel, target: tuple[str, Pos], params) -> list[Pos] | None:
-    """A path onto a kept target; None when nothing reaches it."""
-    found = nearest_target(w, {target[1]}, params)
-    return found[1] if found and found[1] else None
-
-
-def _plan_out(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    blocked: set[Pos],
-    params,
-    safe: set[Pos],
-    clear: Callable[[list[Pos]], bool],
-    d: Danger | None = None,
-) -> None:
-    """Head off safe ground: to the nearest known walkable field cell, else the
-    nearest frontier, by a ``clear`` route (``_nearest_clear``)."""
-    here = w.pos
-    assert here is not None
-    view = w.view
-    field = {p for p in view.tiles if p not in safe and view.walkable(p) and gather_ground(w, p, policy, d)}
-    frontier = {p for p in view.frontier() if p != here and gather_ground(w, p, policy, d)}
-    for cells in (field, frontier):
-        found = _nearest_clear(w, cells, params, blocked, clear)
-        if found:
-            m.path, m.goal, m.gather_target = found[1], GOAL, (OUT, found[0])
-            return
-
-
-def _plan_clear(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    blocked: set[Pos],
-    params,
-    clear: Callable[[list[Pos]], bool],
-    d: Danger | None = None,
-) -> None:
-    """Every known cell to cut is held by a hostile: walk on to the nearest
-    frontier clear of every known one (``_clear_of_hostiles``), by a
-    ``clear`` route, to find grass of its own. The goal keeps working: it is
-    not handed to the safe default, which, hurt, stood off a hostile 10–13
-    cells away for 177 s with no cut (A82, free-play run 8)."""
-    here = w.pos
-    frontier = {p for p in w.view.frontier() if p != here and _clear_of_hostiles(w, policy, p, d)}
-    found = _nearest_clear(w, frontier, params, blocked, clear)
-    if found:
-        m.path, m.goal, m.gather_target = found[1], GOAL, (CLEAR, found[0])
-
-
-def _in_sight(
-    w: WorldModel, policy: Policy, cells: set[Pos], d: Danger | None, pile_region: tuple[int, int] | None
-) -> frozenset[Pos]:
-    """The cells of ``cells`` within sight, and the gem piles Gather may take."""
-    here = w.pos
-    seen = {p for p in cells if here is not None and chebyshev(p, here) <= w.perception}
-    seen |= {e.pos for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)}
-    return frozenset(seen)
-
-
-def _clear_of_hostiles(w: WorldModel, policy: Policy, p: Pos, d: Danger | None = None) -> bool:
-    """``p`` is ground Gather may work with no known hostile within
-    ``GATHER_HOSTILE_RADIUS``, in view or remembered: grass found there is
-    not barred again on arrival."""
-    return gather_ground(w, p, policy, d) and (bool(d and d.fight) or not hostiles_within(w, policy, p, GATHER_HOSTILE_RADIUS))
-
-
-def _nearest(here: Pos, cells: Iterable[Pos], priced: dict[Pos, int] | None = None) -> set[Pos]:
-    """The ``GATHER_CANDIDATES`` cells closest to ``here`` (ties to the smaller
-    cell), a cell in priced ground its ``priced`` steps further."""
-    priced = priced or {}
-    return set(sorted(cells, key=lambda p: (chebyshev(p, here) + priced.get(p, 0), p))[:GATHER_CANDIDATES])

@@ -10,8 +10,8 @@
    put it back; buy-one-more bought a second pair with the last gems. A
    reply is reconciled with what changed since its prompt
    (``strategist.Asked``).
-3. Gather's walks that #162 left unpriced (to an unseen named region, and
-   off a shadowing hostile) keep clear of known hostile ground too.
+3. Gather's walk to an unseen named region keeps clear of known hostile
+   ground too (``test_gather.KeepsClearTest``).
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.pathing import RETREAT_TARGET, committed_safe, grid_params, reachable_safe_goal
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.states.retreat import retreat_step
 from agentrealm_agent.strategist import Asked, Strategist, StrategistConfig
 from agentrealm_agent.world import POST_STILL_TICKS, Entity, WorldModel, chebyshev
@@ -286,94 +285,6 @@ class StaleReplyTest(unittest.TestCase):
         asked = Asked(stack=[BUY, WAIT], held=[])
         asked.note({"trigger": "goal_done", "op": dict(BUY, why="reworded")})
         self.assertEqual(asked.drop_ended([dict(BUY, why="other"), WAIT]), ([WAIT], [dict(BUY, why="other")]))
-
-
-GATHER_MAP = 3
-
-
-def field(at=(2, 10)) -> WorldModel:
-    w = WorldModel(character_id=1, map_id=GATHER_MAP, pos=at, perception=6)
-    for x in range(0, 60):
-        for y in range(0, 21):
-            w.view.tiles[(x, y)] = "dirt"
-    w.terrain_center, w.terrain_map = at, GATHER_MAP
-    w.health, w.max_health = 100, 100
-    w.hostile_types.add(HOSTILE)
-    return w
-
-
-def guard_post_left_behind(w: WorldModel, post=(14, 10), at=(2, 10)) -> None:
-    """A guard stood on ``post`` long enough to keep it; then it was out of view."""
-    guard = Entity("npc", 9, post, HOSTILE[1])
-    w.pos = (post[0] - 3, post[1])
-    w.tick = 0
-    w._set_entities([guard], 0)
-    w.tick = POST_STILL_TICKS
-    w._set_entities([guard], POST_STILL_TICKS)
-    w.pos = w.terrain_center = at
-    w.tick = POST_STILL_TICKS + 1
-    w._set_entities([], w.tick)
-
-
-GATHER_POLICY = Policy(kind="scripted", goals=[], on_hostile="ignore", hostile_range=2)
-POST_GROUND = {(14 + dx, 10 + dy) for dx in range(-3, 4) for dy in range(-3, 4)}
-
-
-def corridor(w: WorldModel) -> None:
-    """Walls but for a corridor along y 9..11 that runs past the post; the
-    named region (x 32..47) unknown."""
-    for cell in list(w.view.tiles):
-        if cell[0] >= 32:
-            del w.view.tiles[cell]
-        elif not 9 <= cell[1] <= 11:
-            w.view.tiles[cell] = "wall"
-    for x in range(-1, 33):
-        w.view.tiles[(x, -1)] = w.view.tiles[(x, 21)] = "wall"
-    for y in range(-1, 22):
-        w.view.tiles[(-1, y)] = "wall"
-
-
-class GatherWalksTest(unittest.TestCase):
-    """Item 3: every Gather walk keeps clear of known hostile ground."""
-
-    def test_the_walk_to_an_unseen_region_takes_no_way_past_a_remembered_post(self):
-        w, m = field(), Memory()
-        guard_post_left_behind(w)
-        corridor(w)
-        out = gather_outcome(w, m, GATHER_POLICY, op={"op": "gather_gems", "count": 99, "x": 40, "y": 10})
-        self.assertFalse(set(m.path) & POST_GROUND, (out.reason, m.path))
-        self.assertNotEqual((m.gather_target or ("",))[0], "region")
-
-    def test_moving_off_a_shadow_keeps_off_a_remembered_post(self):
-        """The nearest ground far enough from the shadow lies on another
-        hostile's post: the move-off goes elsewhere, by a clear route."""
-        w, m = field(at=(12, 10)), Memory()
-        guard_post_left_behind(w, post=(23, 1), at=(12, 10))  # on the far cell the old walk picked, (22, 0)
-        shadow = Entity("npc", 3, (10, 10), HOSTILE[1])
-        w.entities = [shadow]
-        out = gather_outcome(w, m, GATHER_POLICY, op={"op": "gather_gems", "count": 99}, shadow=shadow)
-        self.assertEqual(m.gather_target[0], "off", out.reason)
-        post_ground = {(23 + dx, 1 + dy) for dx in range(-3, 4) for dy in range(-3, 4)}
-        self.assertNotIn(m.gather_target[1], post_ground)
-        self.assertFalse(set(m.path) & post_ground, m.path)
-
-    def test_moving_off_a_shadow_takes_the_post_ground_when_the_op_fights(self):
-        w, m = field(at=(12, 10)), Memory()
-        guard_post_left_behind(w, post=(23, 1), at=(12, 10))
-        shadow = Entity("npc", 3, (10, 10), HOSTILE[1])
-        w.entities = [shadow]
-        op = {"op": "gather_gems", "count": 99, "fight": True}
-        gather_outcome(w, m, GATHER_POLICY, op=op, shadow=shadow)
-        self.assertEqual(m.gather_target, ("off", (22, 0)), "the nearest far cell, post or not")
-
-    def test_the_walk_to_an_unseen_region_takes_the_fight_when_the_op_says(self):
-        w, m = field(), Memory()
-        guard_post_left_behind(w)
-        corridor(w)
-        op = {"op": "gather_gems", "count": 99, "x": 40, "y": 10, "fight": True}
-        out = gather_outcome(w, m, GATHER_POLICY, op=op)
-        self.assertTrue(out.intents, out.reason)
-        self.assertTrue(set(m.path) & POST_GROUND, "past the post: the op chose the risk")
 
 
 if __name__ == "__main__":

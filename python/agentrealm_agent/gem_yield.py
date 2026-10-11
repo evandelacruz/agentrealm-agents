@@ -16,12 +16,11 @@ number comes from cuts this agent made.
 3. **Judge against the map's own rate.** :func:`expected_yield` is the gems
    a cut drops on this map, from all our cuts here, pulled toward the
    manual's rate (``PRIOR_YIELD``) while the sample is small. A region is
-   poor when a fair sample gave under half that rate, and good at that rate
-   or better. It is barren after ``BARREN_MIN_CUTS`` cuts with no gem: enough
-   that ground at the manual's lowest rate would almost surely have shown
-   one (:func:`barren_min_cuts`). That one is not measured: a rich map must
-   not mark unlucky ground barren sooner, and a region's own misses must
-   not put off its own mark.
+   poor when a fair sample gave under half that rate. It is barren after
+   ``BARREN_MIN_CUTS`` cuts with no gem: enough that ground at the manual's
+   lowest rate would almost surely have shown one (:func:`barren_min_cuts`).
+   That one is not measured: a rich map must not mark unlucky ground barren
+   sooner, and a region's own misses must not put off its own mark.
 
 Stored in the world knowledge base under ``kb.extra["gem_yield"]``::
 
@@ -34,9 +33,10 @@ cut: totals from before A81 counted bush cuts at the old drop rates, and
 read now they would mark regions barren that Gather would never revisit.
 
 ``cuts`` keeps the latest ``MAX_RECORDS`` per map; ``regions`` keeps every
-total. The planner's State shows :func:`summary`; Gather skips barren
-regions (:func:`barren_regions`) and cells it cut within ``REGROW_TICKS``,
-pending cuts included (:func:`exhausted_cells`), both read once per decision.
+total. The planner's State shows :func:`summary`; Gather prices each place
+to cut by its region's yield (:func:`region_yields`), skips barren regions
+(:func:`barren_regions`) and cells it cut within ``REGROW_TICKS``, pending
+cuts included (:func:`exhausted_cells`), all read once per decision.
 
 A ``Use`` that comes back ``applied_no_effect`` cut nothing: there was no
 roll, so it is never filed (a false miss would push its region toward
@@ -87,7 +87,7 @@ CUT_BLOCKS = BREAKABLE | {"grass"}  # blocks a cut or break is recorded on
 GATHER_BLOCKS = frozenset({"grass"})
 SUMMARY_RADIUS = 3  # barren regions this far (Chebyshev, in regions) from ours are shown
 # Best regions shown to the planner, at any distance: walking out of range of
-# the one productive region must not hide it (A63 run 3).
+# the one productive region must not hide it.
 SUMMARY_BEST = 3
 # This many no-effect cuts in one region, or one safe zone, mark it uncuttable.
 NO_EFFECT_ZONE_CUTS = 3
@@ -95,16 +95,10 @@ MAX_NO_EFFECT = 500  # no-effect cuts remembered, oldest dropped first
 # A no-effect cut is forgotten this long after it, so an uncuttable mark lapses
 # and the ground is tried again (it holds the cell out only REGROW_TICKS).
 NO_EFFECT_TTL = 10 * REGROW_TICKS
-# Gather leaves poor ground for a better known region (free-play run 2: 54
-# cuts for 1 gem in one region while the next one over gave 1 gem in 4).
 # A region with at least FAIR_SAMPLE_CUTS cuts and fewer than half the
-# expected yield in gems a cut is poor (``poor``).
+# expected yield in gems a cut is poor (``poor``): a reason for the planner
+# to move a ``gather_gems`` region (``keep_gather_region``).
 FAIR_SAMPLE_CUTS = 20
-# A region is better when it gave at least the expected yield over at least
-# GOOD_MIN_CUTS cuts, and lies within BETTER_REGION_BLOCKS of us; the planner
-# can name a region at any distance with a ``gather_gems`` x, y.
-GOOD_MIN_CUTS = 4
-BETTER_REGION_BLOCKS = 64
 GEM_CODE = "gem"  # a ground gem (GAME_NOTES.md Gems)
 GEM_CACHE_PREFIX = "gem_cache"  # gem_cache_5/7/10 (GAME_NOTES.md Gems)
 
@@ -355,7 +349,7 @@ def expected_yield(by_region: dict[str, dict[str, Any]]) -> float:
     every cut. No region is left out for how its cuts came out: keeping only
     the ones that dropped a gem would skew the rate high and mark unlucky
     ground poor. Ground that drops none pulls it low instead, which only
-    makes poor rarer and good easier."""
+    makes poor rarer."""
     cuts = sum(int(v.get("cuts", 0)) for v in by_region.values())
     gems = sum(int(v.get("gems", 0)) for v in by_region.values())
     return (gems + PRIOR_YIELD * PRIOR_CUTS) / (cuts + PRIOR_CUTS)
@@ -401,36 +395,11 @@ def poor(region: dict[str, Any], rate: float = PRIOR_YIELD) -> bool:
     return cuts >= FAIR_SAMPLE_CUTS and int(region.get("gems", 0)) < rate / 2 * cuts
 
 
-def good(region: dict[str, Any], rate: float = PRIOR_YIELD) -> bool:
-    """At least the expected ``rate`` over ``GOOD_MIN_CUTS`` or more cuts."""
-    cuts = int(region.get("cuts", 0))
-    return cuts >= GOOD_MIN_CUTS and int(region.get("gems", 0)) >= rate * cuts
-
-
 def poor_regions(kb: KnowledgeBase | None, map_id: int | None) -> set[tuple[int, int]]:
     """The poor regions of one map, as ``(rx, ry)``."""
     by_region = regions(kb, map_id)
     rate = expected_yield(by_region)
     return {r for key, v in by_region.items() if poor(v, rate) and (r := _parse(key)) is not None}
-
-
-def better_region(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> tuple[int, int] | None:
-    """The best good region within ``BETTER_REGION_BLOCKS`` of ``pos``, by
-    yield then distance, or None."""
-    best: tuple[float, int, tuple[int, int]] | None = None
-    by_region = regions(kb, map_id)
-    rate = expected_yield(by_region)
-    for key, v in by_region.items():
-        r = _parse(key)
-        if r is None or not good(v, rate):
-            continue
-        distance = blocks_to_region(pos, r)
-        if distance > BETTER_REGION_BLOCKS:
-            continue
-        rank = (-int(v.get("gems", 0)) / int(v.get("cuts", 1)), distance, r)
-        if best is None or rank < best:
-            best = rank
-    return best[2] if best is not None else None
 
 
 def region_corner(region: tuple[int, int]) -> Pos:
@@ -481,7 +450,7 @@ def blocks_to_region(pos: Pos, region: tuple[int, int]) -> int:
 def summary(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, Any]:
     """The planner's ``gem_yield``: the best sampled regions, at any distance,
     and the barren ones near us, with ``expected_yield``, the map's
-    measured gems a cut that poor and good are judged against.
+    measured gems a cut that poor is judged against.
 
     A region is named by its corner block ``x, y`` (``REGION_SIZE`` on a side),
     so a ``gather_gems`` op can name it back; a best region also carries its
@@ -555,9 +524,9 @@ def keep_gather_region(
     there taking effect: ``in_region`` is Gather's ``Memory.gather_in_region``,
     so a long walk that keeps closing in never counts, a blocked one does), or
     the situation changed (a death, a new map, a hurt, or a hostile pack
-    seen). Another cell of the same region is the same target. Free-play
-    run 4: the planner moved the region 4 times in 50 s. Two ops that differ
-    in anything but the cell, or that name none, are different goals.
+    seen). Another cell of the same region is the same target: a region
+    moved for no reason is pacing at the planner's level. Two ops that
+    differ in anything but the cell, or that name none, are different goals.
     """
     if old.get("op") != "gather_gems" or new.get("op") != "gather_gems" or old.get("count") != new.get("count"):
         return None

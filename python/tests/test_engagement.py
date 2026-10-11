@@ -398,8 +398,10 @@ class NearGroundTest(unittest.TestCase):
 
     def test_a_pile_counts_its_sure_gem_against_grass(self):
         self.w.sightings.clear()
-        self.w.entities = [gem(50, (20, 22))]  # 12 steps, against grass at 6
-        self.assertEqual(self.pick(), ("pile", (20, 22)))
+        self.w.entities = [gem(50, (20, 19))]  # 9 steps, against grass at 6: its sure gem saves 4 cuts' worth
+        self.assertEqual(self.pick(), ("pile", (20, 19)))
+        self.w.entities = [gem(50, (20, 21))]  # 11 steps: too far for that
+        self.assertEqual(self.pick(), ("grass", (20, 16)))
 
 
 class RepriceTest(unittest.TestCase):

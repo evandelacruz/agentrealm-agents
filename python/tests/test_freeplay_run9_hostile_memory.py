@@ -110,14 +110,14 @@ class RememberedPostsFadeTest(unittest.TestCase):
         return m
 
     def test_a_post_seen_just_now_still_blocks_gather(self):
-        """Its grass is barred: Gather walks on to ground clear of it (A82)."""
+        """Its grass is barred: Gather goes for unexplored ground instead."""
         m = self.gather_at(LAST_SEEN + 10)
-        self.assertEqual(m.gather_target[0], "clear")
+        self.assertEqual(m.gather_target[0], "frontier")
 
     def test_a_post_nobody_looked_at_keeps_its_strength_over_a_long_break(self):
         """A95: time away is no evidence the guard has gone."""
         m = self.gather_at(LAST_SEEN + LONG_BREAK)
-        self.assertEqual(m.gather_target[0], "clear")
+        self.assertEqual(m.gather_target[0], "frontier")
         w = field()
         load_hostiles(kb_with_post(strength=0.8, noted=LAST_SEEN), w)
         see(w, [], LAST_SEEN + LONG_BREAK)

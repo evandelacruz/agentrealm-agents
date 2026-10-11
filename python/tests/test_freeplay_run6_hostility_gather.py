@@ -5,9 +5,9 @@
    knowledge base's ``npc_types`` was never written. They are now saved at
    exit and loaded at start (``hostile_memory``), and feed the same danger
    tests as anything learned this run.
-2. Gather walked back and forth between a bush 4–9 cells off and grass by
-   the character, 8 walks in 34 s, because its pick took any bush before any
-   grass. It now takes the nearest of either by walk.
+2. Gather walked back and forth between a bush and grass by the character:
+   bushes drop berries, not gems (A81), so it cuts only grass
+   (``test_gather.TargetSearchTest``).
 """
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.detour import detour_find
-from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.hostile_ground import known_reach
 from agentrealm_agent.states.gather_safe import gather_ground
 from agentrealm_agent.survival import hostiles_in_range, known_hostile
@@ -227,58 +226,6 @@ class RunnerKeepsHostilityTest(unittest.TestCase):
             kb.npc_types, {CODE: {"hostile": True, "max_hit": 2, "hits": 1}, "fake_biter": {"hostile": True}}
         )
         self.assertIn("9", kb.extra[SIGHTINGS_KEY])
-
-
-def grid(rows: list[str], at) -> WorldModel:
-    glyph = {".": "dirt", "g": "grass", "b": "bush"}
-    w = WorldModel(character_id=1, map_id=7, pos=at, perception=12)
-    for y, row in enumerate(rows):
-        for x, ch in enumerate(row):
-            w.view.tiles[(x, y)] = glyph[ch]
-    w.terrain_center, w.terrain_map = at, 7
-    w.attack_range = 1
-    return w
-
-
-class GatherPicksTheNearestCutTest(unittest.TestCase):
-    """Run 6: a bush at the region's west edge, grass to the east. Bushes
-    drop berries, not gems (A81), so Gather only ever walks to the grass."""
-
-    ROWS = ["b..........", "...gggggggg"]
-
-    def test_grass_beside_us_beats_a_bush_far_off(self):
-        w = grid(self.ROWS, at=(6, 0))
-        m = Memory()
-        gather_outcome(w, m, policy())
-        self.assertEqual(m.gather_target, ("grass", (5, 1)))  # one step off; ties go to the smaller cell
-
-    def test_a_nearer_bush_is_passed_for_grass(self):
-        w = grid(self.ROWS, at=(1, 0))
-        m = Memory()
-        gather_outcome(w, m, policy())
-        self.assertEqual(m.gather_target, ("grass", (3, 1)))
-
-    def test_no_walk_back_to_the_bush_while_grass_is_near(self):
-        """Cut the grass east of us one cell after another: never a walk to the bush, nor a cut of it."""
-        w = grid(self.ROWS, at=(4, 0))
-        m = Memory()
-        targets = []
-        for _ in range(40):
-            out = gather_outcome(w, m, policy())
-            verb = out.intents[0]["verb"] if out.intents else None
-            if verb == "SetPosition":
-                w.pos = (out.intents[0]["x"], out.intents[0]["y"])
-                if m.gather_target not in targets:
-                    targets.append(m.gather_target)
-            elif verb == "Use":
-                t = out.intents[0]["target"]
-                w.view.tiles[(t["x"], t["y"])] = "dirt"  # cut: bare until it grows back
-            else:
-                break
-        kinds = [k for k, _ in targets]
-        self.assertEqual(kinds, ["grass"] * len(kinds))
-        self.assertEqual(sum(1 for t in w.view.tiles.values() if t == "grass"), 0)
-        self.assertEqual(w.view.tiles[(0, 0)], "bush", "the bush is left standing")
 
 
 if __name__ == "__main__":

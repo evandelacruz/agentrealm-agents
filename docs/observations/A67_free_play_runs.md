@@ -793,3 +793,105 @@ Intents: 1,075 `Step`, 2,909 `Wait`, 4 `Take`, 3 `Use`, no `Say`, no `Attack`. C
 3. **Measured damage per type is not saved, so each run starts with every type unmeasured, and no fight starts** (`hostile_memory.py:68–75`, `threat.py:34`). `save_hostiles` writes `hostile: true` per type and the sightings, but not `w.threat.by_type`. Run 8 measured all three types (1 a hit), and run 9 started with none. The planner's progression arc (`strategist.py:204`) refuses an unmeasured type, so its `gather_gems` kept `fight: false` all run. #172's new win estimate never went into a fight, and kill drops stayed out of reach.
 
 **Minor:** A `Take` of an apple at 222.6 s was refused `target_not_nearby`, and Heal walked to it instead. Break cuts on walks are filed as gem-yield cuts: the bush at (402, 437) is in `gem_yield`. Gristlewick 240's remembered post moved from (369, 400) to (357, 400).
+
+### Run 10: the first kills, 19 gems, and every run 8–9 defect gone; a losing gristlewick fight flips between Flee and Fight
+
+- **Code:** `main` at `7235bb0`. Since run 9: #175 (Gather moves on past a far hostile, Detour prices risk, an unreadable reply keeps the plan), #176 (the planner timer is a 15 s gap after each reply), #178 (Heal's regen walk yields to the plan and uses reachable safe tiles), #179 (tests never touch `python/.state`), #180 (remembered posts fade, damage per type is saved), and #173 (weapon data from the Supplies reference).
+- **Knowledge base:** kept from run 9. It held 3 hostile types, 16 posts, the town cell, 8 entrances, 9 shop prices and 23 clues. It held **no damage per type** (run 9's code did not save it). Its posts had no strength (run 9 did not save one), so they loaded at full strength and faded from there.
+- **Verdict:** exit 0, `PASS` after **601.5 s**, on the short-run gates only. The park **parked safe** at (429, 401) after 3.1 s and cleared the queue. The character started at **10/10**, 5 lives and **8 gems** at (380, 404). It had the pocket knife armed and held matches ×3.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; weak hostile kills **0** (the gate's count; the trace has 2 kills, below); gems earned **yes**; armor **no**; shop weapon **no**; potion reserve **no**; Heal took ground food **no** (the gate's count; an apple was taken at the end of Heal's food walk at 206 s); Heal drank a potion **yes**. Planner: 38 calls, 36 plans accepted, 0 errors, 2 kept.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–28 s | `travel` town, then `buy` matches, `gather_gems:30` | Bought a 4th box of matches at 28 s (**8 → 3**), on the potato-patch rumor (defect 3). |
+| 28–46 s | `gather_gems:30` | Detour and Gather took the (413–415, 414) cluster (+3). |
+| 46–132 s | `gather_gems:30`, then `gather_gems:35`, `buy` bronze_sword, `buy` bronze_mail | **24 cuts** up the column (430–431, 375–399), beside snotling 247's remembered post at (430, 401) (+1). |
+| 132–165 s | `travel` point, `gather_gems:35`, … | Detour took the (439–441, 360) piles (+3). The gristlewick (npc 217) swung first, and Fight **killed it in 2 swings** (4 + 4). It dropped a gem (+1). Break cut, then burned, a bush at (429, 370). Flee stepped away from a snotling (npc 215). |
+| 165–314 s | `travel` town, `wait`, `buy` small_potion (dropped), `gather_gems:35` (416, 368) | **No cut for 150 s.** Gather and Detour went for the pile at (429, 351) beside the NE pack four times (defect 2): a flee at 188 s and a Retreat at 238 s. Travel to town gave up once (288 s, lapsed). |
+| 314–346 s | `gather_gems:35` (416, 368), then `travel` town, `buy` small_potion | Gather walked to (427, 368), beside the gristlewick's post. It swung first, and **Flee and Fight took turns for 11 s** (defect 1), 10 → **3/10**. Heal walked 15 s to the safe zone. |
+| 346–390 s | `travel` town, `buy` small_potion, … | Rested 20 s at 3/10 (no regen). Bought a small_potion at 385 s (**11 → 1**) and drank it at once (3 → 10). |
+| 390–600 s | `gather_gems:35`, `buy` bronze_sword, `buy` bronze_mail | **61 cuts** east of town at (430–439, 380–406) (+10). At 562 s it closed on snotling 247 and **killed it in 3 swings** (1 + 3 + 4). It dropped a gem (+1). |
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **8** | **12** (+19 earned, −15 spent) |
+| Armed | pocket_knife | pocket_knife |
+| Worn | `{}` | `{}` |
+| Held | matches ×3 | matches ×4 |
+| Potions | 0 | 0 |
+
+Bought: matches (5) and a small_potion (10), by `buy` ops. Drank: the small_potion, at 387 s at 3/10, on safe ground. It was accepted at once (`SupplyUsed`).
+
+#### Gems earned
+
+**19** in 600 s, **1.9 a minute** (run 8: 0.9, run 9: 0.3).
+
+| Source | Gems | | |
+|---|---|---|---|
+| Grass | 11 | 86 cuts, 1 in 8 | 1 in 24 up the column at (430–431, 375–399) (46–132 s), 0 in 1 at 314 s, and 10 in 61 at (430–439, 380–406) (400–600 s). |
+| Gem piles | 6 | | (413–415, 414) at 41–45 s, (439–441, 360) at 140–150 s. |
+| Kills | 2 | 2 kills, 2 drops | Gristlewick at 143.8 s, snotling at 566.8 s. Each dropped one gem where it fell. |
+
+#### Fights
+
+| Time | Where | Hostile | Started by | Our swings | Hits | Dealt | Their swings | Hits | Taken | Outcome |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 142–144 s | (439, 360), on the piles | npc 217 (gristlewick) | the gristlewick | 2 | 2 | 8 | 2 | 1 | 1 | **Killed**, gem dropped. |
+| 320–331 s | (428–434, 368–372), beside its post | npc 217 (gristlewick), respawned | the gristlewick | 5 | 2 | 4 | 7 | 5 | 7 | Flee at 3/10 (defect 1). |
+| 562–567 s | (435–439, 403–406), cutting | npc 247 (snotling) | us (`close on`) | 3 | 3 | 8 | 3 | 0 | 0 | **Killed**, gem dropped. |
+
+- **Totals:** 3 fights, 1 started by us and 2 by them. We swung 10 times and hit 7 (70%, near the published 65%). 2 kills, and 2 gems from kills. We took 8 damage, 7 of it in fight 2. Deaths 0.
+- **Damage per type now saved:** after the run, `npc_types` holds gristlewick `max_hit` 2, 6 hits, 3 misses; snotling 3 misses and no hit; chugbug nothing.
+
+#### Kept knowledge and post decay
+
+| | Start | End | |
+|---|---|---|---|
+| Posts | 16, all at full strength | 13, strength 0.30–0.78 | The two run 9 posts at (340, 399–400) and snotling 247 (killed) are gone. |
+| Damage per type | none | gristlewick 2 (6 hits, 3 misses), snotling 3 misses | |
+
+Decay let Gather work beside a remembered post. It made 24 cuts in the column at (430–431, 375–399) in its first 90 s, 2 cells from snotling 247's post (430, 401). In run 9 Gather made 1 cut all run.
+
+#### Run 8–9 defects, checked
+
+| Defect | Run 10 | |
+|---|---|---|
+| Gather stalls near a distant hostile (#175) | **Gone.** 86 cuts. The one long gap (defect 2) is a pile pick, not a stall. | Run 8: 177 s, run 9: 1 cut. |
+| Heal circles to measure regen (#178) | **Gone.** One 15 s walk to (426, 397), then 20 s of rest. | Run 9: 217 s. |
+| Wall of remembered posts (#180) | **Gone.** It cut beside a remembered post, and posts faded to 0.30–0.78. | |
+| Never swinging (#172, #180) | **Gone.** 10 swings, 2 kills. | Runs 8–9: 0 swings. |
+| Detour at low health (#175) | **Not tested.** Every gem detour ran at 9–10/10. | |
+| Bad planner reply (#175) | **Not tested.** 0 invalid replies. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 135,911, output 8,950, cache write 103,631, cache read 3,834,347 |
+
+#### Decision mix
+
+Intents: 656 `Step`, 1,499 `Wait`, 99 `Use` (86 cuts, 10 swings, 3 Break), 20 `Take`, 4 `Arm`. Call mix: 767 `tick`, 227 `entities`, 131 `zone`, 86 `strategist`, 53 `self`, 32 `terrain`, 31 `position`.
+
+#### Top 3 defects
+
+1. **Flee and Fight take turns against a gristlewick it is losing to, 10 → 3/10** (`states/flee.py:120–135`). At 320.5 s the gristlewick, beside its post, swung first. Fight closed in and swung 3 times (1 hit, for 1). Flee took 2 steps. Then Flee's "not outrunning" fallback engaged again ("not outrunning npc 217: fight npc 217"), and Flee took 4 more steps. The gristlewick hit 5 of 7 swings, for 7. We hit 2 of 5, for 4, and it lived. The first fight, at 142 s, measured the gristlewick at 1 hit for 1 in 2 swings, so the win estimate took it to be weak. In this fight it hit for 2. A fight given up for Flee should stay given up while the hitter keeps pace, unless health is above the floor by a margin. Gather had also walked into the region the planner named, (416, 368), beside that gristlewick's post.
+
+   ```
+   320.5 s  @428,369  Attacked npc 217 (miss)          close on npc 217
+   322.1 s  fight → hit 1   323.0 s  miss   323.6 s  Damaged 2
+   324.3 s  flee   325.0 s  Damaged 1   325.0 s  flee
+   325.9 s  not outrunning npc 217: fight   326.6 s  miss; Damaged 1   327.7 s  hit 3
+   328.0 s  Damaged 2; flee   329.9 s  Damaged 1; flee   331.7 s  heal_measure → (405, 393)
+   334.7 s  health 3/10
+   ```
+
+2. **150 s with no cut, chasing a pile beside the NE pack** (`states/gather.py:695–700`, `states/detour.py:225–240`). After the first kill, Gather and Detour kept picking the pile at (429, 351), 6–8 cells from the snotling and gristlewick posts at (402–420, 366–369). Detour set out for it at 169 s, and Flee broke that off at 188 s (npc 215). Gather walked for it at 219 s and 262 s, and a Retreat broke one off at 238 s. Gather's pile pick takes the nearest pile in view before any grass, and Detour's risk gate passes at 10/10. The planner added `travel` town and `wait` ops. The next cut came at 314 s. The run 7 pile at (428, 366) and run 9's (413, 414) pick show the same pattern: a pile counts at any distance, and its risk only gates the last steps.
+
+3. **The planner buys matches it already holds** (`strategist.py`, the `buy` op). At 13 s, with 3 boxes held and 8 gems, the plan put `buy` matches on top ("3 held, plus more for the potato patch"). Shop bought a 4th box at 28 s, for 5 gems. Run 8 bought a 3rd box the same way. Break used one match once (at 161 s). Nothing in the State or the arc weighs a tool already held against the gems it costs. Those 5 gems were a third of the way to the bronze sword.
+
+**Minor:** The same apple (supply 460231) was refused `target_not_nearby` twice (212 s, 283 s), as in run 9. The first `buy` small_potion at 220 s was dropped at once (deferred, then unchanged), so the potion waited for the 3/10 fight. The gate's "weak hostile kills 0" and "Heal took ground food no" disagree with the trace (2 kills, and an apple taken at the end of Heal's food walk at 206 s). `m8_acceptance.py:126–131` counts a kill only for a fight it marked weak and lone. `:190–209` does count a food `Take` sent from Heal, so the miss there is in its entity or `is_food` lookup, or the `Take` was not Heal's. Both counters are being fixed separately.

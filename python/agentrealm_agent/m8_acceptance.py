@@ -10,8 +10,8 @@ module checks for each clause:
 - Heals from food it picks up and from carried potions: while hurt, our
   character takes a supply the Supplies reference marks food (a
   ``SupplyTaken`` naming us as ``taker_id``, which only the taker receives),
-  whichever state took it (**Heal**, or **Detour** picking food up on the
-  way), and a self-``Use`` **Heal** sends with a potion in
+  however it was taken (a ``Take``, or a step onto food eaten on pickup) and
+  by whichever state (**Heal**, or **Detour** on the way), and a self-``Use`` **Heal** sends with a potion in
   hand uses one up (A76): its result is ``applied`` and the held plus stowed
   potion count then drops below what it was when the drink was sent, or a
   ``SupplyUsed`` event names our character and a potion. A ``Use`` that

@@ -177,5 +177,15 @@
 
   "A86": {"state": "done"},
 
+  "A87": {"state": "done"},
+
+  "A88": {"state": "todo"},
+
+  "A89": {"state": "todo"},
+
+  "A90": {"state": "todo"},
+
+  "A91": {"state": "todo"},
+
   "A93": {"state": "done"}
 }

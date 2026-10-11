@@ -132,6 +132,16 @@ class MilestoneGateTest(unittest.TestCase):
         decide(m, w, state="Heal", intents=HELD)
         self.assertTrue(m.heal_potion)
 
+    def test_food_eaten_by_walking_onto_it_counts(self):
+        # Heal's food walk ends on the apple's cell: eaten on pickup, no Take sent.
+        m = metrics()
+        w = world(health=9, max_health=10)
+        w.entities = [Entity("supply", 9, (1, 0), code="apple")]
+        decide(m, w, state="Heal", intents=[{"verb": "Step", "direction": "E"}])
+        w.entities = []
+        m.on_events([SUPPLY_TAKEN])
+        self.assertTrue(m.heal_food_take)
+
     def test_food_taken_on_a_detour_counts(self):
         # Hurt, Detour picks up an apple on its way: the food heals all the same.
         m = metrics()

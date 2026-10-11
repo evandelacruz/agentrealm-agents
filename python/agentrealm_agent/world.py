@@ -53,7 +53,7 @@ POST_STILL_TICKS = 50
 # A hostile out of view that keeps no post is remembered where it was last
 # seen for this long (60 s at 10 ticks/s), on any map.
 SIGHTING_TICKS = 600
-# A remembered post fades: hostiles roam and respawn (free-play run 9, A85).
+# A remembered post fades: hostiles roam and respawn (A85).
 # Its ``Sighting.strength`` is 1 while the guard is in view and halves every
 # ``POST_HALF_LIFE_TICKS`` of world time out of view (5 min at 10 ticks/s),
 # times the spells it was seen on its post, up to ``POST_MAX_SPELLS``: a post
@@ -568,8 +568,7 @@ class WorldModel:
         it gone, or it has been unseen for ``SIGHTING_TICKS`` on any map. A
         post out of view fades (``Sighting.fade_post``), fast while it is in
         sight with nobody on it, and is forgotten once faded below
-        ``POST_FORGET_STRENGTH``; on a map left behind it fades by time alone
-        (free-play run 9)."""
+        ``POST_FORGET_STRENGTH``; on a map left behind it fades by time alone."""
         in_view = set()
         for e in self.entities:
             if e.kind not in ("npc", "character"):

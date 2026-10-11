@@ -106,9 +106,11 @@ class StateListsNpcsTest(unittest.TestCase):
             self.rows(w, kb),
             [
                 {"id": 4, "type": "fake_helper", "cells": 3, "dir": "east",
-                 "spoken": True, "greeted": False, "hostile": False, "stays_put": True},
+                 "spoken": True, "greeted": False, "hostile": False, "stays_put": True,
+                 "x": 5, "y": 4, "swing": {"expected_damage": 1.3, "every_ticks": 15, "measured": False}},
                 {"id": 5, "type": "fake_biter", "cells": 3, "dir": "north",
-                 "spoken": False, "greeted": True, "hostile": True, "stays_put": False},
+                 "spoken": False, "greeted": True, "hostile": True, "stays_put": False,
+                 "x": 2, "y": 1, "swing": {"expected_damage": 1.3, "every_ticks": 15, "measured": True}},
             ],
         )
 

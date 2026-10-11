@@ -412,8 +412,10 @@ def _work(
 
 
 def _reaches_region(w: WorldModel, m: Memory, g: Ground, params: CostGridParams, blocked: set[Pos]) -> bool:
-    """A way reaches a target in the target region: the committed one, or
-    any other there."""
+    """A target in the target region is in reach or a way reaches it: the
+    committed one, or any other there."""
+    if _reach(w, g):
+        return True
     kept = m.gather_target
     if kept in g.targets and ((m.goal == GOAL and next_step(w, blocked, m.path)) or _path_to(w, kept, params)):
         return True
@@ -441,7 +443,7 @@ def _in_reach(
     cheaper."""
     here = w.pos
     assert here is not None
-    reach = {t: v for t, v in g.targets.items() if (t[0] == PILE and chebyshev(t[1], here) <= 1) or t == (GRASS, here)}
+    reach = _reach(w, g)
     if not reach:
         return None
     best = min(reach, key=lambda t: (reach[t], t))
@@ -450,6 +452,13 @@ def _in_reach(
         return best
     walk = _walk_price(w, m, g, params(), blocked)
     return best if walk is None or reach[best] <= walk else None
+
+
+def _reach(w: WorldModel, g: Ground) -> dict[Target, float]:
+    """The targets in reach, with their work: a gem pile beside the character, the grass it stands on."""
+    here = w.pos
+    assert here is not None
+    return {t: v for t, v in g.targets.items() if (t[0] == PILE and chebyshev(t[1], here) <= 1) or t == (GRASS, here)}
 
 
 def _walk_price(w: WorldModel, m: Memory, g: Ground, params: CostGridParams, blocked: set[Pos]) -> float | None:

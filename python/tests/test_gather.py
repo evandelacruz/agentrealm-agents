@@ -1030,6 +1030,19 @@ class KeepsClearTest(unittest.TestCase):
             m.path = m.path[1:]
         self.assertEqual(m.gather_walk, walk, "priced once, on the walk it committed to")
 
+    def test_the_regions_last_grass_in_reach_keeps_the_region(self):
+        """Standing on the region's only grass left, with richer grass just outside, it cuts here."""
+        w = three_regions(at=(15, 8))
+        for x in range(REGION_SIZE):
+            for y in range(REGION_SIZE):
+                if (x, y) != (15, 8):
+                    w.view.tiles[(x, y)] = "dirt"
+        kb = KnowledgeBase.empty("fake-world")
+        sample(kb, (24, 8), 8, 4)  # the next region over pays 1 in 2
+        m = Memory()
+        out = gather_outcome(w, m, POLICY, knowledge=kb, op={"op": "gather_gems", "count": 30, "x": 3, "y": 3})
+        self.assertEqual(out.reason, "cut grass (region 0,0)")
+
     def test_a_committed_target_in_the_region_with_no_way_left_lifts_it_at_once(self):
         w = three_regions(at=(24, 8))
         op = {"op": "gather_gems", "count": 30, "x": 3, "y": 3}

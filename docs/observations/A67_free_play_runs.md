@@ -1117,11 +1117,11 @@ None. No hostile came within reach of (432, 400), and the character took no dama
 
 #### Run 12 defects, checked
 
-| Defect | Run 13 | |
-|---|---|---|
-| A held-queue poll goes over the call budget (A98) | **Gone.** 0 API errors in about 1,225 calls. | |
-| Three rules for the best weapon (A99) | **Gone.** The mallet stayed in the pack. The sword stayed armed for cutting and fighting. | |
-| First planner ask before the first sync (A100) | **Gone.** Call 1, at 5.4 s, saw the sword, the mail and 2 potions. | |
+| Defect | Run 13 |
+|---|---|
+| A held-queue poll goes over the call budget (A98) | **Gone.** 0 API errors in about 1,225 calls. |
+| Three rules for the best weapon (A99) | **Gone.** The mallet stayed in the pack. The sword stayed armed for cutting and fighting. |
+| First planner ask before the first sync (A100) | **Gone.** Call 1, at 5.4 s, saw the sword, the mail and 2 potions. |
 
 #### Tokens
 

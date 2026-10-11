@@ -1,4 +1,4 @@
-"""A95: one rule for when a carried potion is spent, read by Heal, Retreat and the planner.
+"""A96: one rule for when a carried potion is spent, read by Heal, Retreat and the planner.
 
 Free-play run 11: the planner bought a potion for the reserve and Heal drank
 it a second later at 7/10 in town, so the reserve never built. A potion is

@@ -130,7 +130,7 @@ def cannot_outrun(w: WorldModel, m: Memory, policy: Policy, params: dict[str, fl
 
 
 def drink_turns_fight(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], heal: int) -> bool:
-    """A drink that heals ``heal`` changes this engagement (A95): the
+    """A drink that heals ``heal`` changes this engagement (A96): the
     estimate at the healed health says fight where the live one does not, or
     wins (above ``BREAK_EVEN``) where the live one loses. False with no
     engagement, or none of its hostiles in view."""

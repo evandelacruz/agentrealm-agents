@@ -66,7 +66,7 @@ def health_low(w: WorldModel) -> bool:
     return w.health <= w.max_health * LOW_HEALTH_SHARE
 
 
-# When a carried potion is spent (A95), in the planner's words: the same rule
+# When a carried potion is spent (A96), in the planner's words: the same rule
 # ``spend_potion`` applies, so a reserve the planner buys is one the
 # character keeps.
 POTION_RULE = (
@@ -85,7 +85,7 @@ def low_health_line(w: WorldModel) -> int | None:
 
 
 def spend_potion(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], code: str) -> bool:
-    """Whether a carried potion of ``code`` is worth drinking now (A95):
+    """Whether a carried potion of ``code`` is worth drinking now (A96):
     health is low (``health_low``), or the drink turns the engagement under
     way (``engagement.drink_turns_fight``). Otherwise rest or food heals,
     and the potion stays a reserve. Every drink of a potion asks this."""

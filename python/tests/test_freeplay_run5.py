@@ -30,7 +30,7 @@ DRINK = [{"verb": "Arm", "supply_id": 4}, {"verb": "Use", "target": {"kind": "se
 
 
 def hurt_world() -> WorldModel:
-    """Map 7, all dirt, 7/20 health (low, A95), a knife armed and two potions held."""
+    """Map 7, all dirt, 7/20 health (low, A96), a knife armed and two potions held."""
     w = WorldModel(character_id=9, map_id=7, pos=(3, 3), perception=6, health=7, max_health=20)
     for x in range(8):
         for y in range(8):

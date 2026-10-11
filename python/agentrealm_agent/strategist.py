@@ -610,7 +610,7 @@ def build_prompt(
 
 def potion_line(w: WorldModel) -> str:
     """Potions held and stowed, and the health at or below which one is
-    drunk out of a fight (``healing.spend_potion``, A95)."""
+    drunk out of a fight (``healing.spend_potion``, A96)."""
     line = low_health_line(w)
     at = f"health<={line}" if line is not None else "unknown"
     return f"potions={potion_count(w)} potion_drunk_at={at}"

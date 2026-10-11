@@ -467,12 +467,14 @@ class NothingToGoForTest(unittest.TestCase):
         self.assertEqual(c.memory.gather_target[0], gather_mod.FRONTIER)
         self.assertEqual(c.memory.gather_status, "walking to unexplored ground")
 
-    def test_with_nowhere_to_go_it_explores(self):
+    def test_with_nowhere_to_go_it_asks_the_planner(self):
+        # Its search already went for unexplored ground: the safe default never explores for it (A120).
         w = fence(grid([".....", "....."], at=(0, 0)))
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
-        self.assertEqual(out.state, "Gather")
-        self.assertTrue(out.reason.startswith("look for gems: "))
+        self.assertEqual((out.state, out.intents, out.wait), ("Gather", None, True), out.reason)
+        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "no_way_on"]
+        self.assertEqual([(s["why"], s["op"]["op"]) for s in asks], [("no gather target: no cuttable cell in view", "gather_gems")])
         self.assertEqual(c.memory.gather_status, gather_mod.NONE_CUTTABLE)
 
     def test_standing_in_a_barren_region_says_so(self):

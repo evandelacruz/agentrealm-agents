@@ -143,13 +143,13 @@ class GoalStackTest(unittest.TestCase):
         self.assertIsNone(plan.current())
 
     def test_buy_stays_on_stack_for_shop(self):
-        # No shop known: Shop sends nothing, the safe default moves, and the
-        # op stays on top while its stall clock runs.
+        # No shop known: Shop asks the planner and holds, the safe default
+        # never walks for it (A120), and the op stays on top while its stall clock runs.
         plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
         m = Memory()
         out = run(open_world(), m, plan)
         self.assertEqual(plan.current(), {"op": "buy", "code": "torch"})
-        self.assertEqual((out.state, m.goal), ("Explore", "explore"))
+        self.assertEqual((out.state, out.intents, out.wait, m.goal), ("Shop", None, True, ""))
         self.assertIsNotNone(plan.stalled_since_tick)
 
     def test_ops_without_an_executor_are_dropped(self):
@@ -233,7 +233,7 @@ class GoalStackTest(unittest.TestCase):
         with mock.patch("agentrealm_agent.states.break_state.break_toward", return_value=unreachable):
             out = run(w, m, plan)
             self.assertEqual(plan.current(), brk, "not dropped for want of a state")
-            self.assertNotEqual(out.state, "Break", "no way to the block: Break sends nothing")
+            self.assertEqual((out.state, out.intents, out.wait), ("Break", None, True), "no way to the block: Break asks and holds")
             w.tick = 100 + PLAN_STALL_SECONDS * 10
             with self.assertLogs("agentrealm_agent.plan", "WARNING"):
                 run(w, m, plan)

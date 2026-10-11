@@ -157,6 +157,15 @@ def held_supplies(w: WorldModel) -> list[InventorySupply]:
     return out
 
 
+def held_supply(w: WorldModel, code: str) -> InventorySupply | None:
+    """A supply of ``code`` in hand. One only in the carried chest does not count:
+    Solve does not withdraw it, so the op stalls and is dropped (A39)."""
+    for s in w.held_supplies:
+        if s.code == code:
+            return s
+    return None
+
+
 def held_capabilities(w: WorldModel, kb: KnowledgeBase | None = None) -> set[str]:
     caps: set[str] = set()
     for s in held_supplies(w):
@@ -243,6 +252,11 @@ def _route(start: Pos, goal: Pos) -> Iterator[Pos]:
     while p != goal:
         p = _step_toward(p, goal)
         yield p
+
+
+def straight_route(start: Pos, goal: Pos) -> list[Pos]:
+    """The cells of the straight route from ``start`` to ``goal``, ``start`` left out."""
+    return list(_route(start, goal))
 
 
 def choice_at(

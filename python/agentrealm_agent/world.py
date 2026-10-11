@@ -177,6 +177,9 @@ class Tiles(dict):
     _frontier: set[Pos] | None = None
     _changes: set[Pos] | None = None
     MAX_CHANGES = 4096  # more than this and a fresh pass is as quick
+    # Counts the calls that may have changed a tile, so a search over this map
+    # can be kept until it does (A120, ``states.way``).
+    revision: int = 0
 
     def frontier(self) -> set[Pos]:
         """Known walkable tiles that touch an unknown one."""
@@ -203,6 +206,7 @@ class Tiles(dict):
         return False
 
     def _changed(self, keys) -> None:
+        self.revision += 1
         changes = self._changes
         if changes is None:
             return
@@ -242,6 +246,7 @@ class Tiles(dict):
 
     def clear(self) -> None:
         super().clear()
+        self.revision += 1
         self._changes = None
 
 

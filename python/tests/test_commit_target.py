@@ -276,7 +276,9 @@ class NearerCandidateTest(unittest.TestCase):
         self.assertEqual(m.gather_target, ("grass", (12, 1)))
         w.tick += 50  # gather.HOLD_TICKS
         out = dispatch(w, c)
-        self.assertIn("look for gems", out.reason)  # the hold is over: the safe default has it
+        # The hold is over and nothing else to work: Gather asks the planner (A120).
+        self.assertEqual((out.state, out.wait, out.intents), ("Gather", True, None), out.reason)
+        self.assertIn("asked the planner", out.reason)
         self.assertIsNone(m.gather_hold)
 
     def test_level_keeps_its_door_when_a_nearer_one_is_seen(self):

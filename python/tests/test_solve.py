@@ -249,7 +249,8 @@ class SolveStallTest(unittest.TestCase):
         explore = {"op": "explore_area", "x": 4, "y": 0, "radius": 1}
         plan = Plan([{"op": "compose", "composes_into": "rusty_key"}, explore], dict(PARAM_DEFAULTS))
         out = dispatch(w, ctx(w, plan))
-        self.assertNotEqual(out.state, "Solve")  # yields while stuck (A44)
+        # Nothing to try: Solve asks the planner and holds (A120).
+        self.assertEqual((out.state, out.intents, out.wait), ("Solve", None, True), out.reason)
         self.assertEqual(plan.current()["op"], "compose")
         self._run(w, plan, self.STALL_TICKS)
         self.assertEqual(plan.current(), explore)

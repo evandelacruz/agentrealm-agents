@@ -127,7 +127,14 @@ class AskDedupTest(unittest.TestCase):
         ask_the_planner(w, c, "nothing left to explore", "Explore")
         ask_the_planner(w, c, WHY, "Travel", travel(5, 1))
         self.assertEqual([a["why"] for a in asks(c)], ["nothing left to explore", WHY])
-        self.assertEqual(c.memory.no_way_on, (7, (1, 1), WHY))
+        self.assertEqual(c.memory.no_way_on[:3], (7, (1, 1), WHY))
+
+    def test_a_new_op_on_the_same_cell_and_reason_is_a_new_ask(self):
+        w, c = world(POCKET), ctx(travel(5, 1))
+        ask_the_planner(w, c, WHY, "Travel", travel(5, 1))
+        ask_the_planner(w, c, WHY, "Travel", travel(5, 1))
+        ask_the_planner(w, c, WHY, "Travel", travel(6, 1))
+        self.assertEqual([a["op"] for a in asks(c)], [travel(5, 1), travel(6, 1)])
 
 
 class NoPlannerAnswersTest(unittest.TestCase):

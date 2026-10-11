@@ -25,6 +25,7 @@ from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import known_safe
 from .base import PlayContext, State, StateOutcome, my_op
 from .intents import set_position, use_npc, use_on
+from .way import clear_the_way
 
 
 # ``Use`` swings queued per submit, ahead of the retreat tail.
@@ -242,7 +243,16 @@ class FightState(State):
         if op is not None:
             refusal = op_refusal(world, ctx, op)
             if refusal is None:
-                return engage(world, ctx, op_npc(op, world, _pinned(ctx)), self.name)
+                target = op_npc(op, world, _pinned(ctx))
+                out = engage(world, ctx, target, self.name)
+                if out.intents or ctx.plan is None or ctx.plan.current() is not op:
+                    return out
+                # No swing and no step toward it: clear the way, else ask the planner (A120).
+                # The ask holds nothing here, so Flee and the reflexes below still act, and the
+                # safe default holds for the op (``explore.HOLD_THEIR_WALK``).
+                out = clear_the_way(world, ctx, target.pos, f"fight {target.kind} {target.id}: {out.reason}", self.name, op)
+                out.wait = False
+                return out
             if ctx.plan is not None:
                 ctx.plan.drop_current(refusal, memory=ctx.memory)
                 return StateOutcome(None, f"fight dropped: {refusal}", state=self.name)

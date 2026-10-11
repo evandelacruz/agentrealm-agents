@@ -37,7 +37,7 @@ def plan_buy_op(ctx: PlayContext, w: WorldModel) -> dict | None:
     op = plan.current()
     if op is None or op.get("op") != "buy":
         return None
-    if goal_done(op, w, plan, ctx.memory):
+    if goal_done(op, w, plan):
         return None
     return op
 
@@ -85,15 +85,7 @@ def note_shop_result(m: Memory, intent: dict | None, applied: bool) -> None:
         m.shop_pending = None
         return
     if intent and intent.get("verb") == "Take" and intent.get("supply_id") == pending[0]:
-        _bought(m, pending)
-
-
-def _bought(m: Memory, pending: tuple) -> None:
-    """The Take in flight landed: the purchase is settled, and its ``buy`` is
-    done once the gems are spent and the item is owned (``plan.bought``, A106)."""
-    m.shop_pending = None
-    m.shop_bought = (pending[1], pending[2], m.shop_pending_for)
-    m.shop_pending_for = None
+        m.shop_pending = None
 
 
 def shop_pending_stale(w: WorldModel, pending: tuple) -> bool:
@@ -123,4 +115,4 @@ def sync_shop(w: WorldModel, m: Memory) -> None:
     if pending[2] is None or w.gems is None:
         return
     if w.gems < pending[2]:
-        _bought(m, pending)
+        m.shop_pending = None

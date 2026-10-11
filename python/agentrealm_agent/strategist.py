@@ -1581,6 +1581,7 @@ class Strategist:
             runner.plan.stalled_since_tick = old.stalled_since_tick
             runner.plan.block_before = old.block_before
             runner.plan.held_before = old.held_before
+            runner.plan.paid_from = old.paid_from
         else:
             # The safe default's walk serves no op, so its queue is cut at its
             # next step, not run out (free-play run 6: the walk queued before

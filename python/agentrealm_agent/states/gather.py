@@ -56,7 +56,8 @@ from ..memory import Memory
 from ..navigation import CostGridParams, cost_path, nearest_target
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
-from ..survival import is_attacker, is_hostile, recently_attacked, would_lose
+from ..engagement import would_fight
+from ..survival import is_attacker, is_hostile, recently_attacked
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
@@ -187,12 +188,13 @@ def shadowing_hostile(w: WorldModel, m: Memory, policy: Policy, tick_hz: int) ->
 
 def fight_shadow(w: WorldModel, ctx: PlayContext, e: Entity) -> StateOutcome | None:
     """Close on and swing at the shadowing ``e`` when ``on_hostile = fight``,
-    it may be attacked, and the win estimate (counting it as in range) passes;
+    it may be attacked, and the decision an engagement with it would start
+    with is to fight (``engagement.would_fight``);
     else None."""
     policy = ctx.policy
     if policy.on_hostile != "fight" or attack_forbidden(e, ctx.never_attack) or w.pos is None:
         return None
-    if would_lose(w, policy, ctx.params, also=e):
+    if not would_fight(w, policy, ctx.params, also=e):
         return None
     out = engage(w, ctx, e, GatherState.name)
     if not out.intents:

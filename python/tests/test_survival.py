@@ -23,6 +23,15 @@ from agentrealm_agent.world import Entity, WorldModel, chebyshev
 from agentrealm_agent.zone_discovery import apply_zone
 
 
+
+def retreats(w, policy, params) -> bool:
+    """``should_retreat`` with the engagement's decision, as Retreat reads it."""
+    from agentrealm_agent.engagement import fights, sync_engagement
+
+    m = Memory()
+    sync_engagement(w, m, policy, params)
+    return should_retreat(w, policy, params, fights(m))
+
 def world(rows: list[str], at=(0, 0)) -> WorldModel:
     glyph = {".": "dirt", "#": "wall", "~": "lava"}
     w = WorldModel(character_id=1, map_id=7, pos=at, perception=5)
@@ -171,8 +180,8 @@ class RetreatTest(unittest.TestCase):
     def test_threshold_is_retreat_hits_times_the_hit(self):
         # risk 0.5 with lives well above the floor: retreat_hits applies as set.
         params = {"retreat_hits": 2, "risk": 0.5, "lives_floor": 3}
-        self.assertTrue(should_retreat(self.hurt(health=10, damage=5), Policy(hostile=["npc"]), {**PARAM_DEFAULTS, **params}))
-        self.assertFalse(should_retreat(self.hurt(health=11, damage=5), Policy(hostile=["npc"]), {**PARAM_DEFAULTS, **params}))
+        self.assertTrue(retreats(self.hurt(health=10, damage=5), Policy(hostile=["npc"]), {**PARAM_DEFAULTS, **params}))
+        self.assertFalse(retreats(self.hurt(health=11, damage=5), Policy(hostile=["npc"]), {**PARAM_DEFAULTS, **params}))
 
     def test_params_move_the_threshold(self):
         w = self.hurt(health=12, damage=5)
@@ -183,7 +192,7 @@ class RetreatTest(unittest.TestCase):
     def test_not_without_a_hostile_in_range(self):
         w = self.hurt(health=1)
         w.entities = []
-        self.assertFalse(should_retreat(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        self.assertFalse(retreats(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
         self.assertEqual(dispatch(w, ctx(hostile=["npc"])).state, "Explore")
 
     def test_not_without_a_known_safe_tile(self):
@@ -666,7 +675,7 @@ class TownsfolkTest(unittest.TestCase):
         policy = Policy(hostile=["npc"], on_hostile="fight")
         self.assertFalse(survival.is_hostile(w, policy, w.entities[0]))
         self.assertEqual(survival.hostiles_in_range(w, policy), [])
-        self.assertFalse(should_retreat(w, policy, dict(PARAM_DEFAULTS)))
+        self.assertFalse(retreats(w, policy, dict(PARAM_DEFAULTS)))
         self.assertFalse(would_lose(w, policy, dict(PARAM_DEFAULTS)))
 
     def test_no_flee_retreat_or_fight_on_a_townsperson(self):
@@ -739,12 +748,12 @@ class RetreatThreatTest(unittest.TestCase):
     def test_a_hostile_standing_two_cells_off_is_not_retreated_from(self):
         w = self.standing()
         self.assertTrue(would_lose(w, self.policy(), self.params()))
-        self.assertFalse(should_retreat(w, self.policy(), self.params()))
+        self.assertFalse(retreats(w, self.policy(), self.params()))
         self.assertNotEqual(dispatch(w, ctx(params=self.params(), on_hostile="fight")).state, "Retreat")
 
     def test_a_hostile_in_reach_is(self):
         w = self.standing(at=(2, 0))
-        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+        self.assertTrue(retreats(w, self.policy(), self.params()))
 
     def test_a_hostile_approaching_is(self):
         w = self.standing(at=(4, 0))
@@ -752,31 +761,31 @@ class RetreatThreatTest(unittest.TestCase):
         w.tick = 104
         w.apply_entities({"tick": 104, "npcs": [{"id": 240, "x": 3, "y": 0, "npc_type_code": "gnawer"}]})
         self.assertTrue(survival.approaching(w, w.entities[0]))
-        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+        self.assertTrue(retreats(w, self.policy(), self.params()))
 
     def test_an_old_approach_is_forgotten(self):
         w = self.standing(at=(4, 0))
         w.apply_entities({"tick": 100, "npcs": [{"id": 240, "x": 4, "y": 0, "npc_type_code": "gnawer"}]})
         w.apply_entities({"tick": 101, "npcs": [{"id": 240, "x": 3, "y": 0, "npc_type_code": "gnawer"}]})
         w.tick = 101 + survival.THREAT_MEMORY_TICKS + 1
-        self.assertFalse(should_retreat(w, self.policy(), self.params()))
+        self.assertFalse(retreats(w, self.policy(), self.params()))
 
     def test_a_hostile_moving_away_is_not(self):
         w = self.standing(at=(2, 0))
         w.apply_entities({"tick": 100, "npcs": [{"id": 240, "x": 2, "y": 0, "npc_type_code": "gnawer"}]})
         w.apply_entities({"tick": 101, "npcs": [{"id": 240, "x": 3, "y": 0, "npc_type_code": "gnawer"}]})
         self.assertFalse(survival.approaching(w, w.entities[0]))
-        self.assertFalse(should_retreat(w, self.policy(), self.params()))
+        self.assertFalse(retreats(w, self.policy(), self.params()))
 
     def test_the_hostile_hitting_us_is(self):
         w = self.standing()
         w.attacker, w.attacked_tick = ("npc", 240), w.tick
-        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+        self.assertTrue(retreats(w, self.policy(), self.params()))
 
     def test_the_health_floor_still_retreats_from_a_standing_hostile(self):
         w = self.standing()
         w.health = 1
-        self.assertTrue(should_retreat(w, self.policy(), self.params()))
+        self.assertTrue(retreats(w, self.policy(), self.params()))
 
 if __name__ == "__main__":
     unittest.main()

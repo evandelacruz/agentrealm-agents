@@ -35,7 +35,7 @@ from .survival import (
     recently_attacked,
     win_ratio,
 )
-from .world import WorldModel
+from .world import Entity, WorldModel
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -119,6 +119,13 @@ def cannot_outrun(w: WorldModel, m: Memory, policy: Policy, params: dict[str, fl
         return e
     m.engagement = decide(w, policy, params, e.group, True)
     return m.engagement
+
+
+def would_fight(w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity) -> bool:
+    """The decision an engagement would start with against the hostiles in
+    range and ``also``, one further off a state would go for."""
+    group = frozenset((h.kind, h.id) for h in combat_group(w, policy, also))
+    return decide(w, policy, params, group, False).fight
 
 
 def fights(m: Memory) -> bool:

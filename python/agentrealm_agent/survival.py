@@ -356,14 +356,11 @@ def estimate_health(w: WorldModel) -> int:
     return NEW_CHARACTER_HEALTH if health is None else health
 
 
-def should_retreat(
-    w: WorldModel, policy: Policy, params: dict[str, float | int], fight: bool | None = None
-) -> bool:
+def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int], fight: bool) -> bool:
     """The next effective ``retreat_hits`` hits from the hostiles in range could
     kill, or (``on_hostile = "fight"``) we would lose to a group that is
-    ``threatening`` us. ``fight`` is the engagement's decision
-    (``engagement.sync_engagement``) when the caller has one; without it, the
-    estimate against the group in range decides.
+    ``threatening`` us: ``fight`` is the engagement's fight-or-flee decision
+    (``engagement.fights``), the one Fight and Flee read too.
 
     A hit's size comes from what is attacking (the threat table), so with no
     hostile in range there is nothing to retreat from. A fight we would lose
@@ -376,8 +373,7 @@ def should_retreat(
     group = combat_group(w, policy)
     if not group:
         return False
-    losing = would_lose(w, policy, params) if fight is None else not fight
-    if policy.on_hostile == "fight" and losing and threatening(w, group):
+    if policy.on_hostile == "fight" and not fight and threatening(w, group):
         return True
     return at_health_floor(w, params, group)
 

@@ -14,14 +14,14 @@ from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.engagement import BREAK_EVEN, fight_bar, sync_engagement
+from agentrealm_agent.engagement import BREAK_EVEN, fight_bar, fights, sync_engagement
 from agentrealm_agent.hostile_ground import Danger, danger
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.detour import detour_find
 from agentrealm_agent.states.gather import gather_outcome
-from agentrealm_agent.survival import win_ratio
+from agentrealm_agent.survival import should_retreat, win_ratio
 from agentrealm_agent.world import Entity, Sighting, WorldModel, chebyshev
 
 MAP = 1
@@ -160,6 +160,7 @@ class CannotOutrunTest(unittest.TestCase):
         self.w.tick += 1
         out = dispatch(self.w, self.c)
         self.assertEqual(out.state, "Fight", "Fight reads the same decision")
+        self.assertFalse(should_retreat(self.w, self.c.policy, self.c.params, fights(m)), "and so does Retreat")
 
     def test_flee_policy_fights_back_on_the_same_decision(self):
         c = ctx(on_hostile="flee")

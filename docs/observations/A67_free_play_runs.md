@@ -1062,7 +1062,7 @@ Intents: 300 `Step`, 276 `Wait`, 196 `Use` (all cuts), 38 `Take`, 2 `Arm`. Call 
 
 Per A87, each names the rule a fix should generalize.
 
-1. **A held-queue poll goes over the call budget** (`runner.py:662–664`, `Pacer` at `runner.py:157–169`). At 473.7–474.7 s the runner sent four `tick` calls in about 1 s, inside game ticks 7985283–7985284: a cut, then two "queue held" polls with no intents, then the call the server refused `429 rate_limited`. A strategist call came at the same time. One refused call is enough to fail the M8 gate. **Rule:** no decision path may exceed one request per tick (burst 3). The held-queue poll waits on the `Pacer` like every other call. Changing the pacing is flagged in AGENTS.md, so the fix needs Evan's eye.
+1. **A held-queue poll goes over the call budget** (`runner.py:662–664`, `Pacer` at `runner.py:157–169`). At 473.7–474.7 s the runner sent four `tick` calls in about 1 s, inside game ticks 7985283–7985284: a cut, then two "queue held" polls with no intents, then the call the server refused `429 rate_limited`. A strategist call came at the same time. One refused call is enough to fail the M8 gate. **Rule:** no decision path may exceed one request per tick (burst 3). The held-queue poll waits on the `Pacer` like every other call. Changing the pacing is flagged in AGENTS.md, so the fix needs Evan's eye. (Addressed in A98: the client spends every `/characters/{id}/…` call from that character's pacer, `pacer.py`, a model of the server's bucket that a 429 empties, so a held-queue poll waits like any other call.)
 
    ```
    473.74 s  tick 7985283  Use (cut grass)

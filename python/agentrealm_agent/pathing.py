@@ -32,24 +32,6 @@ from .executor.movement import step_landing
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
-@dataclasses.dataclass(frozen=True)
-class Toward:
-    """The destination of the op on top, which a walk on its behalf serves (A120).
-
-    ``pos`` is the cell on this map the op's walk heads for, ``label`` names
-    it for the planner, and ``op`` is the op it serves (the commitment's).
-    """
-
-    pos: Pos
-    label: str
-    op: GoalOp
-
-
-def brings_nearer(toward: Toward | None, here: Pos, p: Pos) -> bool:
-    """``p`` is nearer ``toward`` than ``here`` is; any cell is with no destination (A120)."""
-    return toward is None or chebyshev(p, toward.pos) < chebyshev(here, toward.pos)
-
-
 def goto_target(w: WorldModel, policy: Policy) -> tuple[int | None, Pos] | None:
     """The ``goto`` in ``policy.goals`` as (map, cell), or None when there is none."""
     if policy.goto is None or "goto" not in policy.goals:
@@ -278,11 +260,9 @@ def replan(
     costly: set[Pos],
     knowledge: KnowledgeBase | None = None,
     op: GoalOp | None = None,
-    toward: Toward | None = None,
 ) -> tuple[str, Leg, bool] | None:
     """Set ``m.path`` for the ``explore_area`` ``op``, or with no op for the
-    safe default: the nearest safe frontier (``safe_explore_path``), one
-    that brings ``toward`` nearer when the op on top has a destination.
+    safe default: the nearest safe frontier (``safe_explore_path``).
 
     Either walk keeps the frontier it is heading for (``commit_explore``),
     so a reveal never turns it round. A path whose first step lies in fog
@@ -295,7 +275,7 @@ def replan(
         found = path_for_plan_op(op, w, m, policy, blocked, costly, knowledge)
         path, goal, leg = found if found else (None, plan_op_goal(op), None)
     else:
-        path, leg = safe_explore_path(w, m, policy, blocked, costly, knowledge, toward=toward)
+        path, leg = safe_explore_path(w, m, policy, blocked, costly, knowledge)
         goal = SAFE_EXPLORE_GOAL
     if next_step(w, blocked, path):
         _store_path(m, w, goal, path, leg)
@@ -342,7 +322,6 @@ def clue_redirects(
     costly: set[Pos],
     knowledge: KnowledgeBase | None,
     op: GoalOp | None = None,
-    toward: Toward | None = None,
 ) -> bool:
     """A direction clue (A32) names a side the explore walk could go to, and the walk heads elsewhere.
 
@@ -360,7 +339,7 @@ def clue_redirects(
     walk = m.walks.get(goal)
     if hint is None or walk is None or on_hint_side(hint, walk.target):
         return False
-    targets = explore_area_targets(op, w, m) if op is not None else safe_explore_targets(w, m, policy, toward=toward)
+    targets = explore_area_targets(op, w, m) if op is not None else safe_explore_targets(w, m, policy)
     side = {t for t in targets if on_hint_side(hint, t)}
     params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
     if not side or nearest_target(w, side, params) is None:
@@ -934,20 +913,16 @@ def attempt_plan(
     return plan
 
 
-def safe_explore_targets(
-    w: WorldModel, m: Memory, policy: Policy, *, push: bool = False, toward: Toward | None = None
-) -> set[Pos]:
+def safe_explore_targets(w: WorldModel, m: Memory, policy: Policy, *, push: bool = False) -> set[Pos]:
     """The frontier cells the safe default may walk to (``safe_explore_path``).
 
     ``push`` drops the hurt rule (safe-zone ground only): the frontier just
-    outside safe ground, still off hazards and away from hostiles. With the
-    op on top headed for ``toward``, only a frontier that brings it nearer
-    than where we stand (A120): a walk on the op's behalf serves the op.
+    outside safe ground, still off hazards and away from hostiles.
     """
     from .states.gather_safe import hostiles_near, is_safe_ish
 
     targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
-    targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks and brings_nearer(toward, w.pos, p)}
+    targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
     if hurt(w) and not push:
         return {p for p in targets if is_safe_ish(w, p, policy)}
     return {p for p in targets if not hostiles_near(w, p, policy)}
@@ -960,15 +935,9 @@ def safe_explore_path(
     blocked: set[Pos],
     costly: set[Pos],
     knowledge: KnowledgeBase | None = None,
-    *,
-    toward: Toward | None = None,
 ) -> tuple[list[Pos] | None, Leg | None]:
     """The safe default's walk: a path to the nearest frontier in safe ground,
     and what stuck detection tracks (None when there is none).
-
-    With the op on top headed for ``toward``, only a frontier that brings it
-    nearer is a target, and the frontier is committed for that op (A120): a
-    walk the safe default started for no op, or for another, is not kept.
 
     Safe ground keeps off ``avoid_blocks`` hazards and Step rejections
     (``blocked``) and away from hostiles in ``hostile_range``. Hurt, it is
@@ -979,18 +948,15 @@ def safe_explore_path(
     always. So the safe default never loops "look around" while unexplored
     ground is reachable. Frontiers backed off after a give-up are skipped (A15).
     """
-    targets = safe_explore_targets(w, m, policy, toward=toward)
+    targets = safe_explore_targets(w, m, policy)
     params = grid_params(policy, blocked, costly, m=m, w=w, knowledge=knowledge)
     found = nearest_explore_target(w, targets, params, knowledge)
     if not (found and found[1]) and hurt(w):
         # Hurt-safe ground all explored or out of reach: push the boundary.
-        targets = safe_explore_targets(w, m, policy, push=True, toward=toward)
+        targets = safe_explore_targets(w, m, policy, push=True)
         found = nearest_explore_target(w, targets, params, knowledge)
     leg = Leg(found[0]) if found and found[1] else None
-    served = toward.op if toward is not None else None
-    path, leg = commit_explore(
-        m, w, SAFE_EXPLORE_GOAL, targets, leg, found[1] if leg else None, params, knowledge, op=served
-    )
+    path, leg = commit_explore(m, w, SAFE_EXPLORE_GOAL, targets, leg, found[1] if leg else None, params, knowledge)
     return (path, leg) if path else (None, None)
 
 

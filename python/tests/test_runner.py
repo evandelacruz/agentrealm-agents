@@ -285,6 +285,16 @@ class RunnerTest(unittest.TestCase):
         r.world.tick = 18
         self.assertEqual([i["verb"] for i in r.intents_for(Decision(use, "test"))], ["Wait"] * 2 + ["Use"])
 
+    def test_the_tick_record_keeps_why_the_states_above_sent_nothing(self):
+        # A120: a state's no-step reason (``yielded``) reaches the trace.
+        fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
+        r = self.runner(fake, Policy(goals=[], pickup=False))
+        d = Decision(None, "held", state="Explore", yielded=["Travel: travel:point 4,0: no step toward it"])
+        with mock.patch.object(r, "_decide", return_value=d):
+            r.tick()
+        last = json.loads(r.cfg.trace_path(r.cid).read_text().splitlines()[-1])
+        self.assertEqual(last["yielded"], ["Travel: travel:point 4,0: no step toward it"])
+
     def test_non_movement_intent_is_sent_alone(self):
         # Movement, Use, and Say become paced queues; a Take goes as one
         # intent, still held as a queue until it runs (A63 run 3).
@@ -630,9 +640,9 @@ class RunnerTest(unittest.TestCase):
 
     def test_unavoidable_blocker_replaces_the_queue_once_and_does_not_resend_again(self):
         # A one-wide corridor: a wall read on it leaves no route (an NPC
-        # would not: the cost grid prices occupants, A12). Travel yields and
-        # the safe default's step replaces the old queue once; later polls
-        # do not resend.
+        # would not: the cost grid prices occupants, A12). Travel asks the
+        # planner and holds (A120): an empty queue replaces the old walk
+        # once; later polls do not resend.
         fake = FakeClient([
             {"tick": 10, "window_remaining_ms": 0},
             {"tick": 11, "window_remaining_ms": 0},
@@ -649,9 +659,9 @@ class RunnerTest(unittest.TestCase):
         }
         r.step("terrain")
         resent = self._resend(r, fake)
-        self.assertEqual(r.mem.state, "Explore", "no route: the safe default moves")
-        self.assertNotEqual(resent, fake.sent[0][0])
-        self.assertNotIn((2, 0), self._walk_cells((0, 0), resent))
+        self.assertEqual(r.mem.state, "Travel", "no route: Travel holds, the safe default never stands in")
+        self.assertEqual(resent, [])
+        self.assertTrue(any(s["trigger"] == "no_way_on" for s in r.mem.strategist_signals))
         for _ in range(2):
             r.step("terrain")
             r.tick()

@@ -11,10 +11,8 @@ With no reachable frontier at all, the ground in reach is all seen and the
 way on is the planner's call (which block to open, which hostile to fight or
 pass, which clue to follow): it never steps in place and never parks beside
 a hostile; it raises a ``no_way_on`` trigger and sends nothing (A114).
-When the op on top has a destination (``destination.op_destination``), the
-safe default runs on that op's behalf: it walks only to a frontier that
-brings the destination nearer, and with none such to walk to it asks the
-planner the same way, saying so, rather than wander (A120).
+It never stands in for Travel: under a ``travel`` op Travel keeps its walk,
+and with no step it asks the planner itself and holds (A120).
 Stuck detection escalates and gives up a walk that goes nowhere (A15); cells Step
 rejections ruled out and ``avoid_blocks`` hazards stay out of the path (A14).
 """
@@ -26,11 +24,9 @@ import random
 from ..config import Policy
 from ..healing import hurt
 from ..knowledge_base import KnowledgeBase
-from ..memory import SAFE_EXPLORE_GOAL, Memory, queue_signal
+from ..memory import Memory
 from ..navigation import stuck as nav_stuck
-from .. import targets as targets_mod
 from ..pathing import (
-    Toward,
     plan_sets,
     attempt_plan,
     clue_redirects,
@@ -43,7 +39,8 @@ from ..plan import GoalOp
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome, my_op
+from .ask import ask_the_planner
+from .base import PlayContext, State, StateOutcome, my_op, top_executor
 from .gather_safe import is_safe_ish
 from .intents import set_position
 
@@ -54,13 +51,19 @@ CAUTION_RADIUS = HOSTILE_DANGER_RADIUS
 KEEP_AWAY_HOLD_TICKS = 100
 # Why the safe default had no step: the ground in reach is all seen.
 NOTHING_TO_EXPLORE = "nothing left to explore"
+# The executors whose op the safe default never stands in for (A120): each
+# holds its own walk, and with no step asks the planner and holds. Today
+# Travel only; the rest still fall through to the safe default.
+HOLD_THEIR_WALK = frozenset({"Travel"})
 
 
 class ExploreState(State):
     """Last state for a scripted character: the executor for ``explore_area``,
     and otherwise the safe default. It runs whenever no reflex or executor
     sent an intent: no plan op, or the top op's executor had nothing to do
-    this decision (that op's stall clock then runs, A34)."""
+    this decision (that op's stall clock then runs, A34). Under an op whose
+    executor holds its own walk (``HOLD_THEIR_WALK``) it holds too, sending
+    nothing, so it never walks the character off that op's way (A120)."""
 
     name = "Explore"
 
@@ -76,6 +79,9 @@ class ExploreState(State):
             out = explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=op)
             if out.intents:
                 return out
+        owner = top_executor(ctx)
+        if owner in HOLD_THEIR_WALK:
+            return StateOutcome(None, f"{owner} holds its walk", state=self.name, wait=True, progress=False)
         out = safe_default(world, ctx)
         out.progress = False  # it moves for no op: the top op, if any, still stalls
         return out
@@ -85,48 +91,18 @@ def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     """The safe default: explore safe ground, then push past it.
 
     Hurt with a known hostile near, it explores nothing: it steps away from
-    the hostile, or holds when no step gets further (``keep_away``). Under
-    an op with a destination it explores only toward it (A120). With nothing
-    left to explore (toward it) it asks the planner (``ask_the_planner``)."""
-    from .destination import op_destination  # it resolves through Travel, which imports this module
-
+    the hostile, or holds when no step gets further (``keep_away``). With
+    nothing left to explore it asks the planner (``ask_the_planner``)."""
     if not hurt(world):
         ctx.memory.keep_away_hold = None  # healed: a later hold starts afresh
     elif (out := keep_away(world, ctx)) is not None:
         return out
-    toward = op_destination(world, ctx)
-    out = explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None, toward=toward)
+    out = explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None)
     if out.intents:
         ctx.memory.no_way_on = None  # ground to explore again: a later ask is new
     if out.reason != NOTHING_TO_EXPLORE:
         return out
-    return ask_the_planner(world, ctx, why=nothing_toward(toward))
-
-
-def nothing_toward(toward: Toward | None) -> str:
-    """Why the safe default asks the planner: nothing left to explore, or
-    under an op with a destination, no frontier that brings it nearer (A120)."""
-    return NOTHING_TO_EXPLORE if toward is None else f"no frontier brings {toward.label} nearer"
-
-
-def ask_the_planner(w: WorldModel, ctx: PlayContext, state: str = "Explore", why: str = NOTHING_TO_EXPLORE) -> StateOutcome:
-    """The ground in reach is all seen, or none of it brings the op's
-    destination nearer (``why``): the way on is the planner's (A114, A120).
-
-    It never steps in place, and never parks because a hostile stands next
-    to it: it raises one ``no_way_on`` trigger for this cell and holds the
-    decision with nothing sent. The planner reads State ``map`` (the ground round the character,
-    blocks, hostiles, signs and doors by cell), what each held item does and
-    the clues, and opens a block with ``break_block``, fights, or goes on.
-    """
-    m = ctx.memory
-    if w.pos is not None and w.map_id is not None and m.no_way_on != (w.map_id, w.pos):
-        m.no_way_on = (w.map_id, w.pos)
-        queue_signal(
-            m,
-            {"trigger": "no_way_on", "map_id": w.map_id, "x": w.pos[0], "y": w.pos[1], "tick": w.tick, "why": why},
-        )
-    return StateOutcome(None, f"{why}: asked the planner", state=state, wait=True)
+    return ask_the_planner(world, ctx, NOTHING_TO_EXPLORE, "Explore")
 
 
 def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateOutcome | None:
@@ -180,13 +156,8 @@ def explore_outcome(
     knowledge: KnowledgeBase | None = None,
     op: GoalOp | None = None,
     state: str = "Explore",
-    toward: Toward | None = None,
 ) -> StateOutcome:
     """One step toward the ``explore_area`` ``op``, or with no op the safe default's.
-
-    The safe default's walk serves ``toward``, the destination of the op on
-    top, when it has one (A120): only a frontier that brings it nearer is
-    picked, and a walk not committed for that op is not kept.
 
     With no step, sends nothing. With no op and no frontier to walk to at
     all, its reason is ``NOTHING_TO_EXPLORE``, and the safe default asks the
@@ -196,10 +167,8 @@ def explore_outcome(
     if w.pos is None:
         return StateOutcome(None, "position unknown", state=state)
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
-    clue_redirects(w, m, policy, plan_avoid, plan_costly, knowledge, op, toward=toward)
+    clue_redirects(w, m, policy, plan_avoid, plan_costly, knowledge, op)
     owned = path_owned_by(op, m)
-    if owned and toward is not None and targets_mod.committed(m, w, SAFE_EXPLORE_GOAL, toward.op) is None:
-        owned = False  # a walk picked for no op, or another, need not serve this one
     target_plan = attempt_plan(m, w, policy, plan_avoid, plan_costly, knowledge)
     step = _escalated_step(w, m, plan_avoid, target_plan, knowledge) if owned else None
     if step is None and owned:
@@ -208,7 +177,7 @@ def explore_outcome(
         if step is not None and att is not None and m.goal == att.goal:
             nav_stuck.observe(att, w, m.path)
     if step is None:
-        missed = replan(w, m, policy, plan_avoid, plan_costly, knowledge, op=op, toward=toward)
+        missed = replan(w, m, policy, plan_avoid, plan_costly, knowledge, op=op)
         step = next_step(w, plan_avoid, m.path)
         if step is None and missed is not None:
             step = _missed_step(w, m, plan_avoid, target_plan, knowledge, *missed)

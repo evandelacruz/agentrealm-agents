@@ -108,7 +108,7 @@ States are checked in priority order once per round trip: after each `POST tick`
 | 5 | `Level` | Inside a level | Walks the rooms toward the unexplored doors, using `Fight`/`Break`/`Investigate` as they apply |
 | 5 | `Boss` | At a boss door with the plan's preconditions met | Enters, fights within the clock; retreats out only if possible, else commits |
 | 5 | `Travel` | The plan names a destination (entrance, town, hunting ground, shop) | Cost-grid planner through fog, door graph across maps, stuck detection and escalation (see Navigation) |
-| 5 | `Explore` | Nothing else | Frontier exploration, unvisited entrance marks first; frontiers that turn out unreachable are dropped with a backoff. Under an op with a destination (a `travel` with no step, say) only frontiers that bring it nearer, else the planner is asked (A120) |
+| 5 | `Explore` | Nothing else | Frontier exploration, unvisited entrance marks first; frontiers that turn out unreachable are dropped with a backoff. Never under a `travel` op: Travel holds and asks the planner instead (A120) |
 | 6 | `Idle` / `Sleep` | Stopping, or the plan says wait | Sends nothing, or `Sleep` at shutdown (not allowed inside a level) |
 
 Every state is a small class with `guard(world, plan) -> bool`, `act(world, plan) -> list[Intent] | None` and `done(world) -> bool`. `act` returns the whole queue to send, in order, or `None` to send nothing. That is the M7 test seam: a world model and plan in, a `list[Intent]` out. It replaces today's `brain.decide(...) -> Decision`, which carries at most one intent, so new tests are not written in that shape.

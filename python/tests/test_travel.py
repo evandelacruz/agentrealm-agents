@@ -172,7 +172,9 @@ class TravelStateTest(unittest.TestCase):
         plan = travel_plan(["travel:shop"])
         ctx = ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan)
         out = dispatch(w, ctx)
-        self.assertEqual(out.state, "Explore", "the safe default moves meanwhile")
+        # No destination yet: Travel asks the planner and holds (A120), the safe default never stands in.
+        self.assertEqual((out.state, out.intents, out.wait), ("Travel", None, True), out.reason)
+        self.assertEqual(ctx.memory.strategist_signals[-1]["why"], "travel:shop not resolved yet")
         self.assertEqual(plan.current()["to"], "shop", "kept until the knowledge base can resolve it")
         self.assertIsNotNone(plan.stalled_since_tick, "its stall clock runs")
         record_shop_cell(ctx.knowledge, 1, (3, 0))

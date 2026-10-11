@@ -354,8 +354,9 @@ class TravelBackoffTest(unittest.TestCase):
         w, m = r.world, r.memory
         c = PlayContext(m, policy, random.Random(1), never_attack=[], plan=builtin_plan(policy))
         out = dispatch(w, c)
-        self.assertEqual(out.yielded, [f"Travel: {WALK} blocked"], "backed off: Travel yields")
-        self.assertEqual(out.state, "Explore", "the safe default moves instead")
+        # Backed off: Travel asks the planner and holds; the safe default never stands in (A120).
+        self.assertEqual((out.state, out.intents, out.wait), ("Travel", None, True), out.reason)
+        self.assertIn("asked the planner", out.reason)
         self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
         w.tick = m.nav_stuck.given_up[nav_stuck.goal_key(WALK, 1, sc.goal)].until
         dispatch(w, c)
@@ -482,10 +483,11 @@ class CrossMapStuckTest(unittest.TestCase):
         plan = builtin_plan(policy)
         w = sim.world_for(sc, cross=cross)
         out = dispatch(w, PlayContext(Memory(), policy, random.Random(0), knowledge=cross.kb, plan=plan))
-        self.assertEqual(out.yielded, [f"Travel: {WALK} blocked"])
+        self.assertEqual((out.state, out.intents, out.wait), ("Travel", None, True), out.reason)
+        self.assertIn("no step toward it: asked the planner", out.reason)
         r = run_plan(sc, policy, plan, cross=cross, max_decisions=100)
         self.assertEqual(r.outcome, "budget")
-        self.assertFalse(any(row["reason"].startswith(WALK) for row in r.trace), "Travel never stepped")
+        self.assertFalse(any(row["intent"] and row["reason"].startswith(WALK) for row in r.trace), "Travel never stepped")
         self.assertEqual(r.memory.nav_stuck.stuck_signals, [])
         self.assertEqual(r.memory.nav_stuck.given_up, {})
         self.assertNotIn(WALK, {a.goal for a in r.memory.nav_stuck.attempts.values()})

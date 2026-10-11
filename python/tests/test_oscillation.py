@@ -36,8 +36,8 @@ WALK = "travel:point"  # the goal label of the goto's travel op walk
 
 def world(at=A) -> WorldModel:
     """Map 1: a walled corridor of dirt from x=0 to 11, open to the fog only
-    past its west end, away from the goto: once the goto is given up the safe
-    default, which serves it (A120), has no frontier toward it and asks."""
+    past its west end. Once the goto is given up Travel asks the planner and
+    holds; the safe default never stands in for it (A120)."""
     w = WorldModel(character_id=1, map_id=1, pos=at, perception=12, gems=10, health=10, max_health=10)
     for x in range(-1, 13):
         w.view.tiles[(x, -1)] = w.view.tiles[(x, 1)] = "stone"
@@ -166,15 +166,14 @@ class PacingDispatchTest(unittest.TestCase):
         signals = c.memory.nav_stuck.stuck_signals
         self.assertEqual(sorted((s["goal"], s["reason"]) for s in signals), sorted((g, "pacing") for g in given_up))
         self.assertFalse(goto_pending(w, c), "goto backed off")
-        # The safe default serves the goto (A120): the fog lies west, away
-        # from it, so it stays put and asks the planner, never pacing again.
+        # Travel holds where it stands and asks the planner (A120): no pacing again.
         after = cells[oscillation.OSCILLATION_STEPS - 1 :]
         self.assertEqual(set(after), {B}, cells)
         self.assert_asked(c)
 
     def assert_asked(self, c):
         why = {s.get("why") for s in c.memory.strategist_signals if s["trigger"] == "no_way_on"}
-        self.assertEqual(why, {"no frontier brings travel:point 11,0 nearer"})
+        self.assertEqual(why, {f"{WALK} 11,0: no step toward it"})
 
     def test_break_walk_against_the_goto_walk(self):
         # Both are walks: both are given up.
@@ -203,10 +202,9 @@ class PacingDispatchTest(unittest.TestCase):
     def test_the_goto_walk_pacing_on_its_own_is_given_up(self):
         """A58 run 5: the goto walk's own replans stepped it back and forth.
 
-        The guard alone ends it: one give-up, then the safe default, which
-        serves the goto (A120) and has no frontier toward it, asks the planner
-        and never paces the two cells again while the goto is backed off. No
-        back-step block in the walk is needed for that.
+        The guard alone ends it: one give-up, then Travel asks the planner and
+        holds (A120), never pacing the two cells again while the goto is backed
+        off. No back-step block in the walk is needed for that.
         """
         w, c, cells = play(GotoReplanBack(), decisions=12)
         events = c.memory.nav_stuck.oscillations

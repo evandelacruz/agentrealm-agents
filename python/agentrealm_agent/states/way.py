@@ -127,7 +127,8 @@ def clear_the_way(
 def walk_given_up(w: WorldModel, m: Memory, owner: str, at: Pos) -> str | None:
     """How ``owner``'s own walk to ``at`` failed, when the stuck ladder gave it
     up and it is still backed off (``OWNER_WALKS``): each level's reason in
-    order, ``no_nearer`` when it stood no nearer for too long (A125)."""
+    order (A125). A walk to another map is given up under its destination
+    there, so ``at``, None for it, never names it: that ask goes out at once."""
     walks = OWNER_WALKS.get(owner, ())
     for rec in m.nav_stuck.given_up.values():
         mine = (rec.map_id, rec.target) == (w.map_id, at) and rec.goal.startswith(walks)

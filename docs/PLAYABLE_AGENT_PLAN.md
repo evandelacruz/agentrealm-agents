@@ -157,7 +157,7 @@ An opening we cut or burned is open only until it grows back (about 60 s for a b
 - 3 moves in a row are rejected;
 - the planner finds no path, even with fog assumed open.
 
-A walk must also make net progress (A125): one that has not stood nearer its target in 40 of its own moves, across every escalation level, is given up at once and its executor asks the strategist, saying what each level tried. Each leg it walks ends where the remaining cost, as the walk has learned it, is lower than where it stands, and that learning is kept when the corridor is searched again.
+A walk must also make net progress (A125): each escalation level counts progress only when the remaining cost falls below the lowest the walk has had since it was taken up, so a fresh level never forgives wandering; a route round an obstacle lowers it and is progress. When the whole ladder has failed, the executor asks the strategist, saying what each level tried. Each leg it walks ends where the remaining cost, as the walk has learned it, is lower than where it stands, and that learning is kept when the corridor is searched again.
 
 **4. Escalation, in order, each step only if the one before fails:**
 1. Replan with the learned blocks, and with fog optimism lowered so known ground is preferred.

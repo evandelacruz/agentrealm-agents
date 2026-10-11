@@ -24,13 +24,15 @@ progress window, so a level is left only when its own window fails:
 - Step 5: give up, back off ``BACKOFF_BASE_TICKS * 2**n`` and queue a strategist
   ``stuck`` signal.
 
-A walk must also make net progress (A125). Each level's window measures the
-plan, and starts fresh, so on its own the ladder forgives a walk that
-follows one leg after another and stands no nearer. So, across every level,
-a walk that has made ``NO_NEARER_MOVES`` moves without standing nearer the
-target (in steps, Chebyshev) than it has since it was taken up is given up
-at once (``no_nearer``): the executor then clears the way or asks the
-planner (A120), saying what was tried, instead of wandering on.
+A walk must make net progress (A125): each level's window counts progress
+only when the plan's measure falls below the lowest the walk has had since
+it was taken up (``NavAttempt.net_best``), not just below that level's own.
+So a fresh level never forgives a walk that follows one leg after another
+and stands no nearer: each level must beat the walk's best or fail, the
+whole ladder runs, and its give-up leads the executor to clear the way or
+ask the planner (A120), saying how each level failed. A route round an
+obstacle lowers the measure as it is walked, so it is progress. A new way
+(a break that opened, an alternate route) starts the bar again.
 
 The ladder is the same whichever state walks: nothing in it knows Gather,
 Travel, Explore or Break. What a give-up leaves behind is one memory,
@@ -67,11 +69,6 @@ PROGRESS_TICK_LIMIT = 300  # 30 s at 10 ticks/s
 REJECT_STREAK_LIMIT = 3
 OSCILLATION_WINDOW = 8
 OSCILLATION_UNIQUE_MAX = 3
-
-# Net progress (A125): a walk that has moved this many times since it last
-# stood nearer its target is given up, whatever its level. Two walk windows,
-# so the plan and its cautious replan have each had theirs.
-NO_NEARER_MOVES = 2 * PROGRESS_MOVE_LIMIT
 
 # Escalation step 2: decisions that arm a tool before the window fails.
 # A break arms once; more means the arm is going nowhere.
@@ -148,10 +145,9 @@ class NavAttempt:
     closest: int | None = None
     reset_closest: int | None = None
     reset_level: int | None = None
-    # Net progress (A125), across every level: the nearest the agent stood
-    # since the walk was last taken up, and its moves since it stood there.
-    net_closest: int | None = None
-    net_moves: int = 0
+    # Net progress (A125): the lowest measure since the walk was taken up or
+    # found a new way, across every level. A window makes progress only below it.
+    net_best: int | None = None
 
 
 class Leg(NamedTuple):
@@ -282,7 +278,7 @@ def track(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt 
     if m.nav_stuck.active != att.key:
         att.goal = goal
         att.window_tick = w.tick  # only time spent pursuing it counts
-        att.net_closest, att.net_moves = None, 0  # nor moves: another walk may have led it away
+        att.net_best = None  # nor its bar: another walk may have led it away
     m.nav_stuck.active = att.key
     return att
 
@@ -396,6 +392,7 @@ def walk_again(att: NavAttempt, w: WorldModel, from_level: int) -> None:
         att.reset_closest = att.closest
     att.reset_level = max(att.reset_level or WALK, from_level)
     att.level = WALK
+    att.net_best = None  # a new way: its plan is measured afresh (A125)
     clear_break_target(att)
 
 
@@ -440,13 +437,15 @@ def measure(path: list[Pos] | None, target: Pos) -> int | None:
 
 
 def observe(att: NavAttempt, w: WorldModel, path: list[Pos] | None) -> None:
-    """Progress is the remaining measure falling below this window's best."""
+    """Progress is the remaining measure falling below the walk's net best (A125)."""
     _note_position(att, w)
     cost = measure(path, att.target)
     if cost is None:
         return
     if att.best is None or cost < att.best:
-        att.best, att.moves, att.window_tick = cost, 0, w.tick
+        att.best = cost
+    if att.net_best is None or cost < att.net_best:
+        att.net_best, att.moves, att.window_tick = cost, 0, w.tick
     if att.best_ever is None or cost < att.best_ever:
         att.best_ever = cost
 
@@ -457,13 +456,6 @@ def _note_position(att: NavAttempt, w: WorldModel) -> None:
     d = chebyshev(w.pos, att.target)
     if att.closest is None or d < att.closest:
         att.closest = d
-    if att.net_closest is None or d < att.net_closest:
-        att.net_closest, att.net_moves = d, 0
-
-
-def no_nearer(att: NavAttempt) -> bool:
-    """The walk has moved ``NO_NEARER_MOVES`` times without standing nearer its target (A125)."""
-    return att.net_moves >= NO_NEARER_MOVES
 
 
 def _oscillating(recent: list[Pos]) -> bool:
@@ -492,7 +484,6 @@ def on_step(m: Memory, w: WorldModel) -> None:
     if att is None or w.pos is None or m.goal != att.goal:
         return
     att.moves += 1
-    att.net_moves += 1
     att.reject_streak = 0
     _note_position(att, w)
     att.outline.add(w.pos)
@@ -534,6 +525,7 @@ def resume(m: Memory, att: NavAttempt, tick: int) -> None:
     now = m.nav_stuck.decision
     if att.seen_decision not in (now, now - 1):
         _fresh_window(att, tick)
+        att.net_best = None
         att.waiting_since = None
     att.seen_decision = now
 

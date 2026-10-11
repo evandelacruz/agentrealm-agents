@@ -6,9 +6,10 @@
 - Each leg brings the target nearer by what the walk has learned: a corridor
   searched again keeps the window search's learning, so no leg leads back
   over ground the walk learned leads nowhere.
-- A walk that stands no nearer over ``NO_NEARER_MOVES`` moves is given up
-  whatever its ladder level, and the executor asks the planner, saying what
-  was tried.
+- Each level of a walk's stuck ladder must beat the walk's best plan
+  measure, so a fresh level never forgives standing no nearer; a route round
+  an obstacle lowers the measure, so it is progress. Once the whole ladder
+  gives up, the executor asks the planner, saying what each level tried.
 """
 
 from __future__ import annotations
@@ -21,9 +22,10 @@ from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import CostGridParams, NavSearchState, cost_path
 from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_agent.pathing import guided_step
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.world import Entity, WorldModel, chebyshev
+from agentrealm_agent.world import Entity, WorldModel
 
 MAP = 7
 
@@ -133,68 +135,93 @@ class LegsBringTheGoalNearerTest(unittest.TestCase):
         self.assertEqual(nav.learned, {})
 
 
-class NoNetProgressAsksTest(unittest.TestCase):
-    GOAL = (1, -20)
+class NetProgressTest(unittest.TestCase):
+    TARGET = (200, 1)
 
-    def walk(self) -> tuple[WorldModel, PlayContext]:
-        w = WorldModel(character_id=1, map_id=MAP, pos=(1, 1), perception=3)
-        w.view.tiles.update({(x, y): "dirt" for x in range(-3, 6) for y in range(3)})  # unseen ground beyond
-        w.terrain_center, w.terrain_map = w.pos, MAP
-        w.alive, w.health, w.max_health = True, 10, 10
-        c = ctx(Memory(), travel(*self.GOAL))
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Travel", out.reason)
-        self.assertTrue(out.intents, out.reason)
-        return w, c
-
-    def wander(self, w: WorldModel, c: PlayContext, moves: int) -> None:
-        """The walk's own moves, none of them nearer the goal."""
-        cells = [(0, 1), (1, 1), (2, 1), (1, 1)]
-        for i in range(moves):
-            w.pos = cells[i % len(cells)]
+    def test_a_route_round_a_wall_is_progress_and_arrives(self):
+        # The way to the goal runs 36 cells east, away from it in a straight
+        # line, through a gap and back: the plan's measure falls every step.
+        width, gap, goal = 42, 39, (2, 2)
+        w = field(width=width, height=13, at=(2, 10))
+        for x in range(1, width - 1):
+            if x != gap:
+                w.view.tiles[(x, 6)] = "wall"
+        c = ctx(Memory(), travel(*goal))
+        for _ in range(120):
+            out = dispatch(w, c)
+            if c.plan.current() is None:
+                break
+            self.assertEqual(out.state, "Travel", out.reason)
+            self.assertTrue(out.intents, out.reason)
+            w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+            if c.memory.path[:1] == [w.pos]:
+                c.memory.path = c.memory.path[1:]
             nav_stuck.on_step(c.memory, w)
-            w.tick += 4
+            w.tick += 10
+        self.assertEqual(w.pos, goal)
+        self.assertEqual(c.memory.nav_stuck.stuck_signals, [], "never stuck")
+        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "no_way_on" and s.get("op")]
+        self.assertEqual(asks, [], "the walk never asked")
 
-    def asks(self, c: PlayContext) -> list[dict]:
-        return [s for s in c.memory.strategist_signals if s["trigger"] == "no_way_on"]
+    def wander(self, m: Memory, w: WorldModel, levels: list[int]) -> None:
+        """Walk a plan that only ever steps sideways, until the walk is given up."""
 
-    def test_no_net_progress_over_the_window_asks_the_planner(self):
-        w, c = self.walk()
-        self.wander(w, c, nav_stuck.NO_NEARER_MOVES)
+        def sideways(_att) -> list:
+            return [(w.pos[0], 0 if w.pos[1] else 2)]
+
+        for _ in range(1000):
+            step = guided_step(m, w, "travel:point", self.TARGET, set(), sideways)
+            att = m.nav_stuck.attempts.get(nav_stuck.goal_key("travel:point", MAP, self.TARGET))
+            if att is None:
+                return
+            levels.append(att.level)
+            if step is not None:
+                w.pos = step
+                nav_stuck.on_step(m, w)
+            w.tick += 10
+        self.fail("never given up")
+
+    def test_no_net_progress_runs_the_whole_ladder_then_gives_up(self):
+        # Each level must beat the walk's best measure, so none forgives the
+        # wandering; and none is cut short: the ladder reaches ALT_ROUTE first.
+        w = WorldModel(character_id=1, map_id=MAP, pos=(0, 1), perception=40)
+        w.view.tiles.update({(x, y): "dirt" for x in range(60) for y in range(3)})
+        m, levels = Memory(), []
+        self.wander(m, w, levels)
+        for level in (nav_stuck.CAUTIOUS, nav_stuck.REVEAL):
+            self.assertIn(level, levels)
+        (signal,) = m.nav_stuck.stuck_signals
+        # WALK, CAUTIOUS, BREAK (nothing to open), REVEAL, then ALT_ROUTE: each level failed in turn.
+        self.assertEqual(signal["escalation"], ["oscillation", "time", "no_break", "reveal_spent", "no_path"])
+        self.assertTrue(nav_stuck.backed_off(m, "travel:point", MAP, self.TARGET, w.tick))
+
+    def test_a_fresh_level_does_not_forgive_standing_no_nearer(self):
+        w = WorldModel(character_id=1, map_id=MAP, pos=(0, 1), perception=40)
+        w.view.tiles.update({(x, y): "dirt" for x in range(60) for y in range(3)})
+        m = Memory()
+        att = nav_stuck.track(m, w, "travel:point", self.TARGET)
+        nav_stuck.observe(att, w, [(x, 1) for x in range(1, 11)])  # measure 10 + 190
+        self.assertTrue(nav_stuck.escalate(m, w, att, "moves"))  # CAUTIOUS, a fresh window
+        nav_stuck.observe(att, w, [(0, 0)] * 20)  # a leg that leaves the target no nearer
+        att.moves = 5
+        self.assertEqual(att.moves, 5, "no progress: the window runs on")
+        w.pos = (3, 1)
+        nav_stuck.observe(att, w, [(x, 1) for x in range(4, 11)])  # nearer than ever
+        self.assertEqual(att.moves, 0)
+
+    def test_after_the_ladder_gives_up_the_executor_asks_with_what_it_tried(self):
+        w = field(width=30, height=6, at=(2, 2))
+        c = ctx(Memory(), travel(20, 2))
+        att = nav_stuck.track(c.memory, w, "travel:point", (20, 2))
+        att.reasons = ["moves", "moves", "no_known_opener", "reveal_spent"]
+        nav_stuck.give_up(c.memory, w, att, "moves")
         out = dispatch(w, c)
         self.assertEqual((out.state, out.intents, out.wait), ("Travel", None, True), out.reason)
-        self.assertTrue(out.reason.endswith("asked the planner"), out.reason)
-        (ask,) = self.asks(c)
-        self.assertEqual(ask["op"], travel(*self.GOAL))
-        self.assertTrue(ask["tried"].startswith("the walk, given up (no_nearer)"), ask["tried"])
-        (signal,) = c.memory.nav_stuck.stuck_signals
-        self.assertEqual(signal["escalation"], ["no_nearer"])
-        out = dispatch(w, c)
-        self.assertEqual((out.state, out.intents, out.wait), ("Travel", None, True), "it holds; no wandering")
-        self.assertEqual(len(self.asks(c)), 1, "one ask")
-
-    def test_a_walk_that_gets_nearer_goes_on(self):
-        w, c = self.walk()
-        self.wander(w, c, nav_stuck.NO_NEARER_MOVES - 1)
-        w.pos = (1, 0)  # nearer: the window starts again
-        nav_stuck.on_step(c.memory, w)
-        self.wander(w, c, nav_stuck.NO_NEARER_MOVES - 1)
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Travel", out.reason)
-        self.assertTrue(out.intents, out.reason)
-        self.assertEqual(self.asks(c), [])
-
-    def test_the_window_spans_ladder_levels(self):
-        # A fresh level window does not forgive the walk for standing no nearer.
-        w, c = self.walk()
-        att = nav_stuck.active(c.memory, w)
-        self.wander(w, c, nav_stuck.NO_NEARER_MOVES // 2)
-        att.level = nav_stuck.CAUTIOUS
-        nav_stuck._fresh_window(att, w.tick)
-        self.wander(w, c, nav_stuck.NO_NEARER_MOVES // 2)
-        dispatch(w, c)
-        self.assertEqual(len(self.asks(c)), 1)
-        self.assertGreater(chebyshev(w.pos, self.GOAL), 20)
+        (ask,) = [s for s in c.memory.strategist_signals if s["trigger"] == "no_way_on"]
+        self.assertTrue(
+            ask["tried"].startswith("the walk, given up (moves, moves, no_known_opener, reveal_spent, moves)"),
+            ask["tried"],
+        )
 
 
 if __name__ == "__main__":

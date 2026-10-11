@@ -140,7 +140,7 @@ def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
     if policy.on_hostile != "fight" or on_safe_tile(world):
         return False
     target = fight_target(world, policy, ctx.never_attack)
-    if target is None or not fights(world, ctx.memory, policy, ctx.params):
+    if target is None or not fights(ctx.memory):
         return False
     return can_engage(world, target, ctx)
 
@@ -148,7 +148,7 @@ def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
 class FightState(State):
     """Priority 2, before **Flee**. Swings or closes on the nearest allowed hostile
     when ``on_hostile = fight``, the engagement's decision is to fight
-    (``engagement.fight_or_flee``, the decision Flee and Retreat read too), and
+    (``engagement.sync_engagement``, the decision Flee and Retreat read too), and
     we are not on a safe tile; queues retreat steps behind ``Use`` when a safe
     tile is known."""
 

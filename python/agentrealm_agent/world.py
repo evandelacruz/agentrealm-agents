@@ -827,7 +827,7 @@ class WorldModel:
 
     def note_came_for_us(self, e: Entity) -> None:
         """``e`` came into a fight with us here: like a hit, it stretches its
-        post's reach to where we stand (``engagement.fight_or_flee``)."""
+        post's reach to where we stand (``engagement.sync_engagement``)."""
         self._stretch_reach((e.kind, e.id))
 
     def _stretch_reach(self, key: tuple[str, int | None]) -> None:

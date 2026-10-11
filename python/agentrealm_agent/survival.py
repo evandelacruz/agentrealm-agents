@@ -362,7 +362,7 @@ def should_retreat(
     """The next effective ``retreat_hits`` hits from the hostiles in range could
     kill, or (``on_hostile = "fight"``) we would lose to a group that is
     ``threatening`` us. ``fight`` is the engagement's decision
-    (``engagement.fight_or_flee``) when the caller has one; without it, the
+    (``engagement.sync_engagement``) when the caller has one; without it, the
     estimate against the group in range decides.
 
     A hit's size comes from what is attacking (the threat table), so with no

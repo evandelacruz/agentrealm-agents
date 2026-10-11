@@ -14,7 +14,7 @@ from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.engagement import BREAK_EVEN, fight_bar, fight_or_flee
+from agentrealm_agent.engagement import BREAK_EVEN, fight_bar, sync_engagement
 from agentrealm_agent.hostile_ground import Danger, danger
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import dispatch
@@ -95,28 +95,40 @@ class OneDecisionTest(unittest.TestCase):
     def test_a_member_stepping_out_of_range_keeps_the_decision(self):
         w, c = world(), ctx()
         w.entities = [biter(), biter(8, (11, 11))]
-        first = fight_or_flee(w, c.memory, c.policy, c.params)
+        first = sync_engagement(w, c.memory, c.policy, c.params)
         w.entities[1].pos = (14, 14)  # out of hostile_range
-        again = fight_or_flee(w, c.memory, c.policy, c.params)
+        again = sync_engagement(w, c.memory, c.policy, c.params)
         self.assertEqual(again.group, first.group)
         self.assertEqual(again.ratio, first.ratio)
 
     def test_a_new_hostile_joining_decides_again(self):
         w, c = world(), ctx()
         w.entities = [biter()]
-        self.assertTrue(fight_or_flee(w, c.memory, c.policy, c.params).fight)
+        self.assertTrue(sync_engagement(w, c.memory, c.policy, c.params).fight)
         w.entities.append(biter(8, (9, 10)))
-        e = fight_or_flee(w, c.memory, c.policy, c.params)
+        e = sync_engagement(w, c.memory, c.policy, c.params)
         self.assertEqual(e.group, {("npc", 7), ("npc", 8)})
         self.assertFalse(e.fight, "a pair is more than the knife takes at the margin")
+
+    def test_the_guards_read_the_decision_and_change_nothing(self):
+        from agentrealm_agent.states.fight import should_fight
+        from agentrealm_agent.states.flee import should_flee
+
+        w, c = world(), ctx()
+        w.entities = [biter()]
+        e = sync_engagement(w, c.memory, c.policy, c.params)
+        for _ in range(3):
+            should_fight(w, c)
+            should_flee(w, c)
+        self.assertIs(c.memory.engagement, e)
 
     def test_the_engagement_ends_when_nobody_is_in_range_or_hitting(self):
         w, c = world(), ctx()
         w.entities = [biter()]
-        fight_or_flee(w, c.memory, c.policy, c.params)
+        sync_engagement(w, c.memory, c.policy, c.params)
         w.entities = [biter(at=(20, 10))]
         w.tick += 100
-        self.assertIsNone(fight_or_flee(w, c.memory, c.policy, c.params))
+        self.assertIsNone(sync_engagement(w, c.memory, c.policy, c.params))
         self.assertIsNone(c.memory.engagement)
 
 
@@ -186,12 +198,12 @@ class TurnedBackTest(unittest.TestCase):
         self.w.pos = self.w.terrain_center = (24, 10)
         self.guard.pos = (25, 10)
         self.w.entities = [self.guard]
-        fight_or_flee(self.w, self.c.memory, self.c.policy, self.c.params)
+        sync_engagement(self.w, self.c.memory, self.c.policy, self.c.params)
         self.guard.pos = self.POST
         self.w.pos = self.w.terrain_center = (10, 10)
         self.w.entities = [gem(50, self.PILE)]
         self.w.tick += 100
-        fight_or_flee(self.w, self.c.memory, self.c.policy, self.c.params)
+        sync_engagement(self.w, self.c.memory, self.c.policy, self.c.params)
 
     def test_its_reach_stretches_to_where_it_came_for_us(self):
         self.turned_back()
@@ -278,7 +290,7 @@ class RepriceTest(unittest.TestCase):
         m = c.memory
         m.gather_target, m.goal, m.path = ("pile", (14, 10)), "gather", [(11, 10), (12, 10)]
         w.entities = [biter()]
-        fight_or_flee(w, m, c.policy, c.params)
+        sync_engagement(w, m, c.policy, c.params)
         self.assertIsNone(m.gather_target)
         self.assertEqual((m.goal, m.path), ("", []))
 

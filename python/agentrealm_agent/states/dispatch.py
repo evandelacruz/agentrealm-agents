@@ -22,6 +22,7 @@ from __future__ import annotations
 from ..navigation import oscillation
 from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import end_decision
+from ..engagement import sync_engagement
 from ..equip import note_last_weapon
 from ..healing import note_heal_window
 from ..pathing import note_goto_reached
@@ -125,8 +126,9 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     Each call is one decision window. First it settles the plan: finished
     ops pop, and an op no state can carry out is dropped. It ages what Step
     rejections taught the map (A14), starts, ends or finishes the boss fight
-    (A38), settles a Shop purchase (A21), and notes a policy ``goto`` stood
-    on (A16). After the pick, the top op's stall clock runs unless its
+    (A38), settles a Shop purchase (A21), brings the fight-or-flee decision
+    up to date (A94, ``engagement.sync_engagement``), and notes a policy
+    ``goto`` stood on (A16). After the pick, the top op's stall clock runs unless its
     executor made progress (A34).
 
     The oscillation guard is a safety net: it checks whether the character
@@ -145,6 +147,8 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
         _settle_plan(ctx.plan, world, m)
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
+    if ctx.policy.kind == "scripted":
+        sync_engagement(world, m, ctx.policy, ctx.params)
     op = ctx.plan.current() if ctx.plan is not None else None
     owner = top_executor(ctx)
     try:

@@ -74,13 +74,13 @@ class RetreatState(State):
             return False
         if retreat_goal(world, ctx.knowledge) is None:
             return False
-        return should_retreat(world, ctx.policy, ctx.params, fights(world, ctx.memory, ctx.policy, ctx.params))
+        return should_retreat(world, ctx.policy, ctx.params, fights(ctx.memory))
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         if boss_fight_on(world, ctx.memory):
             return True
         return on_safe_tile(world) or not should_retreat(
-            world, ctx.policy, ctx.params, fights(world, ctx.memory, ctx.policy, ctx.params)
+            world, ctx.policy, ctx.params, fights(ctx.memory)
         )
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:

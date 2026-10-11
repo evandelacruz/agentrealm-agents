@@ -60,8 +60,11 @@ class Engagement:
     fight: bool = False
 
 
-def fight_or_flee(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]) -> Engagement | None:
-    """This decision's engagement, kept in ``m.engagement``; None with no hostile in it.
+def sync_engagement(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]) -> Engagement | None:
+    """Bring ``m.engagement`` up to this decision; None with no hostile in it.
+
+    Dispatch calls it once per decision, before any state runs, so every
+    state reads the same decision (``fights``).
 
     A hostile that joins the engagement stretches its post's reach to where
     we stand (``WorldModel.note_came_for_us``): it came out that far for us.
@@ -107,15 +110,17 @@ def fight_bar(w: WorldModel, policy: Policy, params: dict[str, float | int], out
 
 
 def cannot_outrun(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]) -> Engagement | None:
-    """Running away was found not to open distance: decide again on that."""
-    e = fight_or_flee(w, m, policy, params)
+    """Running away was found not to open distance: decide again on that.
+
+    Called by the state that measured it (Flee's probe, Retreat losing
+    ground), in its act, so the new decision is what it carries out."""
+    e = m.engagement
     if e is None or e.cannot_outrun:
         return e
     m.engagement = decide(w, policy, params, e.group, True)
     return m.engagement
 
 
-def fights(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]) -> bool:
-    """The engagement's decision is to fight."""
-    e = fight_or_flee(w, m, policy, params)
-    return e is not None and e.fight
+def fights(m: Memory) -> bool:
+    """This decision's engagement says fight (``sync_engagement``)."""
+    return m.engagement is not None and m.engagement.fight

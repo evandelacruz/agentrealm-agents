@@ -8,7 +8,7 @@ from ..directives import attack_forbidden
 from ..memory import Memory
 from ..navigation import cost_path, oscillation
 from ..pathing import flee_run, flee_step, grid_params, outruns, retreat_safe_goal, step_open
-from ..engagement import cannot_outrun, fight_or_flee, fights
+from ..engagement import cannot_outrun, fights
 from ..survival import flee_from, on_safe_tile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -130,7 +130,7 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
     if policy.on_hostile == "flee":
         return True
     target = fight_target(world, policy, ctx.never_attack)
-    if target is None or not fights(world, ctx.memory, policy, ctx.params):
+    if target is None or not fights(ctx.memory):
         return True
     return not can_engage(world, target, ctx)
 
@@ -175,7 +175,7 @@ class FleeState(State):
         # Read once per decision: the oscillation guard caught Flee/Retreat
         # pacing (A15), and whichever escape runs below must keep off these cells.
         paced = oscillation.take_escape(m, w)
-        e = fight_or_flee(w, m, policy, ctx.params)
+        e = m.engagement
         if e is not None and not e.cannot_outrun and not_outrunning(w, m):
             e = cannot_outrun(w, m, policy, ctx.params)
         if e is not None and e.cannot_outrun:

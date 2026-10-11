@@ -47,6 +47,7 @@ from functools import cache
 from typing import Callable
 
 from .. import targets as targets_mod
+from ..break_memory import held_supply
 from ..config import Policy
 from ..executor import DEFAULT_TICK_RATE_HZ
 from ..gem_yield import (
@@ -76,10 +77,9 @@ from ..survival import is_hostile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
-from .explore import safe_default
 from .gather_safe import gather_ground, route_bar, route_clear
 from .intents import arm, arm_and_use, set_position, take, use_block
-from .solve import held_supply
+from .way import clear_the_way
 
 # Authored gem piles spawn as ground supplies (Obs, GAME_NOTES.md Gems).
 # Gem caches (gem_cache_5/7/10) are a different drop and are not piles.
@@ -124,8 +124,9 @@ class GatherState(State):
     place to work when nothing is in reach. A cut goes out with a tool that
     cuts, armed in the same queue when the armed item is not known to cut;
     the weapon it swapped out is armed again once no ``gather_gems`` op is
-    on top. With nowhere to go, it explores (the safe default) to reveal
-    more."""
+    on top. Its places to work include the edge of unexplored ground, so
+    with nowhere to go it asks the planner and holds (``way.clear_the_way``,
+    A120): the safe default never explores for it."""
 
     name = "Gather"
 
@@ -147,9 +148,9 @@ class GatherState(State):
         )
         if out.intents is not None or out.wait:
             return out
-        out = safe_default(world, ctx)
-        out.state, out.reason = self.name, f"look for gems: {out.reason}"
-        return out
+        # Nowhere to work: its one search already went for the edge of unexplored
+        # ground, so the way on is the planner's (A120).
+        return clear_the_way(world, ctx, None, out.reason, self.name, op)
 
 
 def is_gem_pile(e: Entity) -> bool:
@@ -307,6 +308,7 @@ def gather_outcome(
             m.gather_status = BLOCKED
         else:
             m.gather_status = REGION_BARREN if region_of(here) in g.skip - g.dead_regions else NONE_CUTTABLE
+        out.reason = f"{out.reason}: {m.gather_status}"
     elif verb == "Take":
         m.gather_status = TAKING
     elif walk == PILE:

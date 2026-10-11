@@ -302,20 +302,34 @@ class DispatcherFallThroughTest(unittest.TestCase):
             out = dispatch(w, c)
         self.assertEqual(out.yielded[0], "Fight: no target")
 
-    def test_loot_with_nothing_to_fetch_falls_through_to_safe_default(self):
-        w = world(["....", "....", "...."], at=(1, 1))
-        out = dispatch(w, ctx(w, plan=plan_of({"op": "fetch_item", "code": "heart"})))
-        self.assertEqual(out.yielded, ["Loot: no heart in sight"])
-        self.assertEqual(out.state, "Explore")
-        self.assertIsNotNone(out.intents)
+    # A120: an executor with nothing to do for its op never falls through to
+    # the safe default. It asks the planner and holds, and Explore holds too.
 
-    def test_investigate_whose_npc_is_gone_falls_through_to_safe_default(self):
+    def test_loot_with_nothing_to_fetch_asks_and_holds(self):
+        w = world(["....", "....", "...."], at=(1, 1))
+        c = ctx(w, plan=plan_of({"op": "fetch_item", "code": "heart"}))
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Loot", None, "no heart in sight: asked the planner", True))
+        self.assertEqual(out.yielded, [])
+
+    def test_investigate_whose_npc_is_gone_asks_and_holds(self):
         w = world(["....", "....", "...."], at=(1, 1))
         op = {"op": "say", "npc_type": "fake_sage", "text": "hello"}
         out = dispatch(w, ctx(w, plan=plan_of(op)))
-        self.assertEqual(out.yielded, ["Investigate: no such NPC in sight"])
-        self.assertEqual(out.state, "Explore")
-        self.assertIsNotNone(out.intents)
+        self.assertEqual((out.state, out.intents, out.wait), ("Investigate", None, True), out.reason)
+
+    def test_an_executor_that_yields_leaves_explore_holding(self):
+        # Equip waits while the armed slot is busy, sending nothing: the safe default holds for the op.
+        from agentrealm_agent.item_table import InventorySupply
+
+        w = world(["....", "....", "...."], at=(1, 1))
+        w.held_supplies = [InventorySupply(3, "pocket_knife")]
+        c = ctx(w, plan=plan_of({"op": "equip", "code": "pocket_knife"}))
+        c.memory.solve_rearm = "fake_torch"  # Solve holds the armed slot, and has nothing to re-arm
+        out = dispatch(w, c)
+        self.assertIn("Equip: the armed slot is busy: pocket_knife waits", out.yielded)
+        self.assertEqual((out.state, out.intents, out.wait), ("Explore", None, True), out.reason)
+        self.assertEqual(out.reason, "Equip holds its walk")
 
     def test_travel_walled_off_asks_the_planner_and_holds(self):
         # Travel keeps its walk: the safe default never stands in for it (A120).

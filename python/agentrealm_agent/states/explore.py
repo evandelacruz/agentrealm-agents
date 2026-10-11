@@ -11,8 +11,9 @@ With no reachable frontier at all, the ground in reach is all seen and the
 way on is the planner's call (which block to open, which hostile to fight or
 pass, which clue to follow): it never steps in place and never parks beside
 a hostile; it raises a ``no_way_on`` trigger and sends nothing (A114).
-It never stands in for Travel: under a ``travel`` op Travel keeps its walk,
-and with no step it asks the planner itself and holds (A120).
+It never stands in for an executor: under any op but ``explore_area`` that
+op's executor keeps its walk, clears the way or asks the planner itself, and
+the safe default holds (A120).
 Stuck detection escalates and gives up a walk that goes nowhere (A15); cells Step
 rejections ruled out and ``avoid_blocks`` hazards stay out of the path (A14).
 """
@@ -35,7 +36,7 @@ from ..pathing import (
     path_owned_by,
     replan,
 )
-from ..plan import GoalOp
+from ..plan import OP_STATE, GoalOp
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
@@ -51,20 +52,18 @@ CAUTION_RADIUS = HOSTILE_DANGER_RADIUS
 KEEP_AWAY_HOLD_TICKS = 100
 # Why the safe default had no step: the ground in reach is all seen.
 NOTHING_TO_EXPLORE = "nothing left to explore"
-# The executors whose op the safe default never stands in for (A120): each
-# holds its own walk, and with no step asks the planner and holds. The rule
-# is every executor's; today Travel only, the rest still fall through to the
-# safe default (PLAN.md A120, partial).
-HOLD_THEIR_WALK = frozenset({"Travel"})
+# The executors whose op the safe default never stands in for (A120): every
+# one but Explore's own. Each keeps its own walk, clears the way, and with no
+# way on asks the planner and holds (``way.clear_the_way``).
+HOLD_THEIR_WALK = frozenset(s for s in OP_STATE.values() if s is not None) - {"Explore"}
 
 
 class ExploreState(State):
     """Last state for a scripted character: the executor for ``explore_area``,
-    and otherwise the safe default. It runs whenever no reflex or executor
-    sent an intent: no plan op, or the top op's executor had nothing to do
-    this decision (that op's stall clock then runs, A34). Under an op whose
-    executor holds its own walk (``HOLD_THEIR_WALK``) it holds too, sending
-    nothing, so it never walks the character off that op's way (A120)."""
+    and with no plan op the safe default. Under any other op it holds,
+    sending nothing, whatever that op's executor did this decision
+    (``HOLD_THEIR_WALK``): it never walks the character off that op's way,
+    and that op's stall clock runs (A34, A120)."""
 
     name = "Explore"
 

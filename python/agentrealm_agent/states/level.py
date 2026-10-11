@@ -8,7 +8,9 @@ Every target is committed (A71): the entrance, and inside, the door or
 frontier picked, kept until reached, gone or given up. An entrance a look
 filed as locked and needing an item (``needs``) that is not carried, with
 one in sight, gets that item as a prerequisite stop before it: Level walks
-to it and takes it first, then resumes toward the entrance.
+to it and takes it first, then resumes toward the entrance. With no way to
+the entrance it clears the way (stuck step 2 is Break's) or asks the planner
+and holds (``way``, A120).
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
 from .intents import set_position, take
 from .room import room_for
+from .way import clear_the_way
 
 DOOR_GOAL, FRONTIER_GOAL, ENTRANCE_GOAL = "level:door", "level:frontier", "level:entrance"
 PREREQUISITE_GOAL = "level:prerequisite"
@@ -168,7 +171,8 @@ def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcom
 
     step = guided_step(m, w, ENTRANCE_GOAL, door, plan_avoid, plan, params=params)
     if step is None:
-        return StateOutcome(None, f"no path to level entrance {door}", state=LevelState.name)
+        why = f"no path to level entrance {door[0]},{door[1]}"
+        return clear_the_way(w, ctx, door, why, LevelState.name, top_op(ctx))
     return StateOutcome([set_position(step)], f"level entrance → {door}", state=LevelState.name)
 
 

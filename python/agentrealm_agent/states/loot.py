@@ -21,6 +21,7 @@ from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .intents import set_position
 from .room import planned_take
+from .way import clear_the_way, open_the_way
 
 GOAL = "loot"
 
@@ -50,11 +51,20 @@ class LootState(State):
             out.reason = f"fetch {code}: {out.reason}"
             return out
         target = supply.pos if supply is not None else (op["x"], op["y"]) if "x" in op else None
+        if target is None and (seen := _nearest_supply(world, code)) is not None:
+            # One in sight whose walk was given up (A90): its way is shut, not gone.
+            why = f"no step toward {code} at {seen.pos[0]},{seen.pos[1]}"
+            return clear_the_way(world, ctx, seen.pos, why, self.name, op)
         if target is None:
-            return StateOutcome(None, f"no {code} in sight", state=self.name)
+            return clear_the_way(world, ctx, None, f"no {code} in sight", self.name, op)
+        if target == world.pos:
+            return clear_the_way(world, ctx, None, f"no {code} at {target[0]},{target[1]}", self.name, op)
+        if (out := open_the_way(world, ctx, target, self.name)) is not None:
+            out.reason = f"fetch {code}: {out.reason}"
+            return out
         step = _step_toward(world, ctx, target)
         if step is None:
-            return StateOutcome(None, f"no step toward {code}", state=self.name)
+            return clear_the_way(world, ctx, target, f"no step toward {code} at {target[0]},{target[1]}", self.name, op)
         return StateOutcome([set_position(step)], f"fetch {code} → {target}", state=self.name)
 
 

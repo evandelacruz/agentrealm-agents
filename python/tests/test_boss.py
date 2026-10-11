@@ -105,8 +105,12 @@ class BossStateTest(unittest.TestCase):
     def test_waits_when_preconditions_fail(self):
         w = grid(["..D"])
         w.health = 3
-        out = dispatch(w, ctx(w, Memory(), boss_plan(3, 0, min_health=10)))
-        self.assertNotEqual(out.state, "Boss")
+        m = Memory()
+        out = dispatch(w, ctx(w, m, boss_plan(3, 0, min_health=10)))
+        # Not ready: Boss asks the planner and holds; the safe default never walks for it (A120).
+        self.assertEqual((out.state, out.intents, out.wait), ("Boss", None, True), out.reason)
+        asks = [s["why"] for s in m.strategist_signals if s["trigger"] == "no_way_on"]
+        self.assertEqual(asks, ["fight_boss preconditions not met: health 3 < 10"])
 
     def test_fights_boss_without_retreat_tail(self):
         w = grid(["..."], at=(1, 0), map_id=9)

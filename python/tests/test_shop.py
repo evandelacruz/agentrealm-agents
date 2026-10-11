@@ -166,7 +166,9 @@ class ShopBuyTest(unittest.TestCase):
         m = Memory()
         w = world()
         out = dispatch(w, ctx(w, m=m, plan=plan))
-        self.assertNotEqual(out.state, "Shop")  # nothing in sight: Shop sends nothing
+        # Nothing in sight and nowhere to look: Shop asks the planner and holds (A120).
+        self.assertEqual((out.state, out.intents, out.wait), ("Shop", None, True), out.reason)
+        self.assertEqual([s["op"]["op"] for s in m.strategist_signals if s["trigger"] == "no_way_on"], ["buy"])
         self.assertEqual(plan.current()["op"], "buy")
         w.tick += PLAN_STALL_SECONDS * plan.tick_hz
         with self.assertLogs("agentrealm_agent.plan", "WARNING"):
@@ -199,7 +201,8 @@ class ShopBuyTest(unittest.TestCase):
         plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
         params = dict(PARAM_DEFAULTS, potion_reserve=2)
         out = dispatch(w, ctx(w, plan=plan, params=params))
-        self.assertNotEqual(out.state, "Shop")
+        # No torch for sale and no shop known: Shop holds for the planner (A120), buying nothing.
+        self.assertEqual((out.state, out.intents, out.wait), ("Shop", None, True), out.reason)
         self.assertIsNone(plan.acted)
         w.entities.append(Entity("supply", 6, (2, 1), "torch", gem_price=2))
         out = dispatch(w, ctx(w, plan=plan, params=params))
@@ -400,7 +403,8 @@ class ShopRefusalCapTest(unittest.TestCase):
             self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 5}])
             note_shop_result(m, out.intents[0], applied=False)
         out = dispatch(w, ctx(w, m=m, plan=self.plan))
-        self.assertNotEqual(out.state, "Shop")
+        # Skipped: nothing left to take, so Shop holds for the planner (A120).
+        self.assertEqual((out.state, out.intents, out.wait), ("Shop", None, True), out.reason)
 
     def setUp(self):
         self.w = world()

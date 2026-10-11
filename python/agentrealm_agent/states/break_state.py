@@ -19,6 +19,7 @@ from ..break_memory import (
     attempt_failed,
     break_step_cost,
     given_up_blocks,
+    held_supply,
     known_openers,
     no_break_reason,
     nominate_on_path,
@@ -31,8 +32,8 @@ from ..plan import GoalOp
 from ..reach import supply_reach
 from ..world import VOID, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
+from .ask import ask_the_planner, what_blocks
 from .intents import arm, set_position, use_block
-from .solve import held_supply
 
 GOAL = BREAK_GOAL
 GOAL_STATE = "Break"  # only Break's own arming counts against stuck step 2, not Heal's
@@ -184,7 +185,8 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
 
 class BreakState(State):
     """Executor for ``break_block``. Also opens the block stuck escalation
-    nominates at step 2 (A15), and re-arms the weapon swapped out for a break."""
+    nominates at step 2 (A15), and re-arms the weapon swapped out for a break.
+    With no way to its op's block it asks the planner and holds (A120)."""
 
     name = "Break"
 
@@ -205,7 +207,12 @@ class BreakState(State):
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
+        op = my_op(ctx, self.name)
         out = break_outcome(world, ctx, self.name)
+        if op is not None and not out.intents and ctx.plan is not None and ctx.plan.current() is op:
+            # No way to the block: ask the planner, saying what shuts it, and hold (A120).
+            at = (op["x"], op["y"])
+            return ask_the_planner(world, ctx, out.reason, self.name, op, blocked_by=what_blocks(world, ctx, at))
         if out.intents or out.reason != "nothing to break":
             return out
         code, ctx.memory.break_rearm = ctx.memory.break_rearm, None

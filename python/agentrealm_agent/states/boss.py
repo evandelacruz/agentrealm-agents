@@ -22,6 +22,7 @@ from .fight import (
     in_weapon_reach,
 )
 from .intents import set_position
+from .way import clear_the_way
 
 DOOR_GOAL = "boss:door"
 # Stop trying to leave once the fight clock is this close to expiring (10 s at 10 Hz).
@@ -166,35 +167,37 @@ def boss_attack_queue(w: WorldModel, m: Memory, target: Entity) -> list[dict] | 
 
 
 class BossState(State):
-    """Priority 5, after Travel and before Level. Runs on ``fight_boss`` while preconditions hold or during a fight."""
+    """Priority 5, after Travel and before Level. Runs on ``fight_boss``, and
+    during a fight. With the op's preconditions not met, no way to the door
+    or the boss, or nothing to do this decision, it clears the way or asks
+    the planner and holds (``way``, A120)."""
 
     name = "Boss"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        if boss_fight_on(world, ctx.memory):
-            return True
-        op = current_fight_boss(ctx.plan)
-        if op is None:
-            return False
-        ok, _ = fight_boss_preconditions_met(world, op)
-        return ok
+        return boss_fight_on(world, ctx.memory) or current_fight_boss(ctx.plan) is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
-        if boss_fight_on(world, ctx.memory):
-            return False
-        op = current_fight_boss(ctx.plan)
-        if op is None:
-            return True
-        ok, _ = fight_boss_preconditions_met(world, op)
-        return not ok
+        return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        m, policy = ctx.memory, ctx.policy
         op = current_fight_boss(ctx.plan)
+        out = self._act(world, ctx, op)
+        if op is None or out.intents or out.wait or ctx.plan is None or ctx.plan.current() is not op:
+            return out
+        # Nothing to do for the op this decision: ask the planner and hold (A120).
+        return clear_the_way(world, ctx, None, out.reason, self.name, op)
+
+    def _act(self, world: WorldModel, ctx: PlayContext, op: GoalOp | None) -> StateOutcome:
+        m, policy = ctx.memory, ctx.policy
         if op is None and m.boss is None:
             return StateOutcome(None, "no fight_boss op", state=self.name)
+        if m.boss is None and op is not None:
+            ok, why = fight_boss_preconditions_met(world, op)
+            if not ok:
+                return StateOutcome(None, f"fight_boss preconditions not met: {why}", state=self.name)
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
 
         if m.boss is not None:
@@ -210,11 +213,11 @@ class BossState(State):
             ):
                 return _walk_to_door(world, m, policy, door, plan_avoid, plan_costly, "retreat out")
             if not can_engage(world, boss, ctx):
-                return StateOutcome(None, "cannot reach boss", state=self.name)
+                return clear_the_way(world, ctx, boss.pos, "cannot reach boss", self.name, op)
             if not in_weapon_reach(world, boss, ctx.knowledge):
                 step = close_step(world, boss, plan_avoid)
                 if step is None:
-                    return StateOutcome(None, "cannot close on boss", state=self.name)
+                    return clear_the_way(world, ctx, boss.pos, "cannot close on boss", self.name, op)
                 m.path = []
                 return StateOutcome([set_position(step)], f"boss close on {boss.id}", reflex=True, state=self.name)
             queue = boss_attack_queue(world, m, boss)
@@ -234,7 +237,8 @@ class BossState(State):
         if world.pos == door:
             return StateOutcome(None, "entering boss room", wait=True, state=self.name)
         if not at_boss_door(world, door):
-            return _walk_to_door(world, m, policy, door, plan_avoid, plan_costly, "approach door")
+            out = _walk_to_door(world, m, policy, door, plan_avoid, plan_costly, "approach door")
+            return out if out.intents else clear_the_way(world, ctx, door, out.reason, self.name, op)
         return StateOutcome([set_position(door)], "boss enter door", state=self.name)
 
 

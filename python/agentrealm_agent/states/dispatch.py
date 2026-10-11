@@ -5,9 +5,11 @@ state share one priority list:
 
 - **Reflexes** act on what is happening now, whatever the plan says.
 - **Executors** run only to carry out the plan's current top op; each
-  guard asks ``my_op``. Explore comes last: the executor for
-  ``explore_area``, and otherwise the **safe default**, which explores safe
-  ground whenever nothing above it sent an intent.
+  guard asks ``my_op``. An executor keeps its op's walk: obstructed, it
+  clears the way or asks the planner and holds (``way.clear_the_way``,
+  A120). Explore comes last: the executor for ``explore_area``, and with no
+  op the **safe default**, which explores safe ground; under any other op
+  it holds.
 
 So exactly one thing picks the movement target at any moment: a reflex, the
 executor for the top op, or the safe default.
@@ -90,7 +92,7 @@ REFLEXES: tuple[State, ...] = (
 # walkers because it also opens the block a walk's stuck escalation nominated
 # (A15): the walker yields at step 2 and Break acts in the same decision.
 # Break and Solve re-arm a weapon they swapped out. Explore is last: it is
-# also the safe default.
+# also the safe default with no op, and holds under any other (A120).
 EXECUTORS: tuple[State, ...] = (
     EquipState(),
     LootState(),
@@ -170,8 +172,9 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     Higher-priority guards always win; the active state keeps running past
     its own guard until its ``done`` holds. A state that runs but sends no
     intent falls through to the next one (A44), unless it sets
-    ``StateOutcome.wait``. Explore, last, is the safe default, so a scripted
-    decision is never idle.
+    ``StateOutcome.wait``. Explore, last, is the safe default with no op, so
+    a scripted decision with no op is never idle; under an op it holds for
+    that op's executor (A120).
 
     Each call is one decision window. First it settles the plan: finished
     ops pop, and an op no state can carry out is dropped. It ages what Step
@@ -280,6 +283,7 @@ def _note_op_progress(
     (dropped when none can), so the stack never pins the agent (A104).
     """
     if out.state == owner and out.intents:
+        m.no_way_on = None  # the executor acts again: a later ask from this cell is new (A120)
         plan.acted = op
         if out.progress:
             plan.note_progress()
@@ -311,6 +315,7 @@ def _note_op_progress(
 # to Break, so they need no entry.
 OWNER_WALKS: dict[str, tuple[str, ...]] = {
     "Travel": ("travel:", "explore_area"),
+    "Shop": ("travel:", "explore_area"),  # its walk to a shop or town, and its search round town
     "Explore": ("explore_area",),
     "Level": ("level:",),
     "Boss": ("boss:",),

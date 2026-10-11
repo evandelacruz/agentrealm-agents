@@ -11,7 +11,7 @@ Each wall-clock window the runner makes **one HTTP call**: read self, position, 
 1. **`brain.choose_call`** — which kind of call fits the call budget this window ([PLAN.md](../PLAN.md) *Scheduler*).
 2. **`states.dispatch`** — when the call is `POST tick`, which **state** returns the intent list.
 
-States are checked in **priority order** (see `STATES` in `python/agentrealm_agent/states/dispatch.py`): `REFLEXES`, then `EXECUTORS`, then Idle. AI plans, state machine executes ([PLAN.md](../PLAN.md) *Architecture*): a **reflex** acts on what is happening now, whatever the plan says; an **executor** runs only to carry out the plan's top op, and its guard asks `my_op(ctx, self.name)`. Explore, last, is also the safe default when there is no op. Only one state wins each decision; it returns a `StateOutcome` with zero or more intents.
+States are checked in **priority order** (see `STATES` in `python/agentrealm_agent/states/dispatch.py`): `REFLEXES`, then `EXECUTORS`, then Idle. AI plans, state machine executes ([PLAN.md](../PLAN.md) *Architecture*): a **reflex** acts on what is happening now, whatever the plan says; an **executor** runs only to carry out the plan's top op, and its guard asks `my_op(ctx, self.name)`. Explore, last, is also the safe default when there is no op; under any other op it holds, so a new executor whose walk finds its way shut calls `way.clear_the_way` (open the block on the way with a held item, else ask the planner and hold) rather than send nothing and hope a lower state moves (A120). Only one state wins each decision; it returns a `StateOutcome` with zero or more intents.
 
 ## Anatomy of a state
 

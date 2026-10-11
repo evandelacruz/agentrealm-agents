@@ -29,6 +29,7 @@ from .explore import explore_outcome
 from .intents import set_position
 from .room import planned_take
 from .travel import walk_to
+from .way import clear_the_way
 
 # The commitment of the shop cell a ``buy`` walks to while its item is out of sight (A71).
 SHOP_TARGET = "shop"
@@ -44,7 +45,8 @@ class ShopState(State):
     nearest known shop cell out of sight, committed until it comes into sight;
     with no shop known yet it walks to town and explores around it. It never
     leaves the buy to the safe default, which wandered off into a pack
-    (free-play run 4). The op is dropped when every known shop is in sight
+    (free-play run 4): with no way it opens the block on the way a held item
+    opens, else asks the planner and holds (``way``, A120). The op is dropped when every known shop is in sight
     without the item, or the item is in sight and costs more gems than we have.
     With a full pack, room is the pack rule's (``pack.make_room``, A102): the
     op's ``drop`` is the only way to make room; without one the op goes back
@@ -62,7 +64,12 @@ class ShopState(State):
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        return shop_outcome(world, ctx, self.name)
+        op = my_op(ctx, self.name)
+        out = shop_outcome(world, ctx, self.name)
+        if op is None or out.intents or out.wait or ctx.plan is None or ctx.plan.current() is not op:
+            return out
+        # Nothing to take and no walk to make: ask the planner and hold (A120).
+        return clear_the_way(world, ctx, None, out.reason, self.name, op)
 
 
 def _target(w: WorldModel, ctx: PlayContext) -> Entity | None:
@@ -102,7 +109,8 @@ def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
         return out
     step = _step_toward(w, ctx.memory, ctx, supply.pos)
     if step is None:
-        return StateOutcome(None, f"no step toward {label}", state=state)
+        why = f"no step toward {label} at {supply.pos[0]},{supply.pos[1]}"
+        return clear_the_way(w, ctx, supply.pos, why, state, top_op(ctx))
     return StateOutcome([set_position(step)], f"shop {label} → {supply.pos}", state=state)
 
 
@@ -185,8 +193,8 @@ def _shop_out_of_sight(w: WorldModel, ctx: PlayContext) -> ResolvedDestination |
 
 def _find_shop(w: WorldModel, ctx: PlayContext, op: GoalOp, code: str, state: str) -> StateOutcome:
     """No shop known: walk to town, then explore around it for one. With no
-    town known either Shop sends nothing: the safe default explores, and the
-    buy's stall clock runs (A34)."""
+    town known either Shop sends nothing, and ``ShopState`` asks the planner
+    and holds while the buy's stall clock runs (A34, A120)."""
     m, plan = ctx.memory, ctx.plan
     assert plan is not None and w.pos is not None
     town = resolve_travel(TravelOp(to="town"), w, ctx.knowledge, m.strength)

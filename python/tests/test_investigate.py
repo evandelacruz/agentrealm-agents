@@ -220,12 +220,12 @@ class InvestigateStateTest(unittest.TestCase):
         self.assertEqual(out.state, "Investigate")
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
 
-    def test_no_such_npc_in_sight_yields(self):
+    def test_no_such_npc_in_sight_asks_the_planner_and_holds(self):
         w = world(["...", "...", "..."], at=(0, 1))
         p = plan({"op": "say", "npc_type": "helper", "text": "hello"})
         out = dispatch(w, ctx(p))
-        self.assertNotEqual(out.state, "Investigate")
-        self.assertIn("Investigate: no such NPC in sight", out.yielded)
+        self.assertEqual((out.state, out.intents, out.wait), ("Investigate", None, True), out.reason)
+        self.assertEqual(out.reason, "no such NPC in sight: asked the planner")
         self.assertEqual(p.current()["op"], "say", "kept until its stall clock runs out")
 
     def test_spoken_npc_finishes_the_op(self):

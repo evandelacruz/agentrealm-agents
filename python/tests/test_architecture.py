@@ -3,7 +3,8 @@
 Reflexes act on what is happening now; executors run only for the plan's
 top op; with no plan op the safe default explores safe ground. So exactly
 one thing picks the movement target, states never take turns moving the
-character (the A58 runs 3–7 pacing), and a decision is never idle.
+character (the A58 runs 3–7 pacing), and a decision with nothing to
+explore or open never steps in place: it asks the planner (A114).
 """
 
 from __future__ import annotations
@@ -51,10 +52,10 @@ def tempt(w: WorldModel) -> None:
     w.view.readable[(3, 1)] = True
 
 
-def play(w: WorldModel, plan: Plan | None, decisions: int = 30, **policy_kw) -> list[StateOutcome]:
+def play(w: WorldModel, plan: Plan | None, decisions: int = 30, m: Memory | None = None, **policy_kw) -> list[StateOutcome]:
     """Decide and apply each move and take, the way the runner applies them.
     Each outcome's ``at`` is where the character stood after it."""
-    m = Memory()
+    m = m if m is not None else Memory()
     ctx = PlayContext(
         m, Policy(kind="scripted", goals=[], **policy_kw), random.Random(3), plan=plan, directives=default_directives()
     )
@@ -97,17 +98,22 @@ class NoPlanTest(unittest.TestCase):
         self.assertNotIn("Read", verbs)
         self.assertTrue(all(o.state == "Greet" for o in outs for i in o.intents or [] if i["verb"] == "Say"))
 
-    def test_nothing_to_do_is_never_idle(self):
-        # Walled in, fully known: no frontier, no plan, nothing in sight.
+    def test_nothing_to_do_asks_the_planner_and_never_steps_in_place(self):
+        # Walled in, fully known, nothing held opens a wall: no frontier, no plan, nothing in sight.
         w = field_world(width=7, height=7, at=(3, 3), fog=False)
-        for o in play(w, None, decisions=12):
-            self.assertTrue(o.intents, f"idle decision: {o.state}: {o.reason}")
+        m = Memory()
+        for o in play(w, None, decisions=12, m=m):
+            self.assertFalse(o.intents, f"stepped in place: {o.state}: {o.reason}")
+            self.assertTrue(o.wait and o.state == SAFE_DEFAULT, o.reason)
+            self.assertIn("asked the planner", o.reason)
+        asks = [s for s in m.strategist_signals if s["trigger"] == "no_way_on"]
+        self.assertEqual(len(asks), 1, "one ask per cell, not one per decision")
 
     def test_an_empty_plan_is_no_plan(self):
         w = field_world(width=7, height=7, at=(3, 3), fog=False)
         for o in play(w, Plan([], dict(PARAM_DEFAULTS)), decisions=6):
-            self.assertTrue(o.intents, f"idle decision: {o.state}: {o.reason}")
-            self.assertEqual(o.state, SAFE_DEFAULT)
+            self.assertEqual(o.state, SAFE_DEFAULT, o.reason)
+            self.assertIn("asked the planner", o.reason)
 
 
 class PlanOpTest(unittest.TestCase):
@@ -208,7 +214,7 @@ class ReflexBoundsTest(unittest.TestCase):
         plan = Plan([{"op": "explore_area", "x": 9, "y": 9, "radius": 1}], dict(PARAM_DEFAULTS))
         plan.tick_hz = 1
         outs = play(w, plan, decisions=12)
-        self.assertTrue(all(o.wait and "boxed in" in o.reason for o in outs), [o.reason for o in outs])
+        self.assertTrue(all(o.wait and "asked the planner" in o.reason for o in outs), [o.reason for o in outs])
         self.assertIsNone(plan.current())
 
 

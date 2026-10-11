@@ -64,7 +64,7 @@ def block_at(p: tuple[int, int], burnt: set) -> str:
     if p == ENTRANCE:
         return "framed_door"
     if p in HEDGES and p not in burnt:
-        return "hedge"
+        return "tree"  # hedges are trees (GAME_NOTES Breaking blocks)
     return "grass"
 
 
@@ -169,7 +169,7 @@ class TestWorldServer:
             "w": {"block_type": "stone_wall"},
             "s": {"block_type": "stone_sign", "readable": True},
             "d": {"block_type": "framed_door"},
-            "h": {"block_type": "hedge"},
+            "h": {"block_type": "tree"},
         }
         sym = {v["block_type"]: k for k, v in legend.items()}
         rows = [

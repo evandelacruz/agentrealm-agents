@@ -13,7 +13,6 @@ from agentrealm_agent.pathing import grid_params
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.poll_cadence import hostile_within
 from agentrealm_agent.states import PlayContext
-from agentrealm_agent.states.explore import _look_around
 from agentrealm_agent.states.gather import _barred_by_hostile, ground
 from agentrealm_agent.states.gather_safe import gather_ground, hostiles_near
 from agentrealm_agent.states.greet import threat_near
@@ -67,10 +66,8 @@ class TownsfolkAreNoThreatTest(unittest.TestCase):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [townsperson((2, 1))]
         self.assertFalse(hostiles_near(w, (1, 0), POLICY))
-        self.assertIn("look around", _look_around(w, POLICY, random.Random(1), set(), "Explore").reason)
         w.entities = [monster((2, 1))]
         self.assertTrue(hostiles_near(w, (1, 0), POLICY))
-        self.assertIn("boxed in", _look_around(w, POLICY, random.Random(1), set(), "Explore").reason)
 
     def test_heal_starts_beside_a_townsperson(self):
         w = world(["...", "...", "..."], at=(1, 1))

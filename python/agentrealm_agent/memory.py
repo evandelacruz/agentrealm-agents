@@ -171,6 +171,9 @@ class Memory:
     gather_rearm: tuple[str, str] | None = None
     break_rearm: str | None = None  # code armed before Break, restored when break finishes (A28)
     break_pending: tuple[int, Pos, str] | None = None  # map, block and capability a Use in flight targets (A28)
+    # A114: the cell the safe default last asked the planner from with nothing left to explore (one no_way_on per cell).
+    no_way_on: tuple[int, Pos] | None = None
+    cornered_at: tuple[int, Pos] | None = None  # A114: the cell Flee last asked the planner from, with no move but to stand
     equip_refused: set[tuple[str | None, str]] = field(default_factory=set)  # (subtype, slot) Equip was refused; (None, slot) for Remove (A19)
     equip_refused_sig: tuple | None = None  # loadout and inventory the refusals hold for; None until the next observation syncs it (A19)
     equip_not_wearable: set[str] = field(default_factory=set)  # subtypes Wear rejected with not_wearable for the run (A55)

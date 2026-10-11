@@ -209,14 +209,14 @@ class StallTest(unittest.TestCase):
         out = dispatch(w, ctx(plan=fetch("apple")))
         self.assertNotEqual(out.state, "Loot")
 
-    def test_unreachable_fetch_target_lets_the_safe_default_move(self):
-        # Boxed in with room to move; the apple is outside the box.
+    def test_unreachable_fetch_target_lets_the_safe_default_ask_the_planner(self):
+        # Boxed in with room to move, nothing held opens a wall; the apple is outside the box.
         w = world(["######", "#..#.#", "######"], at=(1, 1))
         w.entities = [Entity("supply", 8, (4, 1), "apple")]
         plan = fetch("apple")
         out = dispatch(w, ctx(plan=plan))
         self.assertEqual(out.state, "Explore")
-        self.assertIsNotNone(out.intents, out.reason)
+        self.assertTrue(out.wait and "asked the planner" in out.reason, out.reason)
         self.assertIsNotNone(plan.stalled_since_tick)  # the fetch op's stall clock runs
 
     def test_chest_with_unread_contents_is_not_a_target(self):

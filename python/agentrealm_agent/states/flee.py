@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 
 from ..directives import attack_forbidden
-from ..memory import Memory
+from ..memory import Memory, queue_signal
 from ..navigation import cost_path, oscillation
 from ..pathing import flee_run, flee_step, grid_params, outruns, retreat_safe_goal, step_open
 from ..engagement import cannot_outrun, fights
@@ -15,6 +15,7 @@ from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .explore import plan_sets
 from .fight import can_engage, engage, fight_target, in_weapon_reach
+from .heal import use_carried_heal
 from .intents import set_position
 from .retreat import retreat_step
 
@@ -132,6 +133,33 @@ def _no_move_but_to_swing(
     return not at_health_floor(w, ctx.params, combat_group(w, ctx.policy) or hostiles)
 
 
+def cornered(w: WorldModel, ctx: PlayContext, hostiles: list[Entity]) -> StateOutcome:
+    """No step opens distance: standing still only takes free hits (A114).
+
+    So it drinks a carried heal when one is due (``heal.use_carried_heal``:
+    a potion only when ``healing.spend_potion`` says so, health low or the
+    drink turning the fight), else swings at the nearest hostile in weapon
+    reach it may attack. With neither, it raises one ``cornered`` trigger
+    for this cell, so the planner makes the call, and holds."""
+    drink = use_carried_heal(w, ctx)
+    if drink is not None and (drink.intents or drink.wait):
+        drink.reason = f"cornered: {drink.reason}"
+        return drink
+    for h in sorted(hostiles, key=lambda e: (chebyshev(e.pos, w.pos), e.id)):
+        if not attack_forbidden(h, ctx.never_attack) and in_weapon_reach(w, h, ctx.knowledge):
+            out = engage(w, ctx, h, FleeState.name)
+            if out.intents:
+                out.reason = f"cornered: {out.reason}"
+                return out
+    m = ctx.memory
+    here = (w.map_id, w.pos)
+    if m.cornered_at != here:
+        m.cornered_at = here
+        ids = [{"id": h.id, "type": h.code or None} for h in hostiles]
+        queue_signal(m, {"trigger": "cornered", "tick": w.tick, "map_id": w.map_id, "x": w.pos[0], "y": w.pos[1], "hostiles": ids})
+    return StateOutcome(None, "nowhere to flee: asked the planner", state=FleeState.name, wait=True)
+
+
 def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
     """``policy.on_hostile`` as the README documents it.
 
@@ -168,7 +196,8 @@ class FleeState(State):
     it arrives, is blocked, or Flee stops running, rather than re-picking the
     greedy best step every decision: against two moving hostiles that
     re-pick sends it back and forth between two cells (A58). Cornered, it
-    stands still.
+    never just stands taking hits: it drinks a heal that is due, else swings
+    at a hostile in reach, else asks the planner (``cornered``, A114).
 
     Running must work: once a hostile hits us after Flee began, or the gap
     to it has not grown over ``FLEE_PROBE_TICKS`` ticks, the engagement is decided again on that
@@ -217,6 +246,7 @@ class FleeState(State):
             m.flee_path = flee_escape(w, m, ctx, hostiles, blocked | paced)
             away = m.flee_path[0] if m.flee_path else None
         if away is None:
-            return StateOutcome(None, "nowhere to flee", state=self.name, wait=True)
+            return cornered(w, ctx, hostiles)
+        m.cornered_at = None
         m.path, m.retreat_walk = [], None  # the queue sent now is Flee's own, not a retreat walk
         return StateOutcome([set_position(away)], f"flee {target.kind} {target.id}", reflex=True, state=self.name)

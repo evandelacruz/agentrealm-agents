@@ -8,12 +8,11 @@ from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
-from ..pathing import grid_params, nav_search, next_step
+from ..pathing import grid_params, nav_search, next_step, plan_sets
 from ..plan import GoalOp
 from ..reach import supply_reach
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
-from .explore import plan_sets
 from .intents import arm, compose, set_position, use_block
 
 GOAL = "solve"

@@ -22,11 +22,10 @@ from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..memory import Memory
 from ..navigation import cost_path, doors_goal_path, nearest_target
 from ..navigation import stuck as nav_stuck
-from ..pathing import bounded_step, grid_params, guided_step, nav_search, next_step
+from ..pathing import bounded_step, grid_params, guided_step, nav_search, next_step, plan_sets
 from ..travel.knowledge import iter_entrances
 from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
-from .explore import plan_sets
 from .intents import set_position, take
 from .room import room_for
 

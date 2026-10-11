@@ -20,7 +20,7 @@ from ..memory import HuntSearch, Memory
 from ..navigation import doors_goal_path, route_first_leg
 from ..navigation import stuck as nav_stuck
 from ..navigation import walk as nav_walk
-from ..pathing import grid_params, guided_step, nav_search, next_step
+from ..pathing import grid_params, guided_step, nav_search, next_step, plan_sets
 from ..plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from ..travel.ops import travel_op_from_plan_goal
 from .. import targets as targets_mod
@@ -28,7 +28,7 @@ from ..navigation.rejection import locked_doors_from_kb
 from ..travel.resolve import ResolvedDestination, at_destination, given_up_travel, picks_nearest, resolve_travel, still_candidate
 from ..world import DOORS, Pos, WorldModel
 from .base import PlayContext, State, StateOutcome, my_op
-from .explore import explore_outcome, plan_sets
+from .explore import explore_outcome
 from .intents import set_position
 
 # A hunting-ground search gives up after this long (A27).

@@ -1445,7 +1445,7 @@ Intents: 1,028 `Step`, 2,688 `Wait`, 24 `Use` (14 cuts, 8 swings, 1 chest, 1 bre
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize.
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A111 (the pacing give-up skips a stuck-ladder Break target); defect 2 is A112 (a buy of an item eaten on pickup never counts as done, and the planner bought a heal at full health); defect 3 is A113 (Travel and Fight take turns mid-engagement). A111 and A113 are on branch `c/run17-pacing-engage`; A112 is on branch `c/run17-buy-consumed`. Their PLAN.md rows come with the implementing pull requests.
 
 1. **The pacing give-up misses a stuck-ladder Break target** (`navigation/oscillation.py:125–128`; the Break level in `navigation/stuck.py`). Under `travel` entrance, Travel's stuck ladder reached its Break level with target (367, 371). Break walked toward it from (375, 401), could not get nearer, and Explore took the next decision toward (371, 424). The guard saw states `Break` and `Explore` three times and gave up Explore's frontier each time. A103 drops a `break_block` op that cannot progress, but this target belonged to the stuck ladder, not to an op. **Rule:** when two walks pace, the one that cannot get nearer is given up, whatever owns it: an op, a stuck-ladder target, or a frontier.
 

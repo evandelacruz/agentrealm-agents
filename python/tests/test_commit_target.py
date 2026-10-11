@@ -352,11 +352,15 @@ class BalloonedWalkTest(unittest.TestCase):
         self.assertEqual(m.gather_target, ("grass", (12, 4)))
 
     def test_nearer_grass_alone_never_prices_the_walk_again(self):
-        w, m = self.detour(gap_y=4)  # the wall leaves the straight way open: no rise
-        w.view.tiles[(6, 4)] = "grass"
-        walk_off(w, m, (6, 3))
+        w = field(width=31, height=9, at=(2, 4))
+        w.view.tiles[(28, 4)] = "grass"
+        m = Memory()
         gather_outcome(w, m, Policy(on_hostile="ignore"))
-        self.assertEqual(m.gather_target, ("grass", (12, 4)))
+        self.assertEqual(m.gather_target, ("grass", (28, 4)))
+        w.pos, m.path = m.path[2], []  # still on the walk, its path ran out, no wall found
+        w.view.tiles[(w.pos[0] - 1, w.pos[1])] = "grass"  # 1 step against 20 or more: past both margins
+        gather_outcome(w, m, Policy(on_hostile="ignore"))
+        self.assertEqual(m.gather_target, ("grass", (28, 4)))
 
     def test_another_state_walking_us_away_is_no_rise(self):
         w = field(width=21, height=21, at=(8, 4))

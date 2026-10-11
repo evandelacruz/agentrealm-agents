@@ -228,6 +228,12 @@ def armor_defense(code: str | None) -> int | None:
     return r.defense if r is not None and r.supply_class == "armor" else None
 
 
+def armor_slot(code: str | None) -> str:
+    """The slot listed armor is worn in (``body``, ``head``, …), or ``""``."""
+    r = row(code)
+    return r.slot if r is not None and r.supply_class == "armor" else ""
+
+
 def what_it_does(code: str | None) -> dict[str, Any]:
     """What the Supplies reference says a subtype does, for the planner's State
     (A92): ``class``, ``use`` (its ``use_effects``), whichever of ``heal``,

@@ -116,7 +116,7 @@ from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .healing import supply_matches
-from .supplies import armor_defense, row as supply_row, weapon_damage, what_it_does
+from .supplies import armor_defense, armor_slot, weapon_damage, what_it_does
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
@@ -835,19 +835,18 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     best_damage = max((weapon_damage(c) or 0 for c in owned), default=0)
 
     def best_defense(slot: str) -> int:
-        return max((armor_defense(c) or 0 for c in owned if getattr(supply_row(c), "slot", "") == slot), default=0)
+        return max((armor_defense(c) or 0 for c in owned if armor_slot(c) == slot), default=0)
 
     gems = w.gems or 0
     rows = []
     for code, price in seen_prices(w, knowledge).items():
-        r = supply_row(code)
-        if r is None or code in owned:
+        if code in owned:
             continue
-        damage, defense = weapon_damage(code), armor_defense(code)
+        damage, defense, slot = weapon_damage(code), armor_defense(code), armor_slot(code)
         if damage is not None and damage > best_damage:
             gain = f"damage {best_damage} -> {damage}"
-        elif defense is not None and r.slot and defense > best_defense(r.slot):
-            gain = f"{r.slot} defense {best_defense(r.slot)} -> {defense}"
+        elif defense is not None and slot and defense > best_defense(slot):
+            gain = f"{slot} defense {best_defense(slot)} -> {defense}"
         else:
             continue
         rows.append({"code": code, "price": price, "gains": gain, "gems_short": max(0, price - gems)})

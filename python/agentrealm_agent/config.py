@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,8 +12,18 @@ GOALS = ("explore", "doors", "goto")  # built-in planner inputs (plan.builtin_go
 ON_HOSTILE = ("flee", "fight", "ignore")
 HOSTILE_KINDS = ("npc", "character")
 
-# Traces and the shared world knowledge base live here (gitignored).
-STATE_DIR = Path(__file__).resolve().parent.parent / ".state"
+# Traces, the shared world knowledge base and the Supplies cache live here.
+DEFAULT_STATE_DIR = Path(__file__).resolve().parent.parent / ".state"  # python/.state, gitignored
+STATE_DIR_ENV = "AGENTREALM_STATE_DIR"
+
+
+def state_dir() -> Path:
+    """``$AGENTREALM_STATE_DIR`` when set, else ``python/.state`` (A86: ``make test`` points it at a temp dir)."""
+    override = os.environ.get(STATE_DIR_ENV)
+    return Path(override).expanduser().resolve() if override else DEFAULT_STATE_DIR
+
+
+STATE_DIR = state_dir()  # read once at import; knowledge_base and supplies derive their paths from it
 
 
 @dataclass

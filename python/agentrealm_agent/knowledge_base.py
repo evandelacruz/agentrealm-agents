@@ -1,4 +1,4 @@
-"""Per-world knowledge base under python/.state/worlds/<world_code>.json.
+"""Per-world knowledge base at ``<STATE_DIR>/worlds/<world_code>.json`` (``AGENTREALM_STATE_DIR``, default python/.state).
 
 Shared by every character run from this checkout that plays the same world.
 Sections are filled over later milestones; A18 owns ``items``.

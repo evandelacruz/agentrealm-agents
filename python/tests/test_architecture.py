@@ -249,7 +249,7 @@ class A58PacingPairsTest(unittest.TestCase):
 # terms; the run that found it is cited in PLAN.md and docs/observations. This
 # count is of citations, not lines, and only falls: lower it in the PR that
 # removes some.
-RUN_CITATION_CEILING = 110
+RUN_CITATION_CEILING = 109
 # ``run 4``, ``Run 4``, ``runs 3, 4``: any form that names a live run.
 RUN_CITATION = re.compile(r"\bruns? \d+\b", re.IGNORECASE)
 PYTHON_DIR = Path(__file__).resolve().parents[1]

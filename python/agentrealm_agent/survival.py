@@ -333,23 +333,6 @@ def win_ratio(health: int | None, group: list[Entity], threat: ThreatTable, weap
     return ticks_to_kill_us(health, group, threat) / ticks_to_kill_them(group, weapon)
 
 
-def would_lose(
-    w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity | None = None
-) -> bool:
-    """True when the win estimate is below the effective fight margin.
-
-    **Fight** (A23) and **Flee** gate on this; **Retreat** also fires when
-    the group outclasses us. ``also`` counts one more hostile as in range,
-    for a fight Gather would start on one further off (A63 run 3).
-    """
-    group = combat_group(w, policy, also)
-    if not group:
-        return False
-    eff_risk = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
-    margin = effective_fight_margin(float(params["fight_margin"]), eff_risk)
-    return win_ratio(estimate_health(w), group, w.threat, w.armed_code) <= margin
-
-
 def estimate_health(w: WorldModel) -> int:
     """The health the win estimate counts: live health, else max, else a new character's."""
     health = w.health if w.health is not None else w.max_health

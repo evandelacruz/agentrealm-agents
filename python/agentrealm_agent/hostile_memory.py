@@ -11,7 +11,7 @@ Retreat (``survival.is_hostile``), and the ground Gather and Detour keep off
 
 The threat table's per-type measurements come and go the same way (A85):
 without them every run started with every type unmeasured.
-Loaded, they feed the win estimate (``survival.would_lose``) and the
+Loaded, they feed the win estimate (``engagement.sync_engagement``) and the
 retreat threshold as if measured this run.
 
 Stored in the knowledge base as::

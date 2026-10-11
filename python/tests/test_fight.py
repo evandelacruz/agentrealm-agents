@@ -9,9 +9,19 @@ from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.fight import attack_intent, fight_target, should_fight
-from agentrealm_agent.survival import would_lose
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
+
+
+def loses(w, policy, params) -> bool:
+    """With hostiles in range, an engagement under ``on_hostile = fight`` would not start as a fight."""
+    import dataclasses
+
+    from agentrealm_agent.engagement import would_fight
+    from agentrealm_agent.survival import combat_group
+
+    fight = dataclasses.replace(policy, on_hostile="fight")
+    return bool(combat_group(w, fight)) and not would_fight(w, fight, params)
 
 
 def world(rows: list[str], at=(0, 0)) -> WorldModel:
@@ -88,7 +98,7 @@ class FightStateTest(unittest.TestCase):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("npc", 5, (2, 1), code="gnawer")]
         w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
-        self.assertTrue(would_lose(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
+        self.assertTrue(loses(w, Policy(hostile=["npc"]), dict(PARAM_DEFAULTS)))
         out = dispatch(w, ctx(on_hostile="fight", hostile=["npc"]))
         self.assertEqual(out.state, "Flee")
 

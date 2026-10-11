@@ -8,7 +8,8 @@ that steps out of range is still in the fight.
 The decision is the win estimate (``survival.win_ratio``: live health, the
 threat table's measured hits and misses, the armed weapon) against a bar:
 
-- ``on_hostile = "fight"``: the effective fight margin (``would_lose``'s).
+- ``on_hostile = "fight"``: the effective fight margin (``fight_margin``
+  scaled by risk, ``survival.effective_fight_margin``).
 - ``on_hostile = "flee"``: no fight while running works.
 - Either, once running away cannot open distance (``cannot_outrun``):
   running only takes free hits, so a fight is picked when it is won
@@ -122,9 +123,9 @@ def cannot_outrun(w: WorldModel, m: Memory, policy: Policy, params: dict[str, fl
     return m.engagement
 
 
-def would_fight(w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity) -> bool:
+def would_fight(w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity | None = None) -> bool:
     """The decision an engagement would start with against the hostiles in
-    range and ``also``, one further off a state would go for."""
+    range, and ``also``, one further off a state would go for."""
     group = frozenset((h.kind, h.id) for h in combat_group(w, policy, also))
     return decide(w, policy, params, group, False).fight
 

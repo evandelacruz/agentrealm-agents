@@ -357,7 +357,7 @@ class OtherWalkBack(OpWalkBack):
 
 
 class PacedOpTest(unittest.TestCase):
-    """Two states pacing, one of them the top op's executor: the op goes (A103)."""
+    """Two states pacing, one of them the top op's executor: the op stalls (A103, A104)."""
 
     def play(self, ops, back):
         w, c = world(), ctx()
@@ -372,13 +372,26 @@ class PacedOpTest(unittest.TestCase):
     def test_the_op_whose_executor_paced_is_dropped_and_the_planner_told(self):
         brk = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
         c, cells = self.play([brk], OpWalkBack())
-        self.assertIsNone(c.plan.current(), "the break op that cannot progress is dropped")
+        self.assertIsNone(c.plan.current(), "with nothing below it, the break op that cannot progress is dropped")
         failed = [s for s in c.memory.strategist_signals if s.get("trigger") == "goal_failed"]
         self.assertEqual(len(failed), 1)
         self.assertEqual(failed[0]["op"], brk)
         self.assertEqual(failed[0]["reason"], "Break paced between 2,0 and 3,0 with Explore: no way forward")
         self.assertEqual(c.memory.nav_stuck.oscillations[0]["op"], brk)
+        self.assertEqual([r.target for r in c.memory.stalled_ops], [brk], "its failure is remembered (A104)")
         self.assertEqual(cells[-3:], [B, B, B], "with the op gone, nothing walks back")
+
+    def test_the_op_that_paced_moves_below_work_that_can_progress(self):
+        brk = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
+        gather = {"op": "gather_gems", "count": 20}
+        plan, m = self.drop(brk, {"states": ["Break", "Explore"], "cells": [[2, 0], [3, 0]]}, ops_after=[gather])
+        self.assertEqual(plan.current(), gather)
+        self.assertEqual(plan.goals[plan.index + 1], brk)
+        stalled = [s for s in m.strategist_signals if s.get("trigger") == "goal_stalled"]
+        self.assertEqual(len(stalled), 1)
+        self.assertEqual(stalled[0]["reason"], "Break paced between 2,0 and 3,0 with Explore: no way forward")
+        self.assertEqual(stalled[0]["now_below"], gather)
+        self.assertEqual(m.stalled_ops[0].why, stalled[0]["reason"])
 
     def test_pacing_the_op_executor_took_no_part_in_keeps_the_op(self):
         brk = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
@@ -389,7 +402,7 @@ class PacedOpTest(unittest.TestCase):
     def drop(self, op, paced, ops_after=()):
         plan = Plan([op, *ops_after], dict(PARAM_DEFAULTS))
         m = Memory()
-        dispatch_module._drop_paced_op(plan, plan.current(), paced, m)
+        dispatch_module._stall_paced_op(plan, plan.current(), paced, world(), m, None)
         return plan, m
 
     def test_pacing_on_the_owners_own_walk_keeps_the_op(self):
@@ -399,6 +412,7 @@ class PacedOpTest(unittest.TestCase):
         plan, m = self.drop(op, paced)
         self.assertIs(plan.current(), plan.goals[0])
         self.assertFalse(m.strategist_signals)
+        self.assertFalse(m.stalled_ops)
 
     def test_escape_only_pacing_keeps_the_op(self):
         op = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
@@ -416,9 +430,12 @@ class PacedOpTest(unittest.TestCase):
         m = Memory()
         paced_op = plan.current()
         plan.finish_current("done")
-        dispatch_module._drop_paced_op(plan, paced_op, {"states": ["Break", "Explore"], "cells": [[2, 0], [3, 0]]}, m)
+        dispatch_module._stall_paced_op(
+            plan, paced_op, {"states": ["Break", "Explore"], "cells": [[2, 0], [3, 0]]}, world(), m, None
+        )
         self.assertEqual(plan.current(), second)
-        self.assertFalse(any(s.get("trigger") == "goal_failed" for s in m.strategist_signals))
+        self.assertFalse(m.strategist_signals)
+        self.assertFalse(m.stalled_ops)
 
 
 if __name__ == "__main__":

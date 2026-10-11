@@ -15,7 +15,9 @@ number. Pricing then takes the armor worn at that moment off it once
 A hit is keyed by the source's type code, looked up among perceived entities
 of the same kind and id. A hit whose source is not perceived, or has no code,
 is not recorded: there is no type to file it under. Trap (keyed by supply
-code) and ``occupy`` damage are recorded but are not hostiles.
+code) and ``occupy`` damage are recorded, gross of armor like any hit, but
+are not hostiles and nothing prices them from this table: the route planner
+takes a hazard's damage from the Supplies reference (``occupy_damage``).
 
 Each hostile type's swings at us are counted too: a hit per ``Damaged``, a
 miss per ``Attacked`` with no ``Damaged`` from the same attacker on its tick

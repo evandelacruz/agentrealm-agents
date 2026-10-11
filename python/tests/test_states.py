@@ -220,8 +220,10 @@ class DispatcherFallThroughTest(unittest.TestCase):
         w = world(["###", "#.#", "###"], at=(1, 1))
         w.entities = [Entity("npc", 5, (2, 1), "gnawer")]
         w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
+        # Out of weapon reach and walled in: nothing to drink or swing at, so it asks the planner (A114).
+        w.entities = [Entity("npc", 5, (3, 1), "gnawer")]
         out = dispatch(w, ctx(w, on_hostile="flee", hostile=["npc"], hostile_range=2))
-        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Flee", None, "nowhere to flee", True))
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Flee", None, "nowhere to flee: asked the planner", True))
 
     def test_heal_in_safe_zone_keeps_moving(self):
         from agentrealm_agent.healing import save_regen_yes

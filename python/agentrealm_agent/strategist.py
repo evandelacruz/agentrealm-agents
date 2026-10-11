@@ -135,7 +135,18 @@ from .break_memory import capabilities_for_code
 from .pack import reserved_supplies
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
 from .stalled import StalledOp, below_progress, find as find_stalled, target_of
-from .survival import STARTING_WEAPON, known_hostile, retreat_goal
+from .survival import (
+    HOSTILE_ATTACK_INTERVAL_TICKS,
+    OUR_ATTACK_INTERVAL_TICKS,
+    STARTING_WEAPON,
+    UNKILLED_HOSTILE_HEALTH,
+    hostile_swing_damage,
+    known_hostile,
+    retreat_goal,
+    swing_damage,
+    worn_defense,
+)
+from .threat import type_key_for_entity
 from .travel.knowledge import iter_entrances, iter_shop_cells, town_from_kb
 from .travel.ops import travel_op_from_plan_goal
 from .world import Pos, WorldModel, chebyshev
@@ -676,10 +687,20 @@ def npc_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     ``greeted`` (Greet's hello was, ``greeted_npcs``), ``hostile`` (``survival.known_hostile``:
     a boss, our last hitter, or a type that has swung at us, hit us or died in view) and ``stays_put`` (on
     one cell for ``HELPER_STILL_TICKS`` in view, as helpers do). The API names
-    no helpers, so these are the only hints.
+    no helpers, so these are the only hints. Each also gives its cell (``x``,
+    ``y``) and its swing at us as the engagement prices it (A114:
+    ``swing``, expected damage per swing through our armor, ``measured``
+    when its type has hit us before, and ``health`` the API serves only for
+    a boss), next to ours (``our_swing``), so the planner can judge a fight.
     """
     spoken, greeted = spoken_npc_ids(knowledge), greeted_npc_ids(knowledge)
-    lines = [f"npcs_spoken_to={len(spoken)} npcs_greeted={len(greeted)}"]
+    ours = {
+        "expected_damage": round(swing_damage(w.armed_code), 2),
+        "every_ticks": OUR_ATTACK_INTERVAL_TICKS,
+        "hostile_health_assumed": UNKILLED_HOSTILE_HEALTH,
+    }
+    lines = [f"npcs_spoken_to={len(spoken)} npcs_greeted={len(greeted)} our_swing={json.dumps(ours, sort_keys=True)}"]
+    armor = worn_defense(w)
     if w.pos is None or w.map_id is None:
         return lines
     here, map_id = w.pos, w.map_id
@@ -697,11 +718,26 @@ def npc_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
             "greeted": e.id in greeted,
             "hostile": known_hostile(w, e),
             "stays_put": w.npc_still_ticks(e) >= HELPER_STILL_TICKS,
+            "x": e.pos[0],
+            "y": e.pos[1],
+            **_their_swing(w, e, armor),
         }
         for e in npcs
     ]
     lines.append(f"nearby_npcs={json.dumps(rows, sort_keys=True)}")
     return lines
+
+
+def _their_swing(w: WorldModel, e: Any, armor: int) -> dict[str, Any]:
+    """An NPC's swing at us as the engagement prices it (``survival.hostile_swing_damage``)."""
+    key = type_key_for_entity(e)
+    swing = hostile_swing_damage(w.threat.damage_per_hit(key), w.threat, key, armor)
+    row: dict[str, Any] = {
+        "swing": {"expected_damage": round(swing, 2), "every_ticks": HOSTILE_ATTACK_INTERVAL_TICKS, "measured": w.threat.measured(key)}
+    }
+    if e.health is not None:
+        row["health"] = e.health
+    return row
 
 
 # The signs and statues State lists.

@@ -18,7 +18,7 @@ from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
 from .stalled import below_progress, find as find_stalled, forget as forget_stalled
 from .supplies import CAPABILITIES, chest_applied, eaten_on_pickup, used_on_self
 from .travel.ops import parse_travel_string, travel_op_from_plan_goal
-from .world import DOORS, Pos, WorldModel, chebyshev
+from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ OP_STATE: dict[str, str | None] = {
     "hunt": None,
     "enter_level": "Level",
     "fight_boss": "Boss",
+    "fight": "Fight",
     "avoid": None,
     "wait": "Wait",
     "set_param": None,
@@ -75,6 +76,7 @@ OP_FIELDS: dict[str, str] = {
     "use_item": "code (a held consumable a Use on yourself applies: a potion heals, a chest raises the pack's carry slots). Done once that item is used up; dropped when none is held or its Use was refused or did nothing. A bigger chest is applied as soon as one is held, without this op",
     "enter_level": "x, y (the level door)",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
+    "fight": "exactly one of npc_id (an id from State nearby_npcs) or npc_type (the nearest NPC of that type in sight). Closes on it and swings until it is dead or out of sight, stepping off safe ground to swing (no attack is made from a safe zone) and back behind the swings; Retreat still pulls back at the health floor. Dropped for a boss (fight_boss) or an NPC the directives forbid attacking",
     "wait": "seconds, why",
     "set_param": "name, value",
 }
@@ -200,10 +202,15 @@ def _validate_say(op: dict[str, Any]) -> bool:
     if not _is_str(op["text"]):
         _drop("bad text", op)
         return False
+    return _validate_npc(op)
+
+
+def _validate_npc(op: dict[str, Any]) -> bool:
+    """Exactly one of ``npc_id`` or ``npc_type``: a ``say``'s or a ``fight``'s NPC."""
     has_id = "npc_id" in op
     has_type = "npc_type" in op
     if has_id == has_type:
-        _drop("say needs npc_id or npc_type", op)
+        _drop(f"{op['op']} needs npc_id or npc_type", op)
         return False
     if has_id and not _is_int(op["npc_id"]):
         _drop("bad npc_id", op)
@@ -369,6 +376,7 @@ _VALIDATORS: dict[str, Any] = {
     "explore_area": _validate_explore_area,
     "read": _validate_read,
     "say": _validate_say,
+    "fight": _validate_npc,
     "buy": _validate_buy,
     "break_block": _validate_break_block,
     "use_block": _validate_use_block,
@@ -794,6 +802,18 @@ def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:
     return {p for p in frontier if chebyshev(p, center) <= op["radius"]}
 
 
+def op_npc(op: GoalOp, world: WorldModel) -> Entity | None:
+    """The NPC in view an op names by ``npc_id``, or the nearest of its ``npc_type``."""
+    npcs = [e for e in world.entities if e.kind == "npc"]
+    if "npc_id" in op:
+        return next((e for e in npcs if e.id == op["npc_id"]), None)
+    npcs = [e for e in npcs if e.code == op.get("npc_type")]
+    if not npcs or world.pos is None:
+        return None
+    here = world.pos
+    return min(npcs, key=lambda e: (chebyshev(e.pos, here), e.id))
+
+
 def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
     """Whether ``op`` is finished. Reads only; ``Plan.advance`` pops it."""
     if world.pos is None:
@@ -838,6 +858,9 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
             )
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
+    if name == "fight":
+        # Done once the NPC it names is dead or out of sight: none left in view to fight.
+        return op_npc(op, world) is None
     if name in BLOCK_CHANGE_OPS:
         # Done once the target's block_type differs from what it was when the
         # op reached the top: a successful Use destroys the block, which then

@@ -461,12 +461,13 @@ class FleeTest(unittest.TestCase):
         safe_at(w, (1, 1))
         self.assertEqual(dispatch(w, ctx()).state, "Explore")
 
-    def test_nowhere_to_flee_sends_nothing(self):
+    def test_nowhere_to_flee_swings_at_the_hostile_in_reach(self):
+        # Cornered, standing still only takes hits: it swings back (A114).
         w = world(["###", "#.#", "###"], at=(1, 1))
         w.entities = [Entity("npc", 5, (2, 1), "gnawer")]
         out = dispatch(w, ctx())
         self.assertEqual(out.state, "Flee")
-        self.assertIsNone(out.intents)
+        self.assertIn("cornered: fight npc 5", out.reason)
 
     def test_out_of_range_is_not_fled(self):
         from agentrealm_agent.plan import Plan

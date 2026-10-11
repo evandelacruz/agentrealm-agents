@@ -54,7 +54,6 @@ from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
 from .loot import NON_TRANSFERABLE
 from .supplies import (
-    DEFAULT_ATTACK_COOLDOWN_MS,
     heals,
     is_weapon,
     kept_on_break,
@@ -225,7 +224,7 @@ def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[b
     if not is_weapon(code):
         return fits, Fraction(0)
     top = max(1, BASE_ATTACK_POWER + (weapon_damage(code) or 0))
-    return fits, Fraction(1 + top, weapon_cooldown_ms(code) or DEFAULT_ATTACK_COOLDOWN_MS)
+    return fits, Fraction(1 + top, weapon_cooldown_ms(code))
 
 
 def damage_per_second(code: str | None) -> float:
@@ -236,8 +235,7 @@ def damage_per_second(code: str | None) -> float:
     the starting knife (``survival.fighting_weapon``, A81) stays there."""
     if not is_weapon(code):
         return 0.0
-    cooldown = weapon_cooldown_ms(code) or DEFAULT_ATTACK_COOLDOWN_MS
-    return weapon_swing_damage(weapon_damage(code) or 0) * 1000 / cooldown
+    return weapon_swing_damage(weapon_damage(code) or 0) * 1000 / weapon_cooldown_ms(code)
 
 
 def does_job(code: str | None, job: str, kb: KnowledgeBase | None = None) -> bool:

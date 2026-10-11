@@ -568,10 +568,6 @@ class StoreVersionTest(unittest.TestCase):
         self.assertEqual(gem_yield.regions(k, MAP), {"0,0": {"cuts": 1, "gems": 1, "last_tick": 10}})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RegionYieldTest(unittest.TestCase):
     """A105: a region's yield, pulled toward the map's, prices Gather's walks."""
 
@@ -591,3 +587,7 @@ class RegionYieldTest(unittest.TestCase):
         rate, by_region = gem_yield.region_yields(k, MAP)
         self.assertEqual(set(by_region), {(1, 0)})
         self.assertGreater(by_region[(1, 0)], rate)
+
+
+if __name__ == "__main__":
+    unittest.main()

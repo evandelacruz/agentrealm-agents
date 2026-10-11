@@ -263,7 +263,7 @@ def gather_outcome(
     dead_regions, dead_cells = gem_cuts.uncuttable(w, safe) if gem_cuts is not None else (set(), set())
     exhausted = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | dead_cells
     barred = cache(lambda: _barred_by_hostile(w, policy, skip | dead_regions, exhausted, d))
-    odds = gem_odds(w, knowledge, op, skip | dead_regions)
+    odds = cache(lambda: gem_odds(w, knowledge, op, skip | dead_regions))
     out, worked = _gather_step(
         w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state, shadow, target, named, d, barred, odds
     )
@@ -359,7 +359,7 @@ def _gather_step(
     named: bool = False,
     d: Danger | None = None,
     barred: Callable[[], bool] = lambda: False,
-    odds: GemOdds | None = None,
+    odds: Callable[[], GemOdds] | None = None,
 ) -> tuple[StateOutcome, tuple[int, int] | None]:
     """Gather's move, and the target region it works only in (None when it
     works anywhere).
@@ -368,7 +368,7 @@ def _gather_step(
     there (free-play run 5: piles outside the named region drew it to a
     hostile's post); one in reach is taken wherever it lies. Working
     anywhere, it weighs the grass it knows against unexplored ground by
-    ``odds`` (``_explore_instead``)."""
+    ``odds()`` (``_explore_instead``)."""
     view = w.view
     cuttable = {
         p
@@ -410,7 +410,7 @@ def _gather_cells(
     d: Danger | None = None,
     pile_region: tuple[int, int] | None = None,
     barred: Callable[[], bool] = lambda: False,
-    odds: GemOdds | None = None,
+    odds: Callable[[], GemOdds] | None = None,
 ) -> StateOutcome:
     """Take or cut what is in reach, else walk to the committed target (A71),
     else to the nearest of ``preferred``; ``barred()``: known cells to cut are
@@ -424,7 +424,7 @@ def _gather_cells(
     ``_replan_gather``). ``d`` is the decision's ``Danger``: remembered
     hostiles' ground, and whether the op chose to fight for it;
     ``pile_region`` bounds the piles it walks to; one in reach is taken anywhere;
-    ``odds`` weighs the grass against unexplored ground (``_explore_instead``)."""
+    ``odds()`` weighs the grass against unexplored ground (``_explore_instead``)."""
     view = w.view
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
@@ -682,14 +682,14 @@ def _replan_gather(
     d: Danger | None = None,
     pile_region: tuple[int, int] | None = None,
     barred: Callable[[], bool] = lambda: False,
-    odds: GemOdds | None = None,
+    odds: Callable[[], GemOdds] | None = None,
 ) -> bool:
     """Plan to the committed target (``m.gather_target``) while one is kept,
     else pick: the pile (in ``pile_region`` when set) and the grass
     (``preferred``: field cells before safe ones) each cheapest by path cost
     (``_nearest_clear``), then the cheaper of the two by ``_price``, a pile
     counting ``GEM_PILE_STEPS`` cheaper: it is a gem for sure; the grass only
-    when, by ``odds``, it is no dearer than the nearest unexplored ground
+    when, by ``odds()``, it is no dearer than the nearest unexplored ground
     (``_explore_instead``), else that ground (``FRONTIER``);
     then a kept walk to ground clear of hostiles (``CLEAR``, tried after the
     picks: it ends for something it can reach), then, on safe ground,
@@ -747,7 +747,7 @@ def _replan_gather(
         m.path, m.goal, m.gather_target = pile[1], GOAL, ("pile", pile[0])
         return False
     if grass:
-        explore = _explore_instead(w, m, policy, grass, params, blocked, clear, safe, odds, d) if odds else None
+        explore = _explore_instead(w, m, policy, grass, params, blocked, clear, safe, odds(), d) if odds else None
         if explore:
             m.path, m.goal, m.gather_target = explore[1], GOAL, (FRONTIER, explore[0])
         else:

@@ -40,7 +40,7 @@ from .downed import DownedState
 from .equip import EquipState
 from .escape import EscapeState
 from .explore import ExploreState
-from .fight import FightState, can_engage
+from .fight import FightState, held_target
 from .flee import FleeState
 from .gather import GatherState
 from .greet import GreetState
@@ -133,7 +133,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     rejections taught the map (A14), starts, ends or finishes the boss fight
     (A38), settles a Shop purchase (A21), brings the fight-or-flee decision
     up to date (A94, ``engagement.sync_engagement``; a fight goes on while
-    Fight can reach a member, A113), and notes a policy
+    Fight has a target in it it can reach, A113), and notes a policy
     ``goto`` stood on (A16). After the pick, the top op's stall clock runs unless its
     executor made progress (A34).
 
@@ -160,7 +160,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
     if ctx.policy.kind == "scripted":
-        sync_engagement(world, m, ctx.policy, ctx.params, lambda h: can_engage(world, h, ctx))
+        sync_engagement(world, m, ctx.policy, ctx.params, lambda e: held_target(world, ctx, e))
     op = ctx.plan.current() if ctx.plan is not None else None
     owner = top_executor(ctx)
     try:
@@ -213,7 +213,7 @@ def _stall_paced_op(
     with_whom = f" with {', '.join(others)}" if others else ""
     paced["op"] = dict(op)
     why = f"{owner} paced between {cells}{with_whom}: no way forward"
-    remember_stalled(m.stalled_ops, op, why, world.tick, retry_basis(world, knowledge))
+    remember_stalled(m.stalled_ops, op, why, world.tick, retry_basis(world, knowledge), world.map_id)
     plan.demote_current(why, memory=m)
 
 
@@ -254,7 +254,7 @@ def _note_op_progress(
         return
     if plan.note_stalled(world.tick):
         why = f"{owner}: no progress for {PLAN_STALL_SECONDS}s"
-        remember_stalled(m.stalled_ops, op, why, world.tick, retry_basis(world, knowledge))
+        remember_stalled(m.stalled_ops, op, why, world.tick, retry_basis(world, knowledge), world.map_id)
         plan.demote_current(why, memory=m)
 
 

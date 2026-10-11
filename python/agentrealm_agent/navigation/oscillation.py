@@ -171,7 +171,7 @@ def _give_up_walks(
                 op = {"op": "break_block", "x": block[0], "y": block[1], "capability": att.break_cap}
                 between = " and ".join(f"{x},{y}" for x, y in cells)
                 why = f"Break paced between {between} walking to it: no way to the block"
-                remember_stalled(m.stalled_ops, op, why, w.tick, retry_basis(w, knowledge))
+                remember_stalled(m.stalled_ops, op, why, w.tick, retry_basis(w, knowledge), w.map_id)
                 entry["break"] = list(block)
             nav_stuck.escalate(m, w, att, GIVE_UP_REASON)
         else:
@@ -187,8 +187,8 @@ def note_move(m: Memory, intents: list[dict] | None, state: str) -> None:
     else "" (a step of its own, such as a Fight approach or a detour). A
     step that happens to land on the next cell of a path another state left
     behind counts for that path's walk. The attempt is the active one when
-    the walk is its own, or Break's walk to the block the attempt's step 2
-    nominated (``walk_attempt``). The next ``check`` files it with the cell
+    the walk is its own, or Break's walk to the very block the attempt's
+    step 2 nominated (``walk_attempt``). The next ``check`` files it with the cell
     the move led to.
     """
     target = None
@@ -201,12 +201,21 @@ def note_move(m: Memory, intents: list[dict] | None, state: str) -> None:
 
 
 def walk_attempt(m: Memory, goal: str) -> str:
-    """The key of the active stuck attempt the walk ``goal`` belongs to, or ""."""
+    """The key of the active stuck attempt the walk ``goal`` belongs to, or "".
+
+    A break walk is the attempt's only when the attempt is at step 2 and the
+    walk ends on the block it nominated: a ``break_block`` op's walk or
+    Heal's cut toward food (``Memory.goal`` ``break`` too) to any other
+    block is no attempt's.
+    """
     stuck = m.nav_stuck
     att = stuck.attempts.get(stuck.active) if goal and stuck.active else None
     if att is None:
         return ""
-    if att.goal == goal or (goal == nav_stuck.BREAK_GOAL and att.level == nav_stuck.BREAK):
+    if att.goal == goal:
+        return att.key
+    block = nav_stuck.break_target(att)
+    if goal == nav_stuck.BREAK_GOAL and att.level == nav_stuck.BREAK and block is not None and m.path[-1:] == [block]:
         return att.key
     return ""
 

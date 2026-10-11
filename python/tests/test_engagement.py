@@ -14,12 +14,13 @@ from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.engagement import BREAK_EVEN, fight_bar, fights, sync_engagement
+from agentrealm_agent.engagement import BREAK_EVEN, CHASE_PROBE_TICKS, fight_bar, fights, sync_engagement
 from agentrealm_agent.hostile_ground import Danger, danger
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.detour import Detour, detour_find
+from agentrealm_agent.states.fight import held_target
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.survival import should_retreat, win_ratio
 from agentrealm_agent.world import Entity, Sighting, WorldModel, chebyshev
@@ -134,7 +135,7 @@ class OneDecisionTest(unittest.TestCase):
 
 
 class FightGoesOnTest(unittest.TestCase):
-    """A fight decided on holds until it ends: dead, gone or out of reach (A113).
+    """A fight decided on holds until it ends: dead, gone, out of reach or no longer closing (A113).
 
     Free-play run 17: Travel walked past a hostile at its post, Fight closed
     in and swung once, the hostile stepped back to its post out of range,
@@ -149,9 +150,13 @@ class FightGoesOnTest(unittest.TestCase):
         w.tick += 100  # and not hitting
         return w, c
 
+    def sync(self, w, c):
+        """The engagement as dispatch brings it up to date: Fight's own target holds it."""
+        return sync_engagement(w, c.memory, c.policy, c.params, lambda e: held_target(w, c, e))
+
     def test_a_member_back_on_its_post_is_still_fought(self):
         w, c = self.engaged()
-        e = sync_engagement(w, c.memory, c.policy, c.params, reachable=lambda h: True)
+        e = self.sync(w, c)
         self.assertTrue(e is not None and e.fight)
         out = dispatch(w, c)
         self.assertEqual(out.state, "Fight", out.reason)
@@ -161,11 +166,38 @@ class FightGoesOnTest(unittest.TestCase):
     def test_the_fight_ends_when_the_member_is_dead_or_gone(self):
         w, c = self.engaged()
         w.entities = []
-        self.assertIsNone(sync_engagement(w, c.memory, c.policy, c.params, reachable=lambda h: True))
+        self.assertIsNone(self.sync(w, c))
 
     def test_the_fight_ends_when_the_member_is_out_of_reach(self):
         w, c = self.engaged()
-        self.assertIsNone(sync_engagement(w, c.memory, c.policy, c.params, reachable=lambda h: False))
+        for p in [(9, 9), (9, 10), (9, 11), (10, 9), (10, 11), (11, 9), (11, 10), (11, 11)]:
+            w.view.tiles[p] = "stone"  # walled in: no step closes on it
+        self.assertIsNone(self.sync(w, c))
+
+    def test_the_fight_ends_with_the_target_fight_cannot_swing_at(self):
+        # One rule for both: a member Fight may not attack holds nothing.
+        w, c = self.engaged()
+        c.never_attack = [CODE]
+        self.assertIsNone(self.sync(w, c))
+        self.assertNotEqual(dispatch(w, c).state, "Fight")
+
+    def test_a_chase_that_never_closes_ends(self):
+        """It steps back each time we step closer: after CHASE_PROBE_TICKS with
+        no new nearest gap, it is out of reach and the fight is over."""
+        w, c = self.engaged()
+        npc = w.entities[0]
+        states = []
+        for _ in range(20):
+            w.tick += 5
+            out = dispatch(w, c)
+            states.append(out.state)
+            if out.intents and out.intents[0]["verb"] == "SetPosition":
+                w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+                npc.pos = (w.pos[0] + 4, w.pos[1])  # keeps its distance
+        self.assertEqual(states[0], "Fight")
+        fought = states.index(next(s for s in states if s != "Fight"))
+        self.assertLessEqual(fought * 5, CHASE_PROBE_TICKS + 10, states)
+        self.assertNotIn("Fight", states[fought:], states)
 
     def test_dispatch_fights_on_until_the_hostile_is_gone(self):
         """Fight holds every decision between swings; nothing else walks in between."""

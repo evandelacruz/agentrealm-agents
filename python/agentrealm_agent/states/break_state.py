@@ -52,7 +52,7 @@ def _stuck_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
         nav_stuck.clear_break_target(att)
     if w.pos is None:
         return None
-    choice = nominate_on_path(w, ctx.knowledge, w.pos, att.target, break_cells(ctx.memory.stalled_ops))
+    choice = nominate_on_path(w, ctx.knowledge, w.pos, att.target, break_cells(ctx.memory.stalled_ops, w.map_id))
     if choice is not None:
         # Kept on the attempt, so the walk to it is the one the oscillation guard gives up (A111).
         nav_stuck.set_break_target(att, choice.pos, choice.capability)
@@ -110,7 +110,7 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
     if choice is None:
         att = nav_stuck.active(m, w)
         if att is not None and att.level == nav_stuck.BREAK:
-            skip = break_cells(m.stalled_ops)
+            skip = break_cells(m.stalled_ops, w.map_id)
             why = no_break_reason(w, ctx.knowledge, w.pos, att.target, skip) if w.pos is not None else "no_break"
             nav_stuck.escalate(m, w, att, why)
         return StateOutcome(None, "nothing to break", state=state)

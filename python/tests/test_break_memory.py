@@ -199,12 +199,12 @@ class StalledBreakTest(unittest.TestCase):
     def remembered(self, w, *ops):
         records = []
         for op in ops:
-            remember_stalled(records, op, "Break paced walking to it", 0, retry_basis(w, None))
+            remember_stalled(records, op, "Break paced walking to it", 0, retry_basis(w, None), w.map_id)
         return records
 
     def test_a_remembered_block_is_not_nominated_or_priced(self):
         w = _sword_world([".b.b."], at=(0, 0))
-        skip = break_cells(self.remembered(w, self.BUSH))
+        skip = break_cells(self.remembered(w, self.BUSH), w.map_id)
         self.assertEqual(skip, {(1, 0)})
         self.assertEqual(nominate_on_path(w, None, (0, 0), (4, 0), skip).pos, (3, 0))
         self.assertEqual(set(break_costs_for_planning(w, None, (4, 0), skip)), {(3, 0)})
@@ -213,7 +213,7 @@ class StalledBreakTest(unittest.TestCase):
         w = _sword_world([".b..."], at=(0, 0))
         m = Memory()
         m.stalled_ops = self.remembered(w, self.BUSH)
-        self.assertEqual(no_break_reason(w, None, (0, 0), (4, 0), break_cells(m.stalled_ops)), "stalled_break")
+        self.assertEqual(no_break_reason(w, None, (0, 0), (4, 0), break_cells(m.stalled_ops, w.map_id)), "stalled_break")
         att = nav_stuck.track(m, w, "goto", (4, 0))
         att.level = nav_stuck.BREAK
         c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
@@ -236,7 +236,20 @@ class StalledBreakTest(unittest.TestCase):
         records = self.remembered(w, self.BUSH)
         w.held_supplies = [*w.held_supplies, InventorySupply(6, "bronze_mallet")]
         lapse_stalled(records, retry_basis(w, None))
-        self.assertEqual(break_cells(records), frozenset())
+        self.assertEqual(break_cells(records, w.map_id), frozenset())
+
+    def test_a_block_remembered_on_another_map_is_nominated_here(self):
+        w = _sword_world([".b..."], at=(0, 0))
+        records = []
+        remember_stalled(records, self.BUSH, "Break paced walking to it", 0, retry_basis(w, None), w.map_id + 1)
+        self.assertEqual(break_cells(records, w.map_id), frozenset())
+        m = Memory()
+        m.stalled_ops = records
+        att = nav_stuck.track(m, w, "goto", (4, 0))
+        att.level = nav_stuck.BREAK
+        c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
+        BreakState().act(w, c)
+        self.assertEqual(nav_stuck.break_target(att), (1, 0))
 
 
 class BreakOpRefusalTest(unittest.TestCase):

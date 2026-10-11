@@ -349,12 +349,21 @@ class PacedBreakStepTest(unittest.TestCase):
     def test_note_move_files_the_break_walk_under_the_stuck_attempt(self):
         m, w = self.m, self.w
         nav_stuck.track(m, w, WALK, GOTO)
-        m.path, m.goal = [B], "break"
+        m.path, m.goal = [B, (4, 0), self.BLOCK], "break"
         oscillation.note_move(m, [set_position(B)], "Break")
         self.assertEqual(m.nav_stuck.last_move, ("break", "Break", self.travel.key))
         self.travel.level = nav_stuck.WALK
         oscillation.note_move(m, [set_position(B)], "Break")
-        self.assertEqual(m.nav_stuck.last_move, ("break", "Break", ""), "a break_block op's walk is no attempt's")
+        self.assertEqual(m.nav_stuck.last_move, ("break", "Break", ""), "off step 2, no break walk is the attempt's")
+
+    def test_a_break_walk_to_another_block_is_not_the_attempts(self):
+        # A planner break_block (or Heal's cut toward food) walks to another
+        # block while the Travel walk sits at step 2: not the step 2 walk.
+        m, w = self.m, self.w
+        nav_stuck.track(m, w, WALK, GOTO)
+        m.path, m.goal = [B, (4, 0)], "break"
+        oscillation.note_move(m, [set_position(B)], "Break")
+        self.assertEqual(m.nav_stuck.last_move, ("break", "Break", ""))
 
     def test_both_walks_are_given_up_and_the_block_remembered(self):
         event = self.pace()
@@ -368,7 +377,7 @@ class PacedBreakStepTest(unittest.TestCase):
         self.assertTrue(nav_stuck.backed_off(self.m, "explore", 1, self.FRONTIER, self.w.tick))
         # The block is remembered by A104's rule, so no ladder nominates it again.
         brk = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
-        self.assertEqual([r.target for r in self.m.stalled_ops], [brk])
+        self.assertEqual([(r.target, r.map_id) for r in self.m.stalled_ops], [(brk, 1)])
         self.assertEqual(self.m.stalled_ops[0].why, "Break paced between 2,0 and 3,0 walking to it: no way to the block")
 
     def test_the_owner_op_stays_when_its_step_2_walk_was_given_up(self):

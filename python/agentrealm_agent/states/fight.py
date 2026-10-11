@@ -130,6 +130,17 @@ def close_step(w: WorldModel, target: Entity, blocked: set[Pos]) -> Pos | None:
     return min(options, key=lambda p: (chebyshev(p, target.pos), p))
 
 
+def held_target(world: WorldModel, ctx: PlayContext, engagement: Engagement) -> Entity | None:
+    """The hostile Fight goes on with in ``engagement``, a fight decided on:
+    the one ``fight_target`` picks, when Fight can swing at it or step closer.
+    None when the fight has nothing left Fight can act on (A113); the
+    engagement ends on it (``engagement.sync_engagement``)."""
+    target = fight_target(world, ctx.policy, ctx.never_attack, engagement)
+    if target is None or not can_engage(world, target, ctx):
+        return None
+    return target
+
+
 def can_engage(world: WorldModel, target: Entity, ctx: PlayContext) -> bool:
     """In weapon reach, or one open step brings us closer."""
     if in_weapon_reach(world, target, ctx.knowledge):

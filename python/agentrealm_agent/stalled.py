@@ -42,12 +42,14 @@ class RetryBasis:
 
 @dataclass
 class StalledOp:
-    """One op that stalled: its target (the op without ``why``), why, when, and what was known then."""
+    """One op that stalled: its target (the op without ``why``), why, when,
+    what was known then, and the map it stalled on (None when not known)."""
 
     target: dict[str, Any]
     why: str
     tick: int
     basis: RetryBasis
+    map_id: int | None = None
 
 
 def target_of(op: dict[str, Any]) -> dict[str, Any]:
@@ -85,11 +87,13 @@ def retry_reason(record: StalledOp, now: RetryBasis) -> str:
     return ""
 
 
-def remember(records: list[StalledOp], op: dict[str, Any], why: str, tick: int, basis: RetryBasis) -> None:
-    """Record ``op`` as stalled, replacing an older record of the same target."""
+def remember(
+    records: list[StalledOp], op: dict[str, Any], why: str, tick: int, basis: RetryBasis, map_id: int | None = None
+) -> None:
+    """Record ``op`` as stalled on ``map_id``, replacing an older record of the same target."""
     target = target_of(op)
     records[:] = [r for r in records if r.target != target]
-    records.append(StalledOp(target, why, tick, basis))
+    records.append(StalledOp(target, why, tick, basis, map_id))
     del records[:-STALLED_KEPT]
 
 
@@ -105,14 +109,20 @@ def find(records: list[StalledOp], op: dict[str, Any]) -> StalledOp | None:
     return next((r for r in records if r.target == target), None)
 
 
-def break_cells(records: list[StalledOp]) -> frozenset[tuple[int, int]]:
-    """The cells of the remembered ``break_block`` targets: a block no walk
-    is sent to open again, by the stuck ladder (``break_memory.nominate_on_path``)
-    or Heal, while its record holds (A111)."""
+def break_cells(records: list[StalledOp], map_id: int | None) -> frozenset[tuple[int, int]]:
+    """The cells on ``map_id`` of the remembered ``break_block`` targets: a
+    block no walk is sent to open again, by the stuck ladder
+    (``break_memory.nominate_on_path``) or Heal, while its record holds
+    (A111). A record from another map, or with no map, names no cell here."""
+    if map_id is None:
+        return frozenset()
     return frozenset(
         (r.target["x"], r.target["y"])
         for r in records
-        if r.target.get("op") == "break_block" and isinstance(r.target.get("x"), int) and isinstance(r.target.get("y"), int)
+        if r.map_id == map_id
+        and r.target.get("op") == "break_block"
+        and isinstance(r.target.get("x"), int)
+        and isinstance(r.target.get("y"), int)
     )
 
 

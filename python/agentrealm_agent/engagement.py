@@ -1,4 +1,4 @@
-"""Fight or flee: one decision per engagement, from one estimate (A92).
+"""Fight or flee: one decision per engagement, from one estimate (A94).
 
 An engagement starts when a hostile comes within ``policy.hostile_range``
 (``survival.combat_group``) and ends once none is in range and none has hit

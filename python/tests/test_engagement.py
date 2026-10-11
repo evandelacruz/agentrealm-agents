@@ -1,4 +1,4 @@
-"""Fight or flee is one decision per engagement, and a target's price carries the danger round it (A92).
+"""Fight or flee is one decision per engagement, and a target's price carries the danger round it (A94).
 
 Rebuilt offline on open ground: Fight, Flee and Retreat read one decision,
 the win estimate against a bar, which changes only when the estimate does;

@@ -119,7 +119,7 @@ class Memory:
     # at each Flee decision, and the tick Flee began.
     flee_gaps: list[tuple[int, int]] = field(default_factory=list)
     flee_since: int = 0
-    # The fight-or-flee decision Fight, Flee and Retreat all read (A92).
+    # The fight-or-flee decision Fight, Flee and Retreat all read (A94).
     engagement: Engagement | None = None
     # Detour (A71): the find a detour walks to, and finds it gave up on this run.
     detour: Detour | None = None

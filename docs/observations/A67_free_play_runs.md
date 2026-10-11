@@ -1693,7 +1693,7 @@ Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A120 
 
 | Time | Ops on the stack (top first) | What happened |
 |---|---|---|
-| 0–92 s | `gather_gems` (432, 400), 50 | "With 0 gems and nothing to buy, gems are the only reachable work … get gems for the chest, then explore toward the closest entrances." Gather walked south and Detour turned off toward the gem piles near (414, 414) **three times** (8 s, 34 s, 56 s), each given up short. Between them, Gather's walk to (435, 410) came back north to about (415, 389). **No gem** (defect 3). |
+| 0–92 s | `gather_gems` (432, 400), 50 | "Stage 2 readiness is met, but with 0 gems and nothing to buy, gems are the only reachable work … get gems for the chest, then explore toward the closest entrances." Gather walked south and Detour turned off toward the gem piles near (414, 414) **three times** (8 s, 34 s, 56 s), each given up short. Between them, Gather's walk to (435, 410) came back north to about (415, 389). **No gem** (defect 3). |
 | 92–148 s | `gather_gems` (432, 400) with `fight`, then in place, then (432, 400) again | "Gather stalled 78 s … snotlings hold the ground." Two stray cuts, a walk north to (410, 362), and Fight **killed snotling 215** with one swing at 118 s. |
 | 148–582 s | `gather_gems` (432, 400), 10 then 50, `fight` | Fight **killed snotling 247** with one swing at 156 s, and health went 8 → 7. Then steady cutting at region (432, 400): **0 → 25**, 2.3 gems a minute. "Stage 2 is met except the health bar, which recovers while gathering." It did not: **7/10 from 159 s to the end**, never on safe ground (defect 1). |
 | 582–600 s | `buy` small_potion, `gather_gems` 60/65 | "Health is 7/10, below the stage 2 health bar … buying one adds to the reserve." Bought a 4th potion (25 → 15) and kept gathering. "Once the chest is bought, or health is at the bar, move on to a level entrance." |
@@ -1701,7 +1701,7 @@ Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A120 
 #### Pack, stage, entrance and level attempts
 
 - **Pack slots:** 10, 6 used at the start; 10, 7 used at the end. The middle_chest (10 → 30, 50 gems) was the plan's target all run.
-- **Stage:** **2, not met**, all run: `health_at_bar` false (8/10, then 7/10, against a bar of 8). Every other check was met. `to_close` lists no row for health, since no purchase closes it.
+- **Stage:** **stage 2 met from 0 to 156 s** (8/10 is at the bar of 8): the plan still chose to save for the chest rather than move to stage 3. Snotling 247's hit at 156 s took health to 7/10, and from then to the end **stage 2 was not met** (`health_at_bar` false in every State from 163 s). Every other check was met. `to_close` lists no row for health, since no purchase closes it.
 - **Entrance and level:** none. No `travel` op was set, so A120's hand-over never came up, and no `no_way_on` ask was made.
 
 #### Gear and gems

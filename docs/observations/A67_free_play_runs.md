@@ -998,7 +998,7 @@ Per A87, each names the rule a fix should generalize.
 - **Code:** `main` at `b172863`. Since run 11: #187 (A95, Equip probes only the slots the Supplies reference leaves open; remembered posts fade on looks) and #188 (A96, one rule for when a carried potion is spent). The game had just deployed armor defense (worn armor reduces hostile hits, traps and fire/lava), water walking with an armed or worn supply, and the largest-light-radius rule.
 - **Knowledge base:** kept from run 11. Damage per type: snotling `max_hit` 1 (3 hits, 6 misses), gristlewick `max_hit` 2 (6 hits, 3 misses). 1 post. Region (432, 400): 202 cuts, 51 gems.
 - **Verdict:** exit 1, **`FAIL: 1 API error(s): tick 429 rate_limited`** after **600.7 s**. Every other short-run gate passed. The park **parked safe** at (429, 399) after 2.6 s. The character started at **10/10**, 5 lives and **13 gems** at (429, 399), with the bronze_sword armed, the bronze_mail worn and matches ×4 held.
-- **Gate summary:** deaths **0**; API errors **1**; fights below the health floor 0; kills **0**; gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **no** (2 of 3); food taken while hurt **no**; Heal drank a potion **no** (no hurt). Planner: 40 calls, 40 plans accepted, 0 errors.
+- **Gate summary:** deaths **0**; API errors **1**; fights below the health floor 0; kills **0**; gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **no** (2 held; the planner raised `potion_reserve` from 2 to 3 between its two buys, and the gate reads the raised value); food taken while hurt **no**; Heal drank a potion **no** (no hurt). Planner: 40 calls, 40 plans accepted, 0 errors.
 
 #### Planner ops over time
 
@@ -1027,6 +1027,8 @@ Bought, each by a `buy` op, with the planner's reason:
 | 200 s | small_potion | 10 | "Potions first: 0 held vs potion_reserve 2. The mallet (damage 6) is not worth 25 gems yet." |
 | 403 s | small_potion | 10 | "Only 1 is held against a reserve of 3 and the character has 10 max health." |
 | 513 s | bronze_mallet | 25 | "The mallet is a smash tool. The hunting ground ceiling is 7: attack power 2 plus mallet damage 6 plus mail 1 is 9, so the mallet would keep us out of the hunting ground … equip arms the best weapon, so the sword stays armed if the mallet would exceed the ceiling." |
+
+The two reasons quote different reserves because the planner raised `potion_reserve` from the directives' 2 to 3 between the buys (plans may only raise it). The gate counts against the raised reserve, so 2 potions held did not meet it.
 
 Neither potion was drunk: health stayed at 10/10, and #188's spend rule kept them. Run 11 drank its potion 1 s after buying it.
 

@@ -358,7 +358,9 @@ class HealWalkBoundedTest(unittest.TestCase):
         self.assertEqual(dispatch(w, c).intents, [{"verb": "Take", "supply_id": 7}])
         self.assertNotIn(loot_key, c.memory.nav_stuck.attempts)
 
-    def test_heal_walks_to_the_next_safe_tile_once_one_is_given_up(self):
+    def test_heal_gives_safe_ground_up_with_its_one_safe_tile(self):
+        # Free-play run 9: moving on to the next safe tile chained unreachable
+        # tiles into a 217 s loop. One give-up ends safe ground until healed.
         w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"]))
         w.entities = []
         w.zones[1] = {(404, 600): ZoneFact(safe=True), (410, 605): ZoneFact(safe=True), (404, 605): ZoneFact(safe=False)}
@@ -366,7 +368,8 @@ class HealWalkBoundedTest(unittest.TestCase):
         self.assertEqual(out.reason, "heal_measure → (404, 600)")
         nav_stuck.give_up(c.memory, w, nav_stuck.active(c.memory, w), "time")
         out = dispatch(w, c)
-        self.assertEqual(out.reason, "heal_measure → (410, 605)")
+        self.assertNotEqual(out.state, "Heal")
+        self.assertIn((1, (404, 600)), c.memory.safe_unreachable)
 
 
 if __name__ == "__main__":

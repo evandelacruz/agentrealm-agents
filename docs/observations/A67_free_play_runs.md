@@ -1623,7 +1623,7 @@ Per A87, each names the rule a fix should generalize. Backlog: all three fold in
 | 0–192 s | `buy` bronze_mail, `gather_gems` (432, 400) | "Stage 2: no armor worn, only 1 potion." Cut grass at region (432, 400), **9 → 20**. |
 | 192–202 s | `buy` bronze_mail, `equip` | Bought and wore the **bronze_mail** (20 → 0). |
 | 202–340 s | `gather_gems`, `buy` small_potion ×2 | Cut grass, 0 → 10. Bought a **small_potion** at 340 s (10 → 0). |
-| 340–511 s | `gather_gems`, `buy` small_potion, `travel` entrance (532, 311) | "Need 10 for the third potion (2 held, bar 3)." Cut grass, 0 → 10. Bought the third potion at 511 s (10 → 0). **Stage 2 met.** The gather target was rewritten 7 times (20, 14, 15, 16, 17, 10). |
+| 340–511 s | `gather_gems`, `buy` small_potion, `travel` entrance (532, 311) | "Need 10 for the third potion (2 held, bar 3)." Cut grass, 0 → 10. Bought the third potion at 511 s (10 → 0). **Stage 2 met.** The planner kept rewriting the gather target (20, 14, 15, 16, 17, 10). |
 | 511–569 s | `travel` entrance (532, 311) | "Stage 2 met … nearest entrance 88 cells NE, frontier route." Travel went from (423, 399) to (530, 349), `[cautious]` near a snotling and gristlewick pack at (450, 369). |
 | 569–600 s | `travel` entrance (532, 311) | Travel's walk ran out of known ground, and Explore took over as the safe default. It went to (545, 347), **36 cells from the entrance**, then south to (546, 373) (defect 1). Wartlurch 226 hit it for 2 at 581 s and it stepped away four times. Then Explore headed for **(414, 369), 120 cells west**, until time ran out, with one Break walk toward (532, 343) at 597 s. |
 

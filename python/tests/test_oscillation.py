@@ -212,7 +212,7 @@ class PacingDispatchTest(unittest.TestCase):
         w, c = world(at=B), ctx(goto=(0, 0))
         c.memory.nav_stuck.cells_map = w.map_id
         c.memory.nav_stuck.recent_cells = [A, B]
-        c.memory.nav_stuck.recent_moves = [(WALK, "Travel")] * 2
+        c.memory.nav_stuck.recent_moves = [(WALK, "Travel", "")] * 2
         with mock.patch.object(dispatch_module, "STATES", (TravelState(),)):
             out = dispatch_module.dispatch(w, c)
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), A)
@@ -233,8 +233,8 @@ class DetectorTest(unittest.TestCase):
         self.assertFalse(oscillation.pacing([A, B, (4, 0), A, B, (4, 0)]), "three cells")
         self.assertTrue(oscillation.pacing([(4, 0), A, B, A, B, A, B]), "only the last six count")
 
-    def _see(self, m, w, cells, move=("", "")):
-        """Stand on each cell in turn, ``move`` (walk goal, state) having led there."""
+    def _see(self, m, w, cells, move=("", "", "")):
+        """Stand on each cell in turn, ``move`` (walk goal, state, attempt key) having led there."""
         fired = []
         for p in cells:
             w.pos = p
@@ -251,9 +251,9 @@ class DetectorTest(unittest.TestCase):
 
     def test_fires_once_and_gives_up_the_active_attempt(self):
         m, w = Memory(), world()
-        nav_stuck.track(m, w, "goto", GOTO)
+        att = nav_stuck.track(m, w, "goto", GOTO)
         m.path, m.goal = [B, GOTO], "goto"
-        fired = self._see(m, w, [A, B, A, B, A, B], move=("goto", "Explore"))
+        fired = self._see(m, w, [A, B, A, B, A, B], move=("goto", "Explore", att.key))
         self.assertEqual(fired[:5], [None] * 5)
         self.assertEqual(fired[5]["reason"], "pacing")
         self.assertEqual(fired[5]["target"], list(GOTO))
@@ -264,7 +264,7 @@ class DetectorTest(unittest.TestCase):
     def test_an_attempt_that_made_none_of_the_moves_is_kept(self):
         m, w = Memory(), world()
         nav_stuck.track(m, w, "goto", GOTO)
-        fired = self._see(m, w, [A, B, A, B, A, B], move=("safe", "Retreat"))
+        fired = self._see(m, w, [A, B, A, B, A, B], move=("safe", "Retreat", ""))
         self.assertNotIn("goal", fired[5])
         self.assertEqual(fired[5]["states"], ["Retreat"])
         self.assertFalse(nav_stuck.backed_off(m, "goto", 1, GOTO, w.tick))
@@ -274,29 +274,29 @@ class DetectorTest(unittest.TestCase):
         m = Memory()
         m.path, m.goal = [B, GOTO], "goto"
         oscillation.note_move(m, [set_position(B)], "Explore")
-        self.assertEqual(m.nav_stuck.last_move, ("goto", "Explore"))
+        self.assertEqual(m.nav_stuck.last_move, ("goto", "Explore", ""), "no attempt walks it")
         oscillation.note_move(m, [set_position(A)], "Fight")
-        self.assertEqual(m.nav_stuck.last_move, ("", "Fight"), "a step off the path is not the walk's")
+        self.assertEqual(m.nav_stuck.last_move, ("", "Fight", ""), "a step off the path is not the walk's")
         oscillation.note_move(m, None, "")
-        self.assertEqual(m.nav_stuck.last_move, ("", ""))
+        self.assertEqual(m.nav_stuck.last_move, ("", "", ""))
 
     def test_flee_or_retreat_pacing_hands_the_cells_to_the_escape(self):
         m, w = Memory(), world()
-        fired = self._see(m, w, [A, B, A, B, A, B], move=("", "Flee"))
+        fired = self._see(m, w, [A, B, A, B, A, B], move=("", "Flee", ""))
         self.assertTrue(fired[5]["escape"])
         self.assertEqual(oscillation.take_escape(m, w), {A}, "the cell stood on is not escaped")
         self.assertEqual(oscillation.take_escape(m, w), set(), "read once")
 
     def test_escape_cells_last_only_for_the_decision_the_guard_fired_on(self):
         m, w = Memory(), world()
-        self._see(m, w, [A, B, A, B, A, B], move=("", "Flee"))
+        self._see(m, w, [A, B, A, B, A, B], move=("", "Flee", ""))
         # Nothing took them on that decision (Explore ran); the next one starts clean.
-        self._see(m, w, [(4, 0)], move=("", "Explore"))
+        self._see(m, w, [(4, 0)], move=("", "Explore", ""))
         self.assertEqual(oscillation.take_escape(m, w), set())
 
     def test_pacing_with_any_other_state_forces_no_escape(self):
         m, w = Memory(), world()
-        fired = self._see(m, w, [A, B, A, B, A, B], move=("", "Fight"))
+        fired = self._see(m, w, [A, B, A, B, A, B], move=("", "Fight", ""))
         self.assertNotIn("escape", fired[5])
         self.assertEqual(oscillation.take_escape(m, w), set())
 
@@ -314,6 +314,70 @@ class DetectorTest(unittest.TestCase):
         self.assertEqual(m.nav_stuck.recent_cells, [B])
 
 
+
+class PacedBreakStepTest(unittest.TestCase):
+    """Break's walk to a stuck step 2 block paces with another walk: both are given up (A111).
+
+    Free-play run 17: Break walked to the block the Travel walk's step 2
+    nominated and Explore stepped back toward its frontier. The guard gave up
+    only the frontier, Explore's being the active attempt, and the break came
+    back for another 40 s.
+    """
+
+    BLOCK = (9, 0)
+    FRONTIER = (0, 0)
+
+    def setUp(self):
+        self.m, self.w = Memory(), world()
+        self.travel = nav_stuck.track(self.m, self.w, WALK, GOTO)
+        self.travel.level = nav_stuck.BREAK
+        nav_stuck.set_break_target(self.travel, self.BLOCK, "cut")
+        self.explore = nav_stuck.track(self.m, self.w, "explore", self.FRONTIER)
+
+    def pace(self):
+        """Break to B under the Travel attempt, Explore back to A, three times."""
+        fired = []
+        for p in [A, B, A, B, A, B]:
+            self.w.pos, self.w.tick = p, self.w.tick + 1
+            if p == B:
+                self.m.nav_stuck.last_move = ("break", "Break", self.travel.key)
+            else:
+                self.m.nav_stuck.last_move = ("explore", "Explore", self.explore.key)
+            fired.append(oscillation.check(self.m, self.w))
+        return fired[-1]
+
+    def test_note_move_files_the_break_walk_under_the_stuck_attempt(self):
+        m, w = self.m, self.w
+        nav_stuck.track(m, w, WALK, GOTO)
+        m.path, m.goal = [B], "break"
+        oscillation.note_move(m, [set_position(B)], "Break")
+        self.assertEqual(m.nav_stuck.last_move, ("break", "Break", self.travel.key))
+        self.travel.level = nav_stuck.WALK
+        oscillation.note_move(m, [set_position(B)], "Break")
+        self.assertEqual(m.nav_stuck.last_move, ("break", "Break", ""), "a break_block op's walk is no attempt's")
+
+    def test_both_walks_are_given_up_and_the_block_remembered(self):
+        event = self.pace()
+        self.assertEqual(event["goals"], [WALK, "explore"])
+        self.assertEqual(event["breaks"], [list(self.BLOCK)])
+        # Travel's walk leaves step 2 for the reveal, the block forgotten by its ladder.
+        self.assertEqual(self.travel.level, nav_stuck.REVEAL)
+        self.assertEqual(self.travel.reasons, ["pacing"])
+        self.assertIsNone(nav_stuck.break_target(self.travel))
+        self.assertFalse(nav_stuck.backed_off(self.m, WALK, 1, GOTO, self.w.tick), "the travel itself walks on")
+        self.assertTrue(nav_stuck.backed_off(self.m, "explore", 1, self.FRONTIER, self.w.tick))
+        # The block is remembered by A104's rule, so no ladder nominates it again.
+        brk = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
+        self.assertEqual([r.target for r in self.m.stalled_ops], [brk])
+        self.assertEqual(self.m.stalled_ops[0].why, "Break paced between 2,0 and 3,0 walking to it: no way to the block")
+
+    def test_the_owner_op_stays_when_its_step_2_walk_was_given_up(self):
+        event = self.pace()
+        plan = Plan([{"op": "travel", "x": GOTO[0], "y": GOTO[1]}], dict(PARAM_DEFAULTS))
+        event["states"] = ["Break", "Travel"]
+        dispatch_module._stall_paced_op(plan, plan.current(), event, self.w, self.m, None)
+        self.assertEqual(plan.current()["op"], "travel", "it walks on past step 2")
+        self.assertFalse(self.m.strategist_signals)
 
 class OpWalkBack(State):
     """Like Break walking to its ``break_block`` op's block: from B it steps back to A."""
@@ -408,7 +472,7 @@ class PacedOpTest(unittest.TestCase):
     def test_pacing_on_the_owners_own_walk_keeps_the_op(self):
         # Explore's explore_area walk was the one given up: it picks another frontier.
         op = {"op": "explore_area", "x": 9, "y": 0, "radius": 5}
-        paced = {"states": ["Detour", "Explore"], "cells": [[2, 0], [3, 0]], "goal": "explore_area"}
+        paced = {"states": ["Detour", "Explore"], "cells": [[2, 0], [3, 0]], "goals": ["explore_area"]}
         plan, m = self.drop(op, paced)
         self.assertIs(plan.current(), plan.goals[0])
         self.assertFalse(m.strategist_signals)

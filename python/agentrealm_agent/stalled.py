@@ -11,6 +11,11 @@ A record holds until something changes that gives a reason to retry
 (``retry_reason``): an item held that was not held at the stall (a new
 opener), a new clue, or a new way known (a door whose warp is learned, a
 level entrance). The planner sees the records in State ``stalled_ops``.
+
+A block the stuck ladder walked to open and the oscillation guard caught
+pacing on is remembered the same way, as the ``break_block`` it was
+(``navigation/oscillation.py``, A111): ``break_cells`` keeps the ladder from
+nominating it again until the record lapses.
 """
 
 from __future__ import annotations
@@ -98,6 +103,17 @@ def find(records: list[StalledOp], op: dict[str, Any]) -> StalledOp | None:
     """The record of ``op``'s target, or None when it has not stalled."""
     target = target_of(op)
     return next((r for r in records if r.target == target), None)
+
+
+def break_cells(records: list[StalledOp]) -> frozenset[tuple[int, int]]:
+    """The cells of the remembered ``break_block`` targets: a block no walk
+    is sent to open again, by the stuck ladder (``break_memory.nominate_on_path``)
+    or Heal, while its record holds (A111)."""
+    return frozenset(
+        (r.target["x"], r.target["y"])
+        for r in records
+        if r.target.get("op") == "break_block" and isinstance(r.target.get("x"), int) and isinstance(r.target.get("y"), int)
+    )
 
 
 def lapse(records: list[StalledOp], now: RetryBasis) -> list[tuple[StalledOp, str]]:

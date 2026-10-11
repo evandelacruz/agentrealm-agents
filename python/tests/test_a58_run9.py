@@ -194,8 +194,8 @@ class PursuerNotOutrunTest(unittest.TestCase):
         m.flee_path = [back]
         m.nav_stuck.cells_map = w.map_id
         m.nav_stuck.recent_cells = [back, here, back, here, back]
-        m.nav_stuck.recent_moves = [("", "Flee")] * 5
-        m.nav_stuck.last_move = ("", "Flee")
+        m.nav_stuck.recent_moves = [("", "Flee", "")] * 5
+        m.nav_stuck.last_move = ("", "Flee", "")
         w.tick += 5
         # The search's partial path toward the walled-in tile is no way there: Retreat finds none.
         with mock.patch("agentrealm_agent.states.retreat.cost_path", return_value=None):
@@ -216,8 +216,8 @@ class PursuerNotOutrunTest(unittest.TestCase):
         here, back = (10, 10), (9, 9)  # (9, 9) is Retreat's first step with nothing paced
         m.nav_stuck.cells_map = w.map_id
         m.nav_stuck.recent_cells = [back, here, back, here, back]
-        m.nav_stuck.recent_moves = [("", "Flee")] * 5
-        m.nav_stuck.last_move = ("", "Flee")
+        m.nav_stuck.recent_moves = [("", "Flee", "")] * 5
+        m.nav_stuck.last_move = ("", "Flee", "")
         w.tick += 5
         out = dispatch(w, c)
         self.assertIn("retreat → safe (4, 10)", out.reason)

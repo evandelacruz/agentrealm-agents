@@ -80,6 +80,10 @@ HUB_GOALS = frozenset({"travel:town", "travel:shop"})
 
 WALK, CAUTIOUS, BREAK, REVEAL, REVEALED, ALT_ROUTE = 0, 1, 2, 3, 4, 5
 
+# The ``Memory.goal`` of Break's walk to a block: at step 2 it walks for the
+# active attempt, so the oscillation guard files its moves under that attempt.
+BREAK_GOAL = "break"
+
 # Goals that share one key per cell, so a frontier or door dropped under one
 # is skipped by the others (Explore's goals, Level's walks, Heal's zone walk).
 # Every walk to a frontier cell must be registered here as "frontier", or a
@@ -156,12 +160,12 @@ class NavStuckMemory:
     # lapse (``expire_hub_give_ups``).
     given_up_hubs: dict[tuple[int, Pos], tuple[int | None, Pos | None, str]] = field(default_factory=dict)
     # The oscillation guard (navigation/oscillation.py): cells stood on at
-    # recent decisions, the (walk goal, state) of the move into each, the
+    # recent decisions, the (walk goal, state, attempt key) of the move into each, the
     # last decision's move, its events waiting for the trace, and the cells
     # survival-only pacing (Flee, Retreat) must escape from next decision.
     recent_cells: list[Pos] = field(default_factory=list)
-    recent_moves: list[tuple[str, str]] = field(default_factory=list)
-    last_move: tuple[str, str] = ("", "")
+    recent_moves: list[tuple[str, str, str]] = field(default_factory=list)
+    last_move: tuple[str, str, str] = ("", "", "")
     cells_map: int | None = None
     oscillations: list[dict] = field(default_factory=list)
     escape_from: set[Pos] = field(default_factory=set)
@@ -301,6 +305,11 @@ def planning_params(m: Memory, params: CostGridParams) -> CostGridParams:
             fog_cost=FOG_CAUTIOUS,
         )
     return params
+
+
+def set_break_target(att: NavAttempt, pos: Pos, capability: str) -> None:
+    """Step 2's block and the capability to open it: the one Break walks to."""
+    att.break_x, att.break_y, att.break_cap = pos[0], pos[1], capability
 
 
 def clear_break_target(att: NavAttempt) -> None:

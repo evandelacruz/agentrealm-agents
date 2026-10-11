@@ -5,6 +5,14 @@ An engagement starts when a hostile comes within ``policy.hostile_range``
 us within ``survival.THREAT_MEMORY_TICKS``. Its group only grows: a member
 that steps out of range is still in the fight.
 
+An engagement whose decision is fight holds until that fight ends (A113):
+while a member is still in view and in reach (the ``reachable`` test
+dispatch passes: Fight can swing at it or step closer), it does not end,
+and Fight goes on with it (``fight_target``), so a walking op never resumes
+between swings at a hostile that stepped back to its post. It ends when
+every member is dead, gone from view or out of reach, or the decision turns
+(the Retreat and Flee rules then run as for any engagement).
+
 The decision is the win estimate (``survival.win_ratio``: live health, the
 threat table's measured hits and misses, the armed weapon, the armor worn)
 against a bar:
@@ -27,7 +35,7 @@ is carried out.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from .survival import (
     combat_group,
@@ -63,11 +71,19 @@ class Engagement:
     fight: bool = False
 
 
-def sync_engagement(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]) -> Engagement | None:
+def sync_engagement(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    params: dict[str, float | int],
+    reachable: Callable[[Entity], bool] | None = None,
+) -> Engagement | None:
     """Bring ``m.engagement`` up to this decision; None with no hostile in it.
 
     Dispatch calls it once per decision, before any state runs, so every
-    state reads the same decision (``fights``).
+    state reads the same decision (``fights``). A fight goes on while a
+    member is in view and ``reachable`` (``fight_goes_on``; every member in
+    view counts as reachable when it is None).
 
     A hostile that joins the engagement off its post stretches that post's
     reach to where we stand (``WorldModel.note_came_for_us``): it came out
@@ -80,7 +96,7 @@ def sync_engagement(w: WorldModel, m: Memory, policy: Policy, params: dict[str, 
         return None
     joined = combat_group(w, policy)
     e = m.engagement
-    if not joined and (e is None or not recently_attacked(w)):
+    if not joined and (e is None or not (recently_attacked(w) or fight_goes_on(w, e, reachable))):
         m.engagement = None
         return None
     known = e.group if e is not None else frozenset()
@@ -92,6 +108,19 @@ def sync_engagement(w: WorldModel, m: Memory, policy: Policy, params: dict[str, 
     group = known | {(h.kind, h.id) for h in joined}
     m.engagement = decide(w, policy, params, group, e is not None and e.cannot_outrun)
     return m.engagement
+
+
+def held_members(w: WorldModel, e: Engagement | None) -> list[Entity]:
+    """The members of a fight decided on that are still in view: whom the fight goes on with."""
+    if e is None or not e.fight:
+        return []
+    return [h for h in w.entities if (h.kind, h.id) in e.group]
+
+
+def fight_goes_on(w: WorldModel, e: Engagement, reachable: Callable[[Entity], bool] | None = None) -> bool:
+    """A fight decided on goes on: a member is still in view (not dead or
+    gone) and in reach (``reachable``, when given)."""
+    return any(reachable is None or reachable(h) for h in held_members(w, e))
 
 
 def decide(

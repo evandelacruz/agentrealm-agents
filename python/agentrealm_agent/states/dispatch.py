@@ -40,7 +40,7 @@ from .downed import DownedState
 from .equip import EquipState
 from .escape import EscapeState
 from .explore import ExploreState
-from .fight import FightState
+from .fight import FightState, can_engage
 from .flee import FleeState
 from .gather import GatherState
 from .greet import GreetState
@@ -132,7 +132,8 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     ops pop, and an op no state can carry out is dropped. It ages what Step
     rejections taught the map (A14), starts, ends or finishes the boss fight
     (A38), settles a Shop purchase (A21), brings the fight-or-flee decision
-    up to date (A94, ``engagement.sync_engagement``), and notes a policy
+    up to date (A94, ``engagement.sync_engagement``; a fight goes on while
+    Fight can reach a member, A113), and notes a policy
     ``goto`` stood on (A16). After the pick, the top op's stall clock runs unless its
     executor made progress (A34).
 
@@ -145,7 +146,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     m = ctx.memory
     m.nav_stuck.decision += 1
     yielded: list[str] = []
-    paced = oscillation.check(m, world)
+    paced = oscillation.check(m, world, ctx.knowledge)
     if paced is not None:
         yielded.append("oscillation: paced between two cells")
     note_goto_reached(world, m, ctx.policy)
@@ -159,7 +160,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
     if ctx.policy.kind == "scripted":
-        sync_engagement(world, m, ctx.policy, ctx.params)
+        sync_engagement(world, m, ctx.policy, ctx.params, lambda h: can_engage(world, h, ctx))
     op = ctx.plan.current() if ctx.plan is not None else None
     owner = top_executor(ctx)
     try:
@@ -193,9 +194,10 @@ def _stall_paced_op(
     treated as stalled at once: remembered in ``Memory.stalled_ops`` with why
     and what was known then, and moved below the next op that can make
     progress, or dropped when none can (``Plan.demote_current``). The why
-    names the executor, the cells and the other pacers. The op stays when the
-    walk the guard gave up was its own (``OWNER_WALKS``): it then picks
-    another target, or drops itself as Travel does.
+    names the executor, the cells and the other pacers. The op stays when a
+    walk the guard gave up was its own (``OWNER_WALKS``), its step 2 break
+    walk included: it then picks another target, or walks on past step 2,
+    or drops itself as Travel does.
 
     ``op`` is the op that was on top while the character paced. Settling the
     plan may have popped it since (done, or no executor); then nothing moves,
@@ -204,7 +206,7 @@ def _stall_paced_op(
     owner = OP_STATE.get(op["op"])
     if plan.current() is not op or owner is None or owner not in paced["states"] or paced.get("escape"):
         return
-    if paced.get("goal", "").startswith(OWNER_WALKS.get(owner, ())):
+    if any(goal.startswith(OWNER_WALKS.get(owner, ())) for goal in paced.get("goals", [])):
         return
     others = [s for s in paced["states"] if s != owner]
     cells = " and ".join(f"{x},{y}" for x, y in paced["cells"])

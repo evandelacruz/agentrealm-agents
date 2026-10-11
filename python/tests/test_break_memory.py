@@ -31,6 +31,7 @@ from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import grid_params
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
 from agentrealm_agent.runner import Runner
+from agentrealm_agent.stalled import break_cells, lapse as lapse_stalled, remember as remember_stalled, retry_basis
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.break_state import BreakState
 from agentrealm_agent.states.escape import EscapeState
@@ -188,6 +189,54 @@ class StuckLadderOpenersTest(unittest.TestCase):
         self.assertIsNone(out.intents)
         self.assertEqual(att.level, nav_stuck.REVEAL)
         self.assertEqual(att.reasons, ["no_known_opener"])
+
+
+class StalledBreakTest(unittest.TestCase):
+    """A block remembered as a stalled break_block is passed over until the record lapses (A104, A111)."""
+
+    BUSH = {"op": "break_block", "x": 1, "y": 0, "capability": "cut"}
+
+    def remembered(self, w, *ops):
+        records = []
+        for op in ops:
+            remember_stalled(records, op, "Break paced walking to it", 0, retry_basis(w, None))
+        return records
+
+    def test_a_remembered_block_is_not_nominated_or_priced(self):
+        w = _sword_world([".b.b."], at=(0, 0))
+        skip = break_cells(self.remembered(w, self.BUSH))
+        self.assertEqual(skip, {(1, 0)})
+        self.assertEqual(nominate_on_path(w, None, (0, 0), (4, 0), skip).pos, (3, 0))
+        self.assertEqual(set(break_costs_for_planning(w, None, (4, 0), skip)), {(3, 0)})
+
+    def test_with_only_remembered_blocks_the_ladder_moves_on(self):
+        w = _sword_world([".b..."], at=(0, 0))
+        m = Memory()
+        m.stalled_ops = self.remembered(w, self.BUSH)
+        self.assertEqual(no_break_reason(w, None, (0, 0), (4, 0), break_cells(m.stalled_ops)), "stalled_break")
+        att = nav_stuck.track(m, w, "goto", (4, 0))
+        att.level = nav_stuck.BREAK
+        c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
+        out = BreakState().act(w, c)
+        self.assertIsNone(out.intents)
+        self.assertEqual(att.level, nav_stuck.REVEAL)
+        self.assertEqual(att.reasons, ["stalled_break"])
+
+    def test_the_stuck_ladder_keeps_the_block_it_walks_to(self):
+        w = _sword_world([".b..."], at=(0, 0))
+        m = Memory()
+        att = nav_stuck.track(m, w, "goto", (4, 0))
+        att.level = nav_stuck.BREAK
+        c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
+        BreakState().act(w, c)
+        self.assertEqual((nav_stuck.break_target(att), att.break_cap), ((1, 0), "cut"))
+
+    def test_the_block_returns_once_something_gives_a_reason(self):
+        w = _sword_world([".b..."], at=(0, 0))
+        records = self.remembered(w, self.BUSH)
+        w.held_supplies = [*w.held_supplies, InventorySupply(6, "bronze_mallet")]
+        lapse_stalled(records, retry_basis(w, None))
+        self.assertEqual(break_cells(records), frozenset())
 
 
 class BreakOpRefusalTest(unittest.TestCase):

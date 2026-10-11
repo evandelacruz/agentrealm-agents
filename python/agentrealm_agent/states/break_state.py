@@ -26,13 +26,14 @@ from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, nav_search, next_step
 from ..plan import GoalOp
+from ..stalled import break_cells
 from ..world import WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets
 from .intents import arm, set_position, use_block
 from .solve import held_supply, use_reach
 
-GOAL = "break"
+GOAL = nav_stuck.BREAK_GOAL
 GOAL_STATE = "Break"  # only Break's own arming counts against stuck step 2, not Heal's
 
 
@@ -42,17 +43,20 @@ def _stuck_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
         return None
     if att.break_x is not None and att.break_y is not None and att.break_cap:
         pos = (att.break_x, att.break_y)
-        if attempt_failed(ctx.knowledge, w.map_id, pos, att.break_cap):
-            # That pair failed or was refused: nominate afresh, or escalate past step 2.
-            nav_stuck.clear_break_target(att)
-            return nominate_on_path(w, ctx.knowledge, w.pos, att.target) if w.pos is not None else None
-        supply = pick_supply_for_capability(w, att.break_cap, ctx.knowledge)
-        if supply is None:
-            return None
-        return BreakChoice(pos, att.break_cap, supply, break_step_cost(ctx.knowledge, supply.code))
+        if not attempt_failed(ctx.knowledge, w.map_id, pos, att.break_cap):
+            supply = pick_supply_for_capability(w, att.break_cap, ctx.knowledge)
+            if supply is None:
+                return None
+            return BreakChoice(pos, att.break_cap, supply, break_step_cost(ctx.knowledge, supply.code))
+        # That pair failed or was refused: nominate afresh, or escalate past step 2.
+        nav_stuck.clear_break_target(att)
     if w.pos is None:
         return None
-    return nominate_on_path(w, ctx.knowledge, w.pos, att.target)
+    choice = nominate_on_path(w, ctx.knowledge, w.pos, att.target, break_cells(ctx.memory.stalled_ops))
+    if choice is not None:
+        # Kept on the attempt, so the walk to it is the one the oscillation guard gives up (A111).
+        nav_stuck.set_break_target(att, choice.pos, choice.capability)
+    return choice
 
 
 def _op_refusal(w: WorldModel, ctx: PlayContext, op: GoalOp) -> str | None:
@@ -106,7 +110,8 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
     if choice is None:
         att = nav_stuck.active(m, w)
         if att is not None and att.level == nav_stuck.BREAK:
-            why = no_break_reason(w, ctx.knowledge, w.pos, att.target) if w.pos is not None else "no_break"
+            skip = break_cells(m.stalled_ops)
+            why = no_break_reason(w, ctx.knowledge, w.pos, att.target, skip) if w.pos is not None else "no_break"
             nav_stuck.escalate(m, w, att, why)
         return StateOutcome(None, "nothing to break", state=state)
     return break_toward(w, ctx, choice, state)

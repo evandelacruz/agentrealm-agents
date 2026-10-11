@@ -90,7 +90,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Rolls.**
   - To hit: d20 + attack ≥ 10 + target defense + target armor defense. 1 always misses, 20 always hits.
   - Damage: uniform from 1 to max(1, attack + weapon damage), less defense and armor defense, never below 0. Weapon damage adds to attack power for this roll only; it does not change the roll to hit (M §11).
-  - Armor counts only worn: its `defense` protects against weapon hits, hostile and boss hits, traps and damaging blocks; armor in hand protects nothing (M §11, CL B138).
+  - Armor counts only worn: its `defense` protects against weapon hits, hostile and boss hits, traps and, since B138, damaging blocks (`occupy_damage`, before cut by defense alone); armor in hand protects nothing (M §11, CL B138). The route planner prices a hazard step at the `occupy_damage` that gets through (A96).
   - Die size, hit target and minimum are per-world settings (API Use).
   - Every Olympuff character has permanent attack power 2, existing characters included; permanent defense stays 0 (M §16, CL). A d20 roll of 8+ hits a hostile, which has no defense: 65%. Damage is 1 up to 2 plus weapon damage: the pocket knife deals 1–4, a bronze sword 1–6. The world's hit target stays 10, so hostiles' swings at characters are unchanged.
   - The API serves no attack power (PLAN.md **Server gaps**); the agent's win estimate uses the base of 2 (`survival.BASE_ATTACK_POWER`).

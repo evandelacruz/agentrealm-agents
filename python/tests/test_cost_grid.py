@@ -50,6 +50,17 @@ class CostGridTest(unittest.TestCase):
         self.assertIsNotNone(p)
         self.assertNotIn((1, 0), p)
 
+    def test_hazard_cost_is_net_of_worn_armor(self):
+        # Worn armor cuts occupy_damage (A96); armor in hand protects nothing.
+        w = grid([".~.", "...", "..."], at=(0, 1))
+        w.view.damage[(1, 0)] = 4
+        w.armed_code = "iron_mail"
+        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 4)
+        w.worn_codes = {"body": "bronze_mail"}
+        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 3)
+        w.worn_codes = {"body": "adamant_mail", "head": "iron_helm"}
+        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 0)
+
     def test_hazard_with_unnamed_damage_costs_a_costly_step(self):
         w = grid(["~"])
         self.assertEqual(_Grid(w, {(5, 5)}, CostGridParams()).cost((0, 0)), 1 + COSTLY_STEP)

@@ -449,7 +449,7 @@ def _gather_cells(
         return _cut(w, m, knowledge, here, "cut grass", state)
 
     # A target that no longer qualifies is let go, whoever walked last.
-    if not _still_wanted(w, m.gather_target, policy, cuttable, here in safe, d, pile_region):
+    if not _still_wanted(w, m.gather_target, policy, cuttable, here in safe, d, pile_region, odds):
         if m.goal == GOAL:
             m.path, m.goal = [], ""
         m.gather_target = None
@@ -629,6 +629,7 @@ def _still_wanted(
     on_safe: bool,
     d: Danger | None = None,
     pile_region: tuple[int, int] | None = None,
+    odds: Callable[[], GemOdds] | None = None,
 ) -> bool:
     """The committed target still exists and may still be worked (A71).
 
@@ -653,9 +654,16 @@ def _still_wanted(
         # to cut or a pile coming into sight is ``_gather_cells``'s to judge.
         return _clear_of_hostiles(w, policy, pos, d)
     if kind == FRONTIER:
-        # Kept until its cell is no longer unexplored ground's edge: what the
-        # walk revealed is then priced again.
-        return pos in w.view.frontier() and gather_ground(w, pos, policy, d)
+        # Kept until its cell is no longer unexplored ground's edge (what the
+        # walk revealed is then priced again), and only while it would still
+        # be priced: Gather works anywhere (``odds``, None once it works only
+        # in a target region) and the edge's region is not skipped.
+        return (
+            odds is not None
+            and region_of(pos) not in odds().skip
+            and pos in w.view.frontier()
+            and gather_ground(w, pos, policy, d)
+        )
     if kind == OUT:
         # Kept while on safe ground: it was planned because no cut was
         # reachable, so re-checking ``preferred`` each tick would only replan

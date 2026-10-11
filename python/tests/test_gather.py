@@ -802,6 +802,23 @@ class GatherPricesUnexploredGroundTest(unittest.TestCase):
         gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
         self.assertEqual(m.gather_target, ("grass", (40, 1)))
 
+    def test_a_walk_to_an_edge_ends_once_a_target_region_is_worked(self):
+        w, m = self.world(), Memory()
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
+        named = {"op": "gather_gems", "count": 3, "x": 40, "y": 1}
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=named)
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))
+
+    def test_a_walk_to_an_edge_ends_once_its_region_is_skipped(self):
+        w, m = self.world(), Memory()
+        op = {"op": "gather_gems", "count": 3}
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
+        with mock.patch.object(gather_mod, "barren_regions", return_value={(0, 0)}):
+            gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))
+
     def test_safe_ground_edges_are_not_priced(self):
         w = self.world()
         safe(w, (0, 1), (1, 1))

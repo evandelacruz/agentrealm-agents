@@ -992,3 +992,88 @@ Per A87, each names the rule a fix should generalize.
 3. **Remembered posts fade on world time between sessions** (`world.py:58–68`, `POST_HALF_LIFE_TICKS`). The 13 posts saved by run 10 were 2.4 h old by the start of run 11: 7 to 29 half-lives, since the half-life is 5 min times the spells on post (at most 4). All 13 fell below the forget line on load, among them the chugbug pack's post south-west of town, which runs 8 and 9 found manned. The fade was built for posts out of view during play (run 9's wall of posts). Applied to time the agent was not playing, it forgets every post between sessions. That cost nothing here, because nothing hit it near a forgotten post. **Rule (a design question for the planner or Evan):** time not playing should count as one spell out of view, or not at all, not as hours of out-of-view time. (Addressed in A95: a post fades only while it is in sight with its guard gone; one nobody looked at keeps its strength.)
 
 **Minor:** Snotling 247 respawned at its post and was killed twice. The first kill dropped a gem, the second did not. Kill drops are not certain. The planner set `fight: false` at 194 s ("a snotling pack 20 cells away"), and Gather kept away from it; the second fight came from the shadow rule.
+
+### Run 12: 35 gems from grass, a 25-gem mallet armed for 11 s and then shelved, and one rate-limited call fails the gate
+
+- **Code:** `main` at `b172863`. Since run 11: #187 (A95, Equip probes only the slots the Supplies reference leaves open; remembered posts fade on looks) and #188 (A96, one rule for when a carried potion is spent). The game had just deployed armor defense (worn armor reduces hostile hits, traps and fire/lava), water walking with an armed or worn supply, and the largest-light-radius rule.
+- **Knowledge base:** kept from run 11. Damage per type: snotling `max_hit` 1 (3 hits, 6 misses), gristlewick `max_hit` 2 (6 hits, 3 misses). 1 post. Region (432, 400): 202 cuts, 51 gems.
+- **Verdict:** exit 1, **`FAIL: 1 API error(s): tick 429 rate_limited`** after **600.7 s**. Every other short-run gate passed. The park **parked safe** at (429, 399) after 2.6 s. The character started at **10/10**, 5 lives and **13 gems** at (429, 399), with the bronze_sword armed, the bronze_mail worn and matches ×4 held.
+- **Gate summary:** deaths **0**; API errors **1**; fights below the health floor 0; kills **0**; gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **no** (2 held; the planner raised `potion_reserve` from 2 to 3 between its two buys, and the gate reads the raised value); food taken while hurt **no**; Heal drank a potion **no** (no hurt). Planner: 40 calls, 40 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–13 s | `gather_gems:60`, `buy` bronze_sword, `buy` bronze_mail, `buy` small_potion ×2, `equip` | Call 1's State came before the first sync: `armed=None`, `worn={}`, `held={}` (defect 3). Call 2 dropped the sword and mail ("already held and worn") and added `buy` bronze_mallet for the hollow-rock clue. |
+| 13–193 s | `gather_gems:60`, `buy` small_potion ×2, `buy` bronze_mallet, then the mallet dropped (164 s) | Cut grass in (432, 400), 13 → 25. At 164 s the planner dropped the mallet: "Potions matter more at 10 health, and the sword already cuts and chops." |
+| 193–398 s | `buy` small_potion ×2, `gather_gems:60` | Bought a **small_potion** at 200 s (**25 → 15**). Cut grass, 15 → 27. |
+| 398–503 s | `buy` small_potion, then `buy` bronze_mallet again (464 s) | Bought a second **small_potion** at 403 s (**27 → 17**). The tick at 474.7 s was refused `429 rate_limited` (defect 1). Cut grass, 17 → 26. |
+| 503–600 s | `buy` bronze_mallet, `equip`, `gather_gems:60` | Bought the **bronze_mallet** at 513 s (**26 → 1**). Equip **armed the mallet** in place of the sword at 514 s (defect 2). About 11 s later, Gather re-armed the sword to cut grass ("arm bronze_sword, cut grass"), and the sword stayed armed. Cut grass, 1 → 3. |
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **13** | **3** (+35 earned, −45 spent) |
+| Armed | bronze_sword | bronze_sword (the mallet from 514 s to about 525 s) |
+| Worn | bronze_mail | bronze_mail |
+| Held | matches ×4 | matches ×4, small_potion ×2, bronze_mallet |
+| Potions | 0 | **2** |
+
+Bought, each by a `buy` op, with the planner's reason:
+
+| Time | Item | Gems | Planner's reason |
+|---|---|---|---|
+| 200 s | small_potion | 10 | "Potions first: 0 held vs potion_reserve 2. The mallet (damage 6) is not worth 25 gems yet." |
+| 403 s | small_potion | 10 | "Only 1 is held against a reserve of 3 and the character has 10 max health." |
+| 513 s | bronze_mallet | 25 | "The mallet is a smash tool. The hunting ground ceiling is 7: attack power 2 plus mallet damage 6 plus mail 1 is 9, so the mallet would keep us out of the hunting ground … equip arms the best weapon, so the sword stays armed if the mallet would exceed the ceiling." |
+
+The two reasons quote different reserves because the planner raised `potion_reserve` from the directives' 2 to 3 between the buys (plans may only raise it). The gate counts against the raised reserve, so 2 potions held did not meet it.
+
+Neither potion was drunk: health stayed at 10/10, and #188's spend rule kept them. Run 11 drank its potion 1 s after buying it.
+
+#### Gems earned
+
+**35** in 600 s, **3.5 a minute** (run 11: 4.6). All 35 came from grass, in 196 cuts (18%), all in region (432, 400). That region now holds 398 cuts and 86 gems. No pile and no kill. The (413–415, 414) piles were in view from 13 s but were never priced into a Detour (0 Detour decisions).
+
+#### Fights
+
+None. No hostile came within reach of region (432, 400), and the character took no damage. So the run has no data on armor defense (B138), and no water walking or new rejection came up.
+
+#### Run 11 defects, checked
+
+| Defect | Run 12 | |
+|---|---|---|
+| Heal drinks the reserve potion at any hurt (#188) | **Gone, in part.** Both potions were kept. Not a hard test: health never dropped. | |
+| Equip probes `Wear` on a tool (#187) | **Gone.** No `Wear` sent; matches ×4 held untouched. | |
+| Posts fade between sessions (#187) | **Not tested.** 1 post at the start, none near the run. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 152,486, output 9,078, cache write 104,289, cache read 4,067,271 |
+
+#### Decision mix
+
+Intents: 300 `Step`, 276 `Wait`, 196 `Use` (all cuts), 38 `Take`, 2 `Arm`. Call mix: 916 `tick`, 220 `entities`, 84 `strategist`, 60 `self`, 8 `terrain`, 6 `zone`, 3 `position`, plus the one refused `tick`.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize.
+
+1. **A held-queue poll goes over the call budget** (`runner.py:662–664`, `Pacer` at `runner.py:157–169`). At 473.7–474.7 s the runner sent four `tick` calls in about 1 s, inside game ticks 7985283–7985284: a cut, then two "queue held" polls with no intents, then the call the server refused `429 rate_limited`. A strategist call came at the same time. One refused call is enough to fail the M8 gate. **Rule:** no decision path may exceed one request per tick (burst 3). The held-queue poll waits on the `Pacer` like every other call. Changing the pacing is flagged in AGENTS.md, so the fix needs Evan's eye.
+
+   ```
+   473.74 s  tick 7985283  Use (cut grass)
+   474.02 s  tick 7985283  queue held
+   474.31 s  tick 7985283  queue held
+   474.65 s  tick 7985284  → 429 rate_limited
+   474.76 s  strategist (call 31)
+   ```
+
+2. **The planner, Equip and Gather each have their own best weapon, and 25 gems bought a weapon that ended up held, not armed** (`equip.py:181–185`, `strategist.py:216`). Equip ranks held weapons by damage alone, so it armed the bronze_mallet (6) over the sword at 514 s. Gather then re-armed the sword to cut grass (the mallet smashes; it does not cut), and the sword stayed armed for the rest of the run. The planner bought the mallet believing "equip arms the best weapon, so the sword stays armed if the mallet would exceed the ceiling". By its own count, attack power 2 plus 6 plus mail 1 is 9, over the hunting ground's ceiling of 7. The planner had also dropped the mallet at 164 s and 193 s as not worth 25 gems, then bought it at 503 s with 26 held, leaving 1. **Rule:** one rule for the weapon to arm, read by the planner, Equip and Gather. It counts the job at hand (cutting, fighting) and the hunting-ground ceiling. A purchase is planned against that rule, so the planner knows what the item will do once bought.
+
+3. **The first planner call is asked before the first full sync** (`strategist.py:1156`, the `map` trigger). Call 1, at tick 3, saw `armed=None`, `worn={}`, `held={}` and unread gems. It planned to buy the sword and mail the character already had. Call 2 dropped them 10 s later, so it cost one wasted call and no gems. Runs 9–11 show the same first State. **Rule:** the planner's first ask waits until self and inventory have been read once.
+
+**Minor:** No Detour went for the (413–415, 414) piles, in view for most of the run 15–20 cells from the cutting ground. Grass yield fell from 27% (run 11) to 18% in the same region.

@@ -308,6 +308,17 @@ class KillTest(unittest.TestCase):
         m.on_events(killed(5))
         self.assertEqual((m.kills, m.weak_hostile_kills), (1, 1))
 
+    def test_weak_is_judged_through_the_armor_worn(self):
+        # A hit is filed gross of armor (A97): a type that hits 3 is weak
+        # through bronze mail, priced at 2 as the win estimate prices it.
+        m = metrics()
+        w = weak_fight_world()
+        w.threat.record(("npc", "snotling"), 3)
+        w.worn_codes = {"body": "bronze_mail"}
+        decide(m, w, state="Fight", intents=SWING)
+        m.on_events(killed(5))
+        self.assertEqual((m.kills, m.weak_hostile_kills), (1, 1))
+
     def test_weak_kill_on_a_later_held_queue_tick(self):
         m = metrics()
         w = weak_fight_world()

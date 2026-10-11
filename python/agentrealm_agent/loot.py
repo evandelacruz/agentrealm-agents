@@ -27,7 +27,7 @@ from typing import Any
 from typing import TYPE_CHECKING
 
 from .item_table import InventorySupply
-from .supplies import heals
+from .supplies import chest_capacity, heals
 from .world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -45,11 +45,6 @@ GEM_PILE_STEPS = 8
 # A life's ground code once live play confirms it (A47). Until then the item
 # table's ``life_on_pickup`` rows, learned by ``learn_life_code``, stand in.
 LIFE_SUPPLY_CODES: frozenset[str] = frozenset()
-# Carry caps the Manual §16 gear table gives for the shop's chest upgrades.
-# Assumed, not measured (GAME_NOTES "Assumed until measured"): an applied
-# ``Take`` of one raises capacity to this, and ``carry_capacity_full`` still
-# lowers it to what was really carried (A47).
-MANUAL_CHEST_CAPACITY: dict[str, int] = {"middle_chest": 30, "red_chest": 100}
 
 LIFE_SCORE = 10_000
 GEM_SCORE = 5_000
@@ -178,9 +173,12 @@ def supply_code_for_take(intent: dict | None, entities: list[Entity]) -> str | N
 
 
 def learn_chest_upgrade(w: WorldModel, code: str | None) -> None:
-    """An applied ``Take`` of a chest upgrade raises carry capacity to the
-    Manual §16 cap (assumed, not measured; A47)."""
-    cap = MANUAL_CHEST_CAPACITY.get(code or "")
+    """An applied ``Take`` of a chest raises carry capacity to its Supplies
+    reference ``chest_capacity`` when that is larger; one no larger (the blue
+    chest, the size a character starts with) changes nothing. Assumed, not
+    measured (GAME_NOTES "Assumed until measured"): ``carry_capacity_full``
+    still lowers it to what was really carried (A47)."""
+    cap = chest_capacity(code)
     if cap is not None:
         w.carry_capacity = max(w.carry_capacity, cap)
 

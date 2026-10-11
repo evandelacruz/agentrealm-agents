@@ -10,6 +10,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from ..supplies import worn_armor_defense
 from ..world import DOORS, NEIGHBOURS, VOID, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
 
 # Base step costs (PLAYABLE_AGENT_PLAN Navigation §1). Every step costs at
@@ -24,7 +25,9 @@ OCCUPANT = 50
 HOSTILE_DANGER = 30
 HOSTILE_DANGER_RADIUS = 6
 # Extra cost of a step onto a `costly` tile, or onto fire/lava whose
-# occupy_damage no read has named: worth a long detour to avoid one.
+# occupy_damage no read has named: worth a long detour to avoid one. A named
+# occupy_damage costs what gets through: less the defense of the armor worn,
+# never below 0 (Manual §11), as the character's defense stays 0.
 COSTLY_STEP = 100
 HAZARDS = ("fire", "lava")
 
@@ -140,6 +143,7 @@ class _Grid:
         # The single goal of a cost_path search (A13); None for a flood.
         self.goal: Pos | None = next(iter(goals)) if len(goals) == 1 else None
         self.tiles = w.view.tiles
+        self.armor = worn_armor_defense(w.worn_codes.values())  # cuts occupy_damage
         if same_world is not None:
             assert same_world.w is w and same_world.params is params
             self.occupied, self.hostiles = same_world.occupied, same_world.hostiles
@@ -214,7 +218,7 @@ class _Grid:
             return None  # void, blocked, or an unknown type
         if block in HAZARDS:
             dmg = self.w.view.occupy_damage(p)
-            base += COSTLY_STEP if dmg is None else dmg
+            base += COSTLY_STEP if dmg is None else max(0, dmg - self.armor)
         if p in params.costly:
             base += COSTLY_STEP
         base += params.priced.get(p, 0) * KNOWN_WALKABLE

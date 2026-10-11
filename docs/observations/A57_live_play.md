@@ -35,8 +35,9 @@ before re-queuing. Space `GET …/entity-tiles` at least ~1 s from burst movemen
 - **Not measured.** **smoke-character-a** held 10 gems at the end of the pass; no character
   reached 50 gems or applied a `Take` of `middle_chest`. Manual §16 cap (30) remains the assumed
   default in code until measured.
-- **Still open (A57):** buy `middle_chest`, fill until `carry_capacity_full`, and replace
-  `MANUAL_CHEST_CAPACITY` for `middle_chest` with the measured slot count.
+- **Still open (A57):** buy `middle_chest`, fill until `carry_capacity_full`, and check the
+  measured slot count against the Supplies reference's `chest_capacity` (30), which replaced
+  the hardcoded `MANUAL_CHEST_CAPACITY` in A97.
 
 ## API notes
 

@@ -19,6 +19,10 @@ each class in this package and in ``docs/CHARACTER_AND_STATES.md``.
 
 from __future__ import annotations
 
+import random
+from collections.abc import Callable
+from typing import TypeVar
+
 from ..navigation import oscillation
 from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import end_decision
@@ -117,6 +121,47 @@ PARK_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name in SURVIVAL
 # once a boss fight is engaged (``Memory.boss``).
 _BOSS = next(s for s in EXECUTORS if s.name == "Boss")
 PROBE_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name not in (GreetState.name, UseItemState.name)) + (_BOSS,)
+# Memory the held-queue probe puts back even when its reflex is sent: the
+# navigation learnings and stuck attempts (only a real decision window ages or
+# escalates them, A14, A15), the boss fight (it belongs to the stack, A38), and
+# Greet's tries (its hello waits for a decision window, A65).
+PROBE_NEVER_KEEPS = ("nav", "nav_stuck", "boss", "greetings")
+
+D = TypeVar("D")
+
+
+def probe_held_queue(
+    m: Memory,
+    rng: random.Random,
+    plan: Plan,
+    decide: Callable[[], D],
+    sends: Callable[[D], bool],
+) -> D | None:
+    """The held-queue probe (A64): ``decide`` run with ``PROBE_STATES`` while a
+    queue is held; its answer when ``sends`` says it is sent, else None.
+
+    The probe has no side effects on memory unless its answer is sent:
+    memory is snapshot before it and put back whole when nothing is sent
+    (its search caches aside, ``memory.SEARCH_CACHES``), and so are the rng
+    and the goal stack. A pick, a try, a commitment or a re-arm made for an
+    answer that is not sent never happened (A71, A24, A22, A77): a ``Use``
+    the probe only decided spends no try. The goal stack is put back even
+    when the answer is sent: reflexes never consume its ops (A34). So is
+    ``PROBE_NEVER_KEEPS``.
+    """
+    saved = m.snapshot()
+    saved_rng = rng.getstate()
+    saved_plan = plan.snapshot()
+    try:
+        d = decide()
+    finally:
+        plan.restore(saved_plan)
+        m.restore(saved, PROBE_NEVER_KEEPS)
+    if sends(d):
+        return d
+    m.restore(saved)
+    rng.setstate(saved_rng)
+    return None
 
 
 def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:

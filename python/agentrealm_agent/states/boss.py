@@ -8,13 +8,12 @@ from ..executor import build_attack_queue, queue_horizon_intents
 from ..healing import potion_count
 from ..memory import BossFight, Memory
 from ..navigation import cost_path
-from ..pathing import grid_params, guided_step, nav_search, next_step
+from ..pathing import grid_params, guided_step, nav_search, next_step, plan_sets
 from ..plan import GoalOp, Plan
 from ..engagement import fights
 from ..survival import should_retreat
 from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
-from .explore import plan_sets
 from .fight import (
     ATTACK_USES,
     attack_intent,

@@ -22,7 +22,7 @@ import unittest
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.hostile_ground import POST_REACH_CAP, danger, hostiles_within, known_reach
-from agentrealm_agent.hostile_memory import SIGHTINGS_KEY, load_hostiles, save_hostiles
+from agentrealm_agent.knowledge_base.hostiles import SIGHTINGS_KEY, load_hostiles, save_hostiles
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states.gather import gather_outcome

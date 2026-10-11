@@ -10,7 +10,7 @@ from ..loot import Pickup, loot_score
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, nav_search, next_step
+from ..pathing import grid_params, nav_search, next_step, plan_sets
 from ..healing import supply_matches
 from ..plan import GoalOp, explore_targets
 from ..shop import (
@@ -25,7 +25,7 @@ from ..travel.ops import TravelOp
 from ..travel.resolve import ResolvedDestination, given_up_travel, resolve_travel
 from ..world import Entity, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
-from .explore import explore_outcome, plan_sets
+from .explore import explore_outcome
 from .intents import set_position
 from .room import planned_take
 from .travel import walk_to

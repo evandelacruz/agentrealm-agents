@@ -904,8 +904,8 @@ def held_line(w: WorldModel, knowledge: KnowledgeBase | None = None) -> str:
         entry.update(what_it_does(code))
         slots = entry.pop("chest_capacity", None)
         if slots is not None:
-            # A chest is the pack's size, not a consumable (A106): carry_slots
-            # it gives, applied once it raised the pack to them (State pack slots_total).
+            # A chest shows the pack's size (A106): carry_slots it gives, applied once
+            # its Use on yourself raised the pack to them (A108, State pack slots_total).
             entry.update({"class": "chest", "carry_slots": slots, "applied": chest_applied(code, w.carry_capacity)})
         breaks = capabilities_for_code(code, knowledge) - set(entry.get("use", []))
         if breaks:

@@ -191,6 +191,16 @@ class EquipAppliesNothingTest(unittest.TestCase):
         dispatch(world(), c)
         self.assertIn("not held", failures(c)[-1]["reason"])
 
+    def test_equip_of_a_refused_weapon_is_dropped(self):
+        w = world()
+        w.held_supplies = [InventorySupply(5, "iron_sword")]
+        m = Memory()
+        m.equip_refused.add(("iron_sword", "armed"))
+        c = ctx(plan({"op": "equip", "code": "iron_sword"}), m)
+        EquipState().act(w, c)
+        self.assertIsNone(c.plan.current())
+        self.assertIn("was refused", failures(c)[-1]["reason"])
+
     def test_a_named_weapon_waits_while_another_state_holds_the_armed_slot(self):
         w = world()
         w.held_supplies = [InventorySupply(5, "iron_sword")]

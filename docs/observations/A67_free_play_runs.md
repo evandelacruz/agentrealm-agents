@@ -1143,13 +1143,77 @@ Per A87, each names the rule a fix should generalize.
 
 3. **The planner cannot see pack space** (`strategist.py:836`, State `held=`). The State lists held items and counts, but not slots used or the pack's size. So a buy that needs a drop is planned without knowing it. The pack carries a 25-gem mallet and a spare knife that no rule arms while gathering. **Rule:** State shows slots used and total, and the arc weighs what an unused item costs in pack room.
 
-### Run 14: Break and Explore pace for 300 s, and the stuck ladder tries every tool on every block
+### Run 14: the plan moves on to stage 3, and 0 gems in 600 s; walls, a hollow rock and a 300 s pacing loop
 
-Only the two defects that A103 addresses are recorded here, as reported from the run's trace; the run's full summary was not filed.
+- **Code:** `main` at `ef2ad80`. Since run 13: A101 (#194, a met progression stage moves on; State shows readiness per stage) and A102 (#195, pack room is the planner's call; State shows slots used and total, and reserved items).
+- **Knowledge base:** kept from run 13. Damage per type unchanged. 1 post. Region (432, 400): 603 cuts, 122 gems. 8 level entrances, the nearest 105–127 cells off.
+- **Verdict:** exit 0, `PASS` after **603.0 s**, on the short-run gates only. The park **parked safe** at (404, 374) after 0.3 s. The character started at **10/10**, 5 lives and **29 gems** at (427, 399), with the bronze_sword armed, the bronze_mail worn, and the pack full (10/10 slots): small_potion ×3, matches ×3, the bronze_mallet and the pocket_knife among them.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; kills **0**; gems earned **no** (29 → 29); armor **yes**; shop weapon **yes**; potion reserve **yes**; food taken while hurt **no**; Heal drank a potion **no**. Planner: 40 calls, 38 plans accepted, 1 error (a reply that was not JSON, at 344 s; the stack was kept).
 
-#### Top defects
+#### Planner ops over time
 
-Per A87, each names the rule a fix should generalize.
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–168 s | `travel` entrance (300, 316) | Call 1, at 7.8 s, read `readiness` with stage 1 and stage 2 both met: "Stage 2 is met … Heading to the north-west entrance to match the burnable-hedge clue." It was 127 cells off. Walls blocked the way west and north of town. Travel's stuck ladder reached its Break level and tried cut, chop, smash and burn on 6 blocking cells between 63 s and 160 s (defect 2). None opened, and stuck gave up the entrance at about 168 s. |
+| 168–247 s | `travel` point (380, 376), `break_block` (379, 375), `equip` bronze_mallet, `gather_gems` | The planner turned to the farmer's hollow rock at (379, 375), with the mallet. Four more blocking cells, at (380–384, 376–378), were tried with every tool. The travel point was given up. |
+| 247–553 s | `break_block` (379, 375), then `equip` bronze_sword (352 s), `gather_gems` (432, 400) | **Break and Explore took turns for 306 s** between (391, 375) and (401, 375). Break walked west toward the rock, and Explore walked east toward a frontier at (424, 371–374). The oscillation guard fired 11 times and the loop went on (defect 1). |
+| 553–600 s | `travel` point (380, 375), `break_block` (379, 375), `gather_gems` (432, 400) | "Explore got stuck pacing against a wall, so go to the hollow rock directly." Travel reached (380, 375). One mallet smash at 564.8 s had no effect. Explore again until the stop. `gather_gems` never ran (defect 3). |
 
-1. **Two states paced between two cells for 300 s** (`navigation/oscillation.py`, `states/break_state.py`). Break, walking to the block of its `break_block` op, and Explore, walking to a frontier, took turns stepping the character between the same two cells. The oscillation guard fired 11 times, but each time it gave up only the active walk's target, Explore's frontier: Explore picked the next one, and Break kept its op, whose every step toward the block counted as progress, so the op never stalled out. **Rule:** two states pacing between each other give up the op that cannot progress, not just a walk target, and the planner is told that op stalled and why. (Addressed in A103: dispatch drops the top op when its executor was one of the pacers, with a `goal_failed` naming the states and cells.)
-2. **The stuck ladder tried every held capability on every blocking cell** (`navigation/stuck.py` step 2, `break_memory.nominate_on_path`). Cut, chop, smash and burn were each tried on each blocking cell, swapping the armed item every time: 34 `Arm` intents over 9 blocks, about 100 s, and nothing opened. **Rule:** a block is tried only with a capability its block type's documented rule or break memory says opens it; a block with no known opener among held items is routed around or reported, and a failed try is not repeated. (Addressed in A103: `break_memory.BLOCK_OPENERS` and `known_openers`; step 2 fails `no_known_opener` and the ladder reveals a way round.)
+#### Stage 3, drops and chests
+
+- **Stage 3:** reached on call 1 (A101). The plan went for the level entrance nearest the burnable-hedge clue, (300, 316), and was given up at walls. **No level was tried.**
+- **Drops:** none. The pack was full (10/10) all run. The planner chose to keep it that way: "The pack is full (10/10), so there are no buys until room opens." No Shop drop happened (A102).
+- **Chests:** the planner named the middle_chest (50 gems) as "the only upgrade for sale" and its next gem target ("gather gems toward the middle chest (50)"). It did not buy one: it had 29 gems.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **29** | **29** (0 earned, 0 spent) |
+| Armed | bronze_sword | bronze_sword |
+| Worn | bronze_mail | bronze_mail |
+| Held | 10/10 slots: small_potion ×3, matches ×3, bronze_mallet, pocket_knife, … | unchanged |
+| Potions | 3 | 3 |
+
+No match was used up. None of the burns opened its block.
+
+#### Fights
+
+None, and no damage taken.
+
+#### Run 13 defects, checked
+
+| Defect | Run 14 | |
+|---|---|---|
+| Stuck in stage 2 with readiness met (A101) | **Gone.** Stage 3 from call 1. | It found no reachable entrance. |
+| Shop drops reserved matches on the shop tile (A102) | **Gone.** No drop; the planner chose not to buy with a full pack. | |
+| The planner cannot see pack space (A102) | **Gone.** State showed `slots_used` 10 of `slots_total` 10. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 163,859, output 9,653, cache write 105,499, cache read 4,114,461 |
+
+#### Decision mix
+
+Intents: 986 `Step`, 2,742 `Wait`, 42 `Use` (all break attempts, 0 cuts), 34 `Arm`. Call mix: 673 `tick`, 237 `entities`, 84 `strategist`, 64 `self`, 60 `zone`, 18 `terrain`, 5 `position`, and 11 `oscillation` events.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 are A103 (the oscillation give-up, and a stuck ladder that tries only known openers; PLAN.md row added by #198); defect 3 is A104 (a stalled head op yields; PLAN.md row added by #197).
+
+1. **Two states pace between each other for 306 s, and the oscillation guard gives up the wrong one** (`navigation/oscillation.py:117–120`, `states/break_state.py:61–110`). With `break_block` (379, 375) on top, Break walked west toward the rock, could not get nearer, and handed the next decision to Explore, the safe default. Explore walked east toward a frontier. Then Break took over again. The guard saw the pacing (states `Break` and `Explore`, cells (391, 375) and (401, 375)). It gave up only the active walk's target, Explore's frontier (424, 371), so Explore picked (424, 372) next time, and the loop went on. **Rule:** when two states pace between each other, the one serving an op that cannot get nearer is given up. The planner is then told that op stalled. Giving up one cell of a frontier is not a give-up. (Addressed in A103: when the guard fires and the top op's executor was one of the pacers, dispatch drops that op, with a `goal_failed` naming the states and cells.)
+
+   ```
+   246.7 s  oscillation  states [Break, Explore]  cells (391,375) (401,375)  gave up explore → (424, 371)
+   252.7 s  @391,375  explore → (424, 372)       258.0 s  @401,375  break → (379, 375)
+   …          (11 oscillation events, the last at 550.6 s)
+   553.3 s  strategist: "Explore got stuck pacing against a wall, so go to the hollow rock directly"
+   ```
+
+2. **The stuck ladder tries every held capability on every blocking cell** (`navigation/stuck.py:487`, the Break level; `states/break_state.py:31–46`, `_stuck_choice`). On the way to the entrance and to the rock, each blocking cell got cut (knife or sword), chop, smash (arm the mallet) and burn (arm the matches), with a re-arm between: 10 cells, about 40 `Use` and 34 `Arm` intents, about 120 s, and none opened. **Rule:** Break tries only a capability that break memory, or the block's documented type, says can open that block. A block with no known opener is routed round or given up, not tried with every tool. (Addressed in A103: `break_memory.BLOCK_OPENERS` and `known_openers`; stuck step 2 fails `no_known_opener` and the ladder reveals a way round.)
+
+3. **The gather op under a stalled head never runs** (`strategist.py:146` and `:199`, the stall rule, and `StallClock` at `strategist.py:956`). `gather_gems` sat below `travel`, `break_block` and `equip` all run. The planner's notes said the head was stuck at 168 s, 210 s, 348 s and 553 s, and each reply re-sent a target that had just failed (the given-up (380, 376), the same rock). It earned 0 gems in 600 s, against 36 in run 13 from the same start. **Rule:** a head op that stalls past the stall window goes below the next op that can work, until a new reason (new terrain, a new tool, a new route) to try it again appears.
+
+**Minor:** The hollow rock at (379, 375) did not open to the mallet's smash. Either it needs another capability, or the clue means something else. Break memory now holds 47 results, among them `smash` failed on (379, 375) and all four tools failed on each of the 10 cells.

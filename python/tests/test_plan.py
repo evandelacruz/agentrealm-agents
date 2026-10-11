@@ -29,6 +29,8 @@ from agentrealm_agent.plan import (
 )
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
+from agentrealm_agent.item_table import InventorySupply
+from agentrealm_agent.states.base import StateOutcome
 from agentrealm_agent.world import Entity, WorldModel
 from tests.test_cost_grid import grid
 from tests.test_runner import FakeClient
@@ -221,17 +223,31 @@ class GoalStackTest(unittest.TestCase):
         # Break owns `break_block`: dispatch leaves it on the stack (A36)
         # until it has stalled as long as any other op.
         w = open_world()
+        w.held_supplies = [InventorySupply(4, "matches")]
         brk = {"op": "break_block", "x": 3, "y": 3, "capability": "burn"}
         plan = Plan([brk, {"op": "wait", "seconds": 5, "why": "t"}], dict(PARAM_DEFAULTS), tick_hz=10)
         m = Memory()
         w.tick = 100
-        out = run(w, m, plan)
-        self.assertEqual(plan.current(), brk, "not dropped for want of a state")
-        self.assertNotEqual(out.state, "Break", "nothing to burn with: Break sends nothing")
-        w.tick = 100 + PLAN_STALL_SECONDS * 10
+        unreachable = StateOutcome(None, "cannot reach", state="Break")
+        with mock.patch("agentrealm_agent.states.break_state.break_toward", return_value=unreachable):
+            out = run(w, m, plan)
+            self.assertEqual(plan.current(), brk, "not dropped for want of a state")
+            self.assertNotEqual(out.state, "Break", "no way to the block: Break sends nothing")
+            w.tick = 100 + PLAN_STALL_SECONDS * 10
+            with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+                run(w, m, plan)
+        self.assertEqual(plan.current()["op"], "wait")
+
+    def test_break_block_with_nothing_to_break_with_is_dropped_at_once(self):
+        # Nothing held burns: Break drops the op with the reason (A103).
+        w = open_world()
+        plan = Plan([{"op": "break_block", "x": 3, "y": 3, "capability": "burn"}], dict(PARAM_DEFAULTS))
+        m = Memory()
         with self.assertLogs("agentrealm_agent.plan", "WARNING"):
             run(w, m, plan)
-        self.assertEqual(plan.current()["op"], "wait")
+        self.assertIsNone(plan.current())
+        failed = [s for s in m.strategist_signals if s.get("trigger") == "goal_failed"]
+        self.assertEqual(failed[-1]["reason"], "nothing held can burn")
 
     def test_break_block_done_once_the_block_changes(self):
         w = open_world()

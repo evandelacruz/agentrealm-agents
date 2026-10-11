@@ -14,6 +14,12 @@ doubled on each give-up, its path dropped, and a ``stuck`` signal queued. An
 ``oscillation`` event goes to the trace, and dispatch picks again with that
 target out of the way. It works the same whichever states caused it.
 
+Giving up a walk target is not enough when the plan's top op's executor is
+one of the pacers: each step it sends counts as progress, so the op never
+stalls, and the other state just walks to its next target. Dispatch then
+drops that op too, and its ``goal_failed`` tells the planner which states
+paced between which cells (``states/dispatch.py`` ``_drop_paced_op``, A103).
+
 After each decision dispatch also calls ``note_move``, so the guard knows
 which walk made each move. A target is given up only when its own walk was
 one of the moves: states that pace with steps of their own (Retreat, Fight,

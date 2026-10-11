@@ -19,7 +19,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import oscillation
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
-from agentrealm_agent.states.base import PlayContext, State, StateOutcome
+from agentrealm_agent.states.base import PlayContext, State, StateOutcome, my_op
 from agentrealm_agent.states.explore import ExploreState
 from agentrealm_agent.states.intents import set_position
 from agentrealm_agent.states.travel import TravelState
@@ -316,3 +316,75 @@ class DetectorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OpWalkBack(State):
+    """Like Break walking to its ``break_block`` op's block: from B it steps back to A."""
+
+    name = "Break"
+
+    def guard(self, world, ctx):
+        return my_op(ctx, self.name) is not None and world.pos == B
+
+    def done(self, world, ctx):
+        return not self.guard(world, ctx)
+
+    def act(self, world, ctx):
+        ctx.memory.path, ctx.memory.goal = [A], "break"
+        return StateOutcome([set_position(A)], "break → A", state=self.name)
+
+
+class ExploreAhead(State):
+    """Like the safe default stepping from A toward a frontier at B."""
+
+    name = "Explore"
+
+    def guard(self, world, ctx):
+        return world.pos == A
+
+    def done(self, world, ctx):
+        return not self.guard(world, ctx)
+
+    def act(self, world, ctx):
+        ctx.memory.path, ctx.memory.goal = [B], "explore"
+        return StateOutcome([set_position(B)], "explore → B", state=self.name)
+
+
+class OtherWalkBack(OpWalkBack):
+    """A state that is not the top op's executor, stepping back from B to A."""
+
+    name = "Detour"
+
+    def guard(self, world, ctx):
+        return world.pos == B
+
+
+class PacedOpTest(unittest.TestCase):
+    """Two states pacing, one of them the top op's executor: the op goes (A103)."""
+
+    def play(self, ops, back):
+        w, c = world(), ctx()
+        c.plan = Plan(ops, dict(PARAM_DEFAULTS))
+        cells = []
+        with mock.patch.object(dispatch_module, "STATES", (back, ExploreAhead())):
+            for _ in range(12):
+                land(w, c, dispatch_module.dispatch(w, c))
+                cells.append(w.pos)
+        return c, cells
+
+    def test_the_op_whose_executor_paced_is_dropped_and_the_planner_told(self):
+        brk = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
+        c, cells = self.play([brk], OpWalkBack())
+        self.assertIsNone(c.plan.current(), "the break op that cannot progress is dropped")
+        failed = [s for s in c.memory.strategist_signals if s.get("trigger") == "goal_failed"]
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(failed[0]["op"], brk)
+        self.assertEqual(failed[0]["reason"], "Break paced between 2,0 and 3,0 with Explore: no way forward")
+        self.assertEqual(c.memory.nav_stuck.oscillations[0]["op"], brk)
+        self.assertEqual(cells[-3:], [B, B, B], "with the op gone, nothing walks back")
+
+    def test_pacing_the_op_executor_took_no_part_in_keeps_the_op(self):
+        brk = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
+        c, _ = self.play([brk], OtherWalkBack())
+        self.assertTrue(c.memory.nav_stuck.oscillations, "the guard fired")
+        self.assertEqual(c.plan.current(), brk, "Break never moved: its op is not the guard's to drop")

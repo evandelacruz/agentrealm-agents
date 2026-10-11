@@ -1142,3 +1142,14 @@ Per A87, each names the rule a fix should generalize.
 2. **Shop drops a held supply on the shop tile to make room, and it turns into shop stock** (`states/shop.py:71–84`, `loot.pickup_room` at `loot.py:118`). With the pack full, Shop dropped the held supply with the lowest loot score, a box of matches, before taking the potion. On the shop tile it showed again with `gem_price` 5, so the drop sold nothing and gave the box away. The planner had reserved the matches for clues ("matches are held for the green-walled garden and hedge maze", run 12). **Rule:** making room never drops an item the plan holds for a use, nor drops it where a drop becomes stock. With no item free to drop, the choice goes back to the planner.
 
 3. **The planner cannot see pack space** (`strategist.py:836`, State `held=`). The State lists held items and counts, but not slots used or the pack's size. So a buy that needs a drop is planned without knowing it. The pack carries a 25-gem mallet and a spare knife that no rule arms while gathering. **Rule:** State shows slots used and total, and the arc weighs what an unused item costs in pack room.
+
+### Run 14: Break and Explore pace for 300 s, and the stuck ladder tries every tool on every block
+
+Only the two defects that A103 addresses are recorded here, as reported from the run's trace; the run's full summary was not filed.
+
+#### Top defects
+
+Per A87, each names the rule a fix should generalize.
+
+1. **Two states paced between two cells for 300 s** (`navigation/oscillation.py`, `states/break_state.py`). Break, walking to the block of its `break_block` op, and Explore, walking to a frontier, took turns stepping the character between the same two cells. The oscillation guard fired 11 times, but each time it gave up only the active walk's target, Explore's frontier: Explore picked the next one, and Break kept its op, whose every step toward the block counted as progress, so the op never stalled out. **Rule:** two states pacing between each other give up the op that cannot progress, not just a walk target, and the planner is told that op stalled and why. (Addressed in A103: dispatch drops the top op when its executor was one of the pacers, with a `goal_failed` naming the states and cells.)
+2. **The stuck ladder tried every held capability on every blocking cell** (`navigation/stuck.py` step 2, `break_memory.nominate_on_path`). Cut, chop, smash and burn were each tried on each blocking cell, swapping the armed item every time: 34 `Arm` intents over 9 blocks, about 100 s, and nothing opened. **Rule:** a block is tried only with a capability its block type's documented rule or break memory says opens it; a block with no known opener among held items is routed around or reported, and a failed try is not repeated. (Addressed in A103: `break_memory.BLOCK_OPENERS` and `known_openers`; step 2 fails `no_known_opener` and the ladder reveals a way round.)

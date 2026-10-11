@@ -3,14 +3,22 @@
 Module ``break_state`` (``break`` is reserved). The executor for the plan's
 ``break_block`` op; it also runs stuck escalation step 2 of the walk under
 way (A15), and re-arms the weapon a break swapped out.
+
+Either way a block is tried only with a capability known to open it: its
+type's rule or a past break of that cell (``break_memory.known_openers``,
+A103). A ``break_block`` op naming any other capability, or one that already
+failed there, is dropped with the reason, so the planner hears why.
 """
 
 from __future__ import annotations
 
 from ..break_memory import (
+    BLOCK_OPENERS,
     BreakChoice,
     attempt_failed,
     break_step_cost,
+    known_openers,
+    no_break_reason,
     nominate_on_path,
     pick_supply_for_capability,
 )
@@ -47,11 +55,29 @@ def _stuck_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
     return nominate_on_path(w, ctx.knowledge, w.pos, att.target)
 
 
+def _op_refusal(w: WorldModel, ctx: PlayContext, op: GoalOp) -> str | None:
+    """Why the ``break_block`` op cannot open its block, or None to go on.
+
+    Its capability failed on that cell before, nothing held has it, or the
+    block in view is one that capability is not known to open (A103). A
+    block not yet in view is walked to first.
+    """
+    pos = (op["x"], op["y"])
+    cap = op["capability"]
+    block = w.view.tiles.get(pos)
+    if attempt_failed(ctx.knowledge, w.map_id, pos, cap):
+        return f"{cap} already failed on the {block or 'block'} at {pos[0]},{pos[1]}"
+    if pick_supply_for_capability(w, cap, ctx.knowledge) is None:
+        return f"nothing held can {cap}"
+    openers = known_openers(w, ctx.knowledge, pos)
+    if block in BLOCK_OPENERS and cap not in openers:
+        return f"{cap} is not known to open {block} (opened by {', '.join(sorted(openers))})"
+    return None
+
+
 def _plan_choice(w: WorldModel, ctx: PlayContext, op: GoalOp) -> BreakChoice | None:
     pos = (op["x"], op["y"])
     cap = op["capability"]
-    if attempt_failed(ctx.knowledge, w.map_id, pos, cap):
-        return None
     supply = pick_supply_for_capability(w, cap, ctx.knowledge)
     if supply is None:
         return None
@@ -64,6 +90,10 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
     op = my_op(ctx, state)
     att = nav_stuck.active(m, w)
     if op is not None:
+        refusal = _op_refusal(w, ctx, op)
+        if refusal is not None and ctx.plan is not None:
+            ctx.plan.drop_current(refusal, memory=m)
+            return StateOutcome(None, f"break_block dropped: {refusal}", state=state)
         choice = _plan_choice(w, ctx, op)
     elif att is not None and att.level == nav_stuck.BREAK:
         if att.arm_decisions >= nav_stuck.ARM_DECISION_LIMIT:
@@ -76,7 +106,8 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
     if choice is None:
         att = nav_stuck.active(m, w)
         if att is not None and att.level == nav_stuck.BREAK:
-            nav_stuck.escalate(m, w, att, "no_break")
+            why = no_break_reason(w, ctx.knowledge, w.pos, att.target) if w.pos is not None else "no_break"
+            nav_stuck.escalate(m, w, att, why)
         return StateOutcome(None, "nothing to break", state=state)
     return break_toward(w, ctx, choice, state)
 

@@ -123,7 +123,7 @@ Paths are never straight lines. Bushes, trees, water, walls, fences, NPCs and ot
 |---|---|
 | Known walkable | 1 |
 | Fog (never seen) | 2. Assumed open, so the agent can aim at an entrance 300 blocks into the fog |
-| An obstacle nominated for breaking (named by the plan, or scored by the odd-block detector) with a capability we hold that break memory has not marked as failed on it | Break time plus 1, plus the gem price of a consumable tool if that is the capability, so a nominated bush in a hedge line is a door, not a wall. Applied only at stuck step 2 or while `Break` walks to its target (A28): otherwise the cell is impassable |
+| An obstacle nominated for breaking (named by the plan, or scored by the odd-block detector) with a capability we hold that is known to open it (A103) and that break memory has not marked as failed on it | Break time plus 1, plus the gem price of a consumable tool if that is the capability, so a nominated bush in a hedge line is a door, not a wall. Applied only at stuck step 2 or while `Break` walks to its target (A28): otherwise the cell is impassable |
 | `fire`, `lava` | 1 plus a cost per point of `occupy_damage`; entered only when there is no other way |
 | Near a hostile | A danger cost that falls off with distance, so routes keep away from hostiles |
 | NPC or character standing there | High but finite, and it expires: they move |
@@ -159,7 +159,7 @@ An opening we cut or burned is open only until it grows back (about 60 s for a b
 
 **4. Escalation, in order, each step only if the one before fails:**
 1. Replan with the learned blocks, and with fog optimism lowered so known ground is preferred.
-2. Break through (M9): if a nominated obstacle lies on the best blocked route and we hold a capability not yet tried on it, `Break` it. A failed try is recorded per (block, capability); that pair is never tried again, but another capability may be.
+2. Break through (M9): if a nominated obstacle lies on the best blocked route and we hold a capability known to open it (its block type's documented opener, or one that opened that cell before) not yet tried on it, `Break` it. A failed try is recorded per (block, capability); that pair is never tried again, but another known opener may be. A block nothing held is known to open is not tried with every tool: the step fails (`no_known_opener`) and the ladder moves on to reveal a way round (A103).
 3. Reveal: explore the frontier cells nearest the goal, following the wall of the obstacle (left-hand rule) for a bounded number of moves, to uncover a way round.
 4. Change the means: if the goal is enclosed on this map (water, cliffs, a locked door), record what seems to be needed (a raft, a key, a door from another map) and route through the door graph if one is known.
 5. Give up for now: mark the goal unreachable with an exponential backoff, pick the next goal, and raise the strategist's `stuck` trigger. The trigger carries the goal, the explored outline and the blocking cell types. The strategist may answer with a tool to buy or a different route.

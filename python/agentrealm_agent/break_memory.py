@@ -7,6 +7,12 @@ its ``items`` row; the reference is also read directly, so a caller with no
 knowledge base still sees them. A code the reference does not list carries
 none until it opens a block. Break attempts are stored with keys
 ``"<map_id>,<x>,<y>,<capability>"``.
+
+A block is tried only with a capability known to open it (A103): one its
+type's documented rule names (``BLOCK_OPENERS``), or one that opened that
+cell before. A capability that failed on a cell is not tried there again.
+A block with no known opener among the held items is not nominated, so the
+walk routes around it.
 """
 
 from __future__ import annotations
@@ -27,6 +33,18 @@ BREAK_BASE_COST = DEFAULT_WEAPON_COOLDOWN_TICKS + 1
 # Refusals of a break that say "not yet", not "cannot": the pair is not marked failed.
 TRANSIENT_BREAK_REJECTIONS = frozenset({"attack_cooldown"})
 
+# What opens each breakable block type, by the game's rules: the knife and
+# swords cut bushes, only a sword chops trees, a mallet smashes boulders,
+# matches or a torch burn hedges (hedges are trees) and burnable bushes, and
+# a bomb blasts secrets, level doors, odd rocks and wild mountain
+# (GAME_NOTES Breaking blocks).
+BLOCK_OPENERS: dict[str, frozenset[str]] = {
+    "bush": frozenset({"cut", "burn"}),
+    "tree": frozenset({"chop", "burn"}),
+    "rock": frozenset({"smash", "blast"}),
+    "mountain": frozenset({"blast"}),
+    "wall": frozenset({"blast"}),
+}
 
 
 def break_key(map_id: int, pos: Pos, capability: str) -> str:
@@ -86,6 +104,14 @@ def attempt_open(kb: KnowledgeBase | None, map_id: int | None, pos: Pos, capabil
         return False
     row = _break_row(kb, break_key(map_id, pos, capability))
     return isinstance(row, dict) and row.get("result") == "opened"
+
+
+def known_openers(w: WorldModel, kb: KnowledgeBase | None, pos: Pos) -> frozenset[str]:
+    """Capabilities known to open the block at ``pos``: those its type's rule
+    names (``BLOCK_OPENERS``), plus any that opened this cell before."""
+    caps = set(BLOCK_OPENERS.get(w.view.tiles.get(pos, ""), ()))
+    caps.update(c for c in CAPABILITIES if attempt_open(kb, w.map_id, pos, c))
+    return frozenset(caps)
 
 
 def record_attempt(
@@ -205,14 +231,29 @@ def _step_toward(p: Pos, goal: Pos) -> Pos:
 
 
 def _choice_at(w: WorldModel, kb: KnowledgeBase | None, pos: Pos, held: set[str]) -> BreakChoice | None:
+    """The cheapest way to open ``pos`` with what is held: a capability known
+    to open it (``known_openers``) that has not failed there."""
     if w.map_id is None or breakable_block(w, pos) is None:
         return None
-    for cap in untried_capabilities(kb, w.map_id, pos, held):
+    for cap in untried_capabilities(kb, w.map_id, pos, held & known_openers(w, kb, pos)):
         supply = pick_supply_for_capability(w, cap, kb)
         if supply is None:
             continue
         return BreakChoice(pos, cap, supply, break_step_cost(kb, supply.code))
     return None
+
+
+def no_break_reason(w: WorldModel, kb: KnowledgeBase | None, start: Pos, goal: Pos) -> str:
+    """Why ``nominate_on_path`` found nothing, for stuck escalation's reasons:
+    ``no_known_opener`` when a breakable stands on the route that nothing held
+    is known to open (or every known opener failed on), else ``no_break``."""
+    held = held_capabilities(w, kb)
+    p = start
+    while p != goal:
+        p = _step_toward(p, goal)
+        if breakable_block(w, p) is not None and _choice_at(w, kb, p, held) is None:
+            return "no_known_opener"
+    return "no_break"
 
 
 def nominate_on_path(
@@ -224,7 +265,8 @@ def nominate_on_path(
     """The first breakable on the straight route from ``start`` to ``goal`` we can still try.
 
     Only cells on that route are candidates: a breakable beside or behind us
-    does not open the way to ``goal``.
+    does not open the way to ``goal``. A block no held item is known to open
+    is passed over (``_choice_at``).
     """
     held = held_capabilities(w, kb)
     if not held or w.map_id is None:
@@ -243,7 +285,8 @@ def break_costs_for_planning(
     kb: KnowledgeBase | None,
     goal: Pos | None,
 ) -> dict[Pos, int]:
-    """Break step costs for breakables on the straight route to ``goal`` with an untried capability."""
+    """Break step costs for breakables on the straight route to ``goal`` that a
+    held item is known to open with a capability not yet failed there."""
     if w.map_id is None or w.pos is None:
         return {}
     held = held_capabilities(w, kb)
@@ -258,12 +301,7 @@ def break_costs_for_planning(
                 cells.add(p)
     costs: dict[Pos, int] = {}
     for p in cells:
-        if breakable_block(w, p) is None:
-            continue
-        for cap in untried_capabilities(kb, w.map_id, p, held):
-            supply = pick_supply_for_capability(w, cap, kb)
-            if supply is None:
-                continue
-            costs[p] = break_step_cost(kb, supply.code)
-            break
+        choice = _choice_at(w, kb, p, held)
+        if choice is not None:
+            costs[p] = choice.cost
     return costs

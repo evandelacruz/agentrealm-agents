@@ -133,18 +133,22 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
 
     The oscillation guard is a safety net: it checks whether the character
     is pacing between two cells, whichever states are doing it, and gives up
-    the target it walks to (``navigation/oscillation.py``, A15).
+    the target it walks to (``navigation/oscillation.py``, A15), and the top
+    op too when its executor was one of the pacers (``_drop_paced_op``, A103).
     """
     m = ctx.memory
     m.nav_stuck.decision += 1
     yielded: list[str] = []
-    if oscillation.check(m, world) is not None:
+    paced = oscillation.check(m, world)
+    if paced is not None:
         yielded.append("oscillation: paced between two cells")
     note_goto_reached(world, m, ctx.policy)
     note_heal_window(m, world)
     note_last_weapon(m, world)
     if ctx.plan is not None:
         _settle_plan(ctx.plan, world, m)
+        if paced is not None:
+            _drop_paced_op(ctx, paced)
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
     if ctx.policy.kind == "scripted":
@@ -169,6 +173,29 @@ def _settle_plan(plan: Plan, world: WorldModel, m: Memory) -> None:
     while (op := plan.current()) is not None and OP_STATE.get(op["op"]) is None:
         plan.drop_current("no executor state", memory=m)
         plan.advance(world, m)
+
+
+def _drop_paced_op(ctx: PlayContext, paced: dict) -> None:
+    """The guard caught pacing that the top op's executor took part in: drop the op (A103).
+
+    Each of the pacing states sends a sensible step, so the op's stall clock
+    keeps resetting while it goes nowhere; giving up only the walk being
+    walked leaves the op to pace again with the next one. So the op goes,
+    and its ``goal_failed`` tells the planner which states paced and where.
+    The op stays when the walk the guard gave up was its own (``OWNER_WALKS``):
+    it then picks another target, or drops itself as Travel does.
+    """
+    plan, m = ctx.plan, ctx.memory
+    owner = top_executor(ctx)
+    if plan is None or owner is None or owner not in paced["states"] or paced.get("escape"):
+        return
+    if paced.get("goal", "").startswith(OWNER_WALKS.get(owner, ())):
+        return
+    others = [s for s in paced["states"] if s != owner]
+    cells = " and ".join(f"{x},{y}" for x, y in paced["cells"])
+    with_whom = f" with {', '.join(others)}" if others else ""
+    paced["op"] = dict(plan.current() or {})
+    plan.drop_current(f"{owner} paced between {cells}{with_whom}: no way forward", memory=m)
 
 
 def _note_op_progress(plan: Plan, world: WorldModel, m: Memory, op: dict, owner: str | None, out: StateOutcome) -> None:

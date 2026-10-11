@@ -26,7 +26,7 @@ from ..pathing import bounded_step, grid_params, guided_step, nav_search, next_s
 from ..travel.knowledge import iter_entrances
 from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
-from ..pathing import plan_sets
+from .explore import plan_sets
 from .intents import set_position, take
 from .room import room_for
 

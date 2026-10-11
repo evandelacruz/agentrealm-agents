@@ -76,8 +76,7 @@ from ..survival import is_hostile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
-from ..pathing import plan_sets
-from .explore import safe_default
+from .explore import plan_sets, safe_default
 from .gather_safe import gather_ground, route_bar, route_clear
 from .intents import arm, arm_and_use, set_position, take, use_block
 from .solve import held_supply

@@ -98,7 +98,6 @@ def fake_runner(goals: list[str] | None = None) -> SimpleNamespace:
         plan=plan or Plan([{"op": "explore_area", "x": 0, "y": 0, "radius": 9999}], dict(PARAM_DEFAULTS)),
         directives=SimpleNamespace(directives=Directives(params=dict(PARAM_DEFAULTS), goals=goals or [])),
         knowledge=None,
-        cfg=SimpleNamespace(policy=Policy(kind="scripted", goals=[])),
         tick_hz=10,
         server_tick=10,
         log=mock.MagicMock(),

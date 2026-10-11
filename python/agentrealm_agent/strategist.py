@@ -123,7 +123,6 @@ from .supplies import (
     chest_capacity,
     eaten_on_pickup,
     is_weapon,
-    kept_on_break,
     sold_codes,
     weapon_damage,
     worn_slot,
@@ -132,9 +131,7 @@ from .supplies import (
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, PLAN_STALL_SECONDS, Plan, collect_rejections, parse_plan_payload
 from .loot import carry_slots_used
-from .break_memory import capabilities_for_code, given_up_blocks
-from .openings import Opening, openings
-from .pathing import plan_sets
+from .break_memory import capabilities_for_code
 from .pack import reserved_supplies
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
 from .stalled import StalledOp, below_progress, find as find_stalled, target_of
@@ -158,6 +155,7 @@ PREFIX_BUDGET_FACTOR = 1.5
 DEFAULT_HURT_FRACTION = 0.5
 DEFAULT_IDLE_MINUTES = 10
 STALL_SECONDS = 30  # State shows a stall once nothing has changed for this long
+MAP_RADIUS = 15  # State map: the cells this far round the character each way (A114)
 # After a failed call the next waits BACKOFF_BASE_S, doubling per failure in a row, at most BACKOFF_CAP_S.
 BACKOFF_BASE_S = 2.0
 BACKOFF_CAP_S = 120.0
@@ -206,11 +204,13 @@ Safe ground: hostiles cannot hurt the character only while it stands on safe gro
 
 NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir from here, spoken, greeted, hostile, stays_put); npcs_spoken_to counts the NPCs a say op of yours has spoken to so far, and npcs_greeted those Greet has said hello to. The game does not say which NPCs are helpers and which are monsters. "hostile" true means known hostile: a boss, the last thing that hit the character, or a type that has swung at it, hit it or died in view, in this run or an earlier one; false only means none of its type has done so yet, so it may still be a monster. "stays_put" true means it has stood on one cell for a while, as helpers do; judge the rest from its type and the clues. On safe ground (anywhere, if policy.hostile does not name NPCs), Greet says hello once to an NPC in sight that stays put and is not hostile, and marks it greeted; a helper answers any words with the same line, which lands in Clues. A greeting never counts as spoken: a say op to a greeted NPC still says your text. To talk to one further away, or with your own words, use a say op with its npc_id (from nearby_npcs) or its npc_type (any NPC of that type, the nearest first); the character walks within speech range and says your text. A helper's reply is added to Clues as a row of kind "npc".
 
+Map: State map draws the ground round the character, {MAP_RADIUS} cells each way, one character per cell: rows by y (the number at the left), x by the ruler above (read a column's digits top to bottom), and a legend of the marks used. It shows what the character's reads have shown on this map (? where none has) and what is in view now, so read exact cells off it: a block to break, a sign, a door, a hostile, the way round something. A block is destroyed only by a Use with an item whose capability opens its type (held lists each item's use: cut, chop, smash, burn, blast); a break_block names the cell (x, y) and the capability, and is dropped if that cell holds no block the capability opens. A destroyed block may grow back. No attack can be made from a safe zone, and nothing can hurt the character there. When the ground the character can walk to is all seen and it has nothing to do, it sends a no_way_on trigger and does nothing until you give it a way on.
+
 Signs: State signs_seen lists the signs and statues seen on this map, the unread ones first and then the nearest, each with its map_id, x, y, block, cells (Chebyshev) and dir from here, and "read" true once its text has been read; unread counts the unread ones on this map. The character does not read a sign on its own. To read one, put a read op with its x, y on the stack: the character walks until the sign is in sight and reads it, and the text lands in Clues as a row of kind "sign". Signs often say where to go or what a place holds, so one near the way is usually worth the few steps.
 
 A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows in the stack without them, with "goes_to": the cell it walks to now, which the agent works out itself. It is already on the stack: re-sending it changes nothing.
 
-State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. An op on top that makes no progress for {PLAN_STALL_SECONDS} s is moved just below the next op on the stack that can make progress, or dropped when none can (a goal_stalled trigger with the op and the op it is now_below, or goal_failed), and State stalled_ops lists it with why. It never comes back on top when the ops above it end, either: it is moved below again, or dropped. It stays there until a new item is held, a new clue comes in or a new way is known (a door's warp learned, a level entrance): until then a reply that puts it back on top has it moved below again, or left out when nothing in the reply can make progress, and last_reply_rejected says so. So put work that can make progress (gather_gems, say) above it, or give it a reason to work: get the item that opens it, or find another way to it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id), each on this map with its route by what is known of the map and steps, the cells of the route found (an estimate that can run up to 3 times the shortest walk, so compare steps loosely): path_known (known ground reaches it), frontier_only (known ground does not reach it; the way runs through unexplored ground, unexplored of those cells not seen yet, so it may be walled off), known_blocked (what is known walls it off from here: it takes a break or another way in) or not_searched (not checked within this look's search budget; steps is the route through unexplored ground when one was found, else the straight line); other_map for one on another map. ways_to_open lists the blocks in view on the edge of the ground a walk reaches from here, with something past them the walk does not reach (beyond: unseen cells, ground or a door cut off, more blocks), cheapest first: steps to it, and what held opens it (opens_with, its capability, used_up when the break uses the item up), or opens_with null and opened_by, the capabilities that would. When the ground in reach is all seen, the character opens the cheapest one a held item opens by itself; when nothing held opens any, it stops and sends a no_way_on trigger. Then the way on is yours: a break_block on the one a clue or the goal's direction points to, an item that opens one (opened_by), a clue to read or an NPC to ask, or another goal. A break_block op on any of them picks it over the cheapest. shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names. A buy needs a seller: no_seller_known lists the items the Supplies reference prices for sale (in some world) that no shop known sells, that are not owned, and that are not in sight now (lying, or in a ground chest within reach): one seen earlier and out of view is listed, so go back for it if you know where it lies. A gem price in the Supplies reference is not a seller. A buy of one is dropped, and gems saved toward one buy nothing until a seller or the item itself is found. When a goal needs one (a tool to reach a door, say), go and find it: travel to a place a clue or an NPC names, explore_area new ground, ask NPCs with say, read signs; or work on a goal that is reachable now. Do not gather gems toward it.
+State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. An op on top that makes no progress for {PLAN_STALL_SECONDS} s is moved just below the next op on the stack that can make progress, or dropped when none can (a goal_stalled trigger with the op and the op it is now_below, or goal_failed), and State stalled_ops lists it with why. It never comes back on top when the ops above it end, either: it is moved below again, or dropped. It stays there until a new item is held, a new clue comes in or a new way is known (a door's warp learned, a level entrance): until then a reply that puts it back on top has it moved below again, or left out when nothing in the reply can make progress, and last_reply_rejected says so. So put work that can make progress (gather_gems, say) above it, or give it a reason to work: get the item that opens it, or find another way to it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id), each on this map with its route by what is known of the map and steps, the cells of the route found (an estimate that can run up to 3 times the shortest walk, so compare steps loosely): path_known (known ground reaches it), frontier_only (known ground does not reach it; the way runs through unexplored ground, unexplored of those cells not seen yet, so it may be walled off), known_blocked (what is known walls it off from here: it takes a break or another way in) or not_searched (not checked within this look's search budget; steps is the route through unexplored ground when one was found, else the straight line); other_map for one on another map. shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names. A buy needs a seller: no_seller_known lists the items the Supplies reference prices for sale (in some world) that no shop known sells, that are not owned, and that are not in sight now (lying, or in a ground chest within reach): one seen earlier and out of view is listed, so go back for it if you know where it lies. A gem price in the Supplies reference is not a seller. A buy of one is dropped, and gems saved toward one buy nothing until a seller or the item itself is found. When a goal needs one (a tool to reach a door, say), go and find it: travel to a place a clue or an NPC names, explore_area new ground, ask NPCs with say, read signs; or work on a goal that is reachable now. Do not gather gems toward it.
 
 Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage, defense (armor protects only while worn, never in hand; worn, it lowers both how often and how hard a hostile hits), and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed); none seen means no better gear is known for sale anywhere, so there is no upgrade to save gems toward until a shop shows one. Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held. A chest shows as class chest with carry_slots, the pack size it gives, and applied true once the pack has those slots (State pack slots_total). Holding a chest gives nothing: it is applied by a Use on yourself, like a potion, which uses it up. The character applies a bigger chest by itself as soon as one is held; a use_item op names a held potion or chest to use now. An equip arms or wears only (a weapon, armor), so an equip of a potion or chest is dropped. Buying a chest no bigger than the pack has adds nothing. State ops_ended_recently lists the ops that finished (outcome done) or were dropped (outcome dropped, with why) in the last few minutes, newest first, with seconds_ago, even after their goal_done or goal_failed trigger has gone out with an earlier call. A done op is done: leave it off the stack unless you mean to do it again (a second buy buys a second one). A buy is done once its gems are spent and the item is held, or for a chest once the pack has its slots, or for an item eaten on pickup once it is taken. for_sale_eaten_on_pickup lists the items seen for sale that are eaten on pickup, with price and what they do: one applies the moment it is taken and is never held, so a heal eaten on pickup heals at once, and bought at full health it heals nothing and its gems are wasted.
 
@@ -575,7 +575,6 @@ def build_prompt(
     strength: StrengthBracket | None = None,
     stalled_ops: Collection[StalledOp] = (),
     ended_ops: Collection[dict[str, Any]] = (),
-    ways_to_open: Collection[Opening] = (),
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -591,13 +590,13 @@ def build_prompt(
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
         *sign_lines(w, knowledge),
+        *map_lines(w),
         f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
         *_gather_line(plan, gather_status),
         f"gather_run={json.dumps(gather_run or {}, sort_keys=True)}",
         f"stall={stall or 'none'}",
         f"ops_ended_recently={json.dumps(list(ended_ops), sort_keys=True) if ended_ops else 'none'}",
         *entrance_lines(w, knowledge),
-        ways_to_open_line(w, ways_to_open),
         shop_price_line(w, knowledge),
         eaten_on_pickup_line(w, knowledge),
         no_seller_line(w, knowledge),
@@ -739,6 +738,112 @@ def sign_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     return [f"signs_seen={json.dumps(rows, sort_keys=True)} unread={unread}"]
 
 
+# What each block type shows as on the State map; a type not listed shows as OTHER_BLOCK.
+MAP_BLOCKS = {
+    "dirt": ".",
+    "tile": ".",
+    "grass": ",",
+    "fire": "!",
+    "lava": "!",
+    "water": "~",
+    "bush": "b",
+    "tree": "T",
+    "rock": "o",
+    "mountain": "M",
+    "wall": "#",
+    "framed_door": "D",
+    "rock_entry": "D",
+}
+OTHER_BLOCK = "X"
+# The legend, in the order it is printed; only the marks on the map are listed.
+MAP_LEGEND = {
+    "@": "you",
+    "H": "known hostile",
+    "B": "boss",
+    "N": "other NPC",
+    "C": "other character",
+    "$": "gem",
+    "i": "item on the ground",
+    "+": "item for sale",
+    "c": "chest",
+    "S": "sign or statue (readable)",
+    "L": "locked door",
+    "D": "door",
+    ".": "ground",
+    ",": "grass",
+    "!": "fire or lava (hurts)",
+    "~": "water",
+    "b": "bush",
+    "T": "tree (hedges are trees)",
+    "o": "rock",
+    "M": "mountain",
+    "#": "wall",
+    OTHER_BLOCK: "other block",
+    "_": "no ground",
+    "?": "not seen",
+}
+
+
+def _entity_mark(w: WorldModel, e: Any) -> str:
+    if e.kind == "npc":
+        return "B" if e.is_boss else "H" if known_hostile(w, e) else "N"
+    if e.kind == "character":
+        return "C"
+    if e.kind == "chest":
+        return "c"
+    if e.gem_price is not None:
+        return "+"
+    return "$" if e.code == "gem" else "i"
+
+
+def map_lines(w: WorldModel) -> list[str]:
+    """The ground round the character as one character per cell (A114):
+    ``MAP_RADIUS`` cells each way, rows by y top to bottom, a ruler of x
+    above (read each column's digits top to bottom), and a legend of the
+    marks used. Terrain is what this map's reads have shown, ``?`` where
+    none has; entities in view are drawn over it, and the character over
+    everything. So the planner can name an exact cell (a block to break, a
+    sign, a door) and see what lies between."""
+    if w.pos is None or w.map_id is None:
+        return []
+    cx, cy = w.pos
+    xs = range(cx - MAP_RADIUS, cx + MAP_RADIUS + 1)
+    ys = range(cy - MAP_RADIUS, cy + MAP_RADIUS + 1)
+    marks: dict[Pos, str] = {}
+    for e in w.entities:
+        if e.pos not in marks or e.kind == "npc":  # an NPC shows over an item on its cell
+            marks[e.pos] = _entity_mark(w, e)
+    marks[w.pos] = "@"
+    used: set[str] = set()
+
+    def cell(p: Pos) -> str:
+        if p in marks:
+            return marks[p]
+        block = w.view.tiles.get(p)
+        if block is None:
+            return "?"
+        if w.view.readable.get(p):
+            return "S"
+        if not block:
+            return "_"
+        mark = MAP_BLOCKS.get(block, OTHER_BLOCK)
+        return "L" if mark == "D" and w.view.locked.get(p) else mark
+
+    rows = []
+    for y in ys:
+        row = "".join(cell((x, y)) for x in xs)
+        used.update(row)
+        rows.append(f"{y:>5} {row}")
+    width = max(len(str(x)) for x in xs)
+    ruler = ["x".rjust(5) + " " + "".join(str(x).rjust(width)[i] for x in xs) for i in range(width)]
+    legend = ", ".join(f"{mark} {what}" for mark, what in MAP_LEGEND.items() if mark in used)
+    head = (
+        f"map (map {w.map_id}, x {xs[0]}..{xs[-1]} left to right, y {ys[0]}..{ys[-1]} top to bottom, "
+        f"one character per cell; legend: {legend}):"
+    )
+    return [head, *ruler, *rows]
+
+
 def _bearing(w: WorldModel, where: tuple[int, Pos]) -> str:
     """``map:x,y (N cells <direction>)``, or ``here``; another map gives no distance."""
     map_id, pos = where
@@ -846,32 +951,6 @@ def entrance_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     shown = [entry for _, entry in rows]
     more = f" (+{count - len(shown)} more)" if count > len(shown) else ""
     return [f"level_entrances={json.dumps(shown, sort_keys=True)}{more}"]
-
-
-# The blocks State lists under ways_to_open, cheapest first (A114).
-WAYS_TO_OPEN_SHOWN = 5
-
-
-def ways_to_open_line(w: WorldModel, ways: Collection[Opening]) -> str:
-    """The blocks in view on the edge of the ground a walk reaches, with
-    something past it (``openings.openings``, A114): cell, block, the walk
-    to it (``steps``), how many cells past it the walk does not reach
-    (``beyond``), and what held opens it (``opens_with`` and its
-    ``capability``, ``used_up`` when the break uses it up), or, when nothing
-    held does, ``opened_by``: the capabilities that would."""
-    rows = []
-    for o in list(ways)[:WAYS_TO_OPEN_SHOWN]:
-        row: dict[str, Any] = {"cell": _bearing(w, (w.map_id, o.pos)), "x": o.pos[0], "y": o.pos[1], "block": o.block, "steps": o.walk, "beyond": o.beyond}
-        if o.choice is not None:
-            code = o.choice.supply.code
-            row.update({"opens_with": code, "capability": o.choice.capability, "used_up": not kept_on_break(code)})
-        else:
-            row.update({"opens_with": None, "opened_by": sorted(o.opened_by)})
-        rows.append(row)
-    if not rows:
-        return "ways_to_open=none"
-    more = f" (+{len(ways) - len(rows)} more)" if len(ways) > len(rows) else ""
-    return f"ways_to_open={json.dumps(rows, sort_keys=True)}{more}"
 
 
 def shop_price_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
@@ -1412,13 +1491,6 @@ class Strategist:
         else:
             acceptance.on_strategist_error("reply has no valid goal op")
 
-    @staticmethod
-    def _ways_to_open(runner: Any) -> list[Opening]:
-        """State ``ways_to_open``: the blocks that open a way on, on the ground walks use (A114)."""
-        w, m = runner.world, runner.mem
-        _, plan_avoid, _ = plan_sets(w, m, runner.cfg.policy, runner.knowledge)
-        return openings(w, runner.knowledge, plan_avoid, given_up_blocks(m.nav_stuck, w.map_id, w.tick))
-
     def _send(self, runner: Any) -> None:
         messages = build_prompt(
             triggers=self.inbox,
@@ -1435,7 +1507,6 @@ class Strategist:
             strength=runner.mem.strength,
             stalled_ops=runner.mem.stalled_ops,
             ended_ops=self.ended.rows(runner.world.tick, runner.tick_hz),
-            ways_to_open=self._ways_to_open(runner),
         )
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1

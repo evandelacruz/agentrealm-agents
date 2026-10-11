@@ -221,7 +221,6 @@ def runner(goals: list[dict]) -> SimpleNamespace:
         plan=Plan([dict(g) for g in goals], dict(PARAM_DEFAULTS)),
         directives=SimpleNamespace(directives=Directives(params=dict(PARAM_DEFAULTS), goals=[])),
         knowledge=None,
-        cfg=SimpleNamespace(policy=Policy(kind="scripted", goals=[])),
         tick_hz=10,
         server_tick=10,
         log=mock.MagicMock(),

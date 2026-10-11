@@ -13,7 +13,7 @@ from ..plan import GoalOp
 from ..reach import supply_reach
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
-from ..pathing import plan_sets
+from .explore import plan_sets
 from .intents import arm, compose, set_position, use_block
 
 GOAL = "solve"

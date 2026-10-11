@@ -245,7 +245,7 @@ def _route(start: Pos, goal: Pos) -> Iterator[Pos]:
         yield p
 
 
-def choice_at(
+def _choice_at(
     w: WorldModel, kb: KnowledgeBase | None, pos: Pos, held: set[str], skip: frozenset[Pos] = frozenset()
 ) -> BreakChoice | None:
     """The cheapest way to open ``pos`` with what is held: a capability known
@@ -275,7 +275,7 @@ def no_break_reason(
             continue
         if p in skip:
             reason = "given_up_break"
-        elif choice_at(w, kb, p, held) is None:
+        elif _choice_at(w, kb, p, held) is None:
             return "no_known_opener"
     return reason
 
@@ -291,13 +291,13 @@ def nominate_on_path(
 
     Only cells on that route are candidates: a breakable beside or behind us
     does not open the way to ``goal``. A block no held item is known to open,
-    or one in ``skip`` (given up), is passed over (``choice_at``).
+    or one in ``skip`` (given up), is passed over (``_choice_at``).
     """
     held = held_capabilities(w, kb)
     if not held or w.map_id is None:
         return None
     for p in _route(start, goal):
-        choice = choice_at(w, kb, p, held, skip)
+        choice = _choice_at(w, kb, p, held, skip)
         if choice is not None:
             return choice
     return None
@@ -322,7 +322,7 @@ def break_costs_for_planning(
         cells.update(p for p in _route(w.pos, goal) if breakable_block(w, p) is not None)
     costs: dict[Pos, int] = {}
     for p in cells:
-        choice = choice_at(w, kb, p, held, skip)
+        choice = _choice_at(w, kb, p, held, skip)
         if choice is not None:
             costs[p] = choice.cost
     return costs

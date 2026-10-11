@@ -15,7 +15,7 @@ from agentrealm_agent.states import STATES, PlayContext, State, StateOutcome, di
 from agentrealm_agent.world import Entity, WorldModel
 
 # The safe default with nothing to explore and nothing to open (A114).
-NO_WAY_ON = "nothing left to explore, nothing to open: asked the planner"
+NO_WAY_ON = "nothing left to explore: asked the planner"
 
 dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")
 

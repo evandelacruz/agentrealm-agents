@@ -13,7 +13,7 @@ from ..pathing import grid_params, guided_step, nav_search
 from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
-from ..pathing import plan_sets
+from .explore import plan_sets
 from .intents import set_position, withdraw, withdraw_all
 
 

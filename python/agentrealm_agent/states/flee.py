@@ -13,7 +13,7 @@ from ..survival import GAP_PROBE_TICKS, at_health_floor, combat_group, flee_from
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
-from ..pathing import plan_sets
+from .explore import plan_sets
 from .fight import can_engage, engage, fight_target, in_weapon_reach
 from .intents import set_position
 from .retreat import retreat_step

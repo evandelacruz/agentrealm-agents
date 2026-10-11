@@ -28,8 +28,7 @@ from ..navigation.rejection import locked_doors_from_kb
 from ..travel.resolve import ResolvedDestination, at_destination, given_up_travel, picks_nearest, resolve_travel, still_candidate
 from ..world import DOORS, Pos, WorldModel
 from .base import PlayContext, State, StateOutcome, my_op
-from ..pathing import plan_sets
-from .explore import explore_outcome
+from .explore import explore_outcome, plan_sets
 from .intents import set_position
 
 # A hunting-ground search gives up after this long (A27).

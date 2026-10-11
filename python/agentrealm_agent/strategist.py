@@ -115,7 +115,7 @@ from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
-from .healing import supply_matches
+from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
 from .supplies import armor_defense, armor_slot, weapon_damage, what_it_does
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
@@ -195,6 +195,8 @@ A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows i
 State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
 
 Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage or defense, and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed). Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held.
+
+Potions: {POTION_RULE} State potions counts the potions held and stowed. Plan a reserve (potion_reserve) by that rule: the character will not drink one to top up a scratch. A heal_supplies trigger (hurt, with no food, no potion due and no rest to be had) also counts potions: any held are that reserve, kept back until health is low, so weigh food, a rest elsewhere or waiting before buying more.
 
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
@@ -563,6 +565,7 @@ def build_prompt(
         f"map_level={w.map_level} armed={w.armed_code} lives={w.lives}",
         f"worn={json.dumps(w.worn_codes, sort_keys=True)}",
         held_line(w),
+        potion_line(w),
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
@@ -603,6 +606,14 @@ def build_prompt(
         {"role": "system", "content": system_prompt(reference_sections), "cache": True},
         {"role": "user", "content": "\n\n".join(user_parts)},
     ]
+
+
+def potion_line(w: WorldModel) -> str:
+    """Potions held and stowed, and the health at or below which one is
+    drunk out of a fight (``healing.spend_potion``, A96)."""
+    line = low_health_line(w)
+    at = f"health<={line}" if line is not None else "unknown"
+    return f"potions={potion_count(w)} potion_drunk_at={at}"
 
 
 def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:

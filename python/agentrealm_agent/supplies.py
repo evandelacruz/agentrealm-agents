@@ -2,10 +2,12 @@
 
 The site serves the table as JSON at ``SUPPLIES_URL`` (API Supplies
 reference, saims B132): per ``code`` its ``class``, ``slot``, ``use_effects``
-(what ``Use`` does), ``attack_range``, ``damage``, ``heal``, ``used_up_on_break``,
-``eaten_on_pickup``, ``gem_prices`` and more; a field that does not apply is
-left out. It is a page on the website, not an API read, so it spends nothing
-from a character's call budget, and it is fetched once per run (``load``).
+(what ``Use`` does), ``attack_range``, ``damage`` (a weapon's), ``defense`` (an
+armor piece's, counted only while worn), ``heal`` (a potion's or food's),
+``chest_capacity`` (a chest's), ``used_up_on_break``, ``eaten_on_pickup``,
+``gem_prices`` and more; a field that does not apply is left out. It is a
+page on the website, not an API read, so it spends nothing from a character's
+call budget, and it is fetched once per run (``load``).
 
 Where the table comes from, first that works:
 
@@ -33,7 +35,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from .config import STATE_DIR
 from .item_table import absorb_supply_entry
@@ -63,6 +65,7 @@ class Supply:
     damage: int | None = None
     defense: int | None = None
     heal: int | None = None
+    chest_capacity: int | None = None
     used_up_on_break: bool | None = None
     eaten_on_pickup: bool = False
 
@@ -88,6 +91,7 @@ def parse(raw: Any) -> dict[str, Supply]:
             damage=_non_negative_int(row.get("damage")),
             defense=_non_negative_int(row.get("defense")),
             heal=_positive_int(row.get("heal")),
+            chest_capacity=_positive_int(row.get("chest_capacity")),
             used_up_on_break=used_up if isinstance(used_up, bool) else None,
             eaten_on_pickup=row.get("eaten_on_pickup") is True,
         )
@@ -228,6 +232,28 @@ def armor_defense(code: str | None) -> int | None:
     return r.defense if r is not None and r.supply_class == "armor" else None
 
 
+def worn_armor_defense(worn_codes: Iterable[str]) -> int:
+    """The defense the armor among ``worn_codes`` adds: each listed armor
+    piece's ``defense``. Only worn armor protects; armor in hand adds none, so
+    callers pass the worn slots' codes, never the armed one."""
+    return sum(armor_defense(code) or 0 for code in worn_codes)
+
+
+def is_consumable(code: str | None) -> bool:
+    """Listed in the ``consumable`` class (potions, chests, teleports), or food:
+    used or eaten, never armed for its own sake or worn."""
+    r = row(code)
+    return r is not None and (r.supply_class == "consumable" or is_food(code))
+
+
+def chest_capacity(code: str | None) -> int | None:
+    """The carry capacity ``Use`` on a listed chest makes the carried chest
+    when that is larger (the blue chest, 10, is the size a character starts
+    with), or None for anything that is not a chest."""
+    r = row(code)
+    return r.chest_capacity if r is not None else None
+
+
 def armor_slot(code: str | None) -> str:
     """The slot listed armor is worn in (``body``, ``head``, …), or ``""``."""
     r = row(code)
@@ -237,13 +263,14 @@ def armor_slot(code: str | None) -> str:
 def what_it_does(code: str | None) -> dict[str, Any]:
     """What the Supplies reference says a subtype does, for the planner's State
     (A92): ``class``, ``use`` (its ``use_effects``), whichever of ``heal``,
-    ``damage``, ``defense`` and ``slot`` apply, and ``used_up_on_break`` when
+    ``damage``, ``defense``, ``chest_capacity`` and ``slot`` apply (``defense``
+    counts only while worn), and ``used_up_on_break`` when
     listed (true: each block broken with it uses one up). ``{}`` when unlisted."""
     r = row(code)
     if r is None:
         return {}
     out: dict[str, Any] = {"class": r.supply_class, "use": sorted(r.use_effects)}
-    for key in ("heal", "damage", "defense"):
+    for key in ("heal", "damage", "defense", "chest_capacity"):
         if getattr(r, key) is not None:
             out[key] = getattr(r, key)
     if r.slot and r.slot != "armed":

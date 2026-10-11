@@ -48,7 +48,7 @@ from .supplies import is_food, is_potion
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .engagement import fight_bar
-from .survival import combat_group, estimate_health, win_ratio
+from .survival import combat_group, estimate_health, win_ratio, worn_defense
 from .threat import UNMEASURED_DEFAULT, type_key_for_entity
 from .states.intents import is_self_use
 from .world import WorldModel
@@ -352,4 +352,4 @@ def _below_every_bar(w: WorldModel, policy: Policy, params: dict[str, float | in
     group = combat_group(w, policy)
     if not group:
         return False
-    return win_ratio(estimate_health(w), group, w.threat, w.armed_code) <= fight_bar(w, policy, params, outrun_failed=True)
+    return win_ratio(estimate_health(w), group, w.threat, w.armed_code, worn_defense(w)) <= fight_bar(w, policy, params, outrun_failed=True)

@@ -4,6 +4,11 @@ Only sourced facts decide what goes where:
 
 - **Weapons** are the subtypes the Manual's Supplies reference lists in the
   ``weapon`` class (A54, ``supplies.is_weapon``). Nothing else is armed by Equip.
+- **Armor counts only worn.** Its ``defense`` protects only in a worn slot
+  (Supplies reference); armor in hand protects nothing, so Equip wears armor
+  and never arms it. A while-equipped piece (goggles, boots of speed, the
+  water-walking sandals, the truth lens, the firefly jar) works armed as well
+  as worn, but the armed slot is the weapon's, so Equip still only wears them.
 - **Worn slots** come from the snapshot's ``worn`` by slot: the world model
   files a subtype seen worn in a slot there for the run (``WorldModel.worn_slots``).
   A held subtype never seen worn has no slot for scoring until Equip tries
@@ -21,8 +26,9 @@ A refused ``Arm``, ``Wear`` or ``Remove`` marks its (subtype, slot) pair, and
 Equip does not try that pair again until the loadout or inventory changes.
 A slot-learn ``Wear`` that gets ``not_wearable`` is never retried for that
 subtype; any other refusal on a try is cleared when the loadout or inventory
-changes. Consumables and compose fragments are never equipped; they stay for
-Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
+changes. Consumables (the Supplies reference's ``consumable`` class: food,
+potions, chests, teleports) and compose fragments are never equipped; they stay
+for Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ from typing import Any
 
 from .item_table import InventorySupply
 from .loot import NON_TRANSFERABLE
-from .supplies import heals, is_weapon
+from .supplies import is_consumable as listed_consumable, is_weapon
 from .memory import Memory
 from .threat import ThreatTable
 from .world import WorldModel
@@ -47,8 +53,10 @@ MIN_GAIN_RATIO = 1.25
 
 
 def is_consumable(code: str | None) -> bool:
-    """Food or a potion: Heal's to use, never equipped."""
-    return heals(code)
+    """Food, a potion, a chest or a teleport (the Supplies reference's
+    ``consumable`` class): used up by ``Use``, never worn and never armed by
+    Equip."""
+    return listed_consumable(code)
 
 
 def wear_slot(code: str | None, w: WorldModel) -> str | None:

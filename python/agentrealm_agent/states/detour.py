@@ -52,7 +52,7 @@ from ..loot import GEM_PILE_STEPS, GEM_SUPPLY_CODES, Pickup, is_life_supply, loo
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
-from ..survival import health_floor
+from ..survival import health_floor, hit_damage, worn_defense
 from ..threat import type_key_for_entity
 from ..world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
@@ -243,7 +243,8 @@ def risk_allowed(w: WorldModel, ctx: PlayContext, at: Pos, known: Danger) -> boo
         return True
     if w.health is None:
         return False
-    volley = sum(w.threat.damage_per_hit(type_key_for_entity(e)) for e in near)
+    armor = worn_defense(w)
+    volley = sum(hit_damage(w.threat, type_key_for_entity(e), armor) for e in near)
     return w.health - volley > health_floor(w, ctx.params, near)
 
 

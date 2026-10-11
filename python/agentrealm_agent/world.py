@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
+from .supplies import worn_armor_defense
 from .threat import (
     ThreatTable,
     TypeKey,
@@ -797,15 +798,17 @@ class WorldModel:
         into ``hostile_types``.
 
         Call after apply_observation, so a source first listed in the same
-        response resolves to its type. A source that left view in that
+        response resolves to its type. A hit is filed gross of the armor worn
+        now (``threat.absorb_damaged``): the loadout this response leaves. A source that left view in that
         response is looked up in earlier, the entities before it. There is
         no entity list per event tick, so a source seen in neither is not
         recorded.
         """
         count_swings(self.threat, events, self.entities, earlier)
+        armor = worn_armor_defense(self.worn_codes.values())
         for ev in events:
             if ev.get("kind") == "Damaged":
-                absorb_damaged(self.threat, ev, self.entities, earlier)
+                absorb_damaged(self.threat, ev, self.entities, earlier, armor=armor)
             key = hostile_type_from_event(ev, self.entities, earlier)
             if key is not None:
                 self.hostile_types.add(key)

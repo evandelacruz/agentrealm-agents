@@ -1,4 +1,4 @@
-"""The planner's State: a finished buy is done and shown done (A106), and each
+"""The planner's State: a finished buy is done and shown done (A106, A112), and each
 level entrance shows whether a known route reaches it (A107)."""
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from agentrealm_agent.navigation import entrance_routes
 from agentrealm_agent.navigation import planner as P
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states.shop import shop_outcome
-from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, held_line, no_seller_line
+from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, eaten_on_pickup_line, held_line, no_seller_line
 from agentrealm_agent.travel.knowledge import entrance_key
 from agentrealm_agent.world import Entity, WorldModel
 
@@ -61,6 +61,21 @@ class BuyDoneTest(unittest.TestCase):
         w.carry_capacity = 30  # applied: the bought chest is the pack now, not held
         plan.advance(w, Memory())
         self.assertIsNone(plan.current())
+
+    def test_an_item_eaten_on_pickup_is_done_once_paid(self):
+        # A golden cap is eaten on its Take (A112): nothing is ever held, the
+        # purchase alone finishes the buy, and Shop has nothing left to do.
+        plan = self.paid_plan("golden_cap", gems=20)
+        w, m = world(gems=12), Memory()
+        w.entities = [Entity("supply", 6, (1, 0), "golden_cap", gem_price=8)]
+        plan.advance(w, m)
+        self.assertIsNone(plan.current())
+        self.assertEqual([t["trigger"] for t in m.strategist_signals], ["goal_done"])
+
+    def test_an_item_eaten_on_pickup_is_not_done_unpaid(self):
+        plan = self.paid_plan("golden_cap", gems=20)
+        plan.advance(world(gems=20), Memory())
+        self.assertEqual(plan.current()["code"], "golden_cap")
 
     def test_not_done_while_the_gems_are_not_spent(self):
         plan = self.paid_plan("middle_chest", gems=50)
@@ -146,6 +161,30 @@ class HeldChestTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(1, "middle_chest")]
         held = json.loads(held_line(w).split("=", 1)[1])
         self.assertFalse(held["middle_chest"]["applied"])
+
+
+class EatenOnPickupForSaleTest(unittest.TestCase):
+    """State names the items for sale that are eaten on pickup and what they do
+    (A112), and the contract says one applies at once, so a heal bought at full
+    health is wasted. The call is the planner's: no code rule forbids the buy."""
+
+    def test_lists_a_heal_eaten_on_pickup_seen_for_sale(self):
+        w = world(gems=20)
+        w.entities = [
+            Entity("supply", 6, (1, 0), "golden_cap", gem_price=8),
+            Entity("supply", 7, (2, 0), "small_potion", gem_price=10),
+        ]
+        rows = json.loads(eaten_on_pickup_line(w, None).split("=", 1)[1])
+        self.assertEqual(list(rows), ["golden_cap"])
+        self.assertEqual((rows["golden_cap"]["price"], rows["golden_cap"]["heal"]), (8, 6))
+        self.assertTrue(rows["golden_cap"]["eaten_on_pickup"])
+
+    def test_none_when_nothing_for_sale_is_eaten_on_pickup(self):
+        self.assertEqual(eaten_on_pickup_line(world(), None), "for_sale_eaten_on_pickup=none")
+
+    def test_the_contract_says_it_applies_at_once(self):
+        self.assertIn("for_sale_eaten_on_pickup", SYSTEM_PROMPT)
+        self.assertIn("bought at full health it heals nothing", SYSTEM_PROMPT)
 
 
 class NoSellerTest(unittest.TestCase):

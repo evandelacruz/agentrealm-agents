@@ -359,7 +359,7 @@ class NoEffectCutTest(unittest.TestCase):
         t.gems_gained = 8
         self.assertNotIn("gems_per_min", t.run_counts(1000 + RATE_MIN_SECONDS * 10 - 10, 10))
         t.gems_gained = 9
-        t.note_gathering(1000 + 3000, True)  # 300 s, 2 gems
+        t.note_gathering(1000 + 3000, True)  # still on top at 300 s: same gather, 2 gems
         self.assertEqual(t.run_counts(4000, 10), {"cuts": 0, "no_effect_cuts": 0, "gems_gained": 9, "gems_per_min": 0.4, "gather_minutes": 5.0})
         t.note_gathering(4000, False)
         t.gems_gained = 12  # gems from elsewhere after the gather ended

@@ -60,6 +60,7 @@ from ..knowledge_base import KnowledgeBase
 from ..loot import GEM_PILE_STEPS
 from ..memory import Memory
 from ..navigation import CostGridParams, cost_path, nearest_target
+from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
 from ..engagement import would_fight
@@ -746,7 +747,7 @@ def _replan_gather(
         m.path, m.goal, m.gather_target = pile[1], GOAL, ("pile", pile[0])
         return False
     if grass:
-        explore = _explore_instead(w, policy, grass, params, blocked, clear, safe, odds, d) if odds else None
+        explore = _explore_instead(w, m, policy, grass, params, blocked, clear, safe, odds, d) if odds else None
         if explore:
             m.path, m.goal, m.gather_target = explore[1], GOAL, (FRONTIER, explore[0])
         else:
@@ -828,6 +829,7 @@ def _steps_to_grass(w: WorldModel) -> float:
 
 def _explore_instead(
     w: WorldModel,
+    m: Memory,
     policy: Policy,
     grass: tuple[Pos, list[Pos]],
     params: CostGridParams,
@@ -846,12 +848,18 @@ def _explore_instead(
     it to grass (``_steps_to_grass``). So known grass far off wins
     only when its yield makes up for the longer walk, and grass as near as
     the edge always wins. Edges on safe ground (no gems), in a skipped
-    region, or off ``gather_ground`` are not priced."""
+    region, or off ``gather_ground`` are not priced, nor are edges stuck
+    detection gave up on and still backs off, as an explorer's or as
+    Gather's own walk (``nav_stuck.filter_frontiers``, ``backed_off``)."""
     here = w.pos
     edges = {
         p
-        for p in w.view.frontier()
-        if p != here and p not in safe and region_of(p) not in odds.skip and gather_ground(w, p, policy, d)
+        for p in nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier(), w.tick)
+        if p != here
+        and p not in safe
+        and region_of(p) not in odds.skip
+        and not nav_stuck.backed_off(m, GOAL, w.map_id, p, w.tick)
+        and gather_ground(w, p, policy, d)
     }
     edge = _nearest_clear(w, edges, params, blocked, clear) if edges else None
     if edge is None:

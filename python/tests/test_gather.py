@@ -17,6 +17,7 @@ from agentrealm_agent.states.gather_safe import gather_ground, is_safe_ish
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.gem_yield import NO_EFFECT_ZONE_CUTS, GemYieldTracker, record_cut
 from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.zone_discovery import apply_zone
 
 
@@ -781,6 +782,13 @@ class GatherPricesUnexploredGroundTest(unittest.TestCase):
             w.view.tiles[p] = "wall"
         gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
         self.assertEqual(m.gather_target, ("grass", (0, 1)))
+
+    def test_an_edge_stuck_detection_backs_off_loses_to_known_grass(self):
+        for goal in ("explore", gather_mod.GOAL):
+            w, m = self.world(), Memory()
+            m.nav_stuck.backoff_until[nav_stuck.goal_key(goal, 7, (1, 1))] = w.tick + 100
+            gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
+            self.assertEqual(m.gather_target, ("grass", (40, 1)), goal)
 
     def test_safe_ground_edges_are_not_priced(self):
         w = self.world()

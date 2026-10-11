@@ -1077,3 +1077,68 @@ Per A87, each names the rule a fix should generalize.
 3. **The first planner call is asked before the first full sync** (`strategist.py:1156`, the `map` trigger). Call 1, at tick 3, saw `armed=None`, `worn={}`, `held={}` and unread gems. It planned to buy the sword and mail the character already had. Call 2 dropped them 10 s later, so it cost one wasted call and no gems. Runs 9–11 show the same first State. **Rule:** the planner's first ask waits until self and inventory have been read once. (Addressed in A100: `WorldModel.synced`.)
 
 **Minor:** No Detour went for the (413–415, 414) piles, in view for most of the run 15–20 cells from the cutting ground. Grass yield fell from 27% (run 11) to 18% in the same region.
+
+### Run 13: a clean gathering run; the plan meets stage 2's readiness and keeps saving for gear no shop sells
+
+- **Code:** `main` at `5a5f7ca`. Since run 12: A97 (B138 alignment), A98 (every call goes through the pacer), A99 (one weapon-to-arm rule for Equip, Gather and the planner), A100 (no planner ask before the first full read).
+- **Knowledge base:** kept from run 12. Damage per type unchanged (snotling `max_hit` 1, gristlewick 2). 1 post. Region (432, 400): 398 cuts, 86 gems.
+- **Verdict:** exit 0, `PASS` after **601.6 s**, on the short-run gates only. The park **parked safe** at (427, 399) after 4.5 s. The character started at **10/10**, 5 lives and **3 gems** at (429, 399), with the bronze_sword armed, the bronze_mail worn, and small_potion ×2, the bronze_mallet, the pocket_knife and matches ×4 held.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; kills **0**; gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **yes** (3); food taken while hurt **no**; Heal drank a potion **no** (no hurt). Planner: 37 calls, 36 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–243 s | `gather_gems:60` | Call 1, at 5.4 s, came after the first full read and saw the gear: "3 gems, 2 potions, bronze sword and mail already. Gather in the 432,400 region." Cut grass in (432, 400). |
+| 243–254 s | `buy` small_potion, `gather_gems:60` | "Spend 10 gems on a third potion, then gather more toward iron gear." With the pack full, Shop **dropped a box of matches** on the shop tile, then bought the **small_potion** at 252 s (defect 2). |
+| 254–600 s | `gather_gems:60` | Cut grass in (432, 400) to the end. The planner kept the stack "toward iron gear" with `upgrades_for_sale=none seen` (defect 1). |
+
+At 355 s, mid-run, the parent session asked what the agent was doing. The answer, from the trace, was the stack above, Gather cutting at (432, 403), and the inventory with what each item was held for.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **3** | **29** (+36 earned, −10 spent) |
+| Armed | bronze_sword | bronze_sword |
+| Worn | bronze_mail | bronze_mail |
+| Held | small_potion ×2, bronze_mallet, pocket_knife, matches ×4 | small_potion ×3, bronze_mallet, pocket_knife, matches ×3 |
+| Potions | 2 | **3** |
+
+Bought: one small_potion (10), at 252 s, by a `buy` op. Dropped: one box of matches, at 250.5 s, by Shop to make room. Its supply (97392) then showed at (423, 398) with `gem_price` 5.
+
+#### Gems earned
+
+**36** in 600 s, **3.6 a minute** (run 12: 3.5). All 36 came from grass, in 205 cuts (18%), all in region (432, 400). That region now holds 603 cuts and 122 gems. No pile and no kill.
+
+#### Fights
+
+None. No hostile came within reach of (432, 400), and the character took no damage, so there is still no data on armor defense.
+
+#### Run 12 defects, checked
+
+| Defect | Run 13 | |
+|---|---|---|
+| A held-queue poll goes over the call budget (A98) | **Gone.** 0 API errors in about 1,225 calls. | |
+| Three rules for the best weapon (A99) | **Gone.** The mallet stayed in the pack. The sword stayed armed for cutting and fighting. | |
+| First planner ask before the first sync (A100) | **Gone.** Call 1, at 5.4 s, saw the sword, the mail and 2 potions. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 138,806, output 4,787, cache write 104,464, cache read 3,760,704 |
+
+#### Decision mix
+
+Intents: 264 `Step`, 153 `Wait`, 205 `Use` (all cuts), 37 `Take`, 1 `Drop`. Call mix: 932 `tick`, 221 `entities`, 74 `strategist`, 58 `self`, 6 `zone`, 4 `terrain`, 2 `position`.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize.
+
+1. **The plan stays in stage 2 after its readiness is met, saving for gear no shop sells** (`strategist.py:216`, the arc; `strategist.py:881`, `upgrades_for_sale`). Stage 2's readiness is health at least 80% of max, at least 3 potions, a weapon better than the starting one armed, and armor worn. All four held from 252 s. The State said `upgrades_for_sale=none seen`, and `shop_prices` lists no iron item. Still, every reply kept `gather_gems:60` "for iron gear", 350 s of cutting toward nothing on sale. **Rule:** when a stage's readiness is met and no upgrade is for sale, the arc moves to the next stage (beat levels). Saving toward gear needs that gear to be known for sale.
+
+2. **Shop drops a held supply on the shop tile to make room, and it turns into shop stock** (`states/shop.py:71–84`, `loot.pickup_room` at `loot.py:118`). With the pack full, Shop dropped the held supply with the lowest loot score, a box of matches, before taking the potion. On the shop tile it showed again with `gem_price` 5, so the drop sold nothing and gave the box away. The planner had reserved the matches for clues ("matches are held for the green-walled garden and hedge maze", run 12). **Rule:** making room never drops an item the plan holds for a use, nor drops it where a drop becomes stock. With no item free to drop, the choice goes back to the planner.
+
+3. **The planner cannot see pack space** (`strategist.py:836`, State `held=`). The State lists held items and counts, but not slots used or the pack's size. So a buy that needs a drop is planned without knowing it. The pack carries a 25-gem mallet and a spare knife that no rule arms while gathering. **Rule:** State shows slots used and total, and the arc weighs what an unused item costs in pack room.

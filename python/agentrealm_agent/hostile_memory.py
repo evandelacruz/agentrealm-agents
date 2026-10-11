@@ -33,7 +33,7 @@ A sighting is saved for every NPC of such a type: its post and reach, or the
 cell it was last seen on, and how strong a post still is (``strength`` as of
 tick ``noted``, ``spells`` seen). A loaded sighting is forgotten by the same
 rules as one seen this run (``WorldModel._note_sightings``): a post fades
-with world time and fast while in sight and empty, one keeping no post goes
+only while in sight and empty, never on time between runs, one keeping no post goes
 once its cell is in sight with it gone or after ``SIGHTING_TICKS`` unseen,
 and an ``NPCDied`` forgets either. Forgotten, it is removed from the file at
 exit.

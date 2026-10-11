@@ -51,7 +51,7 @@ class CostGridTest(unittest.TestCase):
         self.assertNotIn((1, 0), p)
 
     def test_hazard_cost_is_net_of_worn_armor(self):
-        # Worn armor cuts occupy_damage (A96); armor in hand protects nothing.
+        # Worn armor cuts occupy_damage (A97); armor in hand protects nothing.
         w = grid([".~.", "...", "..."], at=(0, 1))
         w.view.damage[(1, 0)] = 4
         w.armed_code = "iron_mail"

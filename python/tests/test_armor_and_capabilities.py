@@ -1,4 +1,4 @@
-"""Game update of 2026-10-11, item capabilities (A96).
+"""Game update of 2026-10-11, item capabilities (A97).
 
 Worn armor's defense lowers both the chance and the size of a hostile's hit,
 and armor in hand protects nothing. ``Damaged.amount`` is already net of the
@@ -16,7 +16,7 @@ from agentrealm_agent import supplies
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.engagement import decide
-from agentrealm_agent.equip import best_equip_upgrade, is_consumable
+from agentrealm_agent.equip import best_equip_upgrade, never_worn
 from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
 from agentrealm_agent.loot import learn_chest_upgrade
 from agentrealm_agent.memory import Memory
@@ -113,7 +113,7 @@ class ChestTest(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row.supply_class, "consumable")
         self.assertEqual(supplies.chest_capacity("blue_chest"), DEFAULT_CARRY_CAPACITY)
-        self.assertTrue(is_consumable("blue_chest"))
+        self.assertTrue(never_worn("blue_chest"))
         self.assertEqual(supplies.what_it_does("blue_chest")["chest_capacity"], 10)
 
     def test_capacity_comes_from_the_reference_and_only_rises(self):

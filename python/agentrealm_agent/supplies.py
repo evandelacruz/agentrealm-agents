@@ -52,6 +52,8 @@ FETCH_TIMEOUT_SECONDS = 5.0
 # and water open none (docs/GAME_NOTES.md Breaking blocks). ``plan`` takes its
 # ``break_block`` capabilities from here.
 CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
+# The classes that go in a worn slot; every other class is armed, used or carried.
+WORN_CLASSES = frozenset({"armor", "accessory"})
 
 
 @dataclass(frozen=True)
@@ -239,13 +241,6 @@ def worn_armor_defense(worn_codes: Iterable[str]) -> int:
     return sum(armor_defense(code) or 0 for code in worn_codes)
 
 
-def is_consumable(code: str | None) -> bool:
-    """Listed in the ``consumable`` class (potions, chests, teleports), or food:
-    used or eaten, never armed for its own sake or worn."""
-    r = row(code)
-    return r is not None and (r.supply_class == "consumable" or is_food(code))
-
-
 def chest_capacity(code: str | None) -> int | None:
     """The carry capacity ``Use`` on a listed chest makes the carried chest
     when that is larger (the blue chest, 10, is the size a character starts
@@ -254,10 +249,19 @@ def chest_capacity(code: str | None) -> int | None:
     return r.chest_capacity if r is not None else None
 
 
-def armor_slot(code: str | None) -> str:
-    """The slot listed armor is worn in (``body``, ``head``, …), or ``""``."""
+def worn(code: str | None) -> bool | None:
+    """Whether the reference says a subtype is worn: True for ``armor`` and
+    ``accessory``, False for every other class it lists (weapons, tools,
+    consumables, gems: armed, used or carried, never worn), None when the
+    reference does not list it."""
     r = row(code)
-    return r.slot if r is not None and r.supply_class == "armor" else ""
+    return None if r is None else r.supply_class in WORN_CLASSES
+
+
+def worn_slot(code: str | None) -> str:
+    """The slot listed armor or an accessory is worn in (``body``, ``accessory``, …), or ``""``."""
+    r = row(code)
+    return r.slot if r is not None and r.supply_class in WORN_CLASSES else ""
 
 
 def what_it_does(code: str | None) -> dict[str, Any]:

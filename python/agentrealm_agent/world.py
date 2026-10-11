@@ -54,17 +54,19 @@ POST_STILL_TICKS = 50
 # A hostile out of view that keeps no post is remembered where it was last
 # seen for this long (60 s at 10 ticks/s), on any map.
 SIGHTING_TICKS = 600
-# A remembered post fades: hostiles roam and respawn (A85).
-# Its ``Sighting.strength`` is 1 while the guard is in view and halves every
-# ``POST_HALF_LIFE_TICKS`` of world time out of view (5 min at 10 ticks/s),
-# times the spells it was seen on its post, up to ``POST_MAX_SPELLS``: a post
-# seen again and again stays strong for longer. A spell counts when the guard
+# A remembered post fades on evidence, never on time away: hostiles roam and
+# respawn (A85), but only looking at the post shows its guard gone.
+# Its ``Sighting.strength`` is 1 while the guard is in view. While the post is
+# in sight with nobody on it, it halves every ``EMPTY_POST_HALF_LIFE_TICKS``
+# looked at (1 s), times the spells the guard was seen on its post, up to
+# ``POST_MAX_SPELLS``: a post seen again and again takes longer to give up on.
+# One look counts at most ``EMPTY_POST_HALF_LIFE_TICKS``, since the time
+# between looks shows nothing. Out of sight, on this map or another, between
+# sessions however long, it keeps its strength. A spell counts when the guard
 # is back on its post after ``SIGHTING_TICKS`` out of view, so a guard at the
-# edge of sight flickering in and out adds none. A post in sight with nobody
-# on it halves every ``EMPTY_POST_HALF_LIFE_TICKS`` looked at (1 s), at most
-# once a look. It holds ground while at least ``POST_HOLD_STRENGTH``, only
-# prices it below that, and is forgotten below ``POST_FORGET_STRENGTH``.
-POST_HALF_LIFE_TICKS = 3000
+# edge of sight flickering in and out adds none. It holds ground while at
+# least ``POST_HOLD_STRENGTH``, only prices it below that, and is forgotten
+# below ``POST_FORGET_STRENGTH``.
 POST_MAX_SPELLS = 4
 EMPTY_POST_HALF_LIFE_TICKS = 10
 POST_HOLD_STRENGTH = 0.5
@@ -82,9 +84,9 @@ class Sighting:
     its post for us shows how far it guards. Whether it is a threat is asked at use
     (``survival.is_hostile``), so a type found hostile later counts.
 
-    A post fades once its guard is out of view (``strength``, as of tick
-    ``noted``; ``fade_post``). ``spells`` counts the times its guard was
-    seen back on its post after a while away.
+    A post fades while it is in sight with its guard gone (``strength``, as
+    of tick ``noted``; ``fade_post``). ``spells`` counts the times its guard
+    was seen back on its post after a while away.
     """
 
     entity: Entity  # as last seen
@@ -99,15 +101,15 @@ class Sighting:
     in_view: bool = True
 
     def fade_post(self, tick: int, empty: bool) -> None:
-        """Bring ``strength`` up to ``tick`` out of view: halved every
-        ``POST_HALF_LIFE_TICKS`` times ``spells`` (up to ``POST_MAX_SPELLS``),
-        and when ``empty`` (its post in sight with nobody on it) also every
-        ``EMPTY_POST_HALF_LIFE_TICKS``, at most once for this look."""
-        dt = max(0, tick - self.noted)
-        half_life = POST_HALF_LIFE_TICKS * min(max(1, self.spells), POST_MAX_SPELLS)
-        self.strength *= 0.5 ** (dt / half_life)
+        """Bring ``strength`` up to ``tick`` with its guard out of view. Only
+        ``empty`` (its post in sight with nobody on it) is evidence: halved every
+        ``EMPTY_POST_HALF_LIFE_TICKS`` times ``spells`` (up to ``POST_MAX_SPELLS``),
+        counting at most ``EMPTY_POST_HALF_LIFE_TICKS`` for this look. Not in
+        sight, it keeps its strength however long it has been."""
         if empty:
-            self.strength *= 0.5 ** (min(dt, EMPTY_POST_HALF_LIFE_TICKS) / EMPTY_POST_HALF_LIFE_TICKS)
+            looked = min(max(0, tick - self.noted), EMPTY_POST_HALF_LIFE_TICKS)
+            half_life = EMPTY_POST_HALF_LIFE_TICKS * min(max(1, self.spells), POST_MAX_SPELLS)
+            self.strength *= 0.5 ** (looked / half_life)
         self.noted = tick
 
 
@@ -567,9 +569,10 @@ class WorldModel:
         post once one has stood still ``POST_STILL_TICKS``, and forget one
         that keeps no post once the cell it was last seen on is in sight with
         it gone, or it has been unseen for ``SIGHTING_TICKS`` on any map. A
-        post out of view fades (``Sighting.fade_post``), fast while it is in
-        sight with nobody on it, and is forgotten once faded below
-        ``POST_FORGET_STRENGTH``; on a map left behind it fades by time alone."""
+        post fades only while it is in sight with nobody on it
+        (``Sighting.fade_post``), and is forgotten once faded below
+        ``POST_FORGET_STRENGTH``; out of sight, or on a map left behind, it
+        keeps its strength."""
         in_view = set()
         for e in self.entities:
             if e.kind not in ("npc", "character"):

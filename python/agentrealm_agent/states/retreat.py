@@ -252,12 +252,13 @@ def losing_ground(w: WorldModel, ctx: PlayContext, goal: Pos) -> bool:
 
 
 def _turn_on_losing(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | None:
-    """Losing ground: drink or eat what we carry, else, when the engagement
-    decided again on running not working says fight, fight back the hitter
-    in weapon reach; else None."""
-    out = use_carried_heal(w, ctx.memory)
+    """Losing ground: the engagement decides again on running not working;
+    then drink or eat what we carry (a potion when that decision says the
+    drink turns the fight, or health is low), else, when it says fight, fight
+    back the hitter in weapon reach; else None."""
+    e = cannot_outrun(w, ctx.memory, ctx.policy, ctx.params)
+    out = use_carried_heal(w, ctx)
     if out is None:
-        e = cannot_outrun(w, ctx.memory, ctx.policy, ctx.params)
         hitter = _hitter_in_reach(w, ctx) if e is not None and e.fight else None
         out = engage(w, ctx, hitter, state) if hitter is not None else None
     if out is None or not out.intents:

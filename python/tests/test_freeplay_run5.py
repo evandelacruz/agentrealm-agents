@@ -30,8 +30,8 @@ DRINK = [{"verb": "Arm", "supply_id": 4}, {"verb": "Use", "target": {"kind": "se
 
 
 def hurt_world() -> WorldModel:
-    """Map 7, all dirt, 7/10 health, a knife armed and two potions held."""
-    w = WorldModel(character_id=9, map_id=7, pos=(3, 3), perception=6, health=7, max_health=10)
+    """Map 7, all dirt, 7/20 health (low, A96), a knife armed and two potions held."""
+    w = WorldModel(character_id=9, map_id=7, pos=(3, 3), perception=6, health=7, max_health=20)
     for x in range(8):
         for y in range(8):
             w.view.tiles[(x, y)] = "dirt"
@@ -63,7 +63,7 @@ class ProbeLeavesMemoryTest(unittest.TestCase):
             self.assertIsNone(r.reflex_while_held())
         self.assertEqual(r.mem.heal_refusals, {})
         self.assertEqual(r.mem, before, "a probe whose answer is not sent leaves memory as it was")
-        self.assertIsNotNone(carried_heal(r.world, r.mem), "both potions are still drinkable")
+        self.assertIsNotNone(carried_heal(r.world, r.mem, Policy(), dict(PARAM_DEFAULTS)), "both potions are still drinkable")
 
     def test_memory_snapshot_restores_named_fields_only(self):
         m = Memory(goal="safe", heal_drink=4)

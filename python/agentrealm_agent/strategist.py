@@ -115,8 +115,8 @@ from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
-from .healing import supply_matches
-from .supplies import armor_defense, armor_slot, weapon_damage, what_it_does
+from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
+from .supplies import armor_defense, weapon_damage, worn_slot, what_it_does
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
@@ -196,6 +196,8 @@ State stall shows how long the character has neither moved, gained or spent gems
 
 Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage, defense (armor protects only while worn, never in hand; worn, it lowers both how often and how hard a hostile hits), chest_capacity, and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed). Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held.
 
+Potions: {POTION_RULE} State potions counts the potions held and stowed. Plan a reserve (potion_reserve) by that rule: the character will not drink one to top up a scratch. A heal_supplies trigger (hurt, with no food, no potion due and no rest to be had) also counts potions: any held are that reserve, kept back until health is low, so weigh food, a rest elsewhere or waiting before buying more.
+
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
 "wait" needs a "why" and at most {MAX_WAIT_SECONDS} seconds. You are asked again on every event and, with none, a few seconds after each reply, so plan the next few steps, not the whole game. A "discovery" trigger lists what the character has just found: an NPC not seen before (kind "npc"), a level entrance (kind "entrance"), an item for sale the gems held can now buy (kind "affordable"), a pack of known-hostile NPCs in a part of the map where none was seen (kind "hostile_pack"), or a sign or statue not read yet (kind "sign"); replan if it changes what is worth doing. A new head op takes over once the action under way ends (within a few seconds), never in the middle of a walk; the survival states still act at once. The agent keeps each target it picks (a grass cell, a frontier, a safe tile, a shop cell, a door) until it gets there or finds it out of reach, and takes a gem, life or (when hurt) food in view before walking on when it is worth the extra steps (more for a cluster of gem piles or a life).
@@ -217,7 +219,7 @@ The character's arc, in order. Judge the stage from State (health, gems, armed, 
 
 Gems by area (stage 2). Gem drops from grass vary by area, and some areas drop none. State gem_yield is measured from the character's own cuts: expected_yield, the gems a cut drops on this map (the manual's rate until enough cuts measure it), the region it stands in (here, once cut there), the best regions at any distance with their yield (gems per cut) and distance in blocks, and the barren ones nearby. A good region far behind is still worth a travel back. Hunt gems where the yield is good, leave a region that shows no gems after a fair sample, and explore regions not yet sampled to sample them.
 
-How gather_gems works. Gather cuts known grass and takes gem piles off hazards with no hostile near (a hostile that has not hit us only bars cells within weapon reach plus a step; one that shadows for 15 s without attacking is fought when the profile fights and would win, else Gather walks well off from it). It remembers hostiles out of view: the cell it last saw one on, the post a guard stands on, and how far from that post it has hit the character or come out to fight it; ground they hold is not gathered and no walk to a gem crosses it (a post fades with time unseen, and within seconds when seen empty; once faded it no longer bars its ground, Gather only prefers other grass nearby to it), ground near a known hostile costs more steps to reach and work, and a hit on the way to a pile shows that pile's ground held. Set fight true on a gather_gems to gather there anyway and take the fight. Field cells come before safe-zone ones (gems drop from cuts outside town, and a cut on town grass was seen to have no effect). It walks to the cheapest one itself (the walk, plus steps for ground near a hostile; a gem pile counts 8 steps cheaper than grass), learns ground where cuts have no effect and leaves it, and with nothing left to cut while on safe ground it heads out to field ground or the frontier; the survival states keep the character alive while it does. It skips barren regions (15 cuts with no gem). Once its region shows a poor yield after a fair sample (20 cuts, under half of expected_yield), it leaves poor regions alone and walks to the best region within 64 blocks that gave at least expected_yield, and cuts there. A gather_gems x, y names a target region (any block of it, such as a gem_yield corner): Gather walks there and cuts only there while it knows a cell to cut there, and walks to gem piles only there (one beside it is taken anyway), and works as usual once it knows none; it also lifts that region's barren mark. Name one to send Gather to a good region it would not pick itself (a far one, say); leave x, y out to let it choose, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (a cut sent now), "taking a gem", "walking to grass" or "walking to a gem pile", "moving off from a hostile that shadows", "fighting a hostile that shadows", "walking to ground clear of hostiles" (every cuttable cell known has a hostile near, so it walks on to the nearest unexplored edge with none near to find more), "blocked by hostile" (the same, with no such edge to walk to), "heading out of safe ground" (nothing left to cut, walking out of the safe zone), "cuts have no effect here" (cuts here changed nothing, so it moves on to other cells), "no cuttable cell in view" (it knows no grass it may cut, so it explores for one), or "region barren" (the same, standing in a barren region); "walking to a target region" while it heads for a named region it has not seen. While it works only in a target region, the status ends in " (region x,y)", that region's corner. Any of these but "cutting" ends in ", no cut for N s" once no cut has taken effect for 30 s: that is a stall, not progress. State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress."""
+How gather_gems works. Gather cuts known grass and takes gem piles off hazards with no hostile near (a hostile that has not hit us only bars cells within weapon reach plus a step; one that shadows for 15 s without attacking is fought when the profile fights and would win, else Gather walks well off from it). It remembers hostiles out of view: the cell it last saw one on, the post a guard stands on, and how far from that post it has hit the character or come out to fight it; ground they hold is not gathered and no walk to a gem crosses it (a post fades only while it is seen empty, within seconds, and one nobody looks at keeps its strength; once faded it no longer bars its ground, Gather only prefers other grass nearby to it), ground near a known hostile costs more steps to reach and work, and a hit on the way to a pile shows that pile's ground held. Set fight true on a gather_gems to gather there anyway and take the fight. Field cells come before safe-zone ones (gems drop from cuts outside town, and a cut on town grass was seen to have no effect). It walks to the cheapest one itself (the walk, plus steps for ground near a hostile; a gem pile counts 8 steps cheaper than grass), learns ground where cuts have no effect and leaves it, and with nothing left to cut while on safe ground it heads out to field ground or the frontier; the survival states keep the character alive while it does. It skips barren regions (15 cuts with no gem). Once its region shows a poor yield after a fair sample (20 cuts, under half of expected_yield), it leaves poor regions alone and walks to the best region within 64 blocks that gave at least expected_yield, and cuts there. A gather_gems x, y names a target region (any block of it, such as a gem_yield corner): Gather walks there and cuts only there while it knows a cell to cut there, and walks to gem piles only there (one beside it is taken anyway), and works as usual once it knows none; it also lifts that region's barren mark. Name one to send Gather to a good region it would not pick itself (a far one, say); leave x, y out to let it choose, and never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (a cut sent now), "taking a gem", "walking to grass" or "walking to a gem pile", "moving off from a hostile that shadows", "fighting a hostile that shadows", "walking to ground clear of hostiles" (every cuttable cell known has a hostile near, so it walks on to the nearest unexplored edge with none near to find more), "blocked by hostile" (the same, with no such edge to walk to), "heading out of safe ground" (nothing left to cut, walking out of the safe zone), "cuts have no effect here" (cuts here changed nothing, so it moves on to other cells), "no cuttable cell in view" (it knows no grass it may cut, so it explores for one), or "region barren" (the same, standing in a barren region); "walking to a target region" while it heads for a named region it has not seen. While it works only in a target region, the status ends in " (region x,y)", that region's corner. Any of these but "cutting" ends in ", no cut for N s" once no cut has taken effect for 30 s: that is a stall, not progress. State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress."""
 
 
 def system_prompt(reference_sections: str = "") -> str:
@@ -563,6 +565,7 @@ def build_prompt(
         f"map_level={w.map_level} armed={w.armed_code} lives={w.lives}",
         f"worn={json.dumps(w.worn_codes, sort_keys=True)}",
         held_line(w),
+        potion_line(w),
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
@@ -603,6 +606,14 @@ def build_prompt(
         {"role": "system", "content": system_prompt(reference_sections), "cache": True},
         {"role": "user", "content": "\n\n".join(user_parts)},
     ]
+
+
+def potion_line(w: WorldModel) -> str:
+    """Potions held and stowed, and the health at or below which one is
+    drunk out of a fight (``healing.spend_potion``, A96)."""
+    line = low_health_line(w)
+    at = f"health<={line}" if line is not None else "unknown"
+    return f"potions={potion_count(w)} potion_drunk_at={at}"
 
 
 def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
@@ -836,14 +847,14 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     best_damage = max((weapon_damage(c) or 0 for c in owned), default=0)
 
     def best_defense(slot: str) -> int:
-        return max((armor_defense(c) or 0 for c in owned if armor_slot(c) == slot), default=0)
+        return max((armor_defense(c) or 0 for c in owned if worn_slot(c) == slot), default=0)
 
     gems = w.gems or 0
     rows = []
     for code, price in seen_prices(w, knowledge).items():
         if code in owned:
             continue
-        damage, defense, slot = weapon_damage(code), armor_defense(code), armor_slot(code)
+        damage, defense, slot = weapon_damage(code), armor_defense(code), worn_slot(code)
         if damage is not None and damage > best_damage:
             gain = f"damage {best_damage} -> {damage}"
         elif defense is not None and slot and defense > best_defense(slot):

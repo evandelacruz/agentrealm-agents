@@ -93,10 +93,10 @@ class SightingsTest(unittest.TestCase):
         post_seen_then_left(w)
         w.pos = (17, 10)  # the post is in sight and nobody is on it
         t = POST_STILL_TICKS + 1
-        for _ in range(EMPTY_POST_HALF_LIFE_TICKS):
+        for _ in range(EMPTY_POST_HALF_LIFE_TICKS + 1):
             t += 1
             see(w, [], t)
-        self.assertEqual(known_reach(w, policy()), [], "half strength: it holds no ground")
+        self.assertEqual(known_reach(w, policy()), [], "below half strength: it holds no ground")
         self.assertIn(("npc", 9), w.sightings)
         for _ in range(3 * EMPTY_POST_HALF_LIFE_TICKS):
             t += 1

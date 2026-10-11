@@ -4,16 +4,12 @@ Only sourced facts decide what goes where:
 
 - **Weapons** are the subtypes the Manual's Supplies reference lists in the
   ``weapon`` class (A54, ``supplies.is_weapon``). Nothing else is armed by Equip.
-- **Armor counts only worn.** Its ``defense`` protects only in a worn slot
-  (Supplies reference); armor in hand protects nothing, so Equip wears armor
-  and never arms it. A while-equipped piece (goggles, boots of speed, the
-  water-walking sandals, the truth lens, the firefly jar) works armed as well
-  as worn, but the armed slot is the weapon's, so Equip still only wears them.
 - **Worn slots** come from the snapshot's ``worn`` by slot: the world model
   files a subtype seen worn in a slot there for the run (``WorldModel.worn_slots``).
-  A held subtype never seen worn has no slot for scoring until Equip tries
-  ``Wear`` once (A55) and reads which slot ``worn`` shows. Any held candidate
-  that is not a weapon gets that one try, priced or not.
+  Failing that, the Supplies reference's ``slot`` for a subtype it classes as
+  worn (``supplies.worn_slot``). A subtype it classes as anything else (a tool,
+  a consumable, a gem) is never worn. Only a subtype whose slot neither gives
+  gets one ``Wear`` to find it (A55), reading which slot ``worn`` shows.
 
 Each slot compares like with like, never across units: learned per-NPC-type
 hits (``weapon_damage`` for weapons, ``damage_saved`` for armor) on the hostile
@@ -26,9 +22,8 @@ A refused ``Arm``, ``Wear`` or ``Remove`` marks its (subtype, slot) pair, and
 Equip does not try that pair again until the loadout or inventory changes.
 A slot-learn ``Wear`` that gets ``not_wearable`` is never retried for that
 subtype; any other refusal on a try is cleared when the loadout or inventory
-changes. Consumables (the Supplies reference's ``consumable`` class: food,
-potions, chests, teleports) and compose fragments are never equipped; they stay
-for Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
+changes. Consumables and compose fragments are never equipped; they stay for
+Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
 """
 
 from __future__ import annotations
@@ -38,7 +33,7 @@ from typing import Any
 
 from .item_table import InventorySupply
 from .loot import NON_TRANSFERABLE
-from .supplies import is_consumable as listed_consumable, is_weapon
+from .supplies import heals, is_weapon, worn, worn_slot
 from .memory import Memory
 from .threat import ThreatTable
 from .world import WorldModel
@@ -53,16 +48,22 @@ MIN_GAIN_RATIO = 1.25
 
 
 def is_consumable(code: str | None) -> bool:
-    """Food, a potion, a chest or a teleport (the Supplies reference's
-    ``consumable`` class): used up by ``Use``, never worn and never armed by
-    Equip."""
-    return listed_consumable(code)
+    """Food or a potion: Heal's to use, never equipped."""
+    return heals(code)
+
+
+def never_worn(code: str | None) -> bool:
+    """A weapon, a consumable, or anything else the Supplies reference lists in
+    a class that is not worn: Equip never sends ``Wear`` for it."""
+    return is_consumable(code) or is_weapon(code) or worn(code) is False
 
 
 def wear_slot(code: str | None, w: WorldModel) -> str | None:
-    if not code or is_consumable(code) or is_weapon(code):
+    """The slot ``code`` is worn in: as seen worn this run, else as the
+    Supplies reference gives it; None when never worn or not yet known."""
+    if not code or never_worn(code):
         return None
-    slot = w.worn_slots.get(code) if code else None
+    slot = w.worn_slots.get(code) or worn_slot(code)
     return slot if slot in WEAR_SLOTS else None
 
 
@@ -197,10 +198,11 @@ def best_equip_upgrade(
 
 
 def _best_learn_wear(w: WorldModel, m: Memory) -> EquipUpgrade | None:
-    """The lowest-id held non-weapon with no known slot, to try ``Wear`` on once (A55)."""
+    """The lowest-id held subtype that may be worn but whose slot neither a
+    snapshot nor the Supplies reference gives, to try ``Wear`` on once (A55)."""
     for s in sorted(_candidates(w), key=lambda h: h.id):
         code = s.code
-        if is_weapon(code) or wear_slot(code, w) is not None:
+        if never_worn(code) or wear_slot(code, w) is not None:
             continue
         if code in m.equip_not_wearable or code in m.equip_try_refused:
             continue

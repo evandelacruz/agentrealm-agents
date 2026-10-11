@@ -82,7 +82,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Hunting grounds.** Your strength is permanent attack + permanent defense + armed weapon damage + worn armor defense. Over the ceiling you can't enter (`over_strength_ceiling`), and if you grow past it inside you are moved out (API Movement). Strength is readable only on the owner watch sheet (`/watch/characters/{id}/sheet`, viewing bucket), not on `get_self` (M §5.5); the sheet counts only an armed weapon's damage and worn armor's defense, never a held potion or worn non-armor (CL, B139). Neither serves attack power on its own.
 - **Olympuff's hunting ground** has `strength_ceiling` 7: attack power 2 plus 5 of gear. The pocket knife or a bronze sword, with bronze mail or without, gets in; a bronze mallet or anything stronger does not (M §16, CL: it was 5 before attack power 2).
 - **Light.** Sight range = perception × zone brightness, plus a light's radius, capped at perception (Guide, The world model). A torch or lantern lights for its lit time (two and five minutes) after `Use` on yourself, without being used up, and gives light only while armed; an always-on light such as the firefly jar lights armed or worn. Only the largest radius carried counts; lights do not add up (M §11, CL B138).
-- **While-equipped pieces work armed too.** Goggles, boots of speed, the water-walking sandals and the truth lens grant their effect armed as well as worn (M §11, CL B138). The armed slot is the weapon's, so the agent wears them (A96).
+- **While-equipped pieces work armed too.** Goggles, boots of speed, the water-walking sandals and the truth lens grant their effect armed as well as worn (M §11, CL B138). The armed slot is the weapon's, so the agent wears them (A97).
 
 ## Combat
 
@@ -90,11 +90,11 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Rolls.**
   - To hit: d20 + attack ≥ 10 + target defense + target armor defense. 1 always misses, 20 always hits.
   - Damage: uniform from 1 to max(1, attack + weapon damage), less defense and armor defense, never below 0. Weapon damage adds to attack power for this roll only; it does not change the roll to hit (M §11).
-  - Armor counts only worn: its `defense` protects against weapon hits, hostile and boss hits, traps and, since B138, damaging blocks (`occupy_damage`, before cut by defense alone); armor in hand protects nothing (M §11, CL B138). The route planner prices a hazard step at the `occupy_damage` that gets through (A96).
+  - Armor counts only worn: its `defense` protects against weapon hits, hostile and boss hits, traps and, since B138, damaging blocks (`occupy_damage`, before cut by defense alone); armor in hand protects nothing (M §11, CL B138). The route planner prices a hazard step at the `occupy_damage` that gets through (A97).
   - Die size, hit target and minimum are per-world settings (API Use).
   - Every Olympuff character has permanent attack power 2, existing characters included; permanent defense stays 0 (M §16, CL). A d20 roll of 8+ hits a hostile, which has no defense: 65%. Damage is 1 up to 2 plus weapon damage: the pocket knife deals 1–4, a bronze sword 1–6. The world's hit target stays 10, so hostiles' swings at characters are unchanged.
   - The API serves no attack power (PLAN.md **Server gaps**); the agent's win estimate uses the base of 2 (`survival.BASE_ATTACK_POWER`).
-  - `Damaged.amount` is what got through: a hit armor absorbs whole is `Damaged` with 0 (API Events, B131). The threat table adds back the defense of the armor worn when a hit lands, so it holds the hostile's own number, and the win estimate and Retreat's floor take the armor worn now off it once (`threat.absorb_damaged`, `survival.worn_defense`, A96).
+  - `Damaged.amount` is what got through: a hit armor absorbs whole is `Damaged` with 0 (API Events, B131). The threat table adds back the defense of the armor worn when a hit lands, so it holds the hostile's own number, and the win estimate and Retreat's floor take the armor worn now off it once (`threat.absorb_damaged`, `survival.worn_defense`, A97).
 - **Hostiles.** A hostile, trap or boss uses its damage number as attack power, with no weapon damage. Hostiles use the same move and attack accumulators as characters (API Use, Movement).
 - **What two weak hostiles did** (Obs 1836771–1836830):
 
@@ -257,4 +257,4 @@ Loot (A47) also assumes one value until measured (A57; Obs [`A57_live_play.md`](
 
 | Assumption | Value | Basis |
 |---|---|---|
-| Carry capacity after an applied `Take` of a chest | its Supplies reference `chest_capacity` when larger: `middle_chest` 30, `red_chest` 50; `blue_chest` (10) changes nothing | The Supplies reference (`supplies.chest_capacity`, A96). The Manual says the capacity rises on `Use` of the chest; the agent assumes it on the `Take`. A `carry_capacity_full` rejection still lowers it to what is carried, and a respawn resets it to 10 |
+| Carry capacity after an applied `Take` of a chest | its Supplies reference `chest_capacity` when larger: `middle_chest` 30, `red_chest` 50; `blue_chest` (10) changes nothing | The Supplies reference (`supplies.chest_capacity`, A97). The Manual says the capacity rises on `Use` of the chest; the agent assumes it on the `Take`. A `carry_capacity_full` rejection still lowers it to what is carried, and a respawn resets it to 10 |

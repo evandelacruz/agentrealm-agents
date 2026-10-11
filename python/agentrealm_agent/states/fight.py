@@ -11,7 +11,8 @@ from ..executor.movement import direction_between
 from ..knowledge_base import KnowledgeBase
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
-from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks, would_lose
+from ..engagement import fights
+from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
@@ -63,21 +64,6 @@ def in_weapon_reach(w: WorldModel, target: Entity, knowledge: KnowledgeBase | No
     if w.pos is None:
         return False
     return chebyshev(w.pos, target.pos) <= weapon_reach(w, knowledge)
-
-
-def weapon_has_hurt(w: WorldModel, target: Entity, knowledge: KnowledgeBase | None) -> bool:
-    """The armed weapon has landed a hit on ``target``'s NPC type (``weapon_damage``, A18).
-
-    A weapon that has never damaged that type gives no evidence we can win:
-    Flee never counts such a fight as won (A23 survive-a-fight run 1).
-    """
-    code = w.armed_code
-    if target.kind != "npc" or not target.code or not code or knowledge is None:
-        return False
-    with knowledge.lock:
-        row = knowledge.items.get(code)
-        per_type = row.get("weapon_damage") if isinstance(row, dict) else None
-        return isinstance(per_type, dict) and bool(per_type.get(target.code))
 
 
 def _ticks_since_use(w: WorldModel, last_use_tick: int | None) -> int | None:
@@ -146,23 +132,25 @@ def can_engage(world: WorldModel, target: Entity, ctx: PlayContext) -> bool:
 
 
 def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
-    """Swing or close in; false when we cannot close, so **Flee** runs."""
+    """The engagement's decision is to fight (``engagement.fights``) and
+    we can swing or close in; false when we cannot close, so **Flee** runs."""
     policy = ctx.policy
     if policy.kind != "scripted" or not world.alive or world.pos is None:
         return False
     if policy.on_hostile != "fight" or on_safe_tile(world):
         return False
     target = fight_target(world, policy, ctx.never_attack)
-    if target is None or would_lose(world, policy, ctx.params):
+    if target is None or not fights(world, ctx.memory, policy, ctx.params):
         return False
     return can_engage(world, target, ctx)
 
 
 class FightState(State):
     """Priority 2, before **Flee**. Swings or closes on the nearest allowed hostile
-    when ``on_hostile = fight``, the win estimate passes ``fight_margin``, and we
-    are not on a safe tile; queues retreat steps behind ``Use`` when a safe tile
-    is known."""
+    when ``on_hostile = fight``, the engagement's decision is to fight
+    (``engagement.fight_or_flee``, the decision Flee and Retreat read too), and
+    we are not on a safe tile; queues retreat steps behind ``Use`` when a safe
+    tile is known."""
 
     name = "Fight"
 

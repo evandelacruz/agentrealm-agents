@@ -13,6 +13,7 @@ from .navigation.walk import Walk
 from .targets import Commitment
 
 if TYPE_CHECKING:
+    from .engagement import Engagement
     from .healing import HealRefusal, NoopDrink
     from .states.detour import Detour
 from .travel.strength import StrengthBracket
@@ -115,10 +116,11 @@ class Memory:
     # _committed_step's open check and its best-step comparison while that escape runs.
     flee_avoid: set[Pos] = field(default_factory=set)
     # Whether fleeing works (A9, A58 run 9): (tick, gap to the nearest hostile)
-    # at each Flee decision, the tick Flee began, and whether it gave up running.
+    # at each Flee decision, and the tick Flee began.
     flee_gaps: list[tuple[int, int]] = field(default_factory=list)
     flee_since: int = 0
-    flee_failed: bool = False
+    # The fight-or-flee decision Fight, Flee and Retreat all read (A92).
+    engagement: Engagement | None = None
     # Detour (A71): the find a detour walks to, and finds it gave up on this run.
     detour: Detour | None = None
     detour_skipped: set[int] = field(default_factory=set)

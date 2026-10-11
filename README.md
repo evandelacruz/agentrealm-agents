@@ -135,7 +135,7 @@ Live M8 smoke: `make smoke-m8-olympuff CHARACTER_ID=…` (or `CHARACTER_NAME=…
 Pass criteria (PLAN.md A25, checked in [`m8_acceptance.py`](python/agentrealm_agent/m8_acceptance.py)):
 
 - deaths are counted and reported and play goes on after the respawn; with `--stop-on-death`, no death (the first one fails and ends the run), and alive at the end of the run;
-- no fight started below the health floor (`would_lose` at the first attack after entering **Fight**);
+- no fight started below the health floor (the win estimate under every fight-or-flee bar at the first attack after entering **Fight**, A92);
 - no API error;
 - on a run of at least 95% of an hour: gems earned at least once; armor worn; a shop weapon armed; potion reserve reached; **Heal** took ground food and drank a carried potion (a self-`Use` that applied and used one up, A76); at least one lone weak hostile kill (`NPCDied` for the NPC **Fight** attacked while it was the lone hostile, of a measured type hitting at most 2).
 

@@ -793,3 +793,10 @@ Intents: 1,075 `Step`, 2,909 `Wait`, 4 `Take`, 3 `Use`, no `Say`, no `Attack`. C
 3. **Measured damage per type is not saved, so each run starts with every type unmeasured, and no fight starts** (`hostile_memory.py:68–75`, `threat.py:34`). `save_hostiles` writes `hostile: true` per type and the sightings, but not `w.threat.by_type`. Run 8 measured all three types (1 a hit), and run 9 started with none. The planner's progression arc (`strategist.py:204`) refuses an unmeasured type, so its `gather_gems` kept `fight: false` all run. #172's new win estimate never went into a fight, and kill drops stayed out of reach.
 
 **Minor:** A `Take` of an apple at 222.6 s was refused `target_not_nearby`, and Heal walked to it instead. Break cuts on walks are filed as gem-yield cuts: the bush at (402, 437) is in `gem_yield`. Gristlewick 240's remembered post moved from (369, 400) to (357, 400).
+
+### Run 10: Fight and Flee take turns against one gristlewick, and Gather goes back 4 times for a pile beside the pack
+
+Only the two defects A92 fixes are written up here.
+
+1. **Fight and Flee take turns against one gristlewick (320–331 s).** It dealt 4 damage and took 7 before Flee broke off at 3/10. Fight re-engaged whenever Flee was not outrunning the hostile (`states/flee.py:120–135`): Fight, Flee's fall-back and Retreat each decided fight or flee on their own test, re-run on what moved (a hostile stepping in or out of range, a step that closed on it, whether Flee was gaining distance). A92 makes it one decision per engagement from one estimate, which changes only when the estimate does.
+2. **150 s without a cut (165–314 s).** Gather and Detour went 4 times for the pile at (429, 351) beside the NE pack; each trip ended in a flee and a retreat (`states/gather.py:405–418` took the nearest pile by straight line; `states/detour.py:225–240` risk gate). A92 prices a target by the danger on it and on the way, and a hostile that comes out to fight us holds the ground out to where it did, so the pile it turned us back from is held from then on.

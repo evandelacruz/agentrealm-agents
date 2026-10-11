@@ -77,8 +77,8 @@ class Sighting:
     ``home`` is its post, the cell an NPC stood on for ``POST_STILL_TICKS``
     (``post`` True), else the cell it was first seen on, which holds no
     ground: a roamer keeps to no cell. ``reach`` is the furthest from its
-    post it has hit us from: a guard that leaves its post to hit us shows how
-    far it guards. Whether it is a threat is asked at use
+    post it has hit us from or come into a fight with us: a guard that leaves
+    its post for us shows how far it guards. Whether it is a threat is asked at use
     (``survival.is_hostile``), so a type found hostile later counts.
 
     A post fades once its guard is out of view (``strength``, as of tick
@@ -823,7 +823,16 @@ class WorldModel:
         source = hitter(ev)
         if source is None and ev.get("kind") == "Attacked" and ev.get("actor_kind") in ("npc", "character"):
             source = (ev["actor_kind"], ev.get("actor_id"))
-        s = self.sightings.get((source[0], _opt_int(source[1]))) if source is not None else None
+        if source is not None:
+            self._stretch_reach((source[0], _opt_int(source[1])))
+
+    def note_came_for_us(self, e: Entity) -> None:
+        """``e`` came into a fight with us here: like a hit, it stretches its
+        post's reach to where we stand (``engagement.fight_or_flee``)."""
+        self._stretch_reach((e.kind, e.id))
+
+    def _stretch_reach(self, key: tuple[str, int | None]) -> None:
+        s = self.sightings.get(key)
         if s is not None and s.post and self.pos is not None and s.map_id == self.map_id:
             s.reach = max(s.reach, chebyshev(self.pos, s.home))
 

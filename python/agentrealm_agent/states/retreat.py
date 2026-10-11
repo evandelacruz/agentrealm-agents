@@ -13,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 
 from ..directives import attack_forbidden
+from ..engagement import cannot_outrun, fights
 from ..hostile_ground import ground_by_hostile
 from ..memory import Memory
 from ..navigation import cost_path, no_way, oscillation
@@ -29,13 +30,12 @@ from ..survival import (
     safe_goals,
     should_retreat,
     town_cell,
-    would_lose,
 )
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .explore import plan_sets
-from .fight import engage, in_weapon_reach, weapon_has_hurt
+from .fight import engage, in_weapon_reach
 from .heal import use_carried_heal
 from .intents import set_position
 
@@ -54,9 +54,13 @@ class RetreatState(State):
     it runs from (``survival.pursuer_peaks``) and goes round the ground of any
     other known hostile, in view or remembered (``hostile_ground.ground_by_hostile``).
     When it is losing ground, it drinks or
-    eats what it carries, fights back a hitter its weapon has hurt and the
-    win estimate says it beats, or else replans weighing no hostile at all
-    (``retreat_step``). With no refuge outside every known hostile's ground
+    eats what it carries; else, since running is not working, the
+    engagement is decided again on that (``engagement.cannot_outrun``) and
+    it fights back the hitter in weapon reach when the decision is to fight,
+    or else replans weighing no hostile at all (``retreat_step``). With
+    ``on_hostile = fight`` it retreats from a group that is coming for us
+    when the engagement's decision is not to fight, the decision Fight and
+    Flee read. With no refuge outside every known hostile's ground
     it sends nothing, and Flee's escape runs."""
 
     name = "Retreat"
@@ -70,12 +74,14 @@ class RetreatState(State):
             return False
         if retreat_goal(world, ctx.knowledge) is None:
             return False
-        return should_retreat(world, ctx.policy, ctx.params)
+        return should_retreat(world, ctx.policy, ctx.params, fights(world, ctx.memory, ctx.policy, ctx.params))
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         if boss_fight_on(world, ctx.memory):
             return True
-        return on_safe_tile(world) or not should_retreat(world, ctx.policy, ctx.params)
+        return on_safe_tile(world) or not should_retreat(
+            world, ctx.policy, ctx.params, fights(world, ctx.memory, ctx.policy, ctx.params)
+        )
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         return retreat_step(world, ctx, self.name)
@@ -246,10 +252,13 @@ def losing_ground(w: WorldModel, ctx: PlayContext, goal: Pos) -> bool:
 
 
 def _turn_on_losing(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | None:
-    """Losing ground: drink or eat what we carry, else fight back a hitter we beat, else None."""
+    """Losing ground: drink or eat what we carry, else, when the engagement
+    decided again on running not working says fight, fight back the hitter
+    in weapon reach; else None."""
     out = use_carried_heal(w, ctx.memory)
     if out is None:
-        hitter = _beatable_hitter(w, ctx)
+        e = cannot_outrun(w, ctx.memory, ctx.policy, ctx.params)
+        hitter = _hitter_in_reach(w, ctx) if e is not None and e.fight else None
         out = engage(w, ctx, hitter, state) if hitter is not None else None
     if out is None or not out.intents:
         return None
@@ -258,15 +267,9 @@ def _turn_on_losing(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome
     return out
 
 
-def _beatable_hitter(w: WorldModel, ctx: PlayContext) -> Entity | None:
-    """The hostile hitting us, when it is in weapon reach, ours to swing at, a
-    type our weapon has hurt, and the win estimate says we beat it."""
+def _hitter_in_reach(w: WorldModel, ctx: PlayContext) -> Entity | None:
+    """The hostile hitting us, when it is in weapon reach and ours to swing at."""
     for e in w.entities:
-        if not is_attacker(w, e) or attack_forbidden(e, ctx.never_attack):
-            continue
-        if not in_weapon_reach(w, e, ctx.knowledge) or not weapon_has_hurt(w, e, ctx.knowledge):
-            continue
-        if would_lose(w, ctx.policy, ctx.params):
-            return None
-        return e
+        if is_attacker(w, e) and not attack_forbidden(e, ctx.never_attack) and in_weapon_reach(w, e, ctx.knowledge):
+            return e
     return None

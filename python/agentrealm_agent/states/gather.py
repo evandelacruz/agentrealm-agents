@@ -651,18 +651,23 @@ def _replan_gather(
     barred: Callable[[], bool] = lambda: False,
 ) -> bool:
     """Plan to the committed target (``m.gather_target``) while one is kept,
-    else pick: the nearest pile (in ``pile_region`` when set), then the
-    nearest grass by walk (``preferred``: field cells before safe ones),
+    else pick: the cheapest pile (in ``pile_region`` when set), then the
+    cheapest grass (``preferred``: field cells before safe ones),
     then a kept walk to ground clear of hostiles (``CLEAR``, tried after the
     picks: it ends for something it can reach), then, on safe ground,
     out to field ground or the frontier; else, when ``barred()`` (known cells
     to cut held by a hostile), the nearest frontier clear of every known
     hostile (``_plan_clear``); leave ``m.path`` alone if none.
 
-    Unless ``d.fight``, every walk prices known hostiles' reach as costly
-    (``reach_cells``) and a target whose path still crosses it is not taken
-    (``route_clear``): a kept one is let go at once, and the next nearest is
-    tried, up to ``ROUTE_TRIES`` per kind (free-play run 5).
+    A target's price is its walk with danger on it: known hostiles' reach is
+    costly unless ``d.fight`` (``reach_cells``), a hostile in view prices the
+    cells round it, and faded ground adds its steps (``Danger.priced_cells``),
+    on the path and at the target alike (``_nearest_clear``). A target
+    whose path still crosses known reach is not taken (``route_clear``): a
+    kept one is let go at once, and the next cheapest is tried, up to
+    ``ROUTE_TRIES`` per kind. A hostile that came out to fight us holds the
+    ground out to where it did (``WorldModel.note_came_for_us``), so a
+    target it turned us back from is priced as held from then on.
 
     A kept target is given up only when no path reaches it at all, or its
     path has started on a taken cell for ``HOLD_TICKS``; until then it is
@@ -673,7 +678,7 @@ def _replan_gather(
     """
     d = d or danger(w, policy)
     params = grid_params(policy, blocked, costly if d.fight else costly | reach_cells(w, policy, d))
-    params.priced = {p: steps for p in preferred if (steps := d.price(p))}
+    params.priced = d.priced_cells()
     here = w.pos
     assert here is not None
 
@@ -692,14 +697,13 @@ def _replan_gather(
         if held is not None:
             return held
 
-    piles = [
-        e for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
-    ]
-    for pile in sorted(piles, key=lambda e: (chebyshev(e.pos, here), e.id))[:ROUTE_TRIES]:
-        path = cost_path(w, pile.pos, params)
-        if next_step(w, blocked, path) and clear(path):
-            m.path, m.goal, m.gather_target = path, GOAL, ("pile", pile.pos)
-            return False
+    piles = {
+        e.pos for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
+    }
+    found = _nearest_clear(w, piles, params, blocked, clear)
+    if found:
+        m.path, m.goal, m.gather_target = found[1], GOAL, ("pile", found[0])
+        return False
 
     found = _nearest_clear(w, set(preferred), params, blocked, clear)
     if found:

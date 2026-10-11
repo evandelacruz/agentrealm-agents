@@ -346,17 +346,24 @@ def would_lose(
     if not group:
         return False
     eff_risk = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
-    health = w.health if w.health is not None else w.max_health
-    if health is None:
-        health = NEW_CHARACTER_HEALTH
     margin = effective_fight_margin(float(params["fight_margin"]), eff_risk)
-    return win_ratio(health, group, w.threat, w.armed_code) <= margin
+    return win_ratio(estimate_health(w), group, w.threat, w.armed_code) <= margin
 
 
-def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]) -> bool:
+def estimate_health(w: WorldModel) -> int:
+    """The health the win estimate counts: live health, else max, else a new character's."""
+    health = w.health if w.health is not None else w.max_health
+    return NEW_CHARACTER_HEALTH if health is None else health
+
+
+def should_retreat(
+    w: WorldModel, policy: Policy, params: dict[str, float | int], fight: bool | None = None
+) -> bool:
     """The next effective ``retreat_hits`` hits from the hostiles in range could
     kill, or (``on_hostile = "fight"``) we would lose to a group that is
-    ``threatening`` us.
+    ``threatening`` us. ``fight`` is the engagement's decision
+    (``engagement.fight_or_flee``) when the caller has one; without it, the
+    estimate against the group in range decides.
 
     A hit's size comes from what is attacking (the threat table), so with no
     hostile in range there is nothing to retreat from. A fight we would lose
@@ -369,7 +376,8 @@ def should_retreat(w: WorldModel, policy: Policy, params: dict[str, float | int]
     group = combat_group(w, policy)
     if not group:
         return False
-    if policy.on_hostile == "fight" and would_lose(w, policy, params) and threatening(w, group):
+    losing = would_lose(w, policy, params) if fight is None else not fight
+    if policy.on_hostile == "fight" and losing and threatening(w, group):
         return True
     return at_health_floor(w, params, group)
 

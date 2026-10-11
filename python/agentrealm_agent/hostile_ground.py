@@ -76,6 +76,11 @@ class Danger:
         dearest one's, so it stays at most ``FADED_POST_STEPS``."""
         return max((steps for c, r, steps in self.priced if chebyshev(c, pos) <= r), default=0)
 
+    def priced_cells(self) -> dict[Pos, int]:
+        """Every cell faded ground covers, with its ``price``: a walk through
+        it costs that much more, as a target in it does."""
+        return {p: self.price(p) for p in zone_cells([(c, r) for c, r, _ in self.priced])}
+
 
 def danger(w: WorldModel, policy: Policy, fight: bool = False) -> Danger:
     """This decision's ``Danger``: nothing held or priced when ``fight``, else

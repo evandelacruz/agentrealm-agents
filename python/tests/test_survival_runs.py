@@ -1,7 +1,6 @@
 """A16 Walk run 4 and A23 survive-a-fight run 1 offline: one hostile killed the character in both.
 
-Rebuilt here: Flee swung back below the health floor at a hostile its
-weapon had never hurt; Retreat had no safe tile to head for, sent one step
+Rebuilt here: Flee swung back below the health floor; Retreat had no safe tile to head for, sent one step
 per decision, and detoured round its chaser; entity reads stopped while
 walking; and Heal gave up food behind a bush its weapon cuts (A9, A10, A16, A23).
 """
@@ -59,14 +58,9 @@ def hit(w: WorldModel, npc_id=7, amount=2) -> None:
 def flee_gave_up(w: WorldModel, c: PlayContext) -> None:
     """Flee has been running since before the last hit, and gave up running."""
     m = c.memory
-    m.state, m.flee_since, m.flee_failed, m.flee_gaps = "Flee", w.tick, True, [(w.tick, 1)]
+    m.state, m.flee_since, m.flee_gaps = "Flee", w.tick, [(w.tick, 1)]
     w.tick += 5
     hit(w)
-
-
-def weapon_hurt_chaser(w: WorldModel, kb: KnowledgeBase) -> None:
-    w.armed_code = "test_blade"
-    kb.items["test_blade"] = {"weapon_damage": {"chaser": 1}}
 
 
 def uses(out) -> list[dict]:
@@ -106,20 +100,10 @@ class FleeSwingBackTest(unittest.TestCase):
         self.w.health = 2  # bold risk lowers the floor to one hit
         self.c.params["risk"] = 1.0
         self.c.params["fight_margin"] = 0.01
-        weapon_hurt_chaser(self.w, self.c.knowledge)
         flee_gave_up(self.w, self.c)
         out = dispatch(self.w, self.c)
         self.assertEqual(out.reason, "not outrunning npc 7: fight npc 7")
 
-    def test_no_win_against_a_type_the_weapon_never_hurt(self):
-        """The win estimate clears, but the weapon has never damaged a chaser."""
-        self.w.health = 2  # bold risk lowers the floor to one hit
-        self.c.params["risk"] = 1.0
-        self.c.params["fight_margin"] = 0.01
-        self.w.armed_code = "test_blade"
-        flee_gave_up(self.w, self.c)
-        out = dispatch(self.w, self.c)
-        self.assertFalse(uses(out), out.reason)
 
 
 class RetreatGoalTest(unittest.TestCase):

@@ -69,7 +69,7 @@ OP_FIELDS: dict[str, str] = {
     "compose": "composes_into (the whole item to make)",
     "fetch_item": "code, optional x, y",
     "gather_gems": "count (the gem total to reach), optional fight (true: gather on ground a known hostile holds, and walk through its reach, taking the fight; left out, Gather keeps clear of it), optional x, y (a block of the region to gather in: Gather walks there and cuts only there, and walks to gem piles only there, while it has a cell to cut; it lifts that region's barren mark. The region is committed: a reply that moves it keeps the old one unless that region is barren or poor, Gather went 30 s without getting nearer it or, once there, without a cut there taking effect, or a death, new map, hurt or hostile pack came up)",
-    "equip": "optional code (else the best held gear is armed and worn)",
+    "equip": "optional code (arms or wears exactly that held item; else the best held gear is armed and worn)",
     "enter_level": "x, y (the level door)",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
     "wait": "seconds, why",

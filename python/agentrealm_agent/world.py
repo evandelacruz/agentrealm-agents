@@ -280,6 +280,11 @@ class WorldModel:
     woke: bool = False
     asleep: bool = False  # GetSelf and a sleeping round trip carry it (GAME_NOTES Sleep)
     lives: int = 0
+    # A self read and an inventory (a snapshot's ``inventory``) have each been
+    # applied at least once: until both, armed, held and gems are unread, not
+    # empty (``synced``).
+    self_read: bool = False
+    inventory_read: bool = False
     levels_cleared: list[int] = field(default_factory=list)  # level numbers cleared, from snapshots (A62)
     level_count: int | None = None  # levels the world authored, from GetWorld (A62)
     gems: int | None = None  # inventory counter from snapshots (A22)
@@ -373,6 +378,7 @@ class WorldModel:
         self.placed = bool(s.get("placed", True)) or (self.woke and self.alive and not self.asleep)
         # Absent while nothing, or no weapon, is armed (B100).
         self.attack_range = _opt_int(s.get("attack_range"))
+        self.self_read = True
 
     def _set_asleep(self, asleep: bool) -> None:
         """A wake puts us on a block: placed until a position read says where (A5)."""
@@ -705,6 +711,7 @@ class WorldModel:
     def _apply_inventory(self, inv: dict | None) -> None:
         if inv is None:
             return
+        self.inventory_read = True
         if "gems" in inv:
             gems = _opt_int(inv.get("gems"))
             if gems is not None and gems >= 0:
@@ -879,6 +886,12 @@ class WorldModel:
         self.snapshot_version = None
 
     # Queries.
+
+    @property
+    def synced(self) -> bool:
+        """Self and inventory have each been read once: what the character is,
+        carries, wears and holds in gems is known, not merely unread."""
+        return self.self_read and self.inventory_read
 
     def occupied(self) -> set[Pos]:
         return {e.pos for e in self.entities if e.kind in ("character", "npc")}

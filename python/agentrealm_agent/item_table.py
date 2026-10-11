@@ -13,7 +13,8 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   when the ``Use`` applied or at the response's observation, filed under the subtype armed after that response's observation (API
   Events). Damage is rolled and the target's defense lowers it (docs/
   GAME_NOTES.md Combat), so one hit is a sample, not the weapon's stat; the
-  max is kept per NPC type and only ever rises.
+  max is kept per NPC type and only ever rises. Nothing reads it since A99:
+  Equip ranks weapons by the Supplies reference's ``damage``.
 - ``damage_taken``: ``{npc_type_code: max hit}``, the largest ``Damaged`` amount
   from that NPC type while this subtype was the only filled worn slot for the
   whole response (API Events, Snapshots). Rolled damage depends on the

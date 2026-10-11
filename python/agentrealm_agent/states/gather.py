@@ -29,7 +29,6 @@ from __future__ import annotations
 from functools import cache
 from typing import Callable, Iterable
 
-from ..break_memory import capabilities_for_code, pick_supply_for_capability
 from ..config import Policy
 from ..directives import attack_forbidden
 from ..executor import DEFAULT_TICK_RATE_HZ
@@ -57,6 +56,7 @@ from ..navigation import CostGridParams, cost_path, nearest_target
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
 from ..engagement import would_fight
+from ..equip import CUT, does_job, hunting_ceiling, weapon_to_arm
 from ..survival import is_attacker, is_hostile, recently_attacked
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
@@ -71,7 +71,6 @@ from .solve import held_supply
 # Gem caches (gem_cache_5/7/10) are a different drop and are not piles.
 # A priced supply with the same code is shop stock: taking it is a purchase.
 GEM_PILE_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
-CUT = "cut"  # the capability Gather arms for: grass is cut
 GOAL = "gather"
 OUT = "out"  # ``m.gather_target`` kind: walking off safe ground to field ground or the frontier
 OFF = "off"  # ``m.gather_target`` kind: moving off from a hostile that shadows us
@@ -450,12 +449,11 @@ def _gather_cells(
 
 
 def _cut_tool(w: WorldModel, knowledge: KnowledgeBase | None) -> InventorySupply | None:
-    """The held supply ``_cut`` arms before it cuts, or None to cut with what
-    is in hand: the armed one cuts, or nothing held is known to."""
-    if CUT in capabilities_for_code(w.armed_code or "", knowledge):
-        return None
-    tool = pick_supply_for_capability(w, CUT, knowledge)
-    return tool if tool is not None and tool.id >= 0 else None
+    """The held supply ``_cut`` arms before it cuts, by the one weapon-to-arm
+    rule for cutting (``equip.weapon_to_arm``, A99), or None to cut with what
+    is in hand: the armed one is that pick, or nothing held is known to cut."""
+    tool = weapon_to_arm(w, knowledge, CUT, hunting_ceiling(w, knowledge))
+    return tool if tool is not None and tool.id >= 0 and tool.code != w.armed_code else None
 
 
 def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reason: str, state: str) -> StateOutcome:
@@ -468,8 +466,10 @@ def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reas
     queue = arm_and_use(w, m, tool.id, use_block(p))
     if not queue:  # the cut's cooldown leaves no room for the Arm and the Use together
         return StateOutcome(None, f"wait out the cooldown to arm {tool.code}, {reason}", state=state, wait=True, progress=False)
-    if m.gather_rearm is None and w.armed_code and not heals(w.armed_code):
-        m.gather_rearm = (w.armed_code, tool.code)  # food or a potion is Heal's to put back
+    if m.gather_rearm is None and w.armed_code and not heals(w.armed_code) and not does_job(w.armed_code, CUT, knowledge):
+        # A weapon that cannot cut goes back once the gather work ends; one
+        # that cuts was only bettered. Food or a potion is Heal's to put back.
+        m.gather_rearm = (w.armed_code, tool.code)
     return StateOutcome(queue, f"arm {tool.code}, {reason}", state=state, paced=True)
 
 

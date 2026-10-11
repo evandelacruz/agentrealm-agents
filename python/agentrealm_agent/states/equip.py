@@ -1,8 +1,8 @@
-"""Equip: carry out the plan's ``equip`` op, arming and wearing better gear (A19, A55)."""
+"""Equip: carry out the plan's ``equip`` op, arming and wearing better gear (A19, A55, A99)."""
 
 from __future__ import annotations
 
-from ..equip import ARMED, EquipUpgrade, best_equip_upgrade
+from ..equip import ARMED, EquipUpgrade, best_equip_upgrade, hunting_ceiling, named_equip
 from ..knowledge_base import knowledge_items
 from ..navigation import stuck as nav_stuck
 from ..world import WorldModel
@@ -11,8 +11,11 @@ from .intents import arm, remove_slot, wear
 
 
 class EquipState(State):
-    """Executor for ``equip``: one upgrade per decision, best first. The op is
-    finished once no upgrade is left (with a ``code``, none for that code)."""
+    """Executor for ``equip``: one upgrade per decision, best first, by the one
+    best-weapon rule the planner is told (``equip.weapon_rank``). An op with a
+    ``code`` arms or wears that held item instead, the planner's call. The op
+    is finished once nothing is left to do: no upgrade, or the named item on,
+    not held or refused."""
 
     name = "Equip"
 
@@ -27,8 +30,9 @@ class EquipState(State):
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         op = my_op(ctx, self.name)
         assert op is not None and ctx.plan is not None
-        up = _upgrade(world, ctx)
-        if up is None or op.get("code", up.code) != up.code:
+        code = op.get("code")
+        up = named_equip(world, ctx.memory, code, _armed_owned(world, ctx)) if code else _upgrade(world, ctx)
+        if up is None:
             ctx.plan.finish_current("nothing left to equip", memory=ctx.memory)
             return StateOutcome(None, "nothing to equip", state=self.name)
         if up.learn_slot:
@@ -41,7 +45,14 @@ class EquipState(State):
 
 
 def _upgrade(world: WorldModel, ctx: PlayContext) -> EquipUpgrade | None:
-    return best_equip_upgrade(world, knowledge_items(ctx.knowledge), world.threat, ctx.memory, _armed_owned(world, ctx))
+    return best_equip_upgrade(
+        world,
+        knowledge_items(ctx.knowledge),
+        world.threat,
+        ctx.memory,
+        _armed_owned(world, ctx),
+        hunting_ceiling(world, ctx.knowledge),
+    )
 
 
 def _armed_owned(world: WorldModel, ctx: PlayContext) -> bool:

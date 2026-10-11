@@ -559,6 +559,7 @@ class SmokeScriptTest(unittest.TestCase):
         target = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": OVERWORLD}
         self.assertEqual(r.plan.current(), target)
         r.world = WorldModel(character_id=1, map_id=OVERWORLD, pos=(0, 0), tick=10)
+        r.world.self_read = r.world.inventory_read = True
         round_trip(planner, r)
         self.assertEqual(r.plan.current(), target, "the planner cannot drop the target")
         self.assertEqual([g["op"] for g in r.plan.goals], ["travel", "wait"])

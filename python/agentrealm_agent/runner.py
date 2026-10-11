@@ -6,6 +6,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass
+from functools import partial
 
 from .break_memory import TRANSIENT_BREAK_REJECTIONS, cannot_cut, record_attempt
 from .gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
@@ -81,6 +82,7 @@ from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
     QUEUE_HORIZON_INTENTS,
+    attack_cooldown_ticks,
     build_paced_walk_queue,
     pace_speech,
     pace_uses,
@@ -865,7 +867,9 @@ class Runner:
         verb = intent.get("verb")
         if verb != "SetPosition":
             if verb == "Use":
-                return self._paced_action(intent, pace_uses, m.last_use_tick)
+                # Spaced by the armed weapon's attack cooldown (A123).
+                cooldown = attack_cooldown_ticks(w.armed_code, self.tick_hz)
+                return self._paced_action(intent, partial(pace_uses, cooldown_ticks=cooldown), m.last_use_tick)
             if verb in ("Say", "Broadcast"):
                 # Tag whose Say this is: Greet's hello keeps its own record (A65).
                 m.greet_say_npc = intent.get("npc_id") if d.state == GREET_STATE else None

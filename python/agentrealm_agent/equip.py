@@ -16,10 +16,13 @@ Only sourced facts decide what goes where:
 lists by, or cutting grass, which Gather arms for (a cutter a cut does not use
 up first). Both order by :func:`weapon_rank`: a weapon that keeps the
 character within the highest hunting-ground strength ceiling known beats one
-that does not, and among those alike, more published ``damage`` wins (the
-Supplies reference; damage adds to attack power on every swing). Strength is
-attack power plus the armed weapon's damage plus worn armor's defense
-(:func:`loadout_strength`). With no ceiling known, damage alone decides. An
+that does not, and among those alike, more damage a second wins: one swing's
+expected damage over the weapon's attack cooldown (the Supplies reference's
+``damage`` and ``cooldown_ms``, A123; :func:`damage_per_second`), so a
+slower weapon's bigger hit counts for what it is worth. Strength is attack
+power plus the armed weapon's damage plus worn armor's defense
+(:func:`loadout_strength`); a weapon's cooldown does not count toward it.
+With no ceiling known, damage a second alone decides. An
 ``equip`` op that names a code arms or wears that item whatever the rule says
 (:func:`named_equip`): the planner's call, for a fight the hunting ground does
 not decide.
@@ -48,9 +51,20 @@ from .break_memory import capabilities_for_code, held_supplies
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
 from .loot import NON_TRANSFERABLE
-from .supplies import heals, is_weapon, kept_on_break, used_on_self, weapon_damage, worn, worn_armor_defense, worn_slot
+from .supplies import (
+    DEFAULT_ATTACK_COOLDOWN_MS,
+    heals,
+    is_weapon,
+    kept_on_break,
+    used_on_self,
+    weapon_cooldown_ms,
+    weapon_damage,
+    worn,
+    worn_armor_defense,
+    worn_slot,
+)
 from .memory import Memory
-from .survival import BASE_ATTACK_POWER
+from .survival import BASE_ATTACK_POWER, weapon_swing_damage
 from .threat import ThreatTable
 from .travel.knowledge import iter_hunting_cells
 from .world import WorldModel
@@ -196,12 +210,22 @@ def loadout_strength(w: WorldModel, weapon: str | None) -> int:
     return BASE_ATTACK_POWER + (weapon_damage(weapon) or 0) + worn_armor_defense(w.worn_codes.values())
 
 
-def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[bool, int]:
+def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[bool, float]:
     """The one rule for which weapon is better (A99): keeping strength within
-    ``ceiling`` first (always true with none known), then published damage.
-    Compare ranks with ``>``: a higher one is a better weapon."""
+    ``ceiling`` first (always true with none known), then damage a second
+    (:func:`damage_per_second`, A123). Compare ranks with ``>``: a higher one
+    is a better weapon."""
     fits = ceiling is None or loadout_strength(w, code) <= ceiling
-    return fits, weapon_damage(code) or 0
+    return fits, damage_per_second(code)
+
+
+def damage_per_second(code: str | None) -> float:
+    """Expected damage a second fighting with ``code`` armed: one swing's
+    (``survival.weapon_swing_damage``) over its attack cooldown (A123). Bare hands, or
+    an item listed as no weapon, swing with no weapon damage at the default
+    cooldown."""
+    cooldown = weapon_cooldown_ms(code) or DEFAULT_ATTACK_COOLDOWN_MS
+    return round(weapon_swing_damage(weapon_damage(code) or 0) * 1000 / cooldown, 6)
 
 
 def does_job(code: str | None, job: str, kb: KnowledgeBase | None = None) -> bool:

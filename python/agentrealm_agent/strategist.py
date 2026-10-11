@@ -117,7 +117,7 @@ from .memory import Memory
 from .navigation import entrance_routes
 from .gem_yield import RATE_MIN_SECONDS, keep_gather_region, summary as gem_yield_summary
 from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
-from .equip import CUT, does_job, hunting_ceiling, loadout_strength, weapon_rank
+from .equip import CUT, damage_per_second, does_job, hunting_ceiling, loadout_strength, weapon_rank
 from .supplies import (
     armor_defense,
     chest_applied,
@@ -148,9 +148,9 @@ from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, i
 from .stalled import StalledOp, below_progress, find as find_stalled, target_of
 from .survival import (
     HOSTILE_ATTACK_INTERVAL_TICKS,
-    OUR_ATTACK_INTERVAL_TICKS,
     STARTING_WEAPON,
     UNKILLED_HOSTILE_HEALTH,
+    attack_interval_ticks,
     hostile_swing_damage,
     known_hostile,
     retreat_goal,
@@ -238,7 +238,7 @@ Held items and purchases: State held lists each item the character carries, with
 
 Pack room: State pack gives the carry slots used and the total (held, stowed, worn and armed each take one; gems and lives take none) and reserved, the carried items the stack's ops will use (a use_block's, equip's or use_item's code, a fight_boss's armed and worn, a compose's fragments, a break_block's tool). Making room never drops a reserved item, and never drops on a shop cell, where a dropped item turns into shop stock. The character never picks what to drop on its own: when a buy or fetch_item needs a slot and the pack is full, it drops only what the op names in drop, and an op that names nothing it may drop comes back to you as dropped, with the items it could drop. A bigger carried chest is the other way to make room: upgrades_for_sale lists any chest seen for sale with more slots than the pack has (carry slots now -> with it), so weigh its price against giving an item up. So before a buy into a full pack, weigh what each held item is good for (held: its use, such as attack, cut, smash or burn, and its damage, defense and heal) against the purchase, and name what to give up in drop. An item not used yet is not worthless: a mallet smashes rocks and fights, matches burn.
 
-Weapons and the hunting ground: which weapon is armed follows one rule, by the job at hand. For fighting (an equip with no code), the best weapon held: one that keeps strength within the highest hunting-ground ceiling known beats one that would put it over; among those alike, more damage wins; with no ceiling known, damage alone decides. For cutting grass (gather_gems), the best held item that cuts, by the same order. So a weapon that would put strength over the ceiling is not armed while a held weapon keeps it within, one armed over it is swapped back, and a weapon that cannot cut (a mallet) is put away while gathering and armed again once the gather work ends. State hunting_strength gives the strength as armed and worn now (attack power 2, plus the armed weapon's damage, plus worn armor's defense) and that ceiling; upgrades_for_sale lists weapons by the fighting rule, with cuts (whether it can cut grass). Weigh a weapon by the work it will do: one that cannot cut adds nothing to gem gathering. To arm or wear an item the rule does not pick (a stronger weapon for a level boss, say), name it: an equip with a code arms or wears exactly that held item, and a later equip with no code applies the rule again. A gather_gems arms by the cutting rule, so it can set aside a named weapon that cuts but would put strength over the ceiling, and does not arm it again afterwards; name it again once the gather work ends.
+Weapons and the hunting ground: which weapon is armed follows one rule, by the job at hand. For fighting (an equip with no code), the best weapon held: one that keeps strength within the highest hunting-ground ceiling known beats one that would put it over; among those alike, more damage a second wins (a swing's damage over the weapon's attack cooldown, cooldown_ms under held: a mallet hits harder than a sword of its tier but swings 1.3 s apart, not 1 s); with no ceiling known, damage a second alone decides. For cutting grass (gather_gems), the best held item that cuts, by the same order. So a weapon that would put strength over the ceiling is not armed while a held weapon keeps it within, one armed over it is swapped back, and a weapon that cannot cut (a mallet) is put away while gathering and armed again once the gather work ends. State hunting_strength gives the strength as armed and worn now (attack power 2, plus the armed weapon's damage, plus worn armor's defense) and that ceiling; upgrades_for_sale lists weapons by the fighting rule, with cuts (whether it can cut grass). Weigh a weapon by the work it will do: one that cannot cut adds nothing to gem gathering. To arm or wear an item the rule does not pick (a stronger weapon for a level boss, say), name it: an equip with a code arms or wears exactly that held item, and a later equip with no code applies the rule again. A gather_gems arms by the cutting rule, so it can set aside a named weapon that cuts but would put strength over the ceiling, and does not arm it again afterwards; name it again once the gather work ends.
 
 Potions: {POTION_RULE} State potions counts the potions held and stowed. Plan a reserve (potion_reserve) by that rule: the character will not drink one to top up a scratch. A heal_supplies trigger (hurt, with no food, no potion due and no rest to be had) also counts potions: any held are that reserve, kept back until health is low, so weigh food, a rest elsewhere or waiting before buying more.
 
@@ -710,7 +710,7 @@ def npc_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     spoken, greeted = spoken_npc_ids(knowledge), greeted_npc_ids(knowledge)
     ours = {
         "expected_damage": round(swing_damage(w.armed_code), 2),
-        "every_ticks": OUR_ATTACK_INTERVAL_TICKS,
+        "every_ticks": attack_interval_ticks(w.armed_code),
         "hostile_health_assumed": UNKILLED_HOSTILE_HEALTH,
     }
     lines = [f"npcs_spoken_to={len(spoken)} npcs_greeted={len(greeted)} our_swing={json.dumps(ours, sort_keys=True)}"]
@@ -1088,7 +1088,8 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     first, with its price and the gems still short (A92). Owned is armed, worn,
     held or stowed; a weapon must rank above every owned one by Equip's own
     best-weapon rule (``equip.weapon_rank``, A99: keeping within the highest
-    hunting-ground ceiling known first, then ``damage``) and says whether it
+    hunting-ground ceiling known first, then damage a second,
+    ``equip.damage_per_second``) and says whether it
     cuts grass (``cuts``, Gather's job), armor have more
     ``defense`` than any owned for its slot, and a chest a larger
     ``chest_capacity`` than the slots carried now (A102: room for a full
@@ -1100,6 +1101,7 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     best_weapon = max((c for c in owned if is_weapon(c)), key=lambda c: weapon_rank(c, w, ceiling), default=None)
     best_rank = weapon_rank(best_weapon, w, ceiling)  # no weapon owned: bare hands, as Equip counts them
     best_damage = weapon_damage(best_weapon) or 0
+    best_dps = damage_per_second(best_weapon)
 
     def best_defense(slot: str) -> int:
         return max((armor_defense(c) or 0 for c in owned if worn_slot(c) == slot), default=0)
@@ -1113,7 +1115,7 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
         rank = weapon_rank(code, w, ceiling)
         extra: dict[str, Any] = {}
         if damage is not None and is_weapon(code) and rank > best_rank:
-            gain = f"damage {best_damage} -> {damage}"
+            gain = f"damage {best_damage} -> {damage}, a second {best_dps:.2f} -> {damage_per_second(code):.2f}"
             if rank[0] and not best_rank[0]:
                 gain += ", back within the hunting ceiling"
             extra = {"cuts": does_job(code, CUT, knowledge)}

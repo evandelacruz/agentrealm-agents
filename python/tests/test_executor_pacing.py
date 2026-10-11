@@ -6,6 +6,7 @@ from agentrealm_agent.executor import (
     DEFAULT_WEAPON_COOLDOWN_TICKS,
     SPEECH_INTERVAL_TICKS,
     arm_then_use,
+    attack_cooldown_ticks,
     build_attack_queue,
     pace_speech,
     pace_uses,
@@ -53,6 +54,21 @@ class PaceUsesTest(unittest.TestCase):
         arm = {"verb": "Arm", "item_id": 1}
         q = pace_uses([use_block(0, 0), arm, use_block(0, 0)])
         self.assertEqual(q, [use_block(0, 0), arm] + waits_then_use(8))
+
+
+class AttackCooldownTicksTest(unittest.TestCase):
+    """A123: a Use waits the armed weapon's attack cooldown, in ticks."""
+
+    def test_each_weapon_family_swings_at_its_own_cooldown(self):
+        self.assertEqual(attack_cooldown_ticks("pocket_knife"), 8)
+        self.assertEqual(attack_cooldown_ticks("bronze_sword"), 10)
+        self.assertEqual(attack_cooldown_ticks("iron_whip"), 12)
+        self.assertEqual(attack_cooldown_ticks("bronze_mallet"), 13)
+        self.assertEqual(attack_cooldown_ticks("bronze_mallet", tick_rate_hz=20), 26)
+
+    def test_anything_else_armed_waits_the_default(self):
+        for code in (None, "matches", "small_potion", "unlisted"):
+            self.assertEqual(attack_cooldown_ticks(code), DEFAULT_WEAPON_COOLDOWN_TICKS, code)
 
 
 class ArmThenUseTest(unittest.TestCase):

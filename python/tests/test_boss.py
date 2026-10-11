@@ -28,6 +28,9 @@ def grid(rows: list[str], at=(0, 0), map_id=8) -> WorldModel:
             w.view.tiles[(x, y)] = glyph.get(g, g)
     w.apply_position({"map_id": map_id, "x": at[0], "y": at[1], "level": 1})
     w.health, w.max_health = 10, 10
+    # A sword: the knife's damage at the 1 s attack cooldown the win-estimate
+    # cases here are priced on (the knife itself swings every 0.8 s).
+    w.armed_code = "sword"
     return w
 
 

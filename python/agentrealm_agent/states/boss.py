@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..config import Policy
 from ..directives import attack_forbidden
-from ..executor import build_attack_queue, queue_horizon_intents
+from ..executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_intents
 from ..healing import potion_count
 from ..memory import BossFight, Memory
 from ..navigation import cost_path
@@ -160,6 +160,7 @@ def boss_attack_queue(w: WorldModel, m: Memory, target: Entity) -> list[dict] | 
         [],
         poll_interval_ticks=m.calm_poll_interval,
         horizon_ticks=horizon,
+        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code),
         ticks_since_last_use=max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None,
     )
     return queue or None

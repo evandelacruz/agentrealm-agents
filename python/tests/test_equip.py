@@ -13,6 +13,7 @@ from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.equip import (
     best_equip_upgrade,
     compare,
+    damage_per_second,
     hunting_ceiling,
     loadout_strength,
     note_equip_result,
@@ -300,13 +301,24 @@ class HuntingCeilingRuleTest(unittest.TestCase):
             w.held_supplies = self.held("bronze_mallet", "bronze_sword")
             self.assertEqual(best_equip_upgrade(w, {}, w.threat, Memory(), ceiling=7).code, "bronze_sword", armed)
 
-    def test_with_no_ceiling_known_damage_decides(self):
+    def test_with_no_ceiling_known_damage_a_second_decides(self):
         w = world()
         w.armed_code = "pocket_knife"
-        w.held_supplies = self.held("bronze_sword", "bronze_mallet")
-        # The sword has a price and the mallet none: price no longer ranks weapons.
-        up = best_equip_upgrade(w, {"bronze_sword": {"gem_price": 15}}, w.threat, Memory())
-        self.assertEqual(up.code, "bronze_mallet")
+        w.held_supplies = self.held("bronze_sword", "iron_mallet")
+        # The mallet has a price and the sword none: price no longer ranks weapons.
+        up = best_equip_upgrade(w, {"iron_mallet": {"gem_price": 120}}, w.threat, Memory())
+        self.assertEqual(up.code, "iron_mallet")
+
+    def test_a_slower_weapon_counts_its_damage_a_second(self):
+        # A123: the bronze mallet hits harder than the bronze sword (6 to 4)
+        # but swings every 1.3 s to the sword's 1 s, so the sword deals more a second.
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = self.held("bronze_mallet", "bronze_sword")
+        self.assertEqual(best_equip_upgrade(w, {}, w.threat, Memory()).code, "bronze_sword")
+        self.assertGreater(damage_per_second("bronze_sword"), damage_per_second("bronze_mallet"))
+        self.assertGreater(damage_per_second("pocket_knife"), damage_per_second("sword"), "the knife swings every 0.8 s")
+        self.assertGreater(damage_per_second(None), damage_per_second("mallet"), "bare hands swing faster than the bare mallet")
 
     def test_a_named_code_is_armed_whatever_the_rule_says(self):
         w = world()

@@ -38,6 +38,9 @@ def world(at=(10, 10), health=10, size=60) -> WorldModel:
     w.terrain_center, w.terrain_map = at, MAP
     w.hostile_types.add(("npc", CODE))
     w.attack_range = 1
+    # A sword: the knife's damage at the 1 s attack cooldown the win-estimate
+    # cases here are priced on (the knife itself swings every 0.8 s).
+    w.armed_code = "sword"
     return w
 
 
@@ -224,7 +227,7 @@ class CannotOutrunTest(unittest.TestCase):
     def setUp(self):
         self.w, self.c = world(health=7), ctx()
         self.w.entities = [biter()]
-        self.ratio = win_ratio(7, self.w.entities, self.w.threat, None)
+        self.ratio = win_ratio(7, self.w.entities, self.w.threat, self.w.armed_code)
         bar = fight_bar(self.w, self.c.policy, self.c.params, outrun_failed=False)
         self.assertTrue(BREAK_EVEN < self.ratio <= bar, (self.ratio, bar))
 

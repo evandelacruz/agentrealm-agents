@@ -6,7 +6,8 @@ import math
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from .supplies import weapon_damage, worn_armor_defense
+from .executor.pacing import attack_cooldown_ticks
+from .supplies import is_weapon, weapon_damage, worn_armor_defense
 from .threat import ThreatTable, TypeKey, type_key_for_entity
 from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
@@ -25,7 +26,6 @@ GAP_PROBE_TICKS = 30
 # Stated assumptions until measured (GAME_NOTES.md Open questions, "Assumed
 # until measured"). Only the win estimate reads them; A23 refines it.
 HOSTILE_ATTACK_INTERVAL_TICKS = 15
-OUR_ATTACK_INTERVAL_TICKS = 10
 UNKILLED_HOSTILE_HEALTH = 10
 # Our swing, by the published roll (GAME_NOTES.md Combat): it hits when d20
 # plus attack power is at least 10 plus the target's defense, which a
@@ -39,9 +39,10 @@ COMBAT_HIT_TARGET = 10
 # A hostile's swing at us rolls the same way against our defense, 0, plus
 # the defense of the armor we wear, and a hit loses that much again (GAME_NOTES
 # Combat): ``worn_defense``. Armor in hand protects nothing.
-# Weapon damage is the Supplies reference's (``supplies.weapon_damage``, A54).
-# An armed item it lists as no weapon (food, a tool, nothing) swings as the
-# starting knife.
+# Weapon damage and attack cooldown are the Supplies reference's
+# (``supplies.weapon_damage``, A54; ``supplies.weapon_cooldown_ms``, A123): a
+# slower weapon swings less often. An armed item it lists as no weapon (food,
+# a tool, nothing) swings as the starting knife.
 STARTING_WEAPON = "pocket_knife"
 NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)
@@ -337,19 +338,34 @@ def hit_chance(attack_power: int = BASE_ATTACK_POWER, defense: int = 0) -> float
 
 
 def swing_damage(weapon: str | None) -> float:
-    """Expected damage of one swing of ``weapon`` at a hostile: the hit
-    chance times the mean of 1 up to attack power plus weapon damage (the
-    pocket knife: 0.65 × 2.5)."""
+    """Expected damage of one swing of ``weapon`` at a hostile (``weapon_swing_damage``;
+    the pocket knife: 0.65 × 2.5)."""
     damage = weapon_damage(weapon)
     if damage is None:
         damage = weapon_damage(STARTING_WEAPON) or 0
+    return weapon_swing_damage(damage)
+
+
+def weapon_swing_damage(damage: int) -> float:
+    """Expected damage of one swing at a hostile with a weapon of ``damage``:
+    the hit chance times the mean of 1 up to attack power plus weapon damage."""
     return hit_chance() * (1 + max(1, BASE_ATTACK_POWER + damage)) / 2
 
 
+def attack_interval_ticks(weapon: str | None) -> int:
+    """Ticks between two swings of ``weapon``: its attack cooldown
+    (``executor.pacing.attack_cooldown_ticks``, A123), the starting knife's
+    for an item listed as no weapon."""
+    return attack_cooldown_ticks(weapon if is_weapon(weapon) else STARTING_WEAPON)
+
+
 def ticks_to_kill_them(group: list[Entity], weapon: str | None = None) -> float:
+    """Ticks for ``weapon`` to kill ``group``: one swing (``swing_damage``)
+    every attack cooldown (``attack_interval_ticks``), so a slower weapon's
+    bigger hit counts for what it is worth (A123)."""
     if not group:
         return float("inf")
-    return len(group) * UNKILLED_HOSTILE_HEALTH / (swing_damage(weapon) / OUR_ATTACK_INTERVAL_TICKS)
+    return len(group) * UNKILLED_HOSTILE_HEALTH * attack_interval_ticks(weapon) / swing_damage(weapon)
 
 
 def win_ratio(

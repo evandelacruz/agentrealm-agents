@@ -753,7 +753,7 @@ class PlannerViewTest(unittest.TestCase):
         self.assertEqual(
             json.loads(line.split("=", 1)[1]),
             [
-                {"code": "bronze_sword", "cuts": True, "gains": "damage 2 -> 4", "gems_short": 7, "price": 15},
+                {"code": "bronze_sword", "cuts": True, "gains": "damage 2 -> 4, a second 2.03 -> 2.27", "gems_short": 7, "price": 15},
                 {"code": "iron_helm", "gains": "head defense 0 -> 1", "gems_short": 32, "price": 40},
                 {"code": "iron_mail", "gains": "body defense 1 -> 2", "gems_short": 72, "price": 80},
             ],
@@ -767,22 +767,22 @@ class PlannerViewTest(unittest.TestCase):
 
     def test_weapon_upgrades_follow_equips_hunting_ceiling_rule(self):
         # A99: with the sword armed and a hunting ground of ceiling 7 known,
-        # the mallet (2 + 6 = 8) is no upgrade; with no ceiling known it is.
+        # the iron mallet (2 + 12 = 14) is no upgrade; with no ceiling known it is.
         self.w.gems = 30
         self.w.armed_code = "bronze_sword"
-        self.kb.items["bronze_mallet"] = {"gem_price": 25}
+        self.kb.items["iron_mallet"] = {"gem_price": 120}
 
         def upgrades() -> str:
             return next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("upgrades_for_sale="))
 
-        self.assertIn('"code": "bronze_mallet", "cuts": false, "gains": "damage 4 -> 6"', upgrades())
+        self.assertIn('"code": "iron_mallet", "cuts": false, "gains": "damage 4 -> 12, a second 2.27 -> 3.75"', upgrades())
         record_hunting_zone(self.kb, 7, (50, 50), 7)
         self.assertEqual(upgrades(), "upgrades_for_sale=none seen")
         self.assertIn('hunting_strength={"ceiling": 7, "strength": 6}', state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb))
         # Armed over the ceiling, a weapon that fits again is the upgrade.
-        self.w.armed_code = "bronze_mallet"
+        self.w.armed_code = "iron_mallet"
         self.kb.items["bronze_sword"] = {"gem_price": 15}
-        self.assertIn('"gains": "damage 6 -> 4, back within the hunting ceiling"', upgrades())
+        self.assertIn('"gains": "damage 12 -> 4, a second 3.75 -> 2.27, back within the hunting ceiling"', upgrades())
 
     def test_with_no_weapon_owned_bare_hands_are_the_baseline(self):
         # Review on #191: as Equip counts them, so an over-ceiling weapon is no upgrade.

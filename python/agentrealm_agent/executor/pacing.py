@@ -11,8 +11,11 @@ carries across queues through ``ticks_since_last``.
 
 from __future__ import annotations
 
+import math
 from typing import Callable, Iterable
 
+from ..supplies import DEFAULT_ATTACK_COOLDOWN_MS, weapon_cooldown_ms
+from .constants import DEFAULT_TICK_RATE_HZ
 from .intents import wait
 
 DEFAULT_WEAPON_COOLDOWN_TICKS = 10
@@ -23,6 +26,15 @@ def waits(count: int) -> list[dict]:
     if count <= 0:
         return []
     return [wait() for _ in range(count)]
+
+
+def attack_cooldown_ticks(code: str | None, tick_rate_hz: int = DEFAULT_TICK_RATE_HZ) -> int:
+    """Ticks between two ``Use`` intents with ``code`` armed: a weapon's attack
+    cooldown (the Supplies reference's ``attacks`` ``cooldown_ms``, A123; 0.8 s
+    to 1.5 s in Olympuff), the 1 s default for anything else, rounded up to a
+    whole tick."""
+    cooldown_ms = weapon_cooldown_ms(code) or DEFAULT_ATTACK_COOLDOWN_MS
+    return max(1, math.ceil(cooldown_ms * tick_rate_hz / 1000))
 
 
 def uses_attack_cooldown(intent: dict) -> bool:
@@ -63,7 +75,8 @@ def pace_uses(
     cooldown_ticks: int = DEFAULT_WEAPON_COOLDOWN_TICKS,
     ticks_since_last: int | None = None,
 ) -> list[dict]:
-    """Space ``Use`` intents by weapon cooldown (10 ticks by default)."""
+    """Space ``Use`` intents by weapon cooldown (10 ticks by default;
+    ``attack_cooldown_ticks`` gives the armed weapon's)."""
     return _pace_actions(
         list(uses),
         interval_ticks=cooldown_ticks,

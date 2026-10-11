@@ -3,8 +3,7 @@
   "code": "accessory",
   "name": "Accessory armor",
   "class": "armor",
-  "use_effects": [],
-  "defense": 0,
+  "capabilities": [],
   "stacks": false
  },
  {
@@ -12,8 +11,17 @@
   "name": "Adamant greaves",
   "class": "armor",
   "slot": "legs",
-  "use_effects": [],
-  "defense": 1,
+  "capabilities": [
+   {
+    "capability": "defend-the-legs",
+    "trigger": "worn"
+   },
+   {
+    "capability": "protects",
+    "trigger": "worn",
+    "amount": 1
+   }
+  ],
   "stacks": false,
   "gem_prices": {
    "olympuff": 150
@@ -24,8 +32,17 @@
   "name": "Adamant helm",
   "class": "armor",
   "slot": "head",
-  "use_effects": [],
-  "defense": 1,
+  "capabilities": [
+   {
+    "capability": "defend-the-head",
+    "trigger": "worn"
+   },
+   {
+    "capability": "protects",
+    "trigger": "worn",
+    "amount": 1
+   }
+  ],
   "stacks": false,
   "gem_prices": {
    "olympuff": 150
@@ -36,8 +53,17 @@
   "name": "Adamant mail",
   "class": "armor",
   "slot": "body",
-  "use_effects": [],
-  "defense": 3,
+  "capabilities": [
+   {
+    "capability": "defend-the-body",
+    "trigger": "worn"
+   },
+   {
+    "capability": "protects",
+    "trigger": "worn",
+    "amount": 3
+   }
+  ],
   "stacks": false,
   "gem_prices": {
    "olympuff": 300
@@ -48,12 +74,19 @@
   "name": "Adamant mallet",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack",
-   "smash"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 20,
+    "reach": 1,
+    "cooldown_ms": 1300
+   },
+   {
+    "capability": "smashes",
+    "trigger": "used"
+   }
   ],
-  "attack_range": 1,
-  "damage": 20,
   "used_up_on_break": false,
   "stacks": false,
   "gem_prices": {
@@ -65,13 +98,23 @@
   "name": "Adamant sword",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack",
-   "cut",
-   "chop"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 14,
+    "reach": 1,
+    "cooldown_ms": 1000
+   },
+   {
+    "capability": "chops",
+    "trigger": "used"
+   },
+   {
+    "capability": "cuts",
+    "trigger": "used"
+   }
   ],
-  "attack_range": 1,
-  "damage": 14,
   "used_up_on_break": false,
   "stacks": false,
   "gem_prices": {
@@ -82,8 +125,13 @@
   "code": "apple",
   "name": "Apple",
   "class": "consumable",
-  "use_effects": [],
-  "heal": 2,
+  "capabilities": [
+   {
+    "capability": "heals",
+    "trigger": "picked_up",
+    "amount": 2
+   }
+  ],
   "stacks": false,
   "eaten_on_pickup": true
  },
@@ -91,8 +139,13 @@
   "code": "berry",
   "name": "Berry",
   "class": "consumable",
-  "use_effects": [],
-  "heal": 1,
+  "capabilities": [
+   {
+    "capability": "heals",
+    "trigger": "picked_up",
+    "amount": 1
+   }
+  ],
   "stacks": false,
   "eaten_on_pickup": true
  },
@@ -101,10 +154,13 @@
   "name": "Blue chest",
   "class": "consumable",
   "slot": "armed",
-  "use_effects": [
-   "chest"
+  "capabilities": [
+   {
+    "capability": "holds",
+    "trigger": "used",
+    "amount": 10
+   }
   ],
-  "chest_capacity": 10,
   "stacks": false
  },
  {
@@ -112,8 +168,11 @@
   "name": "Bomb",
   "class": "tool",
   "slot": "armed",
-  "use_effects": [
-   "blast"
+  "capabilities": [
+   {
+    "capability": "blasts",
+    "trigger": "used"
+   }
   ],
   "used_up_on_break": true,
   "stacks": false,
@@ -126,11 +185,17 @@
   "name": "Boots of speed",
   "class": "armor",
   "slot": "feet",
-  "use_effects": [],
-  "defense": 0,
-  "grants": {
-   "movement_speed": 0.5
-  },
+  "capabilities": [
+   {
+    "capability": "defend-the-feet",
+    "trigger": "worn"
+   },
+   {
+    "capability": "speeds",
+    "trigger": "equipped",
+    "amount": 500
+   }
+  ],
   "stacks": false,
   "gem_prices": {
    "olympuff": 200
@@ -141,8 +206,17 @@
   "name": "Bronze mail",
   "class": "armor",
   "slot": "body",
-  "use_effects": [],
-  "defense": 1,
+  "capabilities": [
+   {
+    "capability": "defend-the-body",
+    "trigger": "worn"
+   },
+   {
+    "capability": "protects",
+    "trigger": "worn",
+    "amount": 1
+   }
+  ],
   "stacks": false,
   "gem_prices": {
    "olympuff": 20
@@ -153,12 +227,19 @@
   "name": "Bronze mallet",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack",
-   "smash"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 6,
+    "reach": 1,
+    "cooldown_ms": 1300
+   },
+   {
+    "capability": "smashes",
+    "trigger": "used"
+   }
   ],
-  "attack_range": 1,
-  "damage": 6,
   "used_up_on_break": false,
   "stacks": false,
   "gem_prices": {
@@ -170,13 +251,23 @@
   "name": "Bronze sword",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack",
-   "cut",
-   "chop"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 4,
+    "reach": 1,
+    "cooldown_ms": 1000
+   },
+   {
+    "capability": "chops",
+    "trigger": "used"
+   },
+   {
+    "capability": "cuts",
+    "trigger": "used"
+   }
   ],
-  "attack_range": 1,
-  "damage": 4,
   "used_up_on_break": false,
   "stacks": false,
   "gem_prices": {
@@ -188,10 +279,12 @@
   "name": "Disguise cloak",
   "class": "accessory",
   "slot": "accessory",
-  "use_effects": [],
-  "grants": {
-   "disguise": true
-  },
+  "capabilities": [
+   {
+    "capability": "disguises",
+    "trigger": "worn"
+   }
+  ],
   "stacks": false
  },
  {
@@ -199,15 +292,19 @@
   "name": "Feet armor",
   "class": "armor",
   "slot": "feet",
-  "use_effects": [],
-  "defense": 0,
+  "capabilities": [
+   {
+    "capability": "defend-the-feet",
+    "trigger": "worn"
+   }
+  ],
   "stacks": false
  },
  {
   "code": "gem",
   "name": "Gem",
   "class": "gem",
-  "use_effects": [],
+  "capabilities": [],
   "stacks": true,
   "eaten_on_pickup": true
  },
@@ -215,7 +312,7 @@
   "code": "gem_cache_10",
   "name": "Gem cache (10)",
   "class": "gem",
-  "use_effects": [],
+  "capabilities": [],
   "stacks": true,
   "eaten_on_pickup": true
  },
@@ -223,7 +320,7 @@
   "code": "gem_cache_5",
   "name": "Gem cache (5)",
   "class": "gem",
-  "use_effects": [],
+  "capabilities": [],
   "stacks": true,
   "eaten_on_pickup": true
  },
@@ -231,7 +328,7 @@
   "code": "gem_cache_7",
   "name": "Gem cache (7)",
   "class": "gem",
-  "use_effects": [],
+  "capabilities": [],
   "stacks": true,
   "eaten_on_pickup": true
  },
@@ -240,11 +337,18 @@
   "name": "Goggles",
   "class": "accessory",
   "slot": "accessory",
-  "use_effects": [],
-  "grants": {
-   "trap_detection": 3,
-   "perception": 5
-  },
+  "capabilities": [
+   {
+    "capability": "detects",
+    "trigger": "equipped",
+    "amount": 3
+   },
+   {
+    "capability": "perceives",
+    "trigger": "equipped",
+    "amount": 5
+   }
+  ],
   "stacks": false,
   "gem_prices": {
    "olympuff": 60,
@@ -255,8 +359,13 @@
   "code": "golden_cap",
   "name": "Golden cap",
   "class": "consumable",
-  "use_effects": [],
-  "heal": 6,
+  "capabilities": [
+   {
+    "capability": "heals",
+    "trigger": "picked_up",
+    "amount": 6
+   }
+  ],
   "stacks": false,
   "eaten_on_pickup": true,
   "gem_prices": {
@@ -268,8 +377,17 @@
   "name": "Head armor",
   "class": "armor",
   "slot": "head",
-  "use_effects": [],
-  "defense": 1,
+  "capabilities": [
+   {
+    "capability": "defend-the-head",
+    "trigger": "worn"
+   },
+   {
+    "capability": "protects",
+    "trigger": "worn",
+    "amount": 1
+   }
+  ],
   "stacks": false,
   "gem_prices": {
    "sandbox": 3
@@ -279,7 +397,7 @@
   "code": "heart",
   "name": "Heart",
   "class": "life",
-  "use_effects": [],
+  "capabilities": [],
   "stacks": true,
   "eaten_on_pickup": true
  },
@@ -288,8 +406,17 @@
   "name": "Iron helm",
   "class": "armor",
   "slot": "head",
-  "use_effects": [],
-  "defense": 1,
+  "capabilities": [
+   {
+    "capability": "defend-the-head",
+    "trigger": "worn"
+   },
+   {
+    "capability": "protects",
+    "trigger": "worn",
+    "amount": 1
+   }
+  ],
   "stacks": false,
   "gem_prices": {
    "olympuff": 40
@@ -300,8 +427,17 @@
   "name": "Iron mail",
   "class": "armor",
   "slot": "body",
-  "use_effects": [],
-  "defense": 2,
+  "capabilities": [
+   {
+    "capability": "defend-the-body",
+    "trigger": "worn"
+   },
+   {
+    "capability": "protects",
+    "trigger": "worn",
+    "amount": 2
+   }
+  ],
   "stacks": false,
   "gem_prices": {
    "olympuff": 80
@@ -312,12 +448,19 @@
   "name": "Iron mallet",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack",
-   "smash"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 12,
+    "reach": 1,
+    "cooldown_ms": 1300
+   },
+   {
+    "capability": "smashes",
+    "trigger": "used"
+   }
   ],
-  "attack_range": 1,
-  "damage": 12,
   "used_up_on_break": false,
   "stacks": false,
   "gem_prices": {
@@ -329,13 +472,23 @@
   "name": "Iron sword",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack",
-   "cut",
-   "chop"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 8,
+    "reach": 1,
+    "cooldown_ms": 1000
+   },
+   {
+    "capability": "chops",
+    "trigger": "used"
+   },
+   {
+    "capability": "cuts",
+    "trigger": "used"
+   }
   ],
-  "attack_range": 1,
-  "damage": 8,
   "used_up_on_break": false,
   "stacks": false,
   "gem_prices": {
@@ -347,11 +500,15 @@
   "name": "Iron whip",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 6,
+    "reach": 2,
+    "cooldown_ms": 1200
+   }
   ],
-  "attack_range": 2,
-  "damage": 6,
   "stacks": false,
   "gem_prices": {
    "olympuff": 100
@@ -362,10 +519,14 @@
   "name": "Lantern",
   "class": "tool",
   "slot": "armed",
-  "use_effects": [
-   "light"
+  "capabilities": [
+   {
+    "capability": "lights",
+    "trigger": "used",
+    "reach": 14,
+    "duration_seconds": 300
+   }
   ],
-  "light_radius": 14,
   "stacks": false,
   "gem_prices": {
    "olympuff": 80
@@ -376,10 +537,13 @@
   "name": "Large potion",
   "class": "consumable",
   "slot": "armed",
-  "use_effects": [
-   "heal"
+  "capabilities": [
+   {
+    "capability": "heals",
+    "trigger": "used",
+    "amount": 30
+   }
   ],
-  "heal": 30,
   "stacks": false,
   "gem_prices": {
    "olympuff": 40
@@ -390,8 +554,12 @@
   "name": "Leg armor",
   "class": "armor",
   "slot": "legs",
-  "use_effects": [],
-  "defense": 0,
+  "capabilities": [
+   {
+    "capability": "defend-the-legs",
+    "trigger": "worn"
+   }
+  ],
   "stacks": false
  },
  {
@@ -399,12 +567,19 @@
   "name": "Mallet",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack",
-   "smash"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 0,
+    "reach": 1,
+    "cooldown_ms": 1300
+   },
+   {
+    "capability": "smashes",
+    "trigger": "used"
+   }
   ],
-  "attack_range": 1,
-  "damage": 0,
   "used_up_on_break": false,
   "stacks": false
  },
@@ -413,10 +588,12 @@
   "name": "Map",
   "class": "accessory",
   "slot": "accessory",
-  "use_effects": [],
-  "grants": {
-   "map": true
-  },
+  "capabilities": [
+   {
+    "capability": "maps",
+    "trigger": "worn"
+   }
+  ],
   "stacks": false
  },
  {
@@ -424,8 +601,11 @@
   "name": "Matches",
   "class": "tool",
   "slot": "armed",
-  "use_effects": [
-   "burn"
+  "capabilities": [
+   {
+    "capability": "burns",
+    "trigger": "used"
+   }
   ],
   "used_up_on_break": true,
   "stacks": false,
@@ -438,10 +618,13 @@
   "name": "Middle chest",
   "class": "consumable",
   "slot": "armed",
-  "use_effects": [
-   "chest"
+  "capabilities": [
+   {
+    "capability": "holds",
+    "trigger": "used",
+    "amount": 30
+   }
   ],
-  "chest_capacity": 30,
   "stacks": false,
   "gem_prices": {
    "olympuff": 50
@@ -451,8 +634,13 @@
   "code": "mushroom",
   "name": "Mushroom",
   "class": "consumable",
-  "use_effects": [],
-  "heal": 3,
+  "capabilities": [
+   {
+    "capability": "heals",
+    "trigger": "picked_up",
+    "amount": 3
+   }
+  ],
   "stacks": false,
   "eaten_on_pickup": true
  },
@@ -461,12 +649,19 @@
   "name": "Pocket knife",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack",
-   "cut"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 2,
+    "reach": 1,
+    "cooldown_ms": 800
+   },
+   {
+    "capability": "cuts",
+    "trigger": "used"
+   }
   ],
-  "attack_range": 1,
-  "damage": 2,
   "used_up_on_break": false,
   "stacks": false
  },
@@ -475,10 +670,13 @@
   "name": "Potion",
   "class": "consumable",
   "slot": "armed",
-  "use_effects": [
-   "heal"
+  "capabilities": [
+   {
+    "capability": "heals",
+    "trigger": "used",
+    "amount": 10
+   }
   ],
-  "heal": 10,
   "stacks": false,
   "gem_prices": {
    "sandbox": 2
@@ -489,8 +687,11 @@
   "name": "Raft",
   "class": "tool",
   "slot": "armed",
-  "use_effects": [
-   "water"
+  "capabilities": [
+   {
+    "capability": "fords",
+    "trigger": "equipped"
+   }
   ],
   "stacks": false,
   "gem_prices": {
@@ -502,10 +703,13 @@
   "name": "Red chest",
   "class": "consumable",
   "slot": "armed",
-  "use_effects": [
-   "chest"
+  "capabilities": [
+   {
+    "capability": "holds",
+    "trigger": "used",
+    "amount": 50
+   }
   ],
-  "chest_capacity": 50,
   "stacks": false,
   "gem_prices": {
    "olympuff": 250
@@ -516,8 +720,11 @@
   "name": "Salvaged bomb",
   "class": "tool",
   "slot": "armed",
-  "use_effects": [
-   "blast"
+  "capabilities": [
+   {
+    "capability": "blasts",
+    "trigger": "used"
+   }
   ],
   "used_up_on_break": true,
   "stacks": false,
@@ -530,10 +737,13 @@
   "name": "Small potion",
   "class": "consumable",
   "slot": "armed",
-  "use_effects": [
-   "heal"
+  "capabilities": [
+   {
+    "capability": "heals",
+    "trigger": "used",
+    "amount": 10
+   }
   ],
-  "heal": 10,
   "stacks": false,
   "gem_prices": {
    "olympuff": 10
@@ -544,13 +754,23 @@
   "name": "Sword",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack",
-   "cut",
-   "chop"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 2,
+    "reach": 1,
+    "cooldown_ms": 1000
+   },
+   {
+    "capability": "chops",
+    "trigger": "used"
+   },
+   {
+    "capability": "cuts",
+    "trigger": "used"
+   }
   ],
-  "attack_range": 1,
-  "damage": 2,
   "used_up_on_break": false,
   "stacks": false,
   "gem_prices": {
@@ -562,10 +782,13 @@
   "name": "Teleport scroll",
   "class": "consumable",
   "slot": "armed",
-  "use_effects": [
-   "teleport"
+  "capabilities": [
+   {
+    "capability": "teleports",
+    "trigger": "used",
+    "amount": 8
+   }
   ],
-  "teleport_range": 8,
   "stacks": false
  },
  {
@@ -573,11 +796,18 @@
   "name": "Torch",
   "class": "tool",
   "slot": "armed",
-  "use_effects": [
-   "burn",
-   "light"
+  "capabilities": [
+   {
+    "capability": "burns",
+    "trigger": "used"
+   },
+   {
+    "capability": "lights",
+    "trigger": "used",
+    "reach": 8,
+    "duration_seconds": 120
+   }
   ],
-  "light_radius": 8,
   "used_up_on_break": true,
   "stacks": false,
   "gem_prices": {
@@ -589,8 +819,13 @@
   "name": "Trap grade 2",
   "class": "trap",
   "slot": "armed",
-  "use_effects": [
-   "trap"
+  "capabilities": [
+   {
+    "capability": "traps",
+    "trigger": "used",
+    "amount": 2,
+    "duration_seconds": 120
+   }
   ],
   "stacks": false
  },
@@ -599,10 +834,12 @@
   "name": "Truth lens",
   "class": "accessory",
   "slot": "accessory",
-  "use_effects": [],
-  "grants": {
-   "reveals_disguise": true
-  },
+  "capabilities": [
+   {
+    "capability": "unmasks",
+    "trigger": "equipped"
+   }
+  ],
   "stacks": false
  },
  {
@@ -610,11 +847,15 @@
   "name": "Whip",
   "class": "weapon",
   "slot": "armed",
-  "use_effects": [
-   "attack"
+  "capabilities": [
+   {
+    "capability": "attacks",
+    "trigger": "used",
+    "amount": 0,
+    "reach": 1,
+    "cooldown_ms": 1200
+   }
   ],
-  "attack_range": 1,
-  "damage": 0,
   "stacks": false
  }
 ]

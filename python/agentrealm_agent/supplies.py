@@ -1,13 +1,21 @@
 """The Manual's Supplies reference: one row per supply subtype (A54).
 
 The site serves the table as JSON at ``SUPPLIES_URL`` (API Supplies
-reference, saims B132): per ``code`` its ``class``, ``slot``, ``use_effects``
-(what ``Use`` does), ``attack_range``, ``damage`` (a weapon's), ``defense`` (an
-armor piece's, counted only while worn), ``heal`` (a potion's or food's),
-``chest_capacity`` (a chest's), ``used_up_on_break``, ``eaten_on_pickup``,
-``gem_prices`` and more; a field that does not apply is left out. It is a
-page on the website, not an API read, so it spends nothing from a character's
-call budget, and it is fetched once per run (``load``).
+reference, saims B132): per ``code`` its ``class``, ``slot``,
+``capabilities``, ``used_up_on_break``, ``eaten_on_pickup``, ``gem_prices``
+and more; a field that does not apply is left out. Each capability names
+what the supply does (``attacks``, ``cuts``, ``heals``, ``holds``,
+``protects``, …), when (its ``trigger``: ``used``, ``equipped``, ``worn`` or
+``picked_up``), and its numbers (``amount``, ``reach``, ``cooldown_ms``,
+``duration_seconds``) where it takes them (saims B138). ``parse`` reads
+those into the fields of ``Supply`` (A123): a weapon's ``damage``, attack
+range and cooldown from ``attacks``, a potion's or food's ``heal`` from
+``heals``, a chest's ``chest_capacity`` from ``holds``, an armor piece's
+``defense`` from ``protects``. Before B138 each row carried ``use_effects``
+and a field per stat (``damage``, ``heal``, …) instead; ``parse`` still reads
+that shape, so a cache saved before it works the same. It is a page on the
+website, not an API read, so it spends nothing from a character's call
+budget, and it is fetched once per run (``load``).
 
 Where the table comes from, first that works:
 
@@ -52,6 +60,28 @@ FETCH_TIMEOUT_SECONDS = 5.0
 # and water open none (docs/GAME_NOTES.md Breaking blocks). ``plan`` takes its
 # ``break_block`` capabilities from here.
 CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
+# The ``use_effects`` name of each served capability that acts while the
+# supply is armed or used (A123). ``use_effects`` is the agent's word for what
+# armed gear does: a capability that acts only worn (armor's ``protects``) or
+# on pickup (food's ``heals``), or one no rule here reads (``detects``,
+# ``speeds``, …), names none.
+USE_EFFECT_OF = {
+    "attacks": "attack",
+    "cuts": "cut",
+    "chops": "chop",
+    "smashes": "smash",
+    "burns": "burn",
+    "blasts": "blast",
+    "heals": "heal",
+    "holds": "chest",
+    "lights": "light",
+    "teleports": "teleport",
+    "traps": "trap",
+    "fords": "water",
+}
+ARMED_TRIGGERS = frozenset({"used", "equipped"})
+# A weapon's attack cooldown when its row sets none (the Manual's rules: 1 s).
+DEFAULT_ATTACK_COOLDOWN_MS = 1000
 # The classes that go in a worn slot; every other class is armed, used or carried.
 WORN_CLASSES = frozenset({"armor", "accessory"})
 # The ``use_effects`` a ``Use`` on yourself applies to the holder (A108): a
@@ -71,6 +101,8 @@ class Supply:
     use_effects: frozenset[str]
     slot: str = ""
     damage: int | None = None
+    attack_range: int | None = None
+    attack_cooldown_ms: int | None = None  # served since B138; None in the older shape
     defense: int | None = None
     heal: int | None = None
     chest_capacity: int | None = None
@@ -80,7 +112,9 @@ class Supply:
 
 
 def parse(raw: Any) -> dict[str, Supply]:
-    """Rows by code from the served JSON array; malformed rows are skipped."""
+    """Rows by code from the served JSON array; malformed rows are skipped.
+    A row with a ``capabilities`` list is read by it (saims B138), any other
+    by its ``use_effects`` and stat fields, the shape before it."""
     if not isinstance(raw, list):
         return {}
     out: dict[str, Supply] = {}
@@ -90,22 +124,59 @@ def parse(raw: Any) -> dict[str, Supply]:
         code = row.get("code")
         if not isinstance(code, str) or not code:
             continue
-        effects = row.get("use_effects")
+        supply_class = row.get("class") if isinstance(row.get("class"), str) else ""
+        caps = row.get("capabilities")
+        stats = _capability_stats(caps, supply_class) if isinstance(caps, list) else _stat_fields(row)
         used_up = row.get("used_up_on_break")
         out[code] = Supply(
             code=code,
-            supply_class=row.get("class") if isinstance(row.get("class"), str) else "",
-            use_effects=frozenset(e for e in effects if isinstance(e, str)) if isinstance(effects, list) else frozenset(),
+            supply_class=supply_class,
             slot=row.get("slot") if isinstance(row.get("slot"), str) else "",
-            damage=_non_negative_int(row.get("damage")),
-            defense=_non_negative_int(row.get("defense")),
-            heal=_positive_int(row.get("heal")),
-            chest_capacity=_positive_int(row.get("chest_capacity")),
             used_up_on_break=used_up if isinstance(used_up, bool) else None,
             eaten_on_pickup=row.get("eaten_on_pickup") is True,
             sold=_sold(row.get("gem_prices")),
+            **stats,
         )
     return out
+
+
+def _capability_stats(caps: list[Any], supply_class: str) -> dict[str, Any]:
+    """The ``Supply`` fields a row's ``capabilities`` give (A123)."""
+    by_name: dict[str, dict[str, Any]] = {}
+    effects: set[str] = set()
+    for cap in caps:
+        if not isinstance(cap, dict) or not isinstance(cap.get("capability"), str):
+            continue
+        name = cap["capability"]
+        by_name.setdefault(name, cap)
+        if name in USE_EFFECT_OF and cap.get("trigger") in ARMED_TRIGGERS:
+            effects.add(USE_EFFECT_OF[name])
+    attacks = by_name.get("attacks", {})
+    defense = _non_negative_int(by_name.get("protects", {}).get("amount"))
+    if defense is None and supply_class == "armor":
+        defense = 0  # armor without ``protects`` adds none
+    return {
+        "use_effects": frozenset(effects),
+        "damage": _non_negative_int(attacks.get("amount")),
+        "attack_range": _positive_int(attacks.get("reach")),
+        "attack_cooldown_ms": _positive_int(attacks.get("cooldown_ms")),
+        "defense": defense,
+        "heal": _positive_int(by_name.get("heals", {}).get("amount")),
+        "chest_capacity": _positive_int(by_name.get("holds", {}).get("amount")),
+    }
+
+
+def _stat_fields(row: dict[str, Any]) -> dict[str, Any]:
+    """The ``Supply`` fields a row in the shape before B138 gives."""
+    effects = row.get("use_effects")
+    return {
+        "use_effects": frozenset(e for e in effects if isinstance(e, str)) if isinstance(effects, list) else frozenset(),
+        "damage": _non_negative_int(row.get("damage")),
+        "attack_range": _positive_int(row.get("attack_range")),
+        "defense": _non_negative_int(row.get("defense")),
+        "heal": _positive_int(row.get("heal")),
+        "chest_capacity": _positive_int(row.get("chest_capacity")),
+    }
 
 
 def _sold(prices: Any) -> bool:
@@ -248,6 +319,23 @@ def weapon_damage(code: str | None) -> int | None:
     return r.damage if r is not None and r.supply_class == "weapon" else None
 
 
+def weapon_cooldown_ms(code: str | None) -> int | None:
+    """A weapon's attack cooldown: the least time between two of its swings
+    (``attacks`` ``cooldown_ms``; ``DEFAULT_ATTACK_COOLDOWN_MS`` when the row
+    sets none), or None for anything that is not a listed weapon."""
+    r = row(code)
+    if r is None or r.supply_class != "weapon":
+        return None
+    return r.attack_cooldown_ms or DEFAULT_ATTACK_COOLDOWN_MS
+
+
+def attack_reach(code: str | None) -> int | None:
+    """A weapon's published attack range (``attacks`` ``reach``), or None for
+    anything that is not a listed weapon or a row that gives none."""
+    r = row(code)
+    return r.attack_range if r is not None and r.supply_class == "weapon" else None
+
+
 def armor_defense(code: str | None) -> int | None:
     """An armor piece's published ``defense``, or None for anything that is not listed armor."""
     r = row(code)
@@ -318,7 +406,8 @@ def what_it_does(code: str | None) -> dict[str, Any]:
     """What the Supplies reference says a subtype does, for the planner's State
     (A92): ``class``, ``use`` (its ``use_effects``), whichever of ``heal``,
     ``damage``, ``defense``, ``chest_capacity`` and ``slot`` apply (``defense``
-    counts only while worn), ``used_up_on_break`` when
+    counts only while worn), a weapon's ``cooldown_ms`` between swings (A123),
+    ``used_up_on_break`` when
     listed (true: each block broken with it uses one up), and ``eaten_on_pickup``
     when it is used up on its ``Take`` (A112). ``{}`` when unlisted."""
     r = row(code)
@@ -328,6 +417,8 @@ def what_it_does(code: str | None) -> dict[str, Any]:
     for key in ("heal", "damage", "defense", "chest_capacity"):
         if getattr(r, key) is not None:
             out[key] = getattr(r, key)
+    if (cooldown := weapon_cooldown_ms(code)) is not None:
+        out["cooldown_ms"] = cooldown
     if r.slot and r.slot != "armed":
         out["slot"] = r.slot
     if r.used_up_on_break is not None:

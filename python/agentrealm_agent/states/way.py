@@ -69,7 +69,7 @@ def open_the_way(w: WorldModel, ctx: PlayContext, at: Pos, state: str) -> StateO
     The way is priced with each block on the straight route that a held item
     opens costed at its break (``grid_params`` ``break_goal``), as Heal's
     walks are (A89). When no way round reaches ``at`` and that way crosses
-    such a block, the first one is walked to and opened (``break_toward``):
+    such a block, the first one short of ``at`` is walked to and opened (``break_toward``):
     a step toward it, or in reach its opener armed and ``Use``d.
     """
     if w.pos is None or w.map_id is None or w.pos == at:
@@ -83,7 +83,9 @@ def open_the_way(w: WorldModel, ctx: PlayContext, at: Pos, state: str) -> StateO
         return None
     if cost_path(w, at, grid_params(ctx.policy, plan_avoid, plan_costly, allow_goal_door=True)) is not None:
         return None  # a way round: the executor's walk takes it
-    cut = next((p for p in cost_path(w, at, opening) or [] if p in opening.break_costs), None)
+    # ``at`` itself is never the block on the way: a ``use_block`` target is a
+    # block, and its op is to use its item on it, not to open it.
+    cut = next((p for p in cost_path(w, at, opening) or [] if p in opening.break_costs and p != at), None)
     choice = choice_at(w, ctx.knowledge, cut, given_up_blocks(m.nav_stuck, w.map_id, w.tick)) if cut else None
     if choice is None:
         return None

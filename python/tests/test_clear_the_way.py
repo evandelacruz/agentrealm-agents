@@ -141,6 +141,21 @@ class ObstructedThenClearedTest(unittest.TestCase):
         self.assertEqual((out.state, out.intents), ("Loot", [{"verb": "SetPosition", "x": 3, "y": 1}]), out.reason)
 
 
+class TheTargetIsNeverTheBlockOpenedTest(unittest.TestCase):
+    def test_step_two_never_opens_the_ops_own_target(self):
+        # A use_block target is a block, so no way round reaches it; a held item
+        # opening its type must not make it the block on the way (A120).
+        from agentrealm_agent.states import way
+
+        w = corridor(".")
+        w.view.tiles[END] = "tree"  # matches burn it, but the op is to use the key on it
+        c = ctx(use_block(w))
+        self.assertIsNone(way.open_the_way(w, c, END, "Solve"))
+        w.view.tiles[BLOCK] = "tree"  # a block on the way is still opened
+        out = way.open_the_way(w, c, END, "Solve")
+        self.assertEqual(out.intents if out else None, [{"verb": "SetPosition", "x": 2, "y": 1}])
+
+
 class ObstructedThenAskedTest(unittest.TestCase):
     def test_with_nothing_held_that_opens_the_way_every_walking_op_asks_once_and_holds(self):
         for owner, make in {**OPENS_ITSELF, **LADDER}.items():

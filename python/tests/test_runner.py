@@ -189,6 +189,16 @@ class RunnerTest(unittest.TestCase):
         second = r.intents_for(Decision(use, "test"))
         self.assertEqual([i["verb"] for i in second], ["Wait"] * 9 + ["Use"])
 
+    def test_a_use_waits_the_armed_weapons_cooldown(self):
+        # A123: a mallet swings every 1.3 s (13 ticks), the knife every 0.8 s (8).
+        r = self.runner(FakeClient([]), Policy(goals=[]))
+        use = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
+        r.mem.last_use_tick, r.world.tick = 10, 11
+        for armed, waits in (("bronze_mallet", 12), ("pocket_knife", 7)):
+            r.world.armed_code = armed
+            queue = r.intents_for(Decision(use, "test"))
+            self.assertEqual([i["verb"] for i in queue], ["Wait"] * waits + ["Use"], armed)
+
     def test_say_carries_speech_cooldown(self):
         r = self.runner(FakeClient([]), Policy(goals=[]))
         say = {"verb": "Say", "text": "hi", "target": {"kind": "character", "character_id": 3}}

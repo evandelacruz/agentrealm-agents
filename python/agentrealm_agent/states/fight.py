@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 
 from ..directives import attack_forbidden
-from ..executor import build_attack_queue, queue_horizon_intents
+from ..executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_intents
 from ..executor.intents import step
 from ..executor.movement import direction_between
 from ..knowledge_base import KnowledgeBase
@@ -290,6 +290,7 @@ def engage(w: WorldModel, ctx: PlayContext, target: Entity, state: str) -> State
         retreat,
         poll_interval_ticks=m.calm_poll_interval,
         horizon_ticks=horizon,
+        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code, ctx.tick_hz),
         ticks_since_last_use=_ticks_since_use(w, m.last_use_tick),
     )
     if not queue:

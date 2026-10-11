@@ -49,7 +49,7 @@ class UseItemState(State):
         item = chest_to_apply(world, ctx.memory)
         if item is None:
             return StateOutcome(None, "no bigger chest to apply", state=self.name)
-        return use_on_self(world, ctx.memory, item, self.name)
+        return use_on_self(world, ctx.memory, item, self.name, ctx.tick_hz)
 
 
 def _use_op(world: WorldModel, ctx: PlayContext) -> StateOutcome:
@@ -66,7 +66,7 @@ def _use_op(world: WorldModel, ctx: PlayContext) -> StateOutcome:
         why = f"its Use on yourself was refused or did nothing: {code}" if held else f"{code} not held"
         plan.drop_current(why, memory=m)
         return StateOutcome(None, why, state=UseItemState.name)
-    out = use_on_self(world, m, item, UseItemState.name)
+    out = use_on_self(world, m, item, UseItemState.name, ctx.tick_hz)
     if out.intents:
         plan.used_id = item.id
     return out
@@ -88,7 +88,7 @@ def chest_to_apply(w: WorldModel, m: Memory) -> InventorySupply | None:
     return max(chests, key=lambda h: (chest_capacity(h.code) or 0, -h.id), default=None)
 
 
-def use_on_self(w: WorldModel, m: Memory, item: InventorySupply, state: str) -> StateOutcome:
+def use_on_self(w: WorldModel, m: Memory, item: InventorySupply, state: str, tick_hz: int) -> StateOutcome:
     """``Use`` ``item`` on yourself (API Use), with its ``Arm`` first in one
     paced queue unless it is already in the slot, so both are sent.
 
@@ -104,7 +104,7 @@ def use_on_self(w: WorldModel, m: Memory, item: InventorySupply, state: str) -> 
     in_slot = w.armed_code == item.code and w.armed_id in (None, item.id)
     if in_slot and not must_arm(m, item.id):
         out = StateOutcome([use_self()], f"use {item.code}", state=state)
-    elif queue := arm_and_use(w, m, item.id, use_self()):
+    elif queue := arm_and_use(w, m, item.id, use_self(), tick_hz):
         out = StateOutcome(queue, f"arm and use {item.code}", state=state)
         out.paced = True
     else:

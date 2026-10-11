@@ -80,8 +80,9 @@ def death_chest_recover_intents(
 def recover_target(w: WorldModel) -> tuple[int, Pos, bool] | None:
     """The death chest Recover works now: (chest id, cell, in reach), or None.
 
-    One in reach comes first, whatever its spot. Else the nearest whose spot
-    is known safe, of the newest and those in view. Only chests on this map.
+    One in reach comes first, whatever its spot, unless nothing in it can be
+    taken now (a full pack). Else the nearest whose spot is known safe, of the
+    newest and those in view. Only chests on this map.
     """
     here = w.pos
     if here is None:
@@ -95,7 +96,10 @@ def recover_target(w: WorldModel) -> tuple[int, Pos, bool] | None:
     )
     for d, chest_id, at in candidates:
         if d <= 1:
-            return chest_id, at, True
+            contents = w.chest_contents.get(chest_id)
+            if contents is None or death_chest_recover_intents(w, chest_id, contents, {}) is not None:
+                return chest_id, at, True
+            continue
         if (chest_id == newest_id or d <= w.perception) and recover_spot_safe(w, w.map_id, at):
             return chest_id, at, False
     return None
@@ -148,14 +152,6 @@ def recover_outcome(
     return None
 
 
-def _skip_reason(w: WorldModel) -> str:
-    """Why Recover fell back to Explore: out of reach, or in reach with nothing worth taking."""
-    picked = recover_target(w)
-    if picked is not None and picked[2] and w.chest_contents.get(picked[0]):
-        return f"chest {picked[0]} not worth a slot"
-    return "chest not reachable"
-
-
 class RecoverState(State):
     """Reflex, after Flee and Pickup: takes back a death chest in reach, or walks to one on a safe spot."""
 
@@ -181,4 +177,4 @@ class RecoverState(State):
         if nav_stuck.awaiting_break(m, world, "chest"):
             return StateOutcome(None, "chest walk stuck: break", state=self.name)
         # No step toward the chest: the next state has the round.
-        return StateOutcome(None, _skip_reason(world), state=self.name)
+        return StateOutcome(None, "chest not reachable", state=self.name)

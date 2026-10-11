@@ -361,6 +361,9 @@ class WorldModel:
     # One is dropped once seen empty or gone: a dropped chest leaves the world
     # when its last supply is withdrawn (B116).
     death_chests: dict[int, DeathChest] = field(default_factory=dict)
+    # Death chests seen empty or gone this run: never remembered again, though
+    # a served ``death_chest`` still names one (A122).
+    death_chests_gone: set[int] = field(default_factory=set)
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[InventorySupply]] = field(default_factory=dict)
@@ -684,7 +687,7 @@ class WorldModel:
     def remember_death_chest(self, chest_id: int, map_id: int, at: Pos, died: int | None = None) -> None:
         """Remember a chest one of our deaths dropped at tick ``died`` (now when not known);
         one already known keeps what was seen of it."""
-        if chest_id not in self.death_chests:
+        if chest_id not in self.death_chests and chest_id not in self.death_chests_gone:
             self.death_chests[chest_id] = DeathChest(map_id, at, self.tick if died is None else died)
 
     def _refresh_death_chests(self) -> None:
@@ -701,6 +704,7 @@ class WorldModel:
             gone = chebyshev(chest.pos, here) <= 1 and contents is None
             if gone or contents == []:
                 del self.death_chests[chest_id]
+                self.death_chests_gone.add(chest_id)
             elif contents is not None:
                 chest.contents = [s.code for s in contents]
 

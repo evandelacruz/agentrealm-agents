@@ -12,7 +12,7 @@ from agentrealm_agent.knowledge_base.death_chests import DEATH_CHESTS_KEY, load_
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.strategist import death_chests_line
+from agentrealm_agent.strategist import DEATH_CHESTS_SHOWN, death_chests_line
 from agentrealm_agent.world import WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
 
@@ -82,6 +82,15 @@ class RememberedTest(unittest.TestCase):
         self.assertEqual(w.death_chests, {})
 
 
+    def test_a_chest_seen_gone_is_not_remembered_again_when_served(self):
+        w = world(at=(1, 0))
+        served = {"death_chest": {"chest_id": 80, "map_id": MAP, "x": 0, "y": 0}}
+        w.apply_observation({"complete": True, "snapshot": {**served, "entities": {"chests": [{"id": 80, "x": 0, "y": 0, "contents": []}]}}})
+        self.assertEqual(w.death_chests, {})
+        w.apply_observation({"complete": True, "snapshot": {**served, "entities": {"chests": []}}})
+        self.assertEqual(w.death_chests, {})
+
+
 class PersistTest(unittest.TestCase):
     def test_chests_persist_across_a_reload(self):
         kb = KnowledgeBase("sandbox")
@@ -125,6 +134,16 @@ class StateLineTest(unittest.TestCase):
     def test_none_known(self):
         self.assertEqual(death_chests_line(world()), "death_chests=none known")
 
+    def test_capped_with_a_count_of_the_rest(self):
+        w = world()
+        for i in range(DEATH_CHESTS_SHOWN + 2):
+            die(w, i + 1, 100 + i, i)
+        line = death_chests_line(w)
+        self.assertTrue(line.endswith(" (+2 more)"), line)
+        rows = json.loads(line.removeprefix("death_chests=").removesuffix(" (+2 more)"))
+        self.assertEqual(len(rows), DEATH_CHESTS_SHOWN)
+        self.assertEqual(rows[0]["chest_id"], 110 - 1)  # cell 9, nearest to 10
+
     def test_each_chest_nearest_first(self):
         w = world()
         die(w, 5, 80, 0)
@@ -158,6 +177,17 @@ class RecoverRememberedTest(unittest.TestCase):
         die(w, 9, 81, 29)
         apply_zone(w, MAP, 0, 0, {"safe": True, "brightness": 1})
         self.assertNotEqual(dispatch(w, ctx()).state, "Recover")
+
+    def test_a_chest_in_reach_with_nothing_to_take_does_not_hide_the_others(self):
+        w = world(at=(1, 0))
+        die(w, 5, 80, 0)  # in reach, but the pack is full
+        die(w, 9, 81, 4)  # newest, on a safe spot
+        w.held_supplies = [InventorySupply(i, "torch") for i in range(1, w.carry_capacity + 1)]
+        w.chest_contents[80] = [InventorySupply(90, "bronze_sword")]
+        apply_zone(w, MAP, 4, 0, {"safe": True, "brightness": 1})
+        out = dispatch(w, ctx())
+        self.assertEqual(out.state, "Recover")
+        self.assertEqual((out.intents[0]["verb"], out.intents[0]["x"]), ("SetPosition", 2))
 
     def test_a_remembered_chest_in_reach_is_taken_back_off_safe_ground(self):
         w = world(at=(1, 0))

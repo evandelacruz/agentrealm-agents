@@ -1006,8 +1006,13 @@ def entrance_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     return [f"level_entrances={json.dumps(shown, sort_keys=True)}{more}"]
 
 
+# Death chests State lists, nearest first.
+DEATH_CHESTS_SHOWN = 8
+
+
 def death_chests_line(w: WorldModel) -> str:
-    """Our remembered death chests (A122), nearest first: cell and bearing,
+    """Our remembered death chests (A122), nearest first, at most
+    ``DEATH_CHESTS_SHOWN`` and a count of the rest: cell and bearing,
     the item codes last seen in it (``unknown`` until seen in reach), and
     ``in_view`` while its cell is in sight. So the planner weighs going back
     for one (a ``travel`` to its cell; Recover takes back what fits)."""
@@ -1024,7 +1029,9 @@ def death_chests_line(w: WorldModel) -> str:
         rows.append(((0 if here else 1, d, c.map_id, chest_id), entry))
     if not rows:
         return "death_chests=none known"
-    return f"death_chests={json.dumps([e for _, e in sorted(rows, key=lambda t: t[0])], sort_keys=True)}"
+    shown = [e for _, e in sorted(rows, key=lambda t: t[0])[:DEATH_CHESTS_SHOWN]]
+    more = f" (+{len(rows) - len(shown)} more)" if len(rows) > len(shown) else ""
+    return f"death_chests={json.dumps(shown, sort_keys=True)}{more}"
 
 
 def shop_price_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:

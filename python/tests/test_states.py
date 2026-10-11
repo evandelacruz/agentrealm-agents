@@ -322,7 +322,9 @@ class DispatcherFallThroughTest(unittest.TestCase):
         out = dispatch(w, ctx(w, plan=plan_of({"op": "travel", "to": "point", "x": 3, "y": 1})))
         self.assert_yielded(out, "Travel")
         self.assertIn("blocked", out.yielded[0])
-        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, NO_WAY_ON, True))
+        # The safe default runs for the travel op (A120): it asks the planner, saying why.
+        why = "no frontier brings travel:point 3,1 nearer: asked the planner"
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, why, True))
 
     def test_explore_area_with_no_step_falls_through_to_safe_default(self):
         # The op's frontier (column 3) is walled off.

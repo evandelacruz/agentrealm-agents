@@ -36,7 +36,8 @@ WALK = "travel:point"  # the goal label of the goto's travel op walk
 
 def world(at=A) -> WorldModel:
     """Map 1: a walled corridor of dirt from x=0 to 11, open to the fog only
-    past its west end, so once the goto is given up Explore heads west."""
+    past its west end, away from the goto: once the goto is given up the safe
+    default, which serves it (A120), has no frontier toward it and asks."""
     w = WorldModel(character_id=1, map_id=1, pos=at, perception=12, gems=10, health=10, max_health=10)
     for x in range(-1, 13):
         w.view.tiles[(x, -1)] = w.view.tiles[(x, 1)] = "stone"
@@ -156,8 +157,7 @@ class RetreatPace(State):
 
 class PacingDispatchTest(unittest.TestCase):
     def _assert_guard_stopped_it(self, competitor, given_up):
-        # Twelve decisions: past the dead end at (0, 0) the never-idle safe
-        # default looks around (never-revealed fog here), which is its own walk.
+        # Twelve decisions.
         w, c, cells = play(competitor, decisions=12)
         events = c.memory.nav_stuck.oscillations
         self.assertEqual(len(events), 1, cells)
@@ -166,10 +166,15 @@ class PacingDispatchTest(unittest.TestCase):
         signals = c.memory.nav_stuck.stuck_signals
         self.assertEqual(sorted((s["goal"], s["reason"]) for s in signals), sorted((g, "pacing") for g in given_up))
         self.assertFalse(goto_pending(w, c), "goto backed off")
-        # The safe default walks west to the fog, never back.
+        # The safe default serves the goto (A120): the fog lies west, away
+        # from it, so it stays put and asks the planner, never pacing again.
         after = cells[oscillation.OSCILLATION_STEPS - 1 :]
-        self.assertEqual(after[:3], [(2, 0), (1, 0), (0, 0)], cells)
-        self.assertNotIn(B, after, cells)
+        self.assertEqual(set(after), {B}, cells)
+        self.assert_asked(c)
+
+    def assert_asked(self, c):
+        why = {s.get("why") for s in c.memory.strategist_signals if s["trigger"] == "no_way_on"}
+        self.assertEqual(why, {"no frontier brings travel:point 11,0 nearer"})
 
     def test_break_walk_against_the_goto_walk(self):
         # Both are walks: both are given up.
@@ -198,8 +203,9 @@ class PacingDispatchTest(unittest.TestCase):
     def test_the_goto_walk_pacing_on_its_own_is_given_up(self):
         """A58 run 5: the goto walk's own replans stepped it back and forth.
 
-        The guard alone ends it: one give-up, then the safe default walks off
-        west and never returns to the two cells while the goto is backed off. No
+        The guard alone ends it: one give-up, then the safe default, which
+        serves the goto (A120) and has no frontier toward it, asks the planner
+        and never paces the two cells again while the goto is backed off. No
         back-step block in the walk is needed for that.
         """
         w, c, cells = play(GotoReplanBack(), decisions=12)
@@ -207,8 +213,8 @@ class PacingDispatchTest(unittest.TestCase):
         self.assertEqual([(e["goal"], e["states"]) for e in events], [(WALK, ["Travel"])], cells)
         self.assertFalse(goto_pending(w, c), "goto backed off")
         after = cells[oscillation.OSCILLATION_STEPS :]
-        self.assertEqual(after[:2], [(1, 0), (0, 0)], cells)
-        self.assertNotIn(B, after, cells)
+        self.assertEqual(len(set(after)), 1, cells)
+        self.assert_asked(c)
 
     def test_a_goto_behind_the_agent_takes_the_step_back(self):
         """One step back toward a goto behind it is a route, not pacing."""

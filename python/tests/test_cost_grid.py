@@ -310,14 +310,15 @@ class TwoLevelBrainTest(unittest.TestCase):
 
 class KnownPrefixBrainTest(unittest.TestCase):
     def test_goal_starting_in_fog_falls_through_to_the_safe_default(self):
-        # doors' travel path starts on an unseen tile; the safe default explores instead.
+        # doors' travel path starts on an unseen tile; the safe default runs for
+        # the travel (A120): its one frontier, (1, 0), is no nearer the door, so it asks.
         w = grid([".."])
         w.view.tiles[(0, 5)] = "framed_door"
         policy = Policy(kind="scripted", goals=["doors", "explore"])
         self.assertNotIn(cost_path(w, (0, 5), CostGridParams(allow_goal_door=True))[0], w.view.tiles)
         d = decide_builtin(w, Memory(), policy)
-        self.assertEqual((d.intent["x"], d.intent["y"]), (1, 0))
-        self.assertTrue(d.reason.startswith("explore"), d.reason)
+        self.assertIsNone(d.intent)
+        self.assertEqual(d.reason, "no frontier brings travel:entrance 0,5 nearer: asked the planner")
 
     def test_no_goal_with_a_seen_first_step_sends_nothing(self):
         w = grid(["."])

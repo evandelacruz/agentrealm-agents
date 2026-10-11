@@ -204,20 +204,24 @@ class FullPackTest(unittest.TestCase):
 
 
 class StallTest(unittest.TestCase):
-    def test_unreachable_fetch_target_yields(self):
+    def test_unreachable_fetch_target_asks_the_planner_and_holds(self):
         w = world([".#..", "##..", "...."], at=(0, 0))
         w.entities = [Entity("supply", 8, (3, 0), "apple")]
         out = dispatch(w, ctx(plan=fetch("apple")))
-        self.assertNotEqual(out.state, "Loot")
+        self.assertEqual((out.state, out.intents, out.wait), ("Loot", None, True), out.reason)
 
-    def test_unreachable_fetch_target_lets_the_safe_default_ask_the_planner(self):
+    def test_unreachable_fetch_target_holds_and_its_stall_clock_runs(self):
         # Boxed in with room to move, nothing held opens a wall; the apple is outside the box.
         w = world(["######", "#..#.#", "######"], at=(1, 1))
         w.entities = [Entity("supply", 8, (4, 1), "apple")]
         plan = fetch("apple")
-        out = dispatch(w, ctx(plan=plan))
-        self.assertEqual(out.state, "Explore")
+        c = ctx(plan=plan)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Loot")
         self.assertTrue(out.wait and "asked the planner" in out.reason, out.reason)
+        ask = next(s for s in c.memory.strategist_signals if s["trigger"] == "no_way_on")
+        self.assertEqual(ask["op"], fetch("apple").current())
+        self.assertIn("wall at 3,1, which nothing held opens", ask["blocked_by"])
         self.assertIsNotNone(plan.stalled_since_tick)  # the fetch op's stall clock runs
 
     def test_chest_with_unread_contents_is_not_a_target(self):
@@ -627,7 +631,7 @@ class FetchItemTest(unittest.TestCase):
         w = world(["....", "...."], at=(0, 0))
         w.entities = [Entity("supply", 8, (3, 0), "apple", gem_price=2)]
         out = dispatch(w, ctx(plan=fetch("apple")))
-        self.assertNotEqual(out.state, "Loot")
+        self.assertEqual((out.state, out.intents, out.wait), ("Loot", None, True), out.reason)
 
     def test_walks_to_the_ops_cell_when_none_in_sight(self):
         w = world(["....", "...."], at=(0, 0))
@@ -635,10 +639,10 @@ class FetchItemTest(unittest.TestCase):
         self.assertEqual(out.state, "Loot")
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 0}])
 
-    def test_no_code_in_sight_and_no_cell_yields(self):
+    def test_no_code_in_sight_and_no_cell_asks_the_planner(self):
         w = world(["....", "...."], at=(0, 0))
         out = dispatch(w, ctx(plan=fetch("apple")))
-        self.assertNotEqual(out.state, "Loot")
+        self.assertEqual((out.state, out.intents, out.reason), ("Loot", None, "no apple in sight: asked the planner"))
 
 
 if __name__ == "__main__":

@@ -11,8 +11,9 @@ With no reachable frontier at all, the ground in reach is all seen and the
 way on is the planner's call (which block to open, which hostile to fight or
 pass, which clue to follow): it never steps in place and never parks beside
 a hostile; it raises a ``no_way_on`` trigger and sends nothing (A114).
-It never stands in for Travel: under a ``travel`` op Travel keeps its walk,
-and with no step it asks the planner itself and holds (A120).
+It never stands in for an executor: under any op but ``explore_area`` that
+op's executor keeps its walk, clears the way or asks the planner itself, and
+the safe default holds (A120).
 Stuck detection escalates and gives up a walk that goes nowhere (A15); cells Step
 rejections ruled out and ``avoid_blocks`` hazards stay out of the path (A14).
 """
@@ -35,14 +36,15 @@ from ..pathing import (
     path_owned_by,
     replan,
 )
-from ..plan import GoalOp
+from ..plan import OP_STATE, GoalOp
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
-from .ask import ask_the_planner
-from .base import PlayContext, State, StateOutcome, my_op, top_executor
+from .ask import ask_the_planner, op_key
+from .base import PlayContext, State, StateOutcome, my_op, top_executor, top_op
 from .gather_safe import is_safe_ish
 from .intents import set_position
+from .way import break_due
 
 # Hurt, the safe default keeps away from a known hostile this close: the
 # planner's danger radius (``navigation.planner``).
@@ -51,20 +53,18 @@ CAUTION_RADIUS = HOSTILE_DANGER_RADIUS
 KEEP_AWAY_HOLD_TICKS = 100
 # Why the safe default had no step: the ground in reach is all seen.
 NOTHING_TO_EXPLORE = "nothing left to explore"
-# The executors whose op the safe default never stands in for (A120): each
-# holds its own walk, and with no step asks the planner and holds. The rule
-# is every executor's; today Travel only, the rest still fall through to the
-# safe default (PLAN.md A120, partial).
-HOLD_THEIR_WALK = frozenset({"Travel"})
+# The executors whose op the safe default never stands in for (A120): every
+# one but Explore's own. Each keeps its own walk, clears the way, and with no
+# way on asks the planner and holds (``way.clear_the_way``).
+HOLD_THEIR_WALK = frozenset(s for s in OP_STATE.values() if s is not None) - {"Explore"}
 
 
 class ExploreState(State):
     """Last state for a scripted character: the executor for ``explore_area``,
-    and otherwise the safe default. It runs whenever no reflex or executor
-    sent an intent: no plan op, or the top op's executor had nothing to do
-    this decision (that op's stall clock then runs, A34). Under an op whose
-    executor holds its own walk (``HOLD_THEIR_WALK``) it holds too, sending
-    nothing, so it never walks the character off that op's way (A120)."""
+    and with no plan op the safe default. Under any other op it holds,
+    sending nothing, whatever that op's executor did this decision
+    (``HOLD_THEIR_WALK``): it never walks the character off that op's way,
+    and that op's stall clock runs (A34, A120)."""
 
     name = "Explore"
 
@@ -82,10 +82,28 @@ class ExploreState(State):
                 return out
         owner = top_executor(ctx)
         if owner in HOLD_THEIR_WALK:
-            return StateOutcome(None, f"{owner} holds its walk", state=self.name, wait=True, progress=False)
+            return hold_for(world, ctx, owner)
         out = safe_default(world, ctx)
         out.progress = False  # it moves for no op: the top op, if any, still stalls
         return out
+
+
+def hold_for(world: WorldModel, ctx: PlayContext, owner: str) -> StateOutcome:
+    """Hold for the op ``owner`` executes, which sent nothing this decision (A120).
+
+    Every op whose executor cannot act asks the planner once: an op asked
+    for from this cell already (``Memory.no_way_on``, whatever its reason;
+    an earlier op's ask does not count), or whose executor left
+    this decision to Break at stuck step 2 of its own walk
+    (``Memory.break_yield``), is left to it; any other is asked for here, so
+    no op waits on its stall clock unheard.
+    """
+    m, op = ctx.memory, top_op(ctx)
+    asked = m.no_way_on is not None and op is not None and m.no_way_on[:2] == (world.map_id, world.pos)
+    asked = asked and m.no_way_on[3] == op_key(op)
+    if op is None or asked or m.break_yield == m.nav_stuck.decision or break_due(world, m, owner):
+        return StateOutcome(None, f"{owner} holds its walk", state=ExploreState.name, wait=True, progress=False)
+    return ask_the_planner(world, ctx, f"{op['op']}: {owner} has no move", ExploreState.name, op)
 
 
 def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:

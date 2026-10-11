@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from ..break_memory import held_supply
 from ..config import Policy
 from ..fragments import compose_supply_ids, fragment_set_complete, holds_whole
-from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
@@ -14,17 +14,9 @@ from ..reach import supply_reach
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .intents import arm, compose, set_position, use_block
+from .way import clear_the_way
 
 GOAL = "solve"
-
-
-def held_supply(w: WorldModel, code: str) -> InventorySupply | None:
-    """A supply of ``code`` in hand. One only in the carried chest does not count:
-    Solve does not withdraw it, so the op stalls and is dropped (A39)."""
-    for s in w.held_supplies:
-        if s.code == code:
-            return s
-    return None
 
 
 def solve_outcome(
@@ -161,7 +153,9 @@ def _use_stands(w: WorldModel, target: Pos, reach: int, blocked: set[Pos]) -> se
 
 class SolveState(State):
     """Executor for ``compose`` and ``use_block``; then re-arms what a
-    ``use_block`` swapped out."""
+    ``use_block`` swapped out. With no stand in reach of its target it opens
+    the block on the way a held item opens; with no way, or nothing to try
+    (the item or a fragment missing), it asks the planner and holds (A120)."""
 
     name = "Solve"
 
@@ -177,6 +171,13 @@ class SolveState(State):
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        return solve_outcome(
-            world, ctx.memory, ctx.policy, my_op(ctx, self.name), knowledge=ctx.knowledge, state=self.name
-        )
+        op = my_op(ctx, self.name)
+        out = solve_outcome(world, ctx.memory, ctx.policy, op, knowledge=ctx.knowledge, state=self.name)
+        if op is None or out.intents or out.wait or ctx.plan is None or ctx.plan.current() is not op:
+            return out
+        # No try and no step: clear the way to the target, else ask the planner and hold (A120).
+        walks = op["op"] == "use_block" and held_supply(world, op["code"]) is not None
+        at = (op["x"], op["y"]) if walks else None
+        out = clear_the_way(world, ctx, at, out.reason, self.name, op)
+        out.progress = bool(out.intents) and any(i.get("verb") == "SetPosition" for i in out.intents)
+        return out

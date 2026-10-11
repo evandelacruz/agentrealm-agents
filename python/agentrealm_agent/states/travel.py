@@ -12,10 +12,10 @@ character (``zone_discovery.hunt_probe``), until a read finds a hunting cell
 it may enter, the frontier runs out, or ``HUNT_SEARCH_SECONDS`` pass.
 
 Travel keeps its walk (A120): the safe default never stands in for it. With
-no step toward the destination it raises one ``no_way_on`` trigger with why
-and holds the decision while the planner answers (``ask.ask_the_planner``),
-except at stuck step 2, where Break, below it, opens the block the walk's
-escalation nominated (A15). The survival reflexes act above it as always.
+no step toward the destination it clears the way or asks the planner and
+holds (``way.clear_the_way``); at stuck step 2 Break, below it, opens the
+block the walk's escalation nominated (A15). The survival reflexes act above
+it as always.
 """
 
 from __future__ import annotations
@@ -33,10 +33,10 @@ from .. import targets as targets_mod
 from ..navigation.rejection import locked_doors_from_kb
 from ..travel.resolve import ResolvedDestination, at_destination, given_up_travel, picks_nearest, resolve_travel, still_candidate
 from ..world import DOORS, Pos, WorldModel
-from .ask import ask_the_planner
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import explore_outcome
 from .intents import set_position
+from .way import clear_the_way
 
 # A hunting-ground search gives up after this long (A27).
 HUNT_SEARCH_SECONDS = 300
@@ -74,13 +74,9 @@ class TravelState(State):
         op = my_op(ctx, self.name)
         assert op is not None and ctx.plan is not None
         out = self._step(world, ctx, op)
-        if out.intents:
-            ctx.memory.no_way_on = None  # walking again: a later ask is new
         if out.intents or out.wait or ctx.plan.current() is not op:
             return out  # a step, a hold, or the op arrived or was dropped
-        if _break_opens_the_way(world, ctx):
-            return out  # stuck step 2: Break, below, opens the nominated block this decision (A15)
-        return ask_the_planner(world, ctx, out.reason, self.name, op)
+        return clear_the_way(world, ctx, None, out.reason, self.name, op)  # no destination resolved yet
 
     def _step(self, world: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
         m = ctx.memory
@@ -103,7 +99,8 @@ class TravelState(State):
 def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDestination, state: str) -> StateOutcome:
     """One step of the walk to ``dest`` for ``op``: Travel's own, and Shop's
     walk to a shop out of sight (A21). Stuck detection's give-ups land on the
-    ``travel:<label>`` goal either way."""
+    ``travel:<label>`` goal either way. With no step it clears the way or
+    asks the planner and holds (``way.clear_the_way``, A120)."""
     m, policy = ctx.memory, ctx.policy
     if m.goal_op != op:
         # Another travel op's path carries the same label: never walk it for this one.
@@ -127,13 +124,8 @@ def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDesti
             return StateOutcome(None, f"{goal}: way taken, waiting", state=state, wait=True, progress=False)
         if first not in world.view.tiles and nav_walk.hold_for_fog(m.walks.get(goal), world):
             return StateOutcome(None, f"{goal}: next cell unseen, waiting", state=state, wait=True, progress=False)
-    return StateOutcome(None, f"{goal} {dest.pos[0]},{dest.pos[1]}: no step toward it", state=state)
-
-
-def _break_opens_the_way(w: WorldModel, ctx: PlayContext) -> bool:
-    """The walk is at stuck step 2: Break, below Travel, works its nominated block (A15)."""
-    att = nav_stuck.active(ctx.memory, w)
-    return att is not None and att.level == nav_stuck.BREAK and att.goal.startswith("travel:")
+    why = f"{goal} {dest.pos[0]},{dest.pos[1]}: no step toward it"
+    return clear_the_way(world, ctx, dest.pos if dest.map_id == world.map_id else None, why, state, op)
 
 
 def search_hunting_ground(world: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:

@@ -616,10 +616,11 @@ class BreakRearmTest(unittest.TestCase):
         self.assertIs(plan.current(), op, "the travel op survives the break")
         self.assertEqual(plan.stalled_since_tick, 0, "a Use try leaves the clock alone")
 
-    def test_break_for_another_walk_does_not_save_a_stalled_op(self):
-        # The safe default's own stuck walk reaches step 2 while the top op's
-        # executor (Shop, nothing priced in sight) cannot act: Break works that
-        # walk, and the buy op still stalls and is dropped.
+    def test_another_walk_at_step_two_never_stands_in_for_a_stalled_op(self):
+        # The safe default's own stuck walk is at step 2 while the top op's
+        # executor (Shop, nothing priced in sight) cannot act: that walk is not
+        # the op's, so Shop asks the planner and holds rather than leave the
+        # round to Break (A120), and the buy op still stalls and is dropped.
         w, m = self.r.world, self.r.mem
         m.nav_stuck.attempts.clear()
         att = nav_stuck.track(m, w, "explore", (4, 0))
@@ -631,7 +632,7 @@ class BreakRearmTest(unittest.TestCase):
         w.tick = PLAN_STALL_SECONDS * plan.tick_hz * 2
         with self.assertLogs("agentrealm_agent.plan", "WARNING"):
             out = dispatch(w, self.ctx)
-        self.assertEqual(out.state, "Break")
+        self.assertEqual((out.state, out.intents, out.wait), ("Shop", None, True), out.reason)
         self.assertIsNone(plan.current(), "the stalled buy op is dropped")
 
     def stalled_plan(self) -> Plan:

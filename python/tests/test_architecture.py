@@ -151,16 +151,18 @@ class PlanOpTest(unittest.TestCase):
         self.assertEqual(out.state, "Pickup")
         self.assertEqual(out.intents[0]["verb"], "Take")
 
-    def test_an_op_its_executor_cannot_act_on_stalls_while_the_safe_default_moves(self):
-        # Nothing priced in sight: Shop has nothing to do. The decision is
-        # not idle, and the op is dropped once it has stalled long enough.
+    def test_an_op_its_executor_cannot_act_on_holds_for_the_planner_then_stalls(self):
+        # Nothing priced in sight and no shop known: Shop asks the planner and
+        # holds; the safe default never stands in for it (A120). Unanswered,
+        # the op is dropped once it has stalled long enough (A104).
         w = field_world()
         plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
         plan.tick_hz = 1  # PLAN_STALL_SECONDS ticks
         outs = play(w, plan, decisions=12)
-        for o in outs:
-            self.assertTrue(o.intents, f"idle decision: {o.state}: {o.reason}")
-            self.assertEqual(o.state, SAFE_DEFAULT)
+        held = [o for o in outs if o.state == "Shop"]
+        self.assertTrue(held)
+        for o in held:
+            self.assertEqual((o.intents, o.wait), (None, True), o.reason)
         self.assertIsNone(plan.current())
 
     def test_a_permanent_occupant_drops_the_travel_op_by_the_stall_bound(self):

@@ -4,7 +4,8 @@ A ``read`` names a readable cell (``x``, ``y``) or a supply (``supply_id``);
 a ``say`` names an NPC by ``npc_id`` or ``npc_type``. Investigate walks into
 reach and sends the ``Read`` or ``Say``, and finishes the op once the
 knowledge base records it, or once the server has refused it
-``MAX_REJECTIONS`` times.
+``MAX_REJECTIONS`` times. With no way into reach it opens the block on the
+way a held item opens, else asks the planner and holds (``way``, A120).
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from ..scroll_investigation import supply_was_read
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .intents import read_block, read_supply, say_to, set_position
+from .way import clear_the_way, open_the_way
 
 GOAL = "investigate"
 
@@ -68,21 +70,21 @@ def _read(w: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
     _, plan_avoid, plan_costly = plan_sets(w, ctx.memory, ctx.policy, ctx.knowledge)
     found = nearest_target(w, stands - plan_avoid, grid_params(ctx.policy, plan_avoid, plan_costly))
     if found is None:
-        return _out(None, f"read {pos}: no path")
-    return _walk(w, ctx, found[0], f"read {pos}")
+        return clear_the_way(w, ctx, pos, f"read {pos[0]},{pos[1]}: no path", InvestigateState.name, op)
+    return _walk(w, ctx, op, found[0], f"read {pos[0]},{pos[1]}")
 
 
 def _say(w: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
     npc = _npc(w, op)
     if npc is None:
-        return _out(None, "no such NPC in sight")
+        return clear_the_way(w, ctx, None, "no such NPC in sight", InvestigateState.name, op)
     # Only the op's own Say settles it: Greet's hello is filed apart (A65).
     if _settled(ctx, say_key(npc.id), npc.id in spoken_npc_ids(ctx.knowledge)):
         return _out(None, f"said to npc {npc.id}: done")
     assert w.pos is not None
     if chebyshev(w.pos, npc.pos) <= SPEECH_RANGE:
         return _out([say_to(npc, op["text"])], f"say to npc {npc.id}")
-    return _walk(w, ctx, npc.pos, f"say to npc {npc.id}")
+    return _walk(w, ctx, op, npc.pos, f"say to npc {npc.id}")
 
 
 def _npc(w: WorldModel, op: GoalOp) -> Entity | None:
@@ -104,8 +106,14 @@ def _settled(ctx: PlayContext, key: str, recorded: bool) -> bool:
     return True
 
 
-def _walk(w: WorldModel, ctx: PlayContext, goal: Pos, reason: str) -> StateOutcome:
+def _walk(w: WorldModel, ctx: PlayContext, op: GoalOp, goal: Pos, reason: str) -> StateOutcome:
+    """A step toward ``goal``; with no way round, the block on the way opened, else the planner asked (A120)."""
     m, policy = ctx.memory, ctx.policy
+    # Before the step, not only when it has none: a walk that found no step backs
+    # off (``bounded_step``) and would hold on after the block is open.
+    if (out := open_the_way(w, ctx, goal, InvestigateState.name)) is not None:
+        out.reason = f"{reason}: {out.reason}"
+        return out
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
 
     def params():
@@ -115,7 +123,9 @@ def _walk(w: WorldModel, ctx: PlayContext, goal: Pos, reason: str) -> StateOutco
         return cost_path(w, goal, params(), nav=nav_search(m, w, GOAL, goal))
 
     step = bounded_step(m, w, GOAL, goal, plan_avoid, plan, params=params)
-    return _out([set_position(step)], f"{reason} → {goal}") if step is not None else _out(None, f"{reason}: no path")
+    if step is None:
+        return clear_the_way(w, ctx, goal, f"{reason}: no path", InvestigateState.name, op)
+    return _out([set_position(step)], f"{reason} → {goal}")
 
 
 def _out(intents: list[dict] | None, reason: str) -> StateOutcome:

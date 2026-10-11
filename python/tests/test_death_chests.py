@@ -87,6 +87,11 @@ class RememberedTest(unittest.TestCase):
         w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": []}}})
         self.assertEqual(w.death_chests, {})
 
+    def test_a_chest_out_of_reach_missing_from_sight_is_kept(self):
+        w = world(at=(3, 0))
+        die(w, 5, 80, 0)
+        w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": []}}})
+        self.assertEqual(sorted(w.death_chests), [80])
 
     def test_a_chest_seen_gone_is_not_remembered_again_when_served(self):
         w = world(at=(1, 0))
@@ -125,6 +130,18 @@ class PersistTest(unittest.TestCase):
         die(w, 5, 80, 0)
         save_death_chests(kb, w)
         self.assertEqual(sorted(kb.extra[DEATH_CHESTS_KEY]), ["1", "2"])
+
+    def test_a_row_that_does_not_parse_is_skipped(self):
+        kb = KnowledgeBase("sandbox")
+        kb.extra[DEATH_CHESTS_KEY] = {"1": {
+            "80": {"map_id": MAP, "x": 0, "y": 0, "died": 5},
+            "81": {"map_id": MAP, "x": "far"},
+            "x": {"map_id": MAP, "x": 1, "y": 0},
+            "82": "not a row",
+        }}
+        w = world()
+        load_death_chests(kb, w)
+        self.assertEqual(sorted(w.death_chests), [80])
 
     def test_an_emptied_chest_leaves_the_file(self):
         kb = KnowledgeBase("sandbox")

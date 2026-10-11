@@ -1011,6 +1011,38 @@ class KeepsClearTest(unittest.TestCase):
         w.pos = (4, 10)
         self.assertEqual(gather_outcome(w, m, self.POLICY, op={"op": "gather_gems", "count": 99, "x": 40, "y": 10}).reason, "cut grass")
 
+    def test_a_target_picked_with_the_region_lifted_is_kept(self):
+        """Commitment holds while Gather works anywhere: the walk is not picked afresh each decision (A71)."""
+        w, m = self.corridor(), Memory()
+        w.view.tiles[(8, 10)] = "grass"
+        op = {"op": "gather_gems", "count": 99, "x": 40, "y": 10}
+        gather_outcome(w, m, self.POLICY, op=op)
+        kept, walk = m.gather_target, m.gather_walk
+        self.assertEqual(kept, ("grass", (8, 10)))
+        w.view.tiles[(3, 10)] = "grass"  # nearer grass turns up behind: no reason to let the walk go
+        for _ in range(3):
+            path = list(m.path)
+            with mock.patch.object(gather_mod, "_replan", wraps=gather_mod._replan) as replan:
+                out = gather_outcome(w, m, self.POLICY, op=op)
+            replan.assert_not_called()
+            self.assertEqual((m.gather_target, m.path), (kept, path))
+            w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+            m.path = m.path[1:]
+        self.assertEqual(m.gather_walk, walk, "priced once, on the walk it committed to")
+
+    def test_a_committed_target_in_the_region_with_no_way_left_lifts_it_at_once(self):
+        w = three_regions(at=(24, 8))
+        op = {"op": "gather_gems", "count": 30, "x": 3, "y": 3}
+        m = Memory()
+        gather_outcome(w, m, POLICY, op=op)
+        self.assertEqual(region_of(m.gather_target[1]), (0, 0))
+        for y in range(-1, REGION_SIZE + 1):
+            w.view.tiles[(16, y)] = "wall"  # the region is walled off
+        m.path, m.goal = [], ""  # the walk there ran into it: planned again
+        out = gather_outcome(w, m, POLICY, op=op)
+        self.assertEqual(out.reason, "cut grass", "it works where it is, not handed to the safe default")
+        self.assertEqual(m.gather_status, gather_mod.CUTTING, "no region suffix: the bound is lifted")
+
     def test_the_walk_to_an_unseen_region_takes_the_fight_when_the_op_says(self):
         w, m = self.corridor(), Memory()
         op = {"op": "gather_gems", "count": 99, "x": 40, "y": 10, "fight": True}

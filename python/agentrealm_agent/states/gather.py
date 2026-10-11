@@ -384,16 +384,16 @@ def _work(
     (A71), else the cheapest."""
     here = w.pos
     assert here is not None
+    _, blocked, costly = plan_sets(w, m, policy, knowledge)
+    params = cache(lambda: _walk_params(w, policy, g, blocked, costly))
+    if g.region is not None and not _reaches_region(w, m, g, params(), blocked):
+        g.lift_region()  # the region holds Gather only while a way reaches something there
     if m.gather_target not in g.targets:  # a target that no longer qualifies is let go, whoever walked last
         if m.goal == GOAL:
             m.path, m.goal = [], ""
         m.gather_target = None
     if m.goal == GOAL and not route_clear(w, policy, m.path, g.danger):
         m.path, m.goal = [], ""  # the way ahead entered a known reach: a way round, or the target goes
-    _, blocked, costly = plan_sets(w, m, policy, knowledge)
-    params = cache(lambda: _walk_params(w, policy, g, blocked, costly))
-    if g.region is not None and m.gather_target is None and _cheapest(w, g, params(), blocked) is None:
-        g.lift_region()  # the region holds Gather only while a way reaches something there
     near = _in_reach(w, m, g, params, blocked)
     if near is not None and near[0] == PILE:
         pile = min((e for e in w.entities if is_gem_pile(e) and e.pos == near[1]), key=lambda e: e.id)
@@ -409,6 +409,15 @@ def _work(
     if step is not None:
         return StateOutcome([set_position(step)], f"gather → {m.path[-1]}", state=state)
     return StateOutcome(None, "no gather target", state=state)
+
+
+def _reaches_region(w: WorldModel, m: Memory, g: Ground, params: CostGridParams, blocked: set[Pos]) -> bool:
+    """A way reaches a target in the target region: the committed one, or
+    any other there."""
+    kept = m.gather_target
+    if kept in g.targets and ((m.goal == GOAL and next_step(w, blocked, m.path)) or _path_to(w, kept, params)):
+        return True
+    return _cheapest(w, g, params, blocked) is not None
 
 
 def _walk_params(w: WorldModel, policy: Policy, g: Ground, blocked: set[Pos], costly: set[Pos]) -> CostGridParams:

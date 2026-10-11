@@ -9,12 +9,12 @@ from ..memory import Memory
 from ..navigation import cost_path, oscillation
 from ..pathing import flee_run, flee_step, grid_params, outruns, retreat_safe_goal, step_open
 from ..engagement import cannot_outrun, fights
-from ..survival import flee_from, on_safe_tile
+from ..survival import at_health_floor, combat_group, flee_from, is_attacker, on_safe_tile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .explore import plan_sets
-from .fight import can_engage, engage, fight_target
+from .fight import can_engage, engage, fight_target, in_weapon_reach
 from .intents import set_position
 from .retreat import retreat_step
 
@@ -89,23 +89,48 @@ def not_outrunning(w: WorldModel, m: Memory) -> bool:
 
 
 def instead_of_fleeing(
-    w: WorldModel, ctx: PlayContext, target: Entity, paced: set[Pos], fight: bool
+    w: WorldModel,
+    ctx: PlayContext,
+    target: Entity,
+    hostiles: list[Entity],
+    blocked: set[Pos],
+    paced: set[Pos],
+    fight: bool,
 ) -> StateOutcome | None:
     """Once running away cannot open distance: carry out the engagement's
     decision (``fight``, ``engagement.cannot_outrun``), or None to keep running.
 
-    Fight: swing at or close on ``target`` unless ``never_attack`` forbids
-    it. Flee: walk toward safety, Retreat's way. ``paced`` is the
-    oscillation guard's escape, already taken this decision (A15).
+    Fight: swing at or close on ``target``. Flee: walk toward safety,
+    Retreat's way. With no move away at all (no step from the hostiles, no
+    Retreat walk), standing still only takes free hits, so it swings at
+    ``target`` when it is the hitter, in weapon reach, and health is above
+    the floor (``at_health_floor``). A ``never_attack`` target is never
+    fought. ``paced`` is the oscillation guard's escape, already taken this
+    decision (A15).
     """
-    if fight and not attack_forbidden(target, ctx.never_attack):
+    may_hit = not attack_forbidden(target, ctx.never_attack)
+    if fight and may_hit:
         out = engage(w, ctx, target, FleeState.name)
     else:
         out = retreat_step(w, ctx, FleeState.name, paced)
+        if not (out.intents or out.wait) and may_hit and _no_move_but_to_swing(w, ctx, target, hostiles, blocked):
+            out = engage(w, ctx, target, FleeState.name)
     if out.intents or out.wait:
         out.reason = f"not outrunning {target.kind} {target.id}: {out.reason}"
         return out
     return None
+
+
+def _no_move_but_to_swing(
+    w: WorldModel, ctx: PlayContext, target: Entity, hostiles: list[Entity], blocked: set[Pos]
+) -> bool:
+    """No step opens distance, ``target`` is hitting us from weapon reach, and
+    health is above the floor against the hostiles in range."""
+    if flee_step(w, hostiles, blocked) is not None:
+        return False
+    if not (is_attacker(w, target) and in_weapon_reach(w, target, ctx.knowledge)):
+        return False
+    return not at_health_floor(w, ctx.params, combat_group(w, ctx.policy) or hostiles)
 
 
 def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
@@ -179,7 +204,7 @@ class FleeState(State):
         if e is not None and not e.cannot_outrun and not_outrunning(w, m):
             e = cannot_outrun(w, m, policy, ctx.params)
         if e is not None and e.cannot_outrun:
-            instead = instead_of_fleeing(w, ctx, target, paced, e.fight)
+            instead = instead_of_fleeing(w, ctx, target, hostiles, blocked, paced, e.fight)
             if instead is not None:
                 return instead
         # Start over when Flee did not run last decision (the threat was

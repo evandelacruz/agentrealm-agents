@@ -173,6 +173,25 @@ class CannotOutrunTest(unittest.TestCase):
         self.assertEqual(out.reason, "not outrunning npc 7: fight npc 7")
 
 
+    def test_cornered_by_a_hitter_we_lose_to_swings_rather_than_stand(self):
+        """No step away and no refuge: standing only takes free hits."""
+        w, c = world(health=10), ctx(on_hostile="flee")
+        w.threat.record(("npc", CODE), 3)
+        w.threat.hits[("npc", CODE)] = 50  # hits for 3 nearly every swing: we lose to it, above the floor of 6
+        for x in range(9, 12):
+            for y in range(9, 12):
+                if (x, y) not in ((10, 10), (11, 10)):
+                    w.view.tiles[(x, y)] = "wall"
+        w.entities = [biter()]
+        m = c.memory
+        m.state, m.flee_since, m.flee_gaps = "Flee", w.tick, [(w.tick, 1)]
+        w.tick += 5
+        hit(w, amount=1)
+        out = dispatch(w, c)
+        self.assertFalse(m.engagement.fight)
+        self.assertEqual(out.reason, "not outrunning npc 7: fight npc 7")
+
+
 def guard_post(w: WorldModel, npc: Entity, home) -> None:
     """``npc`` keeps a post at ``home``, seen just now."""
     w.sightings[(npc.kind, npc.id)] = Sighting(npc, MAP, w.tick, home, post=True, noted=w.tick)

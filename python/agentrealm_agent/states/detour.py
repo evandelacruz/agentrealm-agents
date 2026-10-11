@@ -48,7 +48,7 @@ from ..supplies import is_food
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from ..knowledge_base import knowledge_items
 from ..memory import Memory
-from ..loot import GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_room
+from ..loot import GEM_PILE_STEPS, GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_room
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
@@ -60,9 +60,8 @@ from .gather_safe import gather_ground, route_clear
 from .intents import set_position
 
 GOAL = "detour"
-# The most steps going by a find may add to the walk, by kind (A73; free-play
-# run 4 walked past a gem triple 5 cells off that cost about 7).
-GEM_PILE_STEPS = 8
+# The most steps going by a find may add to the walk, by kind (A73): a gem
+# pile is worth ``loot.GEM_PILE_STEPS``.
 # Each gem pile next to the find adds this much: one stop takes them all.
 GEM_CLUSTER_STEPS = 4
 # A cluster counts at most this many piles.

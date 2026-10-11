@@ -51,15 +51,15 @@ from ..supplies import heals
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase
+from ..loot import GEM_PILE_STEPS
 from ..memory import Memory
-from ..navigation import cost_path, nearest_target
+from ..navigation import CostGridParams, cost_path, nearest_target
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
 from ..survival import is_attacker, is_hostile, recently_attacked, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
-from .detour import GEM_PILE_STEPS
 from .explore import plan_sets, safe_default
 from .fight import engage
 from .gather_safe import gather_ground, route_clear
@@ -652,9 +652,10 @@ def _replan_gather(
     barred: Callable[[], bool] = lambda: False,
 ) -> bool:
     """Plan to the committed target (``m.gather_target``) while one is kept,
-    else pick the cheaper of the cheapest pile (in ``pile_region`` when set)
-    and the cheapest grass (``preferred``: field cells before safe ones),
-    a pile counting ``GEM_PILE_STEPS`` cheaper: it is a gem for sure;
+    else pick: the pile (in ``pile_region`` when set) and the grass
+    (``preferred``: field cells before safe ones) each cheapest by path cost
+    (``_nearest_clear``), then the cheaper of the two by ``_price``, a pile
+    counting ``GEM_PILE_STEPS`` cheaper: it is a gem for sure;
     then a kept walk to ground clear of hostiles (``CLEAR``, tried after the
     picks: it ends for something it can reach), then, on safe ground,
     out to field ground or the frontier; else, when ``barred()`` (known cells
@@ -749,7 +750,7 @@ def _keep(w: WorldModel, m: Memory, kept: tuple[str, Pos], path: list[Pos] | Non
     return None
 
 
-def _price(path: list[Pos], params) -> int:
+def _price(path: list[Pos], params: CostGridParams) -> int:
     """A walk's price: its steps, and the steps priced ground adds to each
     cell of it, the target's included (``Danger.priced_cells``)."""
     return len(path) + sum(params.priced.get(p, 0) for p in path)

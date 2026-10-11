@@ -27,6 +27,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
+from agentrealm_agent.survival import attack_interval_ticks, swing_damage
 from agentrealm_agent.threat import ThreatTable
 from agentrealm_agent.world import WorldModel
 
@@ -319,6 +320,19 @@ class HuntingCeilingRuleTest(unittest.TestCase):
         self.assertGreater(damage_per_second("bronze_sword"), damage_per_second("bronze_mallet"))
         self.assertGreater(damage_per_second("pocket_knife"), damage_per_second("sword"), "the knife swings every 0.8 s")
         self.assertGreater(damage_per_second(None), damage_per_second("mallet"), "bare hands swing faster than the bare mallet")
+
+    def test_an_empty_slot_is_one_model_with_the_win_estimate(self):
+        # A123: an empty slot, or a non-weapon in it, swings as the starting
+        # knife (survival.fighting_weapon), so a knife held is still armed.
+        for armed in (None, "small_potion"):
+            self.assertEqual(damage_per_second(armed), damage_per_second("pocket_knife"), armed)
+            self.assertAlmostEqual(
+                damage_per_second(armed), swing_damage(armed) * 10 / attack_interval_ticks(armed), msg=armed
+            )
+            w = world()
+            w.armed_code = armed
+            w.held_supplies = self.held("pocket_knife")
+            self.assertEqual(best_equip_upgrade(w, {}, w.threat, Memory()).code, "pocket_knife", armed)
 
     def test_a_named_code_is_armed_whatever_the_rule_says(self):
         w = world()

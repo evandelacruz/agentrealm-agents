@@ -290,7 +290,7 @@ def engage(w: WorldModel, ctx: PlayContext, target: Entity, state: str) -> State
         retreat,
         poll_interval_ticks=m.calm_poll_interval,
         horizon_ticks=horizon,
-        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code),
+        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code, ctx.tick_hz),
         ticks_since_last_use=_ticks_since_use(w, m.last_use_tick),
     )
     if not queue:

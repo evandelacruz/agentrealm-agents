@@ -337,13 +337,18 @@ def hit_chance(attack_power: int = BASE_ATTACK_POWER, defense: int = 0) -> float
     return min(max(faces, 1), COMBAT_DIE - 1) / COMBAT_DIE
 
 
+def fighting_weapon(armed: str | None) -> str:
+    """What a fight with ``armed`` in hand swings: the armed item when the
+    Supplies reference lists it as a weapon, else the starting knife (A81).
+    The one model of an empty slot or a non-weapon in it, for the win estimate
+    and the weapon ranking alike (A123)."""
+    return armed if armed is not None and is_weapon(armed) else STARTING_WEAPON
+
+
 def swing_damage(weapon: str | None) -> float:
-    """Expected damage of one swing of ``weapon`` at a hostile (``weapon_swing_damage``;
-    the pocket knife: 0.65 × 2.5)."""
-    damage = weapon_damage(weapon)
-    if damage is None:
-        damage = weapon_damage(STARTING_WEAPON) or 0
-    return weapon_swing_damage(damage)
+    """Expected damage of one swing of ``weapon`` at a hostile (``fighting_weapon``,
+    ``weapon_swing_damage``; the pocket knife: 0.65 × 2.5)."""
+    return weapon_swing_damage(weapon_damage(fighting_weapon(weapon)) or 0)
 
 
 def weapon_swing_damage(damage: int) -> float:
@@ -353,10 +358,12 @@ def weapon_swing_damage(damage: int) -> float:
 
 
 def attack_interval_ticks(weapon: str | None) -> int:
-    """Ticks between two swings of ``weapon``: its attack cooldown
-    (``executor.pacing.attack_cooldown_ticks``, A123), the starting knife's
-    for an item listed as no weapon."""
-    return attack_cooldown_ticks(weapon if is_weapon(weapon) else STARTING_WEAPON)
+    """Ticks between two swings of ``weapon`` (``fighting_weapon``): its attack
+    cooldown (``executor.pacing.attack_cooldown_ticks``, A123). The win
+    estimate prices both sides on one scale, the hostile's assumed
+    ``HOSTILE_ATTACK_INTERVAL_TICKS`` at the default tick rate, so ours is
+    converted at that rate too: the ratio is the same at any world's rate."""
+    return attack_cooldown_ticks(fighting_weapon(weapon))
 
 
 def ticks_to_kill_them(group: list[Entity], weapon: str | None = None) -> float:

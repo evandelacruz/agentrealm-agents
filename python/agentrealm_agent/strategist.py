@@ -151,6 +151,7 @@ from .survival import (
     STARTING_WEAPON,
     UNKILLED_HOSTILE_HEALTH,
     attack_interval_ticks,
+    fighting_weapon,
     hostile_swing_damage,
     known_hostile,
     retreat_goal,
@@ -1100,7 +1101,7 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     ceiling = hunting_ceiling(w, knowledge)
     best_weapon = max((c for c in owned if is_weapon(c)), key=lambda c: weapon_rank(c, w, ceiling), default=None)
     best_rank = weapon_rank(best_weapon, w, ceiling)  # no weapon owned: bare hands, as Equip counts them
-    best_damage = weapon_damage(best_weapon) or 0
+    best_damage = weapon_damage(fighting_weapon(best_weapon)) or 0
     best_dps = damage_per_second(best_weapon)
 
     def best_defense(slot: str) -> int:

@@ -2,6 +2,7 @@
 
 import random
 import unittest
+from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
@@ -11,6 +12,7 @@ from agentrealm_agent.plan import Plan, goal_done, validate_goal_op
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.boss import (
     CLOCK_COMMIT_TICKS,
+    boss_attack_queue,
     fight_boss_preconditions_met,
     potion_count,
     sync_boss,
@@ -318,6 +320,21 @@ class BossClockTest(unittest.TestCase):
         self.assertEqual(w.boss_fight_end_tick, 250)
         w.apply_observation({"version": "3", "delta": {"boss_fight_end_tick": None}})
         self.assertIsNone(w.boss_fight_end_tick)
+
+
+class BossSwingPacingTest(unittest.TestCase):
+    """A123: boss swings wait the armed weapon's cooldown at the world's tick rate."""
+
+    def test_a_mallet_swings_every_1_3_seconds_at_any_tick_rate(self):
+        w = grid(["......"], at=(1, 0))
+        w.armed_code = "bronze_mallet"
+        m = Memory()
+        m.calm_poll_interval = 80
+        for hz, ticks in ((10, 13), (20, 26)):
+            with mock.patch("agentrealm_agent.states.boss.queue_horizon_intents", return_value=80):
+                queue = boss_attack_queue(w, m, boss(pos=(2, 0)), hz)
+            swings = [i for i, x in enumerate(queue) if x["verb"] == "Use"]
+            self.assertEqual(swings[1] - swings[0], ticks, hz)
 
 
 if __name__ == "__main__":

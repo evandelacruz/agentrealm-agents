@@ -152,7 +152,7 @@ def should_commit(w: WorldModel, ctx: PlayContext, door: Pos) -> bool:
     return not can_retreat_out(w, ctx, door)
 
 
-def boss_attack_queue(w: WorldModel, m: Memory, target: Entity) -> list[dict] | None:
+def boss_attack_queue(w: WorldModel, m: Memory, target: Entity, tick_hz: int) -> list[dict] | None:
     uses = [attack_intent(target) for _ in range(ATTACK_USES)]
     horizon = queue_horizon_intents()
     queue = build_attack_queue(
@@ -160,7 +160,7 @@ def boss_attack_queue(w: WorldModel, m: Memory, target: Entity) -> list[dict] | 
         [],
         poll_interval_ticks=m.calm_poll_interval,
         horizon_ticks=horizon,
-        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code),
+        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code, tick_hz),
         ticks_since_last_use=max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None,
     )
     return queue or None
@@ -218,7 +218,7 @@ class BossState(State):
                     return StateOutcome(None, "cannot close on boss", state=self.name)
                 m.path = []
                 return StateOutcome([set_position(step)], f"boss close on {boss.id}", reflex=True, state=self.name)
-            queue = boss_attack_queue(world, m, boss)
+            queue = boss_attack_queue(world, m, boss, ctx.tick_hz)
             if queue is None:
                 return StateOutcome(None, "boss attack empty", state=self.name)
             label = f"boss fight {boss.id}"

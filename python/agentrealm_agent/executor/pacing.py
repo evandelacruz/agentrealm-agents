@@ -18,7 +18,6 @@ from ..supplies import DEFAULT_ATTACK_COOLDOWN_MS, weapon_cooldown_ms
 from .constants import DEFAULT_TICK_RATE_HZ
 from .intents import wait
 
-DEFAULT_WEAPON_COOLDOWN_TICKS = 10
 SPEECH_INTERVAL_TICKS = 10
 
 
@@ -35,6 +34,12 @@ def attack_cooldown_ticks(code: str | None, tick_rate_hz: int = DEFAULT_TICK_RAT
     whole tick."""
     cooldown_ms = weapon_cooldown_ms(code) or DEFAULT_ATTACK_COOLDOWN_MS
     return max(1, math.ceil(cooldown_ms * tick_rate_hz / 1000))
+
+
+# The default attack cooldown at the default tick rate: a time or cost
+# measured in swings (a break's price, a refused drink's retry), never a
+# swing's pacing, which reads the armed weapon's (``attack_cooldown_ticks``).
+DEFAULT_WEAPON_COOLDOWN_TICKS = attack_cooldown_ticks(None)
 
 
 def uses_attack_cooldown(intent: dict) -> bool:
@@ -72,11 +77,11 @@ def _pace_actions(
 def pace_uses(
     uses: Iterable[dict],
     *,
-    cooldown_ticks: int = DEFAULT_WEAPON_COOLDOWN_TICKS,
+    cooldown_ticks: int,
     ticks_since_last: int | None = None,
 ) -> list[dict]:
-    """Space ``Use`` intents by weapon cooldown (10 ticks by default;
-    ``attack_cooldown_ticks`` gives the armed weapon's)."""
+    """Space ``Use`` intents ``cooldown_ticks`` apart: the armed weapon's
+    attack cooldown at the world's tick rate (``attack_cooldown_ticks``)."""
     return _pace_actions(
         list(uses),
         interval_ticks=cooldown_ticks,
@@ -104,18 +109,20 @@ def arm_then_use(
     arm: dict,
     use: dict,
     *,
+    cooldown_ticks: int,
     horizon_ticks: int,
     ticks_since_last_use: int | None = None,
 ) -> list[dict]:
     """``Arm`` then ``Use`` in one queue, the ``Use`` behind the Waits its
-    cooldown still owes, cut at the horizon.
+    cooldown still owes, cut at the horizon. ``cooldown_ticks`` is the armed
+    supply's (``attack_cooldown_ticks`` of what the ``Arm`` puts in hand).
 
     A state that returns the two unpaced has only its first intent sent
     (``brain.decide``): the ``Arm`` goes out and the ``Use`` never does. So
     the two go together or not at all: when the horizon would cut the
     ``Use``, the queue is empty and the caller waits for the cooldown.
     """
-    queue = pace_uses([arm, use], ticks_since_last=ticks_since_last_use)
+    queue = pace_uses([arm, use], cooldown_ticks=cooldown_ticks, ticks_since_last=ticks_since_last_use)
     return queue if len(queue) <= horizon_ticks else []
 
 
@@ -125,7 +132,7 @@ def build_attack_queue(
     *,
     poll_interval_ticks: int,
     horizon_ticks: int,
-    weapon_cooldown_ticks: int = DEFAULT_WEAPON_COOLDOWN_TICKS,
+    weapon_cooldown_ticks: int,
     ticks_since_last_use: int | None = None,
 ) -> list[dict]:
     """Paced attacks with an optional retreat tail, capped for the next poll.

@@ -141,9 +141,8 @@ class GatherState(State):
         op = my_op(ctx, self.name)
         if op is None:
             return _rearm_weapon(world, ctx.memory)
-        tick_hz = ctx.plan.tick_hz if ctx.plan is not None else DEFAULT_TICK_RATE_HZ
         out = gather_outcome(
-            world, ctx.memory, ctx.policy, knowledge=ctx.knowledge, op=op, gem_cuts=ctx.gem_cuts, tick_hz=tick_hz
+            world, ctx.memory, ctx.policy, knowledge=ctx.knowledge, op=op, gem_cuts=ctx.gem_cuts, tick_hz=ctx.tick_hz
         )
         if out.intents is not None or out.wait:
             return out
@@ -297,7 +296,7 @@ def gather_outcome(
     if here is None:
         return StateOutcome(None, "position unknown", state=state)
     g = ground(w, m, policy, knowledge, op, gem_cuts)
-    out = _work(w, m, policy, knowledge, g, state)
+    out = _work(w, m, policy, knowledge, g, state, tick_hz)
     walk = m.gather_target[0] if m.gather_target is not None and m.goal == GOAL else None
     verb = out.intents[0].get("verb") if out.intents else None
     if out.wait and m.gather_target is not None:
@@ -377,7 +376,7 @@ def _cut_ground(g: Ground, p: Pos) -> bool:
 
 
 def _work(
-    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None, g: Ground, state: str
+    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None, g: Ground, state: str, tick_hz: int
 ) -> StateOutcome:
     """Take or cut what is in reach when no walk is cheaper (``_in_reach``),
     else take a step toward the target: the committed one while it is kept
@@ -399,7 +398,7 @@ def _work(
         pile = min((e for e in w.entities if is_gem_pile(e) and e.pos == near[1]), key=lambda e: e.id)
         return StateOutcome([take(pile.id)], f"take {pile.code or pile.id}", state=state)
     if near is not None:
-        return _cut(w, m, knowledge, here, "cut grass", state)
+        return _cut(w, m, knowledge, here, "cut grass", state, tick_hz)
     step = next_step(w, blocked, m.path) if m.goal == GOAL else None
     if step is None:
         if _replan(w, m, g, params(), blocked):
@@ -633,14 +632,16 @@ def _cut_tool(w: WorldModel, knowledge: KnowledgeBase | None) -> InventorySupply
     return tool if tool is not None and tool.id >= 0 and tool.code != w.armed_code else None
 
 
-def _cut(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reason: str, state: str) -> StateOutcome:
+def _cut(
+    w: WorldModel, m: Memory, knowledge: KnowledgeBase | None, p: Pos, reason: str, state: str, tick_hz: int
+) -> StateOutcome:
     """``Use`` on ``p`` with a tool that cuts: when what is armed is not known
     to cut (a potion a drink left armed, say), arm a held one that is, in the
     same paced queue. With none held, cut with what is in hand."""
     tool = _cut_tool(w, knowledge)
     if tool is None:
         return StateOutcome([use_block(p)], reason, state=state)
-    queue = arm_and_use(w, m, tool.id, use_block(p))
+    queue = arm_and_use(w, m, tool.id, use_block(p), tick_hz)
     if not queue:  # the cut's cooldown leaves no room for the Arm and the Use together
         return StateOutcome(None, f"wait out the cooldown to arm {tool.code}, {reason}", state=state, wait=True, progress=False)
     if m.gather_rearm is None and w.armed_code and not heals(w.armed_code) and not does_job(w.armed_code, CUT, knowledge):

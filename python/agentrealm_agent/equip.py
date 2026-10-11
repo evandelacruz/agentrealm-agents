@@ -44,7 +44,9 @@ Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Any, Collection
 
 from .break_memory import capabilities_for_code, held_supplies
@@ -64,7 +66,7 @@ from .supplies import (
     worn_slot,
 )
 from .memory import Memory
-from .survival import BASE_ATTACK_POWER, weapon_swing_damage
+from .survival import BASE_ATTACK_POWER, fighting_weapon, swing_damage
 from .threat import ThreatTable
 from .travel.knowledge import iter_hunting_cells
 from .world import WorldModel
@@ -210,22 +212,24 @@ def loadout_strength(w: WorldModel, weapon: str | None) -> int:
     return BASE_ATTACK_POWER + (weapon_damage(weapon) or 0) + worn_armor_defense(w.worn_codes.values())
 
 
-def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[bool, float]:
+def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[bool, Fraction]:
     """The one rule for which weapon is better (A99): keeping strength within
     ``ceiling`` first (always true with none known), then damage a second
-    (:func:`damage_per_second`, A123). Compare ranks with ``>``: a higher one
-    is a better weapon."""
+    (:func:`damage_per_second`, A123), compared exactly: the top of a swing's
+    damage roll over the cooldown, since no weapon changes the hit chance.
+    Compare ranks with ``>``: a higher one is a better weapon."""
     fits = ceiling is None or loadout_strength(w, code) <= ceiling
-    return fits, damage_per_second(code)
+    weapon = fighting_weapon(code)
+    top = max(1, BASE_ATTACK_POWER + (weapon_damage(weapon) or 0))
+    return fits, Fraction(1 + top, weapon_cooldown_ms(weapon) or DEFAULT_ATTACK_COOLDOWN_MS)
 
 
 def damage_per_second(code: str | None) -> float:
     """Expected damage a second fighting with ``code`` armed: one swing's
-    (``survival.weapon_swing_damage``) over its attack cooldown (A123). Bare hands, or
-    an item listed as no weapon, swing with no weapon damage at the default
-    cooldown."""
-    cooldown = weapon_cooldown_ms(code) or DEFAULT_ATTACK_COOLDOWN_MS
-    return round(weapon_swing_damage(weapon_damage(code) or 0) * 1000 / cooldown, 6)
+    (``survival.swing_damage``) over its attack cooldown (A123). An empty slot,
+    or an item listed as no weapon, swings as the starting knife
+    (``survival.fighting_weapon``), as the win estimate counts it."""
+    return swing_damage(code) * 1000 / (weapon_cooldown_ms(fighting_weapon(code)) or DEFAULT_ATTACK_COOLDOWN_MS)
 
 
 def does_job(code: str | None, job: str, kb: KnowledgeBase | None = None) -> bool:
@@ -256,7 +260,8 @@ def weapon_to_arm(
     if job == FIGHT and not is_weapon(w.armed_code):
         # No weapon armed fights bare-handed: a weapon must beat that, so one
         # over the ceiling is never armed into an empty slot either.
-        best = ((weapon_rank(None, w, ceiling), True, 0), None)
+        # It loses a tie to a weapon held: the knife it swings as is armed.
+        best = ((weapon_rank(None, w, ceiling), False, -math.inf), None)
     for s in held_supplies(w):
         armed = s.code == w.armed_code
         if s.fragment is not None or not does_job(s.code, job, kb) or (not armed and (s.code, ARMED) in refused):

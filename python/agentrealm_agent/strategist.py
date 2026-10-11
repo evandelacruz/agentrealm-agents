@@ -900,8 +900,9 @@ def readiness(w: WorldModel, knowledge: KnowledgeBase | None) -> dict[str, dict[
     """Each stage's readiness check by check, and whether it is met
     (PROGRESSION). Stage 2's bar is ``READY_HEALTH_FRACTION`` of max health,
     ``READY_POTIONS`` potions, a weapon better than the starting one by the
-    one weapon rule (``equip.weapon_rank``, A99) armed, and armor worn. The planner reads it to judge when a stage is done; the
-    code switches no stage itself."""
+    one weapon rule (``equip.weapon_rank``, A99) armed, and armor worn. The
+    planner reads it to judge when a stage is done; the code switches no
+    stage itself."""
     shop_known = bool(iter_shop_cells(knowledge) or seen_prices(w, knowledge))
     entrance_known = bool(iter_entrances(knowledge))
     stage_1 = {"shop_known": shop_known, "entrance_known": entrance_known}

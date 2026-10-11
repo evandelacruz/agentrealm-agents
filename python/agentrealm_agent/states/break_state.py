@@ -128,8 +128,8 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
     Arming waits until the block is in reach. Only a decision's first intent
     is sent, so an ``Arm`` ahead of the step would leave the step unsent (A68).
 
-    **Break** runs it, and so does **Heal** for food behind a block the
-    weapon opens (A10).
+    **Break** runs it, and so does **Heal** once the block its priced way
+    crosses is in reach (A10, A89); Heal walks to it on its own ground.
     """
     m = ctx.memory
     _, plan_avoid, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)

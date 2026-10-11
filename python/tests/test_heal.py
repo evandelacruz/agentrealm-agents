@@ -875,9 +875,41 @@ class HealWalkOpensItsPricedWayTest(unittest.TestCase):
         c = ctx()
         with unittest.mock.patch.object(heal, "FOOD_REACH", 5):
             out = dispatch(w, c)
-        self.assertEqual((out.state, out.reason), ("Heal", "heal_food: break → (3, 2)"))
+        self.assertEqual((out.state, out.reason), ("Heal", "heal_food → (5, 2)"))
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 1}], "round the first bush")
+        self.assertIn((3, 2), c.memory.path, "the walk crosses the block its price cut")
         self.assertEqual(c.memory.nav_stuck.stuck_signals, [], "food priced reachable is never given up")
+        # Beside the block, Heal opens it.
+        w.pos = c.memory.path[c.memory.path.index((3, 2)) - 1]
+        with unittest.mock.patch.object(heal, "FOOD_REACH", 5):
+            out = dispatch(w, c)
+        self.assertEqual((out.state, out.reason), ("Heal", "heal_food: break cut @ (3, 2)"))
+
+    def test_the_walk_to_a_block_out_of_reach_is_heals_own(self):
+        # The straight way to the bush column runs through a pack's reach; a
+        # longer way goes round it. Out of the blade's reach, the walk to the
+        # block is Heal's: on its ground (the reach costly), bounded by stuck
+        # detection, and its goal kept, so a hostile seen later replans it.
+        from agentrealm_agent.states import heal
+        from agentrealm_agent.survival import hostile_reach
+
+        w = ringed(grid(at=(0, 0), size=11), 11)
+        w.zones[7] = {}
+        for y in range(11):
+            w.view.tiles[(8, y)] = "bush"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        w.armed_code = "bronze_sword"
+        w.hostile_types.add(("npc", "wartlurch"))
+        w.entities = [Entity("supply", 1, (10, 0), "apple"), Entity("npc", 20, (3, 1), "wartlurch")]
+        c = ctx()
+        with unittest.mock.patch.object(heal, "FOOD_REACH", 10):
+            out = dispatch(w, c)
+        m = c.memory
+        self.assertEqual((out.state, out.reason), ("Heal", "heal_food → (10, 0)"))
+        self.assertEqual(m.goal, "heal_food")
+        self.assertIn((8, 0), m.path, "the way cuts the bush its price chose")
+        self.assertTrue(hostile_reach(w, c.policy).isdisjoint(m.path), m.path)
+        self.assertIsNotNone(heal.nav_stuck.active(m, w), "the walk is a bounded attempt")
 
     def test_a_walk_to_the_safe_zones_edge_cuts_through(self):
         # Resting on safe ground: the zone's unexplored edge lies past a

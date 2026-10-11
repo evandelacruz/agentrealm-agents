@@ -94,7 +94,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
     _drink_applied: bool = field(default=False, repr=False)
     # A queue without the drink was sent: forget it once that response's
     # results and events are read, which may still carry the drink's own
-    # (as ``Runner._forget_replaced_drink``).
+    # (as ``Runner._forget_replaced_self_use``).
     _drink_replaced: bool = field(default=False, repr=False)
 
     def before_tick(

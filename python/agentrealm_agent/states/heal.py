@@ -44,6 +44,7 @@ from ..pathing import (
     reachable_safe_goal,
     safe_ruled_out,
 )
+from ..reach import supply_reach
 from ..supplies import is_food
 from ..survival import hostiles_in_range, hostiles_reaching, town_cell
 from ..world import Entity, Pos, WorldModel, chebyshev
@@ -304,32 +305,39 @@ def _walk_toward(
 
     One price for every Heal walk: its walk on Heal's ground (``_ground``),
     a block on the straight way a held item opens costed at its break. When
-    the cheapest way crosses such a block, Heal opens it first, Break's way
-    (``break_toward``); else it steps. The walk is bounded like any other
-    (``bounded_step``, A15): no path, or no progress in its window, gives
-    ``at`` up with a backoff, so Heal tries something else instead of
-    pacing. A kept path that now crosses the reach of a known hostile it did
-    not cross when planned is planned again on the grid that prices it.
+    the cheapest way crosses such a block, Heal walks that way on its own
+    ground and opens the block once it is in the opener's reach
+    (``break_toward``); else it steps on the plain grid. Either walk is
+    bounded like any other (``bounded_step``, A15): no path, or no progress
+    in its window, gives ``at`` up with a backoff, so Heal tries something
+    else instead of pacing. A kept path that now crosses the reach of a known
+    hostile it did not cross when planned is planned again on the grid that
+    prices it.
     """
     m, policy = ctx.memory, ctx.policy
+    here = w.pos
+    assert here is not None
     plain, opening = _walk_grids(w, ctx, at, avoid)
     way = cost_path(w, at, opening) if opening.break_costs else None
+    grid = plain
     if (cut := next((p for p in way or [] if p in opening.break_costs), None)) is not None:
         # The first block the priced way crosses is the one opened, so the
         # walk and its price never part.
         choice = choice_at(w, ctx.knowledge, cut, given_up_blocks(m.nav_stuck, w.map_id, w.tick))
         if choice is not None:
-            out = break_toward(w, ctx, choice, HealState.name)
-            if out.intents:
-                out.reason = f"{goal}: {out.reason}"
-                return out
+            if chebyshev(here, cut) <= supply_reach(ctx.knowledge, choice.supply.code):
+                out = break_toward(w, ctx, choice, HealState.name)
+                if out.intents:
+                    out.reason = f"{goal}: {out.reason}"
+                    return out
+            grid = opening  # out of reach: walk the priced way on Heal's ground
     if m.goal == goal and hostiles_reaching(w, policy, m.path) - m.planned_threats:
         m.path = []
 
     def plan() -> list[Pos] | None:
-        return cost_path(w, at, plain, nav=nav_search(m, w, goal, at))
+        return cost_path(w, at, grid, nav=nav_search(m, w, goal, at))
 
-    step = bounded_step(m, w, goal, at, plain.avoid, plan, params=lambda: plain)
+    step = bounded_step(m, w, goal, at, grid.avoid, plan, params=lambda: grid)
     # What the path crosses now it could not go round: only a hostile beyond it replans.
     m.planned_threats = hostiles_reaching(w, policy, m.path)
     return _out([set_position(step)], f"{goal} → {at}") if step is not None else None

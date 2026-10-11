@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING, Callable, Literal
 
 from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
 from .item_table import InventorySupply, merge_heal
-from .supplies import heals, is_food, is_potion
+from .engagement import drink_turns_fight
+from .supplies import heals, is_food, is_potion, row
 from .world import Entity, Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe, safe_tiles
 
 if TYPE_CHECKING:
+    from .config import Policy
     from .knowledge_base import KnowledgeBase
     from .memory import Memory
 
@@ -62,6 +64,36 @@ def health_low(w: WorldModel) -> bool:
     if w.health is None or w.max_health is None:
         return False
     return w.health <= w.max_health * LOW_HEALTH_SHARE
+
+
+# When a carried potion is spent (A95), in the planner's words: the same rule
+# ``spend_potion`` applies, so a reserve the planner buys is one the
+# character keeps.
+POTION_RULE = (
+    f"A carried potion is drunk only when health is low (at or below {LOW_HEALTH_SHARE:.0%} of max, "
+    "potion_drunk_at under State), or mid-fight when the win estimate says the drink turns the fight "
+    "(to one it would take on, or would win). Otherwise a hurt character eats food or rests on safe ground "
+    "and keeps its potions, so potions held are a reserve that lasts until then."
+)
+
+
+def low_health_line(w: WorldModel) -> int | None:
+    """The highest health ``health_low`` counts as low, or None unknown."""
+    if w.max_health is None:
+        return None
+    return int(w.max_health * LOW_HEALTH_SHARE)
+
+
+def spend_potion(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], code: str) -> bool:
+    """Whether a carried potion of ``code`` is worth drinking now (A95):
+    health is low (``health_low``), or the drink turns the engagement under
+    way (``engagement.drink_turns_fight``). Otherwise rest or food heals,
+    and the potion stays a reserve. Every drink of a potion asks this."""
+    if health_low(w):
+        return True
+    r = row(code)
+    heal = r.heal if r is not None and r.heal else (w.max_health or 0)  # unknown: counted as a full heal
+    return drink_turns_fight(w, m, policy, params, heal)
 
 
 # What Heal does after the server refuses a food ``Take`` or a drink, by the
@@ -300,8 +332,11 @@ def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
     return out
 
 
-def carried_heal(w: WorldModel, m: Memory) -> InventorySupply | None:
-    """Carried food first, then a potion (PLAYABLE_AGENT_PLAN.md Heal row).
+def carried_heal(
+    w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]
+) -> InventorySupply | None:
+    """Carried food first, then a potion (PLAYABLE_AGENT_PLAN.md Heal row),
+    a potion only when ``spend_potion`` says it is worth drinking now.
     The armed supply counts too: the snapshot may leave it out of ``held``
     (GAME_NOTES open questions), and a potion a drink left armed is still one
     to drink (A76)."""
@@ -309,10 +344,12 @@ def carried_heal(w: WorldModel, m: Memory) -> InventorySupply | None:
     if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):
         carried.append(InventorySupply(w.armed_id, w.armed_code))
     usable = [h for h in carried if can_try(m, w, "use", h.id)]
-    for kind in (is_food, is_potion):
-        for h in usable:
-            if kind(h.code):
-                return h
+    for h in usable:
+        if is_food(h.code):
+            return h
+    for h in usable:
+        if is_potion(h.code):
+            return h if spend_potion(w, m, policy, params, h.code) else None
     return None
 
 

@@ -55,7 +55,8 @@ FOOD_REACH = 3
 class HealState(State):
     """Reflex, above Fight. Hurt and out of combat: food within ``FOOD_REACH`` (cutting
     through a block the weapon opens when nothing else leads there), then carried
-    food or a potion, then safe ground. Every walk, to food or a safe tile, is
+    food, then a carried potion when health is low (``healing.spend_potion``,
+    A95: the reserve is kept otherwise), then safe ground. Every walk, to food or a safe tile, is
     bounded by stuck detection (``bounded_step``): one that goes nowhere gives
     its target up.
 
@@ -107,12 +108,13 @@ def _wants_heal(w: WorldModel, ctx: PlayContext) -> bool:
 def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     m, policy = ctx.memory, ctx.policy
 
-    # Food lying in sight, then carried food, then a carried potion (the
-    # plan's Heal row). Health changes from these must not count as regen.
+    # Food lying in sight, then carried food, then a carried potion when
+    # ``healing.spend_potion`` says so (the plan's Heal row): else rest. Health
+    # changes from these must not count as regen.
     if out := _act_food(w, m, policy, ctx):
         m.heal_regen_sample = None
         return out
-    if out := use_carried_heal(w, m):
+    if out := use_carried_heal(w, ctx):
         m.heal_regen_sample = None
         return out
 
@@ -360,10 +362,11 @@ def _cut_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at: 
     return out
 
 
-def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
+def use_carried_heal(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
     """``Arm`` + ``Use`` self on carried food or a potion (API Use), one
     paced queue so both are sent. Retreat runs it too, when it is losing
-    ground (A9).
+    ground (A9). A potion goes only when ``healing.spend_potion`` says it is
+    worth drinking now: health low, or the drink turns the fight (A95).
 
     The weapon to put back is remembered in ``heal_rearm`` and re-armed by
     ``_rearm_weapon`` on Heal's next decision, the drink done or not (A24). It
@@ -380,7 +383,8 @@ def use_carried_heal(w: WorldModel, m: Memory) -> StateOutcome | None:
     The ``Arm`` never goes out without its ``Use``: a cooldown that does not
     leave room for both in one queue sends nothing yet (``arm_then_use``).
     """
-    item = carried_heal(w, m)
+    m = ctx.memory
+    item = carried_heal(w, m, ctx.policy, ctx.params)
     if item is None:
         return None
     # Another supply of the same code in the slot is not this one: arm it (A76).

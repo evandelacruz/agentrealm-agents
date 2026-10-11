@@ -93,11 +93,17 @@ def sync_engagement(w: WorldModel, m: Memory, policy: Policy, params: dict[str, 
 
 
 def decide(
-    w: WorldModel, policy: Policy, params: dict[str, float | int], group: frozenset[HostileKey], outrun_failed: bool
+    w: WorldModel,
+    policy: Policy,
+    params: dict[str, float | int],
+    group: frozenset[HostileKey],
+    outrun_failed: bool,
+    health: int | None = None,
 ) -> Engagement:
-    """The estimate against the group's members in view, and the decision it gives."""
+    """The estimate against the group's members in view, and the decision it
+    gives; at ``health`` instead of live health when given."""
     members = [h for h in w.entities if (h.kind, h.id) in group]
-    ratio = win_ratio(estimate_health(w), members, w.threat, w.armed_code)
+    ratio = win_ratio(estimate_health(w) if health is None else health, members, w.threat, w.armed_code)
     bar = fight_bar(w, policy, params, outrun_failed)
     return Engagement(group, outrun_failed, ratio, bool(members) and ratio > bar)
 
@@ -121,6 +127,26 @@ def cannot_outrun(w: WorldModel, m: Memory, policy: Policy, params: dict[str, fl
         return e
     m.engagement = decide(w, policy, params, e.group, True)
     return m.engagement
+
+
+def drink_turns_fight(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], heal: int) -> bool:
+    """A drink that heals ``heal`` changes this engagement (A95): the
+    estimate at the healed health says fight where the live one does not, or
+    wins (above ``BREAK_EVEN``) where the live one loses. False with no
+    engagement, or none of its hostiles in view."""
+    e = m.engagement
+    if e is None:
+        return False
+    health = estimate_health(w)
+    if w.max_health is not None:
+        healed = min(w.max_health, health + heal)
+    else:
+        healed = health + heal
+    if healed <= health:
+        return False
+    now = decide(w, policy, params, e.group, e.cannot_outrun)
+    after = decide(w, policy, params, e.group, e.cannot_outrun, health=healed)
+    return (after.fight and not now.fight) or (now.ratio <= BREAK_EVEN < after.ratio)
 
 
 def would_fight(w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity | None = None) -> bool:

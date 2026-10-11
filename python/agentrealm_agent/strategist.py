@@ -1293,6 +1293,7 @@ def health_to_close(
             buy["minutes"] = minutes
         row["buy"] = buy
     regen = regen_per_tick(knowledge)
+    # Known safe tiles only, never the town cell: Heal rests only on a safe tile.
     safe = retreat_goal(w, None) if regen is not None else None
     if regen is not None and safe is not None and w.pos is not None:
         row["rest"] = {

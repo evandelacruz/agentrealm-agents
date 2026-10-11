@@ -93,6 +93,11 @@ def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
         if out.intents and out.intents[-1].get("verb") == "Take":
             # Settled when this Take lands or gems drop (runner, sync_shop).
             ctx.memory.shop_pending = (supply.id, supply.code, w.gems, supply.pos, w.map_id, w.tick)
+            if ctx.plan is not None:
+                # The gems held as the head buy pays (A106): it is done once they
+                # drop. Every Take re-bases it, so gems gained after one that was
+                # refused or went stale never hide the purchase that lands.
+                ctx.plan.paid_from = w.gems
             out.reason = f"buy {label}" if len(out.intents) == 1 else f"buy {label}: {out.reason}"
         return out
     step = _step_toward(w, ctx.memory, ctx, supply.pos)

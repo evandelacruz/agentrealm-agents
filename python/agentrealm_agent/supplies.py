@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from .config import STATE_DIR
-from .item_table import absorb_supply_entry
+from .item_table import DEFAULT_CARRY_CAPACITY, absorb_supply_entry
 
 if TYPE_CHECKING:
     from .knowledge_base import KnowledgeBase
@@ -248,6 +248,14 @@ def chest_capacity(code: str | None) -> int | None:
     assumes it on the ``Take`` (``loot.learn_chest_upgrade``)."""
     r = row(code)
     return r.chest_capacity if r is not None else None
+
+
+def chest_applied(code: str | None, carry_capacity: int) -> bool:
+    """Whether ``code`` is a chest that raised the pack to its carry slots
+    (A106): larger than the chest a character starts with, and the pack
+    holds at least that many now."""
+    slots = chest_capacity(code)
+    return slots is not None and slots > DEFAULT_CARRY_CAPACITY and carry_capacity >= slots
 
 
 def worn(code: str | None) -> bool | None:

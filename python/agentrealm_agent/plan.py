@@ -16,7 +16,7 @@ from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
 from .stalled import below_progress, find as find_stalled, forget as forget_stalled
-from .supplies import CAPABILITIES
+from .supplies import CAPABILITIES, chest_applied
 from .travel.ops import parse_travel_string, travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
 
@@ -554,6 +554,7 @@ class Plan:
     acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
+    paid_from: int | None = None  # gems held when Shop last sent a Take for the head `buy` op (A106)
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
 
@@ -568,6 +569,7 @@ class Plan:
             self.stalled_since_tick,
             self.block_before,
             self.held_before,
+            self.paid_from,
             self.directive_end,
         )
 
@@ -582,6 +584,7 @@ class Plan:
             self.stalled_since_tick,
             self.block_before,
             self.held_before,
+            self.paid_from,
             self.directive_end,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
@@ -653,7 +656,7 @@ class Plan:
         self.goals = self.goals[: self.index] + kept
         self.directive_end = self.index + kept_directives
         if head_dropped:
-            self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = None
+            self._new_head()
 
     def demote_current(self, reason: str, memory: Memory | None = None) -> None:
         """The head op stalled (A104): move it just below the next op that can
@@ -674,7 +677,7 @@ class Plan:
         log.warning("plan: moved op %r below %r: %s", op, above, reason)
         note_goal_stalled(memory, op, reason, above)
         self.goals = self.goals[: self.index] + order + self.goals[end:]
-        self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = None
+        self._new_head()
 
     def finish_current(self, reason: str, memory: Memory | None = None) -> None:
         """Pop an op whose state saw it finish (``fight_boss``, A38)."""
@@ -701,10 +704,11 @@ class Plan:
 
     def _pop_current(self) -> None:
         self.index += 1
-        self.wait_started_tick = None
-        self.stalled_since_tick = None
-        self.block_before = None
-        self.held_before = None
+        self._new_head()
+
+    def _new_head(self) -> None:
+        """Forget the progress kept for the old head op: a new one starts its own."""
+        self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = self.paid_from = None
 
     @classmethod
     def from_directives(
@@ -826,10 +830,16 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         tile = world.view.tiles.get((op["x"], op["y"]))
         return plan.block_before is not None and tile is not None and tile != plan.block_before
     if name == "buy":
-        # One more than the fewest held since it reached the top, whatever was
-        # held before (free-play run 5). One more is what the buy is for, so one
-        # picked up or withdrawn for free counts too, and saves the gems.
-        return plan.held_before is not None and count_held(world, op["code"]) > plan.held_before
+        # Done once it has paid (A106): gems spent since its latest Take and the
+        # item owned, held or a chest that raised the pack. Or once one more is
+        # held than the fewest held since it reached the top, whatever was held
+        # before (free-play run 5): one picked up or withdrawn for free counts
+        # too, and saves the gems.
+        code = op["code"]
+        paid = plan.paid_from is not None and world.gems is not None and world.gems < plan.paid_from
+        if paid and (count_held(world, code) > 0 or chest_applied(code, world.carry_capacity)):
+            return True
+        return plan.held_before is not None and count_held(world, code) > plan.held_before
     if name == "fetch_item":
         return any(supply_matches(op["code"], s.code) for s in world.held_supplies)
     if name == "gather_gems":

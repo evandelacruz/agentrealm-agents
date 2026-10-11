@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import heapq
 from collections import defaultdict
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, replace
 
 from ..supplies import worn_armor_defense
 from ..world import DOORS, NEIGHBOURS, VOID, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
@@ -36,7 +36,7 @@ MACRO_SIZE = 16
 # Node budgets per replan so search never stalls a tick (A13). Read at call
 # time, so a caller's override (or a test's patch) takes effect.
 COARSE_NODE_BUDGET = 48  # cache tiles expanded by the corridor search
-FINE_NODE_BUDGET = 400  # cells expanded by each cell-level search
+FINE_NODE_BUDGET = 400  # cells expanded by each cell-level search; ``entrance_routes`` shares one across every entrance
 
 
 @dataclass
@@ -52,7 +52,7 @@ class CostGridParams:
     # one hostility test (``survival.is_hostile``), so townsfolk repel no path.
     is_hostile: Callable[[WorldModel, Entity], bool] = lambda w, e: e.kind == "npc"
     allow_goal_door: bool = False
-    fog_cost: int = FOG  # A15 step 1 raises this to prefer known ground
+    fog_cost: int | None = FOG  # A15 step 1 raises this to prefer known ground; None: known ground only (A107)
     # Danger peak per hostile (kind, id), in place of HOSTILE_DANGER: Retreat
     # sets its pursuers' to 0, so it heads straight for safety (A9).
     danger_peaks: dict[tuple[str, int], int] = field(default_factory=dict)
@@ -211,6 +211,8 @@ class _Grid:
             # Stepping onto a door warps, so a door is only ever the goal.
             return KNOWN_WALKABLE if goal and params.allow_goal_door else None
         if block is None:
+            if params.fog_cost is None:
+                return None
             base = params.fog_cost
         elif block in WALKABLE:
             base = KNOWN_WALKABLE
@@ -276,8 +278,9 @@ class _MacroCosts:
             return self.memo[m]
         n = MACRO_SIZE * MACRO_SIZE
         special = self.cells.get(m, ())
-        passable = n - len(special)
-        total = passable * self.grid.params.fog_cost
+        fog = self.grid.params.fog_cost
+        passable = 0 if fog is None else n - len(special)
+        total = passable * (fog or 0)
         for p in special:
             c = self.grid.cost(p)
             if c is not None:
@@ -300,9 +303,13 @@ class _SearchResult:
     path: list[Pos] | None
     cost: int
     budget_hit: bool
+    expanded: int = 0
 
 
-def _astar(grid: _Grid, max_nodes: int) -> _SearchResult:
+def _astar(grid: _Grid, max_nodes: int, weight: int = 1) -> _SearchResult:
+    """A* to ``grid.goal``, at most ``max_nodes`` expanded. A ``weight`` above
+    1 heads for the goal first: a path at most that many times the cheapest,
+    found in far fewer nodes (``entrance_routes``)."""
     w, goal = grid.w, grid.goal
     assert w.pos is not None
     start = w.pos
@@ -317,7 +324,7 @@ def _astar(grid: _Grid, max_nodes: int) -> _SearchResult:
     while frontier and expanded < max_nodes:
         _, g, cur = heapq.heappop(frontier)
         if cur == goal:
-            return _SearchResult(_unwind(came, start, goal), g, False)
+            return _SearchResult(_unwind(came, start, goal), g, False, expanded)
         if g > cost.get(cur, 10**9):
             continue
         expanded += 1
@@ -332,8 +339,8 @@ def _astar(grid: _Grid, max_nodes: int) -> _SearchResult:
             if ng < cost.get(n, 10**9):
                 cost[n] = ng
                 came[n] = cur
-                heapq.heappush(frontier, (ng + chebyshev(n, goal) * KNOWN_WALKABLE, ng, n))
-    return _SearchResult(None, 0, bool(frontier))
+                heapq.heappush(frontier, (ng + weight * chebyshev(n, goal) * KNOWN_WALKABLE, ng, n))
+    return _SearchResult(None, 0, bool(frontier), expanded)
 
 
 def _search(w: WorldModel, goal: Pos, params: CostGridParams, max_nodes: int = 10**9) -> _SearchResult:
@@ -619,6 +626,91 @@ def _learn(
     for p in searched:
         if p in best and best[p] > learned.get(p, 0):
             learned[p] = best[p]
+
+
+# How far each level entrance is, as State shows it (A107): the cells of
+# ``PATH_KNOWN`` ground, of ``FRONTIER_ONLY`` partly unexplored ground, none
+# through either (``KNOWN_BLOCKED``), or ``NOT_SEARCHED`` within the budget.
+PATH_KNOWN, FRONTIER_ONLY, KNOWN_BLOCKED, NOT_SEARCHED = "path_known", "frontier_only", "known_blocked", "not_searched"
+# The route search's heading for the goal (``_astar`` weight): a route at most
+# this many times the cheapest, in about as many nodes as it has cells, even
+# across unexplored ground.
+ROUTE_WEIGHT = 3
+# The most cells a pocket round a goal may hold to be known walled in, checked
+# (and charged to the budget) before the route search.
+POCKET_CELLS = 32
+
+
+@dataclass
+class Route:
+    """Whether a walk reaches a cell, by what is known of the map (A107)."""
+
+    kind: str  # PATH_KNOWN, FRONTIER_ONLY, KNOWN_BLOCKED or NOT_SEARCHED
+    steps: int  # cells walked on the route found; straight-line cells when none was
+    unexplored: int = 0  # cells of it no read has shown yet
+
+
+def entrance_routes(w: WorldModel, goals: Iterable[Pos], budget: int = FINE_NODE_BUDGET) -> dict[Pos, Route]:
+    """Each goal on this map (a level entrance's door), nearest first, with
+    the route a walk would take to it, in one node budget shared by all of
+    them, so the check costs no more than one cell-level search.
+
+    First a route over any ground but walls, priced as a walk prices it
+    (fog dearer than known ground); one that crosses no fog is a known path.
+    One that does is tried again over known ground only: a route found
+    there is a known path, none (the known ground searched to its end) is
+    frontier only, and a retry the budget cut short is not searched, with
+    the fog route's steps.
+    A goal in a pocket of at most ``POCKET_CELLS`` cells that known walls
+    close off, or with no route even through fog, is known blocked: it
+    takes a break or another way. A goal the budget did not reach is not
+    searched, with its straight-line distance. ``steps`` is the route found
+    by a goal-first search (``ROUTE_WEIGHT``): an estimate at most that many
+    times the cheapest, not the shortest walk. With the default budget the
+    nearest few entrances are checked, and far ones are often not searched.
+    Hostiles add nothing: this is whether the ground joins, not how safe it is.
+    """
+    assert w.pos is not None
+    params = CostGridParams(is_hostile=lambda _w, _e: False, allow_goal_door=True)
+    known_only = replace(params, fog_cost=None)
+    left, out = budget, {}
+    grids: dict[int | None, _Grid] = {}
+
+    def grid(goal: Pos, p: CostGridParams) -> _Grid:
+        # One world read per kind of search: every goal's grid shares its prices.
+        g = _Grid(w, {goal}, p, same_world=grids.get(p.fog_cost))
+        grids.setdefault(p.fog_cost, g)
+        return g
+
+    for goal in sorted(set(goals), key=lambda p: (chebyshev(w.pos, p), p)):
+        straight = chebyshev(w.pos, goal)
+        if left <= 0:
+            out[goal] = Route(NOT_SEARCHED, straight)
+            continue
+        g = grid(goal, params)
+        left -= POCKET_CELLS
+        if g.cost(goal) is None or _walled_in(g, goal, w.pos, POCKET_CELLS):
+            out[goal] = Route(KNOWN_BLOCKED, straight)
+            continue
+        found = _astar(g, max(left, 0), ROUTE_WEIGHT)
+        left -= found.expanded
+        if found.path is None:
+            out[goal] = Route(NOT_SEARCHED if found.budget_hit else KNOWN_BLOCKED, straight)
+            continue
+        unexplored = sum(1 for p in found.path if p not in w.view.tiles)
+        if not unexplored:
+            out[goal] = Route(PATH_KNOWN, len(found.path))
+            continue
+        known = _astar(grid(goal, known_only), max(left, 0), ROUTE_WEIGHT)
+        left -= known.expanded
+        if known.path is not None:
+            out[goal] = Route(PATH_KNOWN, len(known.path))
+        else:
+            # Frontier only once known ground is shown not to reach it; a check
+            # the budget cut short says nothing either way.
+            kind = NOT_SEARCHED if known.budget_hit else FRONTIER_ONLY
+            out[goal] = Route(kind, len(found.path), unexplored)
+    return out
 
 
 def path_cost(w: WorldModel, path: list[Pos], goal: Pos, params: CostGridParams | None = None) -> int | None:

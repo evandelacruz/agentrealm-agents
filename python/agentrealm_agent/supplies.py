@@ -59,7 +59,9 @@ class Supply:
     code: str
     supply_class: str
     use_effects: frozenset[str]
+    slot: str = ""
     damage: int | None = None
+    defense: int | None = None
     heal: int | None = None
     used_up_on_break: bool | None = None
     eaten_on_pickup: bool = False
@@ -82,7 +84,9 @@ def parse(raw: Any) -> dict[str, Supply]:
             code=code,
             supply_class=row.get("class") if isinstance(row.get("class"), str) else "",
             use_effects=frozenset(e for e in effects if isinstance(e, str)) if isinstance(effects, list) else frozenset(),
+            slot=row.get("slot") if isinstance(row.get("slot"), str) else "",
             damage=_non_negative_int(row.get("damage")),
+            defense=_non_negative_int(row.get("defense")),
             heal=_positive_int(row.get("heal")),
             used_up_on_break=used_up if isinstance(used_up, bool) else None,
             eaten_on_pickup=row.get("eaten_on_pickup") is True,
@@ -216,6 +220,37 @@ def weapon_damage(code: str | None) -> int | None:
     None for anything that is not a listed weapon."""
     r = row(code)
     return r.damage if r is not None and r.supply_class == "weapon" else None
+
+
+def armor_defense(code: str | None) -> int | None:
+    """An armor piece's published ``defense``, or None for anything that is not listed armor."""
+    r = row(code)
+    return r.defense if r is not None and r.supply_class == "armor" else None
+
+
+def armor_slot(code: str | None) -> str:
+    """The slot listed armor is worn in (``body``, ``head``, …), or ``""``."""
+    r = row(code)
+    return r.slot if r is not None and r.supply_class == "armor" else ""
+
+
+def what_it_does(code: str | None) -> dict[str, Any]:
+    """What the Supplies reference says a subtype does, for the planner's State
+    (A92): ``class``, ``use`` (its ``use_effects``), whichever of ``heal``,
+    ``damage``, ``defense`` and ``slot`` apply, and ``used_up_on_break`` when
+    listed (true: each block broken with it uses one up). ``{}`` when unlisted."""
+    r = row(code)
+    if r is None:
+        return {}
+    out: dict[str, Any] = {"class": r.supply_class, "use": sorted(r.use_effects)}
+    for key in ("heal", "damage", "defense"):
+        if getattr(r, key) is not None:
+            out[key] = getattr(r, key)
+    if r.slot and r.slot != "armed":
+        out["slot"] = r.slot
+    if r.used_up_on_break is not None:
+        out["used_up_on_break"] = r.used_up_on_break
+    return out
 
 
 def file_capabilities(items: dict[str, dict[str, Any]]) -> None:

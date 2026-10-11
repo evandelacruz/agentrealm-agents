@@ -827,9 +827,10 @@ UPGRADES_SHOWN = 3
 
 def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     """The gear seen for sale that beats the best owned for its slot, cheapest
-    first, with its price and the gems still short (A92): a weapon with more
-    ``damage`` than any armed or held, armor with more ``defense`` than any worn
-    or held for its slot (Supplies reference). The first is what gems save toward."""
+    first, with its price and the gems still short (A92). Owned is armed, worn,
+    held or stowed; a weapon must have more ``damage`` than any owned, armor more
+    ``defense`` than any owned for its slot (Supplies reference). An item already
+    owned is not listed. The first is what gems save toward."""
     carried = [s.code for s in w.held_supplies + w.chest_supplies]
     owned = {c for c in [*carried, w.armed_code, *w.worn_codes.values()] if c}
     best_damage = max((weapon_damage(c) or 0 for c in owned), default=0)

@@ -117,10 +117,10 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
 
     # Health changes from food or a potion must not count as regen.
     if out := _act_food(w, ctx):
-        m.heal_regen_sample = m.heal_regen_rise = None
+        m.heal_regen_sample = m.heal_regen_stretch = None
         return out
     if out := use_carried_heal(w, ctx):
-        m.heal_regen_sample = m.heal_regen_rise = None
+        m.heal_regen_sample = m.heal_regen_stretch = None
         return out
 
     known = regen_known(ctx.knowledge, m)

@@ -11,12 +11,14 @@ tried (``can_try``).
 
 from __future__ import annotations
 
+import statistics
 from typing import TYPE_CHECKING
 
 from .directives import PARAM_DEFAULTS
 from .engagement import drink_turns_fight
 from .executor.supply_refusals import can_try, in_hand
 from .item_table import InventorySupply, merge_heal
+from .memory import RegenStretch
 from .supplies import heals, is_food, is_potion, row
 from .world import Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe, safe_tiles
@@ -50,11 +52,12 @@ REGEN_MEASURE_TICKS = 200
 REGEN_SAMPLE_GAP_TICKS = 50
 SURVIVAL_KEY = "survival"
 REGEN_KEY = "safe_zone_regen"
-# Safe-zone regen's rate (A124): the health gained and the ticks it took,
-# summed over every stretch measured from one rise to a later one, so each
-# rest refines it. Rough: a decision can see a rise up to a gap late.
-REGEN_GAIN_KEY = "safe_zone_regen_health"
-REGEN_TICKS_KEY = "safe_zone_regen_ticks"
+# Safe-zone regen's rate (A124): the health a tick of each stretch timed
+# from one rise to the next, the newest REGEN_RATES_KEPT; the estimate is
+# their median, so one bad stretch cannot set it. Rough: a decision sees a
+# rise up to a decision late.
+REGEN_RATES_KEY = "safe_zone_regen_rates"
+REGEN_RATES_KEPT = 9
 
 
 def hurt(w: WorldModel) -> bool:
@@ -166,56 +169,54 @@ def save_regen_yes(knowledge: KnowledgeBase | None) -> None:
 
 
 def regen_per_tick(knowledge: KnowledgeBase | None) -> float | None:
-    """The estimate of safe-zone regen on this world, health a tick, or None
-    when none was measured: the published docs give health back only from a
-    heal or a respawn, so with none measured a rest heals nothing (A124)."""
+    """The estimate of safe-zone regen on this world, health a tick: the
+    median of the stretches measured, and only once regen is a confirmed
+    "yes". None otherwise: the published docs give health back only from a
+    heal or a respawn, so with none confirmed a rest heals nothing (A124)."""
     if knowledge is None:
         return None
     with knowledge.lock:
         surv = knowledge.extra.get(SURVIVAL_KEY)
-        if not isinstance(surv, dict):
+        if not isinstance(surv, dict) or surv.get(REGEN_KEY) != "yes":
             return None
-        gain, ticks = surv.get(REGEN_GAIN_KEY), surv.get(REGEN_TICKS_KEY)
-    if not isinstance(gain, (int, float)) or not isinstance(ticks, (int, float)) or gain <= 0 or ticks <= 0:
-        return None
-    return gain / ticks
+        rates = [r for r in surv.get(REGEN_RATES_KEY) or [] if isinstance(r, (int, float)) and r > 0]
+    return statistics.median(rates) if rates else None
 
 
 def note_regen_rate(m: Memory, w: WorldModel, knowledge: KnowledgeBase | None) -> None:
-    """One decision resting hurt in a safe zone: measure regen's rate between
-    rises (A124). Timing from a rise to a later rise spans whole regen
-    periods, wherever the rest began; each such stretch adds its health and
-    ticks to the world's totals (``regen_per_tick``), and the later rise
-    starts the next stretch. Health that falls, or a decision too far after
-    the last (the character left the zone, or another state ran), starts
-    over at the next rise. Heal resets it for food and potions."""
-    r = m.heal_regen_rise
-    health = w.health
+    """One of Heal's rest decisions, hurt in a safe zone: time regen between
+    rises (A124). A stretch from one rise to the next spans whole regen
+    periods, wherever the rest began; each adds its rate (``add_regen``) and
+    the later rise starts the next. Only rest decisions back to back count:
+    any other decision between them (another state ran, or Heal ate or
+    drank), health that falls, a change of max health, or any heal sent
+    (``note_heal_pending``: a potion or food Use, a food Take, from any
+    state) ends the stretch, and timing starts again at the next rise."""
+    s, health, decision = m.heal_regen_stretch, w.health, m.nav_stuck.decision
     if health is None:
-        m.heal_regen_rise = None
+        m.heal_regen_stretch = None
         return
-    fresh = r is not None and health >= r[3] and w.tick - r[2] <= REGEN_SAMPLE_GAP_TICKS
-    if not fresh:
-        m.heal_regen_rise = (None, None, w.tick, health)
+    if s is None or decision != s.decision + 1 or health < s.health or w.max_health != s.max_health:
+        m.heal_regen_stretch = RegenStretch(decision, health, w.max_health)
         return
-    rise_tick, rise_health, _, last_health = r
-    if health > last_health:
-        if rise_tick is not None and rise_health is not None and w.tick > rise_tick:
-            add_regen(knowledge, health - rise_health, w.tick - rise_tick)
-        m.heal_regen_rise = (w.tick, health, w.tick, health)
-    else:
-        m.heal_regen_rise = (rise_tick, rise_health, w.tick, health)
+    if health > s.health:
+        if s.rise_tick is not None and s.rise_health is not None and w.tick > s.rise_tick:
+            add_regen(knowledge, (health - s.rise_health) / (w.tick - s.rise_tick))
+        s.rise_tick, s.rise_health = w.tick, health
+    s.decision, s.health = decision, health
 
 
-def add_regen(knowledge: KnowledgeBase | None, gain: int, ticks: int) -> None:
-    if knowledge is None:
+def add_regen(knowledge: KnowledgeBase | None, per_tick: float) -> None:
+    """One stretch's regen, health a tick, kept with the newest
+    ``REGEN_RATES_KEPT`` on this world (A124)."""
+    if knowledge is None or per_tick <= 0:
         return
     with knowledge.lock:
         surv = knowledge.extra.get(SURVIVAL_KEY)
         if not isinstance(surv, dict):
             knowledge.extra[SURVIVAL_KEY] = surv = {}
-        surv[REGEN_GAIN_KEY] = surv.get(REGEN_GAIN_KEY, 0) + gain
-        surv[REGEN_TICKS_KEY] = surv.get(REGEN_TICKS_KEY, 0) + ticks
+        rates = [r for r in surv.get(REGEN_RATES_KEY) or [] if isinstance(r, (int, float))]
+        surv[REGEN_RATES_KEY] = [*rates, per_tick][-REGEN_RATES_KEPT:]
 
 
 def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
@@ -277,6 +278,8 @@ def note_heal_pending(m: Memory, w: WorldModel, code: str, kind: str) -> None:
         return
     assert w.health is not None
     m.heal_pending = (w.health, code, kind)
+    # A heal is no regen: it ends both the yes/no sample and the stretch timed (A124).
+    m.heal_regen_sample = m.heal_regen_stretch = None
 
 
 def absorb_heal_pending(

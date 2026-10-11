@@ -10,8 +10,11 @@ from agentrealm_agent.executor import DEFAULT_WEAPON_COOLDOWN_TICKS
 from agentrealm_agent.healing import (
     REGEN_KEY,
     REGEN_MEASURE_TICKS,
+    REGEN_RATES_KEPT,
+    REGEN_RATES_KEY,
     SURVIVAL_KEY,
     absorb_heal_pending,
+    add_regen,
     hurt,
     note_heal_pending,
     regen_known,
@@ -364,42 +367,92 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(regen_known(kb, Memory()), "yes")
         self.assertIsNone(regen_per_tick(kb), "one rise gives a yes, not a rate (A124)")
 
-    def test_regen_rate_is_timed_between_rises_and_refined_by_each_rest(self):
-        # A124 review: a rate timed from wherever the rest began reads high;
-        # timed from one rise to the next it spans whole regen periods.
-        w = grid(at=(0, 0))
-        m, kb = Memory(), KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)  # a world saved before the rate was kept
+    def rest_run(self, kb: KnowledgeBase):
+        """A character resting in the safe zone, one Heal decision per call."""
+        w, m = grid(at=(0, 0)), Memory()
 
         def rest(tick: int, health: int) -> None:
             w.tick, w.health = tick, health
             self.assert_heals_in_zone(dispatch(w, ctx(m, kb)))
 
+        return w, m, rest
+
+    def test_regen_rate_is_timed_between_rises_and_refined_by_each_rest(self):
+        # A124 review: a rate timed from wherever the rest began reads high;
+        # timed from one rise to the next it spans whole regen periods.
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)  # a world saved before the rate was kept
+        _, _, rest = self.rest_run(kb)
         rest(0, 5)
-        rest(1, 6)  # the first rise, 1 tick in: no rate from it
+        rest(1, 6)  # the first rise, 1 tick in: it only starts a stretch
         self.assertIsNone(regen_per_tick(kb))
         for t in range(10, 100, 10):
             rest(t, 6)
         rest(101, 7)  # the next rise, 100 ticks after the first
         self.assertEqual(regen_per_tick(kb), 1 / 100)
-        rest(140, 7)
-        rest(201, 8)  # each rise adds its stretch to the world's totals
-        self.assertEqual(regen_per_tick(kb), 2 / 200)
-        rest(300, 8)  # a gap past REGEN_SAMPLE_GAP_TICKS starts over
-        rest(301, 9)
-        self.assertEqual(regen_per_tick(kb), 2 / 200, "a rise after a gap starts a stretch, it ends none")
+        rest(150, 7)
+        rest(181, 8)  # each stretch adds its own rate
+        self.assertEqual(kb.extra[SURVIVAL_KEY][REGEN_RATES_KEY], [1 / 100, 1 / 80])
 
-    def test_food_eaten_is_no_regen_rise(self):
+    def test_one_bad_stretch_cannot_set_the_rate(self):
+        # A124 review: the estimate is the median of the newest stretches.
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        for rate in (0.01, 0.012, 5.0):
+            add_regen(kb, rate)
+        self.assertEqual(regen_per_tick(kb), 0.012)
+        for _ in range(REGEN_RATES_KEPT):
+            add_regen(kb, 0.02)
+        self.assertEqual(kb.extra[SURVIVAL_KEY][REGEN_RATES_KEY], [0.02] * REGEN_RATES_KEPT, "only the newest are kept")
+
+    def test_the_rate_counts_only_once_regen_is_confirmed(self):
+        # A124 review: rest is shown only on a confirmed "yes".
+        kb = KnowledgeBase.empty("sandbox")
+        add_regen(kb, 0.01)
+        self.assertIsNone(regen_per_tick(kb))
+        kb.extra[SURVIVAL_KEY][REGEN_KEY] = "no"
+        self.assertIsNone(regen_per_tick(kb))
+        save_regen_yes(kb)
+        self.assertEqual(regen_per_tick(kb), 0.01)
+
+    def test_a_heal_sent_by_any_state_ends_the_stretch(self):
+        # A124 review: a planner use_item or Flee's drink between two rests
+        # is not regen.
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        w, m, rest = self.rest_run(kb)
+        rest(0, 5)
+        rest(1, 6)  # a rise: the stretch has started
+        note_heal_pending(m, w, "small_potion", "use")  # sent by UseItem, say
+        self.assertIsNone(m.heal_regen_stretch)
+        rest(10, 8)  # the drink lands: no stretch to time it against
+        rest(20, 8)
+        rest(30, 9)
+        self.assertIsNone(regen_per_tick(kb), "a heal and the rise after it give no rate")
+
+    def test_another_decision_between_rests_ends_the_stretch(self):
+        # A124 review: only rest decisions back to back are timed.
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        _, m, rest = self.rest_run(kb)
+        rest(0, 5)
+        rest(1, 6)
+        m.nav_stuck.decision += 1  # another state decided in between
+        rest(2, 7)
+        rest(102, 8)
+        self.assertIsNone(regen_per_tick(kb), "the rise after the break only starts a stretch")
+        rest(202, 9)
+        self.assertEqual(regen_per_tick(kb), 1 / 100)
+
+    def test_food_eaten_ends_the_stretch(self):
         # A124: a rise from food or a potion is not regen.
-        w = grid(at=(0, 0))
-        m, kb = Memory(), KnowledgeBase.empty("sandbox")
-        dispatch(w, ctx(m, kb))
-        w.tick, w.health = 5, 6
-        dispatch(w, ctx(m, kb))
+        kb = KnowledgeBase.empty("sandbox")
+        w, m, rest = self.rest_run(kb)
+        rest(0, 5)
+        rest(5, 6)
         w.held_supplies = [InventorySupply(4, "apple")]
-        w.tick = 10
         dispatch(w, ctx(m, kb))
-        self.assertIsNone(m.heal_regen_rise)
+        self.assertIsNone(m.heal_regen_stretch)
 
     def test_regen_absent_is_kept_for_this_run_only(self):
         w = grid(at=(0, 0))

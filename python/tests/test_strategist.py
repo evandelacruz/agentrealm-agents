@@ -884,7 +884,7 @@ class PlannerViewTest(unittest.TestCase):
         # A124: health comes back only from a heal or a respawn, so to_close
         # shows a carried potion's heal, else a potion to buy and its time,
         # and a rest only where regen was measured on this world.
-        from agentrealm_agent.healing import add_regen
+        from agentrealm_agent.healing import add_regen, save_regen_yes
 
         self.w.health, self.w.max_health, self.w.gems = 5, 10, 4
         health = lambda **kw: self.readiness(**kw)["stage_2"]["to_close"]["health_at_bar"]
@@ -896,7 +896,9 @@ class PlannerViewTest(unittest.TestCase):
         )
         self.w.held_supplies = [InventorySupply(1, "large_potion"), InventorySupply(2, "small_potion")]
         self.assertEqual(health(), {"health_short": 3, "drink": {"code": "small_potion", "heals": 10}}, "the smallest heal that closes it")
-        add_regen(self.kb, 1, 100)
+        add_regen(self.kb, 0.01)
+        self.assertNotIn("rest", health(), "a rate with regen not confirmed yes: no rest")
+        save_regen_yes(self.kb)
         self.assertNotIn("rest", health(), "no safe tile known: nowhere to rest")
         apply_zone(self.w, 7, 10, 20, {"safe": True})
         self.assertEqual(

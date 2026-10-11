@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from .healing import supply_matches
 from .memory import Memory
-from .plan import goal_done
+from .plan import Plan, goal_done
 from .travel.strength import loadout_key
 from .world import Entity, WorldModel, chebyshev
 
@@ -73,16 +73,24 @@ def pick_supply(
     return candidates[0][1]
 
 
-def note_shop_result(m: Memory, intent: dict | None, applied: bool) -> None:
+def _take_failed(m: Memory, plan: Plan | None) -> None:
+    """The Take in flight will not land: forget it, and the head buy has paid
+    nothing (A112). A later gem drop, from a death say, is no purchase."""
+    m.shop_pending = None
+    if plan is not None:
+        plan.paid_from = None
+
+
+def note_shop_result(m: Memory, intent: dict | None, applied: bool, plan: Plan | None = None) -> None:
     """Settle the Take in flight from its result: applied settles it, a
     rejection (of it or a ``Drop`` queued before it) counts against that
-    supply (``SHOP_MAX_REFUSALS``)."""
+    supply (``SHOP_MAX_REFUSALS``) and unpays the head buy."""
     pending = m.shop_pending
     if pending is None:
         return
     if not applied:
         m.shop_refusals[pending[0]] = m.shop_refusals.get(pending[0], 0) + 1
-        m.shop_pending = None
+        _take_failed(m, plan)
         return
     if intent and intent.get("verb") == "Take" and intent.get("supply_id") == pending[0]:
         m.shop_pending = None
@@ -96,11 +104,14 @@ def shop_pending_stale(w: WorldModel, pending: tuple) -> bool:
     return w.tick - sent > SHOP_PENDING_TICKS
 
 
-def sync_shop(w: WorldModel, m: Memory) -> None:
+def sync_shop(w: WorldModel, m: Memory, plan: Plan | None = None) -> None:
     """A gem drop since the Take was sent is the purchase landing (A21).
 
-    A stale Take is forgotten first, so a later unrelated gem drop does not
-    count as a purchase. A loadout, gem or map change clears the refusal counts.
+    The gem drop is read before staleness, so a Take that landed is never
+    unpaid by the same read that sees it go stale. A stale Take with no gem
+    drop is forgotten, and the head buy has paid nothing, so a later unrelated
+    gem drop does not count as a purchase (A112). A loadout,
+    gem or map change clears the refusal counts.
     """
     key = (loadout_key(w), w.gems, w.map_id)
     if key != m.shop_refusal_key:
@@ -109,10 +120,8 @@ def sync_shop(w: WorldModel, m: Memory) -> None:
     pending = m.shop_pending
     if pending is None:
         return
+    if pending[2] is not None and w.gems is not None and w.gems < pending[2]:
+        m.shop_pending = None
+        return
     if shop_pending_stale(w, pending):
-        m.shop_pending = None
-        return
-    if pending[2] is None or w.gems is None:
-        return
-    if w.gems < pending[2]:
-        m.shop_pending = None
+        _take_failed(m, plan)

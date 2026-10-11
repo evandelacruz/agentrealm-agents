@@ -99,16 +99,24 @@ def remember(
     del records[:-STALLED_KEPT]
 
 
-def forget(records: list[StalledOp], op: dict[str, Any]) -> None:
-    """``op`` finished: it is no longer a stalled target."""
-    target = target_of(op)
-    records[:] = [r for r in records if r.target != target]
+def _on_map(record: StalledOp, map_id: int | None) -> bool:
+    """``record`` speaks for ``map_id``: the same map, or either one unknown."""
+    return record.map_id is None or map_id is None or record.map_id == map_id
 
 
-def find(records: list[StalledOp], op: dict[str, Any]) -> StalledOp | None:
-    """The record of ``op``'s target, or None when it has not stalled."""
+def forget(records: list[StalledOp], op: dict[str, Any], map_id: int | None = None) -> None:
+    """``op`` finished on ``map_id``: it is no longer a stalled target there.
+    A record of the same target on another map stays (A111)."""
     target = target_of(op)
-    return next((r for r in records if r.target == target), None)
+    records[:] = [r for r in records if r.target != target or not _on_map(r, map_id)]
+
+
+def find(records: list[StalledOp], op: dict[str, Any], map_id: int | None = None) -> StalledOp | None:
+    """The record of ``op``'s target on ``map_id``, or None when it has not
+    stalled there. An op's x, y name a cell on the map it runs on, so a record
+    from another map is not this op's (A111)."""
+    target = target_of(op)
+    return next((r for r in records if r.target == target and _on_map(r, map_id)), None)
 
 
 def break_cells(records: list[StalledOp], map_id: int | None) -> frozenset[tuple[int, int]]:

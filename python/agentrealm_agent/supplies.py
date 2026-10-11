@@ -213,6 +213,13 @@ def is_potion(code: str | None) -> bool:
     return r is not None and "heal" in r.use_effects
 
 
+def eaten_on_pickup(code: str | None) -> bool:
+    """Used up the moment it is taken (food, gems, a heart): its effect applies
+    at once and nothing is left in the pack (``eaten_on_pickup``)."""
+    r = row(code)
+    return r is not None and r.eaten_on_pickup
+
+
 def heals(code: str | None) -> bool:
     return is_food(code) or is_potion(code)
 
@@ -311,8 +318,9 @@ def what_it_does(code: str | None) -> dict[str, Any]:
     """What the Supplies reference says a subtype does, for the planner's State
     (A92): ``class``, ``use`` (its ``use_effects``), whichever of ``heal``,
     ``damage``, ``defense``, ``chest_capacity`` and ``slot`` apply (``defense``
-    counts only while worn), and ``used_up_on_break`` when
-    listed (true: each block broken with it uses one up). ``{}`` when unlisted."""
+    counts only while worn), ``used_up_on_break`` when
+    listed (true: each block broken with it uses one up), and ``eaten_on_pickup``
+    when it is used up on its ``Take`` (A112). ``{}`` when unlisted."""
     r = row(code)
     if r is None:
         return {}
@@ -324,6 +332,8 @@ def what_it_does(code: str | None) -> dict[str, Any]:
         out["slot"] = r.slot
     if r.used_up_on_break is not None:
         out["used_up_on_break"] = r.used_up_on_break
+    if r.eaten_on_pickup:
+        out["eaten_on_pickup"] = True
     return out
 
 

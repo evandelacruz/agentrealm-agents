@@ -179,7 +179,7 @@ class SurvivalGateTest(unittest.TestCase):
         self.assertEqual(m.retreat_misses, 0)
 
     def recover(self, m, w, intents):
-        w.death_chest = (OVERWORLD, (3, 0), 11)
+        w.remember_death_chest(11, OVERWORLD, (3, 0))
         decide(m, w, state="Recover", reason="recover chest", intents=intents)
 
     def test_withdraw_from_a_cell_not_known_safe_fails(self):

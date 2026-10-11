@@ -63,12 +63,12 @@ class SnapshotObservationTest(unittest.TestCase):
         self.assertEqual(self.w.view.tiles[(1, 0)], "grass")
 
     def test_chest_contents_from_delta_changed(self):
-        self.w.death_chest = (7, (0, 0), 80)
+        self.w.remember_death_chest(80, 7, (0, 0))
         self.w.map_id, self.w.pos = 7, (1, 0)
         self.w.apply_observation(load("complete_v10.json"))
         self.w.apply_observation(load("delta_chest_empty.json"))
         self.assertEqual(self.w.chest_contents.get(80), [])
-        self.assertIsNone(self.w.death_chest)
+        self.assertEqual(self.w.death_chests, {})
 
     def test_complete_without_version(self):
         self.w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": [

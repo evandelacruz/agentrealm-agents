@@ -156,8 +156,8 @@ class RecoverDispatchTest(unittest.TestCase):
         full_inventory(w)
         w.chest_contents[80] = [InventorySupply(71, "torch")]
         out = dispatch(w, ctx(scripted(goals=[]), m=Memory(equip_not_wearable={"torch"})))
-        # Recover yields; with no plan op the safe default moves.
-        self.assertEqual(out.yielded, ["Recover: chest 80 not worth a slot"])
+        # Nothing fits, so Recover does not take the round; the safe default moves.
+        self.assertEqual(out.yielded, [])
         self.assertEqual(out.state, "Explore")
         self.assertIsNotNone(out.intents)
 
@@ -200,8 +200,8 @@ class RecoverDispatchTest(unittest.TestCase):
         w.chest_contents[80] = [5]
         self.assertEqual(dispatch(w, ctx(scripted(goals=[]), m)).state, "Recover")
         w.chest_contents[80] = []
-        w._refresh_death_chest()
-        self.assertIsNone(w.death_chest)
+        w._refresh_death_chests()
+        self.assertEqual(w.death_chests, {})
         out = dispatch(w, ctx(scripted(goals=[]), m))
         self.assertEqual((out.state, m.state), ("Explore", "Explore"))
 

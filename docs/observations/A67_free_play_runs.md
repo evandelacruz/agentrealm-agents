@@ -1680,3 +1680,77 @@ Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A120 
 1. **Explore, standing in for a travel walk, ignores where the walk is going** (`states/explore.py:78–93`, `safe_default`, which calls `explore_outcome` with `op=None`; Travel hands over at `states/travel.py:111–112`). Travel's route to the entrance at (532, 311) ran out of known ground: its last waypoint was (538, 353), and the last cell it reached was (530, 349). Explore then ran as the safe default with no target of its own. It took the frontier at (545, 347), then (546, 373) to the south, then (414, 369), 120 cells west, while the entrance stayed north, 36 cells at closest. **Rule:** when Explore runs because the top op's walk is waiting on unexplored ground, it explores toward that op's destination. If no frontier brings the destination nearer, the op is reported stalled.
 
 2. **The stage 2 potion bar is held at any cost in time** (`strategist.py:1128–1152`, `readiness`, `READY_POTIONS`). After the mail, the bar of 3 potions took two 10-gem buys at 0.2 gems a cut, about 300 s of the 600. The planner said so ("need 10 for the third potion (2 held, bar 3)"). It had no way to weigh that against the entrance 88 cells off. **Rule:** a readiness bar the plan must grind for comes with its cost in time, so the planner can weigh it against the next stage's goal.
+
+### Run 21: a whole run saving for the middle chest at 7/10 health, which the plan expected to recover while gathering off safe ground
+
+- **Code:** `main` at `6c0385c`. Since run 20: A91 (runner cleanup), A120 (Travel keeps its walk and asks the planner rather than letting the safe default stand in), A121 (State `readiness` stage 2 `to_close`: the gems short and minutes at the measured gather rate for each unmet check a purchase closes; the bars are guidance).
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile, `--seconds 600`.
+- **Knowledge base:** kept from run 20.
+- **Verdict:** exit 0, **`FAIL` (M10) on 4 API errors**, all server-side `entities` reads, of three kinds: a read timeout, a 502 and a 503 "maintenance". The park **parked safe** at (428, 400) after 3.2 s. The character started at **8/10**, 4 lives and **0 gems** on safe ground at (428, 398), with the bronze_sword armed, the bronze_mail worn, 3 potions and 10 pack slots (6 used).
+- **Gate summary (M10):** deaths **0**; API errors **4**; readable cells seen 12 (unread 0); NPCs seen 19 (never spoken 5); duplicate break attempts 0. Planner: 33 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–92 s | `gather_gems` (432, 400), 50 | "Stage 2 readiness is met, but with 0 gems and nothing to buy, gems are the only reachable work … get gems for the chest, then explore toward the closest entrances." Gather walked south and Detour turned off toward the gem piles near (414, 414) **three times** (8 s, 34 s, 56 s), each given up short. Between them, Gather's walk to (435, 410) came back north to about (415, 389). **No gem** (defect 3). |
+| 92–148 s | `gather_gems` (432, 400) with `fight`, then in place, then (432, 400) again | "Gather stalled 78 s … snotlings hold the ground." Two stray cuts, a walk north to (410, 362), and Fight **killed snotling 215** with one swing at 118 s. |
+| 148–582 s | `gather_gems` (432, 400), 10 then 50, `fight` | Fight **killed snotling 247** with one swing at 156 s, and health went 8 → 7. Then steady cutting at region (432, 400): **0 → 25** in 159–582 s, about 3.5 gems a minute while cutting (`gather_run` averaged 2.3 over the whole gather, stalled start included). "Stage 2 is met except the health bar, which recovers while gathering." It did not: **7/10 from 159 s to the end**, never on safe ground (defect 1). |
+| 582–600 s | `buy` small_potion, `gather_gems` 60/65 | "Health is 7/10, below the stage 2 health bar … buying one adds to the reserve." Bought a 4th potion (25 → 15) and kept gathering. "Once the chest is bought, or health is at the bar, move on to a level entrance." |
+
+#### Pack, stage, entrance and level attempts
+
+- **Pack slots:** 10, 6 used at the start; 10, 7 used at the end. The middle_chest (10 → 30, 50 gems) was the plan's target all run.
+- **Stage:** **stage 2 met from 0 to 156 s** (8/10 is at the bar of 8): the plan still chose to save for the chest rather than move to stage 3. Snotling 247's hit at 156 s took health to 7/10, and from then to the end **stage 2 was not met** (`health_at_bar` false in every State from 163 s). Every other check was met. `to_close` lists no row for health, since no purchase closes it.
+- **Entrance and level:** none. No `travel` op was set, so A120's hand-over never came up, and no `no_way_on` ask was made.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **0** | **16** (+26 earned, −10 spent) |
+| Health | 8/10 | 7/10 |
+| Armed | bronze_sword | bronze_sword |
+| Worn | bronze_mail | bronze_mail |
+| Pack | 6/10 slots | 7/10 slots |
+| Potions | 3 | 4 |
+
+Bought: one small_potion (10), at 7/10.
+
+#### Gems earned
+
+**26** in 600 s (2.6 a minute over the run; `gather_run` measured 2.3 a minute while the gather was on top), all from grass at region (432, 400) from 159 s on (126 cuts, 2 with no effect). There were none in the first 159 s, no piles were taken, and the two kills dropped nothing.
+
+#### Fights
+
+| Time | Hostile | Started by | Outcome |
+|---|---|---|---|
+| 117–118 s | snotling 215 | us (`fight` on the gather) | **Killed**, one swing (5). |
+| 153–156 s | snotling 247 | us | **Killed**, one swing (6). Health 8 → 7. |
+
+#### Run 20 defects, checked
+
+| Defect | Run 21 | |
+|---|---|---|
+| Explore stands in for a travel walk (A120) | **Not tested.** No `travel` op. | |
+| A readiness bar held whatever it costs in time (A121) | **Partly.** `to_close` priced nothing this run: potions, weapon and armor were met, and health has no row. The plan stayed in stage 2 on the health check and saved for the chest. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 236,998, output 7,438, cache write 108,925, cache read 4,248,075 |
+
+#### Decision mix
+
+Intents: 454 `Step`, 858 `Wait`, 132 `Use` (130 on grass: 126 cuts that took effect, 2 with no effect and 2 that `gather_run` did not count; 2 swings), 27 `Take`. Call mix: 728 `tick`, 204 `entities`, 116 `zone`, 75 `strategist`, 49 `self`, 16 `position`, 12 `terrain`, and 1 `stuck` record (a detour attempt that lapsed).
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 are A124 (every unmet readiness check shows how it closes and what that costs, health included, and an upgrade the plan saves toward shows its minutes at the measured gather rate), in flight in #223, which brings its PLAN.md row. Defect 3 is queued for a row of its own: a detour find given up short is not picked again until something about it changes.
+
+1. **An unmet health check comes with no way to close it, so the plan assumes one** (`strategist.py:1174–1209`, `cost_to_close`, which leaves health out; `states/heal.py:129–131`, Heal yields to the plan's op above `low_health`). Health was 7/10 against a bar of 8 from 159 s to the end. The planner wrote "the health bar recovers while gathering", but every zone read was `safe: false` and health never moved. Heal does not rest above `low_health` while an op is on top, so nothing closed the check, and the stage stayed unmet for 440 s. **Rule:** every unmet readiness check shows how it closes and what that costs: health by resting on safe ground (minutes at the known regen) or a potion. The plan never relies on a check closing by itself.
+
+2. **Saving for an upgrade shows its gems, not its time** (`strategist.py:237`, `upgrades_for_sale` with `gems_short` only). The plan kept `gather_gems` for the 50-gem middle_chest all run, at `gather_run`'s 2.3 gems a minute: about 22 minutes (about 14 at the 3.5 a minute of steady cutting). It ended 34 gems short, with no entrance attempted. A121 prices the stage 2 checks in minutes but not the upgrade the plan saves toward. **Rule:** anything the plan saves gems for shows its minutes at the measured rate, so the planner weighs it against the next stage's goal.
+
+3. **A detour find given up short is picked again unchanged** (`states/detour.py:201–271`, `detour_find` and `_still_on`). In the first 92 s Detour set off for the gem piles near (414, 414) three times, each time from about (416, 390), and each was given up before a take. Gather's walk to (435, 410) came back north between them. 92 s and no gem. The legs were 10+ cells, so the pacing guard never fired. **Rule:** a find given up is not picked again until something about it changes (seen afresh, a new route, the hostile that barred it gone).

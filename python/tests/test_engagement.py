@@ -14,12 +14,13 @@ from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.engagement import BREAK_EVEN, fight_bar, fights, sync_engagement
+from agentrealm_agent.engagement import BREAK_EVEN, CHASE_PROBE_TICKS, fight_bar, fights, sync_engagement
 from agentrealm_agent.hostile_ground import Danger, danger
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.detour import Detour, detour_find
+from agentrealm_agent.states.fight import held_target
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.survival import should_retreat, win_ratio
 from agentrealm_agent.world import Entity, Sighting, WorldModel, chebyshev
@@ -123,13 +124,98 @@ class OneDecisionTest(unittest.TestCase):
         self.assertIs(c.memory.engagement, e)
 
     def test_the_engagement_ends_when_nobody_is_in_range_or_hitting(self):
-        w, c = world(), ctx()
+        # A flee decision: it ends once the biter is out of range and quiet.
+        w, c = world(health=3), ctx()
         w.entities = [biter()]
-        sync_engagement(w, c.memory, c.policy, c.params)
+        self.assertFalse(sync_engagement(w, c.memory, c.policy, c.params).fight)
         w.entities = [biter(at=(20, 10))]
         w.tick += 100
         self.assertIsNone(sync_engagement(w, c.memory, c.policy, c.params))
         self.assertIsNone(c.memory.engagement)
+
+
+class FightGoesOnTest(unittest.TestCase):
+    """A fight decided on holds until it ends: dead, gone, out of reach or no longer closing (A113).
+
+    Free-play run 17: Travel walked past a hostile at its post, Fight closed
+    in and swung once, the hostile stepped back to its post out of range,
+    and Travel walked on, past it again: 20 s of turns, 6 swings, 3 hits taken.
+    """
+
+    def engaged(self):
+        w, c = world(), ctx()
+        w.entities = [biter()]
+        self.assertTrue(sync_engagement(w, c.memory, c.policy, c.params).fight)
+        w.entities = [biter(at=(14, 10))]  # back on its post, out of hostile_range
+        w.tick += 100  # and not hitting
+        return w, c
+
+    def sync(self, w, c):
+        """The engagement as dispatch brings it up to date: Fight's own target holds it."""
+        return sync_engagement(w, c.memory, c.policy, c.params, lambda e: held_target(w, c, e))
+
+    def test_a_member_back_on_its_post_is_still_fought(self):
+        w, c = self.engaged()
+        e = self.sync(w, c)
+        self.assertTrue(e is not None and e.fight)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Fight", out.reason)
+        step = (out.intents[0]["x"], out.intents[0]["y"])
+        self.assertLess(chebyshev(step, (14, 10)), chebyshev(w.pos, (14, 10)), "it closes in")
+
+    def test_the_fight_ends_when_the_member_is_dead_or_gone(self):
+        w, c = self.engaged()
+        w.entities = []
+        self.assertIsNone(self.sync(w, c))
+
+    def test_the_fight_ends_when_the_member_is_out_of_reach(self):
+        w, c = self.engaged()
+        for p in [(9, 9), (9, 10), (9, 11), (10, 9), (10, 11), (11, 9), (11, 10), (11, 11)]:
+            w.view.tiles[p] = "stone"  # walled in: no step closes on it
+        self.assertIsNone(self.sync(w, c))
+
+    def test_the_fight_ends_with_the_target_fight_cannot_swing_at(self):
+        # One rule for both: a member Fight may not attack holds nothing.
+        w, c = self.engaged()
+        c.never_attack = [CODE]
+        self.assertIsNone(self.sync(w, c))
+        self.assertNotEqual(dispatch(w, c).state, "Fight")
+
+    def test_a_chase_that_never_closes_ends(self):
+        """It steps back each time we step closer: after CHASE_PROBE_TICKS with
+        no new nearest gap, it is out of reach and the fight is over."""
+        w, c = self.engaged()
+        npc = w.entities[0]
+        states = []
+        for _ in range(20):
+            w.tick += 5
+            out = dispatch(w, c)
+            states.append(out.state)
+            if out.intents and out.intents[0]["verb"] == "SetPosition":
+                w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+                npc.pos = (w.pos[0] + 4, w.pos[1])  # keeps its distance
+        self.assertEqual(states[0], "Fight")
+        fought = states.index(next(s for s in states if s != "Fight"))
+        self.assertLessEqual(fought * 5, CHASE_PROBE_TICKS + 10, states)
+        self.assertNotIn("Fight", states[fought:], states)
+
+    def test_dispatch_fights_on_until_the_hostile_is_gone(self):
+        """Fight holds every decision between swings; nothing else walks in between."""
+        w, c = world(), ctx()
+        npc = biter()
+        w.entities = [npc]
+        states = []
+        for i in range(12):
+            w.tick += 5
+            if i % 3 == 2:
+                npc.pos = (npc.pos[0] + 2, npc.pos[1])  # it steps back after each swing
+            out = dispatch(w, c)
+            states.append(out.state)
+            if out.intents and out.intents[0]["verb"] == "SetPosition":
+                w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+        self.assertEqual(set(states), {"Fight"}, states)
+        w.entities = []
+        self.assertNotEqual(dispatch(w, c).state, "Fight")
 
 
 class CannotOutrunTest(unittest.TestCase):

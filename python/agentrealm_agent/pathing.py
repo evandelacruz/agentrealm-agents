@@ -25,6 +25,7 @@ from .navigation.stuck import Leg, NavAttempt
 from .healing import hurt
 from . import targets as targets_mod
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
+from .stalled import break_cells
 from .hostile_ground import ground_by_hostile
 from .survival import hostiles_in_range, is_hostile, pursuer_peaks, safe_goals, town_cell
 from .executor.movement import step_landing
@@ -656,7 +657,7 @@ def grid_params(
         if att is None or att.level != nav_stuck.BREAK:
             return params
         goal = att.target
-    costs = break_costs_for_planning(w, knowledge, goal)
+    costs = break_costs_for_planning(w, knowledge, goal, break_cells(m.stalled_ops, w.map_id) if m is not None else frozenset())
     if not costs:
         return params
     return dataclasses.replace(params, break_nominated=set(costs), break_costs=costs)
@@ -754,11 +755,12 @@ def escalation_step(
         if not nav_stuck.escalate(m, w, att, reason or "stuck"):
             return None
         if att.level == nav_stuck.BREAK:
-            choice = nominate_on_path(w, knowledge, w.pos, att.target) if w.pos else None
+            skip = break_cells(m.stalled_ops, w.map_id)
+            choice = nominate_on_path(w, knowledge, w.pos, att.target, skip) if w.pos else None
             if choice is not None:
-                att.break_x, att.break_y, att.break_cap = choice.pos[0], choice.pos[1], choice.capability
+                nav_stuck.set_break_target(att, choice.pos, choice.capability)
             else:
-                why = no_break_reason(w, knowledge, w.pos, att.target) if w.pos else "no_break"
+                why = no_break_reason(w, knowledge, w.pos, att.target, skip) if w.pos else "no_break"
                 if not nav_stuck.escalate(m, w, att, why):
                     return None
                 continue

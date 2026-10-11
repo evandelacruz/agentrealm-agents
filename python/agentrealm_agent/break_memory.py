@@ -238,10 +238,13 @@ def _route(start: Pos, goal: Pos) -> Iterator[Pos]:
         yield p
 
 
-def _choice_at(w: WorldModel, kb: KnowledgeBase | None, pos: Pos, held: set[str]) -> BreakChoice | None:
+def _choice_at(
+    w: WorldModel, kb: KnowledgeBase | None, pos: Pos, held: set[str], skip: frozenset[Pos] = frozenset()
+) -> BreakChoice | None:
     """The cheapest way to open ``pos`` with what is held: a capability known
-    to open it (``known_openers``) that has not failed there."""
-    if w.map_id is None or breakable_block(w, pos) is None:
+    to open it (``known_openers``) that has not failed there. None for a
+    cell in ``skip``: a block remembered as stalled (``stalled.break_cells``, A111)."""
+    if w.map_id is None or pos in skip or breakable_block(w, pos) is None:
         return None
     for cap in untried_capabilities(kb, w.map_id, pos, held & known_openers(w, kb, pos)):
         supply = pick_supply_for_capability(w, cap, kb)
@@ -251,15 +254,23 @@ def _choice_at(w: WorldModel, kb: KnowledgeBase | None, pos: Pos, held: set[str]
     return None
 
 
-def no_break_reason(w: WorldModel, kb: KnowledgeBase | None, start: Pos, goal: Pos) -> str:
+def no_break_reason(
+    w: WorldModel, kb: KnowledgeBase | None, start: Pos, goal: Pos, skip: frozenset[Pos] = frozenset()
+) -> str:
     """Why ``nominate_on_path`` found nothing, for stuck escalation's reasons:
     ``no_known_opener`` when a breakable stands on the route that nothing held
-    is known to open (or every known opener failed on), else ``no_break``."""
+    is known to open (or every known opener failed on), ``stalled_break``
+    when the only ones are remembered as stalled (``skip``), else ``no_break``."""
     held = held_capabilities(w, kb)
+    reason = "no_break"
     for p in _route(start, goal):
-        if breakable_block(w, p) is not None and _choice_at(w, kb, p, held) is None:
+        if breakable_block(w, p) is None:
+            continue
+        if p in skip:
+            reason = "stalled_break"
+        elif _choice_at(w, kb, p, held) is None:
             return "no_known_opener"
-    return "no_break"
+    return reason
 
 
 def nominate_on_path(
@@ -267,18 +278,19 @@ def nominate_on_path(
     kb: KnowledgeBase | None,
     start: Pos,
     goal: Pos,
+    skip: frozenset[Pos] = frozenset(),
 ) -> BreakChoice | None:
     """The first breakable on the straight route from ``start`` to ``goal`` we can still try.
 
     Only cells on that route are candidates: a breakable beside or behind us
-    does not open the way to ``goal``. A block no held item is known to open
-    is passed over (``_choice_at``).
+    does not open the way to ``goal``. A block no held item is known to open,
+    or one in ``skip`` (remembered as stalled), is passed over (``_choice_at``).
     """
     held = held_capabilities(w, kb)
     if not held or w.map_id is None:
         return None
     for p in _route(start, goal):
-        choice = _choice_at(w, kb, p, held)
+        choice = _choice_at(w, kb, p, held, skip)
         if choice is not None:
             return choice
     return None
@@ -288,9 +300,11 @@ def break_costs_for_planning(
     w: WorldModel,
     kb: KnowledgeBase | None,
     goal: Pos | None,
+    skip: frozenset[Pos] = frozenset(),
 ) -> dict[Pos, int]:
     """Break step costs for breakables on the straight route to ``goal`` that a
-    held item is known to open with a capability not yet failed there."""
+    held item is known to open with a capability not yet failed there, and
+    that are not in ``skip`` (remembered as stalled)."""
     if w.map_id is None or w.pos is None:
         return {}
     held = held_capabilities(w, kb)
@@ -301,7 +315,7 @@ def break_costs_for_planning(
         cells.update(p for p in _route(w.pos, goal) if breakable_block(w, p) is not None)
     costs: dict[Pos, int] = {}
     for p in cells:
-        choice = _choice_at(w, kb, p, held)
+        choice = _choice_at(w, kb, p, held, skip)
         if choice is not None:
             costs[p] = choice.cost
     return costs

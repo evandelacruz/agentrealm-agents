@@ -11,7 +11,7 @@ from ..executor.movement import direction_between
 from ..knowledge_base import KnowledgeBase
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
-from ..engagement import fights
+from ..engagement import Engagement, fights, held_members
 from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -23,8 +23,13 @@ from .intents import set_position, use_npc, use_on
 ATTACK_USES = 3
 
 
-def fight_target(w: WorldModel, policy, never_attack: list[str]) -> Entity | None:
-    """Nearest hostile in range (``survival.is_hostile``) that ``on_hostile = fight`` may swing at."""
+def fight_target(w: WorldModel, policy, never_attack: list[str], engagement: Engagement | None = None) -> Entity | None:
+    """Nearest hostile in range (``survival.is_hostile``) that ``on_hostile = fight`` may swing at.
+
+    With none in range, the nearest member still in view of ``engagement``
+    when its decision is fight: a fight goes on until it ends (A113,
+    ``engagement.held_members``), not only while the hostile stays in range.
+    """
     here = w.pos
     if here is None or policy.on_hostile != "fight":
         return None
@@ -35,6 +40,8 @@ def fight_target(w: WorldModel, policy, never_attack: list[str]) -> Entity | Non
         and not e.is_boss  # Boss fights bosses (A38)
         and chebyshev(e.pos, here) <= policy.hostile_range
     ]
+    if not hostiles:
+        hostiles = [e for e in held_members(w, engagement) if is_hostile(w, policy, e) and not e.is_boss]
     if not hostiles:
         return None
     target = min(hostiles, key=lambda e: (chebyshev(e.pos, here), e.id))
@@ -123,6 +130,17 @@ def close_step(w: WorldModel, target: Entity, blocked: set[Pos]) -> Pos | None:
     return min(options, key=lambda p: (chebyshev(p, target.pos), p))
 
 
+def held_target(world: WorldModel, ctx: PlayContext, engagement: Engagement) -> Entity | None:
+    """The hostile Fight goes on with in ``engagement``, a fight decided on:
+    the one ``fight_target`` picks, when Fight can swing at it or step closer.
+    None when the fight has nothing left Fight can act on (A113); the
+    engagement ends on it (``engagement.sync_engagement``)."""
+    target = fight_target(world, ctx.policy, ctx.never_attack, engagement)
+    if target is None or not can_engage(world, target, ctx):
+        return None
+    return target
+
+
 def can_engage(world: WorldModel, target: Entity, ctx: PlayContext) -> bool:
     """In weapon reach, or one open step brings us closer."""
     if in_weapon_reach(world, target, ctx.knowledge):
@@ -139,7 +157,7 @@ def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
         return False
     if policy.on_hostile != "fight" or on_safe_tile(world):
         return False
-    target = fight_target(world, policy, ctx.never_attack)
+    target = fight_target(world, policy, ctx.never_attack, ctx.memory.engagement)
     if target is None or not fights(ctx.memory):
         return False
     return can_engage(world, target, ctx)
@@ -147,6 +165,7 @@ def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
 
 class FightState(State):
     """Priority 2, before **Flee**. Swings or closes on the nearest allowed hostile
+    in range, else on the nearest member of the fight still in view (A113),
     when ``on_hostile = fight``, the engagement's decision is to fight
     (``engagement.sync_engagement``, the decision Flee and Retreat read too), and
     we are not on a safe tile; queues retreat steps behind ``Use`` when a safe
@@ -161,7 +180,7 @@ class FightState(State):
         return not should_fight(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        target = fight_target(world, ctx.policy, ctx.never_attack)
+        target = fight_target(world, ctx.policy, ctx.never_attack, ctx.memory.engagement)
         if target is None or world.pos is None:
             ctx.memory.path = []
             return StateOutcome(None, "no target", state=self.name)

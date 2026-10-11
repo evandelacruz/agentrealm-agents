@@ -225,5 +225,9 @@
 
   "A110": {"state": "done"},
 
-  "A112": {"state": "done"}
+  "A111": {"state": "done"},
+
+  "A112": {"state": "done"},
+
+  "A113": {"state": "done"}
 }

@@ -570,6 +570,7 @@ class Plan:
     used_id: int | None = None  # supply UseItem sent a Use on yourself for, for the head `use_item` op (A108)
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
+    map_id: int | None = None  # the map ``advance`` last settled the stack on: stalled records are read for it (A111)
 
     def snapshot(self) -> tuple:
         """The stack's progress, for :meth:`restore` after a side-effect-free probe."""
@@ -619,6 +620,7 @@ class Plan:
     def advance(self, world: WorldModel, memory: Memory | None = None) -> None:
         """Apply ``set_param`` ops reached in order, pop finished goals, and
         move a head still remembered as stalled below again (A104)."""
+        self.map_id = world.map_id
         while (op := self.current()) is not None:
             if op["op"] == "set_param":
                 self.params = apply_set_param(self.floor_params, self.params, op)
@@ -631,7 +633,7 @@ class Plan:
                 held = count_held(world, op["code"])
                 self.held_before = held if self.held_before is None else min(self.held_before, held)
             if not goal_done(op, world, self):
-                stall = find_stalled(memory.stalled_ops, op) if memory is not None else None
+                stall = find_stalled(memory.stalled_ops, op, self.map_id) if memory is not None else None
                 if stall is not None:
                     # An op that stalled and has no reason to retry yet never comes
                     # back on top when the op above it ends (A104).
@@ -642,7 +644,7 @@ class Plan:
                 return
             note_goal_done(memory, op, "goal_done")
             if memory is not None:
-                forget_stalled(memory.stalled_ops, op)
+                forget_stalled(memory.stalled_ops, op, self.map_id)
             self._pop_current()
 
     def drop_current(self, reason: str, memory: Memory | None = None) -> None:
@@ -685,7 +687,7 @@ class Plan:
         end = self.directive_end if self.index < self.directive_end else len(self.goals)
         records = memory.stalled_ops if memory is not None else []
         below = self.goals[self.index + 1 : end]
-        order, _, above = below_progress([op, *below], lambda o: o is op or find_stalled(records, o) is not None)
+        order, _, above = below_progress([op, *below], lambda o: o is op or find_stalled(records, o, self.map_id) is not None)
         if above is None:
             self.drop_current(reason, memory)
             return
@@ -701,7 +703,7 @@ class Plan:
             log.info("plan: finished op %r: %s", op, reason)
             note_goal_done(memory, op, reason)
             if memory is not None:
-                forget_stalled(memory.stalled_ops, op)
+                forget_stalled(memory.stalled_ops, op, self.map_id)
         self._pop_current()
 
     def note_progress(self) -> None:

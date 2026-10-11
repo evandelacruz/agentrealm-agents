@@ -5,6 +5,16 @@ An engagement starts when a hostile comes within ``policy.hostile_range``
 us within ``survival.THREAT_MEMORY_TICKS``. Its group only grows: a member
 that steps out of range is still in the fight.
 
+An engagement whose decision is fight holds until that fight ends (A113):
+while Fight still has a target in it (the ``held_target`` dispatch passes:
+the very hostile Fight would swing at or step toward, ``fight.held_target``),
+it does not end, and Fight goes on with that hostile, so a walking op never
+resumes between swings at a hostile that stepped back to its post. It ends
+when Fight has no such target (every member dead, gone from view, forbidden
+or out of reach), when a chase stops closing the gap
+(``CHASE_PROBE_TICKS``, as Flee's probe asks running to work), or when the
+decision turns (the Retreat and Flee rules then run as for any engagement).
+
 The decision is the win estimate (``survival.win_ratio``: live health, the
 threat table's measured hits and misses, the armed weapon, the armor worn)
 against a bar:
@@ -26,10 +36,11 @@ is carried out.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Callable
 
 from .survival import (
+    GAP_PROBE_TICKS,
     combat_group,
     effective_fight_margin,
     effective_risk,
@@ -38,7 +49,7 @@ from .survival import (
     win_ratio,
     worn_defense,
 )
-from .world import Entity, WorldModel
+from .world import Entity, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -50,24 +61,41 @@ HostileKey = tuple[str, int]
 # group before it kills us.
 BREAK_EVEN = 1.0
 
+# Ticks a chase after a member out of range gets to bring the gap below the
+# nearest it has been; then the member is out of reach and the fight ends.
+# The same window Flee's probe gives running away (``survival.GAP_PROBE_TICKS``).
+CHASE_PROBE_TICKS = GAP_PROBE_TICKS
+
 
 @dataclass(frozen=True)
 class Engagement:
     """One fight-or-flee decision: the hostiles it is against, whether
-    running away was found not to open distance, the estimate, and whether
-    it says fight."""
+    running away was found not to open distance, the estimate, whether it
+    says fight, and how a chase after a member out of range is going."""
 
     group: frozenset[HostileKey]
     cannot_outrun: bool = False
     ratio: float = float("inf")
     fight: bool = False
+    # While Fight chases a member out of range: the nearest gap so far, and
+    # the tick it was reached. None while a member is in range.
+    chase: tuple[int, int] | None = None
 
 
-def sync_engagement(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]) -> Engagement | None:
+def sync_engagement(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    params: dict[str, float | int],
+    held_target: Callable[[Engagement], Entity | None] | None = None,
+) -> Engagement | None:
     """Bring ``m.engagement`` up to this decision; None with no hostile in it.
 
     Dispatch calls it once per decision, before any state runs, so every
-    state reads the same decision (``fights``).
+    state reads the same decision (``fights``). With no hostile in range and
+    none hitting us, a fight goes on while ``held_target`` names one Fight
+    can still act on and the chase after it closes the gap (``chase_on``);
+    with no ``held_target``, it ends as a flee does.
 
     A hostile that joins the engagement off its post stretches that post's
     reach to where we stand (``WorldModel.note_came_for_us``): it came out
@@ -80,9 +108,15 @@ def sync_engagement(w: WorldModel, m: Memory, policy: Policy, params: dict[str, 
         return None
     joined = combat_group(w, policy)
     e = m.engagement
-    if not joined and (e is None or not recently_attacked(w)):
-        m.engagement = None
-        return None
+    chase = None
+    if not joined:
+        if e is not None and not recently_attacked(w):
+            chase = chase_on(w, e, held_target)
+            if chase is None:
+                e = None
+        if e is None:
+            m.engagement = None
+            return None
     known = e.group if e is not None else frozenset()
     newcomers = [h for h in joined if (h.kind, h.id) not in known]
     for h in newcomers:
@@ -90,8 +124,37 @@ def sync_engagement(w: WorldModel, m: Memory, policy: Policy, params: dict[str, 
     if newcomers:
         m.reprice_targets()
     group = known | {(h.kind, h.id) for h in joined}
-    m.engagement = decide(w, policy, params, group, e is not None and e.cannot_outrun)
+    m.engagement = replace(decide(w, policy, params, group, e is not None and e.cannot_outrun), chase=chase)
     return m.engagement
+
+
+def held_members(w: WorldModel, e: Engagement | None) -> list[Entity]:
+    """The members of a fight decided on that are still in view: whom Fight
+    may go on with once none is in range (``fight.fight_target``)."""
+    if e is None or not e.fight:
+        return []
+    return [h for h in w.entities if (h.kind, h.id) in e.group]
+
+
+def chase_on(
+    w: WorldModel, e: Engagement, held_target: Callable[[Engagement], Entity | None] | None
+) -> tuple[int, int] | None:
+    """The fight decided on goes on with no member in range: the chase's
+    nearest gap and since when, or None when the fight is over.
+
+    Over when it is not a fight, Fight has no target in it (``held_target``),
+    or the gap to that target has not fallen below the nearest it has been
+    for more than ``CHASE_PROBE_TICKS``.
+    """
+    target = held_target(e) if e.fight and held_target is not None and w.pos is not None else None
+    if target is None:
+        return None
+    gap = chebyshev(w.pos, target.pos)
+    if e.chase is None or gap < e.chase[0]:
+        return gap, w.tick
+    if w.tick - e.chase[1] > CHASE_PROBE_TICKS:
+        return None
+    return e.chase
 
 
 def decide(

@@ -15,7 +15,18 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
 from agentrealm_agent import runner as runner_module
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.stalled import STALLED_KEPT, below_progress, find, lapse, remember, retry_basis
+from agentrealm_agent.stalled import (
+    STALLED_KEPT,
+    below_progress,
+    break_cells,
+    find,
+    forget,
+    lapse,
+    map_local,
+    remember,
+    retry_basis,
+    target_of,
+)
 from agentrealm_agent.states.dispatch import dispatch
 from agentrealm_agent.strategist import system_prompt
 from agentrealm_agent.world import WorldModel
@@ -124,6 +135,62 @@ class AdvanceTest(unittest.TestCase):
         plan = Plan([dict(GATHER), dict(TRAVEL), dict(EQUIP)], dict(PARAM_DEFAULTS))
         plan.advance(w, m)
         self.assertEqual(plan.current()["op"], "travel")
+
+
+class MapScopeTest(unittest.TestCase):
+    """A stalled op's record is its map's: an op's x, y name a cell there (A111)."""
+
+    def on_maps(self, *maps):
+        m = Memory()
+        for map_id in maps:
+            remember(m.stalled_ops, BREAK, f"no way on map {map_id}", 100, retry_basis(WorldModel(character_id=1), None), map_id)
+        return m
+
+    def test_find_reads_only_this_maps_record(self):
+        m = self.on_maps(1)
+        self.assertIsNotNone(find(m.stalled_ops, BREAK, 1))
+        self.assertIsNone(find(m.stalled_ops, BREAK, 2))
+        self.assertEqual(find(self.on_maps(1, 2).stalled_ops, BREAK, 2).why, "no way on map 2")
+
+    def test_finishing_on_one_map_keeps_the_other_maps_record(self):
+        m = self.on_maps(1, 2)
+        forget(m.stalled_ops, BREAK, 2)
+        self.assertEqual([r.map_id for r in m.stalled_ops], [1])
+        self.assertEqual(break_cells(m.stalled_ops, 1), {(5, 5)})
+
+    def test_an_op_with_no_cell_of_its_own_stays_stalled_on_any_map(self):
+        # A buy, an equip or a gather with no region stalled wherever it runs:
+        # a new map is no reason to retry it (A104).
+        m = Memory()
+        for op in (GATHER, EQUIP, {"op": "buy", "code": "potion"}):
+            remember(m.stalled_ops, op, "no progress", 100, retry_basis(WorldModel(character_id=1), None), 1)
+            self.assertIsNotNone(find(m.stalled_ops, op, 2), op)
+        plan = Plan([dict(EQUIP), dict(TRAVEL)], dict(PARAM_DEFAULTS))
+        plan.advance(WorldModel(character_id=1, map_id=2, pos=(0, 0), gems=25), m)
+        self.assertEqual([op["op"] for op in plan.ops_left()], ["travel", "equip"], "still held below on map 2")
+
+    def test_a_travel_that_names_its_map_is_one_target_everywhere(self):
+        there = {"op": "travel", "to": "point", "x": 40, "y": 2, "map_id": 3}
+        m = Memory()
+        remember(m.stalled_ops, there, "no progress", 100, retry_basis(WorldModel(character_id=1), None), 1)
+        self.assertIsNotNone(find(m.stalled_ops, there, 2))
+        forget(m.stalled_ops, there, 2)
+        self.assertEqual(m.stalled_ops, [])
+
+    def test_only_cell_targets_are_map_local(self):
+        self.assertTrue(map_local(target_of(BREAK)))
+        self.assertTrue(map_local(target_of(TRAVEL)))
+        self.assertTrue(map_local(target_of({"op": "gather_gems", "count": 20, "x": 4, "y": 4})))
+        self.assertFalse(map_local(target_of(GATHER)))
+        self.assertFalse(map_local(target_of(EQUIP)))
+        self.assertFalse(map_local(target_of({"op": "travel", "to": "point", "x": 1, "y": 1, "map_id": 3})))
+
+    def test_advance_on_another_map_neither_holds_nor_forgets_it(self):
+        m = self.on_maps(1)
+        plan = Plan([dict(GATHER), dict(BREAK), dict(EQUIP)], dict(PARAM_DEFAULTS))
+        plan.advance(WorldModel(character_id=1, map_id=2, pos=(0, 0), gems=25), m)
+        self.assertEqual(plan.current()["op"], "break_block", "map 1's stall is no reason on map 2")
+        self.assertEqual(len(m.stalled_ops), 1)
 
 
 class RunnerExpireTest(unittest.TestCase):

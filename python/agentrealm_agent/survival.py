@@ -16,6 +16,12 @@ if TYPE_CHECKING:
     from .config import Policy
     from .knowledge_base import KnowledgeBase
 
+# Ticks a move away from or toward a hostile gets to change the gap before it
+# counts as not working: Flee's escape probe (A9) and Fight's chase bound
+# (A113). Ticks, not decisions: under urgent polling a state decides every tick
+# or two, and a step takes several ticks.
+GAP_PROBE_TICKS = 30
+
 # Stated assumptions until measured (GAME_NOTES.md Open questions, "Assumed
 # until measured"). Only the win estimate reads them; A23 refines it.
 HOSTILE_ATTACK_INTERVAL_TICKS = 15

@@ -36,6 +36,7 @@ from ..pathing import (
     reachable_safe_goal,
     safe_ruled_out,
 )
+from ..stalled import break_cells
 from ..survival import hostiles_in_range, hostiles_reaching, town_cell
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
@@ -357,7 +358,7 @@ def _cut_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at: 
     the walk to it then decides, and gives it up if it goes nowhere. Food
     behind bushes the weapon cuts was given up ``no_path`` before (A16 Walk run 4).
     """
-    choice = nominate_on_path(w, ctx.knowledge, w.pos, at)
+    choice = nominate_on_path(w, ctx.knowledge, w.pos, at, break_cells(m.stalled_ops, w.map_id))
     if choice is None:
         return None
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)

@@ -289,9 +289,9 @@ class DispatcherFallThroughTest(unittest.TestCase):
         real = fight_module.fight_target
         calls = iter([True])
 
-        def target_gone_after_guard(world_, policy, never_attack):
+        def target_gone_after_guard(world_, policy, never_attack, engagement=None):
             # The guard sees the target; by act the world has changed.
-            return real(world_, policy, never_attack) if next(calls, False) else None
+            return real(world_, policy, never_attack, engagement) if next(calls, False) else None
 
         with mock.patch.object(fight_module, "fight_target", side_effect=target_gone_after_guard):
             out = dispatch(w, c)

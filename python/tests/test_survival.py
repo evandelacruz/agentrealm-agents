@@ -116,8 +116,8 @@ class RetreatTest(unittest.TestCase):
         m.state, m.path, m.goal = "Retreat", [(2, 0), (3, 0), (4, 0)], "safe"
         m.nav_stuck.cells_map = w.map_id
         m.nav_stuck.recent_cells = [(2, 0), (1, 0), (2, 0), (1, 0), (2, 0)]
-        m.nav_stuck.recent_moves = [("safe", "Retreat")] * 5
-        m.nav_stuck.last_move = ("safe", "Retreat")
+        m.nav_stuck.recent_moves = [("safe", "Retreat", "")] * 5
+        m.nav_stuck.last_move = ("safe", "Retreat", "")
         out = dispatch(w, ctx(m=m, hostile=["npc"]))
         self.assertEqual(out.state, "Retreat")
         self.assertEqual(step(out), (2, 1))
@@ -321,8 +321,8 @@ class FleeTest(unittest.TestCase):
         m.flee_path, m.state = [back], "Flee"  # the escape that was pacing
         m.nav_stuck.cells_map = w.map_id
         m.nav_stuck.recent_cells = [back, here, back, here, back]
-        m.nav_stuck.recent_moves = [("", "Flee")] * 5
-        m.nav_stuck.last_move = ("", "Flee")
+        m.nav_stuck.recent_moves = [("", "Flee", "")] * 5
+        m.nav_stuck.last_move = ("", "Flee", "")
         out = dispatch(w, c)
         self.assertEqual(out.state, "Flee")
         self.assertEqual(step(out), (3, 2))
@@ -379,8 +379,8 @@ class FleeTest(unittest.TestCase):
         m.state = "Flee"
         m.nav_stuck.cells_map = w.map_id
         m.nav_stuck.recent_cells = [back, here, back, here, back]
-        m.nav_stuck.recent_moves = [("", "Flee")] * 5
-        m.nav_stuck.last_move = ("", "Flee")
+        m.nav_stuck.recent_moves = [("", "Flee", "")] * 5
+        m.nav_stuck.last_move = ("", "Flee", "")
         out = dispatch(w, ctx(m=m, hostile_range=3))
         self.assertEqual(out.state, "Flee")
         self.assertEqual(m.flee_path[-1], (1, 3), m.flee_path)

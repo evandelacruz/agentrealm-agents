@@ -1513,7 +1513,7 @@ class Strategist:
             if len(kept) < len(goals):
                 record["given_up_filtered"] = [g for g in goals if g not in kept]
                 goals = kept
-        goals = self._keep_stalled_below(runner.mem.stalled_ops, goals, record)
+        goals = self._keep_stalled_below(runner.mem.stalled_ops, goals, record, runner.world.map_id)
         self.deferred = None  # a newer reply decides
         old = runner.plan
         pinned = old.directive_ops()  # directives ops left: they stay on top
@@ -1569,17 +1569,19 @@ class Strategist:
             return
         self._apply(runner, new, record, len(pinned))
 
-    def _keep_stalled_below(self, records: list[StalledOp], goals: list[dict[str, Any]], record: dict[str, Any]) -> list[dict[str, Any]]:
+    def _keep_stalled_below(
+        self, records: list[StalledOp], goals: list[dict[str, Any]], record: dict[str, Any], map_id: int | None = None
+    ) -> list[dict[str, Any]]:
         """A reply that puts a stalled op back on top (A104) has it moved just
         below its first op that can make progress, or left out when it has
         none, until a reason to retry comes (``stalled.lapse``). Said through
         last_reply_rejected, so the planner learns why."""
-        order, moved, above = below_progress(goals, lambda g: find_stalled(records, g) is not None)
+        order, moved, above = below_progress(goals, lambda g: find_stalled(records, g, map_id) is not None)
         if not moved:
             return goals
         record["stalled_kept_below"] = moved
         for op in moved:
-            stall = find_stalled(records, op)
+            stall = find_stalled(records, op, map_id)
             where = f"moved below {json.dumps(above, sort_keys=True)}" if above is not None else "left out: no op in the reply can make progress"
             self.rejected = [
                 *self.rejected,

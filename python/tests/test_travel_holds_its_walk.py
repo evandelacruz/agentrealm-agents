@@ -23,7 +23,7 @@ from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import BUILTIN_EXPLORE_RADIUS, EXPLORE_ANYWHERE, Plan, builtin_way_on, validate_goal_op
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.ask import ask_the_planner
-from agentrealm_agent.strategist import Strategist
+from agentrealm_agent.strategist import MAP_RADIUS, Strategist
 from agentrealm_agent.world import Entity, WorldModel, chebyshev
 
 GLYPHS = {".": "dirt", "#": "wall"}
@@ -177,6 +177,11 @@ class TraceYieldedTest(unittest.TestCase):
         att.level = nav_stuck.BREAK
         d = decide(w, c.memory, c.policy, c.rng, plan=c.plan, directives=c.directives)
         self.assertIn("Travel: travel:point 1,-20: no step toward it", d.yielded)
+
+
+class BuiltinRadiusTest(unittest.TestCase):
+    def test_builtin_explore_radius_is_state_map_reach(self) -> None:
+        self.assertEqual(BUILTIN_EXPLORE_RADIUS, MAP_RADIUS)
 
 
 if __name__ == "__main__":

@@ -819,8 +819,9 @@ def builtin_goals(policy: Policy, *, goto_satisfied: bool = False) -> list[GoalO
     return ops
 
 
-# The ground the built-in planner explores round a ``no_way_on`` ask (A120): State
-# ``map``'s reach, the ground the AI planner would read the way on from.
+# How far round a ``no_way_on`` ask the built-in planner explores (A120): the
+# reach of State ``map`` (``strategist.MAP_RADIUS``), the ground the AI planner
+# reads the way on from.
 BUILTIN_EXPLORE_RADIUS = 15
 
 

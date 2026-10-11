@@ -120,6 +120,8 @@ from .equip import CUT, does_job, hunting_ceiling, loadout_strength, weapon_rank
 from .supplies import armor_defense, is_weapon, weapon_damage, worn_slot, what_it_does
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
+from .loot import carry_slots_used
+from .pack import reserved_supplies
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
 from .survival import known_hostile, retreat_goal
 from .travel.knowledge import iter_entrances, town_from_kb
@@ -196,6 +198,8 @@ A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows i
 State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
 
 Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage, defense (armor protects only while worn, never in hand; worn, it lowers both how often and how hard a hostile hits), chest_capacity, and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed). Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held.
+
+Pack room: State pack gives the carry slots used and the total (held, stowed, worn and armed each take one; gems and lives take none) and reserved, the carried items the stack's ops will use (a use_block's or equip's code, a fight_boss's armed and worn, a break_block's tool). Making room never drops a reserved item, and never drops on a shop cell, where a dropped item turns into shop stock. When a buy or fetch_item needs a slot and the pack is full, the character drops plain junk (no price seen, no heal) on its own; otherwise it drops only what the op names in drop, and an op that names nothing it may drop comes back to you as dropped, with the items it could drop. So before a buy into a full pack, pick what to give up and name it in drop.
 
 Weapons and the hunting ground: which weapon is armed follows one rule, by the job at hand. For fighting (an equip with no code), the best weapon held: one that keeps strength within the highest hunting-ground ceiling known beats one that would put it over; among those alike, more damage wins; with no ceiling known, damage alone decides. For cutting grass (gather_gems), the best held item that cuts, by the same order. So a weapon that would put strength over the ceiling is not armed while a held weapon keeps it within, one armed over it is swapped back, and a weapon that cannot cut (a mallet) is put away while gathering and armed again once the gather work ends. State hunting_strength gives the strength as armed and worn now (attack power 2, plus the armed weapon's damage, plus worn armor's defense) and that ceiling; upgrades_for_sale lists weapons by the fighting rule, with cuts (whether it can cut grass). Weigh a weapon by the work it will do: one that cannot cut adds nothing to gem gathering. To arm or wear an item the rule does not pick (a stronger weapon for a level boss, say), name it: an equip with a code arms or wears exactly that held item, and a later equip with no code applies the rule again. A gather_gems arms by the cutting rule, so it can set aside a named weapon that cuts but would put strength over the ceiling, and does not arm it again afterwards; name it again once the gather work ends.
 
@@ -568,6 +572,7 @@ def build_prompt(
         f"map_level={w.map_level} armed={w.armed_code} lives={w.lives}",
         f"worn={json.dumps(w.worn_codes, sort_keys=True)}",
         held_line(w),
+        pack_line(w, plan, knowledge),
         potion_line(w),
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         *safety_lines(w, knowledge),
@@ -834,6 +839,15 @@ def held_line(w: WorldModel) -> str:
         entry.update(what_it_does(code))
         rows[code] = entry
     return f"held={json.dumps(rows, sort_keys=True)}"
+
+
+def pack_line(w: WorldModel, plan: Plan, knowledge: KnowledgeBase | None) -> str:
+    """Carry slots used and the total (A102), and the carried items the stack's
+    ops will use, by code (``pack.reserved_supplies``): making room never drops
+    those, so a pickup into a full pack is weighed against the rest."""
+    reserved = Counter(s.code for s in reserved_supplies(w, plan.ops_left(), knowledge) if s.code)
+    row = {"slots_used": carry_slots_used(w), "slots_total": w.carry_capacity, "reserved": dict(sorted(reserved.items()))}
+    return f"pack={json.dumps(row, sort_keys=True)}"
 
 
 # The gear upgrades for sale State lists, cheapest first.

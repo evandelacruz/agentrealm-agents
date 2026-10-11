@@ -6,7 +6,7 @@ from __future__ import annotations
 from .. import targets as targets_mod
 from ..investigation import in_sight
 from ..knowledge_base import knowledge_items
-from ..loot import Pickup, loot_score, pickup_room
+from ..loot import Pickup, loot_score
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
@@ -26,7 +26,8 @@ from ..travel.resolve import ResolvedDestination, resolve_travel
 from ..world import Entity, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
 from .explore import explore_outcome, plan_sets
-from .intents import drop, set_position, take
+from .intents import set_position
+from .pickup import planned_take
 from .travel import walk_to
 
 # The commitment of the shop cell a ``buy`` walks to while its item is out of sight (A71).
@@ -45,6 +46,8 @@ class ShopState(State):
     leaves the buy to the safe default, which wandered off into a pack
     (free-play run 4). The op is dropped when every known shop is in sight
     without the item, or the item is in sight and costs more gems than we have.
+    With a full pack, room is the pack rule's (``pack.make_room``, A102): the
+    op's ``drop`` names what to give up when nothing held is plain junk.
     """
 
     name = "Shop"
@@ -69,21 +72,6 @@ def _target(w: WorldModel, ctx: PlayContext) -> Entity | None:
     return pick_supply(w, wants, knowledge_items(ctx.knowledge), ctx.memory.shop_refusals)
 
 
-def shop_take_intents(w: WorldModel, items: dict, supply: Entity) -> list[dict] | None:
-    """``Take`` the priced supply; with a full pack, ``Drop`` the worst held
-    supply first, but only when the purchase outscores it (Loot's rule, A20)."""
-    price = price_of(supply, items)
-    if price is None or not can_afford(w, price):
-        return None
-    priced = {**items, supply.code: {**(items.get(supply.code) or {}), "gem_price": price}}
-    room = pickup_room(w, Pickup(supply.id, supply.code, supply.pos, None, loot_score(supply.code, priced)), items)
-    if room is False:
-        return None
-    if room is True:
-        return [take(supply.id)]
-    return [drop(room.id), take(supply.id)]
-
-
 def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
     supply = _target(w, ctx)
     if supply is None:
@@ -93,12 +81,19 @@ def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
     assert here is not None
     label = supply.code or str(supply.id)
     if chebyshev(supply.pos, here) <= 1:
-        intents = shop_take_intents(w, knowledge_items(ctx.knowledge), supply)
-        if intents is None:
-            return StateOutcome(None, f"no room for {label}", state=state)
-        # Settled when this Take lands or gems drop (runner, sync_shop).
-        ctx.memory.shop_pending = (supply.id, supply.code, w.gems, supply.pos, w.map_id, w.tick)
-        return StateOutcome(intents, f"buy {label}", state=state)
+        items = knowledge_items(ctx.knowledge)
+        price = price_of(supply, items)
+        if price is None or not can_afford(w, price):
+            return StateOutcome(None, f"cannot buy {label}", state=state)
+        # Room by the pack rule (A102): the supply scores at the price it is sold for.
+        priced = {**items, supply.code: {**(items.get(supply.code) or {}), "gem_price": price}}
+        p = Pickup(supply.id, supply.code, supply.pos, None, loot_score(supply.code, priced))
+        out = planned_take(w, ctx, p, state)
+        if out.intents and out.intents[-1].get("verb") == "Take":
+            # Settled when this Take lands or gems drop (runner, sync_shop).
+            ctx.memory.shop_pending = (supply.id, supply.code, w.gems, supply.pos, w.map_id, w.tick)
+            out.reason = f"buy {label}" if len(out.intents) == 1 else f"buy {label}: {out.reason}"
+        return out
     step = _step_toward(w, ctx.memory, ctx, supply.pos)
     if step is None:
         return StateOutcome(None, f"no step toward {label}", state=state)

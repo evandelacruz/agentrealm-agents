@@ -5,8 +5,10 @@ from __future__ import annotations
 from ..config import Policy
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase, knowledge_items
-from ..loot import carry_slots_used, loot_score, worst_droppable
+from ..loot import Pickup, carry_slots_used, loot_score
 from ..memory import Memory
+from ..pack import DROP, make_room
+from ..plan import GoalOp
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, guided_step, nav_search
@@ -52,29 +54,28 @@ def _chest_supplies(contents: list) -> list[InventorySupply]:
 
 
 def death_chest_recover_intents(
-    w: WorldModel, chest_id: int, contents: list, items: dict
+    w: WorldModel, chest_id: int, contents: list, knowledge: KnowledgeBase | None, plan_ops: list[GoalOp]
 ) -> list[dict] | None:
-    """``WithdrawFromChest`` when there is room; ``Drop`` junk when full but worth it; else skip (A20).
+    """``WithdrawFromChest`` when there is room; when full, ``Drop`` what the
+    pack rule drops here for the best supply in it (``pack.make_room``, A102); else skip (A20).
 
     When only some fit, withdraw the best by id: a bare withdraw takes the
     lowest ids first (B117), which could be junk instead of what the drop was for.
     """
     supplies = _chest_supplies(contents)
-    if not supplies:
+    if not supplies or w.pos is None:
         return None
+    items = knowledge_items(knowledge)
     room = w.carry_capacity - carry_slots_used(w)
     if room >= len(supplies):
         return [withdraw_all(chest_id)]
     if room > 0:
         best_first = sorted(supplies, key=lambda s: (-loot_score(s.code, items), s.id))
         return [withdraw(chest_id, [s.id for s in best_first[:room]])]
-    shed = worst_droppable(w, items)
-    if shed is None:
-        return None
-    best = max(loot_score(s.code, items) for s in supplies)
-    if best <= loot_score(shed.code, items):
-        return None
-    return [drop(shed.id)]
+    best = min(supplies, key=lambda s: (-loot_score(s.code, items), s.id))
+    p = Pickup(best.id, best.code, w.pos, chest_id, loot_score(best.code, items))
+    made = make_room(w, p, plan_ops=plan_ops, knowledge=knowledge)
+    return [drop(made.drop.id)] if made.kind == DROP and made.drop is not None else None
 
 
 def recover_outcome(
@@ -85,6 +86,7 @@ def recover_outcome(
     plan_costly: set[Pos],
     *,
     knowledge: KnowledgeBase | None = None,
+    plan_ops: list[GoalOp] | None = None,
     state: str = "Recover",
 ) -> StateOutcome | None:
     """Path to the death chest and withdraw when adjacent (A11, reflex 4b).
@@ -105,8 +107,7 @@ def recover_outcome(
     if chebyshev(at, here) <= 1:
         contents = w.chest_contents.get(chest_id)
         if contents:
-            items = knowledge_items(knowledge)
-            intents = death_chest_recover_intents(w, chest_id, contents, items)
+            intents = death_chest_recover_intents(w, chest_id, contents, knowledge, plan_ops or [])
             if intents is not None:
                 verb = intents[0]["verb"]
                 reason = (
@@ -161,7 +162,14 @@ class RecoverState(State):
         m, policy = ctx.memory, ctx.policy
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
         out = recover_outcome(
-            world, m, policy, plan_avoid, plan_costly, knowledge=ctx.knowledge, state=self.name
+            world,
+            m,
+            policy,
+            plan_avoid,
+            plan_costly,
+            knowledge=ctx.knowledge,
+            plan_ops=ctx.plan.ops_left() if ctx.plan is not None else [],
+            state=self.name,
         )
         if out is not None:
             return out

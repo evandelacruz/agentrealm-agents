@@ -36,26 +36,30 @@ def world(**kw) -> WorldModel:
 class BuyDoneTest(unittest.TestCase):
     """A buy is done once its gems are spent and the item is owned (A106)."""
 
-    def test_a_gem_drop_on_the_take_records_the_purchase(self):
+    def test_a_gem_drop_on_the_take_records_the_purchase_for_its_op(self):
         w, m = world(gems=50), Memory()
-        m.shop_pending = (5, "middle_chest", 50, (1, 0), 7, 10)
+        op = {"op": "buy", "code": "middle_chest"}
+        m.shop_pending, m.shop_pending_for = (5, "middle_chest", 50, (1, 0), 7, 10), op
         w.gems = 10
         sync_shop(w, m)
         self.assertIsNone(m.shop_pending)
-        self.assertEqual(m.shop_bought, ("middle_chest", 50))
+        self.assertEqual(m.shop_bought, ("middle_chest", 50, op))
+        self.assertIs(m.shop_bought[2], op)
 
     def test_an_applied_take_records_the_purchase(self):
         m = Memory()
-        m.shop_pending = (5, "small_potion", 9, (1, 0), 7, 10)
+        op = {"op": "buy", "code": "small_potion"}
+        m.shop_pending, m.shop_pending_for = (5, "small_potion", 9, (1, 0), 7, 10), op
         note_shop_result(m, {"verb": "Take", "supply_id": 5}, applied=True)
-        self.assertEqual(m.shop_bought, ("small_potion", 9))
+        self.assertIs(m.shop_bought[2], op)
+        self.assertIsNone(m.shop_pending_for)
 
     def test_the_buy_is_done_once_gems_are_spent_and_the_item_held(self):
         w, m = world(gems=10), Memory()
         w.held_supplies = [InventorySupply(1, "middle_chest")]
         plan = buy_plan("middle_chest")
         plan.held_before = 1  # a baseline that already counted it: the purchase still finishes the buy
-        m.shop_bought = ("middle_chest", 50)
+        m.shop_bought = ("middle_chest", 50, plan.current())
         plan.advance(w, m)
         self.assertIsNone(plan.current())
         self.assertEqual([t["trigger"] for t in m.strategist_signals], ["goal_done"])
@@ -66,7 +70,7 @@ class BuyDoneTest(unittest.TestCase):
         w.carry_capacity = 30  # applied: the bought chest is the pack now, not held
         plan = buy_plan("middle_chest")
         plan.held_before = 0
-        m.shop_bought = ("middle_chest", 50)
+        m.shop_bought = ("middle_chest", 50, plan.current())
         plan.advance(w, m)
         self.assertIsNone(plan.current())
 
@@ -75,7 +79,7 @@ class BuyDoneTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(1, "middle_chest")]
         plan = buy_plan("middle_chest")
         plan.held_before = 1
-        m.shop_bought = ("middle_chest", 50)
+        m.shop_bought = ("middle_chest", 50, plan.current())
         plan.advance(w, m)
         self.assertEqual(plan.current()["code"], "middle_chest")
 
@@ -84,16 +88,43 @@ class BuyDoneTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(1, "small_potion")]
         plan = buy_plan("small_potion", "small_potion")
         plan.held_before = 1
-        m.shop_bought = ("small_potion", 13)
+        m.shop_bought = ("small_potion", 13, plan.current())
         plan.advance(w, m)
         self.assertEqual(plan.current(), {"op": "buy", "code": "small_potion"})
         self.assertEqual(len(plan.ops_left()), 1)
         self.assertIsNone(m.shop_bought)
 
+    def test_a_purchase_seen_after_its_buy_ended_does_not_finish_the_next(self):
+        # Two buys of one code. The first ends by the held count before the gem
+        # drop is seen; the purchase recorded after belongs to that first op.
+        w, m = world(gems=13), Memory()
+        plan = buy_plan("small_potion", "small_potion")
+        plan.advance(w, m)
+        first = plan.current()
+        m.shop_pending, m.shop_pending_for = (5, "small_potion", 13, (0, 1), 7, 10), first
+        w.held_supplies = [InventorySupply(1, "small_potion")]
+        plan.advance(w, m)  # held count passes the baseline: the first buy ends
+        second = plan.current()
+        self.assertIsNot(second, first)
+        w.gems = 10
+        sync_shop(w, m)  # the gem drop lands now
+        plan.advance(w, m)
+        self.assertIs(plan.current(), second, "the second buy still needs its own purchase")
+        self.assertIsNone(m.shop_bought)
+
+    def test_a_purchase_for_an_equal_but_other_op_does_not_count(self):
+        w, m = world(gems=10), Memory()
+        w.held_supplies = [InventorySupply(1, "small_potion")]
+        plan = buy_plan("small_potion")
+        plan.held_before = 1
+        m.shop_bought = ("small_potion", 13, {"op": "buy", "code": "small_potion"})
+        plan.advance(w, m)
+        self.assertEqual(plan.current(), {"op": "buy", "code": "small_potion"})
+
     def test_a_purchase_is_forgotten_under_another_op(self):
         w, m = world(gems=10), Memory()
         plan = Plan([{"op": "wait", "seconds": 5, "why": "x"}, {"op": "buy", "code": "small_potion"}], dict(PARAM_DEFAULTS))
-        m.shop_bought = ("small_potion", 13)
+        m.shop_bought = ("small_potion", 13, plan.ops_left()[1])
         plan.advance(w, m)
         self.assertIsNone(m.shop_bought)
 

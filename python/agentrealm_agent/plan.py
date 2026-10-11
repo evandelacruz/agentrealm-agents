@@ -612,7 +612,7 @@ class Plan:
                 # A drink, a drop or a death lowers the bar: the buy still adds one.
                 held = count_held(world, op["code"])
                 self.held_before = held if self.held_before is None else min(self.held_before, held)
-            if not (goal_done(op, world, self) or bought(op, world, memory)):
+            if not goal_done(op, world, self, memory):
                 stall = find_stalled(memory.stalled_ops, op) if memory is not None else None
                 if stall is not None:
                     # An op that stalled and has no reason to retry yet never comes
@@ -626,8 +626,6 @@ class Plan:
             note_goal_done(memory, op, "goal_done")
             if memory is not None:
                 forget_stalled(memory.stalled_ops, op)
-                if op["op"] == "buy":
-                    memory.shop_bought = None  # one purchase finishes one buy
             self._pop_current()
         _forget_purchase(memory, None)
 
@@ -777,8 +775,9 @@ def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:
     return {p for p in frontier if chebyshev(p, center) <= op["radius"]}
 
 
-def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
-    """Whether ``op`` is finished. Reads only; ``Plan.advance`` pops it."""
+def goal_done(op: GoalOp, world: WorldModel, plan: Plan, memory: Memory | None = None) -> bool:
+    """Whether ``op`` is finished. Reads only; ``Plan.advance`` pops it.
+    ``memory`` gives a ``buy`` the purchase made for it (``bought``, A106)."""
     if world.pos is None:
         return False
     name = op["op"]
@@ -830,9 +829,12 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         tile = world.view.tiles.get((op["x"], op["y"]))
         return plan.block_before is not None and tile is not None and tile != plan.block_before
     if name == "buy":
-        # One more than the fewest held since it reached the top, whatever was
-        # held before (free-play run 5). One more is what the buy is for, so one
-        # picked up or withdrawn for free counts too, and saves the gems.
+        # Done by the purchase made for this op (A106), or once one more is held
+        # than the fewest held since it reached the top, whatever was held before
+        # (free-play run 5). One more is what the buy is for, so one picked up or
+        # withdrawn for free counts too, and saves the gems.
+        if bought(op, world, memory):
+            return True
         return plan.held_before is not None and count_held(world, op["code"]) > plan.held_before
     if name == "fetch_item":
         return any(supply_matches(op["code"], s.code) for s in world.held_supplies)
@@ -845,23 +847,22 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
 
 
 def bought(op: GoalOp, world: WorldModel, memory: Memory | None) -> bool:
-    """A ``buy`` is done once its purchase landed (A106): the gems for it are
-    spent (``shop.sync_shop``) and the item is owned, held or stowed, or a
-    chest whose carry slots the pack now has."""
+    """The purchase made for this very ``buy`` op landed (A106): the gems for
+    it are spent (``shop.sync_shop``) and the item is owned, held or stowed, or
+    a chest that raised the pack. A purchase for another op, a same-code buy
+    that ended first included, never finishes this one."""
     got = memory.shop_bought if memory is not None else None
-    if op["op"] != "buy" or got is None or not supply_matches(op["code"], got[0]):
+    if got is None or got[2] is not op:
         return False
-    code, gems_before = got
+    code, gems_before, _ = got
     spent = gems_before is None or (world.gems is not None and world.gems < gems_before)
     return spent and (count_held(world, op["code"]) > 0 or chest_applied(code, world.carry_capacity))
 
 
 def _forget_purchase(memory: Memory | None, top: GoalOp | None) -> None:
-    """A purchase finishes only the ``buy`` on top for it: with another op on
-    top, or none, it is forgotten, so a later buy is never done by it."""
-    if memory is None or memory.shop_bought is None:
-        return
-    if top is None or top["op"] != "buy" or not supply_matches(top["code"], memory.shop_bought[0]):
+    """A purchase finishes only the ``buy`` it was made for, while it is on
+    top: with another op on top, or none, it is forgotten."""
+    if memory is not None and memory.shop_bought is not None and memory.shop_bought[2] is not top:
         memory.shop_bought = None
 
 

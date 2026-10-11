@@ -37,7 +37,7 @@ def plan_buy_op(ctx: PlayContext, w: WorldModel) -> dict | None:
     op = plan.current()
     if op is None or op.get("op") != "buy":
         return None
-    if goal_done(op, w, plan):
+    if goal_done(op, w, plan, ctx.memory):
         return None
     return op
 
@@ -92,7 +92,8 @@ def _bought(m: Memory, pending: tuple) -> None:
     """The Take in flight landed: the purchase is settled, and its ``buy`` is
     done once the gems are spent and the item is owned (``plan.bought``, A106)."""
     m.shop_pending = None
-    m.shop_bought = (pending[1], pending[2])
+    m.shop_bought = (pending[1], pending[2], m.shop_pending_for)
+    m.shop_pending_for = None
 
 
 def shop_pending_stale(w: WorldModel, pending: tuple) -> bool:

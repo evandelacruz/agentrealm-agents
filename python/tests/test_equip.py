@@ -289,6 +289,17 @@ class HuntingCeilingRuleTest(unittest.TestCase):
         up = best_equip_upgrade(w, {}, w.threat, Memory(), ceiling=7)
         self.assertEqual((up.slot, up.code), ("armed", "bronze_sword"))
 
+    def test_an_empty_or_non_weapon_slot_counts_as_bare_hands(self):
+        # Review on #191: bare hands are within the ceiling, so a weapon over
+        # it is not armed into an empty slot or over a leftover potion.
+        for armed in (None, "small_potion"):
+            w = world()
+            w.armed_code = armed
+            w.held_supplies = self.held("bronze_mallet")
+            self.assertIsNone(best_equip_upgrade(w, {}, w.threat, Memory(), ceiling=7), armed)
+            w.held_supplies = self.held("bronze_mallet", "bronze_sword")
+            self.assertEqual(best_equip_upgrade(w, {}, w.threat, Memory(), ceiling=7).code, "bronze_sword", armed)
+
     def test_with_no_ceiling_known_damage_decides(self):
         w = world()
         w.armed_code = "pocket_knife"
@@ -309,6 +320,14 @@ class HuntingCeilingRuleTest(unittest.TestCase):
         # A later equip with no code applies the rule again.
         c = ctx(self.kb)
         self.assertEqual(dispatch(w, c).intents, [{"verb": "Arm", "supply_id": 5}])
+
+    def test_a_named_item_of_unknown_slot_gets_its_own_learn_wear(self):
+        # Review on #191: a lower-id item of unknown slot must not stand in for it.
+        w = world()
+        w.armed_code = "bronze_sword"
+        w.held_supplies = [InventorySupply(5, "fake_hat"), InventorySupply(6, "fake_ring")]
+        c = ctx(self.kb, plan=equip_plan(code="fake_ring"))
+        self.assertEqual(dispatch(w, c).intents, [{"verb": "Wear", "supply_id": 6}])
 
     def test_a_named_armor_is_worn_in_its_slot(self):
         w = world()

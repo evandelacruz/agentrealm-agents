@@ -48,7 +48,7 @@ from .break_memory import capabilities_for_code, held_supplies
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
 from .loot import NON_TRANSFERABLE
-from .supplies import armor_defense, heals, is_weapon, kept_on_break, weapon_damage, worn, worn_slot
+from .supplies import heals, is_weapon, kept_on_break, weapon_damage, worn, worn_armor_defense, worn_slot
 from .memory import Memory
 from .survival import BASE_ATTACK_POWER
 from .threat import ThreatTable
@@ -193,8 +193,7 @@ def loadout_strength(w: WorldModel, weapon: str | None) -> int:
     """Hunting-ground strength with ``weapon`` armed and what is worn now:
     attack power, the weapon's damage and worn armor's defense (Supplies
     reference; GAME_NOTES Hunting grounds)."""
-    armor = sum(armor_defense(code) or 0 for code in w.worn_codes.values())
-    return BASE_ATTACK_POWER + (weapon_damage(weapon) or 0) + armor
+    return BASE_ATTACK_POWER + (weapon_damage(weapon) or 0) + worn_armor_defense(w.worn_codes.values())
 
 
 def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[bool, int]:
@@ -225,10 +224,15 @@ def weapon_to_arm(
     comes first; then :func:`weapon_rank` (within ``ceiling`` first, then
     damage), so a cutter is also the best weapon to be caught with. The armed
     one wins a tie, so the arm never flips. An armed result has id -1 when
-    it is not also held. None when nothing carried does the job; a refused
+    it is not also held. None when nothing carried does the job (for
+    fighting, nothing beats bare hands with no weapon armed); a refused
     ``Arm`` is skipped until the loadout changes, and a compose fragment is
     never armed."""
-    best: tuple[tuple, InventorySupply] | None = None
+    best: tuple[tuple, InventorySupply | None] | None = None
+    if job == FIGHT and not is_weapon(w.armed_code):
+        # No weapon armed fights bare-handed: a weapon must beat that, so one
+        # over the ceiling is never armed into an empty slot either.
+        best = ((weapon_rank(None, w, ceiling), True, 0), None)
     for s in held_supplies(w):
         armed = s.code == w.armed_code
         if s.fragment is not None or not does_job(s.code, job, kb) or (not armed and (s.code, ARMED) in refused):
@@ -255,8 +259,9 @@ def named_equip(w: WorldModel, m: Memory, code: str, armed_owned: bool = False) 
         return None if (code, ARMED) in m.equip_refused else EquipUpgrade(ARMED, s.id, code)
     slot = wear_slot(code, w)
     if slot is None:
-        learn = _best_learn_wear(w, m)
-        return learn if learn is not None and learn.code == code else None
+        if never_worn(code) or code in m.equip_not_wearable or code in m.equip_try_refused:
+            return None
+        return EquipUpgrade("", s.id, code, learn_slot=True)
     if (code, slot) in m.equip_refused or (w.worn_codes.get(slot) is not None and (None, slot) in m.equip_refused):
         return None
     return EquipUpgrade(slot, s.id, code, remove_first=w.worn_codes.get(slot) is not None)

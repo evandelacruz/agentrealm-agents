@@ -5,10 +5,19 @@ hits at the world's base attack power, 2, the published rules (A85); the
 Manual publishes no hostile's own. The win estimate and the retreat
 threshold both use that one price.
 
+A hit is filed gross of armor: ``Damaged.amount`` is what got through the
+armor we wore, so the defense of that armor (``supplies.worn_armor_defense``)
+is added back before it is recorded, and the table holds the source's own
+number. Pricing then takes the armor worn at that moment off it once
+(``survival.hit_damage``), never twice. A hit armor absorbed whole
+(``amount`` 0) still counts as a hit but files no number.
+
 A hit is keyed by the source's type code, looked up among perceived entities
 of the same kind and id. A hit whose source is not perceived, or has no code,
 is not recorded: there is no type to file it under. Trap (keyed by supply
-code) and ``occupy`` damage are recorded but are not hostiles.
+code) and ``occupy`` damage are recorded, gross of armor like any hit, but
+are not hostiles and nothing prices them from this table: the route planner
+takes a hazard's damage from the Supplies reference (``occupy_damage``).
 
 Each hostile type's swings at us are counted too: a hit per ``Damaged``, a
 miss per ``Attacked`` with no ``Damaged`` from the same attacker on its tick
@@ -37,7 +46,8 @@ HOSTILE_KINDS = {"npc": "npc", "character": "character"}
 
 @dataclass
 class ThreatTable:
-    """Max ``Damaged.amount`` seen per source type, and per hostile type the
+    """Max ``Damaged.amount`` seen per source type, gross of the armor worn
+    when it landed (the module docstring), and per hostile type the
     swings at us that hit and missed. ``saved_hits`` and ``saved_misses``
     are the counts already in the knowledge base (``hostile_memory``)."""
 
@@ -178,11 +188,12 @@ def count_swings(table: ThreatTable, events: list[dict], *views: list[Any]) -> N
             table.misses[key] = table.misses.get(key, 0) + missed
 
 
-def absorb_damaged(table: ThreatTable, ev: dict, *views: list[Any]) -> TypeKey | None:
-    """Fold one ``Damaged`` event into the table; return the key if recorded."""
+def absorb_damaged(table: ThreatTable, ev: dict, *views: list[Any], armor: int = 0) -> TypeKey | None:
+    """Fold one ``Damaged`` event into the table, adding back ``armor``, the
+    defense of the armor worn when it landed; return the key if recorded."""
     key = type_key_from_damaged(ev, *views)
     amount = damage_amount(ev)
     if key is None or amount is None or amount <= 0:
         return None
-    table.record(key, amount)
+    table.record(key, amount + max(0, armor))
     return key

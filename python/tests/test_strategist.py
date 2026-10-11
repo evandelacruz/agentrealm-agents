@@ -749,6 +749,15 @@ class PlannerViewTest(unittest.TestCase):
         self.kb.items["bronze_sword"] = {"gem_price": 15}
         self.assertIn('"gains": "damage 6 -> 4, back within the hunting ceiling"', upgrades())
 
+    def test_with_no_weapon_owned_bare_hands_are_the_baseline(self):
+        # Review on #191: as Equip counts them, so an over-ceiling weapon is no upgrade.
+        self.w.gems = 30
+        self.kb.items["bronze_mallet"] = {"gem_price": 25}
+        self.kb.items["bronze_sword"] = {"gem_price": 15}
+        record_hunting_zone(self.kb, 7, (50, 50), 7)
+        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("upgrades_for_sale="))
+        self.assertEqual([r["code"] for r in json.loads(line.split("=", 1)[1])], ["bronze_sword"])
+
     def test_prompt_states_the_best_weapon_rule(self):
         prompt = system_prompt()
         self.assertIn("Weapons and the hunting ground", prompt)

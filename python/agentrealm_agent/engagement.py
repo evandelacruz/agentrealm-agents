@@ -6,7 +6,8 @@ us within ``survival.THREAT_MEMORY_TICKS``. Its group only grows: a member
 that steps out of range is still in the fight.
 
 The decision is the win estimate (``survival.win_ratio``: live health, the
-threat table's measured hits and misses, the armed weapon) against a bar:
+threat table's measured hits and misses, the armed weapon, the armor worn)
+against a bar:
 
 - ``on_hostile = "fight"``: the effective fight margin (``fight_margin``
   scaled by risk, ``survival.effective_fight_margin``).
@@ -35,6 +36,7 @@ from .survival import (
     estimate_health,
     recently_attacked,
     win_ratio,
+    worn_defense,
 )
 from .world import Entity, WorldModel
 
@@ -103,7 +105,9 @@ def decide(
     """The estimate against the group's members in view, and the decision it
     gives; at ``health`` instead of live health when given."""
     members = [h for h in w.entities if (h.kind, h.id) in group]
-    ratio = win_ratio(estimate_health(w) if health is None else health, members, w.threat, w.armed_code)
+    ratio = win_ratio(
+        estimate_health(w) if health is None else health, members, w.threat, w.armed_code, worn_defense(w)
+    )
     bar = fight_bar(w, policy, params, outrun_failed)
     return Engagement(group, outrun_failed, ratio, bool(members) and ratio > bar)
 

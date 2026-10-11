@@ -23,9 +23,12 @@ Stored in the knowledge base as::
                                        "strength", "noted", "spells"}, ...}
 
 A type is saved once it has shown it is hostile (``survival.known_hostile``),
-with the largest hit it dealt us (``max_hit``) and its swings at us that hit
-and missed. Counts add to the file's: other characters of the world share
-it, so a save adds only what this run counted (``ThreatTable.saved_hits``).
+with the largest hit it dealt us (``max_hit``, gross of the armor we wore,
+as the threat table files it) and its swings at us that hit and missed. A
+``max_hit`` saved before hits were filed gross is at most our armor low, and
+grows on the next hit that lands. Counts add to the file's: other characters
+of the world share it, so a save adds only what this run counted
+(``ThreatTable.saved_hits``).
 A sighting is saved for every NPC of such a type: its post and reach, or the
 cell it was last seen on, and how strong a post still is (``strength`` as of
 tick ``noted``, ``spells`` seen). A loaded sighting is forgotten by the same

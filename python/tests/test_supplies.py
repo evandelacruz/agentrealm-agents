@@ -158,5 +158,25 @@ class LoadTest(unittest.TestCase):
         self.assertFalse(self.cache.exists(), "an empty answer is not cached")
 
 
+class WornTest(unittest.TestCase):
+    """A95: what the reference says about wearing a subtype."""
+
+    def test_worn_classes_and_their_slots(self):
+        for code, worn, slot in (
+            ("iron_mail", True, "body"),
+            ("goggles", True, "accessory"),
+            ("matches", False, ""),
+            ("torch", False, ""),
+            ("apple", False, ""),
+            ("bronze_sword", False, ""),
+            ("gem", False, ""),
+            ("looted_helm", None, ""),
+            (None, None, ""),
+        ):
+            with self.subTest(code=code):
+                self.assertIs(supplies.worn(code), worn)
+                self.assertEqual(supplies.worn_slot(code), slot)
+
+
 if __name__ == "__main__":
     unittest.main()

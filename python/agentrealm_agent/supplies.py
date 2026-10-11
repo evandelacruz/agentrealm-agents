@@ -230,12 +230,6 @@ def armor_defense(code: str | None) -> int | None:
     return r.defense if r is not None and r.supply_class == "armor" else None
 
 
-def armor_slot(code: str | None) -> str:
-    """The slot listed armor is worn in (``body``, ``head``, …), or ``""``."""
-    r = row(code)
-    return r.slot if r is not None and r.supply_class == "armor" else ""
-
-
 def worn(code: str | None) -> bool | None:
     """Whether the reference says a subtype is worn: True for ``armor`` and
     ``accessory``, False for every other class it lists (weapons, tools,
@@ -246,9 +240,9 @@ def worn(code: str | None) -> bool | None:
 
 
 def worn_slot(code: str | None) -> str:
-    """The slot the reference gives a worn subtype (``body``, ``accessory``, …), or ``""``."""
+    """The slot listed armor or an accessory is worn in (``body``, ``accessory``, …), or ``""``."""
     r = row(code)
-    return r.slot if r is not None and r.supply_class in WORN_CLASSES and r.slot != "armed" else ""
+    return r.slot if r is not None and r.supply_class in WORN_CLASSES else ""
 
 
 def what_it_does(code: str | None) -> dict[str, Any]:

@@ -11,6 +11,7 @@ from ..executor.movement import direction_between
 from ..knowledge_base import KnowledgeBase
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
+from ..reach import weapon_reach
 from ..engagement import Engagement, fights, held_members
 from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks
 from ..world import Entity, Pos, WorldModel, chebyshev
@@ -54,17 +55,6 @@ def attack_intent(target: Entity) -> dict:
     if target.kind == "npc":
         return use_npc(target)
     return use_on(target)
-
-
-def weapon_reach(w: WorldModel, knowledge: KnowledgeBase | None) -> int:
-    if w.attack_range is not None:
-        return w.attack_range
-    code = w.armed_code
-    if code and knowledge and knowledge.items:
-        learned = knowledge.items.get(code, {}).get("attack_range")
-        if learned is not None:
-            return int(learned)
-    return 1
 
 
 def in_weapon_reach(w: WorldModel, target: Entity, knowledge: KnowledgeBase | None) -> bool:

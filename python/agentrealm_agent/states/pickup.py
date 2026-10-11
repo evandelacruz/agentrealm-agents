@@ -14,6 +14,7 @@ from ..knowledge_base import knowledge_items
 from ..loot import Pickup, pickups
 from ..navigation import stuck as nav_stuck
 from ..pack import TAKE
+from ..reach import NEAR
 from ..world import WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .intents import take, withdraw
@@ -29,7 +30,7 @@ def pickup_outcome(w: WorldModel, ctx: PlayContext, *, state: str) -> StateOutco
     if here is None:
         return None
     items = knowledge_items(ctx.knowledge)
-    found = [p for p in pickups(w, items) if chebyshev(p.pos, here) <= 1]
+    found = [p for p in pickups(w, items) if chebyshev(p.pos, here) <= NEAR]
     found.sort(key=lambda p: (-p.score, chebyshev(p.pos, here), p.supply_id))
     for p in found:
         room = room_for(w, ctx, p)

@@ -177,9 +177,10 @@ def op_refusal(world: WorldModel, ctx: PlayContext, op: dict) -> str | None:
     """Why Fight cannot carry out the ``fight`` op, or None to go on: its NPC
     is not in view (and was not since the op reached the top, or it would be
     done), is a boss (``fight_boss``'s), the directives forbid attacking
-    it, or we stand on safe ground at the health floor
-    (``held_on_safe_ground``), so the planner makes the call. Reads only;
-    ``act`` drops the op with it."""
+    it, we stand on safe ground at the health floor
+    (``held_on_safe_ground``), or no swing or step can reach it
+    (``can_engage``), so the planner makes the call. Reads only; ``act``
+    drops the op with it."""
     target = op_npc(op, world)
     if target is None:
         named = f"npc {op['npc_id']}" if "npc_id" in op else f"no {op.get('npc_type')}"
@@ -190,6 +191,8 @@ def op_refusal(world: WorldModel, ctx: PlayContext, op: dict) -> str | None:
         return f"the directives forbid attacking {target.code or 'npc'} {target.id}"
     if held_on_safe_ground(world, ctx, target):
         return f"at the health floor on safe ground: not stepping off toward {target.code or 'npc'} {target.id}"
+    if not can_engage(world, target, ctx):
+        return f"no swing or open step reaches {target.code or 'npc'} {target.id}"
     return None
 
 
@@ -234,14 +237,11 @@ class FightState(State):
         op = my_op(ctx, self.name) if self._has_op(world, ctx) else None
         if op is not None:
             refusal = op_refusal(world, ctx, op)
-            if refusal is not None and ctx.plan is not None:
+            if refusal is None:
+                return engage(world, ctx, op_npc(op, world), self.name)
+            if ctx.plan is not None:
                 ctx.plan.drop_current(refusal, memory=ctx.memory)
                 return StateOutcome(None, f"fight dropped: {refusal}", state=self.name)
-            target = op_npc(op, world)
-            if target is not None and can_engage(world, target, ctx):
-                return engage(world, ctx, target, self.name)
-            if not should_fight(world, ctx):
-                return StateOutcome(None, "cannot reach it", state=self.name)
         target = fight_target(world, ctx.policy, ctx.never_attack, ctx.memory.engagement)
         if target is None or world.pos is None:
             ctx.memory.path = []

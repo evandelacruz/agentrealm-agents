@@ -101,6 +101,17 @@ class FightOpTest(unittest.TestCase):
         self.assertIsNone(out.intents)
         self.assertIn("health floor", out.reason)
 
+    def test_an_npc_no_step_reaches_drops_it_with_why(self):
+        # Against the wall between us: no swing and no open step closes on it, so the planner makes the call.
+        w = world(["#######", "#..#..#", "#######"], at=(2, 1))
+        w.entities = [Entity("npc", 5, (5, 1), "snotling")]
+        plan, m = fight(npc_id=5), Memory()
+        with self.assertLogs("agentrealm_agent.plan", "WARNING") as logs:
+            out = dispatch(w, ctx(w, plan, m, on_hostile="flee"))
+        self.assertEqual(plan.current()["op"], "wait", out.reason)
+        self.assertIn("no swing or open step reaches snotling 5", "\n".join(logs.output))
+        self.assertFalse(any(s["trigger"] == "goal_done" for s in m.strategist_signals))
+
     def test_off_safe_ground_it_swings(self):
         w = world(["#####", "#...#", "#...#", "#####"], at=(1, 1))
         w.entities = [Entity("npc", 5, (2, 1), "snotling")]

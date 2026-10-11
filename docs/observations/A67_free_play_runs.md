@@ -1299,6 +1299,7 @@ Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A105 
 
 - **Code:** `main` at `c3aa22a`. Since run 15: A105 (#200, with no region named, Gather prices known grass against nearby unexplored ground), A106 (a buy is done once its gems are spent, and State shows finished ops), A107 (State shows, per level entrance, a known route, frontier only, or not searched).
 - **Knowledge base:** kept from run 15. Region (432, 400): 746 cuts, 146 gems. The middle_chest bought in run 15 is held. The north-east entrance (532, 311) was given up in run 15.
+- **Correction to run 15:** its notes say the pack went from 10 to 30 slots when the middle_chest was bought. That was the agent's belief, from the chest's `chest_capacity`, not the server's: the chest was never applied, and the server's pack stayed at 10 slots.
 - **Verdict:** exit 0, `PASS` after **601.7 s**, on the short-run gates only. The park **parked safe** at (416, 399) after 0.3 s. The character started at **10/10**, 5 lives and **3 gems** at (428, 398), with the bronze_sword armed, the bronze_mail worn and the pack at 10/10 slots.
 - **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; kills **3** (lone weak 2); gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **yes**; food taken while hurt **no**; Heal drank a potion **yes**. Planner: 39 calls, 39 plans accepted, 0 errors.
 
@@ -1365,7 +1366,7 @@ Intents: 470 `Step`, 848 `Wait`, 151 `Use` (140 cuts, 8 swings, 1 drink and the 
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize.
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A108 (a chest upgrade is a consumable, applied by `Use` on oneself per the game docs, and nothing applies it); defect 2 is A109 (a committed gather target is dropped for a far cheaper one); defect 3 is A110 (a buy goal needs a known seller). Their PLAN.md rows come with the implementing pull requests.
 
 1. **No op applies a self-use item, so the chest bought in run 15 is still not applied** (`states/equip.py`, `equip.py`; the self-`Use` path in `states/heal.py:375`, `use_carried_heal`). The middle_chest (50 gems, `chest_capacity` 30) has been held since run 15, and the pack stayed at 10/10 slots all run. The planner saw it "held but not applied" and tried `equip` middle_chest (done, nothing applied), then `use_block` middle_chest (one `Arm`, no `Use`). **Rule:** a held item whose documented use is applied to oneself (a chest, a potion) goes through one `Use`-self path. Either the planner names it in an op, or it is applied once on pickup when nothing argues for keeping it closed.
 

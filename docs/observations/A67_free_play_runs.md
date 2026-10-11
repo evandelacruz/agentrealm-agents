@@ -1287,7 +1287,7 @@ Intents: 541 `Step`, 1,068 `Wait`, 147 `Use` (146 cuts, 1 chop), 26 `Take`, 1 `D
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize.
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A105 (with no region named, Gather prices a frontier near it against known grass far off; branch `c/run15-gather-near`); defect 2 is A106 (State lists the ops finished since the last reply, a `buy` is done once its gems are spent, and a chest shows as carry slots); defect 3 is A107 (State says whether a known path reaches each level entrance). A106 and A107 are on branch `c/run15-planner-state`. Their PLAN.md rows come with those pull requests.
 
 1. **With no region named, Gather walks to far-off known grass over the ground it stands on** (`states/gather.py:644–735`, `_replan_gather`). After the entrance was given up at (535, 361), the planner asked for `gather_gems` with no region, "where the character is, then explore north". Gather's pick takes known grass before the frontier, and the nearest known grass was the old region, 100 cells back. It walked there for the rest of the run, and the park then needed 28 s to reach safe ground. **Rule:** Gather prices a frontier near it against known grass far off by the same steps. Cutting nearby unknown ground beats a 100-cell walk to ground it knows.
 

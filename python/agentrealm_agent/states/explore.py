@@ -88,6 +88,7 @@ def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     out = explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None)
     if out.intents:
         ctx.memory.no_way_on = None  # ground to explore again: a later ask is new
+    if out.reason != NOTHING_TO_EXPLORE:
         return out
     return ask_the_planner(world, ctx)
 
@@ -165,8 +166,10 @@ def explore_outcome(
 ) -> StateOutcome:
     """One step toward the ``explore_area`` ``op``, or with no op the safe default's.
 
-    With no step, sends nothing: the safe default then asks the planner
-    (``ask_the_planner``).
+    With no step, sends nothing. With no op and no frontier to walk to at
+    all, its reason is ``NOTHING_TO_EXPLORE``, and the safe default asks the
+    planner (``ask_the_planner``); a frontier whose first step is only taken
+    for now, or that stuck detection is still escalating, is not that.
     """
     if w.pos is None:
         return StateOutcome(None, "position unknown", state=state)
@@ -190,9 +193,13 @@ def explore_outcome(
         label = m.path[-1] if m.path else att.target if att else step
         note = nav_stuck.level_note(att) if att is not None and att.goal == m.goal else ""
         return StateOutcome([set_position(step)], f"{m.goal} → {label}{note}", state=state)
-    if op is not None:
-        return StateOutcome(None, "no explore_area step", state=state)
-    return StateOutcome(None, NOTHING_TO_EXPLORE, state=state)
+    if op is None and missed is None:
+        # No frontier the safe default may walk to at all, not one whose step is only taken now.
+        return StateOutcome(None, NOTHING_TO_EXPLORE, state=state)
+    if op is None:
+        # A frontier is there, its step only taken for now or its walk escalating: hold, never step in place.
+        return StateOutcome(None, "no explore step yet", state=state, wait=True)
+    return StateOutcome(None, "no explore_area step", state=state)
 
 
 def _missed_step(

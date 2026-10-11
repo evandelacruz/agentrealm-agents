@@ -166,24 +166,20 @@ def can_engage(world: WorldModel, target: Entity, ctx: PlayContext) -> bool:
     return close_step(world, target, blocked) is not None
 
 
-def op_target(world: WorldModel, ctx: PlayContext) -> Entity | None:
-    """The NPC the plan's ``fight`` op names, in view, when Fight may go for
-    it. A boss (``fight_boss``'s) or one the directives forbid drops the op
-    with why."""
-    op = my_op(ctx, FightState.name)
-    if op is None:
-        return None
+def op_refusal(world: WorldModel, ctx: PlayContext, op: dict) -> str | None:
+    """Why Fight cannot carry out the ``fight`` op, or None to go on: its NPC
+    is not in view (and was not since the op reached the top, or it would be
+    done), is a boss (``fight_boss``'s), or the directives forbid attacking
+    it. Reads only; ``act`` drops the op with it."""
     target = op_npc(op, world)
     if target is None:
-        return None
-    why = "a boss: fight_boss fights it" if target.is_boss else None
+        named = f"npc {op['npc_id']}" if "npc_id" in op else f"no {op.get('npc_type')}"
+        return f"{named} in view to fight"
+    if target.is_boss:
+        return f"{target.code or 'npc'} {target.id} is a boss: fight_boss fights it"
     if attack_forbidden(target, ctx.never_attack):
-        why = "the directives forbid attacking it"
-    if why is not None:
-        if ctx.plan is not None:
-            ctx.plan.drop_current(f"{target.code or 'npc'} {target.id} is {why}", memory=ctx.memory)
-        return None
-    return target
+        return f"the directives forbid attacking {target.code or 'npc'} {target.id}"
+    return None
 
 
 def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
@@ -211,22 +207,30 @@ class FightState(State):
     name = "Fight"
 
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
-        return should_fight(world, ctx) or self._op_fight(world, ctx)
+        return should_fight(world, ctx) or self._has_op(world, ctx)
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
 
     @staticmethod
-    def _op_fight(world: WorldModel, ctx: PlayContext) -> bool:
+    def _has_op(world: WorldModel, ctx: PlayContext) -> bool:
+        """The plan's top op is a ``fight`` (reads only: ``act`` drops it when it cannot go on)."""
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        target = op_target(world, ctx)
-        return target is not None and can_engage(world, target, ctx)
+        return my_op(ctx, FightState.name) is not None
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
-        target = op_target(world, ctx) if self._op_fight(world, ctx) else None
-        if target is not None:
-            return engage(world, ctx, target, self.name)
+        op = my_op(ctx, self.name) if self._has_op(world, ctx) else None
+        if op is not None:
+            refusal = op_refusal(world, ctx, op)
+            if refusal is not None and ctx.plan is not None:
+                ctx.plan.drop_current(refusal, memory=ctx.memory)
+                return StateOutcome(None, f"fight dropped: {refusal}", state=self.name)
+            target = op_npc(op, world)
+            if target is not None and can_engage(world, target, ctx):
+                return engage(world, ctx, target, self.name)
+            if not should_fight(world, ctx):
+                return StateOutcome(None, "cannot reach it", state=self.name)
         target = fight_target(world, ctx.policy, ctx.never_attack, ctx.memory.engagement)
         if target is None or world.pos is None:
             ctx.memory.path = []

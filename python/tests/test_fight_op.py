@@ -91,11 +91,36 @@ class FightOpTest(unittest.TestCase):
         self.assertEqual(out.state, "Fight", out.reason)
         self.assertIn("Use", verbs(out))
 
-    def test_done_once_the_npc_is_gone(self):
+    def test_an_npc_never_seen_is_dropped_not_done(self):
         w = world(["#####", "#...#", "#####"], at=(1, 1))
-        plan = fight(npc_id=5)
-        dispatch(w, ctx(w, plan))
+        plan, m = fight(npc_id=5), Memory()
+        with self.assertLogs("agentrealm_agent.plan", "WARNING") as logs:
+            dispatch(w, ctx(w, plan, m))
         self.assertEqual(plan.current()["op"], "wait")
+        self.assertIn("npc 5 in view to fight", "\n".join(logs.output))
+        self.assertFalse(any(s["trigger"] == "goal_done" for s in m.strategist_signals))
+
+    def test_done_once_the_npc_seen_is_gone(self):
+        w = world(["#####", "#...#", "#####"], at=(1, 1))
+        w.entities = [Entity("npc", 5, (2, 1), "snotling")]
+        plan, m = fight(npc_id=5), Memory()
+        dispatch(w, ctx(w, plan, m))
+        w.entities = []  # dead, or out of sight
+        w.tick += 5
+        dispatch(w, ctx(w, plan, m))
+        self.assertEqual(plan.current()["op"], "wait")
+        self.assertTrue(any(s["trigger"] == "goal_done" for s in m.strategist_signals))
+
+    def test_the_guard_changes_nothing(self):
+        from agentrealm_agent.states.fight import FightState
+
+        w = world(["#####", "#...#", "#####"], at=(1, 1))
+        w.entities = [Entity("npc", 5, (2, 1), "snotling")]
+        plan = fight(npc_id=5)
+        c = ctx(w, plan, never_attack=["snotling"])
+        FightState().guard(w, c)
+        FightState().done(w, c)
+        self.assertEqual(plan.current()["op"], "fight", "only act drops the op")
 
     def test_a_forbidden_npc_or_a_boss_drops_it(self):
         for npc, never in ((Entity("npc", 5, (2, 1), "snotling"), ["snotling"]),
@@ -106,6 +131,15 @@ class FightOpTest(unittest.TestCase):
             with self.assertLogs("agentrealm_agent.plan", "WARNING"):
                 dispatch(w, ctx(w, plan, never_attack=never))
             self.assertEqual(plan.current()["op"], "wait")
+
+
+class ContractTest(unittest.TestCase):
+    def test_the_planner_hears_what_cornered_means(self):
+        from agentrealm_agent.strategist import system_prompt
+
+        text = system_prompt()
+        self.assertIn("A cornered trigger", text)
+        self.assertIn("a fight op", text)
 
 
 class CorneredTest(unittest.TestCase):

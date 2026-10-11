@@ -13,6 +13,7 @@ failed there, is dropped with the reason, so the planner hears why.
 from __future__ import annotations
 
 from ..break_memory import (
+    BLOCK_OPENERS,
     BREAK_GOAL,
     BreakChoice,
     attempt_failed,
@@ -28,7 +29,7 @@ from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, nav_search, next_step
 from ..plan import GoalOp
 from ..reach import supply_reach
-from ..world import WorldModel, chebyshev
+from ..world import VOID, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets
 from .intents import arm, set_position, use_block
@@ -64,10 +65,12 @@ def _op_refusal(w: WorldModel, ctx: PlayContext, op: GoalOp) -> str | None:
     """Why the ``break_block`` op cannot open its block, or None to go on.
 
     Its capability failed on that cell before, nothing held has it, the
-    cell in view holds no block that capability is known to open (A103; a
-    walkable cell, a hostile's cell, a block of another type, A114), or a
-    walk to it was given up and is still backed off (A90). A cell not yet
-    in view is walked to first.
+    cell in view holds no block at all (walkable ground, where a hostile may
+    stand, or no ground, A114), the block is of a type whose openers are
+    known and that capability is not one of them (A103), or a walk to it was
+    given up and is still backed off (A90). A block of a type with no known
+    openers may be tried with any capability, so its opener can be learned.
+    A cell not yet in view is walked to first.
     """
     pos = (op["x"], op["y"])
     cap = op["capability"]
@@ -78,10 +81,10 @@ def _op_refusal(w: WorldModel, ctx: PlayContext, op: GoalOp) -> str | None:
         return f"{cap} already failed on the {block or 'block'} at {pos[0]},{pos[1]}"
     if pick_supply_for_capability(w, cap, ctx.knowledge) is None:
         return f"nothing held can {cap}"
+    if block is not None and (block == VOID or w.view.walkable(pos)):
+        return f"the {block or 'empty cell'} at {pos[0]},{pos[1]} holds no block to break"
     openers = known_openers(w, ctx.knowledge, pos)
-    if block is not None and cap not in openers:
-        if not openers:
-            return f"the {block or 'empty cell'} at {pos[0]},{pos[1]} is no block {cap} destroys"
+    if block in BLOCK_OPENERS and cap not in openers:
         return f"{cap} is not known to open {block} (opened by {', '.join(sorted(openers))})"
     return None
 

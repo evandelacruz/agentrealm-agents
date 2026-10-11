@@ -86,6 +86,19 @@ class AskThePlannerTest(unittest.TestCase):
         self.assertIsNone(m.no_way_on)
 
 
+class FrontierStillThereTest(unittest.TestCase):
+    def test_a_frontier_whose_step_is_taken_holds_without_asking(self):
+        # A gap in the wall onto unseen ground, a character standing in it: the frontier is there, only its step is taken.
+        w, m = garden(), Memory()
+        w.view.tiles[(1, 3)] = "dirt"
+        w.view.tiles.pop((0, 3))
+        w.entities = [Entity("character", 9, (1, 3), "peer")]
+        out = dispatch(w, ctx(m))
+        self.assertEqual((out.state, out.intents, out.wait), ("Explore", None, True), out.reason)
+        self.assertNotIn("asked the planner", out.reason)
+        self.assertFalse(any(s["trigger"] == "no_way_on" for s in m.strategist_signals))
+
+
 class BreakTargetTest(unittest.TestCase):
     def break_op(self, x: int, y: int) -> tuple[Plan, dict]:
         op = {"op": "break_block", "x": x, "y": y, "capability": "burn"}
@@ -97,7 +110,7 @@ class BreakTargetTest(unittest.TestCase):
         with self.assertLogs("agentrealm_agent.plan", "WARNING") as logs:
             dispatch(w, ctx(m, plan))
         self.assertEqual(plan.current()["op"], "wait")
-        self.assertIn("is no block burn destroys", "\n".join(logs.output))
+        self.assertIn("holds no block to break", "\n".join(logs.output))
 
     def test_a_block_its_capability_does_not_open_is_dropped(self):
         w, m = garden(), Memory()
@@ -113,6 +126,17 @@ class BreakTargetTest(unittest.TestCase):
         self.assertEqual(out.state, "Break", out.reason)
         self.assertEqual(plan.current(), op)
         self.assertIn({"verb": "Use", "target": {"kind": "block", "x": 4, "y": 3}}, out.intents)
+
+    def test_a_block_of_a_type_with_no_known_opener_may_be_tried(self):
+        # Its opener is learned only by trying: a door a bomb may blast, or a type the rules never name.
+        for block, cap in (("framed_door", "blast"), ("pedestal", "burn")):
+            w, m = garden(at=(3, 2), held=("matches", "bomb")), Memory()
+            w.view.tiles[(4, 3)] = block
+            op = {"op": "break_block", "x": 4, "y": 3, "capability": cap}
+            plan = Plan([op], dict(PARAM_DEFAULTS))
+            out = dispatch(w, ctx(m, plan))
+            self.assertEqual(plan.current(), op, block)
+            self.assertEqual(out.state, "Break", out.reason)
 
     def test_a_cell_not_seen_yet_is_walked_to_first(self):
         w, m = garden(), Memory()

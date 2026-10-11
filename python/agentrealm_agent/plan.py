@@ -576,6 +576,7 @@ class Plan:
     held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
     paid_from: int | None = None  # gems held when Shop last sent a Take for the head `buy` op (A106); None once it failed (A112)
     used_id: int | None = None  # supply UseItem sent a Use on yourself for, for the head `use_item` op (A108)
+    fight_seen: bool = False  # the head `fight` op's NPC has been in view since it became the head op (A114)
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
     map_id: int | None = None  # the map ``advance`` last settled the stack on: stalled records are read for it (A111)
@@ -593,6 +594,7 @@ class Plan:
             self.held_before,
             self.paid_from,
             self.used_id,
+            self.fight_seen,
             self.directive_end,
         )
 
@@ -609,6 +611,7 @@ class Plan:
             self.held_before,
             self.paid_from,
             self.used_id,
+            self.fight_seen,
             self.directive_end,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
@@ -636,6 +639,8 @@ class Plan:
                 continue
             if op["op"] in BLOCK_CHANGE_OPS and self.block_before is None and world.map_id is not None:
                 self.block_before = world.view.tiles.get((op["x"], op["y"]))
+            if op["op"] == "fight" and op_npc(op, world) is not None:
+                self.fight_seen = True
             if op["op"] == "buy":
                 # A drink, a drop or a death lowers the bar: the buy still adds one.
                 held = count_held(world, op["code"])
@@ -734,6 +739,7 @@ class Plan:
     def _new_head(self) -> None:
         """Forget the progress kept for the old head op: a new one starts its own."""
         self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = self.paid_from = self.used_id = None
+        self.fight_seen = False
 
     @classmethod
     def from_directives(
@@ -859,8 +865,9 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
     if name == "fight":
-        # Done once the NPC it names is dead or out of sight: none left in view to fight.
-        return op_npc(op, world) is None
+        # Done once the NPC it names, seen since the op reached the top, is dead
+        # or out of sight. One never seen is not fought: Fight drops it with why.
+        return plan.fight_seen and op_npc(op, world) is None
     if name in BLOCK_CHANGE_OPS:
         # Done once the target's block_type differs from what it was when the
         # op reached the top: a successful Use destroys the block, which then

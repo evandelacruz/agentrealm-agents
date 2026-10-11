@@ -50,8 +50,9 @@ from ..supplies import heals
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase
-from ..loot import GEM_PILE_STEPS
+from ..loot import GEM_PILE_STEPS, GEM_SCORE, Pickup
 from ..memory import Memory
+from ..pack import TAKE, make_room
 from ..navigation import CostGridParams, cost_path, nearest_target
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
@@ -414,6 +415,7 @@ def _gather_cells(
         if is_gem_pile(e)
         and chebyshev(e.pos, here) <= 1
         and gather_ground(w, e.pos, policy, d)
+        and make_room(w, Pickup(e.id, e.code, e.pos, None, GEM_SCORE), knowledge=knowledge).kind == TAKE
     ]
     if piles:
         _end_walk_out(m)

@@ -48,7 +48,8 @@ from ..supplies import is_food
 from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from ..knowledge_base import knowledge_items
 from ..memory import Memory
-from ..loot import GEM_PILE_STEPS, GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score, pickup_room
+from ..loot import GEM_PILE_STEPS, GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score
+from ..pack import TAKE
 from ..navigation import cost_path
 from ..navigation.rejection import navigation_avoid_costly
 from ..pathing import bounded_step, grid_params, nav_search, route_ahead
@@ -58,6 +59,7 @@ from ..world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
 from .gather_safe import gather_ground, route_clear
 from .intents import set_position
+from .pickup import room_for
 
 GOAL = "detour"
 # The most steps going by a find may add to the walk, by kind (A73): a gem
@@ -124,13 +126,14 @@ class DetourState(State):
         return StateOutcome([set_position(step)], f"detour → {d.code} at {d.pos}{back}", reflex=True, state=self.name)
 
 
-def valuable(w: WorldModel, e: Entity, items: dict) -> bool:
-    """A free ground supply worth a detour that fits: a gem, a life, or food while hurt."""
+def valuable(w: WorldModel, e: Entity, items: dict, ctx: PlayContext) -> bool:
+    """A free ground supply worth a detour that fits by the pack rule
+    (``pack.make_room``): a gem, a life, or food while hurt."""
     if e.kind != "supply" or e.gem_price is not None or not e.code:
         return False
     if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code, items) or (hurt(w) and is_food(e.code))):
         return False
-    return pickup_room(w, Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items)), items) is not False
+    return room_for(w, ctx, Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items))).kind == TAKE
 
 
 def allowance(w: WorldModel, e: Entity, finds: list[Entity], items: dict) -> int:
@@ -209,7 +212,7 @@ def detour_find(w: WorldModel, ctx: PlayContext, known: Danger | None = None) ->
         return None
     items = knowledge_items(ctx.knowledge)
     known = known or danger(w, ctx.policy, chosen_fight(ctx))
-    finds = [e for e in w.entities if valuable(w, e, items)]
+    finds = [e for e in w.entities if valuable(w, e, items, ctx)]
     best: tuple[int, int, Entity] | None = None
     for e in finds:
         if e.id in m.detour_skipped or chebyshev(e.pos, here) <= 1 or not gather_ground(w, e.pos, ctx.policy, known):

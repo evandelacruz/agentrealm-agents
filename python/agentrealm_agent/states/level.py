@@ -16,7 +16,8 @@ from __future__ import annotations
 from .. import targets as targets_mod
 from ..config import Policy
 from ..healing import supply_matches
-from ..loot import Pickup, loot_score, pickup_room
+from ..loot import Pickup, loot_score
+from ..pack import TAKE
 from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..memory import Memory
 from ..navigation import cost_path, doors_goal_path, nearest_target
@@ -27,6 +28,7 @@ from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
 from .explore import plan_sets
 from .intents import set_position, take
+from .pickup import room_for
 
 DOOR_GOAL, FRONTIER_GOAL, ENTRANCE_GOAL = "level:door", "level:frontier", "level:entrance"
 PREREQUISITE_GOAL = "level:prerequisite"
@@ -211,7 +213,7 @@ def _prerequisite_step(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutco
     if chebyshev(stop.pos, here) <= 1 and stop.supply_id is not None:
         item = _supply(w, stop.supply_id)
         items = knowledge_items(ctx.knowledge)
-        fits = item is not None and pickup_room(w, Pickup(item.id, item.code, item.pos, None, loot_score(item.code, items)), items) is True
+        fits = item is not None and room_for(w, ctx, Pickup(item.id, item.code, item.pos, None, loot_score(item.code, items))).kind == TAKE
         if not fits or stop.tries >= PREREQUISITE_TRIES:
             # No room, or refused every time: the entrance walk goes on without it.
             targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)

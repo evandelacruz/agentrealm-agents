@@ -139,15 +139,15 @@ class RecoverDispatchTest(unittest.TestCase):
         self.assertEqual(out.state, "Recover")
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 80}])
 
-    def test_full_pack_drops_junk_before_death_chest_withdraw(self):
+    def test_full_pack_never_drops_for_the_death_chest(self):
+        # What to give up is the planner's call (A102), never a reflex's.
         w = world(["....."], at=(1, 0))
         died_at(w, 0, 0)
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
         full_inventory(w)
         w.chest_contents[80] = [InventorySupply(71, "bronze_sword")]
         out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
-        self.assertEqual(out.state, "Recover")
-        self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": 1}])
+        self.assertNotIn("Drop", [i.get("verb") for i in out.intents or []])
 
     def test_full_pack_skips_death_chest_when_only_junk(self):
         w = world(["....."], at=(1, 0))

@@ -1672,6 +1672,29 @@ class ParseReplyTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_reply("no json here")
 
+    def test_correction_wins(self):
+        first, second = {"goals": [{"op": "wait"}]}, {"goals": [{"op": "travel", "x": 3, "y": 4}]}
+        raw = f"{json.dumps(first)}\nCorrection:\n{json.dumps(second)}"
+        self.assertEqual(parse_reply(raw), second)
+
+    def test_prose_between_and_around(self):
+        raw = 'Plan:\n```json\n{"goals": []}\n```\nOn second thought, rest first.\n```json\n{"goals": [{"op": "wait"}], "notes": "rest"}\n```\nDone.'
+        self.assertEqual(parse_reply(raw), {"goals": [{"op": "wait"}], "notes": "rest"})
+
+    def test_last_valid_plan_beats_a_later_invalid_object(self):
+        raw = '{"goals": [{"op": "wait"}]}\nAlso: {"thoughts": "none"} and {"goals": "not a list"}'
+        self.assertEqual(parse_reply(raw), {"goals": [{"op": "wait"}]})
+
+    def test_braces_inside_strings(self):
+        first = {"goals": [], "notes": "a } then a {"}
+        second = {"goals": [{"op": "wait", "why": "{rest} first }"}]}
+        raw = f"{json.dumps(first)} Correction: {json.dumps(second)}"
+        self.assertEqual(parse_reply(raw), second)
+
+    def test_no_plan_among_objects_keeps_old_behavior(self):
+        with self.assertRaises(ValueError):
+            parse_reply('{"a": 1} then {"b": 2}')
+
 
 if __name__ == "__main__":
     unittest.main()

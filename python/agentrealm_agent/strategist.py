@@ -542,11 +542,48 @@ def tokens_used(usage: dict[str, Any]) -> int | None:
     return total or None
 
 
+PLAN_KEYS = {"goals": list, "params": dict, "notes": str}
+
+
+def is_plan(obj: Any) -> bool:
+    """Whether ``obj`` is shaped like a plan: a non-empty object of only the
+    reply keys, each of its type."""
+    return (
+        isinstance(obj, dict)
+        and bool(obj)
+        and all(k in PLAN_KEYS and isinstance(v, PLAN_KEYS[k]) for k, v in obj.items())
+    )
+
+
+def json_objects(raw: str) -> list[Any]:
+    """Every top-level JSON object in ``raw``, in order, skipping the text between."""
+    decoder, found, i = json.JSONDecoder(), [], raw.find("{")
+    while i >= 0:
+        try:
+            obj, end = decoder.raw_decode(raw, i)
+        except ValueError:
+            i = raw.find("{", i + 1)
+            continue
+        found.append(obj)
+        i = raw.find("{", end)
+    return found
+
+
 def parse_reply(raw: str) -> Any:
-    """The JSON object in a reply; a model without a JSON mode may wrap it in a code fence."""
+    """The JSON object in a reply; a model without a JSON mode may wrap it in a code fence.
+
+    A reply holding several objects (a plan, then a correction) gives the last
+    one shaped like a plan: the planner's final word.
+    """
     try:
         return json.loads(raw)
     except ValueError:
+        objects = json_objects(raw)
+        plans = [obj for obj in objects if is_plan(obj)]
+        if len(objects) > 1:
+            log.info("planner reply held %d JSON objects, %d plans; using the last plan", len(objects), len(plans))
+        if plans:
+            return plans[-1]
         first, last = raw.find("{"), raw.rfind("}")
         if first < 0 or last < first:
             raise

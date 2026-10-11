@@ -14,6 +14,7 @@ from agentrealm_agent.pack import reserved_supplies
 from agentrealm_agent.plan import Plan, collect_rejections, validate_goal_op
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.dispatch import PROBE_STATES
+from agentrealm_agent.states.equip import EquipState
 from agentrealm_agent.states.use_item import chest_to_apply
 from agentrealm_agent.supplies import chest_upgrade, used_on_self
 from agentrealm_agent.world import Entity, WorldModel
@@ -177,6 +178,26 @@ class EquipAppliesNothingTest(unittest.TestCase):
         c = ctx(plan({"op": "equip", "code": "iron_mail"}))
         dispatch(world(), c)
         self.assertIn("not held", failures(c)[-1]["reason"])
+
+    def test_a_named_weapon_waits_while_another_state_holds_the_armed_slot(self):
+        w = world()
+        w.held_supplies = [InventorySupply(5, "iron_sword")]
+        m = Memory()
+        m.solve_rearm = "bronze_sword"  # Solve swapped the weapon out and owns the slot
+        c = ctx(plan({"op": "equip", "code": "iron_sword"}), m)
+        out = EquipState().act(w, c)
+        self.assertIsNone(out.intents)
+        self.assertFalse(out.wait, "sends nothing and holds nothing: the states below run")
+        self.assertEqual(c.plan.current()["code"], "iron_sword", "still on top, neither done nor dropped")
+        self.assertFalse(failures(c))
+
+    def test_a_named_weapon_already_armed_is_done_even_while_the_slot_is_held(self):
+        m = Memory()
+        m.solve_rearm = "pocket_knife"
+        c = ctx(plan({"op": "equip", "code": "bronze_sword"}), m)
+        EquipState().act(world(), c)
+        self.assertIsNone(c.plan.current())
+        self.assertFalse(failures(c))
 
     def test_equip_of_an_item_already_on_is_done(self):
         c = ctx(plan({"op": "equip", "code": "bronze_sword"}))

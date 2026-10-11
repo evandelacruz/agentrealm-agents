@@ -18,7 +18,8 @@ class EquipState(State):
     is finished once nothing is left to do: no upgrade, or the named item on.
     A named item that is not held, cannot be armed or worn (a potion or a
     chest is used, ``use_item``), or was refused, drops the op with why:
-    nothing was applied, so it is not done (A108)."""
+    nothing was applied, so it is not done (A108). A named weapon not armed
+    yet waits while Heal, Solve or Break holds the armed slot."""
 
     name = "Equip"
 
@@ -36,9 +37,12 @@ class EquipState(State):
         code = op.get("code")
         armed_owned = _armed_owned(world, ctx)
         up = named_equip(world, ctx.memory, code, armed_owned) if code else _upgrade(world, ctx)
-        if up is None and code and armed_owned and is_weapon(code):
-            return StateOutcome(None, f"the armed slot is busy: {code} waits", state=self.name)
         if up is None and code and not is_on(world, code):
+            if armed_owned and is_weapon(code):
+                # Heal, Solve or Break holds the armed slot: the named weapon waits,
+                # sending nothing, so the states below run; the op's stall clock
+                # runs meanwhile (A104).
+                return StateOutcome(None, f"the armed slot is busy: {code} waits", state=self.name)
             # Done means the named item is on; nothing applied is a drop (A108).
             why = cannot_equip_reason(world, code)
             ctx.plan.drop_current(why, memory=ctx.memory)

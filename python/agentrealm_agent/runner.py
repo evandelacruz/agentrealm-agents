@@ -723,6 +723,8 @@ class Runner:
         self.on_events(events)
         self._resolve_pending_break()
         self.gem_cuts.update(w, self.knowledge)
+        head = self.plan.current()
+        self.gem_cuts.note_gathering(w.tick, head is not None and head["op"] == "gather_gems")
         self.note_held_path_stale()
         self.apply_finished_queue(r.get("finished_queue"))
         queue = r.get("queue")

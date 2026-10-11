@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from agentrealm_agent import gem_yield
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.gem_yield import BARREN_MIN_CUTS, GEM_WINDOW_TICKS, GemYieldTracker, record_cut
+from agentrealm_agent.gem_yield import BARREN_MIN_CUTS, GEM_WINDOW_TICKS, RATE_MIN_SECONDS, GemYieldTracker, record_cut
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
@@ -203,7 +203,7 @@ class NoEffectCutTest(unittest.TestCase):
         r.world.tick = 100 + GEM_WINDOW_TICKS + 1
         r.gem_cuts.update(r.world, r.knowledge)
         self.assertNotIn("gem_yield", r.knowledge.extra, "never filed: no false miss toward barren")
-        self.assertEqual(r.gem_cuts.run_counts(), {"cuts": 0, "no_effect_cuts": 1, "gems_gained": 0})
+        self.assertEqual(r.gem_cuts.run_counts(r.world.tick, 10), {"cuts": 0, "no_effect_cuts": 1, "gems_gained": 0})
 
     def test_a_break_probe_that_misses_is_not_a_no_effect_cut(self):
         """Review on #126: Break's capability misses (A28) are not ground that does not cut."""
@@ -341,9 +341,25 @@ class NoEffectCutTest(unittest.TestCase):
             plan=Plan([{"op": "gather_gems", "count": 5}], dict(PARAM_DEFAULTS)),
             directives=Directives(params=dict(PARAM_DEFAULTS)),
             knowledge=kb(),
-            gather_run=t.run_counts(),
+            gather_run=t.run_counts(0, 10),
         )
         self.assertIn('gather_run={"cuts": 4, "gems_gained": 1, "no_effect_cuts": 2}', messages[1]["content"])
+
+    def test_state_shows_the_current_gathers_gem_rate(self):
+        # A121: the current gather's gems a minute, shown once it has run
+        # RATE_MIN_SECONDS, kept after it ends, restarted by the next gather.
+        t = GemYieldTracker(gems_gained=7)
+        t.note_gathering(1000, True)
+        t.gems_gained = 8
+        self.assertNotIn("gems_per_min", t.run_counts(1000 + RATE_MIN_SECONDS * 10 - 10, 10))
+        t.gems_gained = 9
+        t.note_gathering(1000 + 3000, True)  # 300 s, 2 gems
+        self.assertEqual(t.run_counts(4000, 10), {"cuts": 0, "no_effect_cuts": 0, "gems_gained": 9, "gems_per_min": 0.4, "gather_minutes": 5.0})
+        t.note_gathering(4000, False)
+        t.gems_gained = 12  # gems from elsewhere after the gather ended
+        self.assertEqual(t.gather_rate(9000, 10), (0.4, 5.0))
+        t.note_gathering(9000, True)
+        self.assertIsNone(t.gather_rate(9010, 10), "a new gather measures afresh")
 
 
 class RegionSummaryTest(unittest.TestCase):

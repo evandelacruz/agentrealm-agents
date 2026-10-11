@@ -59,6 +59,8 @@ class LootState(State):
             return clear_the_way(world, ctx, None, f"no {code} in sight", self.name, op)
         if target == world.pos:
             return clear_the_way(world, ctx, None, f"no {code} at {target[0]},{target[1]}", self.name, op)
+        # Before the step, not only when it has none: a walk that found no step backs
+        # off (``bounded_step``) and would hold on after the block is open.
         if (out := open_the_way(world, ctx, target, self.name)) is not None:
             out.reason = f"fetch {code}: {out.reason}"
             return out

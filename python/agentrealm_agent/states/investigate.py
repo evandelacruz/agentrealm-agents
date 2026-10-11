@@ -109,6 +109,8 @@ def _settled(ctx: PlayContext, key: str, recorded: bool) -> bool:
 def _walk(w: WorldModel, ctx: PlayContext, op: GoalOp, goal: Pos, reason: str) -> StateOutcome:
     """A step toward ``goal``; with no way round, the block on the way opened, else the planner asked (A120)."""
     m, policy = ctx.memory, ctx.policy
+    # Before the step, not only when it has none: a walk that found no step backs
+    # off (``bounded_step``) and would hold on after the block is open.
     if (out := open_the_way(w, ctx, goal, InvestigateState.name)) is not None:
         out.reason = f"{reason}: {out.reason}"
         return out

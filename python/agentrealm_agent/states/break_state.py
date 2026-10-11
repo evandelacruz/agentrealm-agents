@@ -211,8 +211,10 @@ class BreakState(State):
         out = break_outcome(world, ctx, self.name)
         if op is not None and not out.intents and ctx.plan is not None and ctx.plan.current() is op:
             # No way to the block: ask the planner, saying what shuts it, and hold (A120).
-            at = (op["x"], op["y"])
-            return ask_the_planner(world, ctx, out.reason, self.name, op, blocked_by=what_blocks(world, ctx, at))
+            blocked = tried = None
+            if ctx.memory.no_way_on != (world.map_id, world.pos, out.reason):  # only for an ask that goes out
+                blocked, tried = what_blocks(world, ctx, (op["x"], op["y"])), "a way to the block, round every other"
+            return ask_the_planner(world, ctx, out.reason, self.name, op, blocked_by=blocked, tried=tried)
         if out.intents or out.reason != "nothing to break":
             return out
         code, ctx.memory.break_rearm = ctx.memory.break_rearm, None

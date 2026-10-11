@@ -20,7 +20,7 @@ from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import OP_STATE, Plan
-from agentrealm_agent.states import PlayContext, dispatch
+from agentrealm_agent.states import PlayContext, break_state, dispatch
 from agentrealm_agent.states.explore import HOLD_THEIR_WALK
 from agentrealm_agent.states.fight import FightState
 from agentrealm_agent.world import Entity, WorldModel
@@ -164,9 +164,15 @@ class ObstructedThenAskedTest(unittest.TestCase):
         w.view.tiles[END] = "tree"
         op = {"op": "break_block", "x": END[0], "y": END[1], "capability": "burn"}
         c = ctx(op)
-        out = dispatch(w, c)
-        self.assertEqual((out.state, out.intents, out.wait), ("Break", None, True), out.reason)
-        self.assertEqual([(a["op"], a["blocked_by"]) for a in asks(c)], [(op, "wall at 3,1, which nothing held opens")])
+        with mock.patch.object(break_state, "what_blocks", wraps=break_state.what_blocks) as blocks:
+            out = dispatch(w, c)
+            self.assertEqual((out.state, out.intents, out.wait), ("Break", None, True), out.reason)
+            play(w, c, 2)
+            self.assertEqual(blocks.call_count, 1, "what blocks it is worked out for the ask, not every held tick")
+        self.assertEqual(
+            [(a["op"], a["blocked_by"], a["tried"]) for a in asks(c)],
+            [(op, "wall at 3,1, which nothing held opens", "a way to the block, round every other")],
+        )
 
     def test_a_hostile_on_the_way_is_named_for_the_planner(self):
         # Fight-or-flee is the engagement's, and a fight it did not choose is the planner's (A114).

@@ -3,7 +3,11 @@
 Sourced rules (docs/GAME_NOTES.md, Items, slots and gear):
 
 - Everything held, worn, armed, or stowed in the carried chest counts against
-  carry capacity, 10 for a new character (Manual §11).
+  carry capacity, 10 for a new character (Manual §11). The server serves no
+  capacity, so it is derived at every inventory sync from the chest applied
+  (``WorldModel.sync_carry_capacity``, A115), and the applied chest, a fact
+  only this character's own ``Use`` shows, is kept per character in the world
+  knowledge base (``load_carried_chest``, ``save_carried_chest``).
 - ``Take`` reaches the supply's block or a neighbour; ``WithdrawFromChest``
   with ``supply_ids`` is all or nothing, ``carry_capacity_full`` when one is
   too many (API).
@@ -26,7 +30,7 @@ from typing import Any
 
 from typing import TYPE_CHECKING
 
-from .item_table import InventorySupply
+from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
 from .supplies import chest_capacity, heals
 from .world import Entity, Pos, WorldModel
 
@@ -80,8 +84,7 @@ def loot_score(code: str | None, items: dict[str, dict[str, Any]]) -> int:
 
 
 def carry_slots_used(w: WorldModel) -> int:
-    n = len(w.held_supplies) + len(w.chest_supplies) + len(w.worn_codes)
-    return n + (1 if w.armed_code else 0)
+    return w.slots_carried()
 
 
 def inventory_full(w: WorldModel) -> bool:
@@ -142,15 +145,47 @@ def supply_code_for_take(intent: dict | None, entities: list[Entity]) -> str | N
 
 def learn_chest_upgrade(w: WorldModel, code: str | None) -> None:
     """A ``Use`` on yourself of a chest that went through (it was used up)
-    raises carry capacity to its Supplies reference ``chest_capacity`` when
-    that is larger; one no larger (the blue chest, the size a character starts
-    with) changes nothing. Taking or holding a chest raises nothing (A108):
-    the snapshot gives no capacity, so this is assumed, not measured
-    (GAME_NOTES "Assumed until measured"), and ``carry_capacity_full`` still
-    lowers it to what was really carried (A47)."""
+    makes it the carried chest when its Supplies reference ``chest_capacity``
+    is larger; one no larger (the blue chest, the size a character starts
+    with) changes nothing. Taking or holding a chest raises nothing (A108).
+    The server serves neither capacity nor the carried chest, so capacity is
+    derived from this chest (``WorldModel.sync_carry_capacity``, A115), and a
+    ``carry_capacity_full`` refusal still bounds it (A47)."""
     cap = chest_capacity(code)
-    if cap is not None:
-        w.carry_capacity = max(w.carry_capacity, cap)
+    if cap is not None and cap > (chest_capacity(w.carried_chest) or DEFAULT_CARRY_CAPACITY):
+        w.carried_chest, w.full_at = code, None
+        w.sync_carry_capacity()
+
+
+CARRIED_CHESTS_KEY = "carried_chests"  # kb.extra: character id -> chest code applied (A115)
+
+
+def load_carried_chest(knowledge: KnowledgeBase | None, w: WorldModel) -> None:
+    """The chest this character applied, from the world knowledge base, so a
+    new run starts at its size instead of the blue chest's (A115). Only what
+    the server cannot tell us is kept: the applied chest, never the capacity."""
+    rows = knowledge.extra.get(CARRIED_CHESTS_KEY) if knowledge is not None else None
+    code = rows.get(str(w.character_id)) if isinstance(rows, dict) else None
+    if isinstance(code, str) and chest_capacity(code) is not None:
+        w.carried_chest = code
+        w.sync_carry_capacity()
+
+
+def save_carried_chest(knowledge: KnowledgeBase | None, w: WorldModel) -> None:
+    """Write the applied chest back; the blue chest (None) removes the row."""
+    if knowledge is None:
+        return
+    with knowledge.lock:
+        rows = knowledge.extra.get(CARRIED_CHESTS_KEY)
+        rows = dict(rows) if isinstance(rows, dict) else {}
+        if w.carried_chest is None:
+            rows.pop(str(w.character_id), None)
+        else:
+            rows[str(w.character_id)] = w.carried_chest
+        if rows:
+            knowledge.extra[CARRIED_CHESTS_KEY] = rows
+        else:
+            knowledge.extra.pop(CARRIED_CHESTS_KEY, None)
 
 
 def learn_life_code(
@@ -191,6 +226,9 @@ def learn_loot_rejection(w: WorldModel, intent: dict | None, code: str | None) -
     if code == "carry_capacity_full" and verb in ("Take", "WithdrawFromChest"):
         used = carry_slots_used(w)
         if used:  # an empty model has not read the inventory yet: nothing to learn
-            w.carry_capacity = min(w.carry_capacity, used)
+            w.full_at = used
+            if (chest_capacity(w.carried_chest) or DEFAULT_CARRY_CAPACITY) > used:
+                w.carried_chest = None  # full below its size: not the chest we thought we carry
+            w.sync_carry_capacity()
     elif code == "not_transferable" and verb == "Drop" and intent.get("supply_id") is not None:
         w.undroppable.add(int(intent["supply_id"]))

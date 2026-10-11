@@ -113,7 +113,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Combat events.** `NPCDamaged` shows damage dealt; a miss emits nothing. `NPCDied` marks a kill (M §8).
 - **Who hit us.** `Damaged` names its source in `source_kind` (`npc`, `character`, `trap`, `occupy`) and, except for `occupy`, `source_id` (API Events; `threat.py` keys the threat table on them). `Attacked` names its swinger in `actor_kind` and `actor_id`, on every swing at us, hit or miss; a hit adds a `Damaged` from the same attacker, so an `Attacked` with no such `Damaged` on its tick is a miss (API Events, B131; `threat.count_swings` counts each type's hits and misses from them, A85). Who is hitting us (A9) still follows only a `Damaged`'s source: an `Attacked` on a later tick than the last named hit clears it.
 - **Bosses** are the only NPCs with `health`/`max_health` on entity reads: "A boss NPC also includes its current `health` and `max_health` … no character, hostile, or helper carries health" (M §9.3; API Reads). The agent identifies a boss by that field (A38).
-- **Healing.** Potions and food heal (M §16). A new character starts at 10 health. Regeneration out of combat has not been observed.
+- **Healing.** Potions and food heal (M §16). A new character starts at 10 health. The docs give no regeneration: health comes back only from a heal (a potion `Use`d, food eaten) or a respawn, at full health (M §16; API Events `Respawned`). Safe zones only stop damage (Guide). Resting hurt in a safe zone has measured none (`docs/observations/A67_free_play_runs.md`); the agent saves a regen rate only if a rest ever shows one (A124).
 - **Never wake or idle next to a hostile.** An unattended character keeps taking hits (Guide).
 
 ## Items, slots and gear

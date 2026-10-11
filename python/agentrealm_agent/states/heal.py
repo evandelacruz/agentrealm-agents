@@ -145,7 +145,7 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     if known is None:
         verdict = note_regen_sample(m, w)
         if verdict == "yes":
-            save_regen_yes(ctx.knowledge)
+            save_regen_yes(ctx.knowledge, m.heal_regen_per_tick)
         elif verdict == "no":
             m.heal_regen_absent = True  # this run only: never saved (one noisy window)
             _ask_for_supplies(w, m)

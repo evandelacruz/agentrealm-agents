@@ -15,6 +15,7 @@ from agentrealm_agent.healing import (
     hurt,
     note_heal_pending,
     regen_known,
+    regen_per_tick,
     save_regen_yes,
 )
 from agentrealm_agent.executor.supply_refusals import Refusal, note_refusal, refusal_situation
@@ -68,6 +69,9 @@ class HealingHelpersTest(unittest.TestCase):
         self.assertIsNone(regen_known(kb, Memory()))
         save_regen_yes(kb)
         self.assertEqual(regen_known(kb, Memory()), "yes")
+        self.assertIsNone(regen_per_tick(kb), "a yes with no rate gives no rest estimate")
+        save_regen_yes(kb, 0.05)
+        self.assertEqual(regen_per_tick(kb), 0.05)
 
 
 class HealStateTest(unittest.TestCase):
@@ -361,6 +365,8 @@ class HealStateTest(unittest.TestCase):
         out = dispatch(w, ctx(m, kb))
         self.assert_heals_in_zone(out)
         self.assertEqual(regen_known(kb, Memory()), "yes")
+        # A124: the window's rate is kept, for the planner's rest estimate.
+        self.assertEqual(regen_per_tick(kb), 1 / 7)
 
     def test_regen_absent_is_kept_for_this_run_only(self):
         w = grid(at=(0, 0))

@@ -1294,3 +1294,82 @@ Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A105 
 2. **A `buy` stays on the stack after its purchase lands** (the strategist's State; shop sync at `shop.py:100`). The middle chest was bought at 432.4 s. Call 26, at 437.9 s, still held `buy` middle_chest. Its own note said the purchase was "not needed" and called the held chest "a consumable", and call 27 dropped it 17 s later. **Rule:** a `buy` is done once its gems are spent, and the next State says which ops finished since the last reply, so the planner does not re-send them.
 
 3. **A level entrance is chosen by distance, and its route is found out only by walking it** (the `level_entrances` State line; Travel). Both entrances tried in runs 14 and 15 were 105–127 cells off, into ground the map did not show as passable. In each run, stuck detection gave up after 90–160 s of walking, against bush, tree, wall and water. **Rule:** the planner sees, for each entrance, whether a known path reaches it or only the frontier does. Travel to an entrance with no known route goes by way of exploring toward it, so it can be given up early, not after the walk.
+
+### Run 16: 35 gems and three kills; stage 3 met all run, but the plan saves for a raft no shop is known to sell, and the chest it bought cannot be applied
+
+- **Code:** `main` at `c3aa22a`. Since run 15: A105 (#200, with no region named, Gather prices known grass against nearby unexplored ground), A106 (a buy is done once its gems are spent, and State shows finished ops), A107 (State shows, per level entrance, a known route, frontier only, or not searched).
+- **Knowledge base:** kept from run 15. Region (432, 400): 746 cuts, 146 gems. The middle_chest bought in run 15 is held. The north-east entrance (532, 311) was given up in run 15.
+- **Correction to run 15:** its notes say the pack went from 10 to 30 slots when the middle_chest was bought. That was the agent's belief, from the chest's `chest_capacity`, not the server's: the chest was never applied, and the server's pack stayed at 10 slots.
+- **Verdict:** exit 0, `PASS` after **601.7 s**, on the short-run gates only. The park **parked safe** at (416, 399) after 0.3 s. The character started at **10/10**, 5 lives and **3 gems** at (428, 398), with the bronze_sword armed, the bronze_mail worn and the pack at 10/10 slots.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; kills **3** (lone weak 2); gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **yes**; food taken while hurt **no**; Heal drank a potion **yes**. Planner: 39 calls, 39 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–21 s | `gather_gems` (432, 400) | "Stage 2 is met and nothing is listed under upgrades_for_sale … The nearest entrances are frontier_only. Gather gems in the best known region …. After that, explore toward the entrance at 532,311." Detour took the (414, 414) pile (+1). |
+| 21–112 s | same | Gather walked **90 s** to its committed cell (432, 414), 18 cells east, going round by (428, 373) and (404, 369) (defect 2). |
+| 112–252 s | same, `fight: false` 198–210 s | Cut grass in (432, 400). Killed snotling 247 at 116 s (3 swings, 3 hits) and again at 252 s (3 swings, 3 hits). The second kill dropped a gem. |
+| 252–270 s | `travel` town, `gather_gems` | At 5/10 the potion rule drank a small_potion (253 s, back to 10/10). The planner sent it to town to rest, then dropped the travel. |
+| 270–586 s | `gather_gems`, `buy` small_potion (288–313 s) | Bought a **small_potion** at 312 s (10 gems). Killed snotling 247 a third time at 427.5 s (2 swings, 1 hit). The notes, from 67 s on: gems are "toward the raft" for "the island door" in the east lake (defect 3). |
+| 586–600 s | `equip` middle_chest, then `use_block` middle_chest (436, 403), `gather_gems` | "Before buying a raft, apply the middle_chest (30 slots) or name a drop." The `equip` op finished as done with nothing applied. The `use_block` op sent one `Arm` on the chest and then gave way to Explore (defect 1). |
+
+#### Stage, entrances, level attempts and stalls
+
+- **Stage:** 3 from the first call; `readiness` showed stages 1 and 2 met all run (it dipped for 18 s at 5–6/10 health).
+- **Entrances, as A107 showed them:** (532, 311), 104 steps, `frontier_only` with 79 unexplored cells. (300, 316), 128 steps, `frontier_only` with 103. The other six were `not_searched` (222–361 steps).
+- **Which it picked and why:** none. The planner put the entrance after the raft: "Plan: raft for the lake door, then entrance 532,311." No raft is in `shop_prices`. The fisher said his brother "sells rafts" at the big lake east, but no seller is known.
+- **Level attempts:** none.
+- **Stalls:** none. No oscillation event, no stall line, no stale op.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **3** | **28** (+35 earned, −10 spent) |
+| Armed | bronze_sword | bronze_sword |
+| Worn | bronze_mail | bronze_mail |
+| Held | 10/10 slots, middle_chest not applied | 10/10 slots, middle_chest not applied |
+| Potions | 3 | 3 (one drunk, one bought) |
+
+#### Gems earned
+
+**35** in 600 s, **3.5 a minute**: 33 from grass (140 cuts in region (432, 400); the region's own tally gained 30 gems, the gem counter 33), 1 from the (414, 414) pile, 1 from a kill.
+
+#### Fights
+
+| Time | Hostile | Started by | Our swings | Hits | Their hits | Taken | Outcome |
+|---|---|---|---|---|---|---|---|
+| 112–116 s | snotling 247 | us (`close on`) | 3 | 3 | 2 | 2 | **Killed**, no drop. |
+| 246–252 s | snotling 247, respawned | us | 3 | 3 | 3 | 3 | **Killed**, gem dropped. Potion at 5/10. |
+| 424–428 s | snotling 247, respawned | us | 2 | 1 | 1 | 1 | **Killed**, no drop. |
+
+8 swings, 7 hits, 3 kills, 1 gem from kills, 6 damage taken. Deaths 0.
+
+#### Run 15 defects, checked
+
+| Defect | Run 16 | |
+|---|---|---|
+| Gather walks 100 cells to known grass (A105) | **Not tested.** No call left Gather with no region named; every reply named (432, 400). | Its long walk in this run is defect 2, with a region named. |
+| A `buy` stays after it lands (A106) | **Gone.** The potion buy finished at 312 s and was not re-sent. | |
+| Entrances chosen by distance alone (A107) | **Holds, as designed.** State showed `frontier_only` and `not_searched`, and the planner held off the walk. | It did not pick an entrance at all (defect 3). |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 160,904, output 6,291, cache write 106,739, cache read 4,056,082 |
+
+#### Decision mix
+
+Intents: 470 `Step`, 848 `Wait`, 151 `Use` (140 cuts, 8 swings, 1 drink and the rest), 35 `Take`, 3 `Arm`. Call mix: 817 `tick`, 223 `entities`, 138 `zone`, 81 `strategist`, 53 `self`, 20 `terrain`, 18 `position`.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A108 (a chest upgrade is a consumable, applied by `Use` on oneself per the game docs, and nothing applies it); defect 2 is A109 (a committed gather target is dropped for a far cheaper one); defect 3 is A110 (a buy goal needs a known seller). Their PLAN.md rows come with the implementing pull requests.
+
+1. **No op applies a self-use item, so the chest bought in run 15 is still not applied** (`states/equip.py`, `equip.py`; the self-`Use` path in `states/heal.py:375`, `use_carried_heal`). The middle_chest (50 gems, `chest_capacity` 30) has been held since run 15, and the pack stayed at 10/10 slots all run. The planner saw it "held but not applied" and tried `equip` middle_chest (done, nothing applied), then `use_block` middle_chest (one `Arm`, no `Use`). **Rule:** a held item whose documented use is applied to oneself (a chest, a potion) goes through one `Use`-self path. Either the planner names it in an op, or it is applied once on pickup when nothing argues for keeping it closed.
+
+2. **Gather keeps a committed cell whose path has grown far longer than the cut it buys** (`states/gather.py:782`, `_keep`; `:880`, `_price`). From (414, 414), Gather committed to grass at (432, 414), 18 cells east. Its path went round by (428, 373) and (404, 369), 65 distinct cells over 90 s. Region (432, 400) grass, reached from town in earlier runs in under 20 s, lay closer along the way. **Rule:** a committed target is dropped once its path costs a multiple of the cheapest cut target now known, the same pricing Gather uses to pick one.
+
+3. **The plan saves toward an item no shop is known to sell, and stage 3 waits on it** (the progression arc and `upgrades_for_sale` in `strategist.py`). From 67 s, every reply gathered "toward the raft" for the island door in the east lake. No raft is in `shop_prices`; the fisher only says his brother sells them by the big lake east. The entrance at (532, 311) stayed second in line all run. **Rule:** a buy goal needs a known seller. With none, the plan goes to find one (travel to the place the clue names) or turns to a goal it can reach now.

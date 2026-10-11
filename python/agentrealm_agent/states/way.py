@@ -30,7 +30,7 @@ from ..memory import Memory
 from ..pathing import grid_params, plan_sets
 from ..plan import GoalOp
 from ..world import Pos, WorldModel
-from .ask import ask_the_planner, what_blocks
+from .ask import ask_key, ask_the_planner, op_key, what_blocks
 from .base import PlayContext, StateOutcome
 from .break_state import break_toward
 
@@ -107,7 +107,7 @@ def clear_the_way(
     if break_due(w, m, state):
         m.break_yield = m.nav_stuck.decision
         return StateOutcome(None, why, state=state)
-    key = _shut_key(w, m, state, op, at)
+    key = _shut_key(w, ctx, state, op, at)
     if at is not None and m.way_shut != key:
         if (out := open_the_way(w, ctx, at, state)) is not None:
             m.way_shut = None
@@ -115,19 +115,22 @@ def clear_the_way(
             return out
         m.way_shut = key  # still shut until something it was found under changes
     blocked = tried = None
-    if at is not None and m.no_way_on != (w.map_id, w.pos, why):
+    if at is not None and m.no_way_on != ask_key(w, why, op):
         blocked, tried = what_blocks(w, ctx, at), _tried(w, ctx)  # only for an ask that goes out
     return ask_the_planner(w, ctx, why, state, op, blocked_by=blocked, tried=tried)
 
 
-def _shut_key(w: WorldModel, m: Memory, state: str, op: GoalOp | None, at: Pos | None) -> tuple:
+def _shut_key(w: WorldModel, ctx: PlayContext, state: str, op: GoalOp | None, at: Pos | None) -> tuple:
     """What a shut way was found under: the executor, its op, the map, the
     cell, the target, the map's tiles (``Tiles.revision``), what is held, and
-    the blocks backed off from (A90), whose backoff lapses by time alone."""
+    what lapses by time alone: the blocks backed off from (A90) and the
+    cells the route learnings keep out or price (``plan_sets``)."""
+    m = ctx.memory
     held = tuple(sorted((s.code or "") for s in w.held_supplies)) + (w.armed_code or "",)
-    op_key = tuple(sorted((k, repr(v)) for k, v in op.items())) if op is not None else None
     backed_off = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
-    return (state, op_key, w.map_id, w.pos, at, w.view.tiles.revision, held, backed_off)
+    _, avoid, costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
+    learned = (frozenset(avoid), frozenset(costly))
+    return (state, op_key(op), w.map_id, w.pos, at, w.view.tiles.revision, held, backed_off, learned)
 
 
 def _tried(w: WorldModel, ctx: PlayContext) -> str:

@@ -40,7 +40,7 @@ from ..plan import OP_STATE, GoalOp
 from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
-from .ask import ask_the_planner
+from .ask import ask_the_planner, op_key
 from .base import PlayContext, State, StateOutcome, my_op, top_executor, top_op
 from .gather_safe import is_safe_ish
 from .intents import set_position
@@ -91,14 +91,16 @@ class ExploreState(State):
 def hold_for(world: WorldModel, ctx: PlayContext, owner: str) -> StateOutcome:
     """Hold for the op ``owner`` executes, which sent nothing this decision (A120).
 
-    Every op whose executor cannot act asks the planner once: an executor
-    that asked from this cell already (``Memory.no_way_on``), or that left
+    Every op whose executor cannot act asks the planner once: an op asked
+    for from this cell already (``Memory.no_way_on``, whatever its reason;
+    an earlier op's ask does not count), or whose executor left
     this decision to Break at stuck step 2 of its own walk
     (``Memory.break_yield``), is left to it; any other is asked for here, so
     no op waits on its stall clock unheard.
     """
     m, op = ctx.memory, top_op(ctx)
-    asked = m.no_way_on is not None and m.no_way_on[:2] == (world.map_id, world.pos)
+    asked = m.no_way_on is not None and op is not None and m.no_way_on[:2] == (world.map_id, world.pos)
+    asked = asked and m.no_way_on[3] == op_key(op)
     if op is None or asked or m.break_yield == m.nav_stuck.decision or break_due(world, m, owner):
         return StateOutcome(None, f"{owner} holds its walk", state=ExploreState.name, wait=True, progress=False)
     return ask_the_planner(world, ctx, f"{op['op']}: {owner} has no move", ExploreState.name, op)

@@ -185,11 +185,11 @@ class Memory:
     gather_rearm: tuple[str, str] | None = None
     break_rearm: str | None = None  # code armed before Break, restored when break finishes (A28)
     break_pending: tuple[int, Pos, str] | None = None  # map, block and capability a Use in flight targets (A28)
-    # The last no_way_on ask (A114, A120): map, cell and why. One ask per cell and reason: the safe
+    # The last no_way_on ask (A114, A120): map, cell, why and the op (``ask.ask_key``). One ask per op, cell and reason: the safe
     # default with nothing left to explore, or an executor whose way is shut (``states.ask``).
-    no_way_on: tuple[int, Pos, str] | None = None
+    no_way_on: tuple[int, Pos, str, tuple | None] | None = None
     # What an executor's shut way was last found under (``way.clear_the_way``, A120): while the
-    # state, op, map, cell, tiles, what is held and the blocks backed off from (A90) stay the same, the way is still shut and its
+    # state, op, map, cell, tiles, what is held, the blocks backed off from (A90) and the route learnings stay the same, the way is still shut and its
     # searches are not run again on every held decision.
     way_shut: tuple | None = None
     # The decision (``NavStuckMemory.decision``) an executor last left the round to Break at

@@ -4,7 +4,7 @@ Shared by the states that can find no way on and must not stand still
 pretending otherwise: the safe default with nothing left to explore, and
 every executor whose op's way is shut once it has tried to clear it
 (``way.clear_the_way``). The ask is asynchronous: one ``no_way_on``
-trigger per cell and reason, then the decision holds with nothing sent
+trigger per op, cell and reason, then the decision holds with nothing sent
 until the planner's reply changes the stack. The survival reflexes sit
 above every state that asks, so a hold never stands taking hits.
 """
@@ -19,6 +19,17 @@ from ..plan import GoalOp
 from ..survival import hostiles_reaching
 from ..world import Pos, WorldModel
 from .base import PlayContext, StateOutcome
+
+
+def op_key(op: GoalOp | None) -> tuple | None:
+    """``op`` as a value a key can hold: two ops with the same fields are one op."""
+    return tuple(sorted((k, repr(v)) for k, v in op.items())) if op is not None else None
+
+
+def ask_key(w: WorldModel, why: str, op: GoalOp | None) -> tuple:
+    """What one ``no_way_on`` ask is for (``Memory.no_way_on``): the map, the
+    cell, why, and the op it is for (None for the safe default's)."""
+    return (w.map_id, w.pos, why, op_key(op))
 
 
 def ask_the_planner(
@@ -36,16 +47,17 @@ def ask_the_planner(
     ``op`` is the op the ask is for, None for the safe default's;
     ``blocked_by`` says what shuts the way (blocks, hostiles, unseen
     ground) and ``tried`` what the executor tried first. A second ask from
-    the same cell is new only when its reason is: an executor's ask after
-    the safe default's on the same cell still reaches the planner, and a
-    hostile moving about does not ask again. The planner reads State ``map``
+    the same cell is new only when its reason or its op is: an executor's
+    ask after the safe default's on the same cell, or a new op's after an
+    earlier op's, still reaches the planner, and a hostile moving about does
+    not ask again. The planner reads State ``map``
     (the ground round the character, blocks, hostiles, signs and doors by
     cell), what each held item does and the clues, and opens a block with
     ``break_block``, fights, or goes another way.
     """
     m = ctx.memory
-    if w.pos is not None and w.map_id is not None and m.no_way_on != (w.map_id, w.pos, why):
-        m.no_way_on = (w.map_id, w.pos, why)
+    if w.pos is not None and w.map_id is not None and m.no_way_on != ask_key(w, why, op):
+        m.no_way_on = ask_key(w, why, op)
         signal = {"trigger": "no_way_on", "map_id": w.map_id, "x": w.pos[0], "y": w.pos[1], "tick": w.tick, "why": why}
         if op is not None:
             signal["op"] = dict(op)

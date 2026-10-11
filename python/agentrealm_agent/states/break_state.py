@@ -32,7 +32,7 @@ from ..plan import GoalOp
 from ..reach import supply_reach
 from ..world import VOID, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
-from .ask import ask_the_planner, what_blocks
+from .ask import ask_key, ask_the_planner, what_blocks
 from .intents import arm, set_position, use_block
 
 GOAL = BREAK_GOAL
@@ -212,7 +212,7 @@ class BreakState(State):
         if op is not None and not out.intents and ctx.plan is not None and ctx.plan.current() is op:
             # No way to the block: ask the planner, saying what shuts it, and hold (A120).
             blocked = tried = None
-            if ctx.memory.no_way_on != (world.map_id, world.pos, out.reason):  # only for an ask that goes out
+            if ctx.memory.no_way_on != ask_key(world, out.reason, op):  # only for an ask that goes out
                 blocked, tried = what_blocks(world, ctx, (op["x"], op["y"])), "a way to the block, round every other"
             return ask_the_planner(world, ctx, out.reason, self.name, op, blocked_by=blocked, tried=tried)
         if out.intents or out.reason != "nothing to break":

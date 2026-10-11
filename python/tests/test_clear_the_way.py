@@ -256,6 +256,19 @@ class EveryIdleOpAsksTest(unittest.TestCase):
             self.assertEqual((out.state, out.intents, out.wait), ("Explore", None, True), out.reason)
         self.assertEqual([a["why"] for a in asks(c)], ["equip: Equip has no move"], "asked once")
 
+    def test_an_earlier_ops_ask_from_the_same_cell_does_not_stand_in(self):
+        # Travel asked from this cell; the planner answered with an equip that waits on a busy slot.
+        from agentrealm_agent.states.ask import ask_the_planner
+
+        w = corridor(".")
+        w.held_supplies.append(InventorySupply(3, "pocket_knife"))
+        c = ctx({"op": "equip", "code": "pocket_knife"})
+        ask_the_planner(w, c, "no step toward 30,1", "Travel", travel(w))
+        c.memory.solve_rearm = "fake_torch"  # Solve holds the slot
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.intents, out.wait), ("Explore", None, True), out.reason)
+        self.assertEqual([a["why"] for a in asks(c)], ["no step toward 30,1", "equip: Equip has no move"])
+
     def test_wait_and_use_item_act_on_their_op_and_ask_no_one(self):
         # A planner's wait is its own hold, and use_item uses, waits out a cooldown or drops with why.
         w = corridor(".")
@@ -283,6 +296,28 @@ class ShutWayIsNotSearchedAgainTest(unittest.TestCase):
             play(w, c, 1)
             self.assertEqual((opened.call_count, blocks.call_count), (2, 1), "the ask itself is not repeated")
 
+
+    def test_a_route_learning_that_lapses_searches_the_way_again(self):
+        # Route learnings age by time too (``plan_sets``): one lapsing is a reason to look again.
+        from agentrealm_agent.states import way
+
+        w = corridor("#")
+        c = ctx(fetch(w))
+        real = way.plan_sets
+        learned = {(5, 1)}
+
+        def plan_sets(*a):
+            blocked, avoid, costly = real(*a)
+            return blocked | learned, avoid | learned, costly
+
+        with mock.patch.object(way, "plan_sets", plan_sets), mock.patch.object(
+            way, "open_the_way", wraps=way.open_the_way
+        ) as opened:
+            play(w, c, 2)
+            self.assertEqual(opened.call_count, 1, "searched once, then held")
+            learned.clear()  # the learning lapses
+            play(w, c, 1)
+            self.assertEqual(opened.call_count, 2)
 
     def test_a_block_backed_off_is_tried_again_once_its_backoff_lapses(self):
         # A way shut only because its block was given up (A90) opens again on time alone.

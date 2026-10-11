@@ -270,7 +270,7 @@ class TwoLevelBrainTest(unittest.TestCase):
 
     def test_chest_and_goto_keep_separate_searches(self):
         w = strip(100)
-        w.death_chest = (1, (90, 0), 7)
+        w.remember_death_chest(7, 1, (90, 0))
         apply_zone(w, 1, 89, 0, {"safe": True, "brightness": 1})
         m = Memory()
         policy = Policy(kind="scripted", goals=["goto"], goto=[0, 60], pickup=True)

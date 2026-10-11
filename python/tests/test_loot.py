@@ -28,7 +28,6 @@ from agentrealm_agent.loot import (
     learn_life_code,
     learn_loot_rejection,
     loot_score,
-    worst_droppable,
 )
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
@@ -187,7 +186,7 @@ class FullPackTest(unittest.TestCase):
     def test_full_pack_of_knives_drops_nothing(self):
         w = world(["...", "...", "..."], at=(1, 1))
         full_inventory(w, junk="pocket_knife")
-        self.assertIsNone(worst_droppable(w, {}))
+        self.assertEqual(droppable_supplies(w), [])
         w.entities = [Entity("supply", 99, (1, 2), "bronze_sword")]
         out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
         self.assertNotEqual(out.state, "Pickup")
@@ -199,7 +198,7 @@ class FullPackTest(unittest.TestCase):
         w.chest_supplies = [InventorySupply(i, "torch") for i in range(1, 10)]
         self.assertEqual(carry_slots_used(w), 10)
         self.assertTrue(inventory_full(w))
-        self.assertIsNone(worst_droppable(w, {}))
+        self.assertEqual(droppable_supplies(w), [])
 
 
 class StallTest(unittest.TestCase):
@@ -346,7 +345,7 @@ class RejectionTest(unittest.TestCase):
         full_inventory(w)
         learn_loot_rejection(w, {"verb": "Drop", "supply_id": 1}, "not_transferable")
         self.assertIn(1, w.undroppable)
-        self.assertEqual(worst_droppable(w, {}).id, 2)
+        self.assertEqual(droppable_supplies(w)[0].id, 2)
 
     def test_refused_drop_moves_on_to_the_next_of_the_named_code(self):
         w = world(["...", "...", "..."], at=(1, 1))

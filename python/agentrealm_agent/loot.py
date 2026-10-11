@@ -97,13 +97,6 @@ def droppable_supplies(w: WorldModel) -> list[InventorySupply]:
     return [s for s in w.held_supplies if s.code not in NON_TRANSFERABLE and s.id not in w.undroppable]
 
 
-def worst_droppable(w: WorldModel, items: dict[str, dict[str, Any]]) -> InventorySupply | None:
-    candidates = droppable_supplies(w)
-    if not candidates:
-        return None
-    return min(candidates, key=lambda s: (loot_score(s.code, items), s.id))
-
-
 @dataclass(frozen=True)
 class Pickup:
     """One supply worth carrying: on the ground (``chest_id`` None) or in a chest."""

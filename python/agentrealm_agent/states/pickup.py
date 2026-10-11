@@ -4,9 +4,8 @@ A reflex: it acts on what is in reach now, whatever the plan says, and
 never walks. Walking to a supply further away is **Loot**'s, for a
 ``fetch_item`` op.
 
-Room in a full pack is the one rule in ``pack.make_room`` (A102), for this
-reflex and for every state that picks up: :func:`room_for` asks it with the
-plan's ops, and :func:`planned_take` carries it out for an op's pickup.
+With a full pack it never drops: what to give up is the planner's call
+(``pack.make_room``, A102), so a pickup that does not fit is skipped.
 """
 
 from __future__ import annotations
@@ -14,40 +13,11 @@ from __future__ import annotations
 from ..knowledge_base import knowledge_items
 from ..loot import Pickup, pickups
 from ..navigation import stuck as nav_stuck
-from ..pack import DROP, MOVE, TAKE, Room, drop_spot, make_room
+from ..pack import TAKE
 from ..world import WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome, top_op
-from .intents import drop, set_position, take, withdraw
-
-
-def room_for(w: WorldModel, ctx: PlayContext, p: Pickup, *, named: str | None = None) -> Room:
-    """The pack rule (``pack.make_room``) for ``p``, with what the plan's ops reserve."""
-    ops = ctx.plan.ops_left() if ctx.plan is not None else []
-    return make_room(w, p, plan_ops=ops, knowledge=ctx.knowledge, named=named)
-
-
-def planned_take(w: WorldModel, ctx: PlayContext, p: Pickup, state: str) -> StateOutcome:
-    """``Take`` the supply the top op (``buy``, ``fetch_item``) wants, in reach,
-    making room by the pack rule: ``Drop`` what the op's ``drop`` names, then
-    ``Take``; a step off a shop cell first; or, when the op names nothing it
-    may drop, the op goes back to the planner with the choices."""
-    op = top_op(ctx)
-    named = op.get("drop") if op is not None else None
-    room = room_for(w, ctx, p, named=named)
-    label = p.code or str(p.supply_id)
-    if room.kind == TAKE:
-        return StateOutcome([take(p.supply_id)], f"take {label}", state=state)
-    if room.kind == DROP:
-        assert room.drop is not None
-        return StateOutcome([drop(room.drop.id), take(p.supply_id)], f"{room.why}, take it", state=state)
-    if room.kind == MOVE:
-        spot = drop_spot(w, ctx.knowledge, p.pos)
-        if spot is None:
-            return StateOutcome(None, f"{room.why}: no cell off it in reach of {label}", state=state)
-        return StateOutcome([set_position(spot)], f"{room.why}: step off to {spot}", state=state)
-    if ctx.plan is not None and op is not None:
-        ctx.plan.drop_current(room.why, memory=ctx.memory)
-    return StateOutcome(None, room.why, state=state)
+from .base import PlayContext, State, StateOutcome
+from .intents import take, withdraw
+from .room import room_for
 
 
 def pickup_outcome(w: WorldModel, ctx: PlayContext, *, state: str) -> StateOutcome | None:

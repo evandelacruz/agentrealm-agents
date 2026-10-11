@@ -12,7 +12,7 @@ import unittest
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.item_table import InventorySupply
+from agentrealm_agent.item_table import FragmentMeta, InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.loot import Pickup
 from agentrealm_agent.memory import Memory
@@ -20,6 +20,7 @@ from agentrealm_agent.pack import ASK, DROP, MOVE, TAKE, drop_makes_stock, make_
 from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
+from agentrealm_agent.states.detour import valuable
 from agentrealm_agent.strategist import build_prompt, upgrade_line
 from agentrealm_agent.supplies import chest_capacity
 from agentrealm_agent.travel import record_shop_cell
@@ -91,6 +92,19 @@ class ReservedTest(unittest.TestCase):
             {"op": "fight_boss", "x": 1, "y": 1, "worn": ["rope"]},
         ]
         self.assertEqual(sorted(s.id for s in reserved_supplies(w, ops, kb())), [MALLET, MATCHES_A, 4])
+
+    def test_compose_reserves_one_fragment_per_slot(self):
+        w = world()
+        full_pack(w)
+        w.held_supplies[3:6] = [
+            InventorySupply(4, "key_half", FragmentMeta(composes_into="gate_key", piece_count=2, slot=1, missing_slots=(2,))),
+            InventorySupply(5, "key_half", FragmentMeta(composes_into="gate_key", piece_count=2, slot=2, missing_slots=(1,))),
+            InventorySupply(6, "key_half", FragmentMeta(composes_into="gate_key", piece_count=2, slot=1, missing_slots=(2,))),
+        ]
+        ops = [{"op": "compose", "composes_into": "gate_key"}]
+        self.assertEqual(sorted(s.id for s in reserved_supplies(w, ops, kb())), [4, 5])
+        room = make_room(w, Pickup(POTION.id, POTION.code, POTION.pos, None, 503), plan_ops=ops, knowledge=kb(), named="key_half")
+        self.assertEqual((room.kind, room.drop.id), (DROP, 6))
 
 
 class MakeRoomTest(unittest.TestCase):
@@ -181,6 +195,21 @@ class ShopRoomTest(unittest.TestCase):
         self.assertNotIn(spot, {(2, 2), (2, 3)})
         self.assertLessEqual(max(abs(spot[0] - 2), abs(spot[1] - 3)), 1)
 
+    def test_no_cell_off_the_shop_hands_the_buy_back(self):
+        w = world()
+        full_pack(w)
+        w.entities = [POTION]
+        k = kb()
+        for x in range(1, 4):
+            for y in range(1, 5):
+                record_shop_cell(k, 1, (x, y))
+        c = ctx(plan({"op": "buy", "code": "small_potion", "drop": "bronze_mallet"}), k)
+        out = dispatch(w, c)
+        self.assertFalse(any(i.get("verb") in ("Drop", "Take") for i in out.intents or []), out.intents)
+        failed = [s for s in c.memory.strategist_signals if s["trigger"] == "goal_failed"]
+        self.assertIn("off the shop", failed[0]["reason"])
+        self.assertIsNone(c.plan.current())
+
 
 class LootRoomTest(unittest.TestCase):
     def test_fetch_item_drops_what_it_names(self):
@@ -200,6 +229,40 @@ class PickupRoomTest(unittest.TestCase):
         out = dispatch(w, ctx(plan()))
         self.assertNotEqual(out.state, "Pickup")
         self.assertFalse(any(i.get("verb") in ("Drop", "Take") for i in out.intents or []), out.intents)
+
+    def test_reflex_takes_what_fits_on_a_shop_cell(self):
+        w = world()
+        full_pack(w)
+        w.held_supplies.pop()
+        k = kb()
+        record_shop_cell(k, 1, (2, 2))
+        w.entities = [Entity("supply", 60, (2, 3), "bronze_sword")]
+        out = dispatch(w, ctx(plan(), k))
+        self.assertEqual(out.state, "Pickup")
+        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 60}])
+
+    def test_reflex_never_drops_on_a_shop_cell_either(self):
+        w = world()
+        full_pack(w)
+        k = kb()
+        record_shop_cell(k, 1, (2, 2))
+        w.entities = [Entity("supply", 60, (2, 3), "bronze_sword")]
+        out = dispatch(w, ctx(plan(), k))
+        self.assertFalse(any(i.get("verb") in ("Drop", "Take") for i in out.intents or []), out.intents)
+
+
+class DetourRoomTest(unittest.TestCase):
+    def test_food_is_worth_a_detour_only_when_it_fits(self):
+        w = world()
+        full_pack(w)
+        w.health, w.max_health = 3, 10
+        apple = Entity("supply", 70, (5, 5), "apple")
+        self.assertFalse(valuable(w, apple, {}, ctx(plan())))
+        w.held_supplies.pop()
+        self.assertTrue(valuable(w, apple, {}, ctx(plan())))
+        gem = Entity("supply", 71, (5, 4), "gem")
+        w.held_supplies.append(InventorySupply(9, "rope"))
+        self.assertTrue(valuable(w, gem, {}, ctx(plan())))
 
 
 class PlanTest(unittest.TestCase):

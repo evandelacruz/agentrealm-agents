@@ -1,9 +1,9 @@
 """Pack room: the one rule for making room in a full pack (A102, A20).
 
-Every state that picks a supply up asks :func:`make_room` first: Shop's
-``buy``, Loot's ``fetch_item``, Gather's gem piles, the Pickup reflex,
-Recover's withdraw, Level's prerequisite and Detour's pick of what is worth
-a walk. The rule:
+Every state that picks a supply up into a slot asks :func:`make_room` first:
+Shop's ``buy``, Loot's ``fetch_item``, the Pickup reflex, Level's
+prerequisite and Detour's pick of what is worth a walk (Gather takes only
+gems, which take no slot; Recover withdraws only what fits). The rule:
 
 - A supply that fits, or a gem or life (counters, no slot), is taken.
 - A supply the plan reserves is never dropped (:func:`reserved_supplies`):
@@ -18,14 +18,17 @@ a walk. The rule:
   fights). A ``buy`` or ``fetch_item`` op names it with ``drop``; one that
   names nothing it may drop goes back to the planner (``ASK``) with the
   choices. A pickup no op asked for (the reflexes) is skipped instead.
+
+``states.room`` carries a ``Room`` out for the states.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 from .break_memory import capabilities_for_code
+from .fragments import compose_supply_ids
 from .healing import supply_matches
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase, knowledge_items
@@ -34,28 +37,33 @@ from .supplies import kept_on_break
 from .travel.knowledge import iter_shop_cells
 from .world import NEIGHBOURS, Pos, WorldModel, chebyshev
 
-TAKE = "take"  # it fits: Take it
-DROP = "drop"  # Drop ``Room.drop`` here, then Take it
-MOVE = "move"  # a drop is due, but not on this cell: step off it first
-ASK = "ask"  # which supply to drop is the planner's call
-SKIP = "skip"  # not worth a slot
+RoomKind = Literal["take", "drop", "move", "ask"]
+TAKE: RoomKind = "take"  # it fits: Take it
+DROP: RoomKind = "drop"  # Drop ``Room.drop`` here, then Take it
+MOVE: RoomKind = "move"  # ``Room.drop`` is due, but not on this cell: step off it first
+ASK: RoomKind = "ask"  # which supply to drop is the planner's call
 
 
 @dataclass(frozen=True)
 class Room:
-    """What making room for one pickup comes to; ``why`` says it for the log and the planner."""
+    """What making room for one pickup comes to; ``why`` says it for the log
+    and the planner. ``drop`` is set exactly when ``kind`` is DROP or MOVE."""
 
-    kind: str
+    kind: RoomKind
     drop: InventorySupply | None = None
     why: str = ""
+
+    def __post_init__(self) -> None:
+        assert (self.drop is not None) == (self.kind in (DROP, MOVE)), self
 
 
 def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: KnowledgeBase | None) -> list[InventorySupply]:
     """Held and stowed supplies the plan will use, one per op that needs one:
     ``use_block``'s ``code``, ``equip``'s ``code``, ``fight_boss``'s ``armed``
-    and ``worn``, and ``break_block``'s tool for its ``capability`` (none when
-    the armed supply has it, one kept for every break when a break does not use
-    it up, else one per op). An op is matched to the lowest id not yet reserved."""
+    and ``worn``, ``compose``'s fragments (one per slot, as Solve composes
+    them), and ``break_block``'s tool for its ``capability`` (none when the
+    armed supply has it, one kept for every break when a break does not use it
+    up, else one per op). An op is matched to the lowest id not yet reserved."""
     pool = sorted(w.held_supplies + w.chest_supplies, key=lambda s: s.id)
     out: list[InventorySupply] = []
 
@@ -70,6 +78,10 @@ def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: K
         if kind in ("use_block", "equip") and isinstance(op.get("code"), str):
             code = op["code"]
             claim(lambda s, c=code: supply_matches(c, s.code))
+        elif kind == "compose" and isinstance(op.get("composes_into"), str):
+            taken = {s.id for s in out}
+            ids = set(compose_supply_ids([s for s in pool if s.id not in taken], op["composes_into"]))
+            out.extend(s for s in pool if s.id in ids)
         elif kind == "fight_boss":
             worn = op.get("worn") if isinstance(op.get("worn"), list) else []
             for code in [op.get("armed"), *worn]:

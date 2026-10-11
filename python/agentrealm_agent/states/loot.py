@@ -21,7 +21,7 @@ from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets
 from .intents import set_position
-from .pickup import planned_take
+from .room import planned_take
 
 GOAL = "loot"
 

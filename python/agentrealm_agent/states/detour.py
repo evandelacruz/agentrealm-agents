@@ -59,7 +59,7 @@ from ..world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
 from .gather_safe import gather_ground, route_clear
 from .intents import set_position
-from .pickup import room_for
+from .room import room_for
 
 GOAL = "detour"
 # The most steps going by a find may add to the walk, by kind (A73): a gem

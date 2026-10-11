@@ -28,7 +28,7 @@ from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
 from .explore import plan_sets
 from .intents import set_position, take
-from .pickup import room_for
+from .room import room_for
 
 DOOR_GOAL, FRONTIER_GOAL, ENTRANCE_GOAL = "level:door", "level:frontier", "level:entrance"
 PREREQUISITE_GOAL = "level:prerequisite"

@@ -27,7 +27,7 @@ from ..world import Entity, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
 from .explore import explore_outcome, plan_sets
 from .intents import set_position
-from .pickup import planned_take
+from .room import planned_take
 from .travel import walk_to
 
 # The commitment of the shop cell a ``buy`` walks to while its item is out of sight (A71).
@@ -47,7 +47,8 @@ class ShopState(State):
     (free-play run 4). The op is dropped when every known shop is in sight
     without the item, or the item is in sight and costs more gems than we have.
     With a full pack, room is the pack rule's (``pack.make_room``, A102): the
-    op's ``drop`` names what to give up when nothing held is plain junk.
+    op's ``drop`` is the only way to make room; without one the op goes back
+    to the planner.
     """
 
     name = "Shop"

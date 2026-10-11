@@ -178,7 +178,7 @@ class TravelStateTest(unittest.TestCase):
         record_shop_cell(ctx.knowledge, 1, (3, 0))
         self.assertEqual(dispatch(w, ctx).state, "Travel")
 
-    def test_unresolved_op_is_dropped_after_the_stall_window(self):
+    def test_unresolved_op_moves_below_after_the_stall_window(self):
         from agentrealm_agent.plan import PLAN_STALL_SECONDS
 
         w = grid(["....."], at=(0, 0))
@@ -188,7 +188,9 @@ class TravelStateTest(unittest.TestCase):
         self.assertEqual(plan.index, 0)
         w.tick += PLAN_STALL_SECONDS * plan.tick_hz
         dispatch(w, ctx)
-        self.assertEqual(plan.index, 1, "the stalled op is dropped")
+        self.assertEqual(
+            [op["to"] for op in plan.ops_left()], ["point", "shop"], "the stalled op moves below one that can make progress (A104)"
+        )
         self.assertEqual(dispatch(w, ctx).state, "Travel")
 
     def test_arrival_drops_the_op_and_moves_on(self):

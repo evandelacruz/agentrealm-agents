@@ -24,6 +24,7 @@ from .brain import (
 from .navigation.rejection import learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
 from .navigation.stuck import expire_hub_give_ups
+from .stalled import lapse as lapse_stalled, retry_basis
 from .navigation.stuck import on_break_opened, on_break_tried
 from .navigation.stuck import on_rejection as nav_on_rejection
 from .navigation.stuck import on_step as nav_on_step
@@ -250,6 +251,14 @@ class Runner:
         for mid, (x, y) in expire_hub_give_ups(self.mem.nav_stuck, self.world):
             self.log("stuck", f"give-up on {mid}:{x},{y} lapsed", {"stuck": {"event": "lapsed", "map_id": mid, "target": [x, y]}})
 
+    def expire_stalled_ops(self) -> None:
+        """Forget the stalled ops something has given a reason to retry (a new
+        item held, a new clue, a new way known), so they may go back on top (A104)."""
+        if not self.mem.stalled_ops:
+            return
+        for record, why in lapse_stalled(self.mem.stalled_ops, retry_basis(self.world, self.knowledge)):
+            self.log("plan", f"stalled op may be retried: {why}", {"stalled": {"event": "lapsed", "op": record.target, "because": why}})
+
     def drop_given_up_ops(self) -> None:
         """A ``travel`` op whose destination stuck detection gave up on, by
         the cell it resolves to whatever its ``to`` (a ``shop`` or
@@ -353,6 +362,7 @@ class Runner:
             while not self.stop.is_set():
                 self.next_window(not_before)
                 self.expire_hub_give_ups()
+                self.expire_stalled_ops()
                 self.unpin_done_goals()
                 old_goals = self.directives.directives.goals
                 if self.directives.maybe_reload():

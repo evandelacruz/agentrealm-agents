@@ -15,6 +15,7 @@ from .targets import Commitment
 if TYPE_CHECKING:
     from .engagement import Engagement
     from .healing import HealRefusal, NoopDrink
+    from .stalled import StalledOp
     from .states.detour import Detour
 from .travel.strength import StrengthBracket
 from .world import Pos
@@ -143,6 +144,9 @@ class Memory:
     clue_signals: list[dict] = field(default_factory=list)
     # Strategist (A35): death, goal_done and goal_failed triggers, via queue_signal; clue and stuck live elsewhere.
     strategist_signals: list[dict] = field(default_factory=list)
+    # Plan ops that stalled, by target, and what was known then (A104): each stays
+    # below an op that can make progress until a reason to retry comes (``stalled``).
+    stalled_ops: list[StalledOp] = field(default_factory=list)
     last_decision: str = ""  # "State: reason" of the last decision, for the planner's stall line
     strategist_progress_tick: int = -1  # last tick with an applied Step (the idle trigger counts from it); -1 before the first real tick
     # Shop (A21): (supply id, code, gems before, supply pos, map id, tick sent)
@@ -216,6 +220,12 @@ def note_goal_done(m: Memory | None, op: dict | None, reason: str) -> None:
     """Queue a ``goal_done`` trigger when a plan op finishes."""
     if m is not None and op is not None:
         queue_signal(m, {"trigger": "goal_done", "op": dict(op), "reason": reason})
+
+
+def note_goal_stalled(m: Memory | None, op: dict, reason: str, above: dict) -> None:
+    """Queue a ``goal_stalled`` trigger when a stalled plan op is moved below ``above`` (A104)."""
+    if m is not None:
+        queue_signal(m, {"trigger": "goal_stalled", "op": dict(op), "reason": reason, "now_below": dict(above)})
 
 
 def note_goal_failed(m: Memory | None, op: dict | None, reason: str) -> None:

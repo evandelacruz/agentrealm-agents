@@ -224,11 +224,35 @@ class LoadTest(unittest.TestCase):
         self.assertTrue(supplies.is_weapon("cleaver"))
         self.assertEqual(json.loads(self.cache.read_text()), SERVED)
 
-    def test_fresh_cache_skips_the_fetch(self):
-        self.write_cache(SERVED, age_seconds=60)
+    def test_fresh_cache_in_the_current_shape_skips_the_fetch(self):
+        self.write_cache(SERVED_CAPABILITIES, age_seconds=60)
         self.assertEqual(self.load(None), "cache")
         self.assertEqual(self.fetches, 0)
         self.assertTrue(supplies.is_food("plum"))
+        self.assertEqual(supplies.weapon_cooldown_ms("cleaver"), 1300)
+
+    def test_fresh_cache_in_the_shape_before_b138_is_refetched(self):
+        # A126: a young cache without ``capabilities`` predates the game's
+        # current table, so the served one replaces it.
+        self.write_cache(SERVED, age_seconds=60)
+        self.assertEqual(self.load(SERVED_CAPABILITIES), "served")
+        self.assertEqual(self.fetches, 1)
+        self.assertEqual(supplies.weapon_cooldown_ms("cleaver"), 1300)
+        self.assertEqual(json.loads(self.cache.read_text()), SERVED_CAPABILITIES)
+
+    def test_old_shape_cache_is_still_used_when_the_site_is_unreachable(self):
+        self.write_cache(SERVED, age_seconds=60)
+        self.assertEqual(self.load(None), "stale cache, shape before B138")
+        self.assertEqual(self.fetches, 1)
+        self.assertTrue(supplies.is_weapon("cleaver"))
+
+    def test_current_shape(self):
+        self.assertTrue(supplies.current_shape(SERVED_CAPABILITIES))
+        self.assertFalse(supplies.current_shape(SERVED))
+        self.assertFalse(supplies.current_shape(SERVED_CAPABILITIES + [SERVED[0]]))
+        self.assertFalse(supplies.current_shape([]))
+        self.assertFalse(supplies.current_shape(None))
+        self.assertTrue(supplies.current_shape(json.loads(supplies.BUNDLED_PATH.read_text())))
 
     def test_stale_cache_is_refetched(self):
         self.write_cache([SERVED[2]], age_seconds=supplies.CACHE_MAX_AGE_SECONDS + 1)
@@ -238,7 +262,7 @@ class LoadTest(unittest.TestCase):
 
     def test_unreachable_site_falls_back_to_a_stale_cache(self):
         self.write_cache(SERVED, age_seconds=supplies.CACHE_MAX_AGE_SECONDS * 10)
-        self.assertEqual(self.load(None), "stale cache")
+        self.assertEqual(self.load(None), "stale cache, shape before B138")
         self.assertTrue(supplies.is_weapon("cleaver"))
 
     def test_a_failed_cache_save_leaves_no_temp_file(self):
@@ -254,7 +278,7 @@ class LoadTest(unittest.TestCase):
         self.assertTrue(self.cache.exists())
 
     def test_unreachable_site_and_no_cache_fall_back_to_the_bundled_copy(self):
-        self.assertEqual(self.load([]), "bundled")
+        self.assertEqual(self.load([]), "bundled, capabilities shape")
         self.assertTrue(supplies.is_weapon("pocket_knife"))
         self.assertFalse(self.cache.exists(), "an empty answer is not cached")
 

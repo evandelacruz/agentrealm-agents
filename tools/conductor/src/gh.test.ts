@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLAUDE_REVIEW_WORKFLOW, POLISH_DONE_LABEL, REVIEW_CHECK_NAME, WORKING_LABEL } from "./config.js";
+import { CLAUDE_REVIEW_WORKFLOW, REVIEW_CHECK_NAME, WORKING_LABEL } from "./config.js";
 import {
   hasMergeConflict,
   headVerdict,
@@ -270,7 +270,7 @@ function pr(overrides: Partial<Parameters<typeof triagePrs>[0][number]> & { n: n
     hasMergeConflict: false,
     checksOk: true as boolean | null,
     reviewInProgress: false,
-    labels: [POLISH_DONE_LABEL] as string[],
+    labels: [] as string[],
     ...overrides,
   };
 }
@@ -306,16 +306,10 @@ test("triagePrs: not merge-ready without an approval, while CI is pending, as a 
     pr({ n: 1, verdict: null }),
     pr({ n: 2, checksOk: null }),
     pr({ n: 3, isDraft: true }),
-    pr({ n: 4, labels: [POLISH_DONE_LABEL, WORKING_LABEL] }),
+    pr({ n: 4, labels: [WORKING_LABEL] }),
   ]);
   assert.deepEqual(numbers(t.needsFix), []);
   assert.deepEqual(numbers(t.mergeReady), []);
-});
-
-test("triagePrs: an approved PR without polish-done awaits polish, not the merge", () => {
-  const t = triagePrs([pr({ n: 1, labels: [] }), pr({ n: 2 })]);
-  assert.deepEqual(numbers(t.awaitingPolish), [1]);
-  assert.deepEqual(numbers(t.mergeReady), [2]);
 });
 
 test("triagePrs leaves out PRs whose review check is still running", () => {

@@ -20,11 +20,17 @@ budget, and it is fetched once per run (``load``).
 Where the table comes from, first that works:
 
 1. ``CACHE_PATH``, when it is younger than ``CACHE_MAX_AGE_SECONDS`` (the site
-   serves it with ``max-age=3600``), so back-to-back runs fetch it once.
+   serves it with ``max-age=3600``) and in the current row shape (every row
+   carries ``capabilities``, ``current_shape``), so back-to-back runs fetch it
+   once. A cache in the shape before B138 was saved before the game's table
+   changed, so it is stale whatever its age (A126).
 2. ``SUPPLIES_URL``, saved to ``CACHE_PATH`` on success.
-3. ``CACHE_PATH`` at any age, when the site cannot be reached.
+3. ``CACHE_PATH`` at any age or shape, when the site cannot be reached.
 4. ``BUNDLED_PATH``, a copy checked in with the agent. The module starts on it,
    so tests and a run that never calls ``load`` still have every row.
+
+A fallback (3 or 4) names the row shape it used, so the run log shows a table
+read in the older shape.
 
 The questions the agent asks of a subtype (is it food, a potion, a weapon;
 what blocks it breaks; how much damage it deals) are the functions below. A
@@ -196,11 +202,26 @@ def _positive_int(v: Any) -> int | None:
     return v if v > 0 else None
 
 
-def _read(path: Path) -> dict[str, Supply]:
+def current_shape(raw: Any) -> bool:
+    """Whether the served JSON is in the row shape since saims B138: a
+    non-empty array whose every row carries a ``capabilities`` list."""
+    rows = [r for r in raw if isinstance(r, dict) and r.get("code")] if isinstance(raw, list) else []
+    return bool(rows) and all(isinstance(r.get("capabilities"), list) for r in rows)
+
+
+def _shape_name(raw: Any) -> str:
+    return "capabilities shape" if current_shape(raw) else "shape before B138"
+
+
+def _read_raw(path: Path) -> Any:
     try:
-        return parse(json.loads(path.read_text()))
+        return json.loads(path.read_text())
     except (OSError, ValueError):
-        return {}
+        return None
+
+
+def _read(path: Path) -> dict[str, Supply]:
+    return parse(_read_raw(path))
 
 
 _table: dict[str, Supply] = _read(BUNDLED_PATH)
@@ -222,17 +243,19 @@ def load(
     now: Callable[[], float] = time.time,
 ) -> str:
     """Replace the table from the freshest source that works; return its name
-    (``cache``, ``served``, ``stale cache`` or ``bundled``). ``fetcher`` and
-    ``cache_path`` default to the module's ``fetch`` and ``CACHE_PATH``, read
-    on each call, so tests can turn both off in one place (tests/__init__.py)."""
+    (``cache``, ``served``, or ``stale cache`` or ``bundled`` with the row
+    shape it was in). ``fetcher`` and ``cache_path`` default to the module's
+    ``fetch`` and ``CACHE_PATH``, read on each call, so tests can turn both off
+    in one place (tests/__init__.py)."""
     global _table
     fetcher = fetcher or fetch
     cache_path = cache_path or CACHE_PATH
     try:
-        fresh = now() - cache_path.stat().st_mtime < CACHE_MAX_AGE_SECONDS
+        young = now() - cache_path.stat().st_mtime < CACHE_MAX_AGE_SECONDS
     except OSError:
-        fresh = False
-    if fresh and (rows := _read(cache_path)):
+        young = False
+    cached = _read_raw(cache_path)
+    if young and current_shape(cached) and (rows := parse(cached)):
         _table = rows
         return "cache"
     raw = fetcher()
@@ -240,11 +263,12 @@ def load(
         _table = rows
         _save_cache(cache_path, raw)
         return "served"
-    if rows := _read(cache_path):
+    if rows := parse(cached):
         _table = rows
-        return "stale cache"
-    _table = _read(BUNDLED_PATH)
-    return "bundled"
+        return f"stale cache, {_shape_name(cached)}"
+    bundled = _read_raw(BUNDLED_PATH)
+    _table = parse(bundled)
+    return f"bundled, {_shape_name(bundled)}"
 
 
 def _save_cache(path: Path, raw: Any) -> None:

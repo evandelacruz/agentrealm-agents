@@ -29,6 +29,8 @@ from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_hunting_zone
 from agentrealm_agent.travel.knowledge import entrance_key, sync_town
 from agentrealm_agent.strategist import (
+    READY_HEALTH_FRACTION,
+    READY_POTIONS,
     STALL_SECONDS,
     StallClock,
     repeats_pinned,
@@ -763,6 +765,66 @@ class PlannerViewTest(unittest.TestCase):
         self.assertIn("Weapons and the hunting ground", prompt)
         self.assertIn("an equip with a code arms or wears exactly that held item", prompt)
         self.assertIn("a weapon that cannot cut (a mallet) is put away while gathering", prompt)
+
+    def readiness(self) -> dict:
+        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("readiness="))
+        return json.loads(line.split("=", 1)[1])
+
+    def test_readiness_shows_each_stage_check_by_check(self):
+        # A101: the planner judges when a stage is done from State.
+        self.w.health, self.w.max_health = 4, 10
+        self.w.armed_code = "pocket_knife"
+        ready = self.readiness()
+        self.assertEqual(ready["stage_1"], {"entrance_known": False, "met": False, "shop_known": False})
+        self.assertFalse(ready["stage_2"]["met"])
+        self.assertFalse(ready["stage_2"]["better_weapon_armed"])
+
+        self.kb.items["small_potion"] = {"gem_price": 10}
+        self.kb.entrances[entrance_key(7, (40, 10))] = {"map_id": 7, "x": 40, "y": 10}
+        self.w.health = 10
+        self.w.armed_code = "bronze_sword"
+        self.w.worn_codes = {"body": "bronze_mail"}
+        self.w.held_supplies = [InventorySupply(i, "small_potion") for i in range(3)]
+        ready = self.readiness()
+        self.assertTrue(ready["stage_1"]["met"])
+        self.assertEqual(
+            ready["stage_2"],
+            {"armor_worn": True, "better_weapon_armed": True, "health_at_bar": True, "met": True, "potions_at_bar": True},
+        )
+
+    def test_better_weapon_follows_the_one_weapon_rule(self):
+        # A99: a mallet that puts strength over the hunting ceiling is no
+        # better than the starting knife, so stage 2 is not met with it armed.
+        self.w.armed_code = "bronze_mallet"
+        self.assertTrue(self.readiness()["stage_2"]["better_weapon_armed"])
+        record_hunting_zone(self.kb, 7, (50, 50), 7)
+        self.assertFalse(self.readiness()["stage_2"]["better_weapon_armed"])
+        self.w.armed_code = "bronze_sword"
+        self.assertTrue(self.readiness()["stage_2"]["better_weapon_armed"])
+
+    def test_stage_2_bar_in_the_arc_matches_the_readiness_constants(self):
+        self.assertIn(f"health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions", system_prompt())
+
+    def test_a_met_stage_with_no_upgrade_for_sale_has_nothing_to_save_toward(self):
+        # A101: readiness met and no better gear known for sale; State says
+        # both, and the arc says a met stage moves on unless an upgrade is listed.
+        self.w.health, self.w.max_health = 10, 10
+        self.w.armed_code = "bronze_sword"
+        self.w.worn_codes = {"body": "bronze_mail"}
+        self.w.held_supplies = [InventorySupply(i, "small_potion") for i in range(3)]
+        for code, price in {"small_potion": 10, "bronze_sword": 15, "bronze_mail": 20}.items():
+            self.kb.items[code] = {"gem_price": price}
+        self.assertTrue(self.readiness()["stage_2"]["met"])
+        self.assertIn("upgrades_for_sale=none seen", state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb))
+        prompt = system_prompt()
+        self.assertIn("A stage whose readiness is met is done: move on to the next stage.", prompt)
+        self.assertIn("Saving for gear that is not listed there is not a reason", prompt)
+        self.assertIn("none seen means no better gear is known for sale anywhere", prompt)
+
+    def test_arc_says_how_to_find_an_entrance(self):
+        prompt = system_prompt()
+        self.assertIn('To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door seen on this map', prompt)
+        self.assertIn("explore_area out past the town", prompt)
 
     def test_stall_shows_after_nothing_changes(self):
         self.w.held_supplies = [InventorySupply(6, "pocket_knife")]

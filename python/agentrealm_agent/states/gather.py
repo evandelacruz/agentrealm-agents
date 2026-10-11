@@ -69,14 +69,13 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import CostGridParams, cost_path, nearest_target
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, next_step
+from ..pathing import grid_params, next_step, plan_sets
 from ..plan import GoalOp
 from ..equip import CUT, does_job, hunting_ceiling, weapon_to_arm
 from ..survival import is_hostile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
-from ..pathing import plan_sets
 from .explore import safe_default
 from .gather_safe import gather_ground, route_bar, route_clear
 from .intents import arm, arm_and_use, set_position, take, use_block

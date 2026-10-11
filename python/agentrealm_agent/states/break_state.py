@@ -26,12 +26,11 @@ from ..break_memory import (
 )
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, nav_search, next_step
+from ..pathing import grid_params, nav_search, next_step, plan_sets
 from ..plan import GoalOp
 from ..reach import supply_reach
 from ..world import WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
-from ..pathing import plan_sets
 from .intents import arm, set_position, use_block
 from .solve import held_supply
 

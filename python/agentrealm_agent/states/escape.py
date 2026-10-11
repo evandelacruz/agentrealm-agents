@@ -6,10 +6,9 @@ one reflex ``SetPosition`` to a safe neighbour or replans toward safety.
 
 from __future__ import annotations
 
-from ..pathing import next_step, replan
+from ..pathing import next_step, plan_sets, replan
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
-from ..pathing import plan_sets
 from .intents import set_position
 
 

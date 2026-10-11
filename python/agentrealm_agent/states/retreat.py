@@ -18,7 +18,7 @@ from ..hostile_ground import ground_by_hostile
 from ..memory import Memory
 from ..navigation import cost_path, no_way, oscillation
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
+from ..pathing import grid_params, nav_search, next_step, plan_sets, retreat_safe_goal
 from ..survival import (
     LOSING_NAV,
     RETREAT_NAV,
@@ -34,7 +34,6 @@ from ..survival import (
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
-from ..pathing import plan_sets
 from .fight import engage, in_weapon_reach
 from .heal import use_carried_heal
 from .intents import set_position

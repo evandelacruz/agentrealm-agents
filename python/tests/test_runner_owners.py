@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import random
 import tempfile
@@ -139,7 +140,15 @@ class RunnerIsTheLoopTest(unittest.TestCase):
 
     def test_the_executor_imports_nothing_from_states(self):
         for path in (RUNNER_SOURCE.parent / "executor").glob("*.py"):
-            self.assertNotIn("states", "".join(l for l in path.read_text().splitlines(True) if l.startswith(("from", "import"))), path.name)
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.ImportFrom):
+                    modules = [node.module or ""] + [f"{node.module or ''}.{a.name}" for a in node.names]
+                elif isinstance(node, ast.Import):
+                    modules = [a.name for a in node.names]
+                else:
+                    continue
+                for module in modules:
+                    self.assertNotIn("states", module.split("."), f"{path.name}:{node.lineno} imports {module}")
 
 
 if __name__ == "__main__":

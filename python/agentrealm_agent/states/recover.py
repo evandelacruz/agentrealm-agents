@@ -9,11 +9,10 @@ from ..loot import carry_slots_used, loot_score
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, guided_step, nav_search
+from ..pathing import grid_params, guided_step, nav_search, plan_sets
 from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
-from ..pathing import plan_sets
 from .intents import set_position, withdraw, withdraw_all
 
 

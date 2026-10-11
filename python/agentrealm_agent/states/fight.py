@@ -10,13 +10,12 @@ from ..executor.intents import step
 from ..executor.movement import direction_between
 from ..knowledge_base import KnowledgeBase
 from ..navigation import cost_path
-from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
+from ..pathing import grid_params, nav_search, next_step, plan_sets, retreat_safe_goal
 from ..reach import weapon_reach
 from ..engagement import Engagement, fights, held_members
 from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
-from ..pathing import plan_sets
 from .intents import set_position, use_npc, use_on
 
 

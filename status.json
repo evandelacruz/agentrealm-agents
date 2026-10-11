@@ -185,7 +185,7 @@
 
   "A90": {"state": "done"},
 
-  "A91": {"state": "todo"},
+  "A91": {"state": "done"},
 
   "A92": {"state": "done"},
 
@@ -236,6 +236,10 @@
   "A115": {"state": "done"},
 
   "A116": {"state": "done"},
+
+  "A117": {"state": "todo"},
+
+  "A118": {"state": "todo"},
 
   "A119": {"state": "todo"},
 

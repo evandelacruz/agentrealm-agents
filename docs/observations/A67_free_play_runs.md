@@ -1607,3 +1607,76 @@ Per A87, each names the rule a fix should generalize. Backlog: all three fold in
 2. **A block-changing op keeps using a cell with no block on it** (`states/solve.py:82–119`, `_use_block_outcome`; `plan.py:241`, `_validate_use_block`). The planner's `use_block` and `break_block` targets were (8, 9) and (2, 8): a snotling's cell and its death cell, neither a block. Solve re-sent `Use` every second for 16 s and 32 s. Nothing changed and no match was spent. **Rule:** an op aimed at a block is refused when its target cell holds no block. Once a `Use` resolves with no change, the op ends as failed and is not re-sent.
 
 3. **With nothing left to explore and a hostile adjacent, Explore waits "boxed in"** (`states/explore.py:170–177`, `_look_around`). This is the run 18 defect 2 case with a snotling next to the safe cell. Explore's fallback ruled out every neighbour near a hostile and waited, on and off, for most of 2–507 s. **Rule:** when nothing is left to explore and the goal is out of reach, the walk opens a block a held item is known to open, or reports the goal stalled to the planner. It neither wanders nor stands.
+
+### Run 20: stage 2 rebuilt by grinding (mail and two potions, 500 s), then the north-east entrance walk ends 36 cells short when Explore wanders off it
+
+- **Code:** `main` at `6989a9e`. Since run 19: A114 (the way on is the planner's: a 31 × 31 map in State, the cornered rule, fight ops, in-level fighting) and A89 (healing: the planner's health line, one price, one give-up memory).
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile, `--seconds 600`, as in run 19.
+- **Knowledge base:** kept from run 19.
+- **Verdict:** exit 0, `PASS` (M10) after **602.1 s**. The park **parked safe** at (429, 399) after 53.3 s, walking back to town. The character started at **10/10**, **4 lives** and **9 gems** at (428, 400) on the overworld, where run 19's death had respawned it. It had the bronze_sword armed, no armor, 1 potion and 10 pack slots (3 used).
+- **Gate summary (M10):** deaths **0**; API errors **0**; readable cells seen 5 (unread 0); NPCs seen 22 (never spoken 9); duplicate break attempts 0. Planner: 41 calls, 41 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–192 s | `buy` bronze_mail, `gather_gems` (432, 400) | "Stage 2: no armor worn, only 1 potion." Cut grass at region (432, 400), **9 → 20**. |
+| 192–202 s | `buy` bronze_mail, `equip` | Bought and wore the **bronze_mail** (20 → 0). |
+| 202–340 s | `gather_gems`, `buy` small_potion ×2 | Cut grass, 0 → 10. Bought a **small_potion** at 340 s (10 → 0). |
+| 340–511 s | `gather_gems`, `buy` small_potion, `travel` entrance (532, 311) | "Need 10 for the third potion (2 held, bar 3)." Cut grass, 0 → 10. Bought the third potion at 511 s (10 → 0). **Stage 2 met.** The planner kept rewriting the gather target (20, 14, 15, 16, 17, 10). |
+| 511–569 s | `travel` entrance (532, 311) | "Stage 2 met … nearest entrance 88 cells NE, frontier route." Travel went from (423, 399) to (530, 349), `[cautious]` near a snotling and gristlewick pack at (450, 369). |
+| 569–600 s | `travel` entrance (532, 311) | Travel's walk ran out of known ground, and Explore took over as the safe default. It went to (545, 347), **36 cells from the entrance**, then south to (546, 373) (defect 1). Wartlurch 226 hit it for 2 at 581 s and it stepped away four times. Then Explore headed for **(414, 369), 120 cells west**, until time ran out, with one Break walk toward (532, 343) at 597 s. |
+
+#### Pack, stage, entrance and level attempts
+
+- **Pack slots:** 10, 3 used at the start; 10, 6 used at the end. The middle_chest is still listed for sale.
+- **Stage:** 2 at the start (no armor, 1 potion); **stage 2 met at 511 s** (mail worn, 3 potions); stage 3 for the last 89 s.
+- **Entrance choice:** north-east, (532, 311), at 361 s, kept to the end. The walk got to (545, 347), 36 cells short.
+- **Level attempts:** none. Run 19's death had put the character on the overworld, so the hedge garden was not reached this run.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **9** | **0** (+31 earned, −40 spent) |
+| Armed | bronze_sword | bronze_sword |
+| Worn | none | bronze_mail |
+| Pack | 3/10 slots | 6/10 slots |
+| Potions | 1 | 3 |
+| Lives | 4 | 4 |
+
+Bought: bronze_mail (20), small_potion ×2 (10 each).
+
+#### Gems earned
+
+**31** in 600 s, **3.1 a minute**, all from grass at region (432, 400): about 150 cuts, matching the knowledge base's 0.2 yield. There were no piles and no kill drops.
+
+#### Fights
+
+None. Wartlurch 226 hit once for 2 at 581 s (10 → 8); Explore stepped away and no fight was decided.
+
+#### Run 19 defects, checked
+
+| Defect | Run 20 | |
+|---|---|---|
+| Flee with no escape waits while it is hit (A114) | **Not tested.** No fight. | |
+| A block op keeps using a cell with no block (A114) | **Not tested.** No `use_block` or `break_block` op. | |
+| Explore "boxed in" beside a hostile (A114) | **Not tested.** No "boxed in" decision; the one hostile contact ended in four step-aways. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 290,698, output 10,666, cache write 108,472, cache read 4,989,712 |
+
+#### Decision mix
+
+Intents: 534 `Step`, 1,028 `Wait`, 152 `Use` (grass cuts), 34 `Take` (gems and buys), 1 `Wear`. Call mix: 865 `tick`, 239 `entities`, 162 `zone`, 88 `strategist`, 58 `self`, 22 `terrain`, 3 `position`. No `oscillation`, `stuck` or refusal records.
+
+#### Top defects
+
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A120 (Explore never takes over another op's walk; Travel keeps its walk on unexplored ground and hands the planner the call when it cannot progress); defect 2 is A121 (the planner sees the gem rate and the time each unmet readiness check costs, and weighs the bars as guidance). Both are in open pull requests, which bring their PLAN.md rows.
+
+1. **Explore, standing in for a travel walk, ignores where the walk is going** (`states/explore.py:78–93`, `safe_default`, which calls `explore_outcome` with `op=None`; Travel hands over at `states/travel.py:111–112`). Travel's route to the entrance at (532, 311) ran out of known ground: its last waypoint was (538, 353), and the last cell it reached was (530, 349). Explore then ran as the safe default with no target of its own. It took the frontier at (545, 347), then (546, 373) to the south, then (414, 369), 120 cells west, while the entrance stayed north, 36 cells at closest. **Rule:** when Explore runs because the top op's walk is waiting on unexplored ground, it explores toward that op's destination. If no frontier brings the destination nearer, the op is reported stalled.
+
+2. **The stage 2 potion bar is held at any cost in time** (`strategist.py:1128–1152`, `readiness`, `READY_POTIONS`). After the mail, the bar of 3 potions took two 10-gem buys at 0.2 gems a cut, about 300 s of the 600. The planner said so ("need 10 for the third potion (2 held, bar 3)"). It had no way to weigh that against the entrance 88 cells off. **Rule:** a readiness bar the plan must grind for comes with its cost in time, so the planner can weigh it against the next stage's goal.

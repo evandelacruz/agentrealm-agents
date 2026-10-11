@@ -7,13 +7,12 @@ import dataclasses
 from ..directives import attack_forbidden
 from ..memory import Memory, queue_signal
 from ..navigation import cost_path, oscillation
-from ..pathing import flee_run, flee_step, grid_params, outruns, retreat_safe_goal, step_open
+from ..pathing import flee_run, flee_step, grid_params, outruns, plan_sets, retreat_safe_goal, step_open
 from ..engagement import cannot_outrun, fights
 from ..survival import GAP_PROBE_TICKS, at_health_floor, combat_group, flee_from, is_attacker, on_safe_tile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
-from .explore import plan_sets
 from .fight import can_engage, engage, fight_target, in_weapon_reach
 from .heal import use_carried_heal
 from .intents import set_position

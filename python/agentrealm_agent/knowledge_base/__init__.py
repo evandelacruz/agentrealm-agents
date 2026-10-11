@@ -8,6 +8,11 @@ characters of a world share the one in-memory object; anything that changes
 it holds `kb.lock`, and `save` takes the same lock. One `run` process per
 world at a time: two processes on the same world each save their own copy
 at exit, and the last save wins.
+
+What a run learned that the next one should start from is written into it
+by the module that owns it: ``knowledge_base.hostiles`` for hostile NPC
+types, their threat measurements and their posts (A91);
+``knowledge_maps`` for tiles, warps and levels.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .config import STATE_DIR
+from ..config import STATE_DIR
 
 WORLDS_DIR = STATE_DIR / "worlds"
 SCHEMA_VERSION = 1

@@ -783,12 +783,24 @@ class GatherPricesUnexploredGroundTest(unittest.TestCase):
         gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
         self.assertEqual(m.gather_target, ("grass", (0, 1)))
 
-    def test_an_edge_stuck_detection_backs_off_loses_to_known_grass(self):
-        for goal in ("explore", gather_mod.GOAL):
-            w, m = self.world(), Memory()
-            m.nav_stuck.backoff_until[nav_stuck.goal_key(goal, 7, (1, 1))] = w.tick + 100
-            gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
-            self.assertEqual(m.gather_target, ("grass", (40, 1)), goal)
+    def test_an_edge_explore_gave_up_on_loses_to_known_grass(self):
+        w, m = self.world(), Memory()
+        m.nav_stuck.backoff_until[nav_stuck.goal_key("explore", 7, (1, 1))] = w.tick + 100
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))
+
+    def test_an_edge_with_no_ground_past_it_stops_being_one_at_the_read_there(self):
+        """Reaching the edge, the terrain read marks the cells past it with no
+        ground: the edge is gone and the known grass is weighed alone."""
+        w, m = self.world(), Memory()
+        op = {"op": "gather_gems", "count": 3}
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
+        w.pos = (1, 1)
+        w.apply_terrain({"map_id": 7, "x0": -4, "y0": -4, "width": 11, "height": 11, "rows": ["?" * 11] * 11})
+        self.assertNotIn((1, 1), w.view.frontier())
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))
 
     def test_safe_ground_edges_are_not_priced(self):
         w = self.world()

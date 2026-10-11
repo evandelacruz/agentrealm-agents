@@ -848,9 +848,11 @@ def _explore_instead(
     it to grass (``_steps_to_grass``). So known grass far off wins
     only when its yield makes up for the longer walk, and grass as near as
     the edge always wins. Edges on safe ground (no gems), in a skipped
-    region, or off ``gather_ground`` are not priced, nor are edges stuck
-    detection gave up on and still backs off, as an explorer's or as
-    Gather's own walk (``nav_stuck.filter_frontiers``, ``backed_off``)."""
+    region, or off ``gather_ground`` are not priced, nor are edges the
+    explorers' stuck detection gave up on and still backs off
+    (``nav_stuck.filter_frontiers``). An edge cannot stay one once Gather
+    walks up to it: the terrain read there fills every cell of the
+    perception window, ground or none (``WorldModel.apply_terrain``)."""
     here = w.pos
     edges = {
         p
@@ -858,7 +860,6 @@ def _explore_instead(
         if p != here
         and p not in safe
         and region_of(p) not in odds.skip
-        and not nav_stuck.backed_off(m, GOAL, w.map_id, p, w.tick)
         and gather_ground(w, p, policy, d)
     }
     edge = _nearest_clear(w, edges, params, blocked, clear) if edges else None

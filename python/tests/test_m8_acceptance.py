@@ -50,6 +50,7 @@ WAIT = [{"verb": "Wait"}]
 SWING = [{"verb": "Use", "target": {"kind": "npc", "npc_id": 5}}] * 3
 DRINK = {"verb": "Use", "target": {"kind": "self"}}
 APPLIED = {"outcome": "applied"}
+SUPPLY_TAKEN = {"kind": "SupplyTaken", "supply_id": 9, "taker_id": 1, "tick": 2}
 WINNABLE = {**PARAM_DEFAULTS, "fight_margin": 0.5}  # a 10-health start beats one snotling
 
 
@@ -64,6 +65,15 @@ def decide(m, w, *, state="Explore", intents=WAIT, params=None):
         params=params or dict(PARAM_DEFAULTS),
         knowledge=None,
     )
+
+
+def killed(npc_id, *, actor_id=1, tick=8, npc_type="snotling") -> list[dict]:
+    """The killing blow and the death, as a tick's events carry them (API Events)."""
+    return [
+        {"kind": "NPCDamaged", "npc_id": npc_id, "amount": 4, "map_id": OVERWORLD, "x": 1, "y": 0,
+         "actor_kind": "character", "actor_id": actor_id, "tick": tick},
+        {"kind": "NPCDied", "npc_id": npc_id, "npc_type": npc_type, "map_id": OVERWORLD, "x": 1, "y": 0, "tick": tick},
+    ]
 
 
 def weak_fight_world(health=10) -> WorldModel:
@@ -102,7 +112,7 @@ class MilestoneGateTest(unittest.TestCase):
 
     def test_heal_food_and_potion(self):
         m = metrics()
-        w = world()
+        w = world(health=9, max_health=10)
         w.entities = [Entity("supply", 9, (0, 0), code="apple")]
         decide(
             m,
@@ -110,6 +120,8 @@ class MilestoneGateTest(unittest.TestCase):
             state="Heal",
             intents=[{"verb": "Take", "supply_id": 9}],
         )
+        self.assertFalse(m.heal_food_take, "sent is not taken")
+        m.on_events([SUPPLY_TAKEN])
         self.assertTrue(m.heal_food_take)
         w.armed_code = "small_potion"
         w.held_supplies = [InventorySupply(4, "small_potion")]
@@ -119,6 +131,29 @@ class MilestoneGateTest(unittest.TestCase):
         w.held_supplies, w.armed_code = [], None
         decide(m, w, state="Heal", intents=HELD)
         self.assertTrue(m.heal_potion)
+
+    def test_food_taken_on_a_detour_counts(self):
+        # Hurt, Detour picks up an apple on its way: the food heals all the same.
+        m = metrics()
+        w = world(health=9, max_health=10)
+        w.entities = [Entity("supply", 9, (1, 0), code="apple")]
+        decide(m, w, state="Detour", intents=[{"verb": "Take", "supply_id": 9}])
+        w.entities = []  # SupplyTaken removes it before the gate reads the events
+        m.on_events([SUPPLY_TAKEN])
+        self.assertTrue(m.heal_food_take)
+
+    def test_food_taken_at_full_health_or_by_another_or_not_food_is_not_counted(self):
+        m = metrics()
+        w = world(health=10, max_health=10)
+        w.entities = [Entity("supply", 9, (1, 0), code="apple")]
+        decide(m, w, state="Detour", intents=[{"verb": "Take", "supply_id": 9}])
+        m.on_events([SUPPLY_TAKEN])
+        self.assertFalse(m.heal_food_take, "full health: it healed nothing")
+        w = world(health=9, max_health=10)
+        w.entities = [Entity("supply", 9, (1, 0), code="apple"), Entity("supply", 10, (1, 1), code="gem")]
+        decide(m, w)
+        m.on_events([{**SUPPLY_TAKEN, "taker_id": 2}, {**SUPPLY_TAKEN, "supply_id": 10}])
+        self.assertFalse(m.heal_food_take)
 
     def test_heal_arm_and_use_potion_while_weapon_still_armed(self):
         # Heal's first drink: [Arm potion, Use self] while armed_code is still the weapon.
@@ -252,12 +287,16 @@ class PotionDrinkTest(unittest.TestCase):
         m.on_events([{"kind": "SupplyUsed", "actor_id": 1, "supply_code": "small_potion"}])
         self.assertFalse(m.heal_potion)
 
+
+class KillTest(unittest.TestCase):
+    """A kill is our killing blow on the tick the NPC died (run-shaped events)."""
+
     def test_weak_kill_on_npc_died_after_lone_weak_fight(self):
         m = metrics()
         w = weak_fight_world()
         decide(m, w, state="Fight", intents=SWING)
-        m.on_events([{"kind": "NPCDied", "npc_id": 5}])
-        self.assertEqual(m.weak_hostile_kills, 1)
+        m.on_events(killed(5))
+        self.assertEqual((m.kills, m.weak_hostile_kills), (1, 1))
 
     def test_weak_kill_on_a_later_held_queue_tick(self):
         m = metrics()
@@ -267,40 +306,83 @@ class PotionDrinkTest(unittest.TestCase):
         decide(m, w, state="Fight", intents=HELD)
         m.on_events([])
         decide(m, w, state="Fight", intents=HELD)
-        m.on_events([{"kind": "NPCDied", "npc_id": 5}])
+        m.on_events(killed(5))
         self.assertEqual(m.weak_hostile_kills, 1)
 
     def test_npc_died_for_another_npc_is_not_our_kill(self):
         m = metrics()
         w = weak_fight_world()
         decide(m, w, state="Fight", intents=SWING)
-        m.on_events([{"kind": "NPCDied", "npc_id": 6}])
-        self.assertEqual(m.weak_hostile_kills, 0)
+        m.on_events(killed(6))
+        self.assertEqual((m.kills, m.weak_hostile_kills), (1, 0), "our blow, but never attacked as lone weak")
+        m.on_events([{"kind": "NPCDied", "npc_id": 5, "npc_type": "snotling", "tick": 9}])
+        self.assertEqual(m.kills, 1, "a death with no blow of ours is not our kill")
 
-    def test_npc_died_after_leaving_fight_is_not_counted(self):
+    def test_another_characters_killing_blow_is_not_our_kill(self):
         m = metrics()
         w = weak_fight_world()
         decide(m, w, state="Fight", intents=SWING)
+        m.on_events(killed(5, actor_id=2))
+        self.assertEqual((m.kills, m.weak_hostile_kills), (0, 0))
+
+    def test_our_hit_on_an_earlier_tick_is_not_the_killing_blow(self):
+        m = metrics()
+        decide(m, weak_fight_world(), state="Fight", intents=SWING)
+        hit, died = killed(5)
+        m.on_events([{**hit, "tick": died["tick"] - 1}, died])
+        self.assertEqual(m.kills, 0)
+
+    def test_kill_after_fight_hands_over_to_another_state_counts(self):
+        # The swing that kills may be sent by Flee's "not outrunning" fight or
+        # land after the state moved on: the killing blow decides.
+        m = metrics()
+        w = weak_fight_world()
+        decide(m, w, state="Flee", intents=SWING)
         decide(m, w, state="Retreat")
-        m.on_events([{"kind": "NPCDied", "npc_id": 5}])
-        self.assertEqual(m.weak_hostile_kills, 0)
+        m.on_events(killed(5))
+        self.assertEqual(m.weak_hostile_kills, 1)
 
     def test_kill_of_a_target_in_a_group_is_not_a_lone_kill(self):
         m = metrics()
         w = weak_fight_world()
         w.entities.append(Entity("npc", 6, (2, 0), code="snotling"))
         decide(m, w, state="Fight", intents=SWING)
-        m.on_events([{"kind": "NPCDied", "npc_id": 5}])
-        self.assertEqual(m.weak_hostile_kills, 0)
+        m.on_events(killed(5))
+        self.assertEqual((m.kills, m.weak_hostile_kills), (1, 0))
 
-    def test_kill_of_a_target_outside_the_lone_group_is_not_counted(self):
+    def test_a_hostile_that_hits_harder_than_base_is_not_weak(self):
+        m = metrics()
+        w = weak_fight_world()
+        w.threat.record(("npc", "snotling"), 3)
+        decide(m, w, state="Fight", intents=SWING)
+        m.on_events(killed(5))
+        self.assertEqual((m.kills, m.weak_hostile_kills), (1, 0))
+
+    def test_kill_of_a_target_outside_the_lone_group_is_not_lone(self):
         # The lone weak hostile is NPC 6; NPC 5, the one attacked, is far off.
         m = metrics()
         w = weak_fight_world()
         w.entities = [Entity("npc", 6, (1, 0), code="snotling"), Entity("npc", 5, (20, 0), code="snotling")]
         decide(m, w, state="Fight", intents=SWING)
-        m.on_events([{"kind": "NPCDied", "npc_id": 5}])
+        m.on_events(killed(5))
         self.assertEqual(m.weak_hostile_kills, 0)
+
+    def test_a_type_never_measured_is_weak_at_the_win_estimates_price(self):
+        # Closing on a hostile whose swings at us all missed: no hit measured,
+        # priced at the base attack power, and its kill is a lone weak kill.
+        m = metrics()
+        w = world(health=10, max_health=10)
+        w.entities = [Entity("npc", 5, (1, 0), code="snotling")]
+        w.threat.misses[("npc", "snotling")] = 3
+        decide(m, w, state="Fight", intents=SWING)
+        m.on_events(killed(5))
+        self.assertEqual((m.kills, m.weak_hostile_kills), (1, 1))
+
+    def test_summary_counts_every_kill(self):
+        m = metrics()
+        decide(m, weak_fight_world(), state="Fight", intents=SWING)
+        m.on_events(killed(5))
+        self.assertIn("kills: 1, lone weak: 1", m.summary_lines())
 
     def test_fight_started_when_it_would_lose_fails(self):
         m = metrics()
@@ -335,7 +417,7 @@ class RunnerHookTest(RunnerCase):
         m = metrics()
         r = self.make_runner(TownServer(10, stop), stop, m)
         decide(m, weak_fight_world(), state="Fight", intents=SWING)
-        r.on_events([{"kind": "NPCDied", "npc_id": 5}])
+        r.on_events(killed(5))
         self.assertEqual(m.weak_hostile_kills, 1)
 
     def test_a_drinks_result_reaches_the_gate_through_the_runner(self):

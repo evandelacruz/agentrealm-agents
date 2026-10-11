@@ -1754,3 +1754,83 @@ Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 a
 2. **Saving for an upgrade shows its gems, not its time** (`strategist.py:237`, `upgrades_for_sale` with `gems_short` only). The plan kept `gather_gems` for the 50-gem middle_chest all run, at `gather_run`'s 2.3 gems a minute: about 22 minutes (about 14 at the 3.5 a minute of steady cutting). It ended 34 gems short, with no entrance attempted. A121 prices the stage 2 checks in minutes but not the upgrade the plan saves toward. **Rule:** anything the plan saves gems for shows its minutes at the measured rate, so the planner weighs it against the next stage's goal.
 
 3. **A detour find given up short is picked again unchanged** (`states/detour.py:201–271`, `detour_find` and `_still_on`). In the first 92 s Detour set off for the gem piles near (414, 414) three times, each time from about (416, 390), and each was given up before a take. Gather's walk to (435, 410) came back north between them. 92 s and no gem. The legs were 10+ cells, so the pacing guard never fired. **Rule:** a find given up is not picked again until something about it changes (seen afresh, a new route, the hostile that barred it gone).
+
+### Run 22: the middle chest bought and applied (30 slots), matches bought, then the north-west entrance walk circles south of town; item data came from a pre-deploy cache
+
+- **Code:** `main` at `adf2940`. Since run 21: A122 (death chests remembered across runs, shown in State, reclaimed) and A123 (Supplies read in the new `capabilities` shape; weapon cooldowns paced at the world tick rate).
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile, `--seconds 600`.
+- **Knowledge base:** kept from run 21.
+- **Verdict:** exit 0, `PASS` (M10) after **603.5 s**. The park **parked safe** at (385, 375) after 0.4 s. The character started at **7/10**, 4 lives and **16 gems** at (427, 399), with the bronze_sword armed, the bronze_mail worn, 4 potions and 10 pack slots (7 used).
+- **Gate summary (M10):** deaths **0**; API errors **0**; readable cells seen 13 (unread 0); NPCs seen 26 (never spoken 4); duplicate break attempts 0. Planner: 36 plans accepted, **1 error** (defect 2).
+- **Supplies reference:** loaded from the **cache** ("49 subtypes (cache)"), not served. The cache was saved at run 21's start, 58 min earlier, inside `CACHE_MAX_AGE_SECONDS` (3600), in the old row shape. Parsed with `supplies.parse` against the live `supplies.json` fetched during the run, 38 of 49 rows are equal: heals, chest capacity, openers and damage all match. **All 11 weapons lack `cooldown_ms`** and fall back to `DEFAULT_ATTACK_COOLDOWN_MS` (1000): pocket_knife should be 800, mallets 1300 and whips 1200; swords are 1000 either way. Only the bronze_sword was armed, so this run was not affected (defect 1).
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–416 s | `gather_gems` (432, 400), 50 then 60 | Cut grass at region (432, 400): **16 → 50** by 410 s. Health stayed 7/10. |
+| 416–431 s | `buy` middle_chest, `use_item` middle_chest, `gather_gems` | Bought the **middle_chest** (50 → 0) and applied it with one `Use` (`SupplyUsed`): **pack 10 → 30 slots** (A115). |
+| 431–503 s | `gather_gems` 40 | Cut grass, 0 → 5. At 488 s the planner's reply was dropped as "not JSON" (defect 2); the dropped plan was a rest on safe ground. |
+| 503–517 s | `buy` matches, `gather_gems` | "Clues say Demitater's hedge garden burns." Bought **matches** (6 → 1). |
+| 517–547 s | `travel` point (379, 375), `gather_gems` | Walked north-west. A detour took an apple at (393, 381): 7 → 9. |
+| 547–572 s | `travel` entrance (300, 316), `gather_gems` | "Current travel target 379,375 is the farmer's own position, which is pointless." Heal took food at (389, 379): **10/10** at 555 s. |
+| 572–600 s | `travel` entrance (300, 316) | "Stage 2 readiness is met and no upgrades are for sale … heading to the entrance." Travel's legs went (375, 398) → (374, 399) → (372, 398) → (392, 407) → (371, 382) `[cautious]` → (388, 371). It ended at (385, 375) on "Travel holds its walk", 85 cells from the entrance against 80 at 547 s (defect 3). |
+
+#### Pack, stage, entrance and level attempts
+
+- **Pack slots:** 10 (7 used) to **30** (8 used) at 428 s.
+- **Stage:** 2 not met while health was 7/10; **met from 555 s** (10/10, 4 potions, sword, mail).
+- **Entrance choice:** north-west, (300, 316), from 547 s, with matches held for the hedges. The walk did not get nearer.
+- **Level attempts:** none.
+- **Death chest:** State listed run 19's chest at map 17 (1, 10), contents unknown, on another map (A122). It was not reclaimed; the character was never on map 17.
+- **`no_way_on` asks:** none.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **16** | **1** (+40 earned, −55 spent) |
+| Health | 7/10 | 10/10 |
+| Armed | bronze_sword | bronze_sword |
+| Worn | bronze_mail | bronze_mail |
+| Pack | 7/10 slots | 8/30 slots |
+| Potions | 4 | 4 |
+| Matches | 0 | 1 |
+
+Bought: middle_chest (50), matches (5).
+
+#### Gems earned
+
+**40** in 600 s, all from grass at region (432, 400): 34 in the first 410 s, 6 after the chest. There were no piles and no kills.
+
+#### Fights
+
+None.
+
+#### Run 21 defects, checked
+
+| Defect | Run 22 | |
+|---|---|---|
+| An unmet health check shows no way to close it | **Still there.** Health 7/10 for 538 s; the planner's one rest plan was the reply lost to defect 2. Food on the way to the entrance closed it. | |
+| Saving for an upgrade shows gems, not time | **Bought this run.** The chest took 410 s of gathering. | |
+| A detour find given up short is picked again | **Not seen.** One pile detour at 11 s, taken. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 247,308, output 8,093, cache write 110,915, cache read 4,436,600 |
+
+#### Decision mix
+
+Intents: 403 `Step`, 673 `Wait`, 155 `Use` (grass cuts and the chest), 42 `Take`, 2 `Arm`. Call mix: 837 `tick`, 213 `entities`, 78 `strategist`, 57 `self`, 10 `terrain`, 7 `zone`, 6 `position`. No `stuck`, `oscillation` or refusal records.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize.
+
+1. **A cached reference in an older shape counts as fresh** (`supplies.py:218–247`, `load`; the age check at 232–237). The cache from run 21, in the pre-deploy row shape, was under an hour old, so it won over the served table. Every weapon row lost its `cooldown_ms`, and the parser filled in the 1 s default without a word. **Rule:** a cached copy is fresh only when it carries every field the parser reads from the served shape. A row whose served field is missing is noted, not silently defaulted.
+
+2. **A planner reply with two JSON objects is dropped whole** (`strategist.py:543–551`, `parse_reply`). At 488 s the planner wrote a plan, then "Correction: a wait away from safe ground leaves the character exposed, so I'm putting a travel first.", then a second plan. Slicing from the first `{` to the last `}` spans both objects and fails to parse, so call 28 was lost, and with it the rest on safe ground. **Rule:** a reply is read for its last complete JSON object (the planner's final word). Only a reply with none is an error.
+
+3. **Travel's legs circle without bringing the destination nearer** (`states/travel.py:206–229`, `_travel_step`, and `route_step` below it). From 547 s the walk to (300, 316) took six legs around the ground south of town where run 18 paced. It went south, east, north-west and north-east, and ended 85 cells off against 80 at the start, then held. **Rule:** a travel walk is judged by how much nearer its destination it gets over its last few legs. Legs that net no progress count as stuck, so the ladder escalates or the planner is asked.

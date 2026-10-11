@@ -97,6 +97,17 @@
   "eaten_on_pickup": true
  },
  {
+  "code": "blue_chest",
+  "name": "Blue chest",
+  "class": "consumable",
+  "slot": "armed",
+  "use_effects": [
+   "chest"
+  ],
+  "chest_capacity": 10,
+  "stacks": false
+ },
+ {
   "code": "bomb",
   "name": "Bomb",
   "class": "tool",

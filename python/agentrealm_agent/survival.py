@@ -6,7 +6,7 @@ import math
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from .supplies import weapon_damage
+from .supplies import weapon_damage, worn_armor_defense
 from .threat import ThreatTable, TypeKey, type_key_for_entity
 from .travel.knowledge import town_from_kb
 from .world import Entity, Pos, WorldModel, chebyshev
@@ -30,6 +30,9 @@ UNKILLED_HOSTILE_HEALTH = 10
 BASE_ATTACK_POWER = 2
 COMBAT_DIE = 20
 COMBAT_HIT_TARGET = 10
+# A hostile's swing at us rolls the same way against our defense, 0, plus
+# the defense of the armor we wear, and a hit loses that much again (GAME_NOTES
+# Combat): ``worn_defense``. Armor in hand protects nothing.
 # Weapon damage is the Supplies reference's (``supplies.weapon_damage``, A54).
 # An armed item it lists as no weapon (food, a tool, nothing) swings as the
 # starting knife.
@@ -167,10 +170,25 @@ def combat_group(w: WorldModel, policy: Policy, also: Entity | None = None) -> l
     return group
 
 
-def max_hit_damage(group: list[Entity], threat: ThreatTable) -> int:
+def worn_defense(w: WorldModel) -> int:
+    """The defense the armor we wear adds against a hostile's hit (Supplies
+    reference ``defense``); armor armed or carried adds none."""
+    return worn_armor_defense(w.worn_codes.values())
+
+
+def hit_damage(threat: ThreatTable, key: TypeKey | None, armor: int = 0) -> int:
+    """What one landed hit from this type takes off us through ``armor``: its
+    attack power (the threat table's largest hit, gross of armor) less our
+    armor, at least 1. A hit armor absorbs whole is possible, but the largest
+    hit seen is only a floor on that attack power, so a landed hit is never
+    priced as free."""
+    return max(1, threat.damage_per_hit(key) - armor)
+
+
+def max_hit_damage(group: list[Entity], threat: ThreatTable, armor: int = 0) -> int:
     if not group:
         return 0
-    return max(threat.damage_per_hit(type_key_for_entity(e)) for e in group)
+    return max(hit_damage(threat, type_key_for_entity(e), armor) for e in group)
 
 
 def on_safe_tile(w: WorldModel) -> bool:
@@ -270,32 +288,35 @@ def hostiles_reaching(
     return {(e.kind, e.id) for e in w.entities if not cells.isdisjoint(hostile_reach(w, policy, skip, only=e))}
 
 
-def hostile_swing_damage(damage: int, threat: ThreatTable | None = None, key: TypeKey | None = None) -> float:
-    """Expected damage of one hostile swing at us. A hostile swings with its
+def hostile_swing_damage(
+    damage: int, threat: ThreatTable | None = None, key: TypeKey | None = None, armor: int = 0
+) -> float:
+    """Expected damage of one hostile swing at us through ``armor``, the
+    defense of the armor we wear (``worn_defense``). A hostile swings with its
     damage number as attack power and no weapon damage (GAME_NOTES.md
-    Combat), so it hits on the same roll ours does; once ``threat`` has
-    counted the type's hits and misses, on its measured rate, with that
-    roll as the prior (``ThreatTable.hit_rate``). ``damage`` is the threat
-    table's largest hit, only a floor on that number, so each landed hit is
-    priced at it, not at the mean below it. Our armor is not counted: the
-    agent does not know its defense."""
-    chance = hit_chance(attack_power=damage)
+    Combat), so it hits on the same roll ours does, against our armor; once
+    ``threat`` has counted the type's hits and misses, on its measured rate,
+    with that roll as the prior (``ThreatTable.hit_rate``). ``damage`` is the
+    threat table's largest hit, gross of armor and only a floor on that
+    number, so each landed hit is priced at it less our armor, at least 1,
+    not at the mean below it."""
+    chance = hit_chance(attack_power=damage, defense=armor)
     if threat is not None:
         chance = threat.hit_rate(key, chance)
-    return chance * max(1, damage)
+    return chance * max(1, damage - armor)
 
 
-def _hostile_damage(threat: ThreatTable, key: TypeKey | None) -> float:
+def _hostile_damage(threat: ThreatTable, key: TypeKey | None, armor: int) -> float:
     """A type's expected swing (``hostile_swing_damage``): at its largest
     measured hit, or, never measured, at the world's base attack power
     (``UNMEASURED_DEFAULT``, the published rules; A85)."""
-    return hostile_swing_damage(threat.damage_per_hit(key), threat, key)
+    return hostile_swing_damage(threat.damage_per_hit(key), threat, key, armor)
 
 
-def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:
+def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable, armor: int = 0) -> float:
     if health <= 0 or not group:
         return float("inf")
-    dps = sum(_hostile_damage(threat, type_key_for_entity(e)) for e in group) / HOSTILE_ATTACK_INTERVAL_TICKS
+    dps = sum(_hostile_damage(threat, type_key_for_entity(e), armor) for e in group) / HOSTILE_ATTACK_INTERVAL_TICKS
     if dps <= 0:
         return float("inf")
     return health / dps
@@ -325,12 +346,14 @@ def ticks_to_kill_them(group: list[Entity], weapon: str | None = None) -> float:
     return len(group) * UNKILLED_HOSTILE_HEALTH / (swing_damage(weapon) / OUR_ATTACK_INTERVAL_TICKS)
 
 
-def win_ratio(health: int | None, group: list[Entity], threat: ThreatTable, weapon: str | None = None) -> float:
-    """Ticks for them to kill us, over ticks for us to kill ``group`` with
-    ``weapon`` armed. Higher is better for us."""
+def win_ratio(
+    health: int | None, group: list[Entity], threat: ThreatTable, weapon: str | None = None, armor: int = 0
+) -> float:
+    """Ticks for them to kill us through ``armor`` (``worn_defense``), over
+    ticks for us to kill ``group`` with ``weapon`` armed. Higher is better for us."""
     if health is None or not group:
         return float("inf")
-    return ticks_to_kill_us(health, group, threat) / ticks_to_kill_them(group, weapon)
+    return ticks_to_kill_us(health, group, threat, armor) / ticks_to_kill_them(group, weapon)
 
 
 def estimate_health(w: WorldModel) -> int:
@@ -372,6 +395,7 @@ def at_health_floor(w: WorldModel, params: dict[str, float | int], group: list[E
 
 def health_floor(w: WorldModel, params: dict[str, float | int], group: list[Entity]) -> int:
     """Retreat's floor against ``group``: effective ``retreat_hits`` times the
-    hardest hit among them (threat table). Detour keeps above it too (A82)."""
+    hardest hit among them through the armor we wear (threat table,
+    ``hit_damage``). Detour keeps above it too (A82)."""
     eff = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
-    return effective_retreat_hits(int(params["retreat_hits"]), eff) * max_hit_damage(group, w.threat)
+    return effective_retreat_hits(int(params["retreat_hits"]), eff) * max_hit_damage(group, w.threat, worn_defense(w))

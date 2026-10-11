@@ -10,7 +10,7 @@ What the agent needs to know to play Agent Realm. Every fact names its source:
 | **SM** | [State machine agent guide](https://agentrealm.gg/guides/state-machine) |
 | **Tick** | The `tick` tool's description and intent schema on the Agent Realm MCP server (one call to `POST /characters/{id}/tick`) |
 | **Obs** | Observed in play with the observer character (Olympuff) on 2026-10-04, ticks 1835171–1839533 |
-| **CL** | [Changelog](https://agentrealm.gg/docs/changelog), and the server's change notes behind it (saims B136, B137, B139: the update live on 2026-10-10) |
+| **CL** | [Changelog](https://agentrealm.gg/docs/changelog), and the server's change notes behind it (saims B136, B137, B139: the update live on 2026-10-10; B138 capabilities, live on 2026-10-11) |
 
 ## No spoilers in this repo
 
@@ -54,7 +54,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 
 ## Movement and blocks
 
-- **Block types.** Walkable: `grass`, `dirt`, `tile`, and `fire`/`lava`, which deal `occupy_damage` on the tick you enter and every second you stay. Blocked: `water`, `bush`, `tree`, `rock`, `mountain`, `wall`. Doors (warp): `framed_door`, `rock_entry`. Treat an unknown type as blocked (M §9.2).
+- **Block types.** Walkable: `grass`, `dirt`, `tile`, and `fire`/`lava`, which deal `occupy_damage` on the tick you enter and every second you stay, less your defense and the armor you wear. Blocked: `water`, `bush`, `tree`, `rock`, `mountain`, `wall`. Doors (warp): `framed_door`, `rock_entry`. Treat an unknown type as blocked (M §9.2).
 - **Door destinations are not served.** A terrain cell names a door's `block_type` (and `locked`), never where it leads. The agent learns each warp by observation: it steps on, then reads its position (M §9.2; A26).
 - **Art.** A cell can carry art (path, fence, house, statue, sign, pond, bridge), but behaviour always comes from `block_type`. Statues and signs are `wall` cells with `readable: true` (M §9.2; Obs).
 - **Breaking blocks.** `Use` with the right supply armed destroys a block; anything else is `applied_no_effect`. A block never says whether it breaks or what breaks it (M §11).
@@ -69,7 +69,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Tools are used up when they break a block; weapons are not** (M §11). Matches were consumed on use (Obs).
 - **Destroyed blocks recover.** A destroyed block shows its destroyed type until it grows back. It may reveal a door, which warps only while open, and may drop a supply (M §11). A cut bush grew back in 60 s, 600 ticks (Obs 1835985→1836585).
 - **Locked doors.** A locked door shows `locked: true` and never names its key. Stepping onto it with a matching key consumes the key and warps; without one the move is `door_locked` (M §9.2, §11).
-- **Water** is walkable only while an armed, worn or timed supply makes it so. `would_strand` stops you unequipping it while on water (M §11).
+- **Water** is walkable only while an armed or worn supply makes it so (the raft armed, the water-walking sandals armed or worn); a timed effect does not count. `would_strand` stops you unequipping it while on water (M §11, CL B138).
 - **Occupancy.** One character or NPC per block. Moving onto an NPC is `block_occupied`. Characters move before NPCs act (M §11).
 
 ## Zones
@@ -81,17 +81,20 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Edges are sharp.** Town's gate tiles were safe; the tile one step outside was not (Obs).
 - **Hunting grounds.** Your strength is permanent attack + permanent defense + armed weapon damage + worn armor defense. Over the ceiling you can't enter (`over_strength_ceiling`), and if you grow past it inside you are moved out (API Movement). Strength is readable only on the owner watch sheet (`/watch/characters/{id}/sheet`, viewing bucket), not on `get_self` (M §5.5); the sheet counts only an armed weapon's damage and worn armor's defense, never a held potion or worn non-armor (CL, B139). Neither serves attack power on its own.
 - **Olympuff's hunting ground** has `strength_ceiling` 7: attack power 2 plus 5 of gear. The pocket knife or a bronze sword, with bronze mail or without, gets in; a bronze mallet or anything stronger does not (M §16, CL: it was 5 before attack power 2).
-- **Light.** Sight range = perception × zone brightness, plus an armed torch or lantern (or a worn light), capped at perception (Guide, The world model).
+- **Light.** Sight range = perception × zone brightness, plus a light's radius, capped at perception (Guide, The world model). A torch or lantern lights for its lit time (two and five minutes) after `Use` on yourself, without being used up, and gives light only while armed; an always-on light such as the firefly jar lights armed or worn. Only the largest radius carried counts; lights do not add up (M §11, CL B138).
+- **While-equipped pieces work armed too.** Goggles, boots of speed, the water-walking sandals and the truth lens grant their effect armed as well as worn (M §11, CL B138). The armed slot is the weapon's, so the agent wears them (A97).
 
 ## Combat
 
 - **No battle state.** Attacking is `Use` with a weapon armed: on a character, or on the block an NPC stands on (M §11; Guide). A `Use` target `{"kind": "npc", "npc_id": N}` resolves that block on the tick the `Use` runs; an NPC not in sight that tick, dead, or unknown is `target_out_of_range`, and reach, safe zones, cooldown and the hit roll are those of a `Use` on the block (API Use; server release 1.11, saims B126). `{"kind": "direction", "direction": d}` names the neighbouring block in that direction from wherever the character stands when the `Use` runs; a missing or unknown direction is `malformed_intent` (API Use).
 - **Rolls.**
   - To hit: d20 + attack ≥ 10 + target defense + target armor defense. 1 always misses, 20 always hits.
-  - Damage: uniform from 1 to max(1, attack + weapon damage − defense − armor defense).
+  - Damage: uniform from 1 to max(1, attack + weapon damage), less defense and armor defense, never below 0. Weapon damage adds to attack power for this roll only; it does not change the roll to hit (M §11).
+  - Armor counts only worn: its `defense` protects against weapon hits, hostile and boss hits, traps and, since B138, damaging blocks (`occupy_damage`, before cut by defense alone); armor in hand protects nothing (M §11, CL B138). The route planner prices a hazard step at the `occupy_damage` that gets through (A97).
   - Die size, hit target and minimum are per-world settings (API Use).
   - Every Olympuff character has permanent attack power 2, existing characters included; permanent defense stays 0 (M §16, CL). A d20 roll of 8+ hits a hostile, which has no defense: 65%. Damage is 1 up to 2 plus weapon damage: the pocket knife deals 1–4, a bronze sword 1–6. The world's hit target stays 10, so hostiles' swings at characters are unchanged.
   - The API serves no attack power (PLAN.md **Server gaps**); the agent's win estimate uses the base of 2 (`survival.BASE_ATTACK_POWER`).
+  - `Damaged.amount` is what got through: a hit armor absorbs whole is `Damaged` with 0 (API Events, B131). The threat table adds back the defense of the armor worn when a hit lands, so it holds the hostile's own number, and the win estimate and Retreat's floor take the armor worn now off it once (`threat.absorb_damaged`, `survival.worn_defense`, A97). The armor added back is the loadout a response leaves, so a hit landed before an armor swap in the same response is filed off by the armor swapped; accepted as rare.
 - **Hostiles.** A hostile, trap or boss uses its damage number as attack power, with no weapon damage. Hostiles use the same move and attack accumulators as characters (API Use, Movement).
 - **What two weak hostiles did** (Obs 1836771–1836830):
 
@@ -119,7 +122,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 - **Take and withdraw.** `Take` reaches the supply's block or a neighbour, corners included. A ground chest's `contents` are served only within that same reach. `WithdrawFromChest` with `supply_ids` is all or nothing, `carry_capacity_full` for one too many; without them it takes everything that fits, ascending by id, and a chest with no room for even one is `carry_capacity_full` (M §6, §11; API).
 - **Drop** puts a carried supply on the ground under you. `Drop` and `DepositToChest` refuse a gem, a life, or a non-transferable supply (the starting kit) with `not_transferable`, permanent (M §6, §10.2, §11).
 - **`attack_range`** on `get_self` is the armed weapon's reach; 1 when the weapon authors none (M §5.3).
-- **Supplies reference.** The Manual's Supplies reference lists every supply subtype: class, slot, what `Use` does (`use_effects`), attack range, damage, heal, defense, whether a break uses it up, whether it is eaten on pickup, and gem price per world. The site serves the same rows as JSON at `https://agentrealm.gg/docs/supplies.json`, with no key (API Supplies reference, saims B132). The agent reads it through `supplies.py` (A54).
+- **Supplies reference.** The Manual's Supplies reference lists every supply subtype: class, slot, what `Use` does (`use_effects`), attack range, damage (a weapon's), heal (a potion's or food's), defense (armor's, counted only while worn), chest capacity, light radius, grants, whether a break uses it up, whether it is eaten on pickup, and gem price per world. The `blue_chest` row (consumable, chest capacity 10) is the chest a character starts with (M §11). The site serves the same rows as JSON at `https://agentrealm.gg/docs/supplies.json`, with no key (API Supplies reference, saims B132). The agent reads it through `supplies.py` (A54).
 - **Olympuff starting kit:** a non-transferable pocket knife (damage 2, range 1, cuts grass and bushes; with attack power 2 it deals 1–4). It survives death and is re-armed on respawn (M §5.3, §11; Obs: Died dropped everything but the knife).
 - **Buying.** Walk onto, or `Take`, a supply with a `gem_price`. Without enough gems it is `not_enough_gems` (M §11). The agent never steps onto one (`WorldModel.for_sale()` is impassable except as a search goal): Shop buys only by `Take` from a neighbouring cell, corners included (A21).
 - **Olympuff town shop prices seen** (Obs):
@@ -232,7 +235,7 @@ Each has a test the agent or a hand session can run.
 | Which `supply_subtype_code` a life (heart) has on the ground. Until confirmed, `LIFE_SUPPLY_CODES` ships empty; the agent files a code as `life_on_pickup` in the item table when `lives` rises in a response whose only applied `Take` was that supply (A47), and confirming it is A57 (Obs [`A57_live_play.md`](observations/A57_live_play.md)) | On Olympuff, keep cutting grass and log any ground supply that raises `lives` on `Take`; try sandbox field grass with a bomb if Olympuff never drops one (Manual §16; Obs [`A20_live_play.md`](observations/A20_live_play.md), [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Does `Drop` take a supply stowed in the carried chest (`inventory.chest`), or only a held one? Loot drops held supplies only until this is known (A57; Obs [`A57_live_play.md`](observations/A57_live_play.md)) | `Drop` a stowed supply and read the result (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Is the armed supply also listed in `held`? A67 run 1 suggests not (the armed weapon was missing from `held`, [`A67_free_play_runs.md`](observations/A67_free_play_runs.md)). Loot counts held, worn, armed and stowed separately (A20); Heal's drink candidates and `potion_count` (the M8 potion gate, Shop's reserve) add the armed supply by id when `held` leaves it out (A76) | Compare `inventory` before and after an `Arm` |
-| Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 assumes the Manual §16 cap once a `Take` of the upgrade applies (below), and measuring it is A57 (Obs [`A57_live_play.md`](observations/A57_live_play.md)) | Buy `middle_chest` and fill until `carry_capacity_full` (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
+| Carry capacity with a larger chest (the shop's `middle_chest`). A20 assumes 10 and lowers it on `carry_capacity_full`; A47 assumes the Supplies reference's `chest_capacity` once a `Take` of the chest applies (below, A97), and measuring it is A57 (Obs [`A57_live_play.md`](observations/A57_live_play.md)) | Buy `middle_chest` and fill until `carry_capacity_full` (Obs [`A47_live_play.md`](observations/A47_live_play.md)) |
 | Where gems drop from cutting grass. The manual gives only a rate by ring (Items, slots and gear); the agent measures yield per 16×16-block region from its own cuts, barren after 15 cuts with no gem and poor or good against the map's measured rate, with the manual's 20% as the prior (PLAN.md A63, A81). No region yield is measured yet | Read `gem_yield` in the world knowledge base after field play |
 | Do art or a statue's `facing` mark secrets? The manual only says art is a picture and behaviour comes from `block_type` (M §9.2) | Log art and facing next to every secret found, and compare |
 
@@ -245,7 +248,7 @@ The win estimate (A9, gated on by **Fight** in A23) uses these until the questio
 | Hostile attack interval | 15 ticks | The two weak hostiles in Combat |
 | Our attack interval | 10 ticks | None: weapon cooldown is unmeasured |
 | Our attack power | 2 | The world's base (M §16); the API serves none, so a permanent gain above it is not counted |
-| A hostile's damage a swing | hit chance × its largest measured hit: 1.3 for one that hit for 2. The hit chance is the published roll at that hit as attack power, moved by the type's counted hits and misses (the roll counts as 10 swings) | The published roll (Combat: a hostile's damage number is its attack power). The largest hit seen is only a floor on that number, so a landed hit is priced at it, not at the mean below it; our armor is not counted. A type never measured swings at the world's base attack power, 2, on the same roll; the Manual publishes no hostile's own (A85) |
+| A hostile's damage a swing | hit chance × (its largest measured hit, gross of armor, less the armor we wear, at least 1): 1.3 for one that hit for 2 with no armor worn, 0.6 with bronze mail. The hit chance is the published roll at that hit as attack power against our worn armor's defense, moved by the type's counted hits and misses (the roll counts as 10 swings) | The published roll (Combat: a hostile's damage number is its attack power). The largest hit seen is only a floor on that number, so a landed hit is priced at it less our armor, never as free, not at the mean below it. A type never measured swings at the world's base attack power, 2, on the same roll; the Manual publishes no hostile's own (A85). Two approximations: the counted hits and misses mix every loadout worn when they landed, so a type swung at often drifts off its rate against today's armor; and a hit is filed gross using the armor worn after the response, so one landed before a swap in that same response is filed off by the armor swapped |
 | Our damage a swing | hit chance (65%) × the mean of 1 up to 2 plus weapon damage: 1.625 with the pocket knife | The published roll (Combat) and weapon damage from the Manual's Supplies reference (`supplies.weapon_damage`); an unlisted armed item swings as the knife |
 | Health of a hostile type with no kill on record | 10 | A new character's health (PLAYABLE_AGENT_PLAN Combat) |
 | Our health when no observation has served it | 10 | A new character's health (Combat) |
@@ -254,4 +257,4 @@ Loot (A47) also assumes one value until measured (A57; Obs [`A57_live_play.md`](
 
 | Assumption | Value | Basis |
 |---|---|---|
-| Carry capacity after an applied `Take` of `middle_chest` / `red_chest` | 30 / 100 | Manual §16 gear table. A `carry_capacity_full` rejection still lowers it to what is carried, and a respawn resets it to 10 |
+| Carry capacity after an applied `Take` of a chest | its Supplies reference `chest_capacity` when larger: `middle_chest` 30, `red_chest` 50; `blue_chest` (10) changes nothing | The Supplies reference (`supplies.chest_capacity`, A97). The Manual says the capacity rises on `Use` of the chest; the agent assumes it on the `Take`. A `carry_capacity_full` rejection still lowers it to what is carried, and a respawn resets it to 10 |

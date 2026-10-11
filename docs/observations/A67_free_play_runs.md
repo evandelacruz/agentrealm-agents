@@ -895,3 +895,100 @@ Intents: 656 `Step`, 1,499 `Wait`, 99 `Use` (86 cuts, 10 swings, 3 Break), 20 `T
 3. **The planner buys matches it already holds** (`strategist.py`, the `buy` op). (Addressed in #183, A92: State `held` says what each item does, `upgrades_for_sale` shows the next upgrade and the gems short, and the planner is asked to weigh each buy against both.) At 13 s, with 3 boxes held and 8 gems, the plan put `buy` matches on top ("3 held, plus more for the potato patch"). Shop bought a 4th box at 28 s, for 5 gems. Run 8 bought a 3rd box the same way. Break used one match once (at 161 s). Nothing in the State or the arc weighs a tool already held against the gems it costs. Those 5 gems were a third of the way to the bronze sword.
 
 **Minor:** The same apple (supply 460231) was refused `target_not_nearby` twice (212 s, 283 s), as in run 9. The first `buy` small_potion at 220 s was dropped at once (deferred, then unchanged), so the potion waited for the 3/10 fight. The gate's "weak hostile kills 0" and "Heal took ground food no" disagree with the trace (2 kills, and an apple taken at the end of Heal's food walk at 206 s). `m8_acceptance.py:126–131` counts a kill only for a fight it marked weak and lone. `:190–209` counts a food `Take` sent from Heal, but the apple was walked onto at the end of the walk, which takes food eaten on pickup with no `Take`. A93 fixes both: a kill is our `NPCDamaged` on the tick the NPC died, and food is our own `SupplyTaken`.
+
+### Run 11: sword and mail bought, 46 gems; Heal drinks the reserve potion the moment it is bought
+
+- **Code:** `main` at `65ae52a`. Since run 10: A87 (#181, rules, not run patches), #183 (the planner sees held counts and what each item does before a `buy`), #184 (the M8 gate counts kills and food from API events), #185 (one fight-or-flee decision per engagement; Gather and Detour targets priced by danger on the path and at the target).
+- **Knowledge base:** kept from run 10. Damage per type: gristlewick `max_hit` 2 (6 hits, 3 misses), snotling 3 misses and no hit, chugbug none. 13 posts, saved at strength 0.30–0.78. About 2.4 h of world time passed between the runs. A post out of view halves every 5 min of world time times the spells it was seen on its post (at most 4, so 5–20 min). Even at 4 spells that is about 7 half-lives, so all 13 fell below the forget line on load. The one post left after the run, snotling 256 at (406, 430) (0.53), was seen again during the run.
+- **Verdict:** exit 0, `PASS` after **601.7 s**, on the short-run gates only. The park **parked safe** at (429, 399) after 3.6 s and cleared the queue. The character started at **10/10**, 5 lives and **12 gems** at (428, 400), holding matches ×4 with the pocket knife armed.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; kills **2** (lone weak 1); gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **no**; food taken while hurt **no**; Heal drank a potion **yes**. Planner: 41 calls, 41 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–13 s | `travel` town, `gather_gems:15`, `buy` bronze_sword | The first plan named the region run 10 learned: "farm the 432,400 region (0.2 yield) and buy a sword". |
+| 13–52 s | `gather_gems:15` (432, 400), `buy` bronze_sword | Cut grass in (432, 400), 12 → 15. |
+| 52–68 s | `buy` bronze_sword, `equip` | Bought the **bronze_sword** at 65 s (**15 → 0**) and armed it. Equip then sent `Wear` on the matches to learn their slot (defect 2). |
+| 68–300 s | `gather_gems:20`, then `fight: true` (123 s), then `buy` bronze_mail, `buy` small_potion, `fight: false` from 194 s | Cut grass in (432, 400). Closed on snotling 247 at 122 s and **killed it in 2 swings** (2 + 6), and it dropped a gem. At 292 s, the same snotling (respawned) shadowed it, and it **killed it in 4 swings** (2 hits, 5 + 6). No gem dropped. |
+| 300–334 s | `buy` small_potion, `gather_gems:45`, `buy` bronze_mail | Detour took the (413–415, 414) piles (+3). Bought a **small_potion** at 330 s (**17 → 7**) "since we are on safe ground at 7/10 health with 14 gems and none held". Heal drank it 1 s later (defect 1). |
+| 334–452 s | `gather_gems:45`, `buy` bronze_mail | Cut grass in (432, 400), 7 → 20. |
+| 452–600 s | `buy` bronze_mail, `equip`, `gather_gems:45` | Bought the **bronze_mail** at 452 s (**20 → 0**) and wore it. Back to (432, 400), 0 → 13. |
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **12** | **13** (+46 earned, −45 spent) |
+| Armed | pocket_knife | **bronze_sword** |
+| Worn | `{}` | **bronze_mail** |
+| Held | matches ×4 | matches ×4 |
+| Potions | 0 | 0 |
+
+Bought, each by a `buy` op, with the planner's reason:
+
+| Time | Item | Gems | Planner's reason |
+|---|---|---|---|
+| 65 s | bronze_sword | 15 | "Gather goal is done with 15 gems. Buy the sword now. Afterwards: bronze mail (20 gems), then a few potions." |
+| 330 s | small_potion | 10 | "Buy a potion first, since we are on safe ground at 7/10 health with 14 gems and none held." Call 22 also declined a second sword: "the bronze sword is already armed … do not buy another." |
+| 452 s | bronze_mail | 20 | "Bronze mail is affordable, so buy it and wear it, then resume gathering." |
+
+No matches were bought (4 held throughout).
+
+#### Gems earned
+
+**46** in 600 s, **4.6 a minute** (run 10: 1.9).
+
+| Source | Gems | |
+|---|---|---|
+| Grass | 42 | 156 cuts, 27%, almost all in region (432, 400). That region now holds 202 cuts and 51 gems, across runs 10 and 11. |
+| Gem piles | 3 | (413–415, 414) at 315–317 s, by Detour. |
+| Kills | 1 | 2 kills; the first dropped a gem at (440, 402), the second none. |
+
+#### Fights
+
+| Time | Where | Hostile | Started by | Our swings | Hits | Dealt | Their swings | Hits | Taken | Outcome |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 122–125 s | (440–443, 400–403) | npc 247 (snotling) | us (`close on`) | 2 | 2 | 8 | 2 | 2 | 2 | **Killed**, gem dropped. |
+| 292–300 s | (430–434, 406–412) | npc 247 (snotling), respawned | us (it shadowed us: `close on`) | 4 | 2 | 11 | 4 | 1 | 1 | **Killed**, no drop. |
+
+- **Totals:** 2 fights, both started by us. We swung 6 times and hit 4 (67%). 2 kills, 1 gem from kills. We took 3 damage. Deaths 0.
+- **Fight/flee:** no Flee decision in the run. Both fights were one engagement each (#185).
+- **Damage per type after the run:** snotling `max_hit` 1, 3 hits, 6 misses; gristlewick unchanged.
+
+#### Run 10 defects, checked
+
+| Defect | Run 11 | |
+|---|---|---|
+| Flee and Fight take turns (#185) | **Gone.** No Flee decision; both fights were won in one engagement. | Not a hard test: no gristlewick fight. |
+| Repeated trips to a pile beside a pack (#185) | **Gone.** One Detour to the (413–415, 414) piles, taken in one stop. | |
+| Redundant matches buy (#183) | **Gone.** No matches bought with 4 held. The planner also declined a second sword. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 153,265, output 7,502, cache write 104,034, cache read 4,161,360 |
+
+#### Decision mix
+
+Intents: 405 `Step`, 654 `Wait`, 163 `Use` (156 cuts, 6 swings, 1 drink), 48 `Take`, 3 `Arm`, 2 `Wear`. Call mix: 862 `tick`, 220 `entities`, 86 `strategist`, 60 `self`, 17 `terrain`, 14 `zone`, 13 `position`.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize.
+
+1. **Heal spends a carried potion on any hurt, so the planner's reserve never builds** (`states/heal.py:115–117`). Heal's order is food in sight, then any carried food or potion (`use_carried_heal`), and only then the `health_low` and plan checks. At 330 s the plan bought a small_potion for the reserve, at 7/10 on safe ground. Heal drank it at 331.7 s, and the reserve was back to 0 (the gate's reserve check failed). Run 10 drank its potion the same way, at 3/10, where it was needed. **Rule:** a carried potion is spent only when health is low or in a fight. Above that, Heal rests or leaves the character to the plan. The planner and Heal should read the same rule for when a potion is spent.
+
+   ```
+   306.8 s  strategist: "Buy a potion first, since we are on safe ground at 7/10 health with 14 gems and none held"
+   330.4 s  @421,399  buy small_potion    gems 17 → 7
+   331.7 s  @421,399  arm and use small_potion   (health 7/10)
+   335.8 s  health 10/10; potions 0
+   ```
+
+2. **Equip's slot probe tries `Wear` on a tool** (`equip.py:190–199`). With the sword armed and no other upgrade, `_best_learn_wear` picks the lowest-id held non-weapon with no known slot and sends `Wear` on it to learn the slot. Here that was the matches (67.5 s, "learn wear matches"). The bronze mail at 453.8 s went the same way, rightly. **Rule:** probe only items whose kind the Supplies reference (#173) leaves open. A tool or consumable has no wear slot to learn.
+
+3. **Remembered posts fade on world time between sessions** (`world.py:58–68`, `POST_HALF_LIFE_TICKS`). The 13 posts saved by run 10 were 2.4 h old by the start of run 11: 7 to 29 half-lives, since the half-life is 5 min times the spells on post (at most 4). All 13 fell below the forget line on load, among them the chugbug pack's post south-west of town, which runs 8 and 9 found manned. The fade was built for posts out of view during play (run 9's wall of posts). Applied to time the agent was not playing, it forgets every post between sessions. That cost nothing here, because nothing hit it near a forgotten post. **Rule (a design question for the planner or Evan):** time not playing should count as one spell out of view, or not at all, not as hours of out-of-view time.
+
+**Minor:** Snotling 247 respawned at its post and was killed twice. The first kill dropped a gem, the second did not. Kill drops are not certain. The planner set `fight: false` at 194 s ("a snotling pack 20 cells away"), and Gather kept away from it; the second fight came from the shadow rule.

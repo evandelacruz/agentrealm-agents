@@ -1743,7 +1743,7 @@ Bought: one small_potion (10), at 7/10.
 
 #### Decision mix
 
-Intents: 454 `Step`, 858 `Wait`, 132 `Use` (128 cuts, 2 swings, 2 more), 27 `Take`. Call mix: 728 `tick`, 204 `entities`, 116 `zone`, 75 `strategist`, 49 `self`, 16 `position`, 12 `terrain`, and 1 `stuck` record (a detour attempt that lapsed).
+Intents: 454 `Step`, 858 `Wait`, 132 `Use` (130 on grass: 126 cuts that took effect, 2 with no effect and 2 that `gather_run` did not count; 2 swings), 27 `Take`. Call mix: 728 `tick`, 204 `entities`, 116 `zone`, 75 `strategist`, 49 `self`, 16 `position`, 12 `terrain`, and 1 `stuck` record (a detour attempt that lapsed).
 
 #### Top 3 defects
 

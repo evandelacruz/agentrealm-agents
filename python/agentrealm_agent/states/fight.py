@@ -19,7 +19,7 @@ from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step, retreat_safe_goal
 from ..reach import weapon_reach
 from ..engagement import Engagement, fights, held_members
-from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks
+from ..survival import RETREAT_NAV, at_health_floor, combat_group, is_hostile, on_safe_tile, pursuer_peaks
 from ..plan import op_npc
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import known_safe
@@ -166,11 +166,20 @@ def can_engage(world: WorldModel, target: Entity, ctx: PlayContext) -> bool:
     return close_step(world, target, blocked) is not None
 
 
+def held_on_safe_ground(world: WorldModel, ctx: PlayContext, target: Entity) -> bool:
+    """On a safe tile at the health floor against ``target`` and the hostiles
+    in range (``survival.at_health_floor``): no step off it is taken, or
+    Retreat walks back and the step off follows, round after round (A114)."""
+    return on_safe_tile(world) and at_health_floor(world, ctx.params, combat_group(world, ctx.policy, also=target))
+
+
 def op_refusal(world: WorldModel, ctx: PlayContext, op: dict) -> str | None:
     """Why Fight cannot carry out the ``fight`` op, or None to go on: its NPC
     is not in view (and was not since the op reached the top, or it would be
-    done), is a boss (``fight_boss``'s), or the directives forbid attacking
-    it. Reads only; ``act`` drops the op with it."""
+    done), is a boss (``fight_boss``'s), the directives forbid attacking
+    it, or we stand on safe ground at the health floor
+    (``held_on_safe_ground``), so the planner makes the call. Reads only;
+    ``act`` drops the op with it."""
     target = op_npc(op, world)
     if target is None:
         named = f"npc {op['npc_id']}" if "npc_id" in op else f"no {op.get('npc_type')}"
@@ -179,6 +188,8 @@ def op_refusal(world: WorldModel, ctx: PlayContext, op: dict) -> str | None:
         return f"{target.code or 'npc'} {target.id} is a boss: fight_boss fights it"
     if attack_forbidden(target, ctx.never_attack):
         return f"the directives forbid attacking {target.code or 'npc'} {target.id}"
+    if held_on_safe_ground(world, ctx, target):
+        return f"at the health floor on safe ground: not stepping off toward {target.code or 'npc'} {target.id}"
     return None
 
 
@@ -243,11 +254,14 @@ def engage(w: WorldModel, ctx: PlayContext, target: Entity, state: str) -> State
 
     **Fight** runs it, and so does **Flee** when running away is not working (A9).
     No swing is sent from a safe tile, where no attack can be made: the move
-    there is the step off it toward ``target`` (A114).
+    there is the step off it toward ``target`` (A114), never taken at the
+    health floor (``held_on_safe_ground``).
     """
     m, policy = ctx.memory, ctx.policy
     m.path = []
     if on_safe_tile(w):
+        if held_on_safe_ground(w, ctx, target):
+            return StateOutcome(None, "at the health floor: staying on safe ground", state=state)
         blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
         off = off_safe_step(w, target, blocked, weapon_reach(w, ctx.knowledge))
         if off is None:

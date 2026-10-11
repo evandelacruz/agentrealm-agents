@@ -76,7 +76,7 @@ OP_FIELDS: dict[str, str] = {
     "use_item": "code (a held consumable a Use on yourself applies: a potion heals, a chest raises the pack's carry slots). Done once that item is used up; dropped when none is held or its Use was refused or did nothing. A bigger chest is applied as soon as one is held, without this op",
     "enter_level": "x, y (the level door)",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
-    "fight": "exactly one of npc_id (an id from State nearby_npcs) or npc_type (the nearest NPC of that type in sight). Closes on it and swings until it is dead or out of sight, stepping off safe ground to swing (no attack is made from a safe zone) and back behind the swings; Retreat still pulls back at the health floor. Dropped for a boss (fight_boss) or an NPC the directives forbid attacking",
+    "fight": "exactly one of npc_id (an id from State nearby_npcs) or npc_type (the nearest NPC of that type in sight). Closes on it and swings until it is dead or out of sight, stepping off safe ground to swing (no attack is made from a safe zone) and back behind the swings; Retreat still pulls back at the health floor, and at the floor it never steps off safe ground (dropped then, so you make the call). Dropped for a boss (fight_boss) or an NPC the directives forbid attacking",
     "wait": "seconds, why",
     "set_param": "name, value",
 }

@@ -74,6 +74,33 @@ class FightOpTest(unittest.TestCase):
         self.assertNotIn(cell, ((1, 1), (1, 2)), "off the safe zone")
         self.assertLessEqual(max(abs(cell[0] - 2), abs(cell[1] - 1)), 1, "within reach of it")
 
+    def test_at_the_health_floor_it_stays_on_safe_ground_and_hands_back_the_op(self):
+        # Below the floor Retreat is off on a safe tile; stepping off would loop with it until death.
+        w = world(["#####", "#...#", "#...#", "#####"], at=(1, 1), health=2)
+        for y in (1, 2):
+            apply_zone(w, 17, 1, y, {"safe": True})
+        w.entities = [Entity("npc", 5, (2, 1), "snotling")]
+        w.threat.record(("npc", "snotling"), 3)
+        plan, m = fight(npc_id=5), Memory()
+        with self.assertLogs("agentrealm_agent.plan", "WARNING") as logs:
+            out = dispatch(w, ctx(w, plan, m))
+        self.assertNotIn("SetPosition", verbs(out), out.reason)
+        self.assertEqual(plan.current()["op"], "wait")
+        self.assertIn("at the health floor on safe ground", "\n".join(logs.output))
+
+    def test_engage_never_steps_off_safe_ground_at_the_floor(self):
+        from agentrealm_agent.states.fight import engage
+
+        w = world(["#####", "#...#", "#...#", "#####"], at=(1, 1), health=2)
+        for y in (1, 2):
+            apply_zone(w, 17, 1, y, {"safe": True})
+        target = Entity("npc", 5, (2, 1), "snotling")
+        w.entities = [target]
+        w.threat.record(("npc", "snotling"), 3)
+        out = engage(w, ctx(w), target, "Flee")
+        self.assertIsNone(out.intents)
+        self.assertIn("health floor", out.reason)
+
     def test_off_safe_ground_it_swings(self):
         w = world(["#####", "#...#", "#...#", "#####"], at=(1, 1))
         w.entities = [Entity("npc", 5, (2, 1), "snotling")]

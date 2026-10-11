@@ -319,20 +319,26 @@ class HuntingCeilingRuleTest(unittest.TestCase):
         self.assertEqual(best_equip_upgrade(w, {}, w.threat, Memory()).code, "bronze_sword")
         self.assertGreater(damage_per_second("bronze_sword"), damage_per_second("bronze_mallet"))
         self.assertGreater(damage_per_second("pocket_knife"), damage_per_second("sword"), "the knife swings every 0.8 s")
-        self.assertGreater(damage_per_second(None), damage_per_second("mallet"), "bare hands swing faster than the bare mallet")
+        self.assertGreater(damage_per_second("mallet"), damage_per_second(None), "any weapon beats an empty slot")
 
-    def test_an_empty_slot_is_one_model_with_the_win_estimate(self):
-        # A123: an empty slot, or a non-weapon in it, swings as the starting
-        # knife (survival.fighting_weapon), so a knife held is still armed.
+    def test_any_weapon_held_is_armed_into_an_empty_slot(self):
+        # A123 review: an empty slot, or a potion left armed, swings nothing,
+        # so even a weapon slower a second than the knife (the sandbox sword,
+        # the bare whip and mallet) is armed rather than nothing.
         for armed in (None, "small_potion"):
-            self.assertEqual(damage_per_second(armed), damage_per_second("pocket_knife"), armed)
-            self.assertAlmostEqual(
-                damage_per_second(armed), swing_damage(armed) * 10 / attack_interval_ticks(armed), msg=armed
-            )
-            w = world()
-            w.armed_code = armed
-            w.held_supplies = self.held("pocket_knife")
-            self.assertEqual(best_equip_upgrade(w, {}, w.threat, Memory()).code, "pocket_knife", armed)
+            self.assertEqual(damage_per_second(armed), 0.0, armed)
+            for held in ("sword", "whip", "mallet", "pocket_knife"):
+                w = world()
+                w.armed_code = armed
+                w.held_supplies = self.held(held)
+                up = best_equip_upgrade(w, {}, w.threat, Memory())
+                self.assertEqual(up.code if up else None, held, (armed, held))
+
+    def test_the_win_estimate_keeps_its_knife_for_an_empty_slot(self):
+        # A81's assumption, the win estimate's only (survival.fighting_weapon).
+        for armed in (None, "small_potion"):
+            self.assertEqual(swing_damage(armed), swing_damage("pocket_knife"), armed)
+            self.assertEqual(attack_interval_ticks(armed), attack_interval_ticks("pocket_knife"), armed)
 
     def test_a_named_code_is_armed_whatever_the_rule_says(self):
         w = world()

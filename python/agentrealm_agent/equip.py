@@ -66,7 +66,7 @@ from .supplies import (
     worn_slot,
 )
 from .memory import Memory
-from .survival import BASE_ATTACK_POWER, fighting_weapon, swing_damage
+from .survival import BASE_ATTACK_POWER, weapon_swing_damage
 from .threat import ThreatTable
 from .travel.knowledge import iter_hunting_cells
 from .world import WorldModel
@@ -217,19 +217,27 @@ def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[b
     ``ceiling`` first (always true with none known), then damage a second
     (:func:`damage_per_second`, A123), compared exactly: the top of a swing's
     damage roll over the cooldown, since no weapon changes the hit chance.
-    Compare ranks with ``>``: a higher one is a better weapon."""
+    An empty slot, or an item listed as no weapon, ranks 0: nothing armed
+    swings nothing (the server rejects an attack with no weapon), so any
+    weapon held within the ceiling beats it. Compare ranks with ``>``: a
+    higher one is a better weapon."""
     fits = ceiling is None or loadout_strength(w, code) <= ceiling
-    weapon = fighting_weapon(code)
-    top = max(1, BASE_ATTACK_POWER + (weapon_damage(weapon) or 0))
-    return fits, Fraction(1 + top, weapon_cooldown_ms(weapon) or DEFAULT_ATTACK_COOLDOWN_MS)
+    if not is_weapon(code):
+        return fits, Fraction(0)
+    top = max(1, BASE_ATTACK_POWER + (weapon_damage(code) or 0))
+    return fits, Fraction(1 + top, weapon_cooldown_ms(code) or DEFAULT_ATTACK_COOLDOWN_MS)
 
 
 def damage_per_second(code: str | None) -> float:
-    """Expected damage a second fighting with ``code`` armed: one swing's
-    (``survival.swing_damage``) over its attack cooldown (A123). An empty slot,
-    or an item listed as no weapon, swings as the starting knife
-    (``survival.fighting_weapon``), as the win estimate counts it."""
-    return swing_damage(code) * 1000 / (weapon_cooldown_ms(fighting_weapon(code)) or DEFAULT_ATTACK_COOLDOWN_MS)
+    """Expected damage a second with weapon ``code`` armed: one swing's
+    (``survival.weapon_swing_damage``) over its attack cooldown (A123); 0 for
+    an empty slot or an item listed as no weapon, as :func:`weapon_rank`
+    counts it. The win estimate's own assumption that such a slot swings as
+    the starting knife (``survival.fighting_weapon``, A81) stays there."""
+    if not is_weapon(code):
+        return 0.0
+    cooldown = weapon_cooldown_ms(code) or DEFAULT_ATTACK_COOLDOWN_MS
+    return weapon_swing_damage(weapon_damage(code) or 0) * 1000 / cooldown
 
 
 def does_job(code: str | None, job: str, kb: KnowledgeBase | None = None) -> bool:
@@ -260,7 +268,6 @@ def weapon_to_arm(
     if job == FIGHT and not is_weapon(w.armed_code):
         # No weapon armed fights bare-handed: a weapon must beat that, so one
         # over the ceiling is never armed into an empty slot either.
-        # It loses a tie to a weapon held: the knife it swings as is armed.
         best = ((weapon_rank(None, w, ceiling), False, -math.inf), None)
     for s in held_supplies(w):
         armed = s.code == w.armed_code

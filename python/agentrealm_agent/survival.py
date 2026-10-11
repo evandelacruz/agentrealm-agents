@@ -338,10 +338,11 @@ def hit_chance(attack_power: int = BASE_ATTACK_POWER, defense: int = 0) -> float
 
 
 def fighting_weapon(armed: str | None) -> str:
-    """What a fight with ``armed`` in hand swings: the armed item when the
-    Supplies reference lists it as a weapon, else the starting knife (A81).
-    The one model of an empty slot or a non-weapon in it, for the win estimate
-    and the weapon ranking alike (A123)."""
+    """What the win estimate prices a fight with ``armed`` in hand as: the
+    armed item when the Supplies reference lists it as a weapon, else the
+    starting knife (A81's assumption: Equip arms a weapon before a fight).
+    The win estimate only; the weapon ranking counts an empty slot as no
+    damage (``equip.weapon_rank``, A123)."""
     return armed if armed is not None and is_weapon(armed) else STARTING_WEAPON
 
 

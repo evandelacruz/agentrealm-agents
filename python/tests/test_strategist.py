@@ -793,6 +793,15 @@ class PlannerViewTest(unittest.TestCase):
         line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("upgrades_for_sale="))
         self.assertEqual([r["code"] for r in json.loads(line.split("=", 1)[1])], ["bronze_sword"])
 
+    def test_with_no_weapon_owned_any_weapon_within_the_ceiling_is_an_upgrade(self):
+        # A123 review: even one slower a second than the knife (the sandbox sword).
+        self.w.gems = 30
+        self.kb.items["sword"] = {"gem_price": 5}
+        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("upgrades_for_sale="))
+        rows = json.loads(line.split("=", 1)[1])
+        self.assertEqual([r["code"] for r in rows], ["sword"])
+        self.assertEqual(rows[0]["gains"], "damage 0 -> 2, a second 0.00 -> 1.62")
+
     def test_prompt_states_the_best_weapon_rule(self):
         prompt = system_prompt()
         self.assertIn("Weapons and the hunting ground", prompt)

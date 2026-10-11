@@ -21,7 +21,7 @@ module checks for each clause:
   ``NPCDamaged`` on that NPC from our character on the same tick, the killing
   blow (API Events), whichever state swung it and however many polls of a held
   queue later it lands. It is a lone weak kill when, at our first attack on
-  that NPC, it was the whole combat group and its type's damage per hit was
+  that NPC since it came into sight, it was the whole combat group and its type's damage per hit was
   at most the world's base attack power (2): the price the win estimate gives
   it, measured or not. Deaths fail the run immediately.
 - Never starts a fight below its health floor: the first attack ``Use`` after

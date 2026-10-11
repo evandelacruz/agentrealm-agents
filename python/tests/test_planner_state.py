@@ -121,7 +121,7 @@ class HeldChestTest(unittest.TestCase):
         w = world()
         w.held_supplies = [InventorySupply(1, "blue_chest")]
         held = json.loads(held_line(w).split("=", 1)[1])
-        self.assertFalse(held["blue_chest"]["applied"])  # the same rule plan.bought reads
+        self.assertFalse(held["blue_chest"]["applied"])  # the same rule plan.goal_done reads
 
     def test_not_applied_while_the_pack_is_smaller(self):
         w = world()

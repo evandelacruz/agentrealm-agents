@@ -31,7 +31,7 @@ from ..plan import GoalOp
 from ..reach import supply_reach
 from ..world import WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
-from .explore import plan_sets
+from ..pathing import plan_sets
 from .intents import arm, set_position, use_block
 from .solve import held_supply
 

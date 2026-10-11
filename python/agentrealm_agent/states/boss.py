@@ -14,7 +14,7 @@ from ..engagement import fights
 from ..survival import should_retreat
 from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
-from .explore import plan_sets
+from ..pathing import plan_sets
 from .fight import (
     ATTACK_USES,
     attack_intent,

@@ -9,7 +9,7 @@ from __future__ import annotations
 from ..pathing import next_step, replan
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome
-from .explore import plan_sets
+from ..pathing import plan_sets
 from .intents import set_position
 
 

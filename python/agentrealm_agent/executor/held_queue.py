@@ -23,9 +23,8 @@ from __future__ import annotations
 from ..config import Policy
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
-from ..pathing import remaining_walk_cells
+from ..pathing import plan_sets, remaining_walk_cells
 from ..reach import in_reach_from
-from ..states.explore import plan_sets
 from ..world import DOORS, Pos, WorldModel
 from .movement import step_landing
 

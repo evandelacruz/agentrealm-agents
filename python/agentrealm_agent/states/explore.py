@@ -21,9 +21,9 @@ from ..config import Policy
 from ..healing import hurt
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
-from ..navigation.rejection import navigation_avoid_costly
 from ..navigation import stuck as nav_stuck
 from ..pathing import (
+    plan_sets,
     attempt_plan,
     clue_redirects,
     escalation_step,
@@ -221,19 +221,3 @@ def _escalated_step(
         return escalation_step(m, w, att, avoid, target_plan, None, knowledge)
     reason = nav_stuck.stuck_reason(att, w.tick)
     return escalation_step(m, w, att, avoid, target_plan, reason, knowledge) if reason else None
-
-
-def plan_sets(
-    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None
-) -> tuple[set[Pos], set[Pos], set[Pos]]:
-    """``blocked``, ``plan_avoid``, ``plan_costly`` for this decision.
-
-    Rejection learnings and ``avoid_blocks`` hazards stay out of every choice
-    (A14, reflex 1). Standing on a hazard with no way straight off, the plan may
-    cross hazards at a high price instead.
-    """
-    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
-    hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
-    blocked = nav_avoid | hazards
-    escape = hazards if w.pos in hazards else set()
-    return blocked, blocked - escape, escape | nav_costly

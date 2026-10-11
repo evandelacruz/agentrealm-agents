@@ -137,6 +137,10 @@ class RunnerIsTheLoopTest(unittest.TestCase):
         for gone in ("def possible_positions", "def held_queue_matches", "def steps_land_clear", "PROBE_NEVER_KEEPS =", "def _fmt_", "json.dumps"):
             self.assertNotIn(gone, src)
 
+    def test_the_executor_imports_nothing_from_states(self):
+        for path in (RUNNER_SOURCE.parent / "executor").glob("*.py"):
+            self.assertNotIn("states", "".join(l for l in path.read_text().splitlines(True) if l.startswith(("from", "import"))), path.name)
+
 
 if __name__ == "__main__":
     unittest.main()

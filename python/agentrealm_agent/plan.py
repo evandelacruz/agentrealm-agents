@@ -63,7 +63,7 @@ OP_FIELDS: dict[str, str] = {
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
     "say": "text, and exactly one of npc_id (an id from State nearby_npcs) or npc_type (an NPC type code; the nearest NPC of that type in sight)",
-    "buy": "code (a potion, a tool, gear). Buys one more, whatever is already held: it is done once one more is held than the fewest held since it reached the top (one picked up for free counts too), so put two buy ops on the stack to buy two. With none in sight it walks to the nearest known shop, or to town to look for one; it is dropped when no known shop sells it or it costs more gems than are held",
+    "buy": "code (a potion, a tool, gear). Buys one more, whatever is already held: holding some does not skip it or finish it, it spends the price again (State held shows how many are held). It is done once one more is held than the fewest held since it reached the top (one picked up for free counts too), so put two buy ops on the stack to buy two. With none in sight it walks to the nearest known shop, or to town to look for one; it is dropped when no known shop sells it or it costs more gems than are held",
     "break_block": 'x, y, capability ("cut"|"chop"|"smash"|"burn"|"blast")',
     "use_block": "x, y, code (the supply to use on it)",
     "compose": "composes_into (the whole item to make)",

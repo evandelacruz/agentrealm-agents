@@ -826,9 +826,13 @@ class WorldModel:
             self._stretch_reach((source[0], _opt_int(source[1])))
 
     def note_came_for_us(self, e: Entity) -> None:
-        """``e`` came into a fight with us here: like a hit, it stretches its
-        post's reach to where we stand (``engagement.sync_engagement``)."""
-        self._stretch_reach((e.kind, e.id))
+        """``e`` joined a fight with us here: when it has left its post to
+        do so, like a hit, it stretches its post's reach to where we stand
+        (``engagement.sync_engagement``). A guard still on its post came out
+        for nobody, so it learns no reach."""
+        s = self.sightings.get((e.kind, e.id))
+        if s is not None and e.pos != s.home:
+            self._stretch_reach((e.kind, e.id))
 
     def _stretch_reach(self, key: tuple[str, int | None]) -> None:
         s = self.sightings.get(key)

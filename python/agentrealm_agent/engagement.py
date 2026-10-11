@@ -66,8 +66,9 @@ def sync_engagement(w: WorldModel, m: Memory, policy: Policy, params: dict[str, 
     Dispatch calls it once per decision, before any state runs, so every
     state reads the same decision (``fights``).
 
-    A hostile that joins the engagement stretches its post's reach to where
-    we stand (``WorldModel.note_came_for_us``): it came out that far for us.
+    A hostile that joins the engagement off its post stretches that post's
+    reach to where we stand (``WorldModel.note_came_for_us``): it came out
+    that far for us.
     That changes what ground costs, so committed targets are priced again
     (``Memory.reprice_targets``).
     """

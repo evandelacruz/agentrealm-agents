@@ -229,6 +229,18 @@ class TurnedBackTest(unittest.TestCase):
         self.turned_back()
         self.assertEqual(self.w.sightings[("npc", 7)].reach, chebyshev((24, 10), self.POST))
 
+    def test_a_guard_still_on_its_post_learns_no_reach(self):
+        """Joined the group beside the one that came out, it came out for nobody."""
+        neighbour = biter(8, (27, 10))
+        guard_post(self.w, neighbour, (27, 10))
+        self.w.pos = self.w.terrain_center = (24, 10)
+        self.guard.pos = (25, 10)
+        self.w.entities = [self.guard, neighbour]
+        sync_engagement(self.w, self.c.memory, self.c.policy, self.c.params)
+        self.assertIn(("npc", 8), self.c.memory.engagement.group)
+        self.assertEqual(self.w.sightings[("npc", 8)].reach, 0)
+        self.assertEqual(self.w.sightings[("npc", 7)].reach, 6)
+
     def test_gather_does_not_go_back_for_the_pile_it_turned_us_from(self):
         w = self.w
         w.entities = [gem(50, self.PILE)]

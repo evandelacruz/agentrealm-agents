@@ -43,7 +43,8 @@ from dataclasses import dataclass, field
 from .acceptance_run import FULL_RUN_FRACTION, TimedRunHooks  # FULL_RUN_FRACTION: re-exported for the smoke script
 from .config import Policy
 from .equip import is_consumable, is_weapon, wear_slot
-from .healing import code_in_hand, hurt, potion_count
+from .executor.supply_refusals import code_in_hand
+from .healing import hurt, potion_count
 from .supplies import is_food, is_potion
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -93,7 +94,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
     _drink_applied: bool = field(default=False, repr=False)
     # A queue without the drink was sent: forget it once that response's
     # results and events are read, which may still carry the drink's own
-    # (as ``Runner._forget_replaced_drink``).
+    # (as ``Runner._forget_replaced_self_use``).
     _drink_replaced: bool = field(default=False, repr=False)
 
     def before_tick(

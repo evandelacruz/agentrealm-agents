@@ -1600,7 +1600,7 @@ Intents: 140 `Step`, 420 `Wait`, 50 `Use` (30 match `Use`s on non-blocks, 10 cut
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize. Backlog: all three fold into A114 (#212): defect 1 as Flee waiting under attack at "nowhere to flee" with potions held, defect 2 as `use_block` and `break_block` re-sending `Use` on a cell with no block (A119 takes the `use_block` half), defect 3 as Explore standing "boxed in" with a hostile adjacent. The A114 PLAN.md row comes with #212.
+Per A87, each names the rule a fix should generalize. Backlog: all three fold into A114 (#212): defect 1 as Flee waiting under attack at "nowhere to flee" with potions held, defect 2 as `use_block` and `break_block` re-sending `Use` on a cell with no block, defect 3 as Explore standing "boxed in" with a hostile adjacent. The A114 PLAN.md row comes with #212.
 
 1. **Flee with no escape waits while it is hit** (`states/flee.py:219–220`). From 531 s, two snotlings were adjacent and Flee found no escape cell. It returned "nowhere to flee" with `wait=True` 8 times and took 4 hits to 0. It held 2 potions, and the potion threshold is health ≤ 5. **Rule:** a decision under attack never ends in a wait while an action can still change the outcome. Drink, swing, or step, in that order of what the health floor needs.
 

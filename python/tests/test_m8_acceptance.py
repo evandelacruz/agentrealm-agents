@@ -252,7 +252,7 @@ class PotionDrinkTest(unittest.TestCase):
     def test_the_replacing_responses_own_drink_result_still_counts(self):
         # Sent queues replace the drink, but that response may still carry
         # its result (an empty stop keeps the same queue id), as the runner's
-        # _forget_replaced_drink allows.
+        # _forget_replaced_self_use allows.
         m, w = self.drink_sent()
         decide(m, w, state="Explore", intents=[])
         m.on_intent_result(DRINK, APPLIED)

@@ -17,7 +17,7 @@ from agentrealm_agent.item_table import (
     InventorySupply,
     carried_from_inventory,
 )
-from agentrealm_agent.healing import AppliedDrink
+from agentrealm_agent.executor.supply_refusals import AppliedSelfUse
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.loot import (
     LIFE_SCORE,
@@ -559,8 +559,8 @@ class RunnerLootLearningTest(unittest.TestCase):
     def test_a_middle_chest_used_up_raises_capacity_until_respawn(self):
         r = self.run_tick([{"verb": "Wait"}], [], lives_after=10)
         r.world.held_supplies = []
-        r._applied_drink = AppliedDrink(9, "middle_chest", 11, True, None)
-        r.file_noop_drink()
+        r._applied_self_use = AppliedSelfUse(9, "middle_chest", 11, True, None)
+        r.file_noop_use()
         self.assertEqual(r.world.carry_capacity, 30)
         r.world.apply_events([{"tick": 20, "events": [{"kind": "Respawned", "map_id": 1, "x": 2, "y": 3}]}])
         self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
@@ -569,10 +569,10 @@ class RunnerLootLearningTest(unittest.TestCase):
         r = self.run_tick([{"verb": "Wait"}], [], lives_after=10)
         r.world.held_supplies = [InventorySupply(9, "middle_chest")]
         r.world.health, r.world.max_health = 8, 10
-        r._applied_drink = AppliedDrink(9, "middle_chest", 11, True, 5)  # health rose meanwhile: not the chest's doing
-        r.file_noop_drink()
+        r._applied_self_use = AppliedSelfUse(9, "middle_chest", 11, True, 5)  # health rose meanwhile: not the chest's doing
+        r.file_noop_use()
         self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
-        self.assertIn(("use", 9), r.mem.heal_refusals)
+        self.assertIn(("use", 9), r.mem.supply_refusals)
 
     def test_rejected_middle_chest_take_leaves_capacity_alone(self):
         rejection = {"category": "state", "code": "insufficient_gems", "retryability": "permanent"}

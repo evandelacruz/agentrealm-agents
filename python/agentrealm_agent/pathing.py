@@ -425,8 +425,7 @@ def commit_explore(
 
 
 # Safe cells path-checked per decision, nearest first, before the town cell
-# is tried as the fallback (free-play run 2: Park, Retreat and Heal aimed at
-# safe tiles walled off by bush and wall, and Park timed out).
+# is tried as the fallback, so a safe cell walled off is never aimed at.
 SAFE_GOAL_CHECKS = 4
 # A safe cell a path check found no way to is skipped this long, then tried again.
 SAFE_UNREACHABLE_TICKS = nav_stuck.BACKOFF_BASE_TICKS
@@ -485,15 +484,15 @@ def reachable_safe_goal(
     below rules it out, however near the others have come.
 
     Skipped, ``town`` included: a cell in the ``reach`` of a known hostile
-    (``hostile_ground.ground_by_hostile``, in view or remembered; A63 run 4:
-    Heal walked to a safe tile beside a hostile pack and died), or seen there
+    (``hostile_ground.ground_by_hostile``, in view or remembered: a cell
+    beside a pack is no refuge), or seen there
     within ``SAFE_THREATENED_TICKS`` (``Memory.safe_threatened``), since a
     pick that forgot the pack once it left view would turn back toward it; a
     mark by a hostile still in view counts only while ``reach`` says so.
     ``town`` is the last resort only among cells outside every hostile's
     reach. Also a cell ``params`` avoids, one a check found no way to within
     ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), and one a
-    Heal walk gave up on and still backs off. The first ``SAFE_GOAL_CHECKS``
+    Heal walk gave up on and still backs off (``safe_ruled_out``). The first ``SAFE_GOAL_CHECKS``
     left are searched, then the nearest of the rest; a cell a kept safe
     walk (``SAFE_PATH_GOALS``) already ends on needs no search. "No way" is a
     search that proved it (``navigation.no_way``): one cut short by its

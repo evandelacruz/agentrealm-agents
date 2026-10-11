@@ -100,6 +100,7 @@ PARAM_MEANINGS: dict[str, str] = {
     "lives_floor": "lives at which risk reaches 0. Higher is more careful. You may only raise it",
     "potion_reserve": "potions to keep; buy more below it. You may only raise it",
     "curiosity": "0..1, how far to stray to look at new things. Any value in range",
+    "low_health": "0..1, the share of max health at or below which health is low: a carried potion is drunk out of a fight, and a hurt character leaves the op on top to rest on safe ground. Above it the op goes on and potions are kept. Higher heals sooner, at more health. You may only raise it",
 }
 
 # Shorthand in directives `goals = ["gather_gems:20", "buy:torch"]`.

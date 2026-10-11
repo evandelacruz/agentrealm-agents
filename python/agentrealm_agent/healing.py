@@ -1,25 +1,30 @@
-"""Heal-state helpers: food, potions, safe-zone regen (A10)."""
+"""What heals and when (A10): food, potions, safe-zone regen, and the line
+below which health is low.
+
+Food and potions are the Supplies reference's (A54, ``supplies.is_food``,
+``supplies.is_potion``). Food is tried both ways, a ``Take`` and a carried
+``Use``, and what each did is filed in the item table (A24). What is sent
+after a refused or no-effect ``Take`` or ``Use`` is the executor's
+(``executor.supply_refusals``); Heal only asks whether a supply may be
+tried (``can_try``).
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING
 
-from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
-from .item_table import InventorySupply, merge_heal
+from .directives import PARAM_DEFAULTS
 from .engagement import drink_turns_fight
+from .executor.supply_refusals import can_try, in_hand
+from .item_table import InventorySupply, merge_heal
 from .supplies import heals, is_food, is_potion, row
-from .world import Entity, Pos, WorldModel, chebyshev
+from .world import Pos, WorldModel, chebyshev
 from .zone_discovery import known_safe, safe_tiles
 
 if TYPE_CHECKING:
     from .config import Policy
     from .knowledge_base import KnowledgeBase
     from .memory import Memory
-
-# Food and potions are the Supplies reference's (A54, ``supplies.is_food``,
-# ``supplies.is_potion``). Heal still tries food both ways, a ``Take`` and a
-# carried ``Use``, and files what each did in the item table (A24).
 
 
 def potion_count(w: WorldModel) -> int:
@@ -53,35 +58,40 @@ def hurt(w: WorldModel) -> bool:
     return w.health < w.max_health
 
 
-# Health at or below this share of max is low: only then does Heal's safe
-# ground (the walk there, the rest, the regen sample) outrank a plan op in
-# progress (free-play run 9: a regen measure at 9/10 held off ``travel``).
-LOW_HEALTH_SHARE = 0.5
+Params = dict[str, float | int]
 
 
-def health_low(w: WorldModel) -> bool:
-    """Health is at or below ``LOW_HEALTH_SHARE`` of max."""
+def low_health_share(params: Params) -> float:
+    """The share of max health at or below which health is low: the
+    planner's ``low_health`` param (``plan.PARAM_MEANINGS``)."""
+    return float(params.get("low_health", PARAM_DEFAULTS["low_health"]))
+
+
+def health_low(w: WorldModel, params: Params) -> bool:
+    """Health is at or below ``low_health`` of max. Below it a carried potion
+    is spent (``spend_potion``) and Heal's rest on safe ground goes ahead of
+    the plan's op; above it the planner's op and the potion reserve go first."""
     if w.health is None or w.max_health is None:
         return False
-    return w.health <= w.max_health * LOW_HEALTH_SHARE
+    return w.health <= w.max_health * low_health_share(params)
 
 
 # When a carried potion is spent (A96), in the planner's words: the same rule
 # ``spend_potion`` applies, so a reserve the planner buys is one the
 # character keeps.
 POTION_RULE = (
-    f"A carried potion is drunk only when health is low (at or below {LOW_HEALTH_SHARE:.0%} of max, "
+    "A carried potion is drunk only when health is low (at or below the low_health share of max, "
     "potion_drunk_at under State), or mid-fight when the win estimate says the drink turns the fight "
     "(to one it would take on, or would win). Otherwise a hurt character eats food or rests on safe ground "
     "and keeps its potions, so potions held are a reserve that lasts until then."
 )
 
 
-def low_health_line(w: WorldModel) -> int | None:
+def low_health_line(w: WorldModel, params: Params) -> int | None:
     """The highest health ``health_low`` counts as low, or None unknown."""
     if w.max_health is None:
         return None
-    return int(w.max_health * LOW_HEALTH_SHARE)
+    return int(w.max_health * low_health_share(params))
 
 
 def spend_potion(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], code: str) -> bool:
@@ -89,265 +99,11 @@ def spend_potion(w: WorldModel, m: Memory, policy: Policy, params: dict[str, flo
     health is low (``health_low``), or the drink turns the engagement under
     way (``engagement.drink_turns_fight``). Otherwise rest or food heals,
     and the potion stays a reserve. Every drink of a potion asks this."""
-    if health_low(w):
+    if health_low(w, params):
         return True
     r = row(code)
     heal = r.heal if r is not None and r.heal else (w.max_health or 0)  # unknown: counted as a full heal
     return drink_turns_fight(w, m, policy, params, heal)
-
-
-# What Heal does after the server refuses a food ``Take`` or a drink, by the
-# rejection's code (API rules, Tick Rejection Reasons). There is no count of
-# tries: each refusal changes what Heal sends next, or holds that supply until
-# the situation it was refused in changes, so the same refusal is never sent
-# twice into the same situation.
-#
-#   arm     a drink's ``Use`` found nothing armed: the next drink sends ``Arm`` first
-#   forget  the supply is gone, or we do not carry it: never again
-#   walk    a ``Take`` out of reach: walk onto the food, then ``Take``
-#   wait    we, or the world, cannot act now: try again ``REFUSAL_WAIT_TICKS`` later
-#   hold    anything else, an unknown code included: not again until the
-#           situation (``heal_situation``) changes
-REARM_CODES = frozenset({"nothing_armed", "not_held"})
-GONE_CODES = frozenset({"supply_gone"})
-REACH_CODES = frozenset({"target_not_nearby", "target_out_of_range"})
-# A "wait" refusal is sent again no sooner than this: one weapon cooldown (1 s
-# at 10 Hz), the longest blocker a transient code names for a Use, so a
-# blocker that persists costs one refused intent a second, not one a tick.
-REFUSAL_WAIT_TICKS = DEFAULT_WEAPON_COOLDOWN_TICKS
-# Codes whose handling is "hold" by what they mean (the situation they need
-# changed is in ``heal_situation``), so the trace does not call them unknown.
-HOLD_CODES = frozenset({"would_strand", "carry_capacity_full", "not_allowed_in_safe_zone"})
-
-
-# What Heal does after a drink that applied but drank nothing (A76): the
-# supply is still carried and no ``SupplyUsed`` of ours named it. The cause is
-# read from the result and the next observation (``noop_drink_cause``):
-#
-#   not_armed    the armed slot holds something else: the next drink sends
-#                its ``Arm`` ("arm"), or holds when that queue already did
-#   full_health  health was full when it ran: drink again only once health
-#                is below what it was then ("full")
-#   no_change    armed, hurt, and nothing changed: hold until the drink's
-#                situation (``drink_situation``) changes or health falls
-#                below what it was then
-#
-# A hold never outlasts a fall in health: a potion that did nothing at 8/10
-# is tried again at 7/10, so it is never unusable while health falls (A67
-# run 5 died at 2/10 holding two potions written off).
-#
-# The drink always targets ``{"kind": "self"}`` (A24), so a wrong target,
-# free-play run 4's cause, is not one left to find.
-NoopCause = Literal["not_armed", "full_health", "no_change"]
-NOOP_CAUSES: tuple[NoopCause, ...] = ("not_armed", "full_health", "no_change")
-
-
-RefusalAction = Literal["arm", "forget", "walk", "wait", "hold"]
-NoopAction = Literal["arm", "hold", "full"]
-# (map, cell, armed code, held supply ids, max health, the food's cell for a Take)
-Situation = tuple[int | None, Pos | None, str | None, tuple[int, ...], int | None, Pos | None]
-# (map, every supply id we carry, max health)
-DrinkSituation = tuple[int | None, tuple[int, ...], int | None]
-
-
-@dataclass(frozen=True)
-class HealRefusal:
-    """The last refusal of one supply's ``Take`` or drink (A80)."""
-
-    code: str
-    action: RefusalAction
-    tick: int
-    situation: Situation  # ``heal_situation`` when it was refused
-
-
-@dataclass(frozen=True)
-class NoopDrink:
-    """A drink of one supply that applied and drank nothing (A76), filed
-    beside A80's refusals under the same key."""
-
-    cause: NoopCause
-    action: NoopAction
-    tick: int
-    situation: DrinkSituation  # ``drink_situation`` when it was filed
-    health: int | None  # health when it was filed: a drink waits for less
-
-
-@dataclass
-class AppliedDrink:
-    """A ``Use`` on yourself that applied (a drink, or a chest, A108), kept
-    until the next decision reads from the observation whether a supply went
-    (A76)."""
-
-    supply_id: int
-    code: str | None
-    tick: int
-    armed_first: bool  # its queue sent the supply's ``Arm`` before the ``Use``
-    health: int | None  # health before the response that carried its result
-    used: bool = False  # our own ``SupplyUsed`` named its code
-
-
-def heal_situation(w: WorldModel, target: Pos | None = None) -> Situation:
-    """What a ``Take`` or drink was decided from: where we stand, what is armed
-    and held, max health, and the food's cell for a ``Take``. A held supply is
-    tried again only once one of these differs (a step, a new item, a new
-    max health, the food moved).
-
-    Health itself is left out: regen, poison or a hit moves it every few
-    ticks without touching anything a refusal depends on, and would resend
-    the same refusal each time.
-    """
-    held = tuple(sorted(h.id for h in w.held_supplies))
-    return (w.map_id, w.pos, w.armed_code, held, w.max_health, target)
-
-
-def carried_ids(w: WorldModel) -> tuple[int, ...]:
-    """Every supply id we carry: held, stowed in the carried chest, and armed."""
-    ids = {h.id for h in w.held_supplies} | {s.id for s in w.chest_supplies}
-    if w.armed_id is not None:
-        ids.add(w.armed_id)
-    return tuple(sorted(ids))
-
-
-def drink_situation(w: WorldModel) -> DrinkSituation:
-    """What a drink that drank nothing is held against (A76): the map and what
-    we carry, by id, and max health. Not the cell or the armed slot: a walk
-    and the re-arm after every drink change those without changing what the
-    drink does, and would resend it each time. Health is checked apart, by
-    ``can_try``: only a fall below the filed reading counts."""
-    return (w.map_id, carried_ids(w), w.max_health)
-
-
-def drank(events: list[dict], character_id: int | None, code: str | None) -> bool:
-    """Our own ``SupplyUsed`` for ``code`` is among ``events``: it was used up.
-    The event reaches every character in sight, so another's is not ours."""
-    return any(
-        e.get("kind") == "SupplyUsed" and e.get("actor_id") == character_id and e.get("supply_code") == code
-        for e in events
-    )
-
-
-def noop_drink_cause(w: WorldModel, d: AppliedDrink) -> NoopCause | None:
-    """Why an applied drink drank nothing, from the observation after it
-    (``NOOP_CAUSES``), or None when it went through: our ``SupplyUsed``
-    named it, we no longer carry it, or, for an item that heals, health rose.
-    A "drink" is any ``Use`` on yourself, a chest's too (A108)."""
-    if d.used or d.supply_id not in carried_ids(w):
-        return None
-    # Health is a drink's own measure: a chest used on yourself (A108) went
-    # through only once it is used up, whatever health did meanwhile.
-    drink = heals(d.code)
-    if drink and w.health is not None and d.health is not None and w.health > d.health:
-        return None
-    in_slot = w.armed_id == d.supply_id if w.armed_id is not None else w.armed_code == d.code
-    if not in_slot:
-        return "not_armed"
-    if drink and w.health is not None and w.max_health is not None and w.health >= w.max_health:
-        return "full_health"
-    return "no_change"
-
-
-def noop_action(cause: NoopCause, *, armed_first: bool) -> NoopAction:
-    """What to do about a drink that drank nothing (see ``NOOP_CAUSES``)."""
-    if cause == "not_armed":
-        return "hold" if armed_first else "arm"
-    if cause == "full_health":
-        return "full"
-    return "hold"
-
-
-def refusal_action(rejection: dict, *, verb: str, armed_first: bool, on_target: bool) -> RefusalAction:
-    """What to do about one refusal (see ``REARM_CODES`` and the table above).
-
-    ``verb`` is the refused intent's. ``armed_first`` says the drink already
-    sent its ``Arm``, so arming again is not something new to try, and
-    ``on_target`` that a ``Take`` was sent standing on the food, so walking
-    there is not either: both then hold.
-    """
-    code = rejection.get("code") or ""
-    if code in GONE_CODES or (code == "not_held" and verb in ("Arm", "Take")):
-        return "forget"
-    if code in REARM_CODES and verb == "Use":
-        return "hold" if armed_first else "arm"
-    if code in REACH_CODES and verb == "Take":
-        return "hold" if on_target else "walk"
-    # Retryability first, as the API says: ``character_ended`` and a closed
-    # world's ``world_not_open`` are ``state`` codes that are ``permanent``.
-    if rejection.get("retryability") == "permanent":
-        return "forget"
-    if rejection.get("retryability") == "transient" or rejection.get("category") == "state":
-        return "wait"
-    return "hold"
-
-
-def known_refusal(rejection: dict) -> bool:
-    """A code this module handles by name; any other is traced as unknown."""
-    code = rejection.get("code") or ""
-    return code in REARM_CODES | GONE_CODES | REACH_CODES | HOLD_CODES or rejection.get("category") == "state"
-
-
-def note_refusal(m: Memory, kind: str, supply_id: int, refusal: HealRefusal | NoopDrink) -> None:
-    """File a refusal of ``supply_id`` (``kind`` is "take" or "use"). Only the
-    runner calls it, for a result the server sent, never a probe (A77)."""
-    m.heal_refusals[(kind, supply_id)] = refusal
-
-
-def clear_refusal(m: Memory, kind: str, supply_id: int) -> None:
-    """The ``Take`` or drink applied: what was refused before is over. A drink
-    that drank nothing is filed again from the next observation (A76)."""
-    m.heal_refusals.pop((kind, supply_id), None)
-
-
-def can_try(m: Memory, w: WorldModel, kind: str, supply_id: int, target: Pos | None = None) -> bool:
-    """Whether Heal may send a ``Take`` (``kind`` "take", ``target`` the food's
-    cell), or Heal or UseItem a ``Use`` on yourself ("use") of ``supply_id``
-    now, by its last refusal."""
-    r = m.heal_refusals.get((kind, supply_id))
-    if r is None or r.action in ("arm", "walk"):
-        return True
-    if isinstance(r, NoopDrink):
-        # Lower health is a reason to drink again, never to use a chest again (A108).
-        code = next((h.code for h in in_hand(w) if h.id == supply_id), None)
-        fell = heals(code) and w.health is not None and r.health is not None and w.health < r.health
-        return fell or (r.action == "hold" and drink_situation(w) != r.situation)
-    if r.action == "forget":
-        return False
-    if r.action == "wait":
-        return w.tick >= r.tick + REFUSAL_WAIT_TICKS and w.alive
-    return heal_situation(w, target) != r.situation
-
-
-def must_arm(m: Memory, supply_id: int) -> bool:
-    """A drink of ``supply_id`` found nothing armed, or applied with something
-    else in the slot: send its ``Arm`` whatever ``armed_code`` says (it may
-    trail the server)."""
-    r = m.heal_refusals.get(("use", supply_id))
-    return r is not None and r.action == "arm"
-
-
-def must_stand_on(m: Memory, food: Entity) -> bool:
-    """A ``Take`` of ``food`` was out of reach from where it was sent: walk onto
-    its cell before taking it. Food that moved since is aimed at afresh."""
-    r = m.heal_refusals.get(("take", food.id))
-    return isinstance(r, HealRefusal) and r.action == "walk" and r.situation[-1] == food.pos
-
-
-def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
-    here = w.pos
-    if here is None:
-        return []
-    out = [e for e in w.entities if e.kind == "supply" and is_food(e.code) and can_try(m, w, "take", e.id, e.pos)]
-    out.sort(key=lambda e: (chebyshev(e.pos, here), e.id))
-    return out
-
-
-def in_hand(w: WorldModel) -> list[InventorySupply]:
-    """The held supplies, and the armed one: the snapshot may leave it out of
-    ``held`` (GAME_NOTES open questions). What a ``Use`` on yourself can be
-    sent with, after its ``Arm``."""
-    carried = list(w.held_supplies)
-    if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):
-        carried.append(InventorySupply(w.armed_id, w.armed_code))
-    return carried
 
 
 def carried_heal(
@@ -379,11 +135,9 @@ def standing_in_safe_zone(w: WorldModel, pos: Pos | None = None) -> bool:
 
 def note_heal_window(m: Memory, w: WorldModel) -> None:
     """Once per decision, whatever state runs: a full heal re-arms the
-    ``heal_supplies`` ask, so the next hurt spell asks the planner again, and
-    lets the next hurt spell walk to safe ground again (``heal_safe_given_up``)."""
+    ``heal_supplies`` ask, so the next hurt spell asks the planner again."""
     if w.health is not None and not hurt(w):
         m.heal_supplies_asked = False
-        m.heal_safe_given_up = None
 
 
 def regen_known(knowledge: KnowledgeBase | None, m: Memory) -> str | None:
@@ -455,24 +209,6 @@ def known_safe_cells(w: WorldModel) -> list[Pos]:
     return sorted(safe_tiles(w, map_id), key=order)
 
 
-def code_in_hand(w: WorldModel, queue: list[dict], index: int) -> str | None:
-    """The code the ``Use`` at ``queue[index]`` was made with, from the last
-    intent other than a ``Wait`` queued before it: what a self-``Use`` drinks
-    or eats, or what a cut cut with.
-
-    Heal and Gather send ``[Arm item, Wait…, Use]`` in one queue, and its
-    results are applied before the observation updates ``armed_code``. So an
-    ``Arm`` before the ``Use`` names the item while it is still held; with
-    none, or once an observation shows it armed, it is ``armed_code``.
-    """
-    before = next((i for i in reversed(queue[:index]) if i.get("verb") != "Wait"), None)
-    if before and before.get("verb") == "Arm":
-        for h in w.held_supplies:
-            if h.id == before.get("supply_id"):
-                return h.code
-    return w.armed_code
-
-
 def note_heal_pending(m: Memory, w: WorldModel, code: str, kind: str) -> None:
     """Remember health before a food ``Take`` or self-``Use`` (``kind`` is
     "take" or "use"), so the next observation can show what it healed (A24).
@@ -507,18 +243,3 @@ def absorb_heal_pending(
     on_pickup = (healed > 0) if kind == "take" else None
     with knowledge.lock:
         merge_heal(knowledge.items, code, healed, on_pickup=on_pickup)
-
-
-def rearm_after_drink(w: WorldModel, m: Memory) -> list[dict] | None:
-    """One ``Arm`` for the weapon a drink swapped out, sent once (A24).
-
-    Clears ``heal_rearm`` either way, so a rejected ``Arm`` or a weapon no
-    longer in hand cannot keep Heal (or Equip, which waits on it) stuck.
-    """
-    code, m.heal_rearm = m.heal_rearm, None
-    if code is None or w.armed_code == code:
-        return None
-    for h in w.held_supplies:
-        if h.code == code:
-            return [{"verb": "Arm", "supply_id": h.id}]
-    return None

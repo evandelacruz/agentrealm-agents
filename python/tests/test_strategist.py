@@ -718,7 +718,7 @@ class PlannerViewTest(unittest.TestCase):
         self.assertEqual(
             json.loads(line.split("=", 1)[1]),
             [
-                {"code": "bronze_sword", "gains": "damage 2 -> 4", "gems_short": 7, "price": 15},
+                {"code": "bronze_sword", "cuts": True, "gains": "damage 2 -> 4", "gems_short": 7, "price": 15},
                 {"code": "iron_helm", "gains": "head defense 0 -> 1", "gems_short": 32, "price": 40},
                 {"code": "iron_mail", "gains": "body defense 1 -> 2", "gems_short": 72, "price": 80},
             ],
@@ -740,7 +740,7 @@ class PlannerViewTest(unittest.TestCase):
         def upgrades() -> str:
             return next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("upgrades_for_sale="))
 
-        self.assertIn('"code": "bronze_mallet", "gains": "damage 4 -> 6"', upgrades())
+        self.assertIn('"code": "bronze_mallet", "cuts": false, "gains": "damage 4 -> 6"', upgrades())
         record_hunting_zone(self.kb, 7, (50, 50), 7)
         self.assertEqual(upgrades(), "upgrades_for_sale=none seen")
         self.assertIn('hunting_strength={"ceiling": 7, "strength": 6}', state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb))
@@ -753,6 +753,7 @@ class PlannerViewTest(unittest.TestCase):
         prompt = system_prompt()
         self.assertIn("Weapons and the hunting ground", prompt)
         self.assertIn("an equip with a code arms or wears exactly that held item", prompt)
+        self.assertIn("a weapon that cannot cut (a mallet) is put away while gathering", prompt)
 
     def test_stall_shows_after_nothing_changes(self):
         self.w.held_supplies = [InventorySupply(6, "pocket_knife")]

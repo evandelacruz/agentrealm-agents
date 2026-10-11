@@ -116,7 +116,7 @@ from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
-from .equip import hunting_ceiling, loadout_strength, weapon_rank
+from .equip import CUT, does_job, hunting_ceiling, loadout_strength, weapon_rank
 from .supplies import armor_defense, is_weapon, weapon_damage, worn_slot, what_it_does
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
@@ -197,7 +197,7 @@ State stall shows how long the character has neither moved, gained or spent gems
 
 Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage or defense, and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed). Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held.
 
-Weapons and the hunting ground: an equip with no code arms the best weapon held, and upgrades_for_sale lists weapons, by one rule. A weapon that keeps strength within the highest hunting-ground ceiling known beats one that would put it over; among those alike, more damage wins; with no ceiling known, damage alone decides. State hunting_strength gives the strength as armed and worn now (attack power 2, plus the armed weapon's damage, plus worn armor's defense) and that ceiling. So a weapon that would put strength over the ceiling is not armed while a held weapon keeps it within, and one armed over it is swapped back. To arm or wear an item the rule does not pick (a stronger weapon for a level boss, say), name it: an equip with a code arms or wears exactly that held item, and a later equip with no code applies the rule again.
+Weapons and the hunting ground: which weapon is armed follows one rule, by the job at hand. For fighting (an equip with no code), the best weapon held: one that keeps strength within the highest hunting-ground ceiling known beats one that would put it over; among those alike, more damage wins; with no ceiling known, damage alone decides. For cutting grass (gather_gems), the best held item that cuts, by the same order. So a weapon that would put strength over the ceiling is not armed while a held weapon keeps it within, one armed over it is swapped back, and a weapon that cannot cut (a mallet) is put away while gathering and armed again once the gather work ends. State hunting_strength gives the strength as armed and worn now (attack power 2, plus the armed weapon's damage, plus worn armor's defense) and that ceiling; upgrades_for_sale lists weapons by the fighting rule, with cuts (whether it can cut grass). Weigh a weapon by the work it will do: one that cannot cut adds nothing to gem gathering. To arm or wear an item the rule does not pick (a stronger weapon for a level boss, say), name it: an equip with a code arms or wears exactly that held item, and a later equip with no code applies the rule again.
 
 Potions: {POTION_RULE} State potions counts the potions held and stowed. Plan a reserve (potion_reserve) by that rule: the character will not drink one to top up a scratch. A heal_supplies trigger (hurt, with no food, no potion due and no rest to be had) also counts potions: any held are that reserve, kept back until health is low, so weigh food, a rest elsewhere or waiting before buying more.
 
@@ -845,7 +845,8 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     first, with its price and the gems still short (A92). Owned is armed, worn,
     held or stowed; a weapon must rank above every owned one by Equip's own
     best-weapon rule (``equip.weapon_rank``, A99: keeping within the highest
-    hunting-ground ceiling known first, then ``damage``), armor have more
+    hunting-ground ceiling known first, then ``damage``) and says whether it
+    cuts grass (``cuts``, Gather's job), armor have more
     ``defense`` than any owned for its slot (Supplies reference). An item
     already owned is not listed. The first is what gems save toward."""
     carried = [s.code for s in w.held_supplies + w.chest_supplies]
@@ -865,15 +866,17 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
             continue
         damage, defense, slot = weapon_damage(code), armor_defense(code), worn_slot(code)
         rank = weapon_rank(code, w, ceiling)
+        extra: dict[str, Any] = {}
         if damage is not None and is_weapon(code) and rank > best_rank:
             gain = f"damage {best_damage} -> {damage}"
             if rank[0] and not best_rank[0]:
                 gain += ", back within the hunting ceiling"
+            extra = {"cuts": does_job(code, CUT, knowledge)}
         elif defense is not None and slot and defense > best_defense(slot):
             gain = f"{slot} defense {best_defense(slot)} -> {defense}"
         else:
             continue
-        rows.append({"code": code, "price": price, "gains": gain, "gems_short": max(0, price - gems)})
+        rows.append({"code": code, "price": price, "gains": gain, "gems_short": max(0, price - gems), **extra})
     if not rows:
         return "upgrades_for_sale=none seen"
     rows.sort(key=lambda e: (e["price"], e["code"]))

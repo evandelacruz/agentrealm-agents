@@ -11,8 +11,10 @@ Only sourced facts decide what goes where:
   a consumable, a gem) is never worn. Only a subtype whose slot neither gives
   gets one ``Wear`` to find it (A55), reading which slot ``worn`` shows.
 
-**The best weapon** is one rule, :func:`weapon_rank`, that Equip arms by and
-the planner's ``upgrades_for_sale`` lists by (A99): a weapon that keeps the
+**The weapon to arm** is one rule, :func:`weapon_to_arm`, by the job at hand
+(A99): fighting, which Equip arms for and the planner's ``upgrades_for_sale``
+lists by, or cutting grass, which Gather arms for (a cutter a cut does not use
+up first). Both order by :func:`weapon_rank`: a weapon that keeps the
 character within the highest hunting-ground strength ceiling known beats one
 that does not, and among those alike, more published ``damage`` wins (the
 Supplies reference; damage adds to attack power on every swing). Strength is
@@ -40,12 +42,13 @@ Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Collection
 
+from .break_memory import capabilities_for_code, held_supplies
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
 from .loot import NON_TRANSFERABLE
-from .supplies import armor_defense, heals, is_weapon, weapon_damage, worn, worn_slot
+from .supplies import armor_defense, heals, is_weapon, kept_on_break, weapon_damage, worn, worn_slot
 from .memory import Memory
 from .survival import BASE_ATTACK_POWER
 from .threat import ThreatTable
@@ -53,6 +56,9 @@ from .travel.knowledge import iter_hunting_cells
 from .world import WorldModel
 
 ARMED = "armed"
+# The jobs a weapon is armed for (A99): fighting (Equip) and cutting grass (Gather).
+FIGHT = "fight"
+CUT = "cut"
 WEAR_SLOTS = ("head", "body", "legs", "feet", "accessory")
 NOT_WEARABLE = "not_wearable"
 
@@ -199,13 +205,39 @@ def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[b
     return fits, weapon_damage(code) or 0
 
 
-def _best_weapon(
-    armed: str | None, held: list[InventorySupply], w: WorldModel, ceiling: int | None
+def does_job(code: str | None, job: str, kb: KnowledgeBase | None = None) -> bool:
+    """``code`` can do ``job``: a weapon (Supplies class) fights; a supply
+    whose sourced capabilities include ``cut`` cuts."""
+    if job == CUT:
+        return bool(code) and CUT in capabilities_for_code(code or "", kb)
+    return is_weapon(code)
+
+
+def weapon_to_arm(
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    job: str,
+    ceiling: int | None,
+    refused: Collection[tuple[str | None, str]] = (),
 ) -> InventorySupply | None:
-    """The held weapon whose rank beats the armed one's (any, for an empty slot)."""
-    floor = weapon_rank(armed, w, ceiling) if armed is not None else None
-    better = [s for s in held if s.code != armed and (floor is None or weapon_rank(s.code, w, ceiling) > floor)]
-    return max(better, key=lambda s: (weapon_rank(s.code, w, ceiling), -s.id), default=None)
+    """The one weapon-to-arm rule (A99): of the held and armed supplies that
+    do ``job``, the one to have armed. For cutting, one a cut does not use up
+    comes first; then :func:`weapon_rank` (within ``ceiling`` first, then
+    damage), so a cutter is also the best weapon to be caught with. The armed
+    one wins a tie, so the arm never flips. An armed result has id -1 when
+    it is not also held. None when nothing carried does the job; a refused
+    ``Arm`` is skipped until the loadout changes, and a compose fragment is
+    never armed."""
+    best: tuple[tuple, InventorySupply] | None = None
+    for s in held_supplies(w):
+        armed = s.code == w.armed_code
+        if s.fragment is not None or not does_job(s.code, job, kb) or (not armed and (s.code, ARMED) in refused):
+            continue
+        rank = weapon_rank(s.code, w, ceiling)
+        key = ((kept_on_break(s.code), rank) if job == CUT else rank, armed, -s.id)
+        if best is None or key > best[0]:
+            best = (key, s)
+    return best[1] if best is not None else None
 
 
 def named_equip(w: WorldModel, m: Memory, code: str, armed_owned: bool = False) -> EquipUpgrade | None:
@@ -251,10 +283,8 @@ def best_equip_upgrade(
     held = _candidates(w)
 
     if not armed_owned:
-        armed = w.armed_code if is_weapon(w.armed_code) else None
-        weapons = [s for s in held if is_weapon(s.code) and (s.code, ARMED) not in refused]
-        s = _best_weapon(armed, weapons, w, ceiling)
-        if s is not None:
+        s = weapon_to_arm(w, None, FIGHT, ceiling, refused)
+        if s is not None and s.code != w.armed_code:
             return EquipUpgrade(ARMED, s.id, s.code)
 
     for slot in WEAR_SLOTS:

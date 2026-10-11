@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .supplies import worn_armor_defense
+from .supplies import chest_capacity, worn_armor_defense
 from .threat import (
     ThreatTable,
     TypeKey,
@@ -297,8 +297,14 @@ class WorldModel:
     worn_slots: dict[str, str] = field(default_factory=dict)  # subtype -> slot a snapshot served it worn in, for the run (A19)
     held_supplies: list[InventorySupply] = field(default_factory=list)  # inventory held[] (A10, A20)
     chest_supplies: list[InventorySupply] = field(default_factory=list)
-    # Lowered by a carry_capacity_full rejection; back to the default on respawn,
-    # which brings a new 10-slot chest (Manual §11; loot.learn_loot_rejection).
+    # Carry capacity is derived, never assumed (A115; ``sync_carry_capacity``):
+    # the server serves no capacity and no carried chest's subtype, so it is the
+    # size of the chest we applied (``carried_chest``, None for the blue chest a
+    # character starts with), bounded by the most a carry_capacity_full refusal
+    # left room for (``full_at``, ``loot.full_bound``) and never below the slots
+    # the inventory carries.
+    carried_chest: str | None = None
+    full_at: int | None = None
     carry_capacity: int = DEFAULT_CARRY_CAPACITY
     undroppable: set[int] = field(default_factory=set)  # supply ids Drop refused not_transferable
     tick: int = 0
@@ -720,6 +726,7 @@ class WorldModel:
         armed = inv.get("armed")
         self.armed_id = _opt_int(armed.get("id")) if isinstance(armed, dict) else None
         self.worn_slots.update((code, slot) for slot, code in self.worn_codes.items())
+        self.sync_carry_capacity()
 
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
@@ -795,7 +802,8 @@ class WorldModel:
                 elif kind == "Respawned":
                     self.placed, self.attacked_tick = True, None
                     self.attacker = self.attacker_tick = None
-                    self.carry_capacity = DEFAULT_CARRY_CAPACITY  # a new, empty blue chest (10), Manual §11
+                    self.carried_chest = self.full_at = None  # a new, empty blue chest (10), Manual §11
+                    self.sync_carry_capacity()
                     try:
                         self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))
                     except (KeyError, TypeError, ValueError):
@@ -886,6 +894,22 @@ class WorldModel:
         self.snapshot_version = None
 
     # Queries.
+
+    def slots_carried(self) -> int:
+        """Slots the inventory fills: held, stowed, worn and armed (gems and
+        lives are counters and take none)."""
+        n = len(self.held_supplies) + len(self.chest_supplies) + len(self.worn_codes)
+        return n + (1 if self.armed_code else 0)
+
+    def sync_carry_capacity(self) -> None:
+        """Carry capacity from what the server tells us, at every inventory
+        sync (A115): the carried chest's Supplies reference ``chest_capacity``,
+        no more than a ``carry_capacity_full`` refusal left room for, and never
+        less than the slots the inventory carries now."""
+        size = chest_capacity(self.carried_chest) or DEFAULT_CARRY_CAPACITY
+        if self.full_at is not None:
+            size = min(size, self.full_at)
+        self.carry_capacity = max(size, self.slots_carried())
 
     @property
     def synced(self) -> bool:

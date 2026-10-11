@@ -10,23 +10,13 @@ from ..memory import Memory
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step
 from ..plan import GoalOp
+from ..reach import supply_reach
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets
 from .intents import arm, compose, set_position, use_block
 
 GOAL = "solve"
-DEFAULT_USE_REACH = 1
-
-
-def use_reach(knowledge: KnowledgeBase | None, code: str) -> int:
-    if knowledge is not None:
-        row = knowledge.items.get(code)
-        if isinstance(row, dict):
-            reach = row.get("attack_range")
-            if isinstance(reach, int) and not isinstance(reach, bool) and reach > 0:
-                return reach
-    return DEFAULT_USE_REACH
 
 
 def held_supply(w: WorldModel, code: str) -> InventorySupply | None:
@@ -108,7 +98,7 @@ def _use_block_outcome(
     if supply is None:
         return StateOutcome(None, f"missing {code}", state=state)
 
-    reach = use_reach(knowledge, code)
+    reach = supply_reach(knowledge, code)
     intents: list[dict] = []
     if w.armed_code != code:
         if m.solve_rearm is None and w.armed_code is not None:

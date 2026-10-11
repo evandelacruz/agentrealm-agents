@@ -440,7 +440,7 @@ class RegionSummaryTest(unittest.TestCase):
             triggers=[], w=world(), plan=Plan([], dict(PARAM_DEFAULTS)), directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=kb()
         )[0]["content"]
         self.assertIn("A gather_gems x, y names a target region", system)
-        self.assertIn("Gather walks there and cuts only there", system)
+        self.assertIn("Gather goes only for places there", system)
         self.assertIn("never re-send an otherwise unchanged gather_gems just to change x, y", system)
 
     def test_state_without_knowledge_has_empty_gem_yield(self):

@@ -3,11 +3,10 @@
 ``GatherState`` targets a gem pile or grass only where ``gather_ground``
 holds: known ground off hazards with no known hostile near, in view or
 remembered (``hostile_ground.known_reach``), and walks there only by a route clear of every
-known hostile's reach (``route_clear``). Detour (A71) uses the same two
+known hostile's reach (``route_bar``, ``route_clear``). Detour (A71) uses the same two
 tests for its finds. That includes the
 open field, where the gems are, and safe zones, where breaking a block is
-allowed; Gather prefers field cells and learns which ground does not cut
-(``gem_yield``). Staying alive in the field is the reflexes' job (Retreat,
+allowed; Gather learns which ground does not cut (``gem_yield``). Staying alive in the field is the reflexes' job (Retreat,
 Flee, Fight, Heal), not Gather's. ``is_safe_ish`` is the stricter safe-zone
 ground a hurt character walks first (``safe_explore_path``).
 """
@@ -15,7 +14,7 @@ ground a hurt character walks first (``safe_explore_path``).
 from __future__ import annotations
 
 from ..config import Policy
-from ..hostile_ground import Danger, danger, gather_bar
+from ..hostile_ground import Danger, danger, gather_bar, zone_cells
 from ..survival import hostile_reach, is_hostile
 from ..world import NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import RESPAWN_PROBE_RADIUS, safe_tiles
@@ -49,26 +48,32 @@ def gather_ground(w: WorldModel, pos: Pos, policy: Policy, d: Danger | None = No
     return not any(chebyshev(c, pos) <= r for c, r in held)
 
 
-def route_clear(w: WorldModel, policy: Policy, path: list[Pos], d: Danger | None = None) -> bool:
-    """No cell of ``path`` lies in a known hostile's reach (``reach_cells``),
-    or ``d.fight``: the op chose the risk.
+def route_bar(w: WorldModel, policy: Policy, d: Danger | None = None) -> set[Pos]:
+    """The cells a walk to a gem may not cross: every known hostile's reach,
+    in view (``hostile_reach``) or remembered (``d.held``), none when
+    ``d.fight``: the op chose the risk.
 
     Reach that already holds where we stand is not counted: walking out of
-    it is the way off. A target whose cheapest route still crosses reach is
-    not free to take (free-play run 5: piles beside a post cost 12 hits).
+    it is the way off.
     """
     d = d or danger(w, policy)
     if d.fight:
-        return True
+        return set()
     here = w.pos
     skip = {
         (e.kind, e.id)
         for e in w.entities
         if here is not None and is_hostile(w, policy, e) and chebyshev(e.pos, here) <= policy.hostile_range
     }
-    near = hostile_reach(w, policy, skip)
     zones = [(c, r) for c, r in d.held if here is None or chebyshev(c, here) > r]
-    return not any(p in near or any(chebyshev(c, p) <= r for c, r in zones) for p in path)
+    return hostile_reach(w, policy, skip) | zone_cells(zones)
+
+
+def route_clear(w: WorldModel, policy: Policy, path: list[Pos], d: Danger | None = None) -> bool:
+    """No cell of ``path`` lies in ``route_bar``: a target whose cheapest
+    route still crosses a known hostile's reach is not free to take."""
+    bar = route_bar(w, policy, d)
+    return not any(p in bar for p in path)
 
 
 def near_respawn_anchor(w: WorldModel, pos: Pos) -> bool:

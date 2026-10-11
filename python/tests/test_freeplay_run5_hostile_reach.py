@@ -13,7 +13,8 @@ planner named.
    target crosses a known hostile's reach (``hostile_ground.known_reach``,
    ``route_clear``), unless the op chose to fight for it (``fight``).
 3. A hit on the way to a pile re-prices that pile.
-4. Gather's piles honour the named region.
+
+Gather's named region bounds its piles too: ``test_gather.TargetRegionTest``.
 """
 
 from __future__ import annotations
@@ -31,7 +32,6 @@ from agentrealm_agent.states.detour import DetourState, detour_find
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.hostile_ground import danger, known_reach
 from agentrealm_agent.states.gather_safe import gather_ground, route_clear
-from agentrealm_agent.zone_discovery import apply_zone
 from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
 
 MAP = 1
@@ -240,70 +240,6 @@ class GatherKeepsClearTest(unittest.TestCase):
         w.entities = [Entity("supply", 50, (30, 10), "gem"), guard((8, 10))]
         gather(w, m, {"op": "gather_gems", "count": 5})
         self.assertIsNone(m.gather_target)
-
-
-class HeadingOutKeepsClearTest(unittest.TestCase):
-    def test_no_walk_out_of_safe_ground_through_reach(self):
-        """Every field cell lies past the post: Gather does not head out through its reach."""
-        w, m = field(), Memory()
-        for x in range(-1, 41):
-            for y in range(-1, 41):
-                if y != 10 or x in (-1, 40):
-                    w.view.tiles[(x, y)] = "wall"
-        for x in range(18):
-            apply_zone(w, MAP, x, 10, {"safe": True, "brightness": 1})
-        w.view.tiles[(20, 9)] = "dirt"
-        w.pos = (14, 10)
-        see(w, [guard((20, 9))], 0)
-        see(w, [guard((20, 9))], POST_STILL_TICKS)
-        w.pos = (2, 10)
-        see(w, [], POST_STILL_TICKS + 1)
-        gather(w, m, {"op": "gather_gems", "count": 5})
-        self.assertIsNone(m.gather_target)
-        gather(w, m, {"op": "gather_gems", "count": 5, "fight": True})
-        self.assertEqual(m.gather_target, ("out", (18, 10)))
-
-
-class PilesHonourTheRegionTest(unittest.TestCase):
-    """The op names region (1, 0); grass at (20, 10) gives Gather a cell to cut there."""
-
-    def worked(self) -> tuple[WorldModel, Memory]:
-        w, m = field(perception=30), Memory()
-        w.view.tiles[(20, 10)] = "grass"
-        return w, m
-
-    def test_a_pile_outside_the_named_region_is_not_the_target(self):
-        w, m = self.worked()
-        w.entities = [Entity("supply", 50, (5, 10), "gem"), Entity("supply", 51, (25, 12), "gem")]
-        gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
-        self.assertEqual(m.gather_target, ("pile", (25, 12)))
-
-    def test_with_no_pile_in_the_named_region_its_grass_is_worked(self):
-        w, m = self.worked()
-        w.entities = [Entity("supply", 50, (5, 10), "gem")]
-        gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
-        self.assertEqual(m.gather_target, ("grass", (20, 10)))
-
-    def test_a_kept_pile_outside_a_newly_named_region_is_let_go(self):
-        w, m = self.worked()
-        w.entities = [Entity("supply", 50, (5, 10), "gem")]
-        gather(w, m, {"op": "gather_gems", "count": 5})
-        self.assertEqual(m.gather_target, ("pile", (5, 10)))
-        gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
-        self.assertEqual(m.gather_target, ("grass", (20, 10)))
-
-    def test_a_pile_in_reach_is_taken_wherever_it_lies(self):
-        w, m = self.worked()
-        w.entities = [Entity("supply", 50, (3, 10), "gem")]
-        out = gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
-        self.assertEqual(out.intents[0].get("verb"), "Take")
-
-    def test_with_nothing_to_cut_in_the_named_region_piles_anywhere_count(self):
-        """Gather works as usual once it knows no cell to cut there, piles included."""
-        w, m = field(perception=30), Memory()
-        w.entities = [Entity("supply", 50, (5, 10), "gem")]
-        gather(w, m, {"op": "gather_gems", "count": 5, "x": 20, "y": 10})
-        self.assertEqual(m.gather_target, ("pile", (5, 10)))
 
 
 class DetourKeepsClearTest(unittest.TestCase):

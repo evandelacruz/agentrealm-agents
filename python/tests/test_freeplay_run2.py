@@ -8,10 +8,8 @@ Rebuilt here (A16, A9, A10, A66, A22, A63):
 2. Park, Retreat and Heal aimed at safe tiles walled off by bush and wall,
    with no fallback. They now head for the nearest safe cell a path reaches,
    else the town cell.
-3. Gather cut 54 times for 1 gem in one region while the next region over
-   gave 1 gem in 4, and a ``gather_gems`` x, y could not send it there. The
-   op's x, y now names a target region, and Gather leaves a poor region for a
-   better known one by itself.
+Gather's region rules (a ``gather_gems`` x, y, yield pricing) are tested
+as rules in ``test_gather.py`` (``TargetRegionTest``, ``YieldPricingTest``).
 """
 
 from __future__ import annotations
@@ -21,13 +19,6 @@ import unittest
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.gem_yield import (
-    FAIR_SAMPLE_CUTS,
-    REGION_SIZE,
-    better_region,
-    poor_regions,
-    record_cut,
-)
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
@@ -36,7 +27,6 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.fight import retreat_tail
-from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.states.retreat import retreat_step
 from agentrealm_agent.strategist import build_prompt, hub_give_up_lines
 from agentrealm_agent.travel import sync_town
@@ -392,99 +382,6 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         safe(w, self.PACKED, OPEN)
         self.assertTrue(retreat_tail(w, c.memory, c.policy, c, limit=3))
         self.assertEqual(c.memory.path[-1], OPEN)
-
-
-GEM_MAP = 7
-
-
-def gem_world(at=(40, 8)) -> WorldModel:
-    """Grass over three regions in a row: x 0–15, 16–31 and 32–47."""
-    w = WorldModel(character_id=1, map_id=GEM_MAP, pos=at, perception=5)
-    w.alive, w.tick = True, 10_000
-    for x in range(3 * REGION_SIZE):
-        for y in range(REGION_SIZE):
-            w.view.tiles[(x, y)] = "grass"
-    w.terrain_center, w.terrain_map = at, GEM_MAP
-    return w
-
-
-def sample(kb: KnowledgeBase, cell, cuts: int, gems: int) -> None:
-    """``cuts`` cuts of ``cell`` long ago, ``gems`` of them with a gem."""
-    for i in range(cuts):
-        record_cut(kb, GEM_MAP, cell, "grass", -10_000 - i, i < gems)
-
-
-GATHER = {"op": "gather_gems", "count": 30}
-POLICY = Policy(on_hostile="ignore")
-
-
-class GatherRegionsTest(unittest.TestCase):
-    def setUp(self):
-        self.kb = KnowledgeBase.empty("fake-world")
-        sample(self.kb, (40, 8), 54, 1)  # run 2: 54 cuts, 1 gem, where Gather stands
-        sample(self.kb, (24, 8), 8, 2)  # the next region over: 1 gem in 4
-
-    def test_poor_and_better_regions(self):
-        self.assertEqual(poor_regions(self.kb, GEM_MAP), {(2, 0)})
-        self.assertEqual(better_region(self.kb, GEM_MAP, (40, 8)), (1, 0))
-
-    def test_a_poor_region_is_left_for_a_better_known_one(self):
-        m = Memory()
-        out = gather_outcome(gem_world(), m, POLICY, knowledge=self.kb, op=GATHER)
-        self.assertEqual(out.intents[0]["verb"], "SetPosition", "no cut where it stands")
-        self.assertEqual(m.gather_target[0], "grass")
-        self.assertEqual(m.gather_target[1][0] // REGION_SIZE, 1)
-        self.assertEqual(m.gather_status, "walking to grass (region 16,0)")
-
-    def test_in_the_better_region_it_cuts_and_does_not_drift_back(self):
-        m = Memory()
-        out = gather_outcome(gem_world(at=(31, 8)), m, POLICY, knowledge=self.kb, op=GATHER)
-        self.assertEqual(out.reason, "cut grass")
-        self.assertEqual(m.gather_status, "cutting")
-        w = gem_world(at=(31, 8))
-        w.view.tiles[(31, 8)] = "dirt"  # cut: the nearest grass left is in the poor region
-        for y in range(REGION_SIZE):
-            for x in range(17, 31):
-                w.view.tiles[(x, y)] = "dirt"
-        gather_outcome(w, m, POLICY, knowledge=self.kb, op=GATHER)
-        self.assertNotEqual(m.gather_target[1][0] // REGION_SIZE, 2, "poor ground is skipped")
-
-    def test_with_too_few_cuts_here_it_keeps_cutting(self):
-        kb = KnowledgeBase.empty("fake-world")
-        sample(kb, (40, 8), FAIR_SAMPLE_CUTS - 1, 1)
-        sample(kb, (24, 8), 8, 2)
-        out = gather_outcome(gem_world(), Memory(), POLICY, knowledge=kb, op=GATHER)
-        self.assertEqual(out.reason, "cut grass")
-
-    def test_with_no_better_region_it_keeps_cutting(self):
-        kb = KnowledgeBase.empty("fake-world")
-        sample(kb, (40, 8), 54, 1)
-        out = gather_outcome(gem_world(), Memory(), POLICY, knowledge=kb, op=GATHER)
-        self.assertEqual(out.reason, "cut grass")
-
-    def test_the_op_x_y_names_the_region_gather_walks_to(self):
-        m = Memory()
-        op = {**GATHER, "x": 3, "y": 3}
-        out = gather_outcome(gem_world(at=(24, 8)), m, POLICY, knowledge=self.kb, op=op)
-        self.assertEqual(out.intents[0]["verb"], "SetPosition", "the better region underfoot is not the one named")
-        self.assertEqual(m.gather_target[1][0] // REGION_SIZE, 0)
-        self.assertEqual(m.gather_status, "walking to grass (region 0,0)")
-
-    def test_an_unseen_named_region_is_walked_toward(self):
-        m = Memory()
-        op = {**GATHER, "x": 4 * REGION_SIZE + 2, "y": 3}
-        out = gather_outcome(gem_world(), m, POLICY, knowledge=self.kb, op=op)
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
-        self.assertGreater(out.intents[0]["x"], 40, "east, toward the named region")
-        self.assertEqual(m.gather_status, "walking to a target region (region 64,0)")
-
-    def test_a_named_region_with_nothing_to_cut_is_worked_as_usual(self):
-        w = gem_world(at=(24, 8))
-        for x in range(REGION_SIZE):
-            for y in range(REGION_SIZE):
-                w.view.tiles[(x, y)] = "dirt"
-        out = gather_outcome(w, Memory(), POLICY, knowledge=self.kb, op={**GATHER, "x": 3, "y": 3})
-        self.assertEqual(out.reason, "cut grass")
 
 
 if __name__ == "__main__":

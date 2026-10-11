@@ -1,4 +1,4 @@
-"""A22: Gather state — grass, bushes, gem piles on known ground with no hostile near."""
+"""Gather (A22, A88): one search for the place to work, under one ground filter and one price."""
 
 import random
 import unittest
@@ -12,10 +12,10 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, parse_directives_goal
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
 from agentrealm_agent.states import gather as gather_mod
-from agentrealm_agent.hostile_ground import GATHER_HOSTILE_RADIUS, GATHER_SHADOW_MARGIN
-from agentrealm_agent.states.gather_safe import gather_ground, is_safe_ish
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.gem_yield import NO_EFFECT_ZONE_CUTS, GemYieldTracker, record_cut
+from agentrealm_agent.hostile_ground import GATHER_HOSTILE_RADIUS, GATHER_SHADOW_MARGIN, danger
+from agentrealm_agent.states.gather_safe import gather_ground, is_safe_ish, route_clear
+from agentrealm_agent.world import POST_STILL_TICKS, Entity, WorldModel, chebyshev
+from agentrealm_agent.gem_yield import NO_EFFECT_ZONE_CUTS, REGION_SIZE, GemYieldTracker, record_cut, region_of
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.zone_discovery import apply_zone
@@ -32,6 +32,17 @@ def grid(rows: list[str], at=(1, 1)) -> WorldModel:
     w.terrain_center, w.terrain_map = at, 7
     w.attack_range = 1
     w.gems = 0
+    return w
+
+
+def fence(w: WorldModel) -> WorldModel:
+    """Wall in the known ground: no unexplored ground left to go for."""
+    tiles = w.view.tiles
+    for x, y in list(tiles):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if (x + dx, y + dy) not in tiles:
+                    tiles[(x + dx, y + dy)] = "wall"
     return w
 
 
@@ -58,6 +69,9 @@ def outcome(w: WorldModel, m: Memory | None = None, **policy_kw):
     return gather_outcome(w, m or Memory(), Policy(**kw))
 
 
+POLICY = Policy(on_hostile="ignore")
+
+
 class GatherShorthandTest(unittest.TestCase):
     def test_count_is_parsed(self):
         self.assertEqual(parse_directives_goal("gather_gems:20"), {"op": "gather_gems", "count": 20})
@@ -81,9 +95,11 @@ class WorldGemsTest(unittest.TestCase):
         self.assertEqual(w.gems, 3)
 
 
+
+
 class GatherGroundTest(unittest.TestCase):
     def test_field_grass_with_no_hostile_near_qualifies(self):
-        """A63 run 1: every zone read was unsafe and Gather never cut."""
+        """No safe-zone read is needed: the open field is where the gems are."""
         w = grid(["ggg"], at=(1, 0))
         self.assertTrue(gather_ground(w, (1, 0), Policy()))
 
@@ -96,7 +112,7 @@ class GatherGroundTest(unittest.TestCase):
         self.assertTrue(gather_ground(w, (0, 0), Policy(hostile=["npc"])))
 
     def test_a_hostile_that_has_not_hit_us_bars_only_weapon_reach_plus_a_step(self):
-        """A63 run 3: one following at 4–6 blocks without attacking stopped all cutting."""
+        """A hostile that has not attacked does not bar the full danger radius."""
         w = grid(["g" * 12], at=(0, 0))
         w.attack_range = 2
         bar = w.attack_range + GATHER_SHADOW_MARGIN
@@ -108,7 +124,7 @@ class GatherGroundTest(unittest.TestCase):
         self.assertTrue(gather_ground(w, (0, 0), pol))
 
     def test_the_bar_is_a_step_past_hostile_range_when_that_is_further(self):
-        """A63 run 4: a 2-cell bar under a longer hostile_range paced Gather and Retreat for 34 s."""
+        """A bar inside hostile_range would send Gather where Retreat starts."""
         w = grid(["g" * 12], at=(0, 0))
         w.hostile_types.add(("npc", "gnawer"))
         pol = Policy(hostile=["npc"], hostile_range=3)
@@ -118,10 +134,8 @@ class GatherGroundTest(unittest.TestCase):
         self.assertTrue(gather_ground(w, (0, 0), pol))
 
     def test_gather_never_picks_a_cell_where_retreat_would_fire(self):
-        """A63 run 4: after a death Gather and Retreat paced between the safe tile
-        and a grass cell 4 times in 34 s with no cut. Hurt to the health floor,
-        no cell Gather accepts has Retreat start there, nor after the hostile
-        steps once toward it."""
+        """Hurt to the health floor, no cell Gather accepts has Retreat start
+        there, nor after the hostile steps once toward it: the two never pace."""
         from agentrealm_agent.states.retreat import RetreatState
 
         w = grid(["g" * 14] * 3, at=(0, 1))
@@ -144,7 +158,7 @@ class GatherGroundTest(unittest.TestCase):
                     w.entities = [hostile]
 
     def test_safe_zone_cells_qualify(self):
-        """Breaking a block works in a safe zone: Gather prefers the field, it does not ban safe ground."""
+        """Breaking a block works in a safe zone: Gather does not ban safe ground."""
         w = grid(["ggg"], at=(1, 0))
         safe(w, (0, 0))
         self.assertTrue(gather_ground(w, (0, 0), Policy()))
@@ -183,48 +197,41 @@ class SafeIshTest(unittest.TestCase):
         self.assertTrue(is_safe_ish(w, (2, 0), Policy()))
 
 
-class GatherActTest(unittest.TestCase):
-    def test_field_grass_before_safe_grass(self):
-        """A63 run 2: 168 cuts of one town grass cell, every one applied_no_effect."""
-        w = grid(["ggg"], at=(1, 0))
-        safe(w, (1, 0))
-        m = Memory()
-        out = outcome(w, m)
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
-        self.assertEqual(m.gather_target, ("grass", (0, 0)))
+
+class WorkInReachTest(unittest.TestCase):
+    """What is in reach costs no walk: it is worked unless the walk Gather
+    would take costs less in all (``YieldPricingTest`` has that case)."""
 
     def test_a_bush_is_never_cut(self):
-        """A81: bushes drop berries, not gems."""
+        """Bushes drop berries, not gems."""
         w = grid([".b."], at=(0, 0))
         out = outcome(w)
         self.assertFalse(any(i.get("verb") == "Use" for i in out.intents or []))
 
     def test_unlisted_supply_codes_are_not_treated_as_gem_piles(self):
-        w = grid(["...", "..."], at=(1, 0))
+        w = fence(grid(["...", "..."], at=(1, 0)))
         w.entities = [Entity("supply", 9, (2, 0), "gem_cache_5")]
         self.assertIsNone(outcome(w, pickup=False).intents)
 
     def test_priced_gem_supply_is_shop_stock_not_a_pile(self):
-        w = grid(["...", "..."], at=(1, 0))
+        w = fence(grid(["...", "..."], at=(1, 0)))
         w.entities = [Entity("supply", 9, (2, 0), "gem", gem_price=3)]
         self.assertIsNone(outcome(w, pickup=False).intents)
 
-    def test_takes_gem_pile_on_safe_ground(self):
-        """Piles are not cuts: free ones on safe ground are taken at once."""
+    def test_takes_a_gem_pile_beside_it(self):
         w = grid(["g.g"], at=(1, 0))
         safe(w, (1, 0), (2, 0))
         w.entities = [Entity("supply", 9, (2, 0), "gem")]
         self.assertEqual(outcome(w, pickup=False).intents[0]["verb"], "Take")
 
-    def test_takes_gem_pile_in_range(self):
-        w = grid(["g.g"], at=(1, 0))
-        safe(w, (1, 0))
-        w.entities = [Entity("supply", 9, (2, 0), "gem")]
-        out = outcome(w, pickup=False)
-        self.assertEqual(out.intents[0]["verb"], "Take")
-
-    def test_cuts_field_grass_outside_safe_zones(self):
+    def test_cuts_the_grass_it_stands_on(self):
         w = grid(["ggg"], at=(1, 0))
+        self.assertEqual(outcome(w).reason, "cut grass")
+
+    def test_safe_zone_grass_is_cut_like_any_other(self):
+        """Whether a safe zone's grass cuts is learned from its cuts, not assumed (``NoEffectGroundTest``)."""
+        w = grid(["ggg"], at=(1, 0))
+        safe(w, (0, 0), (1, 0), (2, 0))
         self.assertEqual(outcome(w).reason, "cut grass")
 
     def test_skips_grass_with_a_hostile_near(self):
@@ -233,10 +240,19 @@ class GatherActTest(unittest.TestCase):
         w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
         self.assertIsNone(outcome(w, hostile=["npc"]).intents)
 
+    def test_what_is_in_reach_comes_before_the_committed_walk_and_keeps_it(self):
+        w = grid(["ggg....g"], at=(1, 0))
+        m = Memory(path=[(2, 0)], goal="gather", gather_target=("grass", (7, 0)))
+        self.assertEqual(outcome(w, m).reason, "cut grass")
+        self.assertEqual(m.gather_target, ("grass", (7, 0)), "the walk is not given up for the cut")
+        w.view.tiles[(1, 0)] = "dirt"
+        w.entities = [Entity("supply", 9, (0, 0), "gem")]
+        self.assertEqual(outcome(w, m, pickup=False).intents[0]["verb"], "Take")
+
 
 class GatherArmsACutterTest(unittest.TestCase):
-    """Free-play run 3: Gather cut with a potion armed, and the no-effect cuts
-    marked the ground uncuttable."""
+    """A cut goes out with a tool that cuts: a cut with a potion armed does
+    nothing, and its no-effect would mark good ground uncuttable."""
 
     def test_arms_a_cutting_tool_with_the_cut(self):
         w = grid(["ggg"], at=(1, 0))
@@ -256,8 +272,7 @@ class GatherArmsACutterTest(unittest.TestCase):
         self.assertFalse(out.paced)
 
     def test_the_weapon_swapped_out_comes_back_once_gathering_is_over(self):
-        """Review on #152: a mallet swapped for the knife was never put back,
-        so every later fight used the knife."""
+        """A weapon swapped out for a cutter is armed again once the gather work ends."""
         w = grid(["ggg"], at=(1, 0))
         w.armed_code = "bronze_mallet"
         w.held_supplies = [InventorySupply(5, "pocket_knife")]
@@ -317,7 +332,11 @@ class GatherArmsACutterTest(unittest.TestCase):
         self.assertEqual(outcome(w).intents, [{"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
 
 
-class GatherPathingTest(unittest.TestCase):
+
+class TargetSearchTest(unittest.TestCase):
+    """Nothing in reach: Gather walks to the cheapest place to work, priced by
+    its walk plus the work there (``GemOdds``)."""
+
     def test_walks_to_field_grass(self):
         w = grid(["..g"], at=(0, 0))
         m = Memory()
@@ -326,11 +345,27 @@ class GatherPathingTest(unittest.TestCase):
         self.assertEqual((m.goal, m.gather_target), ("gather", ("grass", (2, 0))))
 
     def test_walks_past_a_nearer_bush_to_grass(self):
-        """A81: a bush beside us is no gem source; the grass further off is."""
         w = grid(["g..b"], at=(2, 0))
         m = Memory()
         outcome(w, m)
         self.assertEqual(m.gather_target, ("grass", (0, 0)))
+
+    def test_cuts_its_way_along_the_grass_and_never_to_a_bush(self):
+        w = fence(grid(["b..........", "...gggggggg"], at=(4, 0)))
+        m = Memory()
+        for _ in range(40):
+            out = outcome(w, m)
+            verb = out.intents[0]["verb"] if out.intents else None
+            if verb == "SetPosition":
+                w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+                self.assertEqual(m.gather_target[0], "grass")
+            elif verb == "Use":
+                t = out.intents[0]["target"]
+                w.view.tiles[(t["x"], t["y"])] = "dirt"  # cut: bare until it grows back
+            else:
+                break
+        self.assertNotIn("grass", w.view.tiles.values())
+        self.assertEqual(w.view.tiles[(0, 0)], "bush", "the bush is left standing")
 
     def test_walks_to_a_known_pile_first(self):
         w = grid(["g...."], at=(1, 0))
@@ -341,6 +376,18 @@ class GatherPathingTest(unittest.TestCase):
         self.assertEqual(m.gather_target, ("pile", (4, 0)))
         self.assertEqual(m.path[-1], (4, 0))
 
+    def test_a_pile_is_worth_the_cuts_its_sure_gem_saves(self):
+        """With 5 gems to go at 1 in 5, grass costs 25 cuts and a pile 1 take
+        and 20 cuts: a pile up to 3 steps further than the grass wins, 5 do not."""
+        op = {"op": "gather_gems", "count": 5}
+        for pile_x, kind in ((9, "pile"), (11, "grass")):
+            w = fence(grid(["." * 20], at=(0, 0)))
+            w.view.tiles[(6, 0)] = "grass"
+            w.entities = [Entity("supply", 9, (pile_x, 0), "gem")]
+            m = Memory()
+            gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+            self.assertEqual(m.gather_target[0], kind, pile_x)
+
     def test_pile_target_path_is_kept_between_ticks(self):
         w = grid(["......"], at=(0, 0))
         safe(w, (5, 0))
@@ -348,13 +395,13 @@ class GatherPathingTest(unittest.TestCase):
         m = Memory()
         outcome(w, m)
         path = list(m.path)
-        with mock.patch.object(gather_mod, "_replan_gather") as replan:
+        with mock.patch.object(gather_mod, "_replan") as replan:
             outcome(w, m)
         replan.assert_not_called()
         self.assertEqual(m.path, path)
 
     def test_target_that_stops_qualifying_is_dropped(self):
-        w = grid(["...g"], at=(0, 0))
+        w = fence(grid(["...g"], at=(0, 0)))
         m = Memory()
         outcome(w, m)
         self.assertEqual(m.gather_target, ("grass", (3, 0)))
@@ -364,10 +411,116 @@ class GatherPathingTest(unittest.TestCase):
         self.assertEqual((m.path, m.goal, m.gather_target), ([], "", None))
 
     def test_no_target_keeps_another_states_path(self):
-        w = grid(["...."], at=(0, 0))
+        w = fence(grid(["...."], at=(0, 0)))
         m = Memory(path=[(1, 0), (2, 0)], goal="explore")
         self.assertIsNone(outcome(w, m).intents)
         self.assertEqual((m.path, m.goal), ([(1, 0), (2, 0)], "explore"))
+
+    def test_the_walk_goes_round_a_known_hostiles_reach(self):
+        """No walk crosses a known hostile's reach: the search treats it as a
+        wall and finds the way round, rather than giving the target up."""
+        w = fence(grid(["." * 20] * 9, at=(2, 4)))
+        w.view.tiles[(16, 4)] = "grass"
+        w.entities = [Entity("npc", 9, (9, 4), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))
+        m = Memory()
+        outcome(w, m, hostile=["npc"], hostile_range=2)
+        self.assertEqual(m.gather_target, ("grass", (16, 4)))
+        self.assertFalse([p for p in m.path if chebyshev(p, (9, 4)) <= 2], m.path)
+
+
+class NoEffectGroundTest(unittest.TestCase):
+    """Ground whose cuts have no effect (town grass, say) is learned from the
+    cuts, not assumed (GAME_NOTES.md), and then left alone."""
+
+    def test_a_cut_with_no_effect_holds_out_its_cell_and_a_few_mark_the_safe_zone(self):
+        w = grid(["ggggg..."], at=(0, 0))
+        safe(w, *[(x, 0) for x in range(5)])
+        tracker = GemYieldTracker()
+        for x in range(NO_EFFECT_ZONE_CUTS - 1):
+            tracker.note_no_effect(w, (x, 0), "grass", w.tick)
+        m = Memory()
+        gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
+        self.assertEqual(m.gather_target, ("grass", (NO_EFFECT_ZONE_CUTS - 1, 0)), "below the bar: the rest stay cuttable")
+        self.assertEqual(m.gather_status, gather_mod.NO_EFFECT)
+        tracker.note_no_effect(w, (NO_EFFECT_ZONE_CUTS - 1, 0), "grass", w.tick)
+        m = Memory()
+        out = gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (5, 0)), "the whole zone is uncuttable, its edges too")
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+
+
+class NothingToGoForTest(unittest.TestCase):
+    def test_walks_to_known_grass_far_away_when_nothing_is_nearer(self):
+        w = grid(["#" * 33, "#" + "." * 30 + "g#", "#" * 33], at=(1, 1))
+        c = ctx(w, ["gather_gems:3"])
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual(c.memory.gather_target, ("grass", (31, 1)))
+        self.assertEqual(c.memory.gather_status, "walking to grass", "a walk is not a cut")
+
+    def test_with_no_grass_known_it_walks_to_unexplored_ground_itself(self):
+        w = grid([".....", "....."], at=(0, 0))
+        c = ctx(w, ["gather_gems:3"])
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual(c.memory.gather_target[0], gather_mod.FRONTIER)
+        self.assertEqual(c.memory.gather_status, "walking to unexplored ground")
+
+    def test_with_nowhere_to_go_it_explores(self):
+        w = fence(grid([".....", "....."], at=(0, 0)))
+        c = ctx(w, ["gather_gems:3"])
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Gather")
+        self.assertTrue(out.reason.startswith("look for gems: "))
+        self.assertEqual(c.memory.gather_status, gather_mod.NONE_CUTTABLE)
+
+    def test_standing_in_a_barren_region_says_so(self):
+        w = grid(["ggg"], at=(1, 0))
+        c = ctx(w, ["gather_gems:3"])
+        with mock.patch.object(gather_mod, "barren_regions", return_value={(0, 0)}):
+            dispatch(w, c)
+        self.assertEqual(c.memory.gather_status, gather_mod.REGION_BARREN)
+
+
+class HostileNearTest(unittest.TestCase):
+    """A hostile that stays near without attacking only bars the cells near
+    it; whether to work near it, or fight it, is not Gather's call."""
+
+    def near(self, off: int, on_hostile: str = "flee", at=(10, 0)) -> tuple[WorldModel, PlayContext]:
+        w = grid(["g" * 40], at=at)
+        w.entities = [Entity("npc", 9, (at[0] + off, 0), "wartlurch")]
+        w.hostile_types.add(("npc", "wartlurch"))  # a type seen attacking (survival.is_hostile)
+        return w, ctx(w, ["gather_gems:3"], on_hostile=on_hostile, hostile=["npc"], hostile_range=2)
+
+    def test_cuts_beside_a_hostile_that_has_not_attacked(self):
+        w, c = self.near(4)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Gather")
+        self.assertEqual(out.intents[0]["verb"], "Use", "4 blocks off and harmless: keep cutting")
+        self.assertEqual(c.memory.gather_status, gather_mod.CUTTING)
+
+    def test_staying_near_for_long_changes_nothing(self):
+        w, c = self.near(4, on_hostile="fight")
+        for _ in range(60):
+            w.tick += c.plan.tick_hz
+            out = dispatch(w, c)
+            self.assertEqual((out.state, out.intents[0]["verb"]), ("Gather", "Use"))
+            self.assertEqual(out.intents[0]["target"]["kind"], "block", "Gather never swings at it")
+
+    def test_one_nearer_bars_only_the_cells_near_it(self):
+        w, c = self.near(2)
+        m = Memory()
+        out = gather_outcome(w, m, c.policy, op={"op": "gather_gems", "count": 3})
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertEqual(m.gather_target[0], "grass")
+        self.assertTrue(gather_ground(w, m.gather_target[1], c.policy))
+        self.assertGreater(chebyshev(m.gather_target[1], (12, 0)), c.policy.hostile_range + 1)
+
+    def test_an_npc_of_a_type_never_seen_attacking_bars_nothing(self):
+        w, c = self.near(1, on_hostile="fight")
+        w.hostile_types.clear()  # townsfolk standing near (survival.is_hostile)
+        self.assertEqual(dispatch(w, c).intents[0]["verb"], "Use")
 
 
 class GatherReflexTest(unittest.TestCase):
@@ -407,119 +560,6 @@ class GatherReflexTest(unittest.TestCase):
         self.assertEqual(out.state, "Fight")
         self.assertEqual(out.intents[0]["target"], {"kind": "character", "character_id": 5})
 
-
-class GatherHeadsOutTest(unittest.TestCase):
-    """On safe ground with nothing to cut: walk out to the field (A63 run 2)."""
-
-    def test_cuts_safe_grass_when_no_field_cell_is_known(self):
-        w = grid(["ggg"], at=(1, 0))
-        safe(w, (0, 0), (1, 0), (2, 0))
-        self.assertEqual(outcome(w).reason, "cut grass")
-
-    def test_heads_to_the_nearest_field_cell(self):
-        w = grid(["........"], at=(0, 0))
-        safe(w, *[(x, 0) for x in range(5)])
-        c = ctx(w, ["gather_gems:3"])
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Gather")
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
-        self.assertEqual(c.memory.gather_target, (gather_mod.OUT, (5, 0)))
-        self.assertEqual(c.memory.gather_status, gather_mod.HEADING_OUT)
-
-    def test_heads_to_the_frontier_when_no_field_cell_is_known(self):
-        w = grid(["...."], at=(0, 0))
-        safe(w, *[(x, 0) for x in range(4)])
-        m = Memory()
-        out = outcome(w, m)
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
-        self.assertEqual(m.gather_target[0], gather_mod.OUT)
-
-    def test_no_effect_cuts_mark_the_safe_zone_uncuttable_and_it_heads_out(self):
-        w = grid(["ggggg..."], at=(0, 0))
-        safe(w, *[(x, 0) for x in range(5)])
-        tracker, m = GemYieldTracker(), Memory()
-        for x in range(NO_EFFECT_ZONE_CUTS - 1):
-            tracker.note_no_effect(w, (x, 0), "grass", w.tick)
-        out = gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
-        self.assertEqual(m.gather_target, ("grass", (NO_EFFECT_ZONE_CUTS - 1, 0)), "below the bar: the rest stay cuttable")
-        self.assertEqual(m.gather_status, gather_mod.NO_EFFECT)
-        tracker.note_no_effect(w, (NO_EFFECT_ZONE_CUTS - 1, 0), "grass", w.tick)
-        m = Memory()
-        gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
-        self.assertEqual(m.gather_target, (gather_mod.OUT, (5, 0)), "the whole zone is uncuttable")
-        self.assertEqual(m.gather_status, gather_mod.HEADING_OUT, "heading out outranks a no-effect status")
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
-
-    def test_grass_found_on_arrival_ends_the_walk_out(self):
-        """Review on #126: a cut returned early left the OUT target and HEADING_OUT status behind."""
-        w = grid(["........"], at=(0, 0))
-        safe(w, *[(x, 0) for x in range(5)])
-        m = Memory()
-        outcome(w, m)
-        self.assertEqual(m.gather_status, gather_mod.HEADING_OUT)
-        w.pos = (5, 0)
-        w.view.tiles[(5, 0)] = "grass"
-        out = outcome(w, m)
-        self.assertEqual(out.reason, "cut grass")
-        self.assertEqual((m.goal, m.gather_target), ("", None))
-        self.assertEqual(m.gather_status, gather_mod.CUTTING)
-
-    def test_out_walk_is_kept_while_the_grass_stays_unreachable(self):
-        """Review on #126: walled-off grass dropped the walk out every tick, replanning it (A15)."""
-        w = grid(["......###", "......#g#", "......###"], at=(0, 1))
-        safe(w, *[(x, y) for x in range(5) for y in range(3)])
-        m = Memory()
-        outcome(w, m)
-        self.assertEqual(m.gather_target[0], gather_mod.OUT)
-        path = list(m.path)
-        with mock.patch.object(gather_mod, "_replan_gather") as replan:
-            outcome(w, m)
-        replan.assert_not_called()
-        self.assertEqual(m.path, path)
-
-    def test_off_safe_ground_the_out_walk_is_dropped_for_field_grass(self):
-        w = grid([".....gg"], at=(0, 0))
-        safe(w, *[(x, 0) for x in range(5)])
-        m = Memory()
-        outcome(w, m)
-        self.assertEqual(m.gather_target, ("grass", (5, 0)))
-        w.view.tiles[(5, 0)] = w.view.tiles[(6, 0)] = "dirt"
-        m.path, m.goal, m.gather_target = [], "", None
-        outcome(w, m)
-        self.assertEqual(m.gather_target, (gather_mod.OUT, (5, 0)))
-        w.pos = (5, 0)
-        w.view.tiles[(6, 0)] = "grass"
-        out = outcome(w, m)
-        self.assertEqual(m.gather_target, ("grass", (6, 0)))
-        self.assertEqual(out.intents[0]["verb"], "SetPosition")
-
-
-class GatherFallbackTest(unittest.TestCase):
-    """Nothing to cut in reach: walk to known cuttable ground before exploring (A63 run 1)."""
-
-    def test_walks_to_known_grass_far_away_rather_than_exploring(self):
-        # Walled in: no unexplored ground to weigh it against (A105).
-        w = grid(["#" * 33, "#" + "." * 30 + "g#", "#" * 33], at=(1, 1))
-        c = ctx(w, ["gather_gems:3"])
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Gather")
-        self.assertEqual(c.memory.gather_target, ("grass", (31, 1)))
-        self.assertEqual(c.memory.gather_status, "walking to grass", "a walk is not a cut (A63 run 3)")
-
-    def test_explores_when_no_known_cell_is_cuttable(self):
-        w = grid([".....", "....."], at=(0, 0))
-        c = ctx(w, ["gather_gems:3"])
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Gather")
-        self.assertTrue(out.reason.startswith("look for gems: "))
-        self.assertEqual(c.memory.gather_status, gather_mod.NONE_CUTTABLE)
-
-    def test_standing_in_a_barren_region_says_so(self):
-        w = grid(["ggg"], at=(1, 0))
-        c = ctx(w, ["gather_gems:3"])
-        with mock.patch.object(gather_mod, "barren_regions", return_value={(0, 0)}):
-            dispatch(w, c)
-        self.assertEqual(c.memory.gather_status, gather_mod.REGION_BARREN)
 
 
 class GatherStatusStaleTest(unittest.TestCase):
@@ -576,13 +616,12 @@ class GatherDispatchTest(unittest.TestCase):
         out = dispatch(w, ctx(w, []))
         self.assertEqual(out.state, "Explore")
 
-    def test_no_target_in_sight_explores_itself(self):
+    def test_no_target_in_sight_gather_moves_itself(self):
         w = grid(["....", "....", "...."], at=(1, 1))
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
         self.assertEqual(out.state, "Gather")
         self.assertIsNotNone(out.intents, "Gather moves instead of the character standing still")
-        self.assertTrue(out.reason.startswith("look for gems: "), out.reason)
         self.assertEqual(c.memory.state, "Gather")
 
     def test_gather_cuts_once_a_target_appears(self):
@@ -595,107 +634,18 @@ class GatherDispatchTest(unittest.TestCase):
         self.assertEqual(out.state, "Gather")
         self.assertEqual(out.reason, "cut grass")
 
-    def test_unreachable_target_explores_instead(self):
-        # Grass walled off: no path to it, so Gather explores safe ground itself.
+    def test_unreachable_grass_leaves_unexplored_ground_to_go_for(self):
         w = grid(["....###", "....#g#", "....###"], at=(1, 1))
         safe(w, (5, 1))
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
         self.assertEqual(out.state, "Gather")
-        self.assertIsNotNone(out.intents)
-        self.assertTrue(out.reason.startswith("look for gems: "), out.reason)
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-class GatherShadowTest(unittest.TestCase):
-    """A63 run 3: a hostile followed at 4–6 blocks for 40 s without attacking; Gather inched away and cut nothing."""
-
-    def shadowed(self, on_hostile: str, at=(10, 0)) -> tuple[WorldModel, PlayContext]:
-        w = grid(["g" * 40], at=at)
-        w.entities = [Entity("npc", 9, (at[0] + 4, 0), "wartlurch")]
-        w.hostile_types.add(("npc", "wartlurch"))  # a type seen attacking (survival.is_hostile)
-        c = ctx(w, ["gather_gems:3"], on_hostile=on_hostile, hostile=["npc"], hostile_range=2)
-        return w, c
-
-    def follow(self, w: WorldModel, c: PlayContext, seconds: int) -> None:
-        """Gather decides every second for ``seconds`` with the hostile still near."""
-        dispatch(w, c)
-        for _ in range(seconds):
-            w.tick += c.plan.tick_hz
-            gather_mod.shadowing_hostile(w, c.memory, c.policy, c.plan.tick_hz)
-
-    def test_a_hit_from_the_shadow_restarts_its_clock(self):
-        w, c = self.shadowed("flee")
-        self.follow(w, c, gather_mod.SHADOW_SECONDS - 5)
-        w.attacker, w.attacked_tick = ("npc", 9), w.tick  # it hits us
-        self.follow(w, c, 10)
-        w.attacker = None  # the hit has lapsed from threat memory
-        self.assertIsNone(gather_mod.shadowing_hostile(w, c.memory, c.policy, c.plan.tick_hz),
-                          "only 10 s without hitting us since the hit")
-
-    def test_a_gap_restarts_its_clock(self):
-        w, c = self.shadowed("flee")
-        self.follow(w, c, gather_mod.SHADOW_SECONDS - 1)
-        w.tick += gather_mod.SHADOW_GAP_SECONDS * c.plan.tick_hz  # another state ran meanwhile
-        self.assertIsNone(gather_mod.shadowing_hostile(w, c.memory, c.policy, c.plan.tick_hz))
-        self.assertEqual(c.memory.gather_shadow, (9, w.tick, w.tick))
-
-    def test_an_npc_of_a_type_never_seen_attacking_is_no_shadow(self):
-        w, c = self.shadowed("fight")
-        w.hostile_types.clear()  # townsfolk standing near (survival.is_hostile)
-        self.follow(w, c, gather_mod.SHADOW_SECONDS)
-        self.assertEqual(dispatch(w, c).intents[0]["verb"], "Use")
-
-    def test_cuts_beside_a_hostile_that_has_not_attacked(self):
-        w, c = self.shadowed("flee")
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Gather")
-        self.assertEqual(out.intents[0]["verb"], "Use", "4 blocks off and harmless: keep cutting")
-        self.assertEqual(c.memory.gather_status, gather_mod.CUTTING)
-
-    def test_moves_well_off_from_a_long_shadow_in_one_walk(self):
-        w, c = self.shadowed("flee")
-        self.follow(w, c, gather_mod.SHADOW_SECONDS)
-        out = dispatch(w, c)
-        kind, goal = c.memory.gather_target
-        self.assertEqual(kind, gather_mod.OFF)
-        self.assertGreaterEqual(abs(goal[0] - 14), gather_mod.MOVE_OFF_DISTANCE, "not the nearest uncovered cell")
+        self.assertEqual(c.memory.gather_target[0], gather_mod.FRONTIER)
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
-        self.assertEqual(c.memory.gather_status, gather_mod.MOVING_OFF)
-        # The next decision keeps the same walk, not a fresh nearest cell.
-        w.pos = (out.intents[0]["x"], out.intents[0]["y"])
-        dispatch(w, c)
-        self.assertEqual(c.memory.gather_target, (gather_mod.OFF, goal))
-
-    def test_fights_a_long_shadow_when_the_profile_fights_and_wins(self):
-        w, c = self.shadowed("fight")
-        self.follow(w, c, gather_mod.SHADOW_SECONDS)
-        with mock.patch.object(gather_mod, "would_fight", return_value=True):
-            out = dispatch(w, c)
-        self.assertEqual(out.state, "Gather")
-        self.assertEqual(out.intents[0]["verb"], "SetPosition", "closes on it")
-        self.assertIn("npc 9 shadows us", out.reason)
-        self.assertEqual(c.memory.gather_status, gather_mod.FIGHTING)
-
-    def test_moves_off_instead_when_the_fight_would_be_lost(self):
-        w, c = self.shadowed("fight")
-        self.follow(w, c, gather_mod.SHADOW_SECONDS)
-        with mock.patch.object(gather_mod, "would_fight", return_value=False):
-            dispatch(w, c)
-        self.assertEqual(c.memory.gather_status, gather_mod.MOVING_OFF)
-
-    def test_a_short_shadow_changes_nothing(self):
-        w, c = self.shadowed("fight")
-        self.follow(w, c, gather_mod.SHADOW_SECONDS - 1)
-        out = dispatch(w, c)
-        self.assertEqual(out.intents[0]["verb"], "Use")
 
 
 class GatherStatusTest(unittest.TestCase):
-    """A63 run 3: gather_status said "cutting" through 45 s of walking with no cut."""
+    """gather_status tells a walk from a cut, and a stall from progress."""
 
     def test_blocked_by_hostile_when_only_a_hostile_bars_the_grass(self):
         w = grid(["..g"], at=(0, 0))
@@ -721,10 +671,10 @@ class GatherStatusTest(unittest.TestCase):
         self.assertEqual(m.gather_status, "walking to grass", "a cut restarts the clock")
 
 
+
 class GatherPricesUnexploredGroundTest(unittest.TestCase):
-    """A105: with no region named, known grass is weighed against the nearest
-    unexplored ground, each by its walk and the cuts the gems still needed
-    take at the yield there."""
+    """Known grass is weighed against the edge of unexplored ground, each by
+    its walk and the cuts the gems still needed take at the yield there."""
 
     # Walled in but for an opening at (0, 1): unexplored ground two steps
     # from (3, 1), known grass 37 steps off at (40, 1).
@@ -819,9 +769,251 @@ class GatherPricesUnexploredGroundTest(unittest.TestCase):
             gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
         self.assertEqual(m.gather_target, ("grass", (40, 1)))
 
-    def test_safe_ground_edges_are_not_priced(self):
+    def test_safe_ground_edges_are_priced_like_any_other(self):
         w = self.world()
         safe(w, (0, 1), (1, 1))
         m = Memory()
         gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
-        self.assertEqual(m.gather_target, ("grass", (40, 1)))
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
+
+
+def three_regions(at=(40, 8)) -> WorldModel:
+    """Grass over three regions in a row (x 0–15, 16–31 and 32–47), walled in."""
+    w = WorldModel(character_id=1, map_id=7, pos=at, perception=5)
+    w.alive, w.tick = True, 10_000
+    for x in range(3 * REGION_SIZE):
+        for y in range(REGION_SIZE):
+            w.view.tiles[(x, y)] = "grass"
+    w.terrain_center, w.terrain_map = at, 7
+    return fence(w)
+
+
+def sample(kb: KnowledgeBase, cell, cuts: int, gems: int) -> None:
+    """``cuts`` cuts of ``cell`` long ago, ``gems`` of them with a gem."""
+    for i in range(cuts):
+        record_cut(kb, 7, cell, "grass", -10_000 - i, i < gems)
+
+
+class YieldPricingTest(unittest.TestCase):
+    """A region's grass is priced at its measured yield: poorer ground costs
+    more cuts per gem, so better ground is worth a walk when enough gems are
+    still needed."""
+
+    def test_the_better_yield_pays_for_the_walk_only_when_enough_gems_are_needed(self):
+        kb = KnowledgeBase.empty("fake-world")
+        sample(kb, (40, 8), 20, 1)  # where Gather stands: 1 gem in 20
+        sample(kb, (24, 8), 8, 2)  # the next region over: 1 gem in 4
+        out = gather_outcome(three_regions(), Memory(), POLICY, knowledge=kb, op={"op": "gather_gems", "count": 1})
+        self.assertEqual(out.reason, "cut grass", "one gem: not worth 9 steps")
+        m = Memory()
+        gather_outcome(three_regions(), m, POLICY, knowledge=kb, op={"op": "gather_gems", "count": 30})
+        self.assertEqual((m.gather_target[0], region_of(m.gather_target[1])), ("grass", (1, 0)))
+        self.assertEqual(m.gather_status, "walking to grass")
+
+    def test_poor_ground_is_left_for_ground_not_sampled_yet(self):
+        """Unsampled ground is worth the map's measured rate."""
+        kb = KnowledgeBase.empty("fake-world")
+        sample(kb, (40, 8), 54, 1)
+        m = Memory()
+        gather_outcome(three_regions(), m, POLICY, knowledge=kb, op={"op": "gather_gems", "count": 30})
+        self.assertEqual(region_of(m.gather_target[1]), (1, 0))
+
+    def test_in_the_better_region_it_does_not_drift_back(self):
+        kb = KnowledgeBase.empty("fake-world")
+        sample(kb, (40, 8), 54, 1)
+        sample(kb, (24, 8), 8, 2)
+        w = three_regions(at=(31, 8))
+        w.view.tiles[(31, 8)] = "dirt"  # cut: the nearest grass left is in the poor region
+        for y in range(REGION_SIZE):
+            for x in range(26, 31):
+                w.view.tiles[(x, y)] = "dirt"
+        m = Memory()
+        gather_outcome(w, m, POLICY, knowledge=kb, op={"op": "gather_gems", "count": 30})
+        self.assertEqual(region_of(m.gather_target[1]), (1, 0), "5 steps on in its own region beat 1 into the poor one")
+
+
+
+class TargetRegionTest(unittest.TestCase):
+    """A ``gather_gems`` x, y is the planner's choice of region: Gather goes
+    only for places there while it knows one there."""
+
+    def test_the_op_x_y_names_the_region_gather_works_in(self):
+        m = Memory()
+        out = gather_outcome(three_regions(at=(24, 8)), m, POLICY, op={"op": "gather_gems", "count": 30, "x": 3, "y": 3})
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", "the grass underfoot is not in the region named")
+        self.assertEqual(region_of(m.gather_target[1]), (0, 0))
+        self.assertEqual(m.gather_status, "walking to grass (region 0,0)")
+
+    def test_an_unseen_named_region_is_walked_toward(self):
+        w = three_regions()
+        for y in range(REGION_SIZE):
+            del w.view.tiles[(48, y)]  # an opening east
+        m = Memory()
+        out = gather_outcome(w, m, POLICY, op={"op": "gather_gems", "count": 30, "x": 4 * REGION_SIZE + 2, "y": 3})
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+        self.assertGreater(out.intents[0]["x"], 40, "east, toward the named region")
+        self.assertEqual(m.gather_status, "walking to a target region (region 64,0)")
+
+    def test_unexplored_ground_in_the_named_region_is_a_place_to_go_there(self):
+        w = three_regions(at=(24, 8))
+        for x in range(REGION_SIZE):
+            for y in range(REGION_SIZE):
+                w.view.tiles[(x, y)] = "dirt"
+        del w.view.tiles[(-1, 8)]  # an opening west, in the named region
+        m = Memory()
+        gather_outcome(w, m, POLICY, op={"op": "gather_gems", "count": 30, "x": 3, "y": 3})
+        self.assertEqual((m.gather_target[0], region_of(m.gather_target[1])), (gather_mod.FRONTIER, (0, 0)))
+
+    def test_with_nothing_known_there_it_works_as_if_none_were_named(self):
+        w = three_regions(at=(24, 8))
+        for x in range(REGION_SIZE):
+            for y in range(REGION_SIZE):
+                w.view.tiles[(x, y)] = "dirt"
+        out = gather_outcome(w, Memory(), POLICY, op={"op": "gather_gems", "count": 30, "x": 3, "y": 3})
+        self.assertEqual(out.reason, "cut grass")
+
+    def piles(self, *cells) -> WorldModel:
+        """Dirt over x, y 0..39, walled in, grass at (20, 10) in region (1, 0)."""
+        w = fence(grid(["." * 40] * 40, at=(2, 10)))
+        w.perception = 30
+        w.view.tiles[(20, 10)] = "grass"
+        w.entities = [Entity("supply", 50 + i, p, "gem") for i, p in enumerate(cells)]
+        return w
+
+    def test_a_pile_outside_the_named_region_is_no_target(self):
+        w, m = self.piles((5, 10), (25, 12)), Memory()
+        gather_outcome(w, m, POLICY, op={"op": "gather_gems", "count": 5, "x": 20, "y": 10})
+        self.assertEqual(region_of(m.gather_target[1]), (1, 0))
+
+    def test_a_kept_pile_outside_a_newly_named_region_is_let_go(self):
+        w, m = self.piles((5, 10)), Memory()
+        gather_outcome(w, m, POLICY, op={"op": "gather_gems", "count": 5})
+        self.assertEqual(m.gather_target, ("pile", (5, 10)))
+        gather_outcome(w, m, POLICY, op={"op": "gather_gems", "count": 5, "x": 20, "y": 10})
+        self.assertEqual(m.gather_target, ("grass", (20, 10)))
+
+    def test_a_pile_beside_it_outside_the_region_is_left_to_pickup(self):
+        from agentrealm_agent.states.pickup import PickupState
+
+        w = self.piles((3, 10))
+        out = gather_outcome(w, Memory(), POLICY, op={"op": "gather_gems", "count": 5, "x": 20, "y": 10})
+        self.assertNotEqual(out.intents[0].get("verb"), "Take")
+        self.assertTrue(PickupState().guard(w, ctx(w, ["gather_gems:5"], pickup=True)))
+
+    def test_with_nothing_in_the_named_region_piles_anywhere_count(self):
+        w = self.piles((5, 10))
+        w.view.tiles[(20, 10)] = "dirt"
+        m = Memory()
+        gather_outcome(w, m, POLICY, op={"op": "gather_gems", "count": 5, "x": 20, "y": 10})
+        self.assertEqual(m.gather_target, ("pile", (5, 10)))
+
+
+GUARD = ("npc", "fake_gristle")
+
+
+def remember_post(w: WorldModel, post, at) -> None:
+    """A guard stood on ``post`` long enough to keep it; then it was out of view."""
+    guard = Entity("npc", 9, post, GUARD[1])
+    w.hostile_types.add(GUARD)
+    w.pos = (post[0] - 3, post[1])
+    w.tick = 0
+    w._set_entities([guard], 0)
+    w.tick = POST_STILL_TICKS
+    w._set_entities([guard], POST_STILL_TICKS)
+    w.pos = w.terrain_center = at
+    w.tick = POST_STILL_TICKS + 1
+    w._set_entities([], w.tick)
+
+
+class KeepsClearTest(unittest.TestCase):
+    """Every walk keeps off known hostile ground, and with every known cell
+    to cut barred Gather keeps working: unexplored ground is a place to go."""
+
+    POLICY = Policy(kind="scripted", goals=[], on_hostile="ignore", hostile_range=2, pickup=True)
+    GATHER = {"op": "gather_gems", "count": 5}
+
+    def blocked(self) -> WorldModel:
+        """Dirt over x 0..39, y 0..20; the only grass lies beside a hostile 13 cells off."""
+        w = grid(["." * 40] * 21, at=(12, 10))
+        w.perception = 8
+        w.alive, w.tick = True, 1000
+        for x in (24, 25, 26):
+            w.view.tiles[(x, 10)] = "grass"
+        w.entities = [Entity("npc", 9, (25, 11), GUARD[1])]
+        w.hostile_types.add(GUARD)
+        return w
+
+    def test_with_every_cell_to_cut_barred_it_walks_to_unexplored_ground(self):
+        w, m = self.blocked(), Memory()
+        out = gather_outcome(w, m, self.POLICY, op=self.GATHER)
+        self.assertEqual(out.intents[0]["verb"], "SetPosition", "not handed to the safe default")
+        kind, cell = m.gather_target
+        self.assertEqual(kind, gather_mod.FRONTIER)
+        self.assertTrue(gather_ground(w, cell, self.POLICY))
+        self.assertTrue(route_clear(w, self.POLICY, m.path, danger(w, self.POLICY)))
+        self.assertEqual(m.gather_status, "walking to unexplored ground")
+
+    def test_a_hostile_that_comes_to_hold_its_end_ends_the_walk(self):
+        w, m = self.blocked(), Memory()
+        gather_outcome(w, m, self.POLICY, op=self.GATHER)
+        first = m.gather_target
+        w.pos = m.path[0]
+        w.entities.append(Entity("npc", 10, first[1], GUARD[1]))
+        gather_outcome(w, m, self.POLICY, op=self.GATHER)
+        self.assertNotEqual(m.gather_target, first)
+
+    def test_a_taken_first_step_holds_the_walk(self):
+        """A peer on the walk's only way out is waited on, not swapped for another target (A71)."""
+        w, m = self.blocked(), Memory()
+        gather_outcome(w, m, self.POLICY, op=self.GATHER)
+        kept, first = m.gather_target, m.path[0]
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                cell = (w.pos[0] + dx, w.pos[1] + dy)
+                if cell not in (w.pos, first):
+                    w.view.tiles[cell] = "wall"
+        w.entities.append(Entity("character", 5, first, "peer"))
+        m.path, m.goal = [], ""  # another state had the move
+        out = gather_outcome(w, m, self.POLICY, op=self.GATHER)
+        self.assertTrue(out.wait, out.reason)
+        self.assertEqual(m.gather_target, kept)
+
+    def test_with_nowhere_clear_to_go_it_is_blocked(self):
+        w, m = fence(self.blocked()), Memory()
+        self.assertEqual(w.view.frontier(), set())
+        out = gather_outcome(w, m, self.POLICY, op=self.GATHER)
+        self.assertIsNone(out.intents)
+        self.assertEqual(m.gather_status, gather_mod.BLOCKED)
+
+    def corridor(self) -> WorldModel:
+        """A corridor along y 9..11 that runs past a remembered post at (14, 10);
+        the named region (x 32..47) unknown."""
+        w = grid(["." * 32] * 21, at=(2, 10))
+        remember_post(w, (14, 10), (2, 10))
+        for cell in list(w.view.tiles):
+            if not 9 <= cell[1] <= 11:
+                w.view.tiles[cell] = "wall"
+        for x in range(-1, 33):
+            w.view.tiles[(x, -1)] = w.view.tiles[(x, 21)] = "wall"
+        for y in range(-1, 22):
+            w.view.tiles[(-1, y)] = "wall"
+        return w
+
+    POST_GROUND = {(14 + dx, 10 + dy) for dx in range(-3, 4) for dy in range(-3, 4)}
+
+    def test_the_walk_to_an_unseen_region_takes_no_way_past_a_remembered_post(self):
+        w, m = self.corridor(), Memory()
+        out = gather_outcome(w, m, self.POLICY, op={"op": "gather_gems", "count": 99, "x": 40, "y": 10})
+        self.assertFalse(set(m.path) & self.POST_GROUND, (out.reason, m.path))
+        self.assertNotEqual((m.gather_target or ("",))[0], gather_mod.REGION)
+
+    def test_the_walk_to_an_unseen_region_takes_the_fight_when_the_op_says(self):
+        w, m = self.corridor(), Memory()
+        op = {"op": "gather_gems", "count": 99, "x": 40, "y": 10, "fight": True}
+        out = gather_outcome(w, m, self.POLICY, op=op)
+        self.assertTrue(out.intents, out.reason)
+        self.assertTrue(set(m.path) & self.POST_GROUND, "past the post: the op chose the risk")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -171,5 +171,7 @@
 
   "A83": {"state": "done"},
 
-  "A85": {"state": "in_progress"}
+  "A84": {"state": "done"},
+
+  "A85": {"state": "done"}
 }

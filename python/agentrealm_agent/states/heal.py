@@ -11,7 +11,7 @@ whether a supply may be tried now (``can_try``).
 
 from __future__ import annotations
 
-from ..break_memory import given_up_blocks, nominate_on_path
+from ..break_memory import choice_at, given_up_blocks
 from ..config import Policy
 from ..executor.intents import wait
 from ..executor.supply_refusals import can_try, must_stand_on
@@ -314,9 +314,11 @@ def _walk_toward(
     m, policy = ctx.memory, ctx.policy
     plain, opening = _walk_grids(w, ctx, at, avoid)
     way = cost_path(w, at, opening) if opening.break_costs else None
-    if way and (cut := [p for p in way if p in opening.break_costs]):
-        choice = nominate_on_path(w, ctx.knowledge, w.pos, at, given_up_blocks(m.nav_stuck, w.map_id, w.tick))
-        if choice is not None and choice.pos in cut:
+    if (cut := next((p for p in way or [] if p in opening.break_costs), None)) is not None:
+        # The first block the priced way crosses is the one opened, so the
+        # walk and its price never part.
+        choice = choice_at(w, ctx.knowledge, cut, given_up_blocks(m.nav_stuck, w.map_id, w.tick))
+        if choice is not None:
             out = break_toward(w, ctx, choice, HealState.name)
             if out.intents:
                 out.reason = f"{goal}: {out.reason}"

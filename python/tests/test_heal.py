@@ -2,6 +2,7 @@
 
 import random
 import unittest
+import unittest.mock
 
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
@@ -612,9 +613,6 @@ class DrinkTargetsSelfTest(unittest.TestCase):
         self.assertEqual(r.mem.heal_pending, (5, "small_potion", "use"))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 # The health line and the one safe cell (A89), on open ground with a cluster
 # of safe cells west of the character.
@@ -697,15 +695,17 @@ class LowHealthLineTest(unittest.TestCase):
         safe(w, *CLUSTER)
         self.assertEqual(dispatch(w, c).state, "Travel")
 
-    def test_the_planner_may_move_the_line_either_way(self):
+    def test_the_planner_may_only_raise_the_line(self):
+        # A lower line rests and drinks later: a loosening, like any survival param.
         from agentrealm_agent.directives import PARAM_DEFAULTS
-        from agentrealm_agent.plan import apply_set_param, validate_goal_op
+        from agentrealm_agent.plan import apply_set_param, collect_rejections, validate_goal_op
 
-        for value in (0.2, 0.8):
-            op = {"op": "set_param", "name": "low_health", "value": value}
-            self.assertIsNotNone(validate_goal_op(op))
-            params = apply_set_param(dict(PARAM_DEFAULTS), dict(PARAM_DEFAULTS), op)
-            self.assertEqual(params["low_health"], value)
+        raised = {"op": "set_param", "name": "low_health", "value": 0.8}
+        self.assertEqual(apply_set_param(dict(PARAM_DEFAULTS), dict(PARAM_DEFAULTS), raised)["low_health"], 0.8)
+        lowered = {"op": "set_param", "name": "low_health", "value": 0.2}
+        params, rejected = collect_rejections(lambda: apply_set_param(dict(PARAM_DEFAULTS), dict(PARAM_DEFAULTS), lowered))
+        self.assertEqual(params["low_health"], PARAM_DEFAULTS["low_health"])
+        self.assertTrue(rejected)
         self.assertIsNone(validate_goal_op({"op": "set_param", "name": "low_health", "value": 1.5}))
 
     def test_on_safe_ground_above_the_line_no_regen_sample(self):
@@ -853,3 +853,50 @@ class FoodByPriceTest(unittest.TestCase):
         w.entities = [Entity("supply", 1, (3, 2), "apple")]
         out = dispatch(w, ctx())
         self.assertNotEqual(out.state, "Heal")
+
+
+class HealWalkOpensItsPricedWayTest(unittest.TestCase):
+    """The block Heal opens is the first one its priced way crosses, on
+    every Heal walk, food or not."""
+
+    def test_the_block_opened_is_the_one_the_way_crosses(self):
+        # Two bushes on the straight route; the cheapest way goes round the
+        # first (open ground above it) and cuts the second.
+        w = ringed(grid(at=(0, 2), size=6), 6)
+        w.zones[7] = {}
+        w.view.tiles[(1, 2)] = "bush"
+        for y in range(6):
+            w.view.tiles[(3, y)] = "bush"  # a full column: the way must cut one
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        w.armed_code = "bronze_sword"
+        w.entities = [Entity("supply", 1, (5, 2), "apple")]
+        from agentrealm_agent.states import heal
+
+        c = ctx()
+        with unittest.mock.patch.object(heal, "FOOD_REACH", 5):
+            out = dispatch(w, c)
+        self.assertEqual((out.state, out.reason), ("Heal", "heal_food: break → (3, 2)"))
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 1}], "round the first bush")
+        self.assertEqual(c.memory.nav_stuck.stuck_signals, [], "food priced reachable is never given up")
+
+    def test_a_walk_to_the_safe_zones_edge_cuts_through(self):
+        # Resting on safe ground: the zone's unexplored edge lies past a
+        # bush column a held blade cuts, so Heal opens it like any walk.
+        w = ringed(grid(at=(0, 2), size=6), 6)
+        w.zones[7] = {(x, y): ZoneFact(safe=True) for x in range(6) for y in range(6)}
+        for y in range(6):
+            w.view.tiles[(1, y)] = "bush"
+        for y in range(6):
+            del w.view.tiles[(5, y)]  # unseen ground in the zone: its edge is at x 4
+            w.view.tiles.pop((6, y), None)
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        w.armed_code = "bronze_sword"
+        kb = KnowledgeBase.empty("sandbox")
+        save_regen_yes(kb)
+        out = dispatch(w, ctx(kb=kb))
+        self.assertEqual(out.state, "Heal")
+        self.assertIn("heal_explore: break", out.reason)
+
+
+if __name__ == "__main__":
+    unittest.main()

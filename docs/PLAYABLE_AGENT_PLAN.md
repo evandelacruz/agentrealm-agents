@@ -307,7 +307,7 @@ This is what makes a second run better than the first, and it is what the strate
 
   Top level has exactly three keys. `goals` replaces the goal stack, tried in order. `params` is applied at once, within the limits below. `notes` is free text for the trace. Everything the agent should do, speech included, is a goal op; a `set_param` op changes a param only when the goal stack reaches it, within the same limits.
 
-- **Param limits.** The strategist may only tighten survival params, never loosen them past the directives file's value (or the default when the file sets none): it may raise `fight_margin`, `retreat_hits`, `lives_floor` and `potion_reserve`, and lower `risk`. `curiosity` and `low_health` it may set anywhere in their range. A value that loosens a survival param, or is out of range (see the param table), is dropped and logged, and so is a `set_param` op that would loosen one. The next prompt's State repeats each such rejection with its reason and the param's meaning (`last_reply_rejected`), so the planner learns which way a param goes. Only the directives file loosens them.
+- **Param limits.** The strategist may only tighten survival params, never loosen them past the directives file's value (or the default when the file sets none): it may raise `fight_margin`, `retreat_hits`, `lives_floor`, `potion_reserve` and `low_health`, and lower `risk`. `curiosity` it may set anywhere in its range. A value that loosens a survival param, or is out of range (see the param table), is dropped and logged, and so is a `set_param` op that would loosen one. The next prompt's State repeats each such rejection with its reason and the param's meaning (`last_reply_rejected`), so the planner learns which way a param goes. Only the directives file loosens them.
 
 - **Operations** form a fixed set. Each maps onto a state and has fixed fields; every op may also carry `why` (free text, logged). An op with an unknown name, a missing field, or a field of the wrong type is dropped and logged.
 
@@ -357,7 +357,7 @@ Hard constraints are never free text. `never_attack` lists what may not be attac
 | `lives_floor` | 3 | ≥ 1, integer | raise | At or below this many lives, fight only measured weak hostiles and stay inside explored ground |
 | `risk` | 0.5 | 0 to 1 | lower | 0 cautious to 1 bold; scales the fight margin, retreat threshold, untested types and level entry (see Health and lives) |
 | `potion_reserve` | 2 | ≥ 0, integer | raise | Potions to keep. Planner-only since A61: the planner adds a `buy` below it; no state restocks on its own |
-| `low_health` | 0.5 | 0 to 1 | set | Share of max health at or below which health is low: a carried potion is drunk out of a fight, and **Heal**'s rest on safe ground goes ahead of the op on top (A89) |
+| `low_health` | 0.5 | 0 to 1 | raise | Share of max health at or below which health is low: a carried potion is drunk out of a fight, and **Heal**'s rest on safe ground goes ahead of the op on top (A89) |
 
 A directives value out of range is ignored and logged, and the default stays.
 

@@ -100,7 +100,7 @@ PARAM_MEANINGS: dict[str, str] = {
     "lives_floor": "lives at which risk reaches 0. Higher is more careful. You may only raise it",
     "potion_reserve": "potions to keep; buy more below it. You may only raise it",
     "curiosity": "0..1, how far to stray to look at new things. Any value in range",
-    "low_health": "0..1, the share of max health at or below which health is low: a carried potion is drunk out of a fight, and a hurt character leaves the op on top to rest on safe ground. Above it the op goes on and potions are kept. Higher heals sooner; lower keeps working longer. Any value in range",
+    "low_health": "0..1, the share of max health at or below which health is low: a carried potion is drunk out of a fight, and a hurt character leaves the op on top to rest on safe ground. Above it the op goes on and potions are kept. Higher heals sooner, at more health. You may only raise it",
 }
 
 # Shorthand in directives `goals = ["gather_gems:20", "buy:torch"]`.
@@ -526,8 +526,8 @@ def apply_strategist_params(
 
 def loosening(floor: dict[str, float | int], name: str, value: float | int) -> str:
     """Why a valid ``value`` for survival param ``name`` loosens it past
-    ``floor``, or "" when it does not (``curiosity`` and ``low_health`` never do)."""
-    if name in ("curiosity", "low_health"):
+    ``floor``, or "" when it does not (``curiosity`` never does)."""
+    if name == "curiosity":
         return ""
     floor_val = floor.get(name, PARAM_DEFAULTS[name])
     if name == "risk":

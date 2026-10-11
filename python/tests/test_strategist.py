@@ -889,6 +889,59 @@ class PlannerViewTest(unittest.TestCase):
         self.assertIn("A check whose minutes still outweigh what it buys stays skipped: by itself it sends the character back to no stage and calls for no restock", prompt)
         self.assertIn("whenever health or potions fall below the stage 2 bar, unless the check is one skipped for its cost", prompt)
 
+    def test_readiness_shows_how_an_unmet_health_check_closes(self):
+        # A124: health comes back only from a heal or a respawn, so to_close
+        # shows a carried potion's heal, else a potion to buy and its time,
+        # and a rest only where regen was measured on this world.
+        from agentrealm_agent.healing import add_regen, save_regen_yes
+
+        self.w.health, self.w.max_health, self.w.gems = 5, 10, 4
+        health = lambda **kw: self.readiness(**kw)["stage_2"]["to_close"]["health_at_bar"]
+        self.assertEqual(health(), {"health_short": 3}, "nothing carried or seen for sale closes it")
+        self.kb.items["small_potion"] = {"gem_price": 10}
+        self.assertEqual(
+            health(gather_run={"gems_per_min": 2.0}),
+            {"health_short": 3, "buy": {"code": "small_potion", "gems_short": 6, "minutes": 3.0}},
+        )
+        self.w.held_supplies = [InventorySupply(1, "large_potion"), InventorySupply(2, "small_potion")]
+        self.assertEqual(health(), {"health_short": 3, "drink": {"code": "small_potion", "heals": 10}}, "the smallest heal that closes it")
+        add_regen(self.kb, 0.01)
+        self.assertNotIn("rest", health(), "a rate with regen not confirmed yes: no rest")
+        save_regen_yes(self.kb)
+        self.assertNotIn("rest", health(), "no safe tile known: nowhere to rest")
+        apply_zone(self.w, 7, 10, 20, {"safe": True})
+        self.assertEqual(
+            health()["rest"],
+            {"safe": "7:10,20", "walk_seconds": 4, "rest_minutes_estimate": 0.5},
+            "10 cells at 2.5 a second, then 3 health at 0.01 a tick at 10 Hz",
+        )
+        self.w.health = 8
+        self.assertNotIn("health_at_bar", self.readiness()["stage_2"].get("to_close", {}), "met: nothing to close")
+
+    def test_contract_says_health_does_not_come_back_by_itself(self):
+        # A124: the docs give no regeneration; the planner assumed health
+        # recovers while gathering off safe ground.
+        prompt = system_prompt()
+        self.assertIn("Safe ground only stops damage: health does not come back by itself, on safe ground or off it", prompt)
+        self.assertIn("The game's documentation gives no regeneration", prompt)
+        self.assertIn("put a use_item with its code on the stack", prompt)
+        self.assertIn("For health_at_bar it shows health_short and the ways it closes", prompt)
+
+    def test_upgrades_for_sale_show_the_minutes_at_the_gem_rate(self):
+        # A124: an upgrade's gems_short in time, as readiness to_close does.
+        self.w.gems = 8
+        self.w.armed_code = "pocket_knife"
+        self.kb.items["bronze_sword"] = {"gem_price": 15}
+
+        def upgrades(**kw):
+            line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb, **kw).splitlines() if l.startswith("upgrades_for_sale="))
+            return json.loads(line.split("=", 1)[1])[0]
+
+        self.assertNotIn("minutes", upgrades(), "no rate measured: no minutes")
+        self.assertEqual(upgrades(gather_run={"gems_per_min": 2.0})["minutes"], 3.5)
+        self.assertEqual(upgrades(gather_run={"gems_per_min": 0.0})["minutes"], NO_GEMS_EARNED)
+        self.assertIn("minutes (how long gems_short takes at gather_run gems_per_min", system_prompt())
+
     def test_a_met_stage_with_no_upgrade_for_sale_has_nothing_to_save_toward(self):
         # A101: readiness met and no better gear known for sale; State says
         # both, and the arc says a met stage moves on unless an upgrade is listed.

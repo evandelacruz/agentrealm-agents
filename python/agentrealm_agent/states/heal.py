@@ -20,6 +20,7 @@ from ..healing import (
     health_low,
     hurt,
     known_safe_cells,
+    note_regen_rate,
     note_regen_sample,
     potion_count,
     regen_known,
@@ -116,10 +117,10 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
 
     # Health changes from food or a potion must not count as regen.
     if out := _act_food(w, ctx):
-        m.heal_regen_sample = None
+        m.heal_regen_sample = m.heal_regen_stretch = None
         return out
     if out := use_carried_heal(w, ctx):
-        m.heal_regen_sample = None
+        m.heal_regen_sample = m.heal_regen_stretch = None
         return out
 
     known = regen_known(ctx.knowledge, m)
@@ -142,6 +143,8 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
             # up: tell the planner. A step held this decision keeps the cell.
             _ask_for_supplies(w, m, safe_ground="unreachable")
         return _out(None, "no reachable safe tile")
+    # Every rest measures regen's rate, refining the planner's estimate (A124).
+    note_regen_rate(m, w, ctx.knowledge)
     if known is None:
         verdict = note_regen_sample(m, w)
         if verdict == "yes":

@@ -24,9 +24,6 @@ export const DEFAULT_STARTING_REF = "main";
 /** The writer lock. Verdicts come from reviews, never labels. */
 export const WORKING_LABEL = "conductor:working";
 
-/** Set by a Claude fixer after an approved PR's one polish pass; the supervisor merges only PRs carrying it. */
-export const POLISH_DONE_LABEL = "polish-done";
-
 /**
  * GitHub check for the Cursor review automation. Not a label. Override with
  * CONDUCTOR_REVIEW_CHECK if the automation is renamed.

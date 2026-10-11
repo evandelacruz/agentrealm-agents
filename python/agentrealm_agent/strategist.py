@@ -116,6 +116,7 @@ from .memory import Memory
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .healing import supply_matches
+from .supplies import armor_defense, row as supply_row, weapon_damage, what_it_does
 from .planner_reference import game_notes_text, reference_text
 from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
@@ -192,6 +193,8 @@ Signs: State signs_seen lists the signs and statues seen on this map, the unread
 A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows in the stack without them, with "goes_to": the cell it walks to now, which the agent works out itself. It is already on the stack: re-sending it changes nothing.
 
 State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
+
+Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage or defense, and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed). Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held.
 
 When State shows last_reply_rejected, those parts of your previous reply were dropped or ignored, for the reasons given; the rest of it was applied. Do not repeat them unchanged.
 
@@ -558,7 +561,8 @@ def build_prompt(
     state_lines = [
         f"tick={w.tick} pos={pos} alive={w.alive} health={w.health}/{w.max_health} gems={w.gems}",
         f"map_level={w.map_level} armed={w.armed_code} lives={w.lives}",
-        f"worn={json.dumps(w.worn_codes, sort_keys=True)} held={json.dumps(dict(sorted(Counter(s.code for s in w.held_supplies).items())))}",
+        f"worn={json.dumps(w.worn_codes, sort_keys=True)}",
+        held_line(w),
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
@@ -569,6 +573,7 @@ def build_prompt(
         f"stall={stall or 'none'}",
         *entrance_lines(w, knowledge),
         shop_price_line(w, knowledge),
+        upgrade_line(w, knowledge),
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
@@ -799,6 +804,57 @@ def shop_price_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     affordable = [code for code, price in ordered.items() if price <= gems]
     return f"shop_prices={json.dumps(ordered)} gems={gems} can_buy_now={json.dumps(affordable)}"
 
+
+def held_line(w: WorldModel) -> str:
+    """Each item carried (A92): how many are held, how many stowed in a
+    carried chest, and what it does by the Supplies reference
+    (:func:`supplies.what_it_does`), so a purchase can be weighed against them."""
+    held = Counter(s.code for s in w.held_supplies if s.code)
+    stowed = Counter(s.code for s in w.chest_supplies if s.code)
+    rows: dict[str, dict[str, Any]] = {}
+    for code in sorted(held.keys() | stowed.keys()):
+        entry: dict[str, Any] = {"count": held[code]}
+        if stowed[code]:
+            entry["stowed"] = stowed[code]
+        entry.update(what_it_does(code))
+        rows[code] = entry
+    return f"held={json.dumps(rows, sort_keys=True)}"
+
+
+# The gear upgrades for sale State lists, cheapest first.
+UPGRADES_SHOWN = 3
+
+
+def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
+    """The gear seen for sale that beats the best owned for its slot, cheapest
+    first, with its price and the gems still short (A92): a weapon with more
+    ``damage`` than any armed or held, armor with more ``defense`` than any worn
+    or held for its slot (Supplies reference). The first is what gems save toward."""
+    carried = [s.code for s in w.held_supplies + w.chest_supplies]
+    owned = {c for c in [*carried, w.armed_code, *w.worn_codes.values()] if c}
+    best_damage = max((weapon_damage(c) or 0 for c in owned), default=0)
+
+    def best_defense(slot: str) -> int:
+        return max((armor_defense(c) or 0 for c in owned if getattr(supply_row(c), "slot", "") == slot), default=0)
+
+    gems = w.gems or 0
+    rows = []
+    for code, price in seen_prices(w, knowledge).items():
+        r = supply_row(code)
+        if r is None or code in owned:
+            continue
+        damage, defense = weapon_damage(code), armor_defense(code)
+        if damage is not None and damage > best_damage:
+            gain = f"damage {best_damage} -> {damage}"
+        elif defense is not None and r.slot and defense > best_defense(r.slot):
+            gain = f"{r.slot} defense {best_defense(r.slot)} -> {defense}"
+        else:
+            continue
+        rows.append({"code": code, "price": price, "gains": gain, "gems_short": max(0, price - gems)})
+    if not rows:
+        return "upgrades_for_sale=none seen"
+    rows.sort(key=lambda e: (e["price"], e["code"]))
+    return f"upgrades_for_sale={json.dumps(rows[:UPGRADES_SHOWN], sort_keys=True)}"
 
 
 @dataclass

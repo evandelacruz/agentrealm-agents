@@ -599,6 +599,21 @@ class OpTableTest(unittest.TestCase):
         self.assertNotIn("hunt", OP_FIELDS)
         self.assertIn("equip", OP_FIELDS)
 
+    def test_prompt_asks_to_weigh_a_buy_against_what_is_held(self):
+        # A92: the planner is asked to weigh a purchase, not given a rule.
+        system = system_prompt()
+        self.assertIn("State held lists each item the character carries", system)
+        self.assertIn("used_up_on_break", system)
+        self.assertIn("upgrades_for_sale", system)
+        self.assertIn("weigh what it is for against what is already held and what the gems are saving toward", system)
+
+    def test_buy_op_says_it_buys_one_more_whatever_is_held(self):
+        # #161 (A79): a buy always buys one more; the op doc the planner reads says so.
+        doc = OP_FIELDS["buy"]
+        self.assertIn("Buys one more, whatever is already held", doc)
+        self.assertIn("holding some does not skip it or finish it, it spends the price again", doc)
+        self.assertIn(f"- buy: {doc}", system_prompt())
+
     def test_prompt_lists_every_op(self):
         messages = build_prompt(
             triggers=[], w=WorldModel(character_id=1), plan=Plan([], dict(PARAM_DEFAULTS)),
@@ -659,6 +674,41 @@ class PlannerViewTest(unittest.TestCase):
             'shop_prices={"small_potion": 3, "bronze_sword": 15, "middle_chest": 40} gems=21 can_buy_now=["small_potion", "bronze_sword"]',
             state,
         )
+
+    def test_held_shows_counts_and_what_each_item_does(self):
+        # A92: the planner sees how many it carries of each item and what that item is for.
+        self.w.held_supplies = [InventorySupply(i, "matches") for i in range(3)] + [InventorySupply(9, "small_potion"), InventorySupply(10, "odd_rock")]
+        self.w.chest_supplies = [InventorySupply(11, "small_potion")]
+        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("held="))
+        held = json.loads(line.split("=", 1)[1])
+        self.assertEqual(held["matches"], {"count": 3, "class": "tool", "use": ["burn"], "used_up_on_break": True})
+        self.assertEqual(held["small_potion"], {"count": 1, "stowed": 1, "class": "consumable", "use": ["heal"], "heal": 10})
+        self.assertEqual(held["odd_rock"], {"count": 1})
+
+    def test_nothing_held(self):
+        self.assertIn("\nheld={}\n", state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb))
+
+    def test_upgrades_for_sale_cheapest_first_with_gems_short(self):
+        self.w.gems = 8
+        self.w.armed_code = "pocket_knife"
+        self.w.worn_codes = {"body": "bronze_mail"}
+        for code, price in {"matches": 5, "bronze_sword": 15, "bronze_mail": 20, "iron_mail": 80, "iron_sword": 80, "iron_helm": 40}.items():
+            self.kb.items[code] = {"gem_price": price}
+        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("upgrades_for_sale="))
+        self.assertEqual(
+            json.loads(line.split("=", 1)[1]),
+            [
+                {"code": "bronze_sword", "gains": "damage 2 -> 4", "gems_short": 7, "price": 15},
+                {"code": "iron_helm", "gains": "head defense 0 -> 1", "gems_short": 32, "price": 40},
+                {"code": "iron_mail", "gains": "body defense 1 -> 2", "gems_short": 72, "price": 80},
+            ],
+        )
+
+    def test_a_held_upgrade_is_not_for_sale_again(self):
+        self.w.armed_code = "pocket_knife"
+        self.w.held_supplies = [InventorySupply(3, "bronze_sword")]
+        self.kb.items["bronze_sword"] = {"gem_price": 15}
+        self.assertIn("upgrades_for_sale=none seen", state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb))
 
     def test_stall_shows_after_nothing_changes(self):
         self.w.held_supplies = [InventorySupply(6, "pocket_knife")]

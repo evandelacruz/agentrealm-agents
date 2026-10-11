@@ -119,11 +119,12 @@ from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
 from .equip import CUT, does_job, hunting_ceiling, loadout_strength, weapon_rank
 from .supplies import armor_defense, chest_capacity, is_weapon, weapon_damage, worn_slot, what_it_does
 from .planner_reference import game_notes_text, reference_text
-from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, Plan, collect_rejections, parse_plan_payload
+from .plan import OP_FIELDS, MAX_WAIT_SECONDS, PARAM_MEANINGS, PLAN_STALL_SECONDS, Plan, collect_rejections, parse_plan_payload
 from .loot import carry_slots_used
 from .break_memory import capabilities_for_code
 from .pack import reserved_supplies
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
+from .stalled import StalledOp, below_progress, find as find_stalled
 from .survival import STARTING_WEAPON, known_hostile, retreat_goal
 from .travel.knowledge import iter_entrances, iter_shop_cells, town_from_kb
 from .travel.ops import travel_op_from_plan_goal
@@ -196,7 +197,7 @@ Signs: State signs_seen lists the signs and statues seen on this map, the unread
 
 A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows in the stack without them, with "goes_to": the cell it walks to now, which the agent works out itself. It is already on the stack: re-sending it changes nothing.
 
-State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
+State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. An op on top that makes no progress for {PLAN_STALL_SECONDS} s is moved just below the next op on the stack that can make progress, or dropped when none can, and State stalled_ops lists it with why. It stays there until a new item is held, a new clue comes in or a new way is known (a door's warp learned, a level entrance): until then a reply that puts it back on top has it moved below again, or left out when nothing in the reply can make progress, and last_reply_rejected says so. So put work that can make progress (gather_gems, say) above it, or give it a reason to work: get the item that opens it, or find another way to it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
 
 Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage, defense (armor protects only while worn, never in hand; worn, it lowers both how often and how hard a hostile hits), chest_capacity, and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed); none seen means no better gear is known for sale anywhere, so there is no upgrade to save gems toward until a shop shows one. Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held.
 
@@ -537,6 +538,17 @@ def trace_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def stalled_lines(records: Collection[StalledOp]) -> str:
+    """The planner's ``stalled_ops`` (A104): each op that stalled, why, and when."""
+    if not records:
+        return ""
+    rows = [{"op": r.target, "why": r.why, "at_tick": r.tick} for r in records]
+    return (
+        f"stalled_ops={json.dumps(rows, sort_keys=True)} (ops that made no progress: each stays below an op "
+        "that can make progress until a new item is held, a new clue comes in or a new way is known)"
+    )
+
+
 def hub_give_up_lines(stuck: NavStuckMemory) -> list[dict[str, Any]]:
     """The planner's ``given_up_hubs``: each town or shop give-up and when it
     lapses (``stuck.HUB_GIVE_UP_TICKS``, ``stuck.HUB_GIVE_UP_CELLS``)."""
@@ -568,6 +580,7 @@ def build_prompt(
     rejected: Collection[str] = (),
     stall: str = "",
     strength: StrengthBracket | None = None,
+    stalled_ops: Collection[StalledOp] = (),
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -605,6 +618,9 @@ def build_prompt(
         state_lines.append(f"given_up_travel={json.dumps(cells)} (cells stuck detection gave up on: never travel to them while listed)")
     if given_up_hubs:
         state_lines.append(f"given_up_hubs={json.dumps(list(given_up_hubs), sort_keys=True)} (town and shop give-ups: each lapses at retry_at_tick or after moving or_after_moving_cells from where it gave up)")
+    stalled = stalled_lines(stalled_ops)
+    if stalled:
+        state_lines.append(stalled)
     if rejected:
         state_lines.append(f"last_reply_rejected={json.dumps(list(rejected))} (parts of your previous reply that were not applied, and why)")
     clues: list[dict[str, Any]] = []
@@ -1301,6 +1317,7 @@ class Strategist:
             rejected=self.rejected,  # replaced when this call's reply is read; kept if the call fails
             stall=self.stall.line(runner.world, runner.tick_hz, runner.mem.last_decision),
             strength=runner.mem.strength,
+            stalled_ops=runner.mem.stalled_ops,
         )
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1
@@ -1396,6 +1413,7 @@ class Strategist:
             if len(kept) < len(goals):
                 record["given_up_filtered"] = [g for g in goals if g not in kept]
                 goals = kept
+        goals = self._keep_stalled_below(runner.mem.stalled_ops, goals, record)
         self.deferred = None  # a newer reply decides
         old = runner.plan
         pinned = old.directive_ops()  # directives ops left: they stay on top
@@ -1450,6 +1468,25 @@ class Strategist:
             runner.log("strategist", "new head deferred to the next action boundary", {"strategist": {"event": "deferred", **record}})
             return
         self._apply(runner, new, record, len(pinned))
+
+    def _keep_stalled_below(self, records: list[StalledOp], goals: list[dict[str, Any]], record: dict[str, Any]) -> list[dict[str, Any]]:
+        """A reply that puts a stalled op back on top (A104) has it moved just
+        below its first op that can make progress, or left out when it has
+        none, until a reason to retry comes (``stalled.lapse``). Said through
+        last_reply_rejected, so the planner learns why."""
+        order, moved, above = below_progress(goals, lambda g: find_stalled(records, g) is not None)
+        if not moved:
+            return goals
+        record["stalled_kept_below"] = moved
+        for op in moved:
+            stall = find_stalled(records, op)
+            where = f"moved below {json.dumps(above, sort_keys=True)}" if above is not None else "left out: no op in the reply can make progress"
+            self.rejected = [
+                *self.rejected,
+                f"{json.dumps(op, sort_keys=True)} {where}: it stalled ({stall.why if stall else 'no progress'}) "
+                "and nothing has changed since (no new item held, clue or way known)",
+            ]
+        return order
 
     def _fail(self, runner: Any, triggers: list[dict[str, Any]], error: str, record: dict[str, Any], auth: bool = False) -> None:
         """A call that gave no plan to apply (it failed, or its reply cannot be

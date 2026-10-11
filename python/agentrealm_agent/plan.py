@@ -14,7 +14,8 @@ from .directives import PARAM_DEFAULTS, _valid_param
 from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
-from .memory import Memory, note_goal_done, note_goal_failed
+from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
+from .stalled import below_progress, find as find_stalled, forget as forget_stalled
 from .supplies import CAPABILITIES
 from .travel.ops import parse_travel_string, travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
@@ -84,7 +85,8 @@ SOLVE_OPS = frozenset({"compose", "use_block"})
 EXPLORE_ANYWHERE = 1 << 30
 # A planner `wait` is short and says why: the agent never idles on a long hold.
 MAX_WAIT_SECONDS = 30
-# An op whose executor makes no progress for this long is dropped and logged.
+# An op whose executor makes no progress for this long is moved below the
+# next op that can make progress, or dropped when none can (A104).
 PLAN_STALL_SECONDS = 30
 
 # What each survival param means to the planner, and which way tightens it
@@ -539,7 +541,7 @@ class Plan:
 
     ``params`` holds the effective survival params the states read (A9): the
     directives' values, tightened by ``set_param`` or the strategist (A35). ``current`` and ``goal_done`` only read;
-    ``advance``, ``drop_current`` and ``finish_current`` are the only calls that move the stack.
+    ``advance``, ``drop_current``, ``demote_current`` and ``finish_current`` are the only calls that move the stack.
     """
 
     goals: list[GoalOp]
@@ -614,6 +616,8 @@ class Plan:
                     self.wait_started_tick = world.tick
                 return
             note_goal_done(memory, op, "goal_done")
+            if memory is not None:
+                forget_stalled(memory.stalled_ops, op)
             self._pop_current()
 
     def drop_current(self, reason: str, memory: Memory | None = None) -> None:
@@ -644,12 +648,35 @@ class Plan:
         if head_dropped:
             self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = None
 
+    def demote_current(self, reason: str, memory: Memory | None = None) -> None:
+        """The head op stalled (A104): move it just below the next op that can
+        make progress, one not remembered as stalled (``Memory.stalled_ops``),
+        and drop it when none can. A directives op moves only among the
+        directives ops, which stay on top (A35). Raises ``goal_stalled``, or
+        ``goal_failed`` on a drop."""
+        op = self.current()
+        if op is None:
+            return
+        end = self.directive_end if self.index < self.directive_end else len(self.goals)
+        records = memory.stalled_ops if memory is not None else []
+        below = self.goals[self.index + 1 : end]
+        order, _, above = below_progress([op, *below], lambda o: o is op or find_stalled(records, o) is not None)
+        if above is None:
+            self.drop_current(reason, memory)
+            return
+        log.warning("plan: moved op %r below %r: %s", op, above, reason)
+        note_goal_stalled(memory, op, reason, above)
+        self.goals = self.goals[: self.index] + order + self.goals[end:]
+        self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = None
+
     def finish_current(self, reason: str, memory: Memory | None = None) -> None:
         """Pop an op whose state saw it finish (``fight_boss``, A38)."""
         op = self.current()
         if op is not None:
             log.info("plan: finished op %r: %s", op, reason)
             note_goal_done(memory, op, reason)
+            if memory is not None:
+                forget_stalled(memory.stalled_ops, op)
         self._pop_current()
 
     def note_progress(self) -> None:

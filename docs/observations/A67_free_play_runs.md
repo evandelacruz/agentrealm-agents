@@ -1142,3 +1142,13 @@ Per A87, each names the rule a fix should generalize.
 2. **Shop drops a held supply on the shop tile to make room, and it turns into shop stock** (`states/shop.py:71–84`, `loot.pickup_room` at `loot.py:118`). With the pack full, Shop dropped the held supply with the lowest loot score, a box of matches, before taking the potion. On the shop tile it showed again with `gem_price` 5, so the drop sold nothing and gave the box away. The planner had reserved the matches for clues ("matches are held for the green-walled garden and hedge maze", run 12). **Rule:** making room never drops an item the plan holds for a use, nor drops it where a drop becomes stock. With no item free to drop, the choice goes back to the planner.
 
 3. **The planner cannot see pack space** (`strategist.py:836`, State `held=`). The State lists held items and counts, but not slots used or the pack's size. So a buy that needs a drop is planned without knowing it. The pack carries a 25-gem mallet and a spare knife that no rule arms while gathering. **Rule:** State shows slots used and total, and the arc weighs what an unused item costs in pack room.
+
+### Run 14: stalled ops re-sent on top keep gather_gems from ever running, 0 gems
+
+Free play, 600 s, planner on. Only the plan-stack defect is written up here (A104).
+
+#### Stalled ops back on top
+
+0 gems all run. Three ops held the top of the stack through repeated stalls: a `travel` to a level entrance blocked by walls, a `break_block` on a rock the character could not reach and then could not break, and an `equip`. The stall rule dropped each after 30 s (`PLAN_STALL_SECONDS`), and the next reply put the same target back on top. The planner's own notes said "stuck" at 210 s, 348 s and 553 s, yet it re-sent the same unreachable targets. `gather_gems` sat below them and never reached the top.
+
+**Rule:** an op that stalls past the stall window moves below the next op that can make progress, with its target and why remembered, and is not put back on top until something gives a reason to retry: a new item held, a new clue, a new way known. The planner sees it in State. (Addressed in A104: `stalled.py`, `Plan.demote_current`, State `stalled_ops`.)

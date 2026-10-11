@@ -27,8 +27,10 @@ from ..equip import note_last_weapon
 from ..healing import note_heal_window
 from ..pathing import note_goto_reached
 from ..plan import OP_STATE, PLAN_STALL_SECONDS, Plan
+from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..shop import sync_shop
+from ..stalled import remember as remember_stalled, retry_basis
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome, top_executor
 from .boss import BossState, sync_boss
@@ -158,7 +160,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     if ctx.probe:
         return outcome  # not a decision window: no op's stall clock runs (A64)
     if op is not None and ctx.plan is not None and ctx.plan.current() is op:
-        _note_op_progress(ctx.plan, world, m, op, owner, outcome)
+        _note_op_progress(ctx.plan, world, m, op, owner, outcome, knowledge=ctx.knowledge)
     oscillation.note_move(m, outcome.intents, m.state)
     return outcome
 
@@ -171,13 +173,24 @@ def _settle_plan(plan: Plan, world: WorldModel, m: Memory) -> None:
         plan.advance(world, m)
 
 
-def _note_op_progress(plan: Plan, world: WorldModel, m: Memory, op: dict, owner: str | None, out: StateOutcome) -> None:
+def _note_op_progress(
+    plan: Plan,
+    world: WorldModel,
+    m: Memory,
+    op: dict,
+    owner: str | None,
+    out: StateOutcome,
+    *,
+    knowledge: KnowledgeBase | None = None,
+) -> None:
     """The executor moved the op forward, or its stall clock runs (A34).
 
     Any intent the executor sends for the op records it as acted on (A36);
     only progress resets the clock, and so does Break working the owner's
-    stuck escalation. A reflex holding the round leaves the clock alone; an op stalled for ``PLAN_STALL_SECONDS`` is dropped, so the
-    stack never pins the agent.
+    stuck escalation. A reflex holding the round leaves the clock alone. An op
+    stalled for ``PLAN_STALL_SECONDS`` is remembered as stalled, with why and
+    what was known then, and moved below the next op that can make progress
+    (dropped when none can), so the stack never pins the agent (A104).
     """
     if out.state == owner and out.intents:
         plan.acted = op
@@ -196,7 +209,9 @@ def _note_op_progress(plan: Plan, world: WorldModel, m: Memory, op: dict, owner:
             plan.stalled_since_tick = None
         return
     if plan.note_stalled(world.tick):
-        plan.drop_current(f"{owner}: no progress for {PLAN_STALL_SECONDS}s", memory=m)
+        why = f"{owner}: no progress for {PLAN_STALL_SECONDS}s"
+        remember_stalled(m.stalled_ops, op, why, world.tick, retry_basis(world, knowledge))
+        plan.demote_current(why, memory=m)
 
 
 # The ``Memory.goal`` labels each executor's walks carry, so dispatch can

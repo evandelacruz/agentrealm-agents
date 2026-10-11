@@ -36,7 +36,7 @@ def world(**kw) -> WorldModel:
 
 
 class BuyDoneTest(unittest.TestCase):
-    """A buy is done once it has paid: the gems held at its first Take spent,
+    """A buy is done once it has paid: the gems held at its latest Take spent,
     and the item owned (A106). What it paid from is the head op's own
     progress on the plan, like ``held_before``."""
 
@@ -93,6 +93,24 @@ class BuyDoneTest(unittest.TestCase):
         w = world(gems=10)
         w.carry_capacity = 30
         plan.advance(w, m)
+        self.assertIsNone(plan.current())
+
+    def test_gems_gained_after_a_refused_take_do_not_hide_the_purchase(self):
+        # A Take at 10 gems is refused, a gem pile on the way lifts it to 15, and
+        # the next Take lands at 15 -> 10: the chest raised the pack, held count 0.
+        w = world(gems=10)
+        w.entities = [Entity("supply", 5, (1, 0), "middle_chest", gem_price=5)]
+        plan = buy_plan("middle_chest")
+        plan.advance(w, Memory())
+        ctx = SimpleNamespace(plan=plan, memory=Memory(), knowledge=None, policy=None)
+        with unittest.mock.patch("agentrealm_agent.states.shop.planned_take") as take:
+            take.return_value = SimpleNamespace(intents=[{"verb": "Take", "supply_id": 5}], reason="take")
+            shop_outcome(w, ctx, "Shop")  # refused: nothing changes
+            w.gems = 15
+            shop_outcome(w, ctx, "Shop")  # this one lands
+        w.gems = 10
+        w.carry_capacity = 30
+        plan.advance(w, Memory())
         self.assertIsNone(plan.current())
 
     def test_shop_records_what_the_head_buy_paid_from(self):

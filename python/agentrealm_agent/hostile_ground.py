@@ -9,7 +9,9 @@ per hostile.
 Gather and Detour keep their targets and routes off this ground
 (``states/gather_safe.py``). A remembered post fades (``Sighting.strength``):
 once faded it holds no ground, only prices it, so Gather cuts its grass when
-no free grass is near (``Danger.price``). Retreat, Park
+no free grass is near (``Danger.price``). Ground near what a hostile holds,
+or near one in view, is priced the same way (``near_reach``): a target there
+may draw it out, so Gather and Detour count its steps. Retreat, Park
 and Heal pick a safe cell only outside it, and Flee runs toward the cell
 Retreat picked, so the two never pull opposite ways
 (``pathing.retreat_safe_goal``, free-play run 7).

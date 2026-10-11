@@ -19,7 +19,7 @@ from agentrealm_agent.hostile_ground import Danger, danger
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.states.detour import detour_find
+from agentrealm_agent.states.detour import Detour, detour_find
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_agent.survival import should_retreat, win_ratio
 from agentrealm_agent.world import Entity, Sighting, WorldModel, chebyshev
@@ -321,9 +321,11 @@ class RepriceTest(unittest.TestCase):
         w, c = world(), ctx()
         m = c.memory
         m.gather_target, m.goal, m.path = ("pile", (14, 10)), "gather", [(11, 10), (12, 10)]
+        m.detour = Detour(50, (14, 12), "gem", "travel", w.tick)
         w.entities = [biter()]
         sync_engagement(w, m, c.policy, c.params)
         self.assertIsNone(m.gather_target)
+        self.assertIsNone(m.detour)
         self.assertEqual((m.goal, m.path), ("", []))
 
 

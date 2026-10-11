@@ -764,11 +764,12 @@ def _pile_in(pos: Pos, region: tuple[int, int] | None) -> bool:
 
 
 def _nearest_clear(
-    w: WorldModel, cells: set[Pos], params, blocked: set[Pos], clear: Callable[[list[Pos]], bool]
+    w: WorldModel, cells: set[Pos], params: CostGridParams, blocked: set[Pos], clear: Callable[[list[Pos]], bool]
 ) -> tuple[Pos, list[Pos]] | None:
-    """The nearest of ``cells`` a path reaches with a first step open and a
+    """The cheapest of ``cells`` by path cost (``nearest_target``) a path reaches with a first step open and a
     ``clear`` route, and that path; up to ``ROUTE_TRIES`` searches. A cell
-    in a faded post's ground counts its ``params.priced`` steps further (A85)."""
+    in priced ground (near a hostile's, or a faded post's) counts its
+    ``params.priced`` steps further (``Danger.priced_cells``)."""
     here = w.pos
     assert here is not None
     cells = set(cells)
@@ -852,6 +853,6 @@ def _clear_of_hostiles(w: WorldModel, policy: Policy, p: Pos, d: Danger | None =
 
 def _nearest(here: Pos, cells: Iterable[Pos], priced: dict[Pos, int] | None = None) -> set[Pos]:
     """The ``GATHER_CANDIDATES`` cells closest to ``here`` (ties to the smaller
-    cell), a cell in a faded post's ground its ``priced`` steps further."""
+    cell), a cell in priced ground its ``priced`` steps further."""
     priced = priced or {}
     return set(sorted(cells, key=lambda p: (chebyshev(p, here) + priced.get(p, 0), p))[:GATHER_CANDIDATES])

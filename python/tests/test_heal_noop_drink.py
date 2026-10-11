@@ -164,7 +164,7 @@ class NoopDrinkTest(RefusalTest):
         self.decide()
         r = self.r.mem.heal_refusals[("use", 4)]
         self.assertEqual((r.cause, r.action), ("full_health", "full"))
-        w.max_health = 10  # hurt again by this reading, health not below 7
+        w.max_health = 20  # hurt again by this reading, health not below 7
         self.next_tick()
         self.assertNotIn(USE_SELF, self.decide())
         w.health = 6

@@ -13,8 +13,9 @@ a safe tile, a shop cell, a door, a supply) it keeps it until one of:
 - the plan op it serves changes (a new head is new information);
 - nothing pursued it for ``LAPSE_TICKS``: the episode it served (a
   retreat, a heal) is over, and the next one picks afresh;
-- the walk to it ballooned: its price rose since it was last priced (a wall
-  found ahead, a long way round) and it now costs more than the cheapest
+- the walk to it ballooned: its price rose over the rest of the walk it was
+  last priced on (a wall found ahead, a long way round; another state
+  walking the character off that walk is no rise) and it now costs more than the cheapest
   other candidate by a clear margin (``outpriced``).
 
 Another candidate becoming nearer is never a reason on its own: a walk is

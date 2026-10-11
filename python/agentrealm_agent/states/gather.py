@@ -760,14 +760,14 @@ def _replan_gather(
     pile = _nearest_clear(w, piles, params, blocked, clear)
     grass = _nearest_clear(w, set(preferred), params, blocked, clear)
     if pile and (grass is None or _cut_price("pile", pile[1], params) <= _cut_price("grass", grass[1], params)):
-        _commit_cut(m, params, "pile", pile)
+        _commit_cut(w, m, "pile", pile)
         return False
     if grass:
         explore = _explore_instead(w, m, policy, grass, params, blocked, clear, safe, odds(), d) if odds else None
         if explore:
             m.path, m.goal, m.gather_target = explore[1], GOAL, (FRONTIER, explore[0])
         else:
-            _commit_cut(m, params, "grass", grass)
+            _commit_cut(w, m, "grass", grass)
         return False
 
     if kept is not None and kept[0] == CLEAR and _clear_of_hostiles(w, policy, kept[1], d):
@@ -787,11 +787,17 @@ def _replan_gather(
     return False
 
 
-def _commit_cut(m: Memory, params: CostGridParams, kind: str, found: tuple[Pos, list[Pos]]) -> None:
+def _commit_cut(w: WorldModel, m: Memory, kind: str, found: tuple[Pos, list[Pos]]) -> None:
     """Commit to the cut target ``found`` (a cell and its path), and remember
-    what its walk was priced at (``_outpriced``)."""
+    the walk it was priced on (``_outpriced``)."""
     m.path, m.goal, m.gather_target = found[1], GOAL, (kind, found[0])
-    m.gather_price = (m.gather_target, _cut_price(kind, found[1], params))
+    m.gather_walk = _walk_from_here(m.gather_target, m.path, w)
+
+
+def _walk_from_here(target: tuple[str, Pos], path: list[Pos], w: WorldModel) -> tuple[tuple[str, Pos], tuple[Pos, ...]]:
+    """``target`` and the walk to it on ``path``, from the cell the character stands on."""
+    assert w.pos is not None
+    return target, (w.pos, *path)
 
 
 def _cut_price(kind: str, path: list[Pos], params: CostGridParams) -> int:
@@ -811,13 +817,18 @@ def _outpriced(
     blocked: set[Pos],
     clear: Callable[[list[Pos]], bool],
 ) -> bool:
-    """The kept cut target's walk on ``path`` costs more than when it was
-    last priced (a wall found ahead, a long way round), and more than the
-    cheapest other known cut target, pile or grass, by a clear margin
-    (``targets.outpriced``, A109). The other targets are priced only on a rise."""
+    """The kept cut target's walk on ``path`` costs more than the rest of the
+    walk it was last priced on, from the cell the character stands on (a
+    wall found ahead, a long way round), and more than the cheapest other
+    known cut target, pile or grass, by a clear margin (``targets.outpriced``,
+    A109). The other targets are priced only on such a rise. Standing off
+    that walk (another state walked the character away) is no rise: the walk
+    from here is the new price to measure against."""
     ahead = _cut_price(kept[0], path, params)
-    last = m.gather_price[1] if m.gather_price is not None and m.gather_price[0] == kept else None
-    m.gather_price = (kept, ahead)
+    walk = m.gather_walk[1] if m.gather_walk is not None and m.gather_walk[0] == kept else ()
+    m.gather_walk = _walk_from_here(kept, path, w)
+    here = w.pos
+    last = _cut_price(kept[0], list(walk[walk.index(here) + 1 :]), params) if here in walk else None
 
     def cheapest() -> int | None:
         found = ((kind, _nearest_clear(w, cells - {kept[1]}, params, blocked, clear)) for kind, cells in (("pile", piles), ("grass", grass)))

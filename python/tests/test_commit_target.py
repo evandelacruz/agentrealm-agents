@@ -321,24 +321,26 @@ class BalloonedWalkTest(unittest.TestCase):
     other cut targets, and let go past a clear margin (A109)."""
 
     def detour(self, gap_y: int, nearer=None) -> tuple[WorldModel, Memory]:
-        """Commit to grass at (12, 4), then find a wall at x=8 open only at ``gap_y``."""
+        """Commit to grass at (12, 4), walk three steps on, then find a wall at
+        x=8 open only at ``gap_y``; ``nearer``: grass that far from there."""
         w = field(width=21, height=21, at=(2, 4))
         w.view.tiles[(12, 4)] = "grass"
         m = Memory()
         gather_outcome(w, m, Policy(on_hostile="ignore"))
         self.assertEqual(m.gather_target, ("grass", (12, 4)))
-        walk_off(w, m, (5, 4))
+        w.pos, m.path = m.path[2], []  # Gather walked three steps on and its path ran out
+        self.assertEqual(w.pos[0], 5)
         for y in range(1, 20):
             if y != gap_y:
                 w.view.tiles[(8, y)] = "wall"
         if nearer is not None:
-            w.view.tiles[nearer] = "grass"
+            w.view.tiles[(w.pos[0] + nearer[0], w.pos[1] + nearer[1])] = "grass"
         gather_outcome(w, m, Policy(on_hostile="ignore"))
         return w, m
 
     def test_a_long_way_round_gives_way_to_nearer_grass(self):
-        _, m = self.detour(gap_y=19, nearer=(4, 4))
-        self.assertEqual(m.gather_target, ("grass", (4, 4)))
+        w, m = self.detour(gap_y=19, nearer=(-1, 0))
+        self.assertEqual(m.gather_target, ("grass", (w.pos[0] - 1, w.pos[1])))
 
     def test_a_long_way_round_with_nothing_cheaper_is_kept(self):
         _, m = self.detour(gap_y=19)
@@ -346,13 +348,24 @@ class BalloonedWalkTest(unittest.TestCase):
         self.assertEqual(m.path[-1], (12, 4))
 
     def test_a_short_way_round_is_kept_inside_the_margin(self):
-        _, m = self.detour(gap_y=10, nearer=(5, 10))  # 12 steps on against 6: under OUTPRICE_STEPS
+        _, m = self.detour(gap_y=10, nearer=(0, 9))  # a few steps more than 9: under OUTPRICE_RATIO
         self.assertEqual(m.gather_target, ("grass", (12, 4)))
 
     def test_nearer_grass_alone_never_prices_the_walk_again(self):
         w, m = self.detour(gap_y=4)  # the wall leaves the straight way open: no rise
         w.view.tiles[(6, 4)] = "grass"
         walk_off(w, m, (6, 3))
+        gather_outcome(w, m, Policy(on_hostile="ignore"))
+        self.assertEqual(m.gather_target, ("grass", (12, 4)))
+
+    def test_another_state_walking_us_away_is_no_rise(self):
+        w = field(width=21, height=21, at=(8, 4))
+        w.view.tiles[(12, 4)] = "grass"
+        m = Memory()
+        gather_outcome(w, m, Policy(on_hostile="ignore"))
+        self.assertEqual(m.gather_target, ("grass", (12, 4)))
+        walk_off(w, m, (3, 7))  # off the walk, no wall found: 9 steps on against 1
+        w.view.tiles[(2, 7)] = "grass"
         gather_outcome(w, m, Policy(on_hostile="ignore"))
         self.assertEqual(m.gather_target, ("grass", (12, 4)))
 

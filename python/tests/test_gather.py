@@ -735,7 +735,7 @@ class GatherPricesUnexploredGroundTest(unittest.TestCase):
 
     def test_an_edge_explore_gave_up_on_loses_to_known_grass(self):
         w, m = self.world(), Memory()
-        m.nav_stuck.backoff_until[nav_stuck.goal_key("explore", 7, (1, 1))] = w.tick + 100
+        nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("explore", 7, (1, 1)), "explore", w.tick)
         gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
         self.assertEqual(m.gather_target, ("grass", (40, 1)))
 

@@ -1,154 +1,33 @@
 """Free-play run 2 offline: 10 minutes, no deaths, gems 6 → 17 and nothing bought.
 
-Rebuilt here (A16, A9, A10, A66, A22, A63):
+Rebuilt here (A9, A10, A66, A22, A63): Park, Retreat and Heal aimed at safe
+tiles walled off by bush and wall, with no fallback. They now head for the
+nearest safe cell a path reaches, else the town cell.
 
-1. One pacing give-up on ``travel:town`` banned the town cell for the rest of
-   the run, so the potion buy was dropped. A give-up on a hub (town, shop)
-   now lapses, by time or by moving well off, and the planner sees when.
-2. Park, Retreat and Heal aimed at safe tiles walled off by bush and wall,
-   with no fallback. They now head for the nearest safe cell a path reaches,
-   else the town cell.
 Gather's region rules (a ``gather_gems`` x, y, yield pricing) are tested
 as rules in ``test_gather.py`` (``TargetRegionTest``, ``YieldPricingTest``).
 """
 
 from __future__ import annotations
 
-import json
 import unittest
 
 from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import SAFE_GOAL_CHECKS, SAFE_THREATENED_TICKS, grid_params, reachable_safe_goal
-from agentrealm_agent.plan import Plan
-from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.fight import retreat_tail
 from agentrealm_agent.states.retreat import retreat_step
-from agentrealm_agent.strategist import build_prompt, hub_give_up_lines
 from agentrealm_agent.travel import sync_town
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
-from tests.test_strategist import FakeLLM, fake_runner, make, round_trip
 from tests.test_survival_runs import MAP, ctx, hit, world
-
-TOWN = (9, 9)
-TOWN_OP = {"op": "travel", "to": "town", "x": 0, "y": 0}
 
 
 def give_up(m: Memory, w: WorldModel, goal: str, cell) -> None:
     nav_stuck.give_up(m, w, nav_stuck.track(m, w, goal, cell), "pacing")
-
-
-def elsewhere(w: WorldModel) -> WorldModel:
-    """``w`` as seen from another map: every hub give-up lapses."""
-    return WorldModel(character_id=w.character_id, map_id=-1, pos=(0, 0), tick=w.tick)
-
-
-class HubGiveUpLapsesTest(unittest.TestCase):
-    def setUp(self):
-        self.w = WorldModel(character_id=1, map_id=MAP, pos=(0, 0), tick=100)
-        self.m = Memory()
-
-    def test_a_town_give_up_lapses_after_the_cooldown(self):
-        give_up(self.m, self.w, "travel:town", TOWN)
-        stuck = self.m.nav_stuck
-        self.assertIn((MAP, TOWN), stuck.given_up_travel)
-        self.w.tick += nav_stuck.HUB_GIVE_UP_TICKS - 1
-        self.assertEqual(nav_stuck.expire_hub_give_ups(stuck, self.w), [])
-        self.w.tick += 1
-        self.assertEqual(nav_stuck.expire_hub_give_ups(stuck, self.w), [(MAP, TOWN)])
-        self.assertNotIn((MAP, TOWN), stuck.given_up_travel)
-        self.assertEqual(stuck.given_up_hubs, {})
-
-    def test_a_shop_give_up_lapses_once_the_agent_moved_well_off(self):
-        give_up(self.m, self.w, "travel:shop", TOWN)
-        stuck = self.m.nav_stuck
-        self.w.pos = (nav_stuck.HUB_GIVE_UP_CELLS - 1, 0)
-        self.assertEqual(nav_stuck.expire_hub_give_ups(stuck, self.w), [])
-        self.w.pos = (0, -nav_stuck.HUB_GIVE_UP_CELLS)
-        self.assertEqual(nav_stuck.expire_hub_give_ups(stuck, self.w), [(MAP, TOWN)])
-
-    def test_travel_walks_to_town_again_once_its_give_up_lapses(self):
-        # Review on #140: a lapse left Travel's backoff on, so it would not move.
-        w, c = world(), ctx()
-        w.respawn_anchors = [(MAP, (20, 10))]
-        c.plan = Plan([dict(TOWN_OP)], dict(PARAM_DEFAULTS))
-        for _ in range(4):  # from the 4th give-up the backoff outlasts the cooldown
-            give_up(c.memory, w, "travel:town", (20, 10))
-            nav_stuck.expire_hub_give_ups(c.memory.nav_stuck, elsewhere(w))
-        give_up(c.memory, w, "travel:town", (20, 10))
-        self.assertTrue(nav_stuck.backed_off(c.memory, "travel:town", MAP, (20, 10), w.tick))
-        w.tick += nav_stuck.HUB_GIVE_UP_TICKS
-        self.assertEqual(nav_stuck.expire_hub_give_ups(c.memory.nav_stuck, w), [(MAP, (20, 10))])
-        self.assertFalse(nav_stuck.backed_off(c.memory, "travel:town", MAP, (20, 10), w.tick))
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Travel")
-        self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
-
-    def test_a_distance_lapse_ends_the_backoff_too(self):
-        give_up(self.m, self.w, "travel:town", TOWN)
-        self.w.pos = (0, nav_stuck.HUB_GIVE_UP_CELLS)
-        nav_stuck.expire_hub_give_ups(self.m.nav_stuck, self.w)
-        self.assertFalse(nav_stuck.backed_off(self.m, "travel:town", MAP, TOWN, self.w.tick))
-
-    def test_a_give_up_with_no_position_known_waits_out_its_cooldown(self):
-        att = nav_stuck.track(self.m, self.w, "travel:town", TOWN)
-        self.w.pos = None  # unknown at the give-up, as after a warp
-        nav_stuck.give_up(self.m, self.w, att, "pacing")
-        self.w.pos = (0, 0)
-        self.assertEqual(nav_stuck.expire_hub_give_ups(self.m.nav_stuck, self.w), [])
-
-    def test_a_hub_cell_given_up_as_a_point_too_holds_for_the_run(self):
-        give_up(self.m, self.w, "travel:town", TOWN)
-        give_up(self.m, self.w, "travel:point", TOWN)
-        self.w.tick += nav_stuck.HUB_GIVE_UP_TICKS
-        self.assertEqual(nav_stuck.expire_hub_give_ups(self.m.nav_stuck, self.w), [])
-        self.assertIn((MAP, TOWN), self.m.nav_stuck.given_up_travel)
-
-    def test_a_point_give_up_holds_for_the_run(self):
-        give_up(self.m, self.w, "travel:point", TOWN)
-        self.w.tick += 100 * nav_stuck.HUB_GIVE_UP_TICKS
-        self.w.pos = (500, 500)
-        self.assertEqual(nav_stuck.expire_hub_give_ups(self.m.nav_stuck, self.w), [])
-        self.assertIn((MAP, TOWN), self.m.nav_stuck.given_up_travel)
-
-    def test_the_planner_sees_the_give_up_and_when_it_lapses(self):
-        give_up(self.m, self.w, "travel:town", TOWN)
-        lines = hub_give_up_lines(self.m.nav_stuck)
-        self.assertEqual(
-            lines,
-            [{"cell": f"{MAP}:9,9", "retry_at_tick": 100 + nav_stuck.HUB_GIVE_UP_TICKS, "or_after_moving_cells": nav_stuck.HUB_GIVE_UP_CELLS, "from": "0,0"}],
-        )
-        messages = build_prompt(
-            triggers=[],
-            w=self.w,
-            plan=Plan([], dict(PARAM_DEFAULTS)),
-            directives=Directives(params=dict(PARAM_DEFAULTS)),
-            knowledge=None,
-            given_up_travel=self.m.nav_stuck.given_up_travel,
-            given_up_hubs=lines,
-        )
-        self.assertIn(f"given_up_hubs={json.dumps(lines, sort_keys=True)}", messages[1]["content"])
-        self.assertIn("given_up_hubs, with when that give-up lapses", messages[0]["content"])
-
-    def test_a_town_travel_is_filtered_until_its_give_up_lapses(self):
-        s = make(FakeLLM({"goals": [TOWN_OP]}, {"goals": [TOWN_OP]}))
-        r = fake_runner()
-        r.world.respawn_anchors = [(7, TOWN)]
-        give_up(r.mem, r.world, "travel:town", TOWN)
-        r.mem.nav_stuck.stuck_signals.clear()
-        round_trip(s, r)
-        self.assertIsNone(r.plan.current(), "given up: the re-sent travel:town never reaches the stack")
-        r.world.tick += nav_stuck.HUB_GIVE_UP_TICKS
-        Runner.expire_hub_give_ups(r)
-        r.log.assert_called()
-        s.clock.now += 60
-        round_trip(s, r)
-        self.assertEqual(r.plan.current()["to"], "town", "lapsed: the planner may send it again")
 
 
 def wall_in(w: WorldModel, cell) -> None:

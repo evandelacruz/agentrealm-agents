@@ -125,7 +125,7 @@ class NearerCandidateTest(unittest.TestCase):
         record_shop_cell(kb, MAP, (8, 4))
         self.assertEqual(resolve_destination(w, c, op).pos, (18, 4))
         # Given up on: another candidate is picked.
-        c.memory.nav_stuck.given_up_travel[(MAP, (18, 4))] = w.tick
+        nav_stuck.remember_give_up(c.memory.nav_stuck, nav_stuck.goal_key("travel:shop", MAP, (18, 4)), "travel:shop", w.tick)
         self.assertEqual(resolve_destination(w, c, op).pos, (8, 4))
         self.assertEqual(targets.committed(c.memory, w, TRAVEL_TARGET, op).target.pos, (8, 4))
 

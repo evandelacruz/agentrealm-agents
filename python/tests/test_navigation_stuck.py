@@ -213,7 +213,7 @@ class BreakResetTest(unittest.TestCase):
                 break
         self.assertTrue(given_up, "the break loop never gave up")
         self.assertLessEqual(failures, 6, "WALK, CAUTIOUS, BREAK, WALK, REVEAL, ALT_ROUTE")
-        self.assertIn((w.map_id, target), m.nav_stuck.given_up_travel)
+        self.assertIn((w.map_id, target), nav_stuck.given_up_dests(m.nav_stuck, w.tick, "travel:"))
         self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
 
     def test_break_then_real_progress_restarts_the_ladder(self):
@@ -240,9 +240,9 @@ class BackoffTest(unittest.TestCase):
         self.assertGreaterEqual(second - first, nav_stuck.BACKOFF_BASE_TICKS)
         key = nav_stuck.goal_key(WALK, 1, sc.goal)
         n = len(sigs)
-        self.assertEqual(r.memory.nav_stuck.backoff_power[key], n)
+        self.assertEqual(r.memory.nav_stuck.given_up[key].power, n)
         self.assertEqual(
-            r.memory.nav_stuck.backoff_until[key] - sigs[-1]["tick"], nav_stuck.BACKOFF_BASE_TICKS * 2 ** (n - 1)
+            r.memory.nav_stuck.given_up[key].until - sigs[-1]["tick"], nav_stuck.BACKOFF_BASE_TICKS * 2 ** (n - 1)
         )
 
     def test_signal_queue_is_bounded(self):
@@ -265,7 +265,7 @@ class FrontierDropTest(unittest.TestCase):
         self.assertEqual((att.goal, att.target), ("explore", first))
         att.level, att.moves = nav_stuck.REVEALED, nav_stuck.PROGRESS_MOVE_LIMIT
         out = dispatch(w, sim_ctx(m, policy))  # no plan: the safe default
-        self.assertIn(nav_stuck.goal_key("explore", 1, first), m.nav_stuck.backoff_until)
+        self.assertIn(nav_stuck.goal_key("explore", 1, first), m.nav_stuck.given_up)
         self.assertEqual(m.nav_stuck.stuck_signals[0]["goal"], "explore")
         self.assertNotEqual(m.path[-1], first, "the dropped frontier is not picked again")
         self.assertEqual(out.intents[0]["verb"], "SetPosition")
@@ -357,7 +357,7 @@ class TravelBackoffTest(unittest.TestCase):
         self.assertEqual(out.yielded, [f"Travel: {WALK} blocked"], "backed off: Travel yields")
         self.assertEqual(out.state, "Explore", "the safe default moves instead")
         self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
-        w.tick = m.nav_stuck.backoff_until[nav_stuck.goal_key(WALK, 1, sc.goal)]
+        w.tick = m.nav_stuck.given_up[nav_stuck.goal_key(WALK, 1, sc.goal)].until
         dispatch(w, c)
         self.assertEqual(len(m.nav_stuck.stuck_signals), 2, "retried after the backoff, and stuck again")
 
@@ -487,7 +487,7 @@ class CrossMapStuckTest(unittest.TestCase):
         self.assertEqual(r.outcome, "budget")
         self.assertFalse(any(row["reason"].startswith(WALK) for row in r.trace), "Travel never stepped")
         self.assertEqual(r.memory.nav_stuck.stuck_signals, [])
-        self.assertEqual(r.memory.nav_stuck.backoff_until, {})
+        self.assertEqual(r.memory.nav_stuck.given_up, {})
         self.assertNotIn(WALK, {a.goal for a in r.memory.nav_stuck.attempts.values()})
         self.assertIsNone(plan.current(), "the stalled op is dropped (A34)")
 
@@ -550,7 +550,7 @@ class TraceReplayTest(unittest.TestCase):
             if d.intent is not None:
                 self.assertEqual(sim.apply(w, m, sc, (d.intent["x"], d.intent["y"]), {}), row["applied"], row)
         self.assertEqual(m.nav_stuck.stuck_signals, recorded.memory.nav_stuck.stuck_signals)
-        self.assertEqual(m.nav_stuck.backoff_until, recorded.memory.nav_stuck.backoff_until)
+        self.assertEqual(m.nav_stuck.given_up, recorded.memory.nav_stuck.given_up)
 
 
 if __name__ == "__main__":

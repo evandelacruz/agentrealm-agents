@@ -25,7 +25,7 @@ from ..plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from ..travel.ops import travel_op_from_plan_goal
 from .. import targets as targets_mod
 from ..navigation.rejection import locked_doors_from_kb
-from ..travel.resolve import ResolvedDestination, at_destination, picks_nearest, resolve_travel, still_candidate
+from ..travel.resolve import ResolvedDestination, at_destination, given_up_travel, picks_nearest, resolve_travel, still_candidate
 from ..world import DOORS, Pos, WorldModel
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import explore_outcome, plan_sets
@@ -149,7 +149,7 @@ def resolve_destination(w: WorldModel, ctx: PlayContext, op: GoalOp) -> Resolved
     """
     m = ctx.memory
     t = travel_op_from_plan_goal(op)
-    given_up = m.nav_stuck.given_up_travel
+    given_up = given_up_travel(m.nav_stuck, w.tick)
     if t.to == "entrance" and t.x is None:
 
         def pick_door() -> ResolvedDestination | None:

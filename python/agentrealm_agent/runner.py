@@ -23,7 +23,7 @@ from .brain import (
 )
 from .navigation.rejection import learn_step_rejection, on_block_changed
 from .navigation.stuck import active as nav_active
-from .navigation.stuck import expire_hub_give_ups
+from .navigation.stuck import lapsed as lapsed_give_ups
 from .stalled import lapse as lapse_stalled, retry_basis
 from .navigation.stuck import on_break_opened, on_break_tried
 from .navigation.stuck import on_rejection as nav_on_rejection
@@ -76,7 +76,7 @@ from .healing import (
 from .shop import note_shop_result
 from .supplies import heals, is_food
 from .states.explore import plan_sets
-from .travel.resolve import travel_given_up
+from .travel.resolve import given_up_travel, travel_given_up
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.strength import loadout_key
 from .executor import (
@@ -253,12 +253,16 @@ class Runner:
             if any(same_ops([op], [e]) for e in ended) or self.travel_given_up(op):
                 self.directives.unpin(goal)
 
-    def expire_hub_give_ups(self) -> None:
-        """Forget the Travel give-ups on a hub (town, shop) that lapsed, by time
-        or by the agent moving well off, so the planner may send it there again
-        (``stuck.expire_hub_give_ups``; free-play run 2)."""
-        for mid, (x, y) in expire_hub_give_ups(self.mem.nav_stuck, self.world):
-            self.log("stuck", f"give-up on {mid}:{x},{y} lapsed", {"stuck": {"event": "lapsed", "map_id": mid, "target": [x, y]}})
+    def note_lapsed_give_ups(self) -> None:
+        """Trace each give-up whose backoff ended (``stuck.lapsed``): its
+        target may be walked to again, and a Travel op to it planned again (A90)."""
+        for rec in lapsed_give_ups(self.mem.nav_stuck, self.world.tick):
+            x, y = rec.target
+            self.log(
+                "stuck",
+                f"give-up on {rec.goal} {rec.map_id}:{x},{y} lapsed",
+                {"stuck": {"event": "lapsed", "goal": rec.goal, "map_id": rec.map_id, "target": [x, y]}},
+            )
 
     def expire_stalled_ops(self) -> None:
         """Forget the stalled ops something has given a reason to retry (a new
@@ -271,14 +275,13 @@ class Runner:
     def drop_given_up_ops(self) -> None:
         """A ``travel`` op whose destination stuck detection gave up on, by
         the cell it resolves to whatever its ``to`` (a ``shop`` or
-        ``hunting_ground`` only once no candidate is left), leaves the stack for
-        good, wherever it sits (A16): a directives op, or a planner
+        ``hunting_ground`` only once no candidate is left), leaves the stack, wherever it sits (A16): a directives op, or a planner
         op sent before the give-up. Otherwise the backoff's end walks it
         again, and every planner reply keeps a directives op on top. Its
         ``goal_failed`` signal unpins it. A planner reply that re-sends one
-        never reaches the stack (``Strategist._settle`` filters it), so this
-        fires once per op. A new head walks a path of its own."""
-        if not self.mem.nav_stuck.given_up_travel:
+        while the give-up holds never reaches the stack (``Strategist._settle``
+        filters it); once the backoff ends, sending it again is the planner's call. A new head walks a path of its own."""
+        if not given_up_travel(self.mem.nav_stuck, self.world.tick):
             return
         head = self.plan.current()
         self.plan.drop_ops(self.travel_given_up, "stuck detection gave up on its target", self.mem)
@@ -289,7 +292,8 @@ class Runner:
     def travel_given_up(self, op: dict) -> bool:
         """Whether stuck detection gave up on where a ``travel`` op goes
         (``travel.resolve.travel_given_up``)."""
-        return travel_given_up(op, self.world, self.knowledge, self.mem.strength, self.mem.nav_stuck.given_up_travel)
+        given_up = given_up_travel(self.mem.nav_stuck, self.world.tick)
+        return travel_given_up(op, self.world, self.knowledge, self.mem.strength, given_up)
 
     def reload_directives(self, old_goals: list[str]) -> None:
         """Apply reloaded directives to the plan (A34).
@@ -370,7 +374,7 @@ class Runner:
         try:
             while not self.stop.is_set():
                 self.next_window(not_before)
-                self.expire_hub_give_ups()
+                self.note_lapsed_give_ups()
                 self.expire_stalled_ops()
                 self.unpin_done_goals()
                 old_goals = self.directives.directives.goals

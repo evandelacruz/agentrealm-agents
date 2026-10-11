@@ -18,7 +18,6 @@ from agentrealm_agent.runner import Runner
 from agentrealm_agent.stalled import (
     STALLED_KEPT,
     below_progress,
-    break_cells,
     find,
     forget,
     lapse,
@@ -156,7 +155,6 @@ class MapScopeTest(unittest.TestCase):
         m = self.on_maps(1, 2)
         forget(m.stalled_ops, BREAK, 2)
         self.assertEqual([r.map_id for r in m.stalled_ops], [1])
-        self.assertEqual(break_cells(m.stalled_ops, 1), {(5, 5)})
 
     def test_an_op_with_no_cell_of_its_own_stays_stalled_on_any_map(self):
         # A buy, an equip or a gather with no region stalled wherever it runs:

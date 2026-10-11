@@ -1,40 +1,33 @@
-"""The oscillation guard: stop pacing back and forth between two cells (A15, A58).
+"""The oscillation guard: stop pacing back and forth between two cells (A15, A58, A90).
 
-Two states can fight over the character: one steps it east, the next decision
+Two walks can fight over the character: one steps it east, the next decision
 another steps it back west, and it paces between two cells for minutes. No
 single state sees that, because each one only ever sends one sensible step.
 
 So dispatch (``states/dispatch.py``) asks this module once per decision,
 before any state runs. It remembers the cells the character stood on at the
-last few decisions; when the last ``OSCILLATION_STEPS`` of them hold at most
-2 distinct cells, the character is pacing. Every walk that made one of the
-paced moves is then given up, not only the one walked last: while the other
-walk pulls it back, none of them can get nearer. A walk is given up through
-stuck detection's own step 5 (``stuck.give_up``, reason ``pacing``): backed
-off for ``BACKOFF_BASE_TICKS`` doubled on each give-up, its path and
-commitment dropped, and a ``stuck`` signal queued. Break's walk to the block
-a stuck attempt's step 2 nominated is that attempt's walk too: when only
-the break walk moved, the ladder leaves step 2 (``stuck.escalate``, reason
-``pacing``) and the block is remembered as a stalled ``break_block`` in
-``Memory.stalled_ops`` (A104), so no walk is sent to open it again until
-something gives a reason to retry (``stalled.break_cells``, A111). An
-``oscillation`` event goes to the trace, and dispatch picks again with those
-targets out of the way. It works the same whichever states caused it.
+last few decisions, and the walk each move into them belonged to; when the
+last ``OSCILLATION_STEPS`` cells hold at most 2 distinct ones, the
+character is pacing, and while one walk pulls it back none of them can get
+nearer. So every walk that made one of the paced moves is given up,
+whichever state sent it and whichever stuck attempt was active: a walk is
+known by the target it heads for (``walk_key``), not by the state or
+ladder level that sent it. It is given up through the ladder's own step 5
+(``stuck.give_up``, reason ``pacing``): remembered with a backoff, its path
+and commitment dropped, and a ``stuck`` trigger raised, so the planner
+decides whether the goal behind it is still worth it. Every walk asks
+whether its target is backed off, so none of them walks there again until
+the backoff ends.
 
-Giving up a walk target is not enough when the plan's top op's executor is
-one of the pacers: each step it sends counts as progress, so the op never
-stalls, and the other state just walks to its next target. Dispatch then
-treats that op as stalled: remembered, and moved below the next op that can
-make progress or dropped when none can, with a why that tells the planner
-which states paced between which cells (``states/dispatch.py``
-``_stall_paced_op``, A103, A104).
+A walk to a block is a walk like any other. When the block a stuck
+attempt's step 2 would open is a target given up, that attempt leaves step 2
+(``stuck.escalate``, reason ``pacing``), and no ladder nominates the block
+again while it is backed off (``break_memory.given_up_blocks``).
 
-After each decision dispatch also calls ``note_move``, so the guard knows
-which walk, and which stuck attempt, made each move. A target is given up
-only when its own walk was one of the moves: states that pace with steps of
-their own (Retreat, Fight, Flee) back nothing off. Heal's and Loot's walks are stuck attempts of their
-own (``pathing.bounded_step``), so pacing on one of them gives up its own
-food, pickup or safe tile.
+An ``oscillation`` event goes to the trace, and dispatch picks again with
+those targets out of the way. When the plan's top op's executor made a
+paced move that was no walk, nothing of its was given up, so dispatch
+stalls the op instead (``states/dispatch.py`` ``_stall_paced_op``, A104).
 
 Survival-only pacing is corrected here too, in the same one place. When
 only Flee and Retreat made the moves, the guard hands the paced cells to
@@ -51,12 +44,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..stalled import remember as remember_stalled, retry_basis
 from ..world import Pos, WorldModel
 from . import stuck as nav_stuck
 
 if TYPE_CHECKING:
-    from ..knowledge_base import KnowledgeBase
     from ..memory import Memory
 
 # Decisions in a row, each on a new cell, that may hold only 2 distinct cells
@@ -83,22 +74,24 @@ def pacing(cells: list[Pos]) -> bool:
     return len(window) == OSCILLATION_STEPS and len(set(window)) <= OSCILLATION_CELLS_MAX
 
 
-def check(m: Memory, w: WorldModel, knowledge: KnowledgeBase | None = None) -> dict | None:
-    """Note where the character stands; if it is pacing, give up what it walks to.
+def check(m: Memory, w: WorldModel) -> dict | None:
+    """Note where the character stands; if it is pacing, give up every walk that paced.
 
-    Every stuck attempt whose walk made some of the moves (``note_move``) is
-    given up (``_give_up_walks``). When other states did all the moving
-    (Retreat, Fight or Flee pacing on their own), a goto or explore attempt
-    left over from earlier did not cause it, so nothing is backed off; the
-    event still goes to the trace.
+    Each walk that made one of the paced moves (``note_move``) is given up
+    (``_give_up_walks``). When only steps that are no walk did the moving
+    (a Fight approach), nothing is backed off; the event still goes to the
+    trace.
 
-    When only Flee and Retreat did the moving, the paced cells are kept for
-    ``take_escape`` and the event carries ``escape: true``. They hold for
-    this decision only: the next ``check`` clears them, read or not.
+    When only Flee and Retreat did the moving, nothing is given up: the
+    paced cells are kept for ``take_escape`` and the event carries
+    ``escape: true``. They hold for this decision only: the next ``check``
+    clears them, read or not.
 
     Returns the ``oscillation`` event (also queued on
-    ``m.nav_stuck.oscillations`` for the trace), or None. It names each walk
-    given up in ``goals`` (the first also as ``goal`` and ``target``).
+    ``m.nav_stuck.oscillations`` for the trace), or None. ``walks`` lists
+    each walk given up with the states that walked it, ``goals`` their goals
+    (the first also as ``goal`` and ``target``), and ``escalated`` the stuck
+    attempts that left step 2 because their block was given up.
     """
     stuck = m.nav_stuck
     stuck.escape_from = set()  # held only for the decision the guard fires on
@@ -120,75 +113,67 @@ def check(m: Memory, w: WorldModel, knowledge: KnowledgeBase | None = None) -> d
     moves = stuck.recent_moves[1:]
     states = sorted({state for _, state, _ in moves if state})
     stuck.recent_cells, stuck.recent_moves = [], []
-    event = {
+    event: dict = {
         "event": "oscillation",
         "reason": GIVE_UP_REASON,
         "tick": w.tick,
         "map_id": w.map_id,
         "cells": [list(p) for p in cells],
         "states": states,
+        "unwalked": sorted({state for goal, state, key in moves if state and not key}),
     }
     if states and set(states) <= ESCAPE_STATES:
         stuck.escape_from = set(cells)
         event["escape"] = True
-    given = _give_up_walks(m, w, moves, cells, knowledge)
+        given, escalated = [], []  # the escape is planned afresh around the cells instead
+    else:
+        given, escalated = _give_up_walks(m, w, moves)
     if given:
-        event.update(goal=given[0]["goal"], target=given[0]["target"], goals=[g["goal"] for g in given])
-        breaks = [g["break"] for g in given if "break" in g]
-        if breaks:
-            event["breaks"] = breaks
+        event.update(goal=given[0]["goal"], target=given[0]["target"], goals=[g["goal"] for g in given], walks=given)
+    if escalated:
+        event["escalated"] = escalated
     stuck.oscillations.append(event)
     del stuck.oscillations[:-EVENTS_KEPT]
     return event
 
 
-def _give_up_walks(
-    m: Memory, w: WorldModel, moves: list[tuple[str, str, str]], cells: list[Pos], knowledge: KnowledgeBase | None
-) -> list[dict]:
-    """Give up each stuck attempt on this map whose walk made one of ``moves``.
+def _give_up_walks(m: Memory, w: WorldModel, moves: list[tuple[str, str, str]]) -> tuple[list[dict], list[dict]]:
+    """Give up every walk on this map that made one of ``moves``; then every
+    stuck attempt whose step 2 block was one of their targets leaves step 2.
 
-    An attempt whose own walk moved is given up (``stuck.give_up``). One
-    whose only moves were Break's walk to the block its step 2 nominated
-    leaves step 2 instead (``stuck.escalate``): that block is what cannot be
-    got nearer, and it is remembered as a stalled ``break_block`` (A104,
-    A111), so neither this attempt's ladder nor a later one sends Break to
-    it again until something gives a reason to retry. Returns what was given
-    up, in the order the walks first moved.
+    A walk with a stuck attempt of its own is given up through it; any other
+    (a walk to a block, a waypoint) through a fresh one, so it is remembered
+    and backed off the same way. Returns the walks given up, in the order
+    they first moved, and the attempts that left step 2.
     """
     stuck = m.nav_stuck
     given: list[dict] = []
+    targets: set = set()
     for key in dict.fromkeys(k for _, _, k in moves if k):
-        att = stuck.attempts.get(key)
-        if att is None or att.map_id != w.map_id:
+        map_id, target = nav_stuck.key_dest(key)
+        if map_id != w.map_id:
             continue
-        walked = {goal for goal, _, k in moves if k == key}
-        entry = {"goal": att.goal, "target": list(att.target)}
-        if att.goal in walked:
-            nav_stuck.give_up(m, w, att, GIVE_UP_REASON)
-        elif att.level == nav_stuck.BREAK:
-            block = nav_stuck.break_target(att)
-            if block is not None and att.break_cap:
-                op = {"op": "break_block", "x": block[0], "y": block[1], "capability": att.break_cap}
-                between = " and ".join(f"{x},{y}" for x, y in cells)
-                why = f"Break paced between {between} walking to it: no way to the block"
-                remember_stalled(m.stalled_ops, op, why, w.tick, retry_basis(w, knowledge), w.map_id)
-                entry["break"] = list(block)
+        goal = next(g for g, _, k in moves if k == key)
+        att = stuck.attempts.get(key) or nav_stuck.NavAttempt(key=key, goal=goal, target=target, map_id=map_id)
+        nav_stuck.give_up(m, w, att, GIVE_UP_REASON)
+        targets.add(target)
+        walkers = sorted({state for _, state, k in moves if k == key and state})
+        given.append({"goal": goal, "target": list(target), "states": walkers})
+    escalated: list[dict] = []
+    for att in list(stuck.attempts.values()):
+        block = nav_stuck.break_target(att)
+        if att.map_id == w.map_id and att.level == nav_stuck.BREAK and block in targets:
             nav_stuck.escalate(m, w, att, GIVE_UP_REASON)
-        else:
-            continue
-        given.append(entry)
-    return given
+            escalated.append({"goal": att.goal, "target": list(att.target), "block": list(block)})
+    return given, escalated
 
 
-def note_move(m: Memory, intents: list[dict] | None, state: str) -> None:
-    """After a decision: which walk, and which stuck attempt, the move it sends belongs to.
+def note_move(m: Memory, w: WorldModel, intents: list[dict] | None, state: str) -> None:
+    """After a decision: which walk the move it sends belongs to.
 
-    The goal of ``m.path`` when the first move lands on the path's next cell,
-    else "" (a step of its own, such as a Fight approach or a detour). A
-    step that happens to land on the next cell of a path another state left
-    behind counts for that path's walk. The attempt is the active one when
-    the walk is its own, or Break's walk to the very block the attempt's
-    step 2 nominated (``walk_attempt``). The next ``check`` files it with the cell
+    A move is a walk's when it lands on the next cell of ``m.path``, whoever
+    planned that path; else it is a step of its own (a Fight approach, a
+    detour step) and no walk's. The next ``check`` files it with the cell
     the move led to.
     """
     target = None
@@ -197,27 +182,27 @@ def note_move(m: Memory, intents: list[dict] | None, state: str) -> None:
             target = (intent["x"], intent["y"])
             break
     goal = m.goal if target is not None and m.path[:1] == [target] else ""
-    m.nav_stuck.last_move = (goal, state if intents else "", walk_attempt(m, goal))
+    m.nav_stuck.last_move = (goal, state if intents else "", walk_key(m, w, goal))
 
 
-def walk_attempt(m: Memory, goal: str) -> str:
-    """The key of the active stuck attempt the walk ``goal`` belongs to, or "".
+def walk_key(m: Memory, w: WorldModel, goal: str) -> str:
+    """The give-up key of the target the walk ``goal`` heads for, or "" for no walk.
 
-    A break walk is the attempt's only when the attempt is at step 2 and the
-    walk ends on the block it nominated: a ``break_block`` op's walk or
-    Heal's cut toward food (``Memory.goal`` ``break`` too) to any other
-    block is no attempt's.
+    The target is the active stuck attempt's when that attempt is this
+    walk's, else the one the walk committed to (``Memory.walks``), else
+    where its path ends. Which attempt is active does not change whether a
+    walk is filed: every walk has a target.
     """
-    stuck = m.nav_stuck
-    att = stuck.attempts.get(stuck.active) if goal and stuck.active else None
-    if att is None:
+    if not goal or w.map_id is None:
         return ""
-    if att.goal == goal:
+    stuck = m.nav_stuck
+    att = stuck.attempts.get(stuck.active) if stuck.active else None
+    if att is not None and att.goal == goal and att.map_id == w.map_id:
         return att.key
-    block = nav_stuck.break_target(att)
-    if goal == nav_stuck.BREAK_GOAL and att.level == nav_stuck.BREAK and block is not None and m.path[-1:] == [block]:
-        return att.key
-    return ""
+    walk = m.walks.get(goal)
+    if walk is not None and walk.map_id == w.map_id:
+        return nav_stuck.goal_key(goal, w.map_id, walk.target)
+    return nav_stuck.goal_key(goal, w.map_id, m.path[-1]) if m.path else ""
 
 
 def take_escape(m: Memory, w: WorldModel) -> set[Pos]:

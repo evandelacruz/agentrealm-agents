@@ -6,10 +6,22 @@ from collections.abc import Collection
 from dataclasses import dataclass
 
 from ..knowledge_base import KnowledgeBase
+from ..navigation.stuck import NavStuckMemory, given_up_dests
 from ..world import Pos, WorldModel, chebyshev
 from .knowledge import entrance_from_kb, iter_hunting_cells, iter_shop_cells, town_from_kb
 from .ops import TravelOp, travel_op_from_plan_goal
 from .strength import StrengthBracket
+
+
+# Every Travel walk's ``Memory.goal`` starts with this (``travel:<to>``).
+TRAVEL_GOAL_PREFIX = "travel:"
+
+
+def given_up_travel(stuck: NavStuckMemory, tick: int) -> dict[tuple[int, Pos], int]:
+    """The destinations a Travel walk gave up on and is still backed off
+    from (stuck detection's one memory, A16, A90), each with the tick it may
+    be travelled to again."""
+    return given_up_dests(stuck, tick, TRAVEL_GOAL_PREFIX)
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,7 @@ weapon a drink swapped out (A24)."""
 
 from __future__ import annotations
 
-from ..break_memory import nominate_on_path
+from ..break_memory import given_up_blocks, nominate_on_path
 from ..config import Policy
 from ..healing import (
     carried_heal,
@@ -36,7 +36,6 @@ from ..pathing import (
     reachable_safe_goal,
     safe_ruled_out,
 )
-from ..stalled import break_cells
 from ..survival import hostiles_in_range, hostiles_reaching, town_cell
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
@@ -358,7 +357,7 @@ def _cut_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at: 
     the walk to it then decides, and gives it up if it goes nowhere. Food
     behind bushes the weapon cuts was given up ``no_path`` before (A16 Walk run 4).
     """
-    choice = nominate_on_path(w, ctx.knowledge, w.pos, at, break_cells(m.stalled_ops, w.map_id))
+    choice = nominate_on_path(w, ctx.knowledge, w.pos, at, given_up_blocks(m.nav_stuck, w.map_id, w.tick))
     if choice is None:
         return None
     plan_avoid, plan_costly = _plan_blocked(w, m, policy, ctx)

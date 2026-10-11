@@ -1,4 +1,4 @@
-"""Stuck detection and escalation steps 1, 3 and 5 (A15).
+"""Stuck detection: one escalation ladder for every walk, and one memory of what failed where (A15, A90).
 
 See docs/PLAYABLE_AGENT_PLAN.md Navigation §3–§4. One ``NavAttempt`` per
 (goal, map, target) on the current map. Each escalation level gets a fresh
@@ -23,6 +23,16 @@ progress window, so a level is left only when its own window fails:
   carries on from the level that reset it, so it still ends in a give-up.
 - Step 5: give up, back off ``BACKOFF_BASE_TICKS * 2**n`` and queue a strategist
   ``stuck`` signal.
+
+The ladder is the same whichever state walks: nothing in it knows Gather,
+Travel, Explore or Break. What a give-up leaves behind is one memory,
+``NavStuckMemory.given_up``: a ``GiveUp`` per walk target, keyed by goal, map
+and cell (``goal_key``), so a target is given up only on the map it is on.
+It is aged by time alone: it holds until its backoff ends, and its power is
+kept, so the next give-up there backs off twice as long. Every walk asks it
+(``is_backed_off``), a Travel destination included (``given_up_dests``).
+Whether to drop a goal that keeps getting stuck is the planner's call: each
+give-up raises a ``stuck`` trigger saying when the target may be walked again.
 
 Progress is the remaining length of the planned path plus the straight-line
 rest to the target, read when the state plans; a move only bumps counters, so
@@ -68,21 +78,11 @@ RESET_PROGRESS_CELLS = 5
 # Escalation step 5: exponential backoff before retrying the goal (§4.5).
 BACKOFF_BASE_TICKS = 300
 
-# A give-up on a hub Travel resolves symbolically (``travel:town``,
-# ``travel:shop``) is not for the whole run: it lapses after this long, or
-# once the agent stands this far (Chebyshev) from where it gave up, since a
-# route from elsewhere may well get there (free-play run 2: one pacing
-# give-up on town banned it for the run, so a potion buy was dropped and 17
-# gems went unspent).
-HUB_GIVE_UP_TICKS = 1200
-HUB_GIVE_UP_CELLS = 16
-HUB_GOALS = frozenset({"travel:town", "travel:shop"})
+# Lapsed give-ups kept for their power beyond this many are forgotten,
+# oldest first. A give-up still backed off is never forgotten.
+GIVE_UPS_KEPT = 64
 
 WALK, CAUTIOUS, BREAK, REVEAL, REVEALED, ALT_ROUTE = 0, 1, 2, 3, 4, 5
-
-# The ``Memory.goal`` of Break's walk to a block: at step 2 it walks for the
-# active attempt, so the oscillation guard files its moves under that attempt.
-BREAK_GOAL = "break"
 
 # Goals that share one key per cell, so a frontier or door dropped under one
 # is skipped by the others (Explore's goals, Level's walks, Heal's zone walk).
@@ -146,21 +146,31 @@ class Leg(NamedTuple):
 
 
 @dataclass
+class GiveUp:
+    """A walk target given up: walked under ``goal``, at ``target`` on ``map_id``.
+
+    It holds until ``until``; ``power`` is how many times it has been given
+    up, so the next backoff there is ``BACKOFF_BASE_TICKS * 2**power``.
+    """
+
+    goal: str
+    map_id: int
+    target: Pos
+    since: int
+    until: int
+    power: int
+    lapse_noted: bool = False  # ``lapsed`` has reported it
+
+
+@dataclass
 class NavStuckMemory:
     attempts: dict[str, NavAttempt] = field(default_factory=dict)
     active: str | None = None
-    backoff_until: dict[str, int] = field(default_factory=dict)
-    backoff_power: dict[str, int] = field(default_factory=dict)
+    # What failed where: every walk target given up, by ``goal_key`` (A90).
+    given_up: dict[str, GiveUp] = field(default_factory=dict)
     stuck_signals: list[dict] = field(default_factory=list)
-    # Travel destinations given up this run, (map_id, cell) -> tick: their ops
-    # leave the stack for good, pinned or not, and are never walked again (A16).
-    given_up_travel: dict[tuple[int, Pos], int] = field(default_factory=dict)
-    # The hub ones among them (``HUB_GOALS``), (map_id, cell) -> where the
-    # agent stood when it gave up (map_id, cell) and the backoff key: they
-    # lapse (``expire_hub_give_ups``).
-    given_up_hubs: dict[tuple[int, Pos], tuple[int | None, Pos | None, str]] = field(default_factory=dict)
     # The oscillation guard (navigation/oscillation.py): cells stood on at
-    # recent decisions, the (walk goal, state, attempt key) of the move into each, the
+    # recent decisions, the (walk goal, state, walk key) of the move into each, the
     # last decision's move, its events waiting for the trace, and the cells
     # survival-only pacing (Flee, Retreat) must escape from next decision.
     recent_cells: list[Pos] = field(default_factory=list)
@@ -186,7 +196,46 @@ def key_dest(key: str) -> tuple[int, Pos]:
 
 
 def is_backed_off(stuck: NavStuckMemory, key: str, tick: int) -> bool:
-    return tick < stuck.backoff_until.get(key, -1)
+    """``key``'s target was given up and its backoff has not ended."""
+    rec = stuck.given_up.get(key)
+    return rec is not None and tick < rec.until
+
+
+def remember_give_up(stuck: NavStuckMemory, key: str, goal: str, tick: int) -> GiveUp:
+    """Give up ``key``'s target now: backed off twice as long as the last time."""
+    old = stuck.given_up.pop(key, None)
+    power = old.power if old is not None else 0
+    map_id, target = key_dest(key)
+    rec = stuck.given_up[key] = GiveUp(goal, map_id, target, tick, tick + BACKOFF_BASE_TICKS * (2**power), power + 1)
+    if len(stuck.given_up) > GIVE_UPS_KEPT:
+        lapsed_keys = [k for k, r in stuck.given_up.items() if tick >= r.until]
+        for k in lapsed_keys[: len(stuck.given_up) - GIVE_UPS_KEPT]:
+            del stuck.given_up[k]
+    return rec
+
+
+def given_up_dests(stuck: NavStuckMemory, tick: int, goal_prefix: str) -> dict[tuple[int, Pos], int]:
+    """The (map, cell) of each target a walk whose goal starts with
+    ``goal_prefix`` gave up and is still backed off from, with the tick it may
+    be walked to again."""
+    out: dict[tuple[int, Pos], int] = {}
+    for rec in stuck.given_up.values():
+        if rec.goal.startswith(goal_prefix) and tick < rec.until:
+            dest = (rec.map_id, rec.target)
+            out[dest] = max(out.get(dest, 0), rec.until)
+    return out
+
+
+def lapsed(stuck: NavStuckMemory, tick: int) -> list[GiveUp]:
+    """The give-ups whose backoff ended since the last call, each reported once.
+
+    A lapsed give-up stays remembered for its power until it is reached
+    (``finish``) or, past ``GIVE_UPS_KEPT``, pushed out by newer ones.
+    """
+    out = [rec for rec in stuck.given_up.values() if not rec.lapse_noted and tick >= rec.until]
+    for rec in out:
+        rec.lapse_noted = True
+    return out
 
 
 def backed_off(m: Memory, goal: str, map_id: int | None, target: Pos, tick: int) -> bool:
@@ -266,10 +315,10 @@ def leg_toward(
 
 
 def finish(m: Memory, att: NavAttempt) -> None:
-    """The target was reached or stopped mattering: forget it and its backoff power."""
+    """The target was reached or stopped mattering: forget it and any give-up of it."""
     stuck = m.nav_stuck
     stuck.attempts.pop(att.key, None)
-    stuck.backoff_power.pop(att.key, None)
+    stuck.given_up.pop(att.key, None)
     if stuck.active == att.key:
         stuck.active = None
 
@@ -523,25 +572,17 @@ def reveal_found_way(att: NavAttempt, w: WorldModel, path: list[Pos] | None) -> 
 
 
 def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None) -> None:
-    """Step 5: back off the goal, drop its path and raise the strategist's ``stuck`` trigger.
+    """Step 5: remember the target as given up, drop its path and raise the strategist's ``stuck`` trigger.
 
-    The signal's ``reason`` is why the attempt first got stuck; ``escalation``
-    is why each level after it failed.
+    A leg toward another map gives up its ultimate destination
+    (``backoff_key``). The signal's ``reason`` is why the attempt first got
+    stuck; ``escalation`` is why each level after it failed; ``retry_at_tick``
+    is when the backoff ends. Whether to drop the goal is the planner's call.
     """
     if reason is not None:
         att.reasons.append(reason)
     stuck = m.nav_stuck
-    backoff = att.backoff_key or att.key
-    power = stuck.backoff_power.get(backoff, 0)
-    stuck.backoff_until[backoff] = w.tick + BACKOFF_BASE_TICKS * (2**power)
-    stuck.backoff_power[backoff] = power + 1
-    if att.goal.startswith("travel:"):
-        dest = key_dest(backoff)
-        stuck.given_up_travel.setdefault(dest, w.tick)
-        if att.goal not in HUB_GOALS:
-            stuck.given_up_hubs.pop(dest, None)  # given up as a point too: for the run
-        elif stuck.given_up_travel[dest] == w.tick:
-            stuck.given_up_hubs[dest] = (w.map_id, w.pos, backoff)
+    rec = remember_give_up(stuck, att.backoff_key or att.key, att.goal, w.tick)
     stuck.stuck_signals.append(
         {
             "trigger": "stuck",
@@ -552,6 +593,7 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
             "target": list(att.target),
             "map_id": att.map_id,
             "tick": w.tick,
+            "retry_at_tick": rec.until,
             "outline": [list(p) for p in sorted(att.outline)],
             "blocking": sorted(att.blocking | _blocking_types(w, att)),
         }
@@ -566,32 +608,6 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
         m.goal_op = None
     else:
         m.corridors.pop(att.goal, None)
-
-
-def hub_give_up_lapses(stuck: NavStuckMemory, dest: tuple[int, Pos]) -> tuple[int, Pos | None] | None:
-    """When a hub give-up on ``dest`` lapses: (tick, the cell it gave up
-    from), or None for one that holds for the run."""
-    if dest not in stuck.given_up_hubs or dest not in stuck.given_up_travel:
-        return None
-    return stuck.given_up_travel[dest] + HUB_GIVE_UP_TICKS, stuck.given_up_hubs[dest][1]
-
-
-def expire_hub_give_ups(stuck: NavStuckMemory, w: WorldModel) -> list[tuple[int, Pos]]:
-    """Forget the hub give-ups that lapsed, and return them: ``HUB_GIVE_UP_TICKS``
-    passed, or the agent stands ``HUB_GIVE_UP_CELLS`` from where it gave up
-    (or on another map). Its backoff ends with it, so its ops may be planned
-    and walked again at once; the backoff's power is kept, so a later
-    give-up there still backs off longer."""
-    lapsed = []
-    for dest, (mid, cell, key) in list(stuck.given_up_hubs.items()):
-        since = stuck.given_up_travel.get(dest)
-        moved = w.pos is not None and (mid != w.map_id or (cell is not None and chebyshev(cell, w.pos) >= HUB_GIVE_UP_CELLS))
-        if since is None or w.tick - since >= HUB_GIVE_UP_TICKS or moved:
-            del stuck.given_up_hubs[dest]
-            stuck.given_up_travel.pop(dest, None)
-            stuck.backoff_until.pop(key, None)
-            lapsed.append(dest)
-    return lapsed
 
 
 LEVEL_NAMES = {

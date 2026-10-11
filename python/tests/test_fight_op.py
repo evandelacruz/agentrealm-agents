@@ -135,7 +135,7 @@ class FightOpTest(unittest.TestCase):
         with self.assertLogs("agentrealm_agent.plan", "WARNING") as logs:
             dispatch(w, ctx(w, plan, m))
         self.assertEqual(plan.current()["op"], "wait")
-        self.assertIn("npc 5 in view to fight", "\n".join(logs.output))
+        self.assertIn("no npc 5 in view", "\n".join(logs.output))
         self.assertFalse(any(s["trigger"] == "goal_done" for s in m.strategist_signals))
 
     def test_done_once_the_npc_seen_is_gone(self):
@@ -144,6 +144,25 @@ class FightOpTest(unittest.TestCase):
         plan, m = fight(npc_id=5), Memory()
         dispatch(w, ctx(w, plan, m))
         w.entities = []  # dead, or out of sight
+        w.tick += 5
+        dispatch(w, ctx(w, plan, m))
+        self.assertEqual(plan.current()["op"], "wait")
+        self.assertTrue(any(s["trigger"] == "goal_done" for s in m.strategist_signals))
+
+    def test_an_npc_type_fight_is_one_fight_with_the_npc_it_first_saw(self):
+        w = world(["######", "#....#", "#....#", "######"], at=(1, 1))
+        w.entities = [Entity("npc", 5, (2, 1), "snotling"), Entity("npc", 6, (4, 2), "snotling")]
+        plan, m = fight(npc_type="snotling"), Memory()
+        out = dispatch(w, ctx(w, plan, m))
+        self.assertEqual(plan.fight_npc, 5)
+        self.assertIn("npc 5", out.reason)
+        # The other one comes nearer: the fight stays on the first.
+        w.entities = [Entity("npc", 5, (3, 1), "snotling"), Entity("npc", 6, (1, 2), "snotling")]
+        w.tick += 5
+        out = dispatch(w, ctx(w, plan, m))
+        self.assertIn("npc 5", out.reason)
+        # The first is dead: the op is done, not carried on to the next of its type.
+        w.entities = [Entity("npc", 6, (1, 2), "snotling")]
         w.tick += 5
         dispatch(w, ctx(w, plan, m))
         self.assertEqual(plan.current()["op"], "wait")

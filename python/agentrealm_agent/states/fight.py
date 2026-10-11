@@ -181,10 +181,10 @@ def op_refusal(world: WorldModel, ctx: PlayContext, op: dict) -> str | None:
     (``held_on_safe_ground``), or no swing or step can reach it
     (``can_engage``), so the planner makes the call. Reads only; ``act``
     drops the op with it."""
-    target = op_npc(op, world)
+    target = op_npc(op, world, _pinned(ctx))
     if target is None:
-        named = f"npc {op['npc_id']}" if "npc_id" in op else f"no {op.get('npc_type')}"
-        return f"{named} in view to fight"
+        named = f"npc {op['npc_id']}" if "npc_id" in op else op.get("npc_type")
+        return f"no {named} in view"
     if target.is_boss:
         return f"{target.code or 'npc'} {target.id} is a boss: fight_boss fights it"
     if attack_forbidden(target, ctx.never_attack):
@@ -194,6 +194,11 @@ def op_refusal(world: WorldModel, ctx: PlayContext, op: dict) -> str | None:
     if not can_engage(world, target, ctx):
         return f"no swing or open step reaches {target.code or 'npc'} {target.id}"
     return None
+
+
+def _pinned(ctx: PlayContext) -> int | None:
+    """The NPC the head ``fight`` op settled on (``Plan.fight_npc``), if any."""
+    return ctx.plan.fight_npc if ctx.plan is not None else None
 
 
 def should_fight(world: WorldModel, ctx: PlayContext) -> bool:
@@ -238,7 +243,7 @@ class FightState(State):
         if op is not None:
             refusal = op_refusal(world, ctx, op)
             if refusal is None:
-                return engage(world, ctx, op_npc(op, world), self.name)
+                return engage(world, ctx, op_npc(op, world, _pinned(ctx)), self.name)
             if ctx.plan is not None:
                 ctx.plan.drop_current(refusal, memory=ctx.memory)
                 return StateOutcome(None, f"fight dropped: {refusal}", state=self.name)

@@ -76,7 +76,7 @@ OP_FIELDS: dict[str, str] = {
     "use_item": "code (a held consumable a Use on yourself applies: a potion heals, a chest raises the pack's carry slots). Done once that item is used up; dropped when none is held or its Use was refused or did nothing. A bigger chest is applied as soon as one is held, without this op",
     "enter_level": "x, y (the level door)",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
-    "fight": "exactly one of npc_id (an id from State nearby_npcs) or npc_type (the nearest NPC of that type in sight). Closes on it and swings until it is dead or out of sight, stepping off safe ground to swing (no attack is made from a safe zone) and back behind the swings; Retreat still pulls back at the health floor, and at the floor it never steps off safe ground (dropped then, so you make the call). Dropped for a boss (fight_boss), an NPC the directives forbid attacking, or one no swing or open step reaches",
+    "fight": "exactly one of npc_id (an id from State nearby_npcs) or npc_type (the nearest NPC of that type in sight, kept as the op's one NPC once seen: one fight, not the whole type). Closes on it and swings until it is dead or out of sight, stepping off safe ground to swing (no attack is made from a safe zone) and back behind the swings; Retreat still pulls back at the health floor, and at the floor it never steps off safe ground (dropped then, so you make the call). Dropped for a boss (fight_boss), an NPC the directives forbid attacking, or one no swing or open step reaches",
     "wait": "seconds, why",
     "set_param": "name, value",
 }
@@ -576,7 +576,7 @@ class Plan:
     held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
     paid_from: int | None = None  # gems held when Shop last sent a Take for the head `buy` op (A106); None once it failed (A112)
     used_id: int | None = None  # supply UseItem sent a Use on yourself for, for the head `use_item` op (A108)
-    fight_seen: bool = False  # the head `fight` op's NPC has been in view since it became the head op (A114)
+    fight_npc: int | None = None  # id of the head `fight` op's NPC, pinned when first in view since it became the head op (A114)
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
     map_id: int | None = None  # the map ``advance`` last settled the stack on: stalled records are read for it (A111)
@@ -594,7 +594,7 @@ class Plan:
             self.held_before,
             self.paid_from,
             self.used_id,
-            self.fight_seen,
+            self.fight_npc,
             self.directive_end,
         )
 
@@ -611,7 +611,7 @@ class Plan:
             self.held_before,
             self.paid_from,
             self.used_id,
-            self.fight_seen,
+            self.fight_npc,
             self.directive_end,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
@@ -639,8 +639,8 @@ class Plan:
                 continue
             if op["op"] in BLOCK_CHANGE_OPS and self.block_before is None and world.map_id is not None:
                 self.block_before = world.view.tiles.get((op["x"], op["y"]))
-            if op["op"] == "fight" and op_npc(op, world) is not None:
-                self.fight_seen = True
+            if op["op"] == "fight" and self.fight_npc is None and (npc := op_npc(op, world)) is not None:
+                self.fight_npc = npc.id
             if op["op"] == "buy":
                 # A drink, a drop or a death lowers the bar: the buy still adds one.
                 held = count_held(world, op["code"])
@@ -739,7 +739,7 @@ class Plan:
     def _new_head(self) -> None:
         """Forget the progress kept for the old head op: a new one starts its own."""
         self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = self.paid_from = self.used_id = None
-        self.fight_seen = False
+        self.fight_npc = None
 
     @classmethod
     def from_directives(
@@ -808,11 +808,16 @@ def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:
     return {p for p in frontier if chebyshev(p, center) <= op["radius"]}
 
 
-def op_npc(op: GoalOp, world: WorldModel) -> Entity | None:
-    """The NPC in view an op names by ``npc_id``, or the nearest of its ``npc_type``."""
+def op_npc(op: GoalOp, world: WorldModel, pinned: int | None = None) -> Entity | None:
+    """The NPC in view an op names by ``npc_id``, or the nearest of its ``npc_type``.
+
+    ``pinned`` is the id a ``fight`` op settled on when its NPC was first in
+    view (``Plan.fight_npc``): from then on only that NPC is the op's, so an
+    ``npc_type`` fight is one fight, not every NPC of the type in turn."""
     npcs = [e for e in world.entities if e.kind == "npc"]
-    if "npc_id" in op:
-        return next((e for e in npcs if e.id == op["npc_id"]), None)
+    if pinned is not None or "npc_id" in op:
+        want = pinned if pinned is not None else op["npc_id"]
+        return next((e for e in npcs if e.id == want), None)
     npcs = [e for e in npcs if e.code == op.get("npc_type")]
     if not npcs or world.pos is None:
         return None
@@ -865,9 +870,9 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
     if name == "fight":
-        # Done once the NPC it names, seen since the op reached the top, is dead
+        # Done once the NPC it pinned, seen since the op reached the top, is dead
         # or out of sight. One never seen is not fought: Fight drops it with why.
-        return plan.fight_seen and op_npc(op, world) is None
+        return plan.fight_npc is not None and op_npc(op, world, plan.fight_npc) is None
     if name in BLOCK_CHANGE_OPS:
         # Done once the target's block_type differs from what it was when the
         # op reached the top: a successful Use destroys the block, which then

@@ -19,6 +19,7 @@ from agentrealm_agent.plan import (
     MAX_WAIT_SECONDS,
     PLAN_STALL_SECONDS,
     Plan,
+    accepts_plan,
     apply_strategist_params,
     builtin_goals,
     goal_done,
@@ -82,6 +83,28 @@ class ValidateOpTest(unittest.TestCase):
         self.assertEqual(validate_goal_op({"op": "equip"}), {"op": "equip"})
         self.assertIsNotNone(validate_goal_op({"op": "equip", "code": "bronze_sword"}))
         self.assertIsNone(validate_goal_op({"op": "equip", "code": ""}))
+
+
+class AcceptsPlanTest(unittest.TestCase):
+    """accepts_plan is parse_plan_payload's own top-level step, so the two agree."""
+
+    def test_accepted_payloads(self):
+        for raw in (
+            {"goals": []},
+            {"notes": "x"},
+            {"goals": [{"op": "wait"}], "reason": "extra keys are dropped"},
+            {"goals": [], "params": None},
+            {"goals": [], "notes": 5},
+        ):
+            self.assertTrue(accepts_plan(raw), raw)
+
+    def test_refused_payloads(self):
+        for raw in ([], "goals", {}, {"thoughts": "none"}, {"goals": "not a list"}, {"params": None}):
+            self.assertFalse(accepts_plan(raw), raw)
+
+    def test_null_params_keeps_current(self):
+        goals, params, _ = parse_plan_payload({"goals": [], "params": None}, floor_params={}, current_params={"flee_hp": 3})
+        self.assertEqual((goals, params), ([], {"flee_hp": 3}))
 
 
 class DirectivesGoalsTest(unittest.TestCase):

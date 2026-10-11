@@ -18,7 +18,7 @@ walk routes around it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
 from .item_table import InventorySupply, merge_capability
@@ -230,6 +230,14 @@ def _step_toward(p: Pos, goal: Pos) -> Pos:
     return nx, ny
 
 
+def _route(start: Pos, goal: Pos) -> Iterator[Pos]:
+    """The cells of the straight route from ``start`` to ``goal``, ``start`` left out."""
+    p = start
+    while p != goal:
+        p = _step_toward(p, goal)
+        yield p
+
+
 def _choice_at(w: WorldModel, kb: KnowledgeBase | None, pos: Pos, held: set[str]) -> BreakChoice | None:
     """The cheapest way to open ``pos`` with what is held: a capability known
     to open it (``known_openers``) that has not failed there."""
@@ -248,9 +256,7 @@ def no_break_reason(w: WorldModel, kb: KnowledgeBase | None, start: Pos, goal: P
     ``no_known_opener`` when a breakable stands on the route that nothing held
     is known to open (or every known opener failed on), else ``no_break``."""
     held = held_capabilities(w, kb)
-    p = start
-    while p != goal:
-        p = _step_toward(p, goal)
+    for p in _route(start, goal):
         if breakable_block(w, p) is not None and _choice_at(w, kb, p, held) is None:
             return "no_known_opener"
     return "no_break"
@@ -271,9 +277,7 @@ def nominate_on_path(
     held = held_capabilities(w, kb)
     if not held or w.map_id is None:
         return None
-    p = start
-    while p != goal:
-        p = _step_toward(p, goal)
+    for p in _route(start, goal):
         choice = _choice_at(w, kb, p, held)
         if choice is not None:
             return choice
@@ -294,11 +298,7 @@ def break_costs_for_planning(
         return {}
     cells: set[Pos] = set()
     if goal is not None:
-        p = w.pos
-        while p != goal:
-            p = _step_toward(p, goal)
-            if breakable_block(w, p) is not None:
-                cells.add(p)
+        cells.update(p for p in _route(w.pos, goal) if breakable_block(w, p) is not None)
     costs: dict[Pos, int] = {}
     for p in cells:
         choice = _choice_at(w, kb, p, held)

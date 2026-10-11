@@ -314,9 +314,6 @@ class DetectorTest(unittest.TestCase):
         self.assertEqual(m.nav_stuck.recent_cells, [B])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class OpWalkBack(State):
     """Like Break walking to its ``break_block`` op's block: from B it steps back to A."""
@@ -388,3 +385,41 @@ class PacedOpTest(unittest.TestCase):
         c, _ = self.play([brk], OtherWalkBack())
         self.assertTrue(c.memory.nav_stuck.oscillations, "the guard fired")
         self.assertEqual(c.plan.current(), brk, "Break never moved: its op is not the guard's to drop")
+
+    def drop(self, op, paced, ops_after=()):
+        plan = Plan([op, *ops_after], dict(PARAM_DEFAULTS))
+        m = Memory()
+        dispatch_module._drop_paced_op(plan, plan.current(), paced, m)
+        return plan, m
+
+    def test_pacing_on_the_owners_own_walk_keeps_the_op(self):
+        # Explore's explore_area walk was the one given up: it picks another frontier.
+        op = {"op": "explore_area", "x": 9, "y": 0, "radius": 5}
+        paced = {"states": ["Detour", "Explore"], "cells": [[2, 0], [3, 0]], "goal": "explore_area"}
+        plan, m = self.drop(op, paced)
+        self.assertIs(plan.current(), plan.goals[0])
+        self.assertFalse(m.strategist_signals)
+
+    def test_escape_only_pacing_keeps_the_op(self):
+        op = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
+        paced = {"states": ["Break", "Flee"], "cells": [[2, 0], [3, 0]], "escape": True}
+        plan, m = self.drop(op, paced)
+        self.assertEqual(plan.current(), op)
+        self.assertFalse(m.strategist_signals)
+
+    def test_an_op_settled_off_the_top_spares_the_next_one(self):
+        # The op that paced was popped before the drop: the next op, with the
+        # same executor, took no part in the pacing and stays.
+        first = {"op": "break_block", "x": 9, "y": 0, "capability": "cut"}
+        second = {"op": "break_block", "x": 8, "y": 0, "capability": "cut"}
+        plan = Plan([first, second], dict(PARAM_DEFAULTS))
+        m = Memory()
+        paced_op = plan.current()
+        plan.finish_current("done")
+        dispatch_module._drop_paced_op(plan, paced_op, {"states": ["Break", "Explore"], "cells": [[2, 0], [3, 0]]}, m)
+        self.assertEqual(plan.current(), second)
+        self.assertFalse(any(s.get("trigger") == "goal_failed" for s in m.strategist_signals))
+
+
+if __name__ == "__main__":
+    unittest.main()

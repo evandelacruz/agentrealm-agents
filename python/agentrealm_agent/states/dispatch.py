@@ -146,9 +146,10 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     note_heal_window(m, world)
     note_last_weapon(m, world)
     if ctx.plan is not None:
+        paced_op = ctx.plan.current()  # the op on top while it paced, before settling pops any
         _settle_plan(ctx.plan, world, m)
-        if paced is not None:
-            _drop_paced_op(ctx, paced)
+        if paced is not None and paced_op is not None:
+            _drop_paced_op(ctx.plan, paced_op, paced, m)
     sync_boss(world, m, ctx.plan)
     sync_shop(world, m)
     if ctx.policy.kind == "scripted":
@@ -175,7 +176,7 @@ def _settle_plan(plan: Plan, world: WorldModel, m: Memory) -> None:
         plan.advance(world, m)
 
 
-def _drop_paced_op(ctx: PlayContext, paced: dict) -> None:
+def _drop_paced_op(plan: Plan, op: dict, paced: dict, m: Memory) -> None:
     """The guard caught pacing that the top op's executor took part in: drop the op (A103).
 
     Each of the pacing states sends a sensible step, so the op's stall clock
@@ -184,17 +185,20 @@ def _drop_paced_op(ctx: PlayContext, paced: dict) -> None:
     and its ``goal_failed`` tells the planner which states paced and where.
     The op stays when the walk the guard gave up was its own (``OWNER_WALKS``):
     it then picks another target, or drops itself as Travel does.
+
+    ``op`` is the op that was on top while the character paced. Settling the
+    plan may have popped it since (done, or no executor); then nothing is
+    dropped, so the next op never pays for pacing it took no part in.
     """
-    plan, m = ctx.plan, ctx.memory
-    owner = top_executor(ctx)
-    if plan is None or owner is None or owner not in paced["states"] or paced.get("escape"):
+    owner = OP_STATE.get(op["op"])
+    if plan.current() is not op or owner is None or owner not in paced["states"] or paced.get("escape"):
         return
     if paced.get("goal", "").startswith(OWNER_WALKS.get(owner, ())):
         return
     others = [s for s in paced["states"] if s != owner]
     cells = " and ".join(f"{x},{y}" for x, y in paced["cells"])
     with_whom = f" with {', '.join(others)}" if others else ""
-    paced["op"] = dict(plan.current() or {})
+    paced["op"] = dict(op)
     plan.drop_current(f"{owner} paced between {cells}{with_whom}: no way forward", memory=m)
 
 

@@ -1542,7 +1542,7 @@ Per A87, each names the rule a fix should generalize. Backlog: defect 1 is cover
 |---|---|---|
 | 0–67 s | `explore_area` | The map was fully seen, so each explore finished at once. Explore's fallback reported **"boxed in"**: snotling 12 stood next to the character at (8, 9), so no neighbour counted as safe (defect 3). |
 | 67–196 s | `break_block` (8, 9), `explore_area`, `say`, `wait` | "The probe cell is a guess." Break armed the matches and sent one `Use` on (8, 9), snotling 12's cell. Nothing changed. Then came explores, waits and "boxed in" again. |
-| 196–213 s | `use_block` matches (8, 9) | Solve sent **14 `Use`s** on (8, 9) in 16 s. No block changed and no match was spent (defect 2). |
+| 196–213 s | `use_block` matches (8, 9) | Solve sent **13 `Use`s** on (8, 9) in 16 s (30 match `Use`s in all, with the one at 67 s and the 16 below). No block changed and no match was spent (defect 2). |
 | 213–277 s | `explore_area`, `break_block` | "Boxed in" again. |
 | 277–325 s | `travel` point (2, 10), then `use_block` matches (2, 8), `travel` town | The walk west drew both snotlings. Fight **killed snotling 13** (286 s) and **snotling 12** (291 s), 6/10 after. Solve then sent **16 `Use`s** on (2, 8), snotling 12's death cell, over 32 s. No change. |
 | 325–507 s | `travel` town, `gather_gems`, `wait`, `buy` small_potion, `explore_area` | No door to town is known on map 17, so Explore's random steps ran. **Snotling 13 was back** at 346 s and hit the character from 6/10 down to 4/10. It drank a potion at 358 s (10/10 by 375 s). Then waits and "boxed in" again. |

@@ -20,7 +20,8 @@ from agentrealm_agent.pack import ASK, DROP, MOVE, TAKE, drop_makes_stock, make_
 from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.strategist import build_prompt
+from agentrealm_agent.strategist import build_prompt, upgrade_line
+from agentrealm_agent.supplies import chest_capacity
 from agentrealm_agent.travel import record_shop_cell
 from agentrealm_agent.world import Entity, WorldModel
 
@@ -223,6 +224,16 @@ class PlanTest(unittest.TestCase):
         held = json.loads(messages[1]["content"].split("held=", 1)[1].split("\n", 1)[0])
         self.assertIn("burn", held["matches"]["use"])
         self.assertIn("smash", held["bronze_mallet"]["use"])
+
+    def test_a_bigger_chest_for_sale_is_a_room_option(self):
+        w = world()
+        full_pack(w)
+        k = kb()
+        k.items["middle_chest"] = {"gem_price": 50}
+        k.items["blue_chest"] = {"gem_price": 5}
+        rows = json.loads(upgrade_line(w, k).split("=", 1)[1])
+        chests = {r["code"]: r["gains"] for r in rows if "chest" in r["code"]}
+        self.assertEqual(chests, {"middle_chest": f"carry slots 10 -> {chest_capacity('middle_chest')}"})
 
 
 if __name__ == "__main__":

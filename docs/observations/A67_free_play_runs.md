@@ -1373,3 +1373,82 @@ Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A108 
 2. **Gather keeps a committed cell whose path has grown far longer than the cut it buys** (`states/gather.py:782`, `_keep`; `:880`, `_price`). From (414, 414), Gather committed to grass at (432, 414), 18 cells east. Its path went round by (428, 373) and (404, 369), 65 distinct cells over 90 s. Region (432, 400) grass, reached from town in earlier runs in under 20 s, lay closer along the way. **Rule:** a committed target is dropped once its path costs a multiple of the cheapest cut target now known, the same pricing Gather uses to pick one.
 
 3. **The plan saves toward an item no shop is known to sell, and stage 3 waits on it** (the progression arc and `upgrades_for_sale` in `strategist.py`). From 67 s, every reply gathered "toward the raft" for the island door in the east lake. No raft is in `shop_prices`; the fisher only says his brother sells them by the big lake east. The entrance at (532, 311) stayed second in line all run. **Rule:** a buy goal needs a known seller. With none, the plan goes to find one (travel to the place the clue names) or turns to a goal it can reach now.
+
+### Run 17: the chest applied at last (30 slots); the plan heads north-west and reaches a new shop, then a golden cap and a break target throw it back
+
+- **Code:** `main` at `c54db18`. Since run 16: A108 (one `Use`-self path applies a held chest or potion), A109 (#203, a committed walk that balloons is priced again), A110 (a buy goal needs a known seller).
+- **Knowledge base:** kept from run 16. The middle_chest bought in run 15 was held and not applied. Region (432, 400): 886 cuts, 176 gems.
+- **Verdict:** exit 0, `PASS` after **601.3 s**, on the short-run gates only. The park **parked safe** at (389, 380) after 0.3 s. The character started at **9/10**, 5 lives and **28 gems** at (416, 399), with the bronze_sword armed, the bronze_mail worn and the pack at 10/10 slots.
+- **Gate summary:** deaths **0**; API errors **0**; fights below the health floor 0; kills **2** (lone weak 0); gems earned **yes**; armor **yes**; shop weapon **yes**; potion reserve **yes**; food taken while hurt **yes**; Heal drank a potion **no**. Planner: 43 calls, 43 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–10 s | `equip` bronze_sword, `gather_gems` (432, 400) | A108 applied the **middle_chest** with one `Use` at 6.1 s (`SupplyUsed`). The pack went from **10/10 to 30 slots** (9 used). |
+| 10–64 s | `gather_gems` (432, 400) | Cut grass, 28 → 32 by 64 s. |
+| 64–177 s | `travel` entrance (300, 316) | "Leave the gem grind. Head northwest toward the entrance and read the burnable-hedge clues once there." Both nearest entrances were `frontier_only` at about 116 cells. Gristlewick 221 swung first at (339, 359), and Fight **killed it in 2 swings** (2 + 6) at 143 s. Detour took gem piles at (360, 360) (+3). |
+| 177–303 s | `say` mushroom trader, `buy` golden_cap, `travel` entrance | A new shop: a mushroom trader at (308, 344), about 30 cells from the entrance. Bought a **golden_cap** at 206 s (**35 → 27**) at 10/10 health. It was eaten on pickup. Shop then walked **100 s** east toward another golden_cap seller (defect 2), until the planner dropped the buy at 303 s. |
+| 303–380 s | `travel` entrance, then `travel` town, `wait` | Travel walked into gristlewick 240 at its post (369, 400). Fight and Travel took turns for 20 s, and Fight **killed it** with the sixth swing (defect 3). Then rest in town at 7–8/10. |
+| 380–502 s | `wait`, `travel` entrance (300, 316) | **Break and Explore paced for about 100 s** between (371, 391) and (375, 401): Break toward its stuck-ladder target (367, 371), Explore toward (371, 424). 3 oscillation events, each giving up Explore's frontier (defect 1). |
+| 502–600 s | `explore_area` (340, 360), then `gather_gems`, `wait`, `travel` entrance | "Stuck pacing on a wall at 375,401." A short gather and a pile detour (+3, 27 → 30), then the entrance again. Break's (367, 371) came back from 553 s to the end. |
+
+#### Pack, stage, entrance and level attempts
+
+- **Pack slots:** 10/10 at the start, 30 (9 used) from 6.1 s, after the middle_chest was applied (A108). Run 16 could not apply it.
+- **Stage:** 3. The first call read stage 2 as missing only "a better armed weapon" (the pocket knife was armed at the start) and armed the sword.
+- **Entrance choice:** north-west, (300, 316), at 64 s. The State gave both near entrances as `frontier_only`, 116 steps, 91 unexplored cells. The plan picked the one the burnable-hedge clue points to. Run 14 had given that entrance up at walls. This time the walk got to (308, 345), about 30 cells off, on a route through the mushroom trader's ground.
+- **Level attempts:** none.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **28** | **30** (+10 earned, −8 spent) |
+| Armed | pocket_knife | bronze_sword |
+| Worn | bronze_mail | bronze_mail |
+| Pack | 10/10 slots, middle_chest held | 9/30 slots (middle_chest applied) |
+| Potions | 3 | 3 |
+
+Bought: a golden_cap (8 gems), at 10/10 health. It is eaten on pickup for 6 heal, so the purchase did nothing.
+
+#### Gems earned
+
+**10** in 600 s, **1.0 a minute**: 4 from grass (14 cuts, all before 64 s) and 6 from gem piles, 3 at (360, 360) and 3 at (414, 414). No gem from a kill.
+
+#### Fights
+
+| Time | Hostile | Started by | Our swings | Hits | Their hits | Taken | Outcome |
+|---|---|---|---|---|---|---|---|
+| 141–143 s | gristlewick 221 | it | 2 | 2 | 2 | 2 | **Killed**, no drop. |
+| 306–326 s | gristlewick 240, at its post | us (`close on`) | 6 | 3 | 3 | 3 | **Killed** after 20 s of Fight and Travel taking turns. No drop. |
+
+8 swings, 5 hits, 2 kills, 5 damage taken. Deaths 0.
+
+#### Run 16 defects, checked
+
+| Defect | Run 17 | |
+|---|---|---|
+| No op applies a self-use item (A108) | **Gone.** The middle_chest was applied at 6.1 s; 30 slots. | |
+| A committed gather walk that balloons (A109) | **Not tested.** Gather ran only 64 s. | |
+| Saving for an item no shop sells (A110) | **Gone.** No raft goal; the plan went for the entrance at 64 s. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 186,727, output 7,146, cache write 107,386, cache read 4,510,212 |
+
+#### Decision mix
+
+Intents: 1,028 `Step`, 2,688 `Wait`, 24 `Use` (14 cuts, 8 swings, 1 chest, 1 break), 11 `Take`, 2 `Arm`, 1 `Say`. Call mix: 659 `tick`, 251 `entities`, 199 `zone`, 94 `strategist`, 57 `self`, 38 `terrain`, 30 `position`, and 3 `oscillation` events.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize.
+
+1. **The pacing give-up misses a stuck-ladder Break target** (`navigation/oscillation.py:117–120`; the Break level in `navigation/stuck.py`). Under `travel` entrance, Travel's stuck ladder reached its Break level with target (367, 371). Break walked toward it from (375, 401), could not get nearer, and Explore took the next decision toward (371, 424). The guard saw states `Break` and `Explore` three times and gave up Explore's frontier each time. A103 drops a `break_block` op that cannot progress, but this target belonged to the stuck ladder, not to an op. **Rule:** when two walks pace, the one that cannot get nearer is given up, whatever owns it: an op, a stuck-ladder target, or a frontier.
+
+2. **A buy of an item eaten on pickup never counts as done** (`shop.py:99`, `sync_shop`; `states/shop.py`). At 206.4 s the `Take` on the golden_cap landed and gems fell 35 → 27. The cap is eaten on pickup, so nothing was held, and the `buy` op stayed. Shop walked 100 s east toward another golden_cap seller, away from the entrance it had nearly reached, until the planner dropped the op at 303 s. The planner had also bought a heal-on-pickup at full health. **Rule:** a buy is done when its `Take` lands and its price is paid, whether the item stays held or is used up on pickup.
+
+3. **Travel and Fight take turns against a hostile at its post** (`engagement.py:66–113`, `sync_engagement` and `decide`). From 306 s, Travel's walk passed gristlewick 240 at (369, 400). Fight closed in and swung once, then Travel took the next decision and stepped on, and the gristlewick came back into reach. That happened 6 times in 20 s. **Rule:** an engagement, once decided, holds until the fight ends or the retreat rule fires. A walking op does not take a decision in between.

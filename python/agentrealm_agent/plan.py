@@ -462,6 +462,37 @@ def parse_directives_goals(lines: list[str]) -> list[GoalOp]:
     return out
 
 
+# A reply's top-level keys: the type each must have, and its name in a refusal.
+PLAN_FIELDS: dict[str, tuple[type, str]] = {"goals": (list, "a list"), "params": (dict, "an object"), "notes": (str, "a string")}
+
+
+def plan_fields(raw: object, reject: Callable[[str], None] = _reject) -> dict[str, Any] | None:
+    """The reply keys :func:`parse_plan_payload` keeps from ``raw``, or None
+    when ``raw`` is not an object. Unknown keys and a key of the wrong type are
+    dropped with a refusal; ``"params": null`` counts as omitted."""
+    if not isinstance(raw, dict):
+        reject("payload is not an object")
+        return None
+    extra = set(raw) - set(PLAN_FIELDS)
+    if extra:
+        reject(f"dropped unknown top-level keys {sorted(extra)}")
+    kept: dict[str, Any] = {}
+    for key, (kind, name) in PLAN_FIELDS.items():
+        if key not in raw or (key == "params" and raw[key] is None):
+            continue
+        if isinstance(raw[key], kind):
+            kept[key] = raw[key]
+        else:
+            reject(f"`{key}` must be {name}")
+    return kept
+
+
+def accepts_plan(raw: object) -> bool:
+    """Whether :func:`parse_plan_payload` takes something from ``raw``: an
+    object with at least one reply key it keeps."""
+    return bool(plan_fields(raw, reject=lambda _message: None))
+
+
 def parse_plan_payload(
     raw: object,
     *,
@@ -475,16 +506,10 @@ def parse_plan_payload(
     bounded by ``floor_params``.
     """
     current = dict(floor_params if current_params is None else current_params)
-    if not isinstance(raw, dict):
-        _reject("payload is not an object")
+    fields = plan_fields(raw)
+    if fields is None:
         return [], current, ""
-    extra = set(raw) - {"goals", "params", "notes"}
-    if extra:
-        _reject(f"dropped unknown top-level keys {sorted(extra)}")
-    goals_raw = raw.get("goals", [])
-    if not isinstance(goals_raw, list):
-        _reject("`goals` must be a list")
-        goals_raw = []
+    goals_raw = fields.get("goals", [])
     goals: list[GoalOp] = []
     for item in goals_raw:
         op = validate_goal_op(item)
@@ -495,17 +520,11 @@ def parse_plan_payload(
                 continue
         if op is not None:
             goals.append(op)
-    notes = raw.get("notes", "")
-    if not isinstance(notes, str):
-        _reject("`notes` must be a string")
-        notes = ""
+    notes = fields.get("notes", "")
     params = current
-    incoming = raw.get("params")
+    incoming = fields.get("params")
     if incoming is not None:
-        if not isinstance(incoming, dict):
-            _reject("`params` must be an object")
-        else:
-            params = apply_strategist_params(floor_params, params, incoming)
+        params = apply_strategist_params(floor_params, params, incoming)
     return goals, params, notes
 
 

@@ -26,14 +26,15 @@ class ThreatTableTest(unittest.TestCase):
         self.assertEqual(t.damage_per_hit(None), UNMEASURED_DEFAULT)
         self.assertFalse(t.measured(("npc", "snotling")))
 
-    def test_unmeasured_type_uses_worst_seen(self):
+    def test_unmeasured_type_hits_at_the_base_attack_power(self):
+        """A85: one price for a type never measured, by the published rules,
+        whatever other types have dealt."""
         t = ThreatTable()
         t.record(("npc", "snotling"), 1)
         self.assertEqual(t.damage_per_hit(("npc", "snotling")), 1)
-        self.assertEqual(t.damage_per_hit(("npc", "gristlewick")), 1)
         t.record(("npc", "gristlewick"), 3)
-        self.assertEqual(t.damage_per_hit(("npc", "snotling")), 1)
-        self.assertEqual(t.damage_per_hit(("npc", "unknown")), 3)
+        self.assertEqual(t.damage_per_hit(("npc", "unknown")), UNMEASURED_DEFAULT)
+        self.assertEqual(t.damage_per_hit(None), UNMEASURED_DEFAULT)
 
     def test_keeps_max_per_type(self):
         t = ThreatTable()
@@ -74,7 +75,7 @@ class ThreatTableTest(unittest.TestCase):
         self.assertEqual(t.damage_per_hit(("trap", "spike_trap")), 5)
         self.assertEqual(t.damage_per_hit(("npc", "rat")), UNMEASURED_DEFAULT)
         t.record(("npc", "rat"), 1)
-        self.assertEqual(t.damage_per_hit(("npc", "pest")), 1)
+        self.assertEqual(t.damage_per_hit(("npc", "pest")), UNMEASURED_DEFAULT)
 
     def test_trap_without_a_perceived_supply_is_not_recorded(self):
         self.assertIsNone(type_key_from_damaged(hit("trap", None, 5), []))

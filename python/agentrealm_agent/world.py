@@ -6,7 +6,16 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .threat import ThreatTable, TypeKey, absorb_damaged, damage_amount, hitter, hostile_hit, hostile_type_from_event
+from .threat import (
+    ThreatTable,
+    TypeKey,
+    absorb_damaged,
+    count_swings,
+    damage_amount,
+    hitter,
+    hostile_hit,
+    hostile_type_from_event,
+)
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +53,21 @@ POST_STILL_TICKS = 50
 # A hostile out of view that keeps no post is remembered where it was last
 # seen for this long (60 s at 10 ticks/s), on any map.
 SIGHTING_TICKS = 600
+# A remembered post fades: hostiles roam and respawn (A85).
+# Its ``Sighting.strength`` is 1 while the guard is in view and halves every
+# ``POST_HALF_LIFE_TICKS`` of world time out of view (5 min at 10 ticks/s),
+# times the spells it was seen on its post, up to ``POST_MAX_SPELLS``: a post
+# seen again and again stays strong for longer. A spell counts when the guard
+# is back on its post after ``SIGHTING_TICKS`` out of view, so a guard at the
+# edge of sight flickering in and out adds none. A post in sight with nobody
+# on it halves every ``EMPTY_POST_HALF_LIFE_TICKS`` looked at (1 s), at most
+# once a look. It holds ground while at least ``POST_HOLD_STRENGTH``, only
+# prices it below that, and is forgotten below ``POST_FORGET_STRENGTH``.
+POST_HALF_LIFE_TICKS = 3000
+POST_MAX_SPELLS = 4
+EMPTY_POST_HALF_LIFE_TICKS = 10
+POST_HOLD_STRENGTH = 0.5
+POST_FORGET_STRENGTH = 0.1
 
 
 @dataclass
@@ -56,6 +80,10 @@ class Sighting:
     post it has hit us from: a guard that leaves its post to hit us shows how
     far it guards. Whether it is a threat is asked at use
     (``survival.is_hostile``), so a type found hostile later counts.
+
+    A post fades once its guard is out of view (``strength``, as of tick
+    ``noted``; ``fade_post``). ``spells`` counts the times its guard was
+    seen back on its post after a while away.
     """
 
     entity: Entity  # as last seen
@@ -64,6 +92,22 @@ class Sighting:
     home: Pos
     post: bool = False
     reach: int = 0
+    strength: float = 1.0
+    noted: int = 0  # the tick ``strength`` is as of
+    spells: int = 1
+    in_view: bool = True
+
+    def fade_post(self, tick: int, empty: bool) -> None:
+        """Bring ``strength`` up to ``tick`` out of view: halved every
+        ``POST_HALF_LIFE_TICKS`` times ``spells`` (up to ``POST_MAX_SPELLS``),
+        and when ``empty`` (its post in sight with nobody on it) also every
+        ``EMPTY_POST_HALF_LIFE_TICKS``, at most once for this look."""
+        dt = max(0, tick - self.noted)
+        half_life = POST_HALF_LIFE_TICKS * min(max(1, self.spells), POST_MAX_SPELLS)
+        self.strength *= 0.5 ** (dt / half_life)
+        if empty:
+            self.strength *= 0.5 ** (min(dt, EMPTY_POST_HALF_LIFE_TICKS) / EMPTY_POST_HALF_LIFE_TICKS)
+        self.noted = tick
 
 
 @dataclass(frozen=True)
@@ -520,9 +564,11 @@ class WorldModel:
     def _note_sightings(self, tick: int) -> None:
         """Keep ``sightings``: refresh the NPCs and characters in view, note a
         post once one has stood still ``POST_STILL_TICKS``, and forget one
-        whose cell (its post, else where it was last seen) is in sight with it
-        gone, or, keeping no post, unseen for ``SIGHTING_TICKS`` on any map.
-        A post on a map left behind is kept for a return."""
+        that keeps no post once the cell it was last seen on is in sight with
+        it gone, or it has been unseen for ``SIGHTING_TICKS`` on any map. A
+        post out of view fades (``Sighting.fade_post``), fast while it is in
+        sight with nobody on it, and is forgotten once faded below
+        ``POST_FORGET_STRENGTH``; on a map left behind it fades by time alone."""
         in_view = set()
         for e in self.entities:
             if e.kind not in ("npc", "character"):
@@ -531,17 +577,24 @@ class WorldModel:
             in_view.add(key)
             s = self.sightings.get(key)
             if s is None or s.map_id != self.map_id:
-                s = self.sightings[key] = Sighting(e, self.map_id, tick, e.pos)
-            s.entity, s.tick = e, tick
+                s = self.sightings[key] = Sighting(e, self.map_id, tick, e.pos, noted=tick)
+            elif s.post and not s.in_view and e.pos == s.home and tick - s.tick >= SIGHTING_TICKS:
+                s.spells += 1  # back on its post after a while away: one more spell
+            s.entity, s.tick, s.strength, s.noted, s.in_view = e, tick, 1.0, tick, True
             if not s.post and e.kind == "npc" and self.npc_still_ticks(e) >= POST_STILL_TICKS:
                 s.home, s.post = e.pos, True
         for key, s in list(self.sightings.items()):
             if key in in_view:
                 continue
+            s.in_view = False
             cell = s.home if s.post else s.entity.pos
             here = self.pos if s.map_id == self.map_id else None
             gone = here is not None and chebyshev(cell, here) < self.perception
-            if gone or (not s.post and tick - s.tick > SIGHTING_TICKS):
+            if s.post:
+                s.fade_post(tick, gone)
+                if s.strength < POST_FORGET_STRENGTH:
+                    del self.sightings[key]
+            elif gone or tick - s.tick > SIGHTING_TICKS:
                 del self.sightings[key]
 
     def npc_still_ticks(self, e: Entity) -> int:
@@ -696,6 +749,8 @@ class WorldModel:
         self.changed_blocks = []
         for group in events_by_tick or []:
             for ev in group.get("events") or []:
+                if "tick" not in ev and "tick" in group:
+                    ev = {**ev, "tick": group["tick"]}  # flat, each event keeps its tick (count_swings pairs on it)
                 flat.append(ev)
                 kind = ev.get("kind")
                 if hostile_hit(ev):
@@ -738,7 +793,7 @@ class WorldModel:
 
     def learn_threat(self, events: list[dict], earlier: list[Entity]) -> None:
         """Folds this round trip's Damaged events into the threat table (A6),
-        and the NPC types its Attacked, Damaged and NPCDied events show hostile
+        with each hostile type's hits and misses (A85), and the NPC types its Attacked, Damaged and NPCDied events show hostile
         into ``hostile_types``.
 
         Call after apply_observation, so a source first listed in the same
@@ -747,6 +802,7 @@ class WorldModel:
         no entity list per event tick, so a source seen in neither is not
         recorded.
         """
+        count_swings(self.threat, events, self.entities, earlier)
         for ev in events:
             if ev.get("kind") == "Damaged":
                 absorb_damaged(self.threat, ev, self.entities, earlier)

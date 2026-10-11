@@ -1,14 +1,18 @@
 """Damage per hit per hostile type, learned from ``Damaged`` events (A6, M7).
 
 The API serves no NPC's damage. Until a type is measured, callers assume it
-hits as hard as the hardest hostile type already seen; with no measurements
-yet, 2 (the most a weak hostile dealt in M0; docs/GAME_NOTES.md Combat).
+hits at the world's base attack power, 2, the published rules (A85); the
+Manual publishes no hostile's own. The win estimate and the retreat
+threshold both use that one price.
 
 A hit is keyed by the source's type code, looked up among perceived entities
 of the same kind and id. A hit whose source is not perceived, or has no code,
 is not recorded: there is no type to file it under. Trap (keyed by supply
-code) and ``occupy`` damage are recorded but are not hostiles, so they never
-raise the default for an unmeasured hostile.
+code) and ``occupy`` damage are recorded but are not hostiles.
+
+Each hostile type's swings at us are counted too: a hit per ``Damaged``, a
+miss per ``Attacked`` with no ``Damaged`` from the same attacker on its tick
+(API Events, B131). ``hostile_memory`` carries the table across runs (A85).
 """
 
 from __future__ import annotations
@@ -16,8 +20,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-# Assumption, not a measurement — PLAYABLE_AGENT_PLAN Health and lives.
+# Assumption, not a measurement — PLAYABLE_AGENT_PLAN Health and lives. It
+# is also the attack power the win estimate gives a type never measured: the
+# world's base (GAME_NOTES Combat); the Manual publishes no hostile's own.
 UNMEASURED_DEFAULT = 2
+# How many swings the published hit chance counts for against a type's
+# measured hits and misses (``ThreatTable.hit_rate``): one type's rate moves
+# off the roll's only once it has swung at us about this often.
+PRIOR_SWINGS = 10
 
 TypeKey = tuple[str, str]  # (source_kind, type_code)
 
@@ -27,9 +37,15 @@ HOSTILE_KINDS = {"npc": "npc", "character": "character"}
 
 @dataclass
 class ThreatTable:
-    """Max ``Damaged.amount`` seen per source type."""
+    """Max ``Damaged.amount`` seen per source type, and per hostile type the
+    swings at us that hit and missed. ``saved_hits`` and ``saved_misses``
+    are the counts already in the knowledge base (``hostile_memory``)."""
 
     by_type: dict[TypeKey, int] = field(default_factory=dict)
+    hits: dict[TypeKey, int] = field(default_factory=dict)
+    misses: dict[TypeKey, int] = field(default_factory=dict)
+    saved_hits: dict[TypeKey, int] = field(default_factory=dict)
+    saved_misses: dict[TypeKey, int] = field(default_factory=dict)
 
     def measured(self, key: TypeKey | None) -> bool:
         return key in self.by_type
@@ -40,15 +56,17 @@ class ThreatTable:
         prev = self.by_type.get(key, 0)
         self.by_type[key] = max(prev, amount)
 
-    def damage_per_hit(self, key: TypeKey | None) -> int:
-        """Expected damage for one hit from this type (conservative if unknown).
+    def hit_rate(self, key: TypeKey | None, published: float) -> float:
+        """This type's share of swings that hit us: its counted hits and
+        misses, with the ``published`` chance counted as ``PRIOR_SWINGS``."""
+        hits, misses = self.hits.get(key, 0), self.misses.get(key, 0)
+        return (hits + PRIOR_SWINGS * published) / (hits + misses + PRIOR_SWINGS)
 
-        None (a hostile whose type is unknown) gets the unmeasured default.
-        """
-        if key in self.by_type:
-            return self.by_type[key]
-        hostile = [v for k, v in self.by_type.items() if k[0] in HOSTILE_KINDS]
-        return max(hostile) if hostile else UNMEASURED_DEFAULT
+    def damage_per_hit(self, key: TypeKey | None) -> int:
+        """Damage of one hit from this type: its largest measured, else the
+        world's base attack power (``UNMEASURED_DEFAULT``, the published
+        rules; A85). None (a hostile whose type is unknown) gets the same."""
+        return self.by_type.get(key, UNMEASURED_DEFAULT) if key is not None else UNMEASURED_DEFAULT
 
 
 def _find(views: Iterable[list[Any]], kind: str, eid: Any) -> Any | None:
@@ -134,6 +152,30 @@ def damage_amount(ev: dict) -> int | None:
         return int(v)
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def count_swings(table: ThreatTable, events: list[dict], *views: list[Any]) -> None:
+    """Count each hostile type's swings at us in one round trip's ``events``:
+    a ``Damaged`` from it is a hit, an ``Attacked`` past its ``Damaged``
+    count on the same tick a miss. A swing whose source is not perceived is
+    not counted."""
+    attacks: dict[tuple[Any, Any, Any], int] = {}
+    for ev in events:
+        kind = ev.get("kind")
+        if kind == "Damaged" and ev.get("source_kind") in HOSTILE_KINDS:
+            side = (ev.get("source_kind"), ev.get("source_id"), ev.get("tick"))
+            attacks[side] = attacks.get(side, 0) - 1
+            key = type_key_from_damaged(ev, *views)
+            if key is not None:
+                table.hits[key] = table.hits.get(key, 0) + 1
+        elif kind == "Attacked" and ev.get("actor_kind") in HOSTILE_KINDS:
+            side = (ev.get("actor_kind"), ev.get("actor_id"), ev.get("tick"))
+            attacks[side] = attacks.get(side, 0) + 1
+    for (kind, sid, _), missed in attacks.items():
+        e = _find(views, HOSTILE_KINDS[kind], sid) if missed > 0 and sid is not None else None
+        key = type_key_for_entity(e) if e is not None else None
+        if key is not None:
+            table.misses[key] = table.misses.get(key, 0) + missed
 
 
 def absorb_damaged(table: ThreatTable, ev: dict, *views: list[Any]) -> TypeKey | None:

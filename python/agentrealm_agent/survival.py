@@ -270,21 +270,26 @@ def hostiles_reaching(
     return {(e.kind, e.id) for e in w.entities if not cells.isdisjoint(hostile_reach(w, policy, skip, only=e))}
 
 
-def hostile_swing_damage(damage: int) -> float:
+def hostile_swing_damage(damage: int, threat: ThreatTable | None = None, key: TypeKey | None = None) -> float:
     """Expected damage of one hostile swing at us. A hostile swings with its
     damage number as attack power and no weapon damage (GAME_NOTES.md
-    Combat), so it hits on the same roll ours does. ``damage`` is the threat
+    Combat), so it hits on the same roll ours does; once ``threat`` has
+    counted the type's hits and misses, on its measured rate, with that
+    roll as the prior (``ThreatTable.hit_rate``). ``damage`` is the threat
     table's largest hit, only a floor on that number, so each landed hit is
     priced at it, not at the mean below it. Our armor is not counted: the
     agent does not know its defense."""
-    return hit_chance(attack_power=damage) * max(1, damage)
+    chance = hit_chance(attack_power=damage)
+    if threat is not None:
+        chance = threat.hit_rate(key, chance)
+    return chance * max(1, damage)
 
 
 def _hostile_damage(threat: ThreatTable, key: TypeKey | None) -> float:
-    """A measured type's expected swing (``hostile_swing_damage``); an
-    unmeasured one's conservative guess lands every swing, undiscounted."""
-    damage = threat.damage_per_hit(key)
-    return hostile_swing_damage(damage) if threat.measured(key) else damage
+    """A type's expected swing (``hostile_swing_damage``): at its largest
+    measured hit, or, never measured, at the world's base attack power
+    (``UNMEASURED_DEFAULT``, the published rules; A85)."""
+    return hostile_swing_damage(threat.damage_per_hit(key), threat, key)
 
 
 def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable) -> float:
@@ -328,14 +333,6 @@ def win_ratio(health: int | None, group: list[Entity], threat: ThreatTable, weap
     return ticks_to_kill_us(health, group, threat) / ticks_to_kill_them(group, weapon)
 
 
-def has_unmeasured_type(w: WorldModel, group: list[Entity]) -> bool:
-    for e in group:
-        key = type_key_for_entity(e)
-        if key is None or not w.threat.measured(key):
-            return True
-    return False
-
-
 def would_lose(
     w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity | None = None
 ) -> bool:
@@ -349,8 +346,6 @@ def would_lose(
     if not group:
         return False
     eff_risk = effective_risk(float(params["risk"]), w.lives, int(params["lives_floor"]))
-    if eff_risk < 0.5 and has_unmeasured_type(w, group):
-        return True
     health = w.health if w.health is not None else w.max_health
     if health is None:
         health = NEW_CHARACTER_HEALTH

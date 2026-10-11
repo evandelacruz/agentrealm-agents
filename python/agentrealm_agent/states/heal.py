@@ -44,12 +44,11 @@ from ..pathing import (
     reachable_safe_goal,
     safe_ruled_out,
 )
-from ..reach import supply_reach
 from ..supplies import is_food
 from ..survival import hostiles_in_range, hostiles_reaching, town_cell
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
-from .break_state import break_toward
+from .break_state import break_toward, in_break_reach
 from .gather_safe import hostiles_near
 from .intents import set_position, take
 from .use_item import rearm_after_use, use_on_self
@@ -315,8 +314,6 @@ def _walk_toward(
     prices it.
     """
     m, policy = ctx.memory, ctx.policy
-    here = w.pos
-    assert here is not None
     plain, opening = _walk_grids(w, ctx, at, avoid)
     way = cost_path(w, at, opening) if opening.break_costs else None
     grid = plain
@@ -325,11 +322,10 @@ def _walk_toward(
         # walk and its price never part.
         choice = choice_at(w, ctx.knowledge, cut, given_up_blocks(m.nav_stuck, w.map_id, w.tick))
         if choice is not None:
-            if chebyshev(here, cut) <= supply_reach(ctx.knowledge, choice.supply.code):
+            if in_break_reach(w, ctx, choice):
                 out = break_toward(w, ctx, choice, HealState.name)
-                if out.intents:
-                    out.reason = f"{goal}: {out.reason}"
-                    return out
+                out.reason = f"{goal}: {out.reason}"
+                return out
             grid = opening  # out of reach: walk the priced way on Heal's ground
     if m.goal == goal and hostiles_reaching(w, policy, m.path) - m.planned_threats:
         m.path = []

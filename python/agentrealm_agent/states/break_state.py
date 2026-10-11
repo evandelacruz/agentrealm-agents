@@ -122,6 +122,11 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
     return break_toward(w, ctx, choice, state)
 
 
+def in_break_reach(w: WorldModel, ctx: PlayContext, choice: BreakChoice) -> bool:
+    """Whether ``choice``'s block is in reach of its supply's ``Use`` from where we stand."""
+    return w.pos is not None and chebyshev(w.pos, choice.pos) <= supply_reach(ctx.knowledge, choice.supply.code)
+
+
 def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: str = "Break") -> StateOutcome:
     """Open ``choice``'s block: step toward it, then in reach arm its supply and ``Use`` it.
 
@@ -133,12 +138,10 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
     """
     m = ctx.memory
     _, plan_avoid, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)
-    reach = supply_reach(ctx.knowledge, choice.supply.code)
-
     here = w.pos
     if here is None or w.map_id is None:
         return StateOutcome(None, "position unknown", state=state)
-    if chebyshev(here, choice.pos) <= reach:
+    if in_break_reach(w, ctx, choice):
         intents: list[dict] = []
         if w.armed_code != choice.supply.code:
             if m.break_rearm is None and w.armed_code:

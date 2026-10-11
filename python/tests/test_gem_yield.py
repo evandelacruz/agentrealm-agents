@@ -155,6 +155,7 @@ class AttributionTest(unittest.TestCase):
     def test_runner_records_an_applied_use_on_a_block(self):
         r = Runner.__new__(Runner)
         r.world, r.mem, r.knowledge, r.acceptance = world(), Memory(), kb(), None
+        r.plan = None
         r.gem_cuts, r._applied_uses, r._applied_take_codes, r._loadout_verbs = GemYieldTracker(), [], [], []
         r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 2, "y": 1}}
         r.on_result({"outcome": "applied", "tick": 100}, 0)
@@ -171,6 +172,7 @@ class AttributionTest(unittest.TestCase):
     def test_only_a_gem_take_in_the_window_blocks_the_counter_credit(self):
         r = Runner.__new__(Runner)
         r.world, r.mem, r.knowledge, r.acceptance = world(gems=4), Memory(), kb(), None
+        r.plan = None
         r.gem_cuts, r._applied_uses, r._applied_take_codes, r._loadout_verbs = GemYieldTracker(), [], [], []
         r.gem_cuts.note_cut(r.world, (1, 1), "grass", 100)
         r.world.entities = [Entity("supply", 60, (1, 2), "berry")]
@@ -188,6 +190,7 @@ class NoEffectCutTest(unittest.TestCase):
     def runner(self) -> Runner:
         r = Runner.__new__(Runner)
         r.world, r.mem, r.knowledge, r.acceptance = world(), Memory(), kb(), None
+        r.plan = None
         r.gem_cuts, r._applied_uses, r._applied_take_codes, r._loadout_verbs = GemYieldTracker(), [], [], []
         return r
 

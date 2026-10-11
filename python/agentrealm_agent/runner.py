@@ -1111,7 +1111,7 @@ class Runner:
         intent = self._intent_at(index)
         if self.acceptance is not None:
             self.acceptance.on_intent_result(intent, result)
-        note_shop_result(m, intent, result.get("outcome") != "rejected")
+        note_shop_result(m, intent, result.get("outcome") != "rejected", self.plan)
         if m.state == "Equip":
             code = (result.get("rejection") or {}).get("code")
             note_equip_result(m, w, intent, result.get("outcome") == "rejected", code)

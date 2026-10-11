@@ -16,7 +16,7 @@ from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
 from .stalled import below_progress, find as find_stalled, forget as forget_stalled
-from .supplies import CAPABILITIES, chest_applied, used_on_self
+from .supplies import CAPABILITIES, chest_applied, eaten_on_pickup, used_on_self
 from .travel.ops import parse_travel_string, travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
 
@@ -566,7 +566,7 @@ class Plan:
     acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
-    paid_from: int | None = None  # gems held when Shop last sent a Take for the head `buy` op (A106)
+    paid_from: int | None = None  # gems held when Shop last sent a Take for the head `buy` op (A106); None once it failed (A112)
     used_id: int | None = None  # supply UseItem sent a Use on yourself for, for the head `use_item` op (A108)
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
@@ -845,14 +845,18 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         tile = world.view.tiles.get((op["x"], op["y"]))
         return plan.block_before is not None and tile is not None and tile != plan.block_before
     if name == "buy":
-        # Done once it has paid (A106): gems spent since its latest Take and the
-        # item owned, held or a chest that raised the pack. Or once one more is
-        # held than the fewest held since it reached the top, whatever was held
-        # before (free-play run 5): one picked up or withdrawn for free counts
-        # too, and saves the gems.
+        # Done once it has paid (A106): gems spent since its latest Take, which
+        # neither was refused nor went stale (``shop`` unpays it then, A112), and the
+        # item got, whether it ends up held, a chest that raised the pack, or
+        # used up on the Take itself (eaten on pickup, A112), which leaves
+        # nothing to hold. Or once one more is held than the fewest held since
+        # it reached the top, whatever was held before (free-play run 5): one
+        # picked up or withdrawn for free counts too, and saves the gems.
         code = op["code"]
         paid = plan.paid_from is not None and world.gems is not None and world.gems < plan.paid_from
-        if paid and (count_held(world, code) > 0 or chest_applied(code, world.carry_capacity)):
+        if paid and (
+            count_held(world, code) > 0 or chest_applied(code, world.carry_capacity) or eaten_on_pickup(code)
+        ):
             return True
         return plan.held_before is not None and count_held(world, code) > plan.held_before
     if name == "fetch_item":

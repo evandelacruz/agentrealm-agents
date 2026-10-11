@@ -566,7 +566,7 @@ class Plan:
     acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
-    paid_from: int | None = None  # gems held when Shop last sent a Take for the head `buy` op (A106)
+    paid_from: int | None = None  # gems held when Shop last sent a Take for the head `buy` op (A106); None once it failed (A112)
     used_id: int | None = None  # supply UseItem sent a Use on yourself for, for the head `use_item` op (A108)
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
@@ -845,7 +845,8 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         tile = world.view.tiles.get((op["x"], op["y"]))
         return plan.block_before is not None and tile is not None and tile != plan.block_before
     if name == "buy":
-        # Done once it has paid (A106): gems spent since its latest Take and the
+        # Done once it has paid (A106): gems spent since its latest Take, which
+        # neither was refused nor went stale (``shop`` unpays it then, A112), and the
         # item got, whether it ends up held, a chest that raised the pack, or
         # used up on the Take itself (eaten on pickup, A112), which leaves
         # nothing to hold. Or once one more is held than the fewest held since

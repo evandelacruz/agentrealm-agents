@@ -15,6 +15,7 @@ from agentrealm_agent.memory import Memory, queue_signal
 from agentrealm_agent.navigation import entrance_routes
 from agentrealm_agent.navigation import planner as P
 from agentrealm_agent.plan import Plan
+from agentrealm_agent.shop import note_shop_result, sync_shop
 from agentrealm_agent.states.shop import shop_outcome
 from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, eaten_on_pickup_line, held_line, no_seller_line
 from agentrealm_agent.travel.knowledge import entrance_key
@@ -71,6 +72,39 @@ class BuyDoneTest(unittest.TestCase):
         plan.advance(w, m)
         self.assertIsNone(plan.current())
         self.assertEqual([t["trigger"] for t in m.strategist_signals], ["goal_done"])
+
+    def took(self, plan: Plan, gems: int) -> tuple[WorldModel, Memory]:
+        """A Take of a golden cap sent beside the shop at ``gems``, as Shop sends it."""
+        w, m = world(gems=gems), Memory()
+        m.shop_pending = (6, "golden_cap", gems, (1, 0), w.map_id, w.tick)
+        plan.paid_from = gems
+        return w, m
+
+    def test_a_refused_take_then_a_gem_drop_is_no_purchase(self):
+        plan = self.paid_plan("golden_cap", gems=20)
+        w, m = self.took(plan, 20)
+        note_shop_result(m, {"verb": "Take", "supply_id": 6}, False, plan)
+        w.gems = 15  # lost some other way, a death say
+        plan.advance(w, m)
+        self.assertEqual(plan.current()["code"], "golden_cap")
+
+    def test_a_stale_take_then_a_gem_drop_is_no_purchase(self):
+        plan = self.paid_plan("golden_cap", gems=20)
+        w, m = self.took(plan, 20)
+        w.pos = (9, 9)  # walked off the shop cell: the Take can no longer land
+        sync_shop(w, m, plan)
+        w.gems = 15
+        plan.advance(w, m)
+        self.assertEqual(plan.current()["code"], "golden_cap")
+
+    def test_a_take_that_landed_stays_paid(self):
+        plan = self.paid_plan("golden_cap", gems=20)
+        w, m = self.took(plan, 20)
+        note_shop_result(m, {"verb": "Take", "supply_id": 6}, True, plan)
+        w.gems = 12
+        sync_shop(w, m, plan)
+        plan.advance(w, m)
+        self.assertIsNone(plan.current())
 
     def test_an_item_eaten_on_pickup_is_not_done_unpaid(self):
         plan = self.paid_plan("golden_cap", gems=20)

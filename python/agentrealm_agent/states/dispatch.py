@@ -151,13 +151,13 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     note_goto_reached(world, m, ctx.policy)
     note_heal_window(m, world)
     note_last_weapon(m, world)
+    sync_shop(world, m, ctx.plan)  # before the plan settles: a Take gone stale has paid nothing (A112)
     if ctx.plan is not None:
         paced_op = ctx.plan.current()  # the op on top while it paced, before settling pops any
         _settle_plan(ctx.plan, world, m)
         if paced is not None and paced_op is not None:
             _stall_paced_op(ctx.plan, paced_op, paced, world, m, ctx.knowledge)
     sync_boss(world, m, ctx.plan)
-    sync_shop(world, m)
     if ctx.policy.kind == "scripted":
         sync_engagement(world, m, ctx.policy, ctx.params)
     op = ctx.plan.current() if ctx.plan is not None else None

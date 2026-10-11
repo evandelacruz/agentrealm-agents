@@ -793,3 +793,9 @@ Intents: 1,075 `Step`, 2,909 `Wait`, 4 `Take`, 3 `Use`, no `Say`, no `Attack`. C
 3. **Measured damage per type is not saved, so each run starts with every type unmeasured, and no fight starts** (`hostile_memory.py:68–75`, `threat.py:34`). `save_hostiles` writes `hostile: true` per type and the sightings, but not `w.threat.by_type`. Run 8 measured all three types (1 a hit), and run 9 started with none. The planner's progression arc (`strategist.py:204`) refuses an unmeasured type, so its `gather_gems` kept `fight: false` all run. #172's new win estimate never went into a fight, and kill drops stayed out of reach.
 
 **Minor:** A `Take` of an apple at 222.6 s was refused `target_not_nearby`, and Heal walked to it instead. Break cuts on walks are filed as gem-yield cuts: the bush at (402, 437) is in `gem_yield`. Gristlewick 240's remembered post moved from (369, 400) to (357, 400).
+
+### Run 10: a fourth box of matches (partial notes)
+
+Full notes for this run are not written yet. One defect is recorded here because A92 cites it.
+
+- **The planner bought a fourth box of matches with 3 held**, on the rumor clue "potato patch, take matches" (see the rumor_teller row under Run 1's clues). It spent 5 of its 8 gems on it at 13 s. This was the third run with gems to spend in which it bought matches it already held (run 7: a second box; run 8: a third, with its only 5 gems; run 9 bought nothing). State listed `held` counts but not what each item is for, nor what the gems were saving toward (the bronze sword at 15). Addressed by A92: State `held` says what each item does and `upgrades_for_sale` shows the next upgrade and the gems short, and the planner is asked to weigh each purchase against both.

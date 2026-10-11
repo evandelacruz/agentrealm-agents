@@ -14,6 +14,9 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import STATES, PlayContext, State, StateOutcome, dispatch
 from agentrealm_agent.world import Entity, WorldModel
 
+# The safe default with nothing to explore and nothing to open (A114).
+NO_WAY_ON = "nothing left to explore, nothing to open: asked the planner"
+
 dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")
 
 
@@ -256,7 +259,7 @@ class DispatcherFallThroughTest(unittest.TestCase):
         w = world(["###", "#~#", "###"], at=(1, 1))
         out = dispatch(w, ctx(w, avoid_blocks=["lava"]))
         self.assertEqual(out.yielded, ["Escape: no escape route"])
-        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, "boxed in", True))
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, NO_WAY_ON, True))
 
     def test_retreat_with_safe_tile_walled_off_falls_through(self):
         from agentrealm_agent.directives import PARAM_DEFAULTS
@@ -317,7 +320,7 @@ class DispatcherFallThroughTest(unittest.TestCase):
         out = dispatch(w, ctx(w, plan=plan_of({"op": "travel", "to": "point", "x": 3, "y": 1})))
         self.assert_yielded(out, "Travel")
         self.assertIn("blocked", out.yielded[0])
-        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, "boxed in", True))
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, NO_WAY_ON, True))
 
     def test_explore_area_with_no_step_falls_through_to_safe_default(self):
         # The op's frontier (column 3) is walled off.
@@ -325,7 +328,7 @@ class DispatcherFallThroughTest(unittest.TestCase):
         c = ctx(w, plan=plan_of({"op": "explore_area", "x": 1, "y": 1, "radius": 5}))
         out = dispatch(w, c)
         # Explore itself runs the safe default when its op has no step.
-        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, "boxed in", True))
+        self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, NO_WAY_ON, True))
         self.assertFalse(out.progress, "the safe default's move is no progress on the op")
         self.assertEqual(c.plan.current()["op"], "explore_area")
 
@@ -374,7 +377,7 @@ class SafeDefaultPushesTheBoundaryTest(unittest.TestCase):
         w.entities = [Entity("npc", 5, (10, 1), "slime")]
         w.hostile_types.add(("npc", "slime"))  # a type seen attacking (survival.is_hostile)
         out = dispatch(w, ctx(w, Memory(heal_regen_absent=True), hostile=["npc"], hostile_range=2))
-        self.assertIn("look around", out.reason)
+        self.assertIn("asked the planner", out.reason)
 
     def test_a_townsperson_by_the_frontier_does_not_close_it(self):
         w = self.hurt_in_a_small_safe_zone()

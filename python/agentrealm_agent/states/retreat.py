@@ -34,7 +34,7 @@ from ..survival import (
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
-from .explore import plan_sets
+from ..pathing import plan_sets
 from .fight import engage, in_weapon_reach
 from .heal import use_carried_heal
 from .intents import set_position

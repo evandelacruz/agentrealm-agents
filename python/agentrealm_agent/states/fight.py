@@ -16,7 +16,7 @@ from ..engagement import Engagement, fights, held_members
 from ..survival import RETREAT_NAV, is_hostile, on_safe_tile, pursuer_peaks
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
-from .explore import plan_sets
+from ..pathing import plan_sets
 from .intents import set_position, use_npc, use_on
 
 

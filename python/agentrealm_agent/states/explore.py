@@ -7,9 +7,12 @@ off hazards, away from hostiles, and, when hurt, inside safe zones first so
 the character heals while it looks around. Once that ground is all explored
 or out of reach, it pushes the boundary: the nearest frontier outside, still
 off hazards and away from hostiles, with the survival reflexes above it.
-Only with no reachable frontier at all does it step to a safe neighbour
-("look around"), so a decision with nothing to do is never idle. Stuck
-detection escalates and gives up a walk that goes nowhere (A15); cells Step
+With no reachable frontier at all, the ground in reach is all seen, so it
+opens a way on: the cheapest block on the edge of that ground that a held
+item is known to open (``openings``, A114), walked to and broken as Break
+breaks any block. With nothing to open either, it never steps in place: it
+raises a ``no_way_on`` trigger and waits for the planner. Stuck detection
+escalates and gives up a walk that goes nowhere (A15); cells Step
 rejections ruled out and ``avoid_blocks`` hazards stay out of the path (A14).
 """
 
@@ -19,16 +22,19 @@ import random
 
 from ..config import Policy
 from ..healing import hurt
+from ..break_memory import given_up_blocks
 from ..knowledge_base import KnowledgeBase
-from ..memory import Memory
-from ..navigation.rejection import navigation_avoid_costly
+from ..memory import Memory, queue_signal
 from ..navigation import stuck as nav_stuck
+from ..openings import cheapest_opening
 from ..pathing import (
     attempt_plan,
     clue_redirects,
     escalation_step,
+    grid_params,
     next_step,
     path_owned_by,
+    plan_sets,
     replan,
 )
 from ..plan import GoalOp
@@ -36,7 +42,8 @@ from ..navigation.planner import HOSTILE_DANGER_RADIUS
 from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
-from .gather_safe import hostiles_near, is_safe_ish
+from .break_state import break_toward
+from .gather_safe import is_safe_ish
 from .intents import set_position
 
 # Hurt, the safe default keeps away from a known hostile this close: the
@@ -44,6 +51,8 @@ from .intents import set_position
 CAUTION_RADIUS = HOSTILE_DANGER_RADIUS
 # How long it holds with no step away before it explores again (10 s at 10 ticks/s).
 KEEP_AWAY_HOLD_TICKS = 100
+# Why the safe default had no step: the ground in reach is all seen.
+NOTHING_TO_EXPLORE = "nothing left to explore"
 
 
 class ExploreState(State):
@@ -72,15 +81,55 @@ class ExploreState(State):
 
 
 def safe_default(world: WorldModel, ctx: PlayContext) -> StateOutcome:
-    """The safe default: explore safe ground, then push past it (never idle).
+    """The safe default: explore safe ground, then push past it, then open a way on.
 
     Hurt with a known hostile near, it explores nothing: it steps away from
-    the hostile, or holds when no step gets further (``keep_away``)."""
+    the hostile, or holds when no step gets further (``keep_away``). With
+    nothing left to explore it opens a way, or asks the planner
+    (``open_a_way``)."""
     if not hurt(world):
         ctx.memory.keep_away_hold = None  # healed: a later hold starts afresh
     elif (out := keep_away(world, ctx)) is not None:
         return out
-    return explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None)
+    out = explore_outcome(world, ctx.memory, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=None)
+    if out.intents:
+        ctx.memory.opening = ctx.memory.no_way_on = None  # ground to explore again: a later ask is new
+        return out
+    return open_a_way(world, ctx)
+
+
+def open_a_way(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateOutcome:
+    """The ground in reach is all seen: open the cheapest way on, or ask the planner (A114).
+
+    The way on is a block on the edge of the reached ground with something
+    past it that a held item is known to open, by the walk to it plus the
+    break (``openings.cheapest_opening``); one picked is kept until it is
+    opened, fails or its walk is given up. It is broken as Break breaks any
+    block (``break_toward``). With none, it never steps in place: it raises
+    one ``no_way_on`` trigger for this cell, and waits for the planner,
+    who weighs the clues and State ``ways_to_open``.
+    """
+    m = ctx.memory
+    if w.pos is None or w.map_id is None:
+        return StateOutcome(None, "position unknown", state=state)
+    _, plan_avoid, plan_costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
+    priced = grid_params(ctx.policy, plan_avoid, plan_costly, m=m, w=w, knowledge=ctx.knowledge).priced
+    skip = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
+    kept = m.opening[1] if m.opening is not None and m.opening[0] == w.map_id else None
+    found = cheapest_opening(w, ctx.knowledge, plan_avoid, skip, priced, kept)
+    if found is not None and found.choice is not None:
+        out = break_toward(w, ctx, found.choice, state)
+        if out.intents:
+            m.opening, m.no_way_on = (w.map_id, found.pos), None
+            out.reason = f"{NOTHING_TO_EXPLORE}: open the {found.block} at {found.pos}: {out.reason}"
+            return out
+    m.opening = None
+    here = (w.map_id, w.pos)
+    if m.no_way_on != here:
+        m.no_way_on = here
+        why = f"{NOTHING_TO_EXPLORE}, and nothing held is known to open a block on the edge of the ground in reach"
+        queue_signal(m, {"trigger": "no_way_on", "map_id": w.map_id, "x": w.pos[0], "y": w.pos[1], "tick": w.tick, "why": why})
+    return StateOutcome(None, f"{NOTHING_TO_EXPLORE}, nothing to open: asked the planner", state=state, wait=True)
 
 
 def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateOutcome | None:
@@ -137,8 +186,8 @@ def explore_outcome(
 ) -> StateOutcome:
     """One step toward the ``explore_area`` ``op``, or with no op the safe default's.
 
-    With an op and no step, sends nothing. The safe default always sends a
-    step, or waits only when boxed in with no open safe neighbour.
+    With no step, sends nothing: the safe default then opens a way on
+    (``open_a_way``).
     """
     if w.pos is None:
         return StateOutcome(None, "position unknown", state=state)
@@ -164,17 +213,7 @@ def explore_outcome(
         return StateOutcome([set_position(step)], f"{m.goal} → {label}{note}", state=state)
     if op is not None:
         return StateOutcome(None, "no explore_area step", state=state)
-    return _look_around(w, policy, rng, plan_avoid, state)
-
-
-def _look_around(w: WorldModel, policy: Policy, rng: random.Random, blocked: set[Pos], state: str) -> StateOutcome:
-    """No reachable frontier at all: step to a safe neighbour rather than stand idle."""
-    options = [p for p in w.open_neighbours(w.pos, blocked) if not hostiles_near(w, p, policy)]
-    if hurt(w):
-        options = [p for p in options if is_safe_ish(w, p, policy)] or options
-    if not options:
-        return StateOutcome(None, "boxed in", state=state, wait=True)
-    return StateOutcome([set_position(rng.choice(sorted(options)))], "look around: nothing left to explore", state=state)
+    return StateOutcome(None, NOTHING_TO_EXPLORE, state=state)
 
 
 def _missed_step(
@@ -221,19 +260,3 @@ def _escalated_step(
         return escalation_step(m, w, att, avoid, target_plan, None, knowledge)
     reason = nav_stuck.stuck_reason(att, w.tick)
     return escalation_step(m, w, att, avoid, target_plan, reason, knowledge) if reason else None
-
-
-def plan_sets(
-    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None
-) -> tuple[set[Pos], set[Pos], set[Pos]]:
-    """``blocked``, ``plan_avoid``, ``plan_costly`` for this decision.
-
-    Rejection learnings and ``avoid_blocks`` hazards stay out of every choice
-    (A14, reflex 1). Standing on a hazard with no way straight off, the plan may
-    cross hazards at a high price instead.
-    """
-    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
-    hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
-    blocked = nav_avoid | hazards
-    escape = hazards if w.pos in hazards else set()
-    return blocked, blocked - escape, escape | nav_costly

@@ -25,7 +25,8 @@ from ..travel.ops import TravelOp
 from ..travel.resolve import ResolvedDestination, given_up_travel, resolve_travel
 from ..world import Entity, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
-from .explore import explore_outcome, plan_sets
+from ..pathing import plan_sets
+from .explore import explore_outcome
 from .intents import set_position
 from .room import planned_take
 from .travel import walk_to

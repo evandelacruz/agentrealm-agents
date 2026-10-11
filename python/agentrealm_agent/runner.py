@@ -75,7 +75,7 @@ from .healing import (
 )
 from .shop import note_shop_result
 from .supplies import heals, is_food
-from .states.explore import plan_sets
+from .pathing import plan_sets
 from .travel.resolve import given_up_travel, travel_given_up
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.strength import loadout_key

@@ -19,7 +19,7 @@ from ..navigation import stuck as nav_stuck
 from ..pathing import bounded_step, grid_params, nav_search
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
-from .explore import plan_sets
+from ..pathing import plan_sets
 from .intents import set_position
 from .room import planned_take
 

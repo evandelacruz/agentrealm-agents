@@ -25,7 +25,7 @@ from ..plan import GoalOp
 from ..scroll_investigation import supply_was_read
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
-from .explore import plan_sets
+from ..pathing import plan_sets
 from .intents import read_block, read_supply, say_to, set_position
 
 GOAL = "investigate"

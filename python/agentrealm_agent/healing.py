@@ -302,7 +302,9 @@ def can_try(m: Memory, w: WorldModel, kind: str, supply_id: int, target: Pos | N
     if r is None or r.action in ("arm", "walk"):
         return True
     if isinstance(r, NoopDrink):
-        fell = w.health is not None and r.health is not None and w.health < r.health
+        # Lower health is a reason to drink again, never to use a chest again (A108).
+        code = next((h.code for h in in_hand(w) if h.id == supply_id), None)
+        fell = heals(code) and w.health is not None and r.health is not None and w.health < r.health
         return fell or (r.action == "hold" and drink_situation(w) != r.situation)
     if r.action == "forget":
         return False

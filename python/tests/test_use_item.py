@@ -6,7 +6,7 @@ import unittest
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.healing import HealRefusal, heal_situation
+from agentrealm_agent.healing import HealRefusal, NoopDrink, can_try, drink_situation, heal_situation
 from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
@@ -92,6 +92,18 @@ class ApplyChestTest(unittest.TestCase):
         m = Memory()
         m.heal_refusals[("use", 9)] = HealRefusal("bad_target", "hold", 5, heal_situation(w))
         self.assertIsNone(chest_to_apply(w, m))
+
+    def test_a_chest_whose_use_did_nothing_is_not_retried_after_a_hit(self):
+        w = world()
+        w.held_supplies = [InventorySupply(9, "middle_chest")]
+        m = Memory()
+        m.heal_refusals[("use", 9)] = NoopDrink("no_change", "hold", 5, drink_situation(w), 10)
+        w.health = 6  # hit since: a reason to drink again, not to use a chest again
+        self.assertIsNone(chest_to_apply(w, m))
+        # A potion in the same spot is drunk again once health fell.
+        w.held_supplies = [InventorySupply(9, "potion")]
+        m.heal_refusals[("use", 9)] = NoopDrink("no_change", "hold", 5, drink_situation(w), 10)
+        self.assertTrue(can_try(m, w, "use", 9))
 
     def test_not_with_a_hostile_in_range(self):
         w = world()

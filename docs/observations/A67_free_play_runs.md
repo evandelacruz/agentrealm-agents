@@ -1747,7 +1747,7 @@ Intents: 454 `Step`, 858 `Wait`, 132 `Use` (130 on grass: 126 cuts that took eff
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 are A124 (every unmet readiness check shows how it closes and what that costs, health included, and an upgrade the plan saves toward shows its minutes at the measured gather rate), in flight in #223, which brings its PLAN.md row. Defect 3 is queued for a row of its own: a detour find given up short is not picked again until something about it changes.
+Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 are A124 (every unmet readiness check shows how it closes and what that costs, health included, and an upgrade the plan saves toward shows its minutes at the measured gather rate), merged in #223 with its PLAN.md row. Defect 3 is queued for a row of its own: a detour find given up short is not picked again until something about it changes.
 
 1. **An unmet health check comes with no way to close it, so the plan assumes one** (`strategist.py:1174–1209`, `cost_to_close`, which leaves health out; `states/heal.py:129–131`, Heal yields to the plan's op above `low_health`). Health was 7/10 against a bar of 8 from 159 s to the end. The planner wrote "the health bar recovers while gathering", but every zone read was `safe: false` and health never moved. Heal does not rest above `low_health` while an op is on top, so nothing closed the check, and the stage stayed unmet for 440 s. **Rule:** every unmet readiness check shows how it closes and what that costs: health by resting on safe ground (minutes at the known regen) or a potion. The plan never relies on a check closing by itself.
 
@@ -1811,7 +1811,7 @@ None.
 
 | Defect | Run 22 | |
 |---|---|---|
-| An unmet health check shows no way to close it | **Still there.** Health 7/10 for 538 s; the planner's one rest plan was the reply lost to defect 2. Food on the way to the entrance closed it. | |
+| An unmet health check shows no way to close it (A124) | **Still there**; A124 (#223) merged after this run's commit. Health 7/10 for 538 s; the planner's one rest plan was the reply lost to defect 2. Food on the way to the entrance closed it. | |
 | Saving for an upgrade shows gems, not time | **Bought this run.** The chest took 410 s of gathering. | |
 | A detour find given up short is picked again | **Not seen.** One pile detour at 11 s, taken. | |
 

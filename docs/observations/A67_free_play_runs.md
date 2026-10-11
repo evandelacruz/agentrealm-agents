@@ -1520,10 +1520,90 @@ Intents: 1,086 `Step`, 2,881 `Wait`, 6 `Take` (2 gems; 4 apples, 1 taken and 3 r
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize. Backlog: defect 1 is covered by A90 (the stuck escalation and the pacing guard rewritten under A87, subsuming A103 and A111; branch `c/a90-stuck-under-a87`); defect 2 is A114 (queued); defect 3 is A116 (a `Take` sent from a position the server has not confirmed). The pack shown at 10 slots after run 17 applied the middle_chest is A115. A115 and A116 are on branch `c/run18-capacity-pickup`.
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is covered by A90 (the stuck escalation and the pacing guard rewritten under A87, subsuming A103 and A111; branch `c/a90-stuck-under-a87`); defect 2 is A114 (#212); defect 3 is A116 (a `Take` sent from a position the server has not confirmed). The pack shown at 10 slots after run 17 applied the middle_chest is A115. A115 and A116 are on branch `c/run18-capacity-pickup`.
 
 1. **The pacing give-up still misses a stuck-ladder Break target** (`navigation/oscillation.py:203–220`, `walk_attempt`; `_give_up_walks` at 145–180). Under `travel` entrance, Break walked toward (367, 368) and Explore walked back toward (409, 419), about 9 steps each, for about 300 s in all. The three oscillation events had states `Break` and `Explore` but named only `explore` in `goals` and carried no `breaks`. So the Break walk was not attributed to a stuck attempt, (367, 368) was never filed as a stalled `break_block`, and Break kept nominating it. It was cut only after `explore_area` led the character round to its north side. **Rule:** every walk that took part in pacing is given up, whichever state or ladder level sent it and whichever attempt is active when the guard fires.
 
 2. **A fully seen map leaves Explore stepping at random** (`states/explore.py:165–177`, `_look_around`). On map 17 every cell was seen, so `explore_area` had no target and Explore took a random safe step each decision for 45 s. Both the scarecrow and the sign said the hedges burn, and 3 matches were held, but nothing nominated a hedge. **Rule:** when nothing is left to explore and the goal is still out of reach, the walk opens a block a held item is known to open, or reports the goal stalled. It does not wander.
 
 3. **A pickup `Take` sent out of reach** (`states/pickup.py:23–44`, `pickup_outcome`). Pickup sent `take apple` three times at full health, and all three were refused `target_not_nearby`. Twice it was the apple at (391, 385) with the trace at (389, 384), 2 cells off. Pickup takes only within 1 cell by the world model's position, so that position was most likely a step behind the server's while a move queue was still running. **Rule:** a reflex that needs reach acts on a position the server has confirmed, not on one a running move queue may already have left.
+
+### Run 19: started inside the hedge garden; no way on found, 30 match `Use`s on snotling cells, then a death to respawned snotlings with 2 potions held
+
+- **Code:** `main` at `5a9ae6b`. Since run 18: A90 (one stuck ladder and one give-up memory; pacing gives up every walk that took part), A88 (Gather as one scored target search), A115 (carry capacity derived from the applied chest at every sync), A116 (reach-limited intents only from a confirmed position).
+- **Runner:** `scripts/smoke_m10_olympuff.py` with the same free-play profile and `--seconds 600`. Run 18 parked the character inside map 17, and the M8 runner starts only on the overworld. The M10 runner plays from wherever the character stands, so the gate printout below is M10's.
+- **Knowledge base:** kept from run 18.
+- **Verdict:** exit 0, `PASS` (M10) after **602.1 s**. The park **parked safe** at (429, 401) on the overworld after 3.8 s. The character started at **10/10**, 5 lives and **33 gems** at (9, 10) on map 17, with the bronze_sword armed, the bronze_mail worn, 3 potions and 3 matches.
+- **Gate summary (M10):** deaths **1**; API errors **0**; readable cells seen 13 (unread 0); NPCs seen 19 (never spoken 4); duplicate break attempts 0. Planner: 51 calls, 51 plans accepted, 0 errors.
+
+#### Planner ops over time
+
+| Time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 0–67 s | `explore_area` | The map was fully seen, so each explore finished at once. Explore's fallback reported **"boxed in"**: snotling 12 stood next to the character at (8, 9), so no neighbour counted as safe (defect 3). |
+| 67–196 s | `break_block` (8, 9), `explore_area`, `say`, `wait` | "The probe cell is a guess." Break armed the matches and sent one `Use` on (8, 9), snotling 12's cell. Nothing changed. Then came explores, waits and "boxed in" again. |
+| 196–213 s | `use_block` matches (8, 9) | Solve sent **13 `Use`s** on (8, 9) in 16 s (30 match `Use`s in all, with the one at 67 s and the 16 below). No block changed and no match was spent (defect 2). |
+| 213–277 s | `explore_area`, `break_block` | "Boxed in" again. |
+| 277–325 s | `travel` point (2, 10), then `use_block` matches (2, 8), `travel` town | The walk west drew both snotlings. Fight **killed snotling 13** (286 s) and **snotling 12** (291 s), 6/10 after. Solve then sent **16 `Use`s** on (2, 8), snotling 12's death cell, over 32 s. No change. |
+| 325–507 s | `travel` town, `gather_gems`, `wait`, `buy` small_potion, `explore_area` | No door to town is known on map 17, so Explore's random steps ran. **Snotling 13 was back** at 346 s and hit the character from 6/10 down to 4/10. It drank a potion at 358 s (10/10 by 375 s). Then waits and "boxed in" again. |
+| 507–535 s | `use_block` matches, `explore_area` | Solve walked toward (3, 9) and Retreat walked back. **One pacing event** (517 s, `Retreat`/`Solve`) gave up both walks. **Snotling 12 was back too.** From 519 s both snotlings hit it, **10 → 0 in 17 s**, with 2 potions held. Flee answered **"nowhere to flee"** for 8 decisions and sent nothing (defect 1). **Died** at 535.6 s, dropping 7 supplies (sword, mail, matches, potions) in a death chest on map 17. |
+| 540–600 s | `equip`, `travel` town, `buy` sword/potion, `gather_gems` | Respawned at (391, 391) on the overworld, lives 4. Bought a **bronze_sword** (33 → 18) and a **small_potion** (18 → 8). Cut 10 grass at region (432, 400) for 1 gem. |
+
+#### Pack, stage, entrance and level attempts
+
+- **Pack slots:** **10, 9 used** at the start; 10, 3 used at the end. The State listed the middle_chest (10 → 30) as an upgrade for sale all run, as in run 18, so no chest is applied server-side.
+- **Stage:** 3 at the start, **2 at the end**: the bronze_mail was lost at death and not rebought (20 gems, 11 short).
+- **Entrance and level:** no progress on map 17. No hedge cell was found or burned. All 3 matches were dropped at death, unused.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **33** | **9** (+1 earned, −25 spent) |
+| Armed | bronze_sword | bronze_sword (rebought) |
+| Worn | bronze_mail | none |
+| Pack | 9/10 slots | 3/10 slots |
+| Potions | 3 | 1 (1 drunk, 2 lost at death, 1 bought) |
+| Matches | 3 | 0 (lost at death) |
+| Lives | 5 | 4 |
+
+#### Gems earned
+
+**1** in 600 s, from 10 grass cuts in the last 30 s. There were no piles and no kill drops.
+
+#### Fights
+
+| Time | Hostile | Started by | Outcome |
+|---|---|---|---|
+| 280–286 s | snotling 13 | it | **Killed** (4 + 4). |
+| 286–291 s | snotling 12 | it | **Killed** (4 + 4). 6/10 after. |
+| 346–358 s | snotling 13 (respawned) | it | Hit it from 6/10 to 4/10; drank a potion. |
+| 510–535 s | snotlings 12 and 13 (both respawned) | them | **Died.** 10 hits of 1 from 519 s; a few swings, no drink. |
+
+#### Run 18 defects, checked
+
+| Defect | Run 19 | |
+|---|---|---|
+| A walk that took part in pacing is not given up (A90) | **Gone for this case.** The one pacing event named both walks (`solve`, `safe`) and gave both up. | |
+| A fully seen map leaves Explore stepping at random | **Still there**, and worse with a hostile adjacent: "boxed in" waits on and off from 2 s to 507 s (727 ticks). | |
+| A reflex `Take` sent out of reach (A116) | **Gone.** No `target_not_nearby` refusal. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens | input 266,222, output 11,082, cache write 107,608, cache read 5,703,224 |
+
+#### Decision mix
+
+Intents: 140 `Step`, 420 `Wait`, 50 `Use` (30 match `Use`s on non-blocks, 10 cuts, 10 swings), 12 `Arm`, 3 `Take`. Call mix: 1,565 `tick`, 105 `strategist`, 66 `entities`, 39 `self`, 19 `position`, 5 `terrain`, 2 `stuck`, 1 `zone`, and 1 `oscillation` event.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize. Backlog: all three fold into A114 (#212): defect 1 as Flee waiting under attack at "nowhere to flee" with potions held, defect 2 as `use_block` and `break_block` re-sending `Use` on a cell with no block, defect 3 as Explore standing "boxed in" with a hostile adjacent. The A114 PLAN.md row comes with #212.
+
+1. **Flee with no escape waits while it is hit** (`states/flee.py:219–220`). From 531 s, two snotlings were adjacent and Flee found no escape cell. It returned "nowhere to flee" with `wait=True` 8 times and took 4 hits to 0. It held 2 potions, and the potion threshold is health ≤ 5. **Rule:** a decision under attack never ends in a wait while an action can still change the outcome. Drink, swing, or step, in that order of what the health floor needs.
+
+2. **A block-changing op keeps using a cell with no block on it** (`states/solve.py:82–119`, `_use_block_outcome`; `plan.py:241`, `_validate_use_block`). The planner's `use_block` and `break_block` targets were (8, 9) and (2, 8): a snotling's cell and its death cell, neither a block. Solve re-sent `Use` every second for 16 s and 32 s. Nothing changed and no match was spent. **Rule:** an op aimed at a block is refused when its target cell holds no block. Once a `Use` resolves with no change, the op ends as failed and is not re-sent.
+
+3. **With nothing left to explore and a hostile adjacent, Explore waits "boxed in"** (`states/explore.py:170–177`, `_look_around`). This is the run 18 defect 2 case with a snotling next to the safe cell. Explore's fallback ruled out every neighbour near a hostile and waited, on and off, for most of 2–507 s. **Rule:** when nothing is left to explore and the goal is out of reach, the walk opens a block a held item is known to open, or reports the goal stalled to the planner. It neither wanders nor stands.

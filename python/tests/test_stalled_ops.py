@@ -6,13 +6,16 @@ from __future__ import annotations
 import threading
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
-from agentrealm_agent.stalled import below_progress, find, lapse, remember, retry_basis
+from agentrealm_agent import runner as runner_module
+from agentrealm_agent.runner import Runner
+from agentrealm_agent.stalled import STALLED_KEPT, below_progress, find, lapse, remember, retry_basis
 from agentrealm_agent.states.dispatch import dispatch
 from agentrealm_agent.strategist import system_prompt
 from agentrealm_agent.world import WorldModel
@@ -98,6 +101,56 @@ class DemoteTest(unittest.TestCase):
         self.assertIsNone(find(m.stalled_ops, GATHER))
 
 
+class AdvanceTest(unittest.TestCase):
+    def test_a_stalled_op_does_not_come_back_on_top_when_the_op_above_ends(self):
+        m = stalled_on(TRAVEL)
+        plan = Plan([dict(GATHER), dict(TRAVEL), dict(EQUIP)], dict(PARAM_DEFAULTS))
+        plan.advance(WorldModel(character_id=1, map_id=1, pos=(0, 0), gems=25), m)
+        self.assertEqual([op["op"] for op in plan.ops_left()], ["equip", "travel"])
+        self.assertEqual(m.strategist_signals[-1]["trigger"], "goal_stalled")
+
+    def test_with_nothing_below_it_is_dropped(self):
+        m = stalled_on(TRAVEL)
+        plan = Plan([dict(GATHER), dict(TRAVEL)], dict(PARAM_DEFAULTS))
+        plan.advance(WorldModel(character_id=1, map_id=1, pos=(0, 0), gems=25), m)
+        self.assertEqual(plan.ops_left(), [])
+        self.assertEqual(m.strategist_signals[-1]["trigger"], "goal_failed")
+
+    def test_once_lapsed_it_comes_back_on_top(self):
+        m = stalled_on(TRAVEL)
+        w = WorldModel(character_id=1, map_id=1, pos=(0, 0), gems=25)
+        w.held_supplies = [InventorySupply(id=1, code="iron_key")]
+        lapse(m.stalled_ops, retry_basis(w, None))
+        plan = Plan([dict(GATHER), dict(TRAVEL), dict(EQUIP)], dict(PARAM_DEFAULTS))
+        plan.advance(w, m)
+        self.assertEqual(plan.current()["op"], "travel")
+
+
+class RunnerExpireTest(unittest.TestCase):
+    def runner(self, m: Memory) -> SimpleNamespace:
+        return SimpleNamespace(mem=m, world=WorldModel(character_id=1, map_id=1, pos=(0, 0)), knowledge=None, log=mock.MagicMock())
+
+    def test_a_reason_to_retry_forgets_the_record_and_logs_why(self):
+        r = self.runner(stalled_on(BREAK))
+        r.world.held_supplies = [InventorySupply(id=1, code="bronze_mallet")]
+        Runner.expire_stalled_ops(r)
+        self.assertEqual(r.mem.stalled_ops, [])
+        record = r.log.call_args.args[2]["stalled"]
+        self.assertEqual((record["event"], record["because"]), ("lapsed", "now holds bronze_mallet"))
+
+    def test_nothing_new_keeps_it_and_logs_nothing(self):
+        r = self.runner(stalled_on(BREAK))
+        Runner.expire_stalled_ops(r)
+        self.assertEqual(len(r.mem.stalled_ops), 1)
+        r.log.assert_not_called()
+
+    def test_with_nothing_remembered_it_reads_nothing(self):
+        r = self.runner(Memory())
+        with mock.patch.object(runner_module, "retry_basis") as basis:
+            Runner.expire_stalled_ops(r)
+        basis.assert_not_called()
+
+
 class RetryTest(unittest.TestCase):
     def setUp(self):
         self.w = WorldModel(character_id=1, map_id=1, pos=(0, 0))
@@ -123,6 +176,14 @@ class RetryTest(unittest.TestCase):
         self.kb.maps["1"] = {"doors": [{"x": 3, "y": 0, "to_map_id": 2, "to_x": 0, "to_y": 0}]}
         self.assertEqual([why for _, why in lapse(self.records, retry_basis(self.w, self.kb))], ["a new way known"])
 
+    def test_only_the_newest_records_are_kept(self):
+        basis = retry_basis(self.w, self.kb)
+        for x in range(STALLED_KEPT + 3):
+            remember(self.records, {"op": "travel", "to": "point", "x": x, "y": 0}, "no progress", x, basis)
+        self.assertEqual(len(self.records), STALLED_KEPT)
+        self.assertIsNone(find(self.records, BREAK), "the oldest went first")
+        self.assertIsNotNone(find(self.records, {"op": "travel", "to": "point", "x": STALLED_KEPT + 2, "y": 0}))
+
     def test_losing_an_item_is_no_reason(self):
         self.w.held_supplies = [InventorySupply(id=1, code="small_potion")]
         records = []
@@ -140,6 +201,27 @@ class PlannerReplyTest(unittest.TestCase):
         self.assertEqual(len(s.rejected), 1)
         self.assertIn("moved below", s.rejected[0])
         self.assertIn("no progress", s.rejected[0])
+
+    def test_the_trace_records_what_was_kept_below(self):
+        s, r = make(FakeLLM({"goals": [TRAVEL, GATHER]})), fake_runner()
+        r.mem = stalled_on(TRAVEL)
+        round_trip(s, r)
+        applied = [c.args[2]["strategist"] for c in r.log.call_args_list if c.args[2]["strategist"]["event"] == "applied"]
+        self.assertEqual(applied[-1]["stalled_kept_below"], [TRAVEL])
+
+    def test_a_stall_while_the_call_is_out_keeps_the_reply_from_putting_it_back(self):
+        # The planner was shown the travel on top; it stalls and moves below
+        # while the call is out, and the reply sends the stack it was shown.
+        s, r = make(FakeLLM({"goals": [TRAVEL, GATHER]})), fake_runner()
+        r.plan = Plan([dict(TRAVEL), dict(GATHER)], dict(PARAM_DEFAULTS))
+        s.on_window(r)  # sends, with the travel on top
+        remember(r.mem.stalled_ops, TRAVEL, "Travel: no progress for 30s", 300, retry_basis(r.world, None))
+        r.plan.demote_current("Travel: no progress for 30s", r.mem)
+        s.serve_one(timeout=0)
+        s.on_window(r)
+        self.assertEqual([op["op"] for op in r.plan.ops_left()], ["gather_gems", "travel"])
+        pending = (s.in_flight or []) + s.inbox
+        self.assertIn("goal_stalled", [t["trigger"] for t in pending], "the planner hears of the stall next")
 
     def test_a_reply_of_only_stalled_ops_leaves_them_out(self):
         s, r = make(FakeLLM({"goals": [TRAVEL, BREAK]})), fake_runner()

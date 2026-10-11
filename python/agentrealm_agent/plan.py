@@ -599,7 +599,8 @@ class Plan:
         return self.goals[self.index : self.directive_end]
 
     def advance(self, world: WorldModel, memory: Memory | None = None) -> None:
-        """Apply ``set_param`` ops reached in order and pop finished goals."""
+        """Apply ``set_param`` ops reached in order, pop finished goals, and
+        move a head still remembered as stalled below again (A104)."""
         while (op := self.current()) is not None:
             if op["op"] == "set_param":
                 self.params = apply_set_param(self.floor_params, self.params, op)
@@ -612,6 +613,12 @@ class Plan:
                 held = count_held(world, op["code"])
                 self.held_before = held if self.held_before is None else min(self.held_before, held)
             if not goal_done(op, world, self):
+                stall = find_stalled(memory.stalled_ops, op) if memory is not None else None
+                if stall is not None:
+                    # An op that stalled and has no reason to retry yet never comes
+                    # back on top when the op above it ends (A104).
+                    self.demote_current(f"still stalled: {stall.why}", memory)
+                    continue
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
                 return

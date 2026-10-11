@@ -254,6 +254,8 @@ class Runner:
     def expire_stalled_ops(self) -> None:
         """Forget the stalled ops something has given a reason to retry (a new
         item held, a new clue, a new way known), so they may go back on top (A104)."""
+        if not self.mem.stalled_ops:
+            return
         for record, why in lapse_stalled(self.mem.stalled_ops, retry_basis(self.world, self.knowledge)):
             self.log("plan", f"stalled op may be retried: {why}", {"stalled": {"event": "lapsed", "op": record.target, "because": why}})
 

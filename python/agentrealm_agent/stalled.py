@@ -104,7 +104,8 @@ def lapse(records: list[StalledOp], now: RetryBasis) -> list[tuple[StalledOp, st
     """Forget the records something has given a reason to retry; return each with that reason."""
     lapsed = [(r, why) for r in records if (why := retry_reason(r, now))]
     if lapsed:
-        records[:] = [r for r in records if not retry_reason(r, now)]
+        gone = {id(r) for r, _ in lapsed}
+        records[:] = [r for r in records if id(r) not in gone]
     return lapsed
 
 

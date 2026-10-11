@@ -113,6 +113,14 @@ def attempt_open(kb: KnowledgeBase | None, map_id: int | None, pos: Pos, capabil
     return isinstance(row, dict) and row.get("result") == "opened"
 
 
+def attempts_at(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> list[tuple[str, str]]:
+    """Each capability a break of ``pos`` was recorded with, and its result."""
+    if map_id is None:
+        return []
+    rows = ((c, _break_row(kb, break_key(map_id, pos, c))) for c in sorted(CAPABILITIES))
+    return [(c, str(row.get("result"))) for c, row in rows if row is not None]
+
+
 def known_openers(w: WorldModel, kb: KnowledgeBase | None, pos: Pos) -> frozenset[str]:
     """Capabilities known to open the block at ``pos``: those its type's rule
     names (``BLOCK_OPENERS``), plus any that opened this cell before."""

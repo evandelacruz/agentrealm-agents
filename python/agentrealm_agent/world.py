@@ -797,8 +797,9 @@ class WorldModel:
 
     def learn_threat(self, events: list[dict], earlier: list[Entity]) -> None:
         """Folds this round trip's Damaged events into the threat table (A6),
-        with each hostile type's hits and misses (A85), and the NPC types its Attacked, Damaged and NPCDied events show hostile
-        into ``hostile_types``.
+        with each hostile type's hits and misses (A85), and the NPC types its
+        Attacked, Damaged and NPCDied events show hostile into
+        ``hostile_types``.
 
         Call after apply_observation, so a source first listed in the same
         response resolves to its type. A source that left view in that

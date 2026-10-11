@@ -1,5 +1,6 @@
 """The Manual's Supplies reference (A54)."""
 
+import dataclasses
 import http.client
 import json
 import os
@@ -37,11 +38,98 @@ class ParseTest(unittest.TestCase):
         rows = supplies.parse(json.loads(supplies.BUNDLED_PATH.read_text()))
         self.assertEqual(rows["pocket_knife"].use_effects, frozenset({"attack", "cut"}))
         self.assertEqual(rows["pocket_knife"].damage, 2)
+        self.assertEqual(rows["pocket_knife"].attack_cooldown_ms, 800)
+
+
+# The same supplies as ``SERVED``, in the shape the site serves since saims
+# B138: a ``capabilities`` list in place of ``use_effects`` and the stat fields.
+SERVED_CAPABILITIES = [
+    {"code": "cleaver", "class": "weapon", "slot": "armed", "capabilities": [
+        {"capability": "attacks", "trigger": "used", "amount": 9, "reach": 2, "cooldown_ms": 1300},
+        {"capability": "chops", "trigger": "used"}, {"capability": "cuts", "trigger": "used"}],
+     "used_up_on_break": False, "stacks": False},
+    {"code": "flare", "class": "tool", "slot": "armed", "capabilities": [
+        {"capability": "burns", "trigger": "used"},
+        {"capability": "lights", "trigger": "used", "reach": 8, "duration_seconds": 120}], "used_up_on_break": True},
+    {"code": "plum", "class": "consumable", "capabilities": [
+        {"capability": "heals", "trigger": "picked_up", "amount": 2}], "eaten_on_pickup": True},
+    {"code": "tonic", "class": "consumable", "slot": "armed", "capabilities": [
+        {"capability": "heals", "trigger": "used", "amount": 10}]},
+    {"code": "gem", "class": "gem", "capabilities": [], "stacks": True, "eaten_on_pickup": True},
+    {"name": "no code"},
+    "not a row",
+]
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "supplies"
+
+
+class CapabilitiesShapeTest(unittest.TestCase):
+    """A123: the ``capabilities`` shape reads into the same ``Supply`` as the shape before it."""
+
+    def test_both_shapes_parse_to_the_same_supply(self):
+        old, new = supplies.parse(SERVED), supplies.parse(SERVED_CAPABILITIES)
+        self.assertEqual(sorted(old), sorted(new))
+        for code in old:
+            with self.subTest(code=code):
+                self.assertEqual(dataclasses.replace(new[code], attack_cooldown_ms=None), old[code])
+
+    def test_the_whole_table_parses_alike_in_both_shapes(self):
+        # The table as served before B138 and the bundled copy served after it.
+        old = supplies.parse(json.loads((FIXTURES / "before_b138.json").read_text()))
+        new = supplies.parse(json.loads(supplies.BUNDLED_PATH.read_text()))
+        self.assertEqual(sorted(old), sorted(new))
+        for code in old:
+            with self.subTest(code=code):
+                self.assertEqual(dataclasses.replace(new[code], attack_cooldown_ms=None), old[code])
+
+    def test_the_attack_cooldown_is_read(self):
+        rows = supplies.parse(SERVED_CAPABILITIES)
+        self.assertEqual(rows["cleaver"].attack_cooldown_ms, 1300)
+        self.assertEqual(rows["cleaver"].attack_range, 2)
+        self.assertIsNone(rows["flare"].attack_cooldown_ms)
+        self.assertIsNone(supplies.parse(SERVED)["cleaver"].attack_cooldown_ms, "the shape before B138 has none")
+
+    def test_every_question_answers_alike_on_both_tables(self):
+        # What loot, healing, break memory, equip and State read, per subtype.
+        questions = (
+            supplies.is_food, supplies.is_potion, supplies.heals, supplies.eaten_on_pickup, supplies.is_weapon,
+            supplies.kept_on_break, supplies.break_capabilities, supplies.weapon_damage, supplies.attack_reach,
+            supplies.armor_defense, supplies.used_on_self, supplies.chest_capacity, supplies.worn, supplies.worn_slot,
+        )
+        old = supplies.parse(json.loads((FIXTURES / "before_b138.json").read_text()))
+        new = supplies.parse(json.loads(supplies.BUNDLED_PATH.read_text()))
+        answers = {}
+        for name, table in (("old", old), ("new", new)):
+            with mock.patch.object(supplies, "_table", table):
+                answers[name] = {
+                    (q.__name__, code): q(code) for q in questions for code in [*old, "unlisted", None]
+                } | {"sold": supplies.sold_codes()}
+        self.assertEqual(answers["old"], answers["new"])
+
+    def test_a_weapon_with_no_cooldown_listed_swings_at_the_default(self):
+        with mock.patch.object(supplies, "_table", supplies.parse(SERVED)):
+            self.assertEqual(supplies.weapon_cooldown_ms("cleaver"), supplies.DEFAULT_ATTACK_COOLDOWN_MS)
+            self.assertIsNone(supplies.weapon_cooldown_ms("unlisted"))
+
+    def test_armor_without_protects_adds_no_defense(self):
+        rows = supplies.parse([
+            {"code": "boots", "class": "armor", "slot": "feet", "capabilities": [
+                {"capability": "defend-the-feet", "trigger": "worn"},
+                {"capability": "speeds", "trigger": "equipped", "amount": 500}]},
+            {"code": "mail", "class": "armor", "slot": "body", "capabilities": [
+                {"capability": "defend-the-body", "trigger": "worn"},
+                {"capability": "protects", "trigger": "worn", "amount": 2}]},
+            {"code": "lens", "class": "accessory", "slot": "accessory", "capabilities": [
+                {"capability": "unmasks", "trigger": "equipped"}]},
+        ])
+        self.assertEqual((rows["boots"].defense, rows["mail"].defense, rows["lens"].defense), (0, 2, None))
+        self.assertEqual(rows["boots"].use_effects, frozenset(), "a worn capability no rule reads names no use effect")
 
 
 class QuestionsTest(unittest.TestCase):
+    served = SERVED
+
     def setUp(self):
-        patch = mock.patch.object(supplies, "_table", supplies.parse(SERVED))
+        patch = mock.patch.object(supplies, "_table", supplies.parse(self.served))
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -82,6 +170,19 @@ class QuestionsTest(unittest.TestCase):
             supplies.load_for_run(kb, lines.append)
         self.assertEqual(kb.items["cleaver"]["capabilities"], ["chop", "cut"])
         self.assertEqual(lines, ["supplies reference: 5 subtypes (bundled)"])
+
+
+class CapabilitiesQuestionsTest(QuestionsTest):
+    """A123: every question answers the same on the ``capabilities`` shape."""
+
+    served = SERVED_CAPABILITIES
+
+    def test_weapon_cooldown_and_reach(self):
+        self.assertEqual(supplies.weapon_cooldown_ms("cleaver"), 1300)
+        self.assertEqual(supplies.attack_reach("cleaver"), 2)
+        self.assertIsNone(supplies.weapon_cooldown_ms("flare"))
+        self.assertIsNone(supplies.attack_reach("tonic"))
+        self.assertEqual(supplies.what_it_does("cleaver")["cooldown_ms"], 1300)
 
 
 class FetchTest(unittest.TestCase):

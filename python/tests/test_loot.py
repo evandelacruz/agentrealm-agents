@@ -29,6 +29,7 @@ from agentrealm_agent.loot import (
     learn_life_code,
     learn_loot_rejection,
     loot_score,
+    pickups,
 )
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
@@ -282,25 +283,26 @@ class ChestTest(unittest.TestCase):
         out = dispatch(w, ctx(scripted(goals=[])))
         self.assertNotEqual(out.state, "Pickup")
 
-    def test_death_chest_is_left_to_recover(self):
-        # No safe tile known (A7), so Recover waits and Loot must not go around it.
+    def test_death_chest_in_reach_is_recovered(self):
+        # Ours, in reach: Recover takes all back with one withdraw, wherever it
+        # lies (A122); Pickup does not pick at it one supply at a time.
         w = world(["...", "...", "..."], at=(1, 1))
-        w.death_chest = (7, (2, 1), 50)
+        w.remember_death_chest(50, 7, (2, 1))
         w.entities = [Entity("chest", 50, (2, 1))]
         w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
         out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
-        self.assertNotIn(out.state, ("Pickup", "Recover"))
-        self.assertTrue(no_loot_intent(out.intents), out.intents)
+        self.assertEqual(out.state, "Recover")
+        self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 50}])
 
     def test_ground_chest_beside_the_death_chest_is_still_looted(self):
         w = world(["...", "...", "..."], at=(1, 1))
-        w.death_chest = (7, (2, 1), 50)
+        w.remember_death_chest(50, 7, (2, 1))
         w.entities = [Entity("chest", 50, (2, 1)), Entity("chest", 51, (0, 1))]
         w.chest_contents[50] = [InventorySupply(71, "bronze_sword")]
         w.chest_contents[51] = [InventorySupply(72, "apple")]
-        out = dispatch(w, ctx(scripted(goals=[]), kb=priced(bronze_sword=15)))
-        self.assertEqual(out.state, "Pickup")
-        self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 51, "supply_ids": [72]}])
+        # The death chest is Recover's; Pickup's list still has the other chest.
+        found = [(p.chest_id, p.supply_id) for p in pickups(w, {})]
+        self.assertEqual(found, [(51, 72)])
 
 
 class LootHostileTest(unittest.TestCase):

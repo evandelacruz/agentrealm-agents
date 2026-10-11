@@ -6,6 +6,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass
+from functools import partial
 
 from .break_memory import TRANSIENT_BREAK_REJECTIONS, cannot_cut, record_attempt
 from .gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
@@ -43,6 +44,7 @@ from .item_table import (
     use_npc_type,
     use_target_block,
 )
+from .knowledge_base.death_chests import load_death_chests, save_death_chests
 from .knowledge_base.hostiles import load_hostiles, save_hostiles
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
@@ -81,6 +83,7 @@ from .executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
     QUEUE_HORIZON_INTENTS,
+    attack_cooldown_ticks,
     build_paced_walk_queue,
     pace_speech,
     pace_uses,
@@ -198,6 +201,7 @@ class Runner:
         # Hostile types and posts earlier runs learned; saved back at exit.
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
         load_carried_chest(knowledge, self.world)  # the chest applied in an earlier run (A115)
+        load_death_chests(knowledge, self.world)  # chests earlier deaths left (A122)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
         self.rng = random.Random(seed)
@@ -385,6 +389,7 @@ class Runner:
                 sync_world_maps(self.knowledge, self.world)
                 save_hostiles(self.knowledge, self.world, self._loaded_hostiles)
                 save_carried_chest(self.knowledge, self.world)
+                save_death_chests(self.knowledge, self.world)
             self.trace.close()
 
     def next_window(self, not_before: float) -> None:
@@ -865,7 +870,9 @@ class Runner:
         verb = intent.get("verb")
         if verb != "SetPosition":
             if verb == "Use":
-                return self._paced_action(intent, pace_uses, m.last_use_tick)
+                # Spaced by the armed weapon's attack cooldown (A123).
+                cooldown = attack_cooldown_ticks(w.armed_code, self.tick_hz)
+                return self._paced_action(intent, partial(pace_uses, cooldown_ticks=cooldown), m.last_use_tick)
             if verb in ("Say", "Broadcast"):
                 # Tag whose Say this is: Greet's hello keeps its own record (A65).
                 m.greet_say_npc = intent.get("npc_id") if d.state == GREET_STATE else None

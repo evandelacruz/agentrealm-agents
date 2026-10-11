@@ -1066,5 +1066,23 @@ class KeepsClearTest(unittest.TestCase):
         self.assertTrue(set(m.path) & self.POST_GROUND, "past the post: the op chose the risk")
 
 
+
+class ArmAndUsePacingTest(unittest.TestCase):
+    """A123: an Arm + Use waits the armed supply's cooldown at the world's tick rate."""
+
+    def test_the_use_waits_what_the_arm_puts_in_hand(self):
+        from agentrealm_agent.states.intents import arm_and_use, use_block
+
+        w = WorldModel(character_id=1, map_id=7, pos=(0, 0), perception=3)
+        w.tick = 100
+        m = Memory()
+        m.last_use_tick = 99
+        for code, hz, cooldown in (("pocket_knife", 10, 8), ("bronze_mallet", 10, 13), ("bronze_mallet", 20, 26)):
+            w.held_supplies = [InventorySupply(3, code)]
+            queue = arm_and_use(w, m, 3, use_block((1, 0)), hz)
+            self.assertEqual(queue[0]["verb"], "Arm", code)
+            self.assertEqual(queue[-1]["verb"], "Use", code)
+            self.assertEqual(len(queue) - 1, cooldown - 1, (code, hz))  # due a cooldown after the last Use
+
 if __name__ == "__main__":
     unittest.main()

@@ -114,16 +114,15 @@ class Pickup:
 def pickups(w: WorldModel, items: dict[str, dict[str, Any]]) -> list[Pickup]:
     """Free supplies in sight and supplies in ground chests with known contents.
 
-    Priced supplies are the shop's (Manual §11). The death chest is Recover's
-    (A11), which only goes there once the spot is known safe.
+    Priced supplies are the shop's (Manual §11). Our death chests are
+    Recover's (A11, A122), which takes back all that fits from one in reach.
     """
     out: list[Pickup] = []
     for e in w.entities:
         if e.kind == "supply" and e.gem_price is None:
             out.append(Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items)))
-    death_chest = w.death_chest[2] if w.death_chest is not None else None
     for e in w.entities:
-        if e.kind != "chest" or e.id == death_chest:
+        if e.kind != "chest" or e.id in w.death_chests:
             continue
         for s in w.chest_contents.get(e.id) or []:
             out.append(Pickup(s.id, s.code, e.pos, e.id, loot_score(s.code, items)))

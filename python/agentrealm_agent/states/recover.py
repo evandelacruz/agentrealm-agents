@@ -1,4 +1,10 @@
-"""Recover: walk to the death chest when its spot is safe (A11, A7)."""
+"""Recover: take back what our deaths dropped (A11, A7, A122).
+
+Withdraws from any remembered death chest in reach, wherever it lies. Walks,
+as a reflex, only to one whose spot is known safe: the newest wherever it is
+on this map, an older one once it is in view. Going for one elsewhere is the
+planner's call (State ``death_chests``, a ``travel`` to its cell).
+"""
 
 from __future__ import annotations
 
@@ -71,6 +77,34 @@ def death_chest_recover_intents(
     return None
 
 
+def recover_target(w: WorldModel) -> tuple[int, Pos, bool] | None:
+    """The death chest Recover works now: (chest id, cell, in reach), or None.
+
+    One in reach comes first, whatever its spot, unless nothing in it can be
+    taken now (a full pack). Else the nearest whose spot is known safe, of the
+    newest and those in view. Only chests on this map.
+    """
+    here = w.pos
+    if here is None:
+        return None
+    newest = w.newest_death_chest()
+    newest_id = newest[0] if newest is not None else None
+    candidates = sorted(
+        (chebyshev(c.pos, here), chest_id, c.pos)
+        for chest_id, c in w.death_chests.items()
+        if c.map_id == w.map_id
+    )
+    for d, chest_id, at in candidates:
+        if d <= 1:
+            contents = w.chest_contents.get(chest_id)
+            if contents is None or death_chest_recover_intents(w, chest_id, contents, {}) is not None:
+                return chest_id, at, True
+            continue
+        if (chest_id == newest_id or d <= w.perception) and recover_spot_safe(w, w.map_id, at):
+            return chest_id, at, False
+    return None
+
+
 def recover_outcome(
     w: WorldModel,
     m: Memory,
@@ -81,22 +115,16 @@ def recover_outcome(
     knowledge: KnowledgeBase | None = None,
     state: str = "Recover",
 ) -> StateOutcome | None:
-    """Path to the death chest and withdraw when adjacent (A11, reflex 4b).
+    """Withdraw from the death chest in reach, else path to one on a safe spot (A11, A122, reflex 4b).
 
     Only the destination is checked for safety; the route is not (A9's).
     None when no step toward the chest can be planned, so the caller yields.
     """
-    here = w.pos
-    if here is None or w.death_chest is None:
+    picked = recover_target(w)
+    if picked is None:
         return None
-    map_id, at, chest_id = w.death_chest
-    if map_id != w.map_id:
-        return None
-    target = recover_approach_target(w, map_id, at)
-    if target is None:
-        return None
-
-    if chebyshev(at, here) <= 1:
+    chest_id, at, in_reach = picked
+    if in_reach:
         contents = w.chest_contents.get(chest_id)
         if contents:
             items = knowledge_items(knowledge)
@@ -105,6 +133,10 @@ def recover_outcome(
                 return StateOutcome(intents, f"recover from chest {chest_id}", reflex=True, state=state)
         if contents is None:
             return StateOutcome(None, f"open chest {chest_id}", state=state, wait=True)
+        return None
+    target = recover_approach_target(w, w.map_id, at)
+    if target is None:
+        return None
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly, m=m)
@@ -120,16 +152,8 @@ def recover_outcome(
     return None
 
 
-def _skip_reason(w: WorldModel) -> str:
-    """Why Recover fell back to Explore: out of reach, or in reach with nothing worth taking."""
-    _, at, chest_id = w.death_chest
-    if w.pos is not None and chebyshev(at, w.pos) <= 1 and w.chest_contents.get(chest_id):
-        return f"chest {chest_id} not worth a slot"
-    return "chest not reachable"
-
-
 class RecoverState(State):
-    """Reflex, after Flee and Pickup: walks to the death chest when its spot is safe."""
+    """Reflex, after Flee and Pickup: takes back a death chest in reach, or walks to one on a safe spot."""
 
     name = "Recover"
 
@@ -137,10 +161,7 @@ class RecoverState(State):
         policy = ctx.policy
         if policy.kind != "scripted" or not policy.pickup or not world.alive or world.pos is None:
             return False
-        if world.death_chest is None or world.death_chest[0] != world.map_id:
-            return False
-        _, at, _ = world.death_chest
-        return recover_spot_safe(world, world.map_id, at)
+        return recover_target(world) is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
@@ -156,4 +177,4 @@ class RecoverState(State):
         if nav_stuck.awaiting_break(m, world, "chest"):
             return StateOutcome(None, "chest walk stuck: break", state=self.name)
         # No step toward the chest: the next state has the round.
-        return StateOutcome(None, _skip_reason(world), state=self.name)
+        return StateOutcome(None, "chest not reachable", state=self.name)

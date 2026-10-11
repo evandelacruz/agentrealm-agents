@@ -40,6 +40,9 @@ def world(at=(10, 10)) -> WorldModel:
     w.terrain_center, w.terrain_map = at, 1
     # Monster types these tests use, shown hostile (``survival.is_hostile``).
     w.hostile_types |= {("npc", "pursuer"), ("npc", "bystander")}
+    # A sword: the knife's damage at the 1 s attack cooldown the win-estimate
+    # cases here are priced on (the knife itself swings every 0.8 s).
+    w.armed_code = "sword"
     return w
 
 

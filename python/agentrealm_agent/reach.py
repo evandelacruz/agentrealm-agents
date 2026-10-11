@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Iterable
 
 from .item_table import use_target_block
+from .supplies import attack_reach
 from .world import Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -28,19 +29,20 @@ NEAR = 1  # Take, WithdrawFromChest, DepositToChest, and a tool's Use (API)
 
 def supply_reach(knowledge: KnowledgeBase | None, code: str | None) -> int:
     """A supply's ``Use`` reach once armed: its learned ``attack_range``, else
-    a tool's one block."""
+    a weapon's published one (``supplies.attack_reach``, A123), else a tool's
+    one block."""
     if knowledge is not None and code:
         row = knowledge.items.get(code)
         if isinstance(row, dict):
             reach = row.get("attack_range")
             if isinstance(reach, int) and not isinstance(reach, bool) and reach > 0:
                 return reach
-    return NEAR
+    return attack_reach(code) or NEAR
 
 
 def weapon_reach(w: WorldModel, knowledge: KnowledgeBase | None) -> int:
     """The armed supply's ``Use`` reach: ``get_self``'s ``attack_range``, else
-    what play learned for its code, else one block."""
+    ``supply_reach``."""
     if w.attack_range is not None:
         return w.attack_range
     return supply_reach(knowledge, w.armed_code)

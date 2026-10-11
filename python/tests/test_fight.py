@@ -2,11 +2,13 @@
 
 import random
 import unittest
+from unittest import mock
 
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.fight import attack_intent, fight_target, should_fight
 from agentrealm_agent.world import Entity, WorldModel
@@ -31,6 +33,9 @@ def world(rows: list[str], at=(0, 0)) -> WorldModel:
         for x, g in enumerate(row):
             w.view.tiles[(x, y)] = glyph[g]
     w.terrain_center, w.terrain_map = at, 7
+    # A sword: the knife's damage at the 1 s attack cooldown the win-estimate
+    # cases here are priced on (the knife itself swings every 0.8 s).
+    w.armed_code = "sword"
     return w
 
 
@@ -93,6 +98,39 @@ class FightStateTest(unittest.TestCase):
         swings = [i for i in out.intents if i["verb"] == "Use"]
         self.assertTrue(swings)
         self.assertTrue(all(i["target"] == {"kind": "npc", "npc_id": 5} for i in swings))
+
+    def test_swings_are_spaced_by_the_armed_weapons_cooldown(self):
+        # A123: a mallet swings every 1.3 s, 13 ticks; the knife every 0.8 s.
+        for armed, ticks in (("bronze_mallet", 13), ("pocket_knife", 8)):
+            w = world(["...", "...", "..."], at=(1, 1))
+            w.armed_code = armed
+            w.health, w.lives = 500, 10
+            w.entities = [Entity("npc", 5, (2, 1), code="snotling")]
+            w.threat.record(("npc", "snotling"), 1)
+            c = ctx(params={"risk": 1.0, "lives_floor": 1}, on_hostile="fight", hostile=["npc"], hostile_range=2)
+            c.memory.calm_poll_interval = 40
+            out = dispatch(w, c)
+            self.assertEqual(out.state, "Fight", armed)
+            swings = [i for i, x in enumerate(out.intents) if x["verb"] == "Use"]
+            self.assertGreater(len(swings), 1, armed)
+            self.assertEqual(swings[1] - swings[0], ticks, armed)
+
+    def test_swings_are_spaced_at_the_worlds_tick_rate(self):
+        # A123: a mallet's 1.3 s is 26 ticks in a 20 Hz world, as the runner paces a single Use.
+        w = world(["...", "...", "..."], at=(1, 1))
+        w.armed_code = "bronze_mallet"
+        w.health, w.lives = 500, 10
+        w.entities = [Entity("npc", 5, (2, 1), code="snotling")]
+        w.threat.record(("npc", "snotling"), 1)
+        c = ctx(params={"risk": 1.0, "lives_floor": 1}, on_hostile="fight", hostile=["npc"], hostile_range=2)
+        c.plan = Plan([], dict(PARAM_DEFAULTS))
+        c.plan.tick_hz = 20
+        c.memory.calm_poll_interval = 80
+        with mock.patch("agentrealm_agent.states.fight.queue_horizon_intents", return_value=80):
+            out = dispatch(w, c)
+        swings = [i for i, x in enumerate(out.intents) if x["verb"] == "Use"]
+        self.assertGreater(len(swings), 1)
+        self.assertEqual(swings[1] - swings[0], 26)
 
     def test_unmeasured_npc_at_default_params_flees(self):
         w = world(["...", "...", "..."], at=(1, 1))

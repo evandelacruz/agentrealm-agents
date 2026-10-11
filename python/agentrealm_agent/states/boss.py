@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..config import Policy
 from ..directives import attack_forbidden
-from ..executor import build_attack_queue, queue_horizon_intents
+from ..executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_intents
 from ..healing import potion_count
 from ..memory import BossFight, Memory
 from ..navigation import cost_path
@@ -153,7 +153,7 @@ def should_commit(w: WorldModel, ctx: PlayContext, door: Pos) -> bool:
     return not can_retreat_out(w, ctx, door)
 
 
-def boss_attack_queue(w: WorldModel, m: Memory, target: Entity) -> list[dict] | None:
+def boss_attack_queue(w: WorldModel, m: Memory, target: Entity, tick_hz: int) -> list[dict] | None:
     uses = [attack_intent(target) for _ in range(ATTACK_USES)]
     horizon = queue_horizon_intents()
     queue = build_attack_queue(
@@ -161,6 +161,7 @@ def boss_attack_queue(w: WorldModel, m: Memory, target: Entity) -> list[dict] | 
         [],
         poll_interval_ticks=m.calm_poll_interval,
         horizon_ticks=horizon,
+        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code, tick_hz),
         ticks_since_last_use=max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None,
     )
     return queue or None
@@ -220,7 +221,7 @@ class BossState(State):
                     return clear_the_way(world, ctx, boss.pos, "cannot close on boss", self.name, op)
                 m.path = []
                 return StateOutcome([set_position(step)], f"boss close on {boss.id}", reflex=True, state=self.name)
-            queue = boss_attack_queue(world, m, boss)
+            queue = boss_attack_queue(world, m, boss, ctx.tick_hz)
             if queue is None:
                 return StateOutcome(None, "boss attack empty", state=self.name)
             label = f"boss fight {boss.id}"

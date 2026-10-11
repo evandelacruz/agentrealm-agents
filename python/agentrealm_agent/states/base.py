@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from ..client import Intent
 from ..config import Policy
 from ..directives import PARAM_DEFAULTS, Directives, default_directives
+from ..executor import DEFAULT_TICK_RATE_HZ
 from ..gem_yield import GemYieldTracker
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
@@ -32,6 +33,11 @@ class PlayContext:
     # The runner's held-queue probe (A64): only the states that can answer
     # with a reflex run (``dispatch.PROBE_STATES``), not the whole list.
     probe: bool = False
+
+    @property
+    def tick_hz(self) -> int:
+        """The world's tick rate, as the runner learned it onto the plan."""
+        return self.plan.tick_hz if self.plan is not None else DEFAULT_TICK_RATE_HZ
 
 
 @dataclass

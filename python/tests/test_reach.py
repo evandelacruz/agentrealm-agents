@@ -55,6 +55,15 @@ class InReachTest(unittest.TestCase):
         kb.items["pickaxe"] = {"attack_range": 2}
         self.assertTrue(in_reach_from([arm(4), use_block((2, 0))], [(0, 0)], w, kb))
 
+    def test_an_armed_weapon_reaches_its_published_range_until_play_learns_it(self):
+        # A123: the Supplies reference's ``attacks`` reach, before get_self or a refusal says.
+        w = world()
+        w.held_supplies = [InventorySupply(4, "iron_whip")]
+        self.assertTrue(in_reach_from([arm(4), use_npc(w.entities[2])], [(0, 0)], w, None))
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["iron_whip"] = {"attack_range": 1}
+        self.assertFalse(in_reach_from([arm(4), use_npc(w.entities[2])], [(0, 0)], w, kb), "what play learned wins")
+
     def test_intents_with_no_reach_limit_always_pass(self):
         w = world()
         intents = [{"verb": "Step", "direction": "right"}, use_self(), arm(4), {"verb": "Wait"}]

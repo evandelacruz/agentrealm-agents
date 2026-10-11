@@ -52,6 +52,9 @@ def world(rows: list[str], at=(0, 0)) -> WorldModel:
     # The monster types these tests use have shown themselves hostile
     # (``survival.is_hostile``): an NPC of an unproven type is not a threat.
     w.hostile_types |= {("npc", "gnawer"), ("npc", "snotling")}
+    # A sword: the knife's damage at the 1 s attack cooldown the win-estimate
+    # cases here are priced on (the knife itself swings every 0.8 s).
+    w.armed_code = "sword"
     return w
 
 
@@ -619,6 +622,18 @@ class SwingTest(unittest.TestCase):
         for code in supplies._table:
             self.assertEqual(supplies.weapon_damage(code) is not None, supplies.is_weapon(code), code)
         self.assertAlmostEqual(survival.swing_damage("iron_sword"), 0.65 * (1 + 2 + 8) / 2)
+
+    def test_a_swing_comes_every_attack_cooldown(self):
+        # A123: the knife swings every 0.8 s, a mallet every 1.3 s, ten ticks a second.
+        self.assertEqual(survival.attack_interval_ticks("pocket_knife"), 8)
+        self.assertEqual(survival.attack_interval_ticks("bronze_mallet"), 13)
+        self.assertEqual(survival.attack_interval_ticks(None), 8, "an unlisted armed item swings as the knife")
+        group = [Entity("npc", 5, (1, 0), "gnawer")]
+        self.assertAlmostEqual(
+            survival.ticks_to_kill_them(group, "bronze_mallet"),
+            survival.UNKILLED_HOSTILE_HEALTH * 13 / survival.swing_damage("bronze_mallet"),
+        )
+        self.assertLess(survival.ticks_to_kill_them(group, "bronze_sword"), survival.ticks_to_kill_them(group, "bronze_mallet"))
 
     def test_a_hostile_swings_on_the_same_roll(self):
         """Its damage number is its attack power: 2 hits 65%, 1 hits 60%. The

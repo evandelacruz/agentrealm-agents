@@ -4,12 +4,13 @@
 # estimate turns to Retreat (should_retreat) at health 6 against one that hits
 # for 2. It takes that fight only with at least lives_floor * 2 lives (6);
 # with fewer, the effective risk falls and it retreats instead.
-# fight_margin is 2.4 since the published roll priced both sides' swings
-# (A81): 1.0 before.
+# fight_margin is 3.0 since the win estimate counts the knife's 0.8 s attack
+# cooldown (A123): 2.4 before, when every swing was priced 1 s apart; 1.0
+# before the published roll priced both sides' swings (A81).
 goals = []
 
 [params]
-fight_margin = 2.4
+fight_margin = 3.0
 risk = 1.0
 retreat_hits = 2
 lives_floor = 3

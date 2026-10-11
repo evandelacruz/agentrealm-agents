@@ -6,6 +6,7 @@ from agentrealm_agent.executor import (
     DEFAULT_WEAPON_COOLDOWN_TICKS,
     SPEECH_INTERVAL_TICKS,
     arm_then_use,
+    attack_cooldown_ticks,
     build_attack_queue,
     pace_speech,
     pace_uses,
@@ -30,7 +31,7 @@ def waits_then_use(n: int) -> list[dict]:
 
 class PaceUsesTest(unittest.TestCase):
     def test_two_uses_default_cooldown(self):
-        q = pace_uses([use_block(1, 0), use_block(1, 0)])
+        q = pace_uses([use_block(1, 0), use_block(1, 0)], cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS)
         self.assertEqual(q[0], use_block(1, 0))
         self.assertEqual(q[1 + DEFAULT_WEAPON_COOLDOWN_TICKS - 1], use_block(1, 0))
         self.assertEqual(len(q), 1 + (DEFAULT_WEAPON_COOLDOWN_TICKS - 1) + 1)
@@ -43,31 +44,50 @@ class PaceUsesTest(unittest.TestCase):
         self.assertEqual(q[4]["verb"], "Use")
 
     def test_empty(self):
-        self.assertEqual(pace_uses([]), [])
+        self.assertEqual(pace_uses([], cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS), [])
 
     def test_carried_cooldown_delays_first_use(self):
-        self.assertEqual(pace_uses([use_block(0, 0)], ticks_since_last=4), waits_then_use(6))
-        self.assertEqual(pace_uses([use_block(0, 0)], ticks_since_last=10), waits_then_use(0))
+        self.assertEqual(pace_uses([use_block(0, 0)], cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS, ticks_since_last=4), waits_then_use(6))
+        self.assertEqual(pace_uses([use_block(0, 0)], cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS, ticks_since_last=10), waits_then_use(0))
 
     def test_other_intents_count_toward_gap(self):
         arm = {"verb": "Arm", "item_id": 1}
-        q = pace_uses([use_block(0, 0), arm, use_block(0, 0)])
+        q = pace_uses([use_block(0, 0), arm, use_block(0, 0)], cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS)
         self.assertEqual(q, [use_block(0, 0), arm] + waits_then_use(8))
+
+
+class AttackCooldownTicksTest(unittest.TestCase):
+    """A123: a Use waits the armed weapon's attack cooldown, in ticks."""
+
+    def test_each_weapon_family_swings_at_its_own_cooldown(self):
+        self.assertEqual(attack_cooldown_ticks("pocket_knife"), 8)
+        self.assertEqual(attack_cooldown_ticks("bronze_sword"), 10)
+        self.assertEqual(attack_cooldown_ticks("iron_whip"), 12)
+        self.assertEqual(attack_cooldown_ticks("bronze_mallet"), 13)
+        self.assertEqual(attack_cooldown_ticks("bronze_mallet", tick_rate_hz=20), 26)
+
+    def test_the_default_is_the_default_cooldown_at_the_default_rate(self):
+        self.assertEqual(DEFAULT_WEAPON_COOLDOWN_TICKS, attack_cooldown_ticks(None))
+        self.assertEqual(DEFAULT_WEAPON_COOLDOWN_TICKS, 10)
+
+    def test_anything_else_armed_waits_the_default(self):
+        for code in (None, "matches", "small_potion", "unlisted"):
+            self.assertEqual(attack_cooldown_ticks(code), DEFAULT_WEAPON_COOLDOWN_TICKS, code)
 
 
 class ArmThenUseTest(unittest.TestCase):
     ARM = {"verb": "Arm", "supply_id": 4}
 
     def test_use_follows_the_arm_when_ready(self):
-        self.assertEqual(arm_then_use(self.ARM, use_block(0, 0), horizon_ticks=HORIZON), [self.ARM, use_block(0, 0)])
+        self.assertEqual(arm_then_use(self.ARM, use_block(0, 0), cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS, horizon_ticks=HORIZON), [self.ARM, use_block(0, 0)])
 
     def test_the_arm_counts_toward_the_cooldown(self):
-        queue = arm_then_use(self.ARM, use_block(0, 0), horizon_ticks=HORIZON, ticks_since_last_use=3)
+        queue = arm_then_use(self.ARM, use_block(0, 0), cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS, horizon_ticks=HORIZON, ticks_since_last_use=3)
         self.assertEqual(queue, [self.ARM] + waits_then_use(DEFAULT_WEAPON_COOLDOWN_TICKS - 3 - 1))
 
     def test_a_use_past_the_horizon_sends_no_arm_alone(self):
         # Free-play run 3: an Arm sent without its Use left the potion armed.
-        self.assertEqual(arm_then_use(self.ARM, use_block(0, 0), horizon_ticks=3, ticks_since_last_use=1), [])
+        self.assertEqual(arm_then_use(self.ARM, use_block(0, 0), cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS, horizon_ticks=3, ticks_since_last_use=1), [])
 
 
 class PaceSpeechTest(unittest.TestCase):
@@ -93,7 +113,7 @@ class PaceSpeechTest(unittest.TestCase):
 class BuildAttackQueueTest(unittest.TestCase):
     def test_retreat_appended_when_it_fits(self):
         retreat = [{"verb": "Step", "direction": "up"}] * 3
-        q = build_attack_queue([use_block(1, 1)], retreat, poll_interval_ticks=40, horizon_ticks=HORIZON)
+        q = build_attack_queue([use_block(1, 1)], retreat, poll_interval_ticks=40, horizon_ticks=HORIZON, weapon_cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS)
         self.assertEqual(q[0]["verb"], "Use")
         self.assertEqual(q[-3:], retreat)
 
@@ -127,14 +147,16 @@ class BuildAttackQueueTest(unittest.TestCase):
     def test_cooldown_carries_into_next_queue(self):
         retreat = [{"verb": "Step", "direction": "up"}]
         q = build_attack_queue(
-            [use_block(0, 0)], retreat, poll_interval_ticks=20, horizon_ticks=HORIZON, ticks_since_last_use=3
+            [use_block(0, 0)], retreat, poll_interval_ticks=20, horizon_ticks=HORIZON, weapon_cooldown_ticks=10,
+            ticks_since_last_use=3,
         )
         self.assertEqual(q, waits_then_use(7) + retreat)
 
     def test_no_swing_fits_after_carried_cooldown(self):
         retreat = [{"verb": "Step", "direction": "up"}]
         q = build_attack_queue(
-            [use_block(0, 0)], retreat, poll_interval_ticks=4, horizon_ticks=HORIZON, ticks_since_last_use=1
+            [use_block(0, 0)], retreat, poll_interval_ticks=4, horizon_ticks=HORIZON, weapon_cooldown_ticks=10,
+            ticks_since_last_use=1,
         )
         self.assertEqual(q, retreat)
 
@@ -145,7 +167,7 @@ class BuildAttackQueueTest(unittest.TestCase):
 
     def test_poll_interval_must_be_positive(self):
         with self.assertRaises(ValueError):
-            build_attack_queue([use_block(0, 0)], None, poll_interval_ticks=0, horizon_ticks=HORIZON)
+            build_attack_queue([use_block(0, 0)], None, poll_interval_ticks=0, horizon_ticks=HORIZON, weapon_cooldown_ticks=10)
 
 
 if __name__ == "__main__":

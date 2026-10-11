@@ -13,6 +13,7 @@ from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.equip import (
     best_equip_upgrade,
     compare,
+    damage_per_second,
     hunting_ceiling,
     loadout_strength,
     note_equip_result,
@@ -26,6 +27,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
+from agentrealm_agent.survival import attack_interval_ticks, swing_damage
 from agentrealm_agent.threat import ThreatTable
 from agentrealm_agent.world import WorldModel
 
@@ -300,13 +302,43 @@ class HuntingCeilingRuleTest(unittest.TestCase):
             w.held_supplies = self.held("bronze_mallet", "bronze_sword")
             self.assertEqual(best_equip_upgrade(w, {}, w.threat, Memory(), ceiling=7).code, "bronze_sword", armed)
 
-    def test_with_no_ceiling_known_damage_decides(self):
+    def test_with_no_ceiling_known_damage_a_second_decides(self):
         w = world()
         w.armed_code = "pocket_knife"
-        w.held_supplies = self.held("bronze_sword", "bronze_mallet")
-        # The sword has a price and the mallet none: price no longer ranks weapons.
-        up = best_equip_upgrade(w, {"bronze_sword": {"gem_price": 15}}, w.threat, Memory())
-        self.assertEqual(up.code, "bronze_mallet")
+        w.held_supplies = self.held("bronze_sword", "iron_mallet")
+        # The mallet has a price and the sword none: price no longer ranks weapons.
+        up = best_equip_upgrade(w, {"iron_mallet": {"gem_price": 120}}, w.threat, Memory())
+        self.assertEqual(up.code, "iron_mallet")
+
+    def test_a_slower_weapon_counts_its_damage_a_second(self):
+        # A123: the bronze mallet hits harder than the bronze sword (6 to 4)
+        # but swings every 1.3 s to the sword's 1 s, so the sword deals more a second.
+        w = world()
+        w.armed_code = "pocket_knife"
+        w.held_supplies = self.held("bronze_mallet", "bronze_sword")
+        self.assertEqual(best_equip_upgrade(w, {}, w.threat, Memory()).code, "bronze_sword")
+        self.assertGreater(damage_per_second("bronze_sword"), damage_per_second("bronze_mallet"))
+        self.assertGreater(damage_per_second("pocket_knife"), damage_per_second("sword"), "the knife swings every 0.8 s")
+        self.assertGreater(damage_per_second("mallet"), damage_per_second(None), "any weapon beats an empty slot")
+
+    def test_any_weapon_held_is_armed_into_an_empty_slot(self):
+        # A123 review: an empty slot, or a potion left armed, swings nothing,
+        # so even a weapon slower a second than the knife (the sandbox sword,
+        # the bare whip and mallet) is armed rather than nothing.
+        for armed in (None, "small_potion"):
+            self.assertEqual(damage_per_second(armed), 0.0, armed)
+            for held in ("sword", "whip", "mallet", "pocket_knife"):
+                w = world()
+                w.armed_code = armed
+                w.held_supplies = self.held(held)
+                up = best_equip_upgrade(w, {}, w.threat, Memory())
+                self.assertEqual(up.code if up else None, held, (armed, held))
+
+    def test_the_win_estimate_keeps_its_knife_for_an_empty_slot(self):
+        # A81's assumption, the win estimate's only (survival.fighting_weapon).
+        for armed in (None, "small_potion"):
+            self.assertEqual(swing_damage(armed), swing_damage("pocket_knife"), armed)
+            self.assertEqual(attack_interval_ticks(armed), attack_interval_ticks("pocket_knife"), armed)
 
     def test_a_named_code_is_armed_whatever_the_rule_says(self):
         w = world()

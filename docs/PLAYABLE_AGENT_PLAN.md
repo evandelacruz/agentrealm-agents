@@ -72,7 +72,7 @@ Open measurements are listed at the end of GAME_NOTES.md. Each is gathered by th
 
 ### Executor (M6; replaces the M1 one-intent loop)
 
-- **Paced queues.** Paths become `Step`, `Wait`×n, `Step`, … queues. The number of waits comes from `movement_speed`. Attacks are paced by the weapon cooldown (10 ticks by default), and block breaking spends the same attack accumulator. Speech is paced at 10 ticks. The queue is cut at the world's horizon.
+- **Paced queues.** Paths become `Step`, `Wait`×n, `Step`, … queues. The number of waits comes from `movement_speed`. Attacks are paced by the armed weapon's cooldown (10 ticks by default; 8 to 15 by weapon family in Olympuff, A123), and block breaking spends the same attack accumulator. Speech is paced at 10 ticks. The queue is cut at the world's horizon.
 - **Re-send only when the queue goes wrong.** That means a result is rejected, a delta changes something on the path, or the state changes. A rejection discards the rest of the queue, so a path is rebuilt from the current position, not resent.
 - **Two cadences.** While calm, poll every 4–10 ticks and spend spare tokens on terrain reads. While a hostile is within 3 blocks or health is dropping, poll every tick.
 - **Snapshots.** Deltas come only against the previous version, so the slow cadence gets complete snapshots. The world model applies both shapes.

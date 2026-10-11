@@ -414,7 +414,7 @@ def use_carried_heal(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
     item = carried_heal(w, ctx.memory, ctx.policy, ctx.params)
     if item is None:
         return None
-    return use_on_self(w, ctx.memory, item, HealState.name)
+    return use_on_self(w, ctx.memory, item, HealState.name, ctx.tick_hz)
 
 
 def _rearm_weapon(w: WorldModel, m: Memory) -> StateOutcome:

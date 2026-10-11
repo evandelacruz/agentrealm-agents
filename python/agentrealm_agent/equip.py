@@ -16,10 +16,13 @@ Only sourced facts decide what goes where:
 lists by, or cutting grass, which Gather arms for (a cutter a cut does not use
 up first). Both order by :func:`weapon_rank`: a weapon that keeps the
 character within the highest hunting-ground strength ceiling known beats one
-that does not, and among those alike, more published ``damage`` wins (the
-Supplies reference; damage adds to attack power on every swing). Strength is
-attack power plus the armed weapon's damage plus worn armor's defense
-(:func:`loadout_strength`). With no ceiling known, damage alone decides. An
+that does not, and among those alike, more damage a second wins: one swing's
+expected damage over the weapon's attack cooldown (the Supplies reference's
+``damage`` and ``cooldown_ms``, A123; :func:`damage_per_second`), so a
+slower weapon's bigger hit counts for what it is worth. Strength is attack
+power plus the armed weapon's damage plus worn armor's defense
+(:func:`loadout_strength`); a weapon's cooldown does not count toward it.
+With no ceiling known, damage a second alone decides. An
 ``equip`` op that names a code arms or wears that item whatever the rule says
 (:func:`named_equip`): the planner's call, for a fight the hunting ground does
 not decide.
@@ -41,16 +44,28 @@ Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Any, Collection
 
 from .break_memory import capabilities_for_code, held_supplies
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
 from .loot import NON_TRANSFERABLE
-from .supplies import heals, is_weapon, kept_on_break, used_on_self, weapon_damage, worn, worn_armor_defense, worn_slot
+from .supplies import (
+    heals,
+    is_weapon,
+    kept_on_break,
+    used_on_self,
+    weapon_cooldown_ms,
+    weapon_damage,
+    worn,
+    worn_armor_defense,
+    worn_slot,
+)
 from .memory import Memory
-from .survival import BASE_ATTACK_POWER
+from .survival import BASE_ATTACK_POWER, weapon_swing_damage
 from .threat import ThreatTable
 from .travel.knowledge import iter_hunting_cells
 from .world import WorldModel
@@ -196,12 +211,31 @@ def loadout_strength(w: WorldModel, weapon: str | None) -> int:
     return BASE_ATTACK_POWER + (weapon_damage(weapon) or 0) + worn_armor_defense(w.worn_codes.values())
 
 
-def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[bool, int]:
+def weapon_rank(code: str | None, w: WorldModel, ceiling: int | None) -> tuple[bool, Fraction]:
     """The one rule for which weapon is better (A99): keeping strength within
-    ``ceiling`` first (always true with none known), then published damage.
-    Compare ranks with ``>``: a higher one is a better weapon."""
+    ``ceiling`` first (always true with none known), then damage a second
+    (:func:`damage_per_second`, A123), compared exactly: the top of a swing's
+    damage roll over the cooldown, since no weapon changes the hit chance.
+    An empty slot, or an item listed as no weapon, ranks 0: nothing armed
+    swings nothing (the server rejects an attack with no weapon), so any
+    weapon held within the ceiling beats it. Compare ranks with ``>``: a
+    higher one is a better weapon."""
     fits = ceiling is None or loadout_strength(w, code) <= ceiling
-    return fits, weapon_damage(code) or 0
+    if not is_weapon(code):
+        return fits, Fraction(0)
+    top = max(1, BASE_ATTACK_POWER + (weapon_damage(code) or 0))
+    return fits, Fraction(1 + top, weapon_cooldown_ms(code))
+
+
+def damage_per_second(code: str | None) -> float:
+    """Expected damage a second with weapon ``code`` armed: one swing's
+    (``survival.weapon_swing_damage``) over its attack cooldown (A123); 0 for
+    an empty slot or an item listed as no weapon, as :func:`weapon_rank`
+    counts it. The win estimate's own assumption that such a slot swings as
+    the starting knife (``survival.fighting_weapon``, A81) stays there."""
+    if not is_weapon(code):
+        return 0.0
+    return weapon_swing_damage(weapon_damage(code) or 0) * 1000 / weapon_cooldown_ms(code)
 
 
 def does_job(code: str | None, job: str, kb: KnowledgeBase | None = None) -> bool:
@@ -232,7 +266,7 @@ def weapon_to_arm(
     if job == FIGHT and not is_weapon(w.armed_code):
         # No weapon armed fights bare-handed: a weapon must beat that, so one
         # over the ceiling is never armed into an empty slot either.
-        best = ((weapon_rank(None, w, ceiling), True, 0), None)
+        best = ((weapon_rank(None, w, ceiling), False, -math.inf), None)
     for s in held_supplies(w):
         armed = s.code == w.armed_code
         if s.fragment is not None or not does_job(s.code, job, kb) or (not armed and (s.code, ARMED) in refused):

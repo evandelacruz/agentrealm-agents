@@ -78,7 +78,8 @@ RESET_PROGRESS_CELLS = 5
 # Escalation step 5: exponential backoff before retrying the goal (§4.5).
 BACKOFF_BASE_TICKS = 300
 
-# The newest give-ups remembered; the oldest is forgotten first.
+# Lapsed give-ups kept for their power beyond this many are forgotten,
+# oldest first. A give-up still backed off is never forgotten.
 GIVE_UPS_KEPT = 64
 
 WALK, CAUTIOUS, BREAK, REVEAL, REVEALED, ALT_ROUTE = 0, 1, 2, 3, 4, 5
@@ -206,8 +207,10 @@ def remember_give_up(stuck: NavStuckMemory, key: str, goal: str, tick: int) -> G
     power = old.power if old is not None else 0
     map_id, target = key_dest(key)
     rec = stuck.given_up[key] = GiveUp(goal, map_id, target, tick, tick + BACKOFF_BASE_TICKS * (2**power), power + 1)
-    while len(stuck.given_up) > GIVE_UPS_KEPT:
-        stuck.given_up.pop(next(iter(stuck.given_up)))
+    if len(stuck.given_up) > GIVE_UPS_KEPT:
+        lapsed_keys = [k for k, r in stuck.given_up.items() if tick >= r.until]
+        for k in lapsed_keys[: len(stuck.given_up) - GIVE_UPS_KEPT]:
+            del stuck.given_up[k]
     return rec
 
 
@@ -227,7 +230,7 @@ def lapsed(stuck: NavStuckMemory, tick: int) -> list[GiveUp]:
     """The give-ups whose backoff ended since the last call, each reported once.
 
     A lapsed give-up stays remembered for its power until it is reached
-    (``finish``) or pushed out by newer ones (``GIVE_UPS_KEPT``).
+    (``finish``) or, past ``GIVE_UPS_KEPT``, pushed out by newer ones.
     """
     out = [rec for rec in stuck.given_up.values() if not rec.lapse_noted and tick >= rec.until]
     for rec in out:

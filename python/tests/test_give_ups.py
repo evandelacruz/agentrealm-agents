@@ -73,10 +73,21 @@ class GiveUpMemoryTest(unittest.TestCase):
         self.assertEqual(nav_stuck.lapsed(self.m.nav_stuck, rec.until), [rec])
         self.assertEqual(nav_stuck.lapsed(self.m.nav_stuck, rec.until + 1), [])
 
-    def test_the_memory_is_bounded(self):
+    def test_lapsed_give_ups_are_forgotten_first_and_an_active_one_never(self):
+        travel = give_up(self.m, self.w, "travel:point", TOWN)
+        self.w.tick += 1
         for x in range(nav_stuck.GIVE_UPS_KEPT + 3):
             give_up(self.m, self.w, "explore", (x, 50))
-        self.assertEqual(len(self.m.nav_stuck.given_up), nav_stuck.GIVE_UPS_KEPT)
+        stuck = self.m.nav_stuck
+        self.assertEqual(len(stuck.given_up), nav_stuck.GIVE_UPS_KEPT + 4, "all still backed off: none forgotten")
+        self.assertIn((MAP, TOWN), given_up_travel(stuck, self.w.tick))
+        self.w.tick = travel.until  # the travel lapses; the explores (one tick later) do not
+        give_up(self.m, self.w, "explore", (99, 50))
+        self.assertNotIn(nav_stuck.goal_key("travel:point", MAP, TOWN), stuck.given_up, "the lapsed one goes first")
+        self.assertEqual(len(stuck.given_up), nav_stuck.GIVE_UPS_KEPT + 4)
+        self.w.tick += nav_stuck.BACKOFF_BASE_TICKS
+        give_up(self.m, self.w, "explore", (98, 50))
+        self.assertEqual(len(stuck.given_up), nav_stuck.GIVE_UPS_KEPT, "back to the bound once they lapse")
 
     def test_travel_walks_there_again_once_its_give_up_lapses(self):
         w, c = world(), ctx()

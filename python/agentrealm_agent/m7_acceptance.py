@@ -53,7 +53,7 @@ from .acceptance_survival import (
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .travel.resolve import given_up_travel, travel_dest
+from .travel.resolve import TRAVEL_GOAL_PREFIX, given_up_travel, travel_dest
 from .world import Pos, WorldModel, chebyshev
 
 TARGET_SECONDS = 3600.0
@@ -171,7 +171,7 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
         on its op counts once."""
         given_up = given_up_travel(m.nav_stuck, w.tick)
         dest = travel_dest(acted_op, w, knowledge, m.strength, given_up) if acted_op else None
-        rec = next((r for r in m.nav_stuck.given_up.values() if (r.map_id, r.target) == dest), None)
+        rec = next((r for r in m.nav_stuck.given_up.values() if r.goal.startswith(TRAVEL_GOAL_PREFIX) and (r.map_id, r.target) == dest), None)
         on_it = dest in given_up and rec is not None and rec.since < w.tick
         if on_it and not self._on_given_up:
             self.given_up_returns += 1

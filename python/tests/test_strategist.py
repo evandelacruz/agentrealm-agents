@@ -29,7 +29,9 @@ from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_hunting_zone
 from agentrealm_agent.travel.knowledge import entrance_key, sync_town
+from agentrealm_agent.gem_yield import RATE_MIN_SECONDS
 from agentrealm_agent.strategist import (
+    NO_GEMS_EARNED,
     READY_HEALTH_FRACTION,
     READY_POTIONS,
     STALL_SECONDS,
@@ -797,8 +799,8 @@ class PlannerViewTest(unittest.TestCase):
         self.assertIn("an equip with a code arms or wears exactly that held item", prompt)
         self.assertIn("a weapon that cannot cut (a mallet) is put away while gathering", prompt)
 
-    def readiness(self) -> dict:
-        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("readiness="))
+    def readiness(self, **kw) -> dict:
+        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb, **kw).splitlines() if l.startswith("readiness="))
         return json.loads(line.split("=", 1)[1])
 
     def test_readiness_shows_each_stage_check_by_check(self):
@@ -835,6 +837,48 @@ class PlannerViewTest(unittest.TestCase):
 
     def test_stage_2_bar_in_the_arc_matches_the_readiness_constants(self):
         self.assertIn(f"health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions", system_prompt())
+
+    def test_readiness_shows_what_each_unmet_check_costs_at_the_gem_rate(self):
+        # A121: each unmet check a purchase closes, priced in gems short and
+        # in minutes at the current gather's rate; carried gear costs nothing.
+        self.w.health, self.w.max_health, self.w.gems = 10, 10, 5
+        self.w.armed_code = "pocket_knife"
+        self.w.held_supplies = [InventorySupply(1, "small_potion"), InventorySupply(2, "bronze_mail")]
+        for code, price in {"small_potion": 10, "bronze_sword": 15}.items():
+            self.kb.items[code] = {"gem_price": price}
+        short = READY_POTIONS - 1
+        stage_2 = self.readiness(gather_run={"gems_per_min": 0.5})["stage_2"]
+        self.assertEqual(
+            stage_2["to_close"],
+            {
+                "potions_at_bar": {"gems_short": short * 10 - 5, "minutes": (short * 10 - 5) / 0.5},
+                "better_weapon_armed": {"gems_short": 10, "minutes": 20.0},
+                "armor_worn": {"gems_short": 0, "minutes": 0.0},
+            },
+        )
+        self.assertEqual(self.readiness()["stage_2"]["to_close"]["better_weapon_armed"], {"gems_short": 10}, "no rate measured: no minutes")
+        zero = self.readiness(gather_run={"gems_per_min": 0.0})["stage_2"]["to_close"]
+        self.assertEqual(zero["better_weapon_armed"], {"gems_short": 10, "minutes": NO_GEMS_EARNED}, "a gather that earned nothing: no time closes it")
+        self.assertEqual(zero["armor_worn"], {"gems_short": 0, "minutes": 0.0}, "nothing short: no time needed")
+        self.kb.items.clear()
+        self.assertNotIn("potions_at_bar", self.readiness()["stage_2"]["to_close"], "no potion seen for sale: no price")
+
+    def test_arc_weighs_the_bars_against_their_time(self):
+        # A121: the bars are guidance the planner weighs, and the rate the arc
+        # names is shown from the same constant.
+        prompt = system_prompt()
+        self.assertIn("The readiness bars are guidance you weigh, not a gate", prompt)
+        self.assertIn("A bar whose cost in time outweighs what it is worth may be skipped: move on, and name the trade in the why", prompt)
+        self.assertIn(f'"{NO_GEMS_EARNED}" when that rate is 0', prompt)
+        self.assertIn(f"Once the current gather_gems has been on top for {RATE_MIN_SECONDS} s, gather_run also shows its measured rate", prompt)
+        self.assertIn(f"at least {READY_POTIONS} potions are held", prompt)
+
+    def test_a_check_skipped_for_its_cost_sends_no_drop_back_or_restock(self):
+        # A121 review: drop back and restock would otherwise undo a skipped bar.
+        prompt = system_prompt()
+        self.assertIn("Drop back a stage when its readiness no longer is met (after a death, say), except for a check skipped for its cost", prompt)
+        self.assertIn("A check whose minutes still outweigh what it buys stays skipped: by itself it sends the character back to no stage and calls for no restock", prompt)
+        self.assertIn("whenever health or potions fall below the stage 2 bar, unless the check is one skipped for its cost", prompt)
 
     def test_a_met_stage_with_no_upgrade_for_sale_has_nothing_to_save_toward(self):
         # A101: readiness met and no better gear known for sale; State says

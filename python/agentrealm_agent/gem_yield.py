@@ -66,6 +66,8 @@ VERSION = 2
 # No cut that took effect for this long is a stall: Gather says so in its
 # status, and a planner reply may then move its region (``keep_gather_region``).
 STALL_SECONDS = 30
+# A gather's gems a minute is shown once it has run this long (A121).
+RATE_MIN_SECONDS = 60
 REGION_SIZE = 16  # blocks per region side
 # The manual's lowest grass rate: a cut drops a gem 20% of the time in the
 # ring-1 fields, 25% farther out (GAME_NOTES.md Gems). It is the prior for
@@ -157,6 +159,10 @@ class GemYieldTracker:
     gems_gained: int = 0  # rises of the gem counter this run, spending not taken off
     last_cut_tick: int | None = None  # tick of this run's latest cut that took effect: Gather's stall clock
     last_cut_pos: Pos | None = None  # and the cell it cut
+    # The current gather (A121): the stretch of rounds with a gather_gems on top,
+    # as (tick, gems_gained) at its start and, once it ended, at its end.
+    gather_from: tuple[int, int] | None = None
+    gather_to: tuple[int, int] | None = None
 
     def note_cut(self, w: WorldModel, pos: Pos, block: str, tick: int, *, took: bool = False) -> None:
         """Our ``Use`` on ``pos`` applied while it showed ``block``. ``took``: a
@@ -232,9 +238,36 @@ class GemYieldTracker:
             return False
         return last[0] == map_id and region_of(last[1]) == region_of(pos)
 
-    def run_counts(self) -> dict[str, int]:
-        """This run's cuts, no-effect cuts and gems gained, for the planner's State."""
-        return {"cuts": self.cuts, "no_effect_cuts": self.no_effect_cuts, "gems_gained": self.gems_gained}
+    def note_gathering(self, tick: int, gathering: bool) -> None:
+        """Whether a ``gather_gems`` is on top this round (A121). One that
+        starts after none was opens a new gather; one that ends keeps its
+        figures, so the rate stays shown until the next gather starts."""
+        if gathering and (self.gather_from is None or self.gather_to is not None):
+            self.gather_from, self.gather_to = (tick, self.gems_gained), None
+        elif not gathering and self.gather_from is not None and self.gather_to is None:
+            self.gather_to = (tick, self.gems_gained)
+
+    def gather_rate(self, tick: int, tick_hz: int) -> tuple[float, float] | None:
+        """The current gather's gems a minute and its minutes (A121), or None
+        before it has run ``RATE_MIN_SECONDS``: every gem the counter gained
+        while it was on top, piles and kills included."""
+        if self.gather_from is None:
+            return None
+        start_tick, start_gems = self.gather_from
+        end_tick, end_gems = self.gather_to or (tick, self.gems_gained)
+        seconds = (end_tick - start_tick) / max(1, tick_hz)
+        if seconds < RATE_MIN_SECONDS:
+            return None
+        return (end_gems - start_gems) * 60 / seconds, seconds / 60
+
+    def run_counts(self, tick: int, tick_hz: int) -> dict[str, float | int]:
+        """This run's cuts, no-effect cuts and gems gained, and the current
+        gather's gems a minute over its minutes (A121), for the planner's State."""
+        row: dict[str, float | int] = {"cuts": self.cuts, "no_effect_cuts": self.no_effect_cuts, "gems_gained": self.gems_gained}
+        rate = self.gather_rate(tick, tick_hz)
+        if rate is not None:
+            row.update({"gems_per_min": round(rate[0], 2), "gather_minutes": round(rate[1], 1)})
+        return row
 
     def note_take(self) -> None:
         for cut in self.pending:

@@ -115,7 +115,7 @@ from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import entrance_routes
-from .gem_yield import keep_gather_region, summary as gem_yield_summary
+from .gem_yield import RATE_MIN_SECONDS, keep_gather_region, summary as gem_yield_summary
 from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
 from .equip import CUT, does_job, hunting_ceiling, loadout_strength, weapon_rank
 from .supplies import (
@@ -123,6 +123,7 @@ from .supplies import (
     chest_applied,
     chest_capacity,
     eaten_on_pickup,
+    is_potion,
     is_weapon,
     sold_codes,
     weapon_damage,
@@ -254,19 +255,21 @@ Examples:
 # The stage 2 readiness bar (PROGRESSION, stage 2).
 READY_HEALTH_FRACTION = 0.8
 READY_POTIONS = 3
+# A check's minutes while the gather's rate shows 0 gems a minute (A121).
+NO_GEMS_EARNED = "never at gems_per_min 0"
 
 PROGRESSION = f"""# Progression
 
-The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. State readiness shows each stage's readiness check by check, and whether it is met. A stage whose readiness is met is done: move on to the next stage. Stay only for a concrete, reachable reason, and name it in the why: an upgrade listed under upgrades_for_sale whose gems_short the gems will cover soon, say. Saving for gear that is not listed there is not a reason: an item not known to be for sale cannot be bought, however much it would help, so with upgrades_for_sale none seen there is nothing to save toward and a met stage moves on. The same holds for anything a goal needs, at any stage: an item under no_seller_known is no reason to gather gems. A goal that waits on one finds a seller or the item first (travel to a named place, explore, ask NPCs, read signs), or the stage works on a goal reachable now (another level entrance, say). Drop back a stage when its readiness no longer is met (after a death, say). Applying this is yours: the code does not switch stages.
+The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. State readiness shows each stage's readiness check by check, and whether it is met. A stage whose readiness is met is done: move on to the next stage. Stay only for a concrete, reachable reason, and name it in the why: an upgrade listed under upgrades_for_sale whose gems_short the gems will cover soon, say. Saving for gear that is not listed there is not a reason: an item not known to be for sale cannot be bought, however much it would help, so with upgrades_for_sale none seen there is nothing to save toward and a met stage moves on. The same holds for anything a goal needs, at any stage: an item under no_seller_known is no reason to gather gems. A goal that waits on one finds a seller or the item first (travel to a named place, explore, ask NPCs, read signs), or the stage works on a goal reachable now (another level entrance, say). Drop back a stage when its readiness no longer is met (after a death, say), except for a check skipped for its cost (below). The readiness bars are guidance you weigh, not a gate: readiness stage_2 to_close shows, for each unmet check a purchase closes, the gems_short and the minutes it takes at gather_run gems_per_min, this gather's measured rate ("{NO_GEMS_EARNED}" when that rate is 0; no minutes before a rate is measured). A bar whose cost in time outweighs what it is worth may be skipped: move on, and name the trade in the why (the minutes a check costs against what it buys, say). A check whose minutes still outweigh what it buys stays skipped: by itself it sends the character back to no stage and calls for no restock; weigh it again when its minutes fall (gems gained, a cheaper seller, a better region). Applying this is yours: the code does not switch stages.
 
 1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known. To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and does nothing while no door has been seen here; so explore_area out past the town toward ground not yet seen, read the signs and ask the NPCs where the levels are, and travel to a door once one shows. A later stage that needs an entrance and knows none comes back here to find one.
-2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip them (gather_gems, break_block, fetch_item, buy, equip; equip arms the best weapon by the rule under Weapons and the hunting ground, so a weapon that would shut the hunting ground stays unarmed unless named). Ready when health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions are held, a weapon better than the starting weapon by the rule under Weapons and the hunting ground is armed, and armor is worn (State readiness stage_2). Better gear helps in levels, but once these are met, more gems are worth gathering only toward an upgrade listed under upgrades_for_sale.
-3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). Pick the entrance by its route and cost under level_entrances, not by distance alone: a path_known entrance beats a nearer one whose way is frontier_only through many unexplored cells, unless its steps are far more, and a known_blocked one needs a break or another way first. When the best option is an entrance no known path reaches yet, explore toward it (explore_area around the way there) rather than send one long travel into unexplored ground. A boss has no defense, so swings hit it 65% of the time for up to the weapon's damage plus 2; bosses were tuned for a tier's gear before that base, so the stage 2 bar leaves a margin. Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar.
+2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip them (gather_gems, break_block, fetch_item, buy, equip; equip arms the best weapon by the rule under Weapons and the hunting ground, so a weapon that would shut the hunting ground stays unarmed unless named). Ready when health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions are held, a weapon better than the starting weapon by the rule under Weapons and the hunting ground is armed, and armor is worn (State readiness stage_2), each weighed against its minutes under to_close. Better gear helps in levels, but once these are met, more gems are worth gathering only toward an upgrade listed under upgrades_for_sale.
+3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). Pick the entrance by its route and cost under level_entrances, not by distance alone: a path_known entrance beats a nearer one whose way is frontier_only through many unexplored cells, unless its steps are far more, and a known_blocked one needs a break or another way first. When the best option is an entrance no known path reaches yet, explore toward it (explore_area around the way there) rather than send one long travel into unexplored ground. A boss has no defense, so swings hit it 65% of the time for up to the weapon's damage plus 2; bosses were tuned for a tier's gear before that base, so the stage 2 bar leaves a margin. Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar, unless the check is one skipped for its cost.
 4. Beat the world. Clear every level to transcend: done when levels_cleared holds level_count levels.
 
 Gems by area (stage 2). Gem drops from grass vary by area, and some areas drop none. State gem_yield is measured from the character's own cuts: expected_yield, the gems a cut drops on this map (the manual's rate until enough cuts measure it), the region it stands in (here, once cut there), the best regions at any distance with their yield (gems per cut) and distance in blocks, and the barren ones nearby. A good region far behind is still worth a travel back. Hunt gems where the yield is good, leave a region that shows no gems after a fair sample, and explore regions not yet sampled to sample them.
 
-How gather_gems works. Gather goes for three kinds of place: grass to cut, gem piles to take, and the edge of unexplored ground, where more grass may lie. Each is priced the same way, and the cheapest wins: the walk there (its steps, plus extra steps for ground near a known hostile), then the actions there that get the gems still needed (count less the gems held) at the yield there (a region's measured yield, expected_yield on ground not sampled yet): a cut for each gem a cut is expected to drop; a gem pile is one take for a sure gem, then cuts for the rest; an edge also pays the steps it takes to find grass past it. So near grass is cut first, a good region's grass beats closer grass in a poor one only when its yield outweighs the longer walk, and Gather explores nearby rather than walk far for grass of the same yield. What is in reach is worked first. It works only ground clear of known hostiles: a hostile in view bars cells within weapon reach or hostile_range plus a step (the one that hit us, 6 blocks), and it remembers hostiles out of view: the cell it last saw one on, the post a guard stands on, and how far from that post it has hit the character or come out to fight it; ground they hold is not gathered and no walk crosses a known hostile's reach (a post fades only while it is seen empty, within seconds, and one nobody looks at keeps its strength; once faded it no longer bars its ground, it only adds steps to it), and a hit on the way to a pile shows that pile's ground held. A hostile that stays near without attacking only bars the cells near it, so Gather works further off; whether to work near one is yours: set fight true on a gather_gems to gather on ground a hostile holds and walk through its reach, taking the fight. It skips barren regions (15 cuts with no gem) and learns ground where cuts have no effect (town grass, say) and leaves it; the survival states keep the character alive while it works. Gather keeps the place it picked until it is reached or gone; it trades it for another only when the walk there grows (a wall found ahead, a long way round) and another is cheaper by a clear margin. Which region is yours too: with no x, y Gather works the ground where the character is, priced as above. A gather_gems x, y names a target region (any block of it, such as a gem_yield corner): Gather goes only for places there (grass, piles and unexplored edges in that region; a pile beside it outside the region is left to pickup), walks toward the region while it knows no cell of it, and works as if no region were named once it knows nothing there to go for or no way reaches it (known hostile ground in between, say: then name another region, or set fight); it also lifts that region's barren mark. Name one to send Gather to a good region (State gem_yield lists the best sampled regions at any distance), and move it once the region turns poor (20 cuts with under half of expected_yield) or barren; never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (a cut sent now), "taking a gem", "walking to grass", "walking to a gem pile", "walking to unexplored ground", "walking to a target region" (it heads for a named region it has not seen), "blocked by hostile" (known grass is barred by a hostile near it and there is nowhere else to go), "cuts have no effect here" (cuts here changed nothing, so it moves on to other cells), "no cuttable cell in view" (it knows nowhere to go, so it explores), or "region barren" (the same, standing in a barren region). While it works only in a target region, the status ends in " (region x,y)", that region's corner. Any of these but "cutting" ends in ", no cut for N s" once no cut has taken effect for 30 s: that is a stall, not progress. State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress."""
+How gather_gems works. Gather goes for three kinds of place: grass to cut, gem piles to take, and the edge of unexplored ground, where more grass may lie. Each is priced the same way, and the cheapest wins: the walk there (its steps, plus extra steps for ground near a known hostile), then the actions there that get the gems still needed (count less the gems held) at the yield there (a region's measured yield, expected_yield on ground not sampled yet): a cut for each gem a cut is expected to drop; a gem pile is one take for a sure gem, then cuts for the rest; an edge also pays the steps it takes to find grass past it. So near grass is cut first, a good region's grass beats closer grass in a poor one only when its yield outweighs the longer walk, and Gather explores nearby rather than walk far for grass of the same yield. What is in reach is worked first. It works only ground clear of known hostiles: a hostile in view bars cells within weapon reach or hostile_range plus a step (the one that hit us, 6 blocks), and it remembers hostiles out of view: the cell it last saw one on, the post a guard stands on, and how far from that post it has hit the character or come out to fight it; ground they hold is not gathered and no walk crosses a known hostile's reach (a post fades only while it is seen empty, within seconds, and one nobody looks at keeps its strength; once faded it no longer bars its ground, it only adds steps to it), and a hit on the way to a pile shows that pile's ground held. A hostile that stays near without attacking only bars the cells near it, so Gather works further off; whether to work near one is yours: set fight true on a gather_gems to gather on ground a hostile holds and walk through its reach, taking the fight. It skips barren regions (15 cuts with no gem) and learns ground where cuts have no effect (town grass, say) and leaves it; the survival states keep the character alive while it works. Gather keeps the place it picked until it is reached or gone; it trades it for another only when the walk there grows (a wall found ahead, a long way round) and another is cheaper by a clear margin. Which region is yours too: with no x, y Gather works the ground where the character is, priced as above. A gather_gems x, y names a target region (any block of it, such as a gem_yield corner): Gather goes only for places there (grass, piles and unexplored edges in that region; a pile beside it outside the region is left to pickup), walks toward the region while it knows no cell of it, and works as if no region were named once it knows nothing there to go for or no way reaches it (known hostile ground in between, say: then name another region, or set fight); it also lifts that region's barren mark. Name one to send Gather to a good region (State gem_yield lists the best sampled regions at any distance), and move it once the region turns poor (20 cuts with under half of expected_yield) or barren; never re-send an otherwise unchanged gather_gems just to change x, y. A gather_gems of yours under a pinned gather_gems with no higher count is a repeat of it and is dropped. State gather_status, shown while a gather_gems is on top, is Gather's last decision: "cutting" (a cut sent now), "taking a gem", "walking to grass", "walking to a gem pile", "walking to unexplored ground", "walking to a target region" (it heads for a named region it has not seen), "blocked by hostile" (known grass is barred by a hostile near it and there is nowhere else to go), "cuts have no effect here" (cuts here changed nothing, so it moves on to other cells), "no cuttable cell in view" (it knows nowhere to go, so it explores), or "region barren" (the same, standing in a barren region). While it works only in a target region, the status ends in " (region x,y)", that region's corner. Any of these but "cutting" ends in ", no cut for N s" once no cut has taken effect for 30 s: that is a stall, not progress. State gather_run counts this run's cuts that took effect (cuts), cuts that did nothing (no_effect_cuts) and gems the counter gained (gems_gained): cuts rising with gems_gained flat for long is a stall, not progress. Once the current gather_gems has been on top for {RATE_MIN_SECONDS} s, gather_run also shows its measured rate: gems_per_min, every gem gained while it was on top, over gather_minutes; any other op on top ends that gather, and the rate stays shown until the next gather_gems on top starts measuring afresh."""
 
 
 def system_prompt(reference_sections: str = "") -> str:
@@ -590,7 +593,7 @@ def build_prompt(
     reference_sections: str = "",
     given_up_travel: Mapping[tuple[int, tuple[int, int]], int] | None = None,
     gather_status: str = "",
-    gather_run: dict[str, int] | None = None,
+    gather_run: dict[str, float | int] | None = None,
     rejected: Collection[str] = (),
     stall: str = "",
     strength: StrengthBracket | None = None,
@@ -623,7 +626,7 @@ def build_prompt(
         no_seller_line(w, knowledge),
         upgrade_line(w, knowledge),
         hunting_strength_line(w, knowledge),
-        readiness_line(w, knowledge),
+        readiness_line(w, knowledge, (gather_run or {}).get("gems_per_min")),
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
@@ -1135,13 +1138,14 @@ def hunting_strength_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str
     return f"hunting_strength={json.dumps(row, sort_keys=True)}"
 
 
-def readiness(w: WorldModel, knowledge: KnowledgeBase | None) -> dict[str, dict[str, Any]]:
+def readiness(w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None) -> dict[str, dict[str, Any]]:
     """Each stage's readiness check by check, and whether it is met
     (PROGRESSION). Stage 2's bar is ``READY_HEALTH_FRACTION`` of max health,
     ``READY_POTIONS`` potions, a weapon better than the starting one by the
     one weapon rule (``equip.weapon_rank``, A99) armed, and armor worn. The
     planner reads it to judge when a stage is done; the code switches no
-    stage itself."""
+    stage itself. Stage 2's ``to_close`` prices each unmet check a purchase
+    closes (A121, :func:`cost_to_close`)."""
     shop_known = bool(iter_shop_cells(knowledge) or seen_prices(w, knowledge))
     entrance_known = bool(iter_entrances(knowledge))
     stage_1 = {"shop_known": shop_known, "entrance_known": entrance_known}
@@ -1156,14 +1160,57 @@ def readiness(w: WorldModel, knowledge: KnowledgeBase | None) -> dict[str, dict[
         "better_weapon_armed": better_weapon,
         "armor_worn": armor_worn,
     }
+    row_2: dict[str, Any] = {**stage_2, "met": all(stage_2.values())}
+    unmet = [check for check, ok in stage_2.items() if not ok]
+    to_close = cost_to_close(w, knowledge, unmet, gems_per_min)
+    if to_close:
+        row_2["to_close"] = to_close
     return {
         "stage_1": {**stage_1, "met": all(stage_1.values())},
-        "stage_2": {**stage_2, "met": all(stage_2.values())},
+        "stage_2": row_2,
     }
 
 
-def readiness_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
-    return f"readiness={json.dumps(readiness(w, knowledge), sort_keys=True)}"
+def cost_to_close(
+    w: WorldModel, knowledge: KnowledgeBase | None, unmet: Collection[str], gems_per_min: float | None
+) -> dict[str, dict[str, Any]]:
+    """What each unmet stage 2 check a purchase closes costs (A121): the gems
+    still short of the cheapest seen for sale that closes it (none for gear
+    carried, which an equip closes), each alone, and the minutes that takes
+    at the current gather's gems a minute: left out with no rate measured, and
+    ``NO_GEMS_EARNED`` while the rate shown is 0 and gems are still short. A
+    check with nothing seen for sale that closes it, or that no purchase
+    closes (health), is left out."""
+    prices = seen_prices(w, knowledge)
+    # Gear already carried closes its check with an equip: no gems.
+    carried = {s.code for s in w.held_supplies + w.chest_supplies if s.code}
+    gear = {**prices, **{code: 0 for code in carried}}
+    ceiling = hunting_ceiling(w, knowledge)
+    starting = weapon_rank(STARTING_WEAPON, w, ceiling)
+    closes: dict[str, tuple[int, int]] = {}  # check: (cheapest price, how many)
+    potion = min((p for c, p in prices.items() if is_potion(c)), default=None)
+    if "potions_at_bar" in unmet and potion is not None:
+        closes["potions_at_bar"] = (potion, READY_POTIONS - potion_count(w))
+    weapon = min((p for c, p in gear.items() if is_weapon(c) and weapon_rank(c, w, ceiling) > starting), default=None)
+    if "better_weapon_armed" in unmet and weapon is not None:
+        closes["better_weapon_armed"] = (weapon, 1)
+    armor = min((p for c, p in gear.items() if (armor_defense(c) or 0) > 0), default=None)
+    if "armor_worn" in unmet and armor is not None:
+        closes["armor_worn"] = (armor, 1)
+    rows: dict[str, dict[str, Any]] = {}
+    for check, (price, count) in closes.items():
+        short = max(0, price * count - (w.gems or 0))
+        row: dict[str, Any] = {"gems_short": short}
+        if gems_per_min is not None and gems_per_min > 0:
+            row["minutes"] = round(short / gems_per_min, 1)
+        elif gems_per_min is not None:
+            row["minutes"] = NO_GEMS_EARNED if short else 0.0
+        rows[check] = row
+    return rows
+
+
+def readiness_line(w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None) -> str:
+    return f"readiness={json.dumps(readiness(w, knowledge, gems_per_min), sort_keys=True)}"
 
 
 @dataclass
@@ -1551,7 +1598,7 @@ class Strategist:
             reference_sections=self.config.reference_sections,
             given_up_travel=given_up_travel(runner.mem.nav_stuck, runner.world.tick),
             gather_status=runner.mem.gather_status,
-            gather_run=runner.gem_cuts.run_counts(),
+            gather_run=runner.gem_cuts.run_counts(runner.world.tick, runner.tick_hz),
             rejected=self.rejected,  # replaced when this call's reply is read; kept if the call fails
             stall=self.stall.line(runner.world, runner.tick_hz, runner.mem.last_decision),
             strength=runner.mem.strength,

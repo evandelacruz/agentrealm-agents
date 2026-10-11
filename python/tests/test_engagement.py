@@ -412,7 +412,7 @@ class RepriceTest(unittest.TestCase):
         w, c = world(), ctx()
         m = c.memory
         m.gather_target, m.goal, m.path = ("pile", (14, 10)), "gather", [(11, 10), (12, 10)]
-        m.detour = Detour(50, (14, 12), "gem", "travel", w.tick)
+        m.detour = Detour(50, (14, 12), "gem", "travel")
         w.entities = [biter()]
         sync_engagement(w, m, c.policy, c.params)
         self.assertIsNone(m.gather_target)

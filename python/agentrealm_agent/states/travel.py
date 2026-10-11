@@ -15,7 +15,9 @@ Travel keeps its walk (A120): the safe default never stands in for it. With
 no step toward the destination it clears the way or asks the planner and
 holds (``way.clear_the_way``); at stuck step 2 Break, below it, opens the
 block the walk's escalation nominated (A15). The survival reflexes act above
-it as always.
+it as always. Its legs must bring the destination nearer (A125): a walk that
+stands no nearer over ``nav_stuck.NO_NEARER_MOVES`` moves is given up, and
+the ask's ``tried`` says how its ladder failed (``way.clear_the_way``).
 """
 
 from __future__ import annotations

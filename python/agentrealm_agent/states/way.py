@@ -99,9 +99,11 @@ def clear_the_way(
     """The executor's walk to ``at`` has no step: open the way, else ask and hold.
 
     ``at`` is None when the op has no target to walk to (none in sight): it
-    asks at once. At stuck step 2 it sends nothing and holds nothing, so
-    Break, below, opens the nominated block this decision; the safe default
-    holds meanwhile (``explore.HOLD_THEIR_WALK``).
+    asks at once. When the executor's own walk to ``at`` was given up, the
+    ask's ``tried`` leads with how each level of its ladder failed
+    (``walk_given_up``, A125). At stuck step 2 it sends nothing and holds
+    nothing, so Break, below, opens the nominated block this decision; the
+    safe default holds meanwhile (``explore.HOLD_THEIR_WALK``).
     """
     m = ctx.memory
     if break_due(w, m, state):
@@ -116,8 +118,22 @@ def clear_the_way(
         m.way_shut = key  # still shut until something it was found under changes
     blocked = tried = None
     if at is not None and m.no_way_on != ask_key(w, why, op):
-        blocked, tried = what_blocks(w, ctx, at), _tried(w, ctx)  # only for an ask that goes out
+        blocked = what_blocks(w, ctx, at)  # only for an ask that goes out
+        walked = walk_given_up(w, m, state, at)
+        tried = f"{walked}, then {_tried(w, ctx)}" if walked else _tried(w, ctx)
     return ask_the_planner(w, ctx, why, state, op, blocked_by=blocked, tried=tried)
+
+
+def walk_given_up(w: WorldModel, m: Memory, owner: str, at: Pos) -> str | None:
+    """How ``owner``'s own walk to ``at`` failed, when the stuck ladder gave it
+    up and it is still backed off (``OWNER_WALKS``): each level's reason in
+    order, ``no_nearer`` when it stood no nearer for too long (A125)."""
+    walks = OWNER_WALKS.get(owner, ())
+    for rec in m.nav_stuck.given_up.values():
+        mine = (rec.map_id, rec.target) == (w.map_id, at) and rec.goal.startswith(walks)
+        if mine and w.tick < rec.until and rec.reasons:
+            return f"the walk, given up ({', '.join(rec.reasons)})"
+    return None
 
 
 def _shut_key(w: WorldModel, ctx: PlayContext, state: str, op: GoalOp | None, at: Pos | None) -> tuple:

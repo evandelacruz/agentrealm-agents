@@ -24,6 +24,14 @@ progress window, so a level is left only when its own window fails:
 - Step 5: give up, back off ``BACKOFF_BASE_TICKS * 2**n`` and queue a strategist
   ``stuck`` signal.
 
+A walk must also make net progress (A125). Each level's window measures the
+plan, and starts fresh, so on its own the ladder forgives a walk that
+follows one leg after another and stands no nearer. So, across every level,
+a walk that has made ``NO_NEARER_MOVES`` moves without standing nearer the
+target (in steps, Chebyshev) than it has since it was taken up is given up
+at once (``no_nearer``): the executor then clears the way or asks the
+planner (A120), saying what was tried, instead of wandering on.
+
 The ladder is the same whichever state walks: nothing in it knows Gather,
 Travel, Explore or Break. What a give-up leaves behind is one memory,
 ``NavStuckMemory.given_up``: a ``GiveUp`` per walk target, keyed by goal, map
@@ -59,6 +67,11 @@ PROGRESS_TICK_LIMIT = 300  # 30 s at 10 ticks/s
 REJECT_STREAK_LIMIT = 3
 OSCILLATION_WINDOW = 8
 OSCILLATION_UNIQUE_MAX = 3
+
+# Net progress (A125): a walk that has moved this many times since it last
+# stood nearer its target is given up, whatever its level. Two walk windows,
+# so the plan and its cautious replan have each had theirs.
+NO_NEARER_MOVES = 2 * PROGRESS_MOVE_LIMIT
 
 # Escalation step 2: decisions that arm a tool before the window fails.
 # A break arms once; more means the arm is going nowhere.
@@ -135,6 +148,10 @@ class NavAttempt:
     closest: int | None = None
     reset_closest: int | None = None
     reset_level: int | None = None
+    # Net progress (A125), across every level: the nearest the agent stood
+    # since the walk was last taken up, and its moves since it stood there.
+    net_closest: int | None = None
+    net_moves: int = 0
 
 
 class Leg(NamedTuple):
@@ -160,6 +177,7 @@ class GiveUp:
     until: int
     power: int
     lapse_noted: bool = False  # ``lapsed`` has reported it
+    reasons: tuple[str, ...] = ()  # why each level of the walk given up failed, in order
 
 
 @dataclass
@@ -264,6 +282,7 @@ def track(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt 
     if m.nav_stuck.active != att.key:
         att.goal = goal
         att.window_tick = w.tick  # only time spent pursuing it counts
+        att.net_closest, att.net_moves = None, 0  # nor moves: another walk may have led it away
     m.nav_stuck.active = att.key
     return att
 
@@ -438,6 +457,13 @@ def _note_position(att: NavAttempt, w: WorldModel) -> None:
     d = chebyshev(w.pos, att.target)
     if att.closest is None or d < att.closest:
         att.closest = d
+    if att.net_closest is None or d < att.net_closest:
+        att.net_closest, att.net_moves = d, 0
+
+
+def no_nearer(att: NavAttempt) -> bool:
+    """The walk has moved ``NO_NEARER_MOVES`` times without standing nearer its target (A125)."""
+    return att.net_moves >= NO_NEARER_MOVES
 
 
 def _oscillating(recent: list[Pos]) -> bool:
@@ -466,6 +492,7 @@ def on_step(m: Memory, w: WorldModel) -> None:
     if att is None or w.pos is None or m.goal != att.goal:
         return
     att.moves += 1
+    att.net_moves += 1
     att.reject_streak = 0
     _note_position(att, w)
     att.outline.add(w.pos)
@@ -583,6 +610,7 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
         att.reasons.append(reason)
     stuck = m.nav_stuck
     rec = remember_give_up(stuck, att.backoff_key or att.key, att.goal, w.tick)
+    rec.reasons = tuple(att.reasons)
     stuck.stuck_signals.append(
         {
             "trigger": "stuck",

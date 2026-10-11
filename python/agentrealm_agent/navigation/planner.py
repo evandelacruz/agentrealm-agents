@@ -79,9 +79,14 @@ class NavSearchState:
     learned: dict[Pos, int] = field(default_factory=dict)
 
     def reset(self, goal: Pos) -> None:
+        """Search again for ``goal``. What the window search learned is
+        kept while the goal stays the same (A125): a corridor searched again
+        because a tile on it got dearer must not send the walk back over
+        ground it has already learned leads nowhere."""
+        if goal != self.goal:
+            self.learned = {}
         self.goal, self.origin = goal, None
         self.frontier, self.came, self.cost, self.closed, self.step = [], {}, {}, set(), {}
-        self.learned = {}
 
 
 def macro_cell(p: Pos) -> Pos:
@@ -540,7 +545,11 @@ def _fine_path(
     least cost so far plus estimate, and raises the estimate of every cell
     it searched to what it learned the way on costs. A dead end then looks
     as dear as the way out of it, so the next decision walks away from it
-    and none walks back in (free-play run 6).
+    and none walks back in (free-play run 6). So each leg ends where the
+    estimate of the cost left is below what it has just learned the cost
+    left from here is: every leg brings the goal nearer by what the walk
+    knows (A125), and that knowledge outlives a corridor searched again
+    (``NavSearchState.reset``).
 
     Without it, an end scores its cost so far plus twice ``h``, which
     favours progress over an exactly cheapest prefix, and the start competes

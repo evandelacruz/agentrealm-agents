@@ -788,7 +788,9 @@ def guided_step(
 
     Keeps the current path for ``goal`` while it has an open first step, else
     plans with ``plan``. None when we stand on the target, or it is backed off
-    or was just given up on, so the caller yields the round.
+    or was just given up on, so the caller yields the round. A walk that
+    stands no nearer after ``nav_stuck.NO_NEARER_MOVES`` moves is given up
+    whatever its level (A125).
 
     A cross-map ``Leg`` is backed off, and given up, by its ultimate destination.
 
@@ -808,6 +810,9 @@ def guided_step(
         return None
     if w.pos == leg.target:
         nav_stuck.finish(m, att)
+        return None
+    if nav_stuck.no_nearer(att):
+        nav_stuck.give_up(m, w, att, "no_nearer")  # no net progress: the executor asks (A125)
         return None
     reason = None if att.level in (nav_stuck.REVEAL, nav_stuck.BREAK) else nav_stuck.stuck_reason(att, w.tick)
     if reason is None and att.level not in (nav_stuck.REVEAL, nav_stuck.BREAK):

@@ -200,8 +200,8 @@ class RecoverDispatchTest(unittest.TestCase):
         w.chest_contents[80] = [5]
         self.assertEqual(dispatch(w, ctx(scripted(goals=[]), m)).state, "Recover")
         w.chest_contents[80] = []
-        w._refresh_death_chest()
-        self.assertIsNone(w.death_chest)
+        w._refresh_death_chests()
+        self.assertEqual(w.death_chests, {})
         out = dispatch(w, ctx(scripted(goals=[]), m))
         self.assertEqual((out.state, m.state), ("Explore", "Explore"))
 

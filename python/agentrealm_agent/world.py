@@ -74,6 +74,23 @@ POST_FORGET_STRENGTH = 0.1
 
 
 @dataclass
+class DeathChest:
+    """A chest one of our deaths dropped, remembered until it is seen empty or gone (A122).
+
+    ``contents`` are the subtype codes last seen in it, None until it was
+    seen in reach. ``died`` is the tick it dropped: the largest is the newest.
+    Kept across runs (``knowledge_base.death_chests``). A chest says neither
+    whose it is nor when it goes (API Snapshots), so only our own deaths add
+    one and only a look at it drops one.
+    """
+
+    map_id: int
+    pos: Pos
+    died: int
+    contents: list[str] | None = None
+
+
+@dataclass
 class Sighting:
     """An NPC or character seen this run, kept after it leaves view (free-play run 5).
 
@@ -339,10 +356,11 @@ class WorldModel:
     # Where each entity stood before its latest move, and the tick that move
     # was seen: ``survival.approaching`` reads it (A9).
     entity_moves: dict[tuple[str, int], tuple[Pos, int]] = field(default_factory=dict)
-    # The chest our last death dropped: (map_id, position, chest_id), from Died
-    # (docs/API.md Events, B103). Cleared once it is gone: a dropped chest
-    # leaves the world when its last supply is withdrawn (B116).
-    death_chest: tuple[int, Pos, int] | None = None
+    # Every chest our deaths dropped, by chest id (A122): from Died and from
+    # the observation's ``death_chest`` (API Events and Snapshots, B103, B124).
+    # One is dropped once seen empty or gone: a dropped chest leaves the world
+    # when its last supply is withdrawn (B116).
+    death_chests: dict[int, DeathChest] = field(default_factory=dict)
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[InventorySupply]] = field(default_factory=dict)
@@ -657,14 +675,34 @@ class WorldModel:
             if "contents" in ch
         }
 
-    def _refresh_death_chest(self) -> None:
-        if self.death_chest is None:
+    def newest_death_chest(self) -> tuple[int, DeathChest] | None:
+        """The chest our latest death dropped, while it is remembered: (chest id, chest)."""
+        if not self.death_chests:
+            return None
+        return max(self.death_chests.items(), key=lambda kv: (kv[1].died, kv[0]))
+
+    def remember_death_chest(self, chest_id: int, map_id: int, at: Pos, died: int | None = None) -> None:
+        """Remember a chest one of our deaths dropped at tick ``died`` (now when not known);
+        one already known keeps what was seen of it."""
+        if chest_id not in self.death_chests:
+            self.death_chests[chest_id] = DeathChest(map_id, at, self.tick if died is None else died)
+
+    def _refresh_death_chests(self) -> None:
+        """Note what is seen of each remembered death chest on this map (A122):
+        its contents once in reach, and drop it once seen empty, or gone while
+        in reach. Out of reach, a chest missing from sight may only be unseen."""
+        here = self.pos
+        if here is None:
             return
-        map_id, at, chest_id = self.death_chest
-        here = self.pos if self.map_id == map_id else None
-        gone = here is not None and chebyshev(at, here) <= 1 and chest_id not in self.chest_contents
-        if gone or self.chest_contents.get(chest_id) == []:
-            self.death_chest = None
+        for chest_id, chest in list(self.death_chests.items()):
+            if chest.map_id != self.map_id:
+                continue
+            contents = self.chest_contents.get(chest_id)
+            gone = chebyshev(chest.pos, here) <= 1 and contents is None
+            if gone or contents == []:
+                del self.death_chests[chest_id]
+            elif contents is not None:
+                chest.contents = [s.code for s in contents]
 
     def _apply_vitals(self, body: dict, complete: bool) -> None:
         """Reads health and max health from a snapshot or a delta.
@@ -687,6 +725,12 @@ class WorldModel:
             self.levels_cleared = sorted({n for n in map(_opt_int, body["levels_cleared"]) if n is not None})
         if "asleep" in body:
             self._set_asleep(bool(body["asleep"]))
+        served = body.get("death_chest")
+        if isinstance(served, dict):
+            try:
+                self.remember_death_chest(int(served["chest_id"]), int(served["map_id"]), (int(served["x"]), int(served["y"])))
+            except (KeyError, TypeError, ValueError):
+                pass  # a malformed field names no chest
         if "position" in body:
             pos = body["position"]
             if pos is None:
@@ -742,7 +786,7 @@ class WorldModel:
         terrain = snap.get("terrain")
         if terrain:
             self._apply_snapshot_terrain(terrain)
-        self._refresh_death_chest()
+        self._refresh_death_chests()
 
     def _apply_delta_body(self, delta: dict) -> None:
         self._apply_body_scalars(delta)
@@ -755,7 +799,7 @@ class WorldModel:
             self.entities_tick = self.tick
         if "terrain" in delta:
             self._apply_terrain_delta(delta["terrain"])
-        self._refresh_death_chest()
+        self._refresh_death_chests()
 
     def apply_events(self, events_by_tick: list[dict]) -> list[dict]:
         """Folds durable facts from events into the model and returns them flat.
@@ -798,7 +842,9 @@ class WorldModel:
                     self.forget_position()
                     self.placed = self.woke = False  # off the map until Respawned: no position read can answer (A5)
                     if ev.get("chest_id"):
-                        self.death_chest = (int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev["chest_id"]))
+                        self.remember_death_chest(
+                            int(ev["chest_id"]), int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev.get("tick", group["tick"]))
+                        )
                 elif kind == "Respawned":
                     self.placed, self.attacked_tick = True, None
                     self.attacker = self.attacker_tick = None

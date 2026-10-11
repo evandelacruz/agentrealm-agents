@@ -182,7 +182,7 @@ class DeathChestTest(unittest.TestCase):
     def test_recover_death_chest(self):
         w = world(["....."], at=(4, 0))
         w.apply_events([{"tick": 5, "events": [{"kind": "Died", "cause": "killed", "chest_id": 80, "map_id": 7, "x": 0, "y": 0}]}])
-        self.assertEqual(w.death_chest, (7, (0, 0), 80))
+        self.assertEqual(list(w.death_chests), [80])
         w.map_id, w.pos = 7, (4, 0)  # respawned along the strip
         apply_zone(w, 7, 1, 0, {"safe": True, "brightness": 1})
 
@@ -203,7 +203,7 @@ class DeathChestTest(unittest.TestCase):
         # snapshot while its block is within reach, it is forgotten rather
         # than waited on.
         w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": []}}})
-        self.assertIsNone(w.death_chest)
+        self.assertEqual(w.death_chests, {})
 
     def test_death_chest_out_of_reach_is_kept(self):
         """Out of reach, a chest missing from the snapshot may only be out of sight."""
@@ -211,7 +211,7 @@ class DeathChestTest(unittest.TestCase):
         w.apply_events([{"tick": 5, "events": [{"kind": "Died", "cause": "killed", "chest_id": 80, "map_id": 7, "x": 0, "y": 0}]}])
         w.map_id, w.pos = 7, (4, 0)
         w.apply_observation({"complete": True, "snapshot": {"entities": {"chests": []}}})
-        self.assertEqual(w.death_chest, (7, (0, 0), 80))
+        self.assertEqual((w.death_chests[80].map_id, w.death_chests[80].pos), (7, (0, 0)))
 
 
 class TerrainStaleTest(unittest.TestCase):

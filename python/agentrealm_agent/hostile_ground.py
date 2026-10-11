@@ -123,12 +123,14 @@ def held_by_hostile(
     One that keeps a post (``Sighting.post``) holds ``policy.hostile_range``,
     or the reach it hit us from when further (up to ``POST_REACH_CAP``), plus
     ``GATHER_SHADOW_MARGIN``, round that post, in view or not: it goes back
-    there. One out of view also holds its ``gather_bar`` round the cell it
-    was last seen on. A post that has faded below ``POST_HOLD_STRENGTH``
-    (``Sighting.strength``) holds neither, unless its guard
-    was seen within ``SIGHTING_TICKS`` somewhere not in sight now: then its
-    last-seen cell holds, as a passer-by's does. ``faded`` lists the faded zones instead, which only
-    price ground (``faded_reach``).
+    there. A post that has faded below ``POST_HOLD_STRENGTH``
+    (``Sighting.strength``) holds no ground there. One out of view also
+    holds its ``gather_bar`` round the cell it was last seen on, by the
+    passer-by's rule whether or not it keeps a post: while it was seen there
+    within ``SIGHTING_TICKS`` and that cell is not in sight with it gone
+    (``_last_seen_holds``). ``faded`` lists the faded zones instead, which
+    only price ground (``faded_reach``): a faded post, and a faded post's
+    guard's last-seen cell once that no longer holds.
     """
     if w.map_id is None:
         return {}
@@ -141,8 +143,10 @@ def held_by_hostile(
         if s.post and _post_faded(s) == faded:
             reach = max(policy.hostile_range, min(s.reach, POST_REACH_CAP))
             zones.append((s.home, reach + GATHER_SHADOW_MARGIN))
-        if key not in in_view and _last_seen_faded(w, s) == faded:
-            zones.append((s.entity.pos, gather_bar(w, s.entity, policy)))
+        if key not in in_view:
+            holds = _last_seen_holds(w, s)
+            if holds != faded and (holds or _post_faded(s)):
+                zones.append((s.entity.pos, gather_bar(w, s.entity, policy)))
         if zones:
             out[key] = zones
     return out
@@ -153,14 +157,13 @@ def _post_faded(s: Sighting) -> bool:
     return s.post and s.strength < POST_HOLD_STRENGTH
 
 
-def _last_seen_faded(w: WorldModel, s: Sighting) -> bool:
-    """The cell ``s`` was last seen on holds no ground: its post has faded,
-    and its guard has not been seen for ``SIGHTING_TICKS`` or that cell is
-    in sight with it gone, as a passer-by is forgotten."""
-    if not _post_faded(s):
-        return False
+def _last_seen_holds(w: WorldModel, s: Sighting) -> bool:
+    """The cell ``s`` was last seen on still holds ground: it was seen there
+    within ``SIGHTING_TICKS`` and that cell is not in sight with it gone, as
+    a passer-by is remembered. A guard that keeps a post goes back to it, so
+    its post, not where it last stood, holds ground after that."""
     in_sight = w.pos is not None and chebyshev(s.entity.pos, w.pos) < w.perception
-    return in_sight or w.tick - s.tick > SIGHTING_TICKS
+    return not in_sight and w.tick - s.tick <= SIGHTING_TICKS
 
 
 def faded_reach(w: WorldModel, policy: Policy) -> list[tuple[Pos, int, int]]:
@@ -223,7 +226,7 @@ def hostiles_within(w: WorldModel, policy: Policy, pos: Pos, radius: int) -> lis
         if key in out or s.map_id != w.map_id or not is_hostile(w, policy, s.entity):
             continue
         cells = ([s.home] if s.post and not _post_faded(s) else []) + (
-            [s.entity.pos] if key not in in_view and not _last_seen_faded(w, s) else []
+            [s.entity.pos] if key not in in_view and _last_seen_holds(w, s) else []
         )
         if any(chebyshev(c, pos) <= radius for c in cells):
             out[key] = s.entity

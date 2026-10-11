@@ -88,6 +88,8 @@ POST_GRASS = {(POST[0] + dx, POST[1] + dy) for dx in (-1, 0, 1) for dy in (-1, 0
 
 # Ticks in a break of 2.4 hours at 10 ticks/s.
 LONG_BREAK = 86400
+# Where the guard was last seen after chasing us off its post, 10 cells away.
+CHASED = (10, 18)
 
 
 def look_at_empty_post(w: WorldModel, start: int, ticks: int) -> int:
@@ -201,6 +203,33 @@ class AGuardJustSeenStillHoldsItsCellTest(unittest.TestCase):
         self.assertEqual([c for c, _ in reach], [roamed])
         self.assertEqual(hostiles_within(w, policy(), roamed, 1), [w.sightings[("npc", 9)].entity])
         self.assertEqual(hostiles_within(w, policy(), POST, 1), [])
+
+
+class AGuardsLastSeenCellLetsGoTest(unittest.TestCase):
+    """A95 review: a strong post's guard seen off its post holds its last-seen
+    cell only as a passer-by would, so that cell never holds ground for good."""
+
+    def chased_off_its_post(self) -> WorldModel:
+        w = field(at=(2, 30))
+        load_hostiles(kb_with_post(), w)
+        see(w, [Entity("npc", 9, CHASED, CODE)], LAST_SEEN)
+        w.pos = (2, 30)  # neither its post nor that cell in sight
+        return w
+
+    def test_its_last_seen_cell_holds_for_a_while_then_only_its_post(self):
+        w = self.chased_off_its_post()
+        see(w, [], LAST_SEEN + 1)
+        self.assertIn(CHASED, [c for c, _ in known_reach(w, policy())])
+        see(w, [], LAST_SEEN + LONG_BREAK)
+        self.assertEqual([c for c, _ in known_reach(w, policy())], [POST])
+        self.assertGreater(w.sightings[("npc", 9)].strength, 0.99)
+
+    def test_its_last_seen_cell_in_sight_and_empty_holds_nothing(self):
+        w = self.chased_off_its_post()
+        w.pos = (CHASED[0], CHASED[1] + 3)  # that cell in sight, the post not
+        see(w, [], LAST_SEEN + 1)
+        self.assertEqual([c for c, _ in known_reach(w, policy())], [POST])
+        self.assertEqual(hostiles_within(w, policy(), CHASED, 1), [])
 
 
 class FadedGroundIsPricedTest(unittest.TestCase):

@@ -238,6 +238,8 @@ Held items and purchases: State held lists each item the character carries, with
 
 Pack room: State pack gives the carry slots used and the total (held, stowed, worn and armed each take one; gems and lives take none) and reserved, the carried items the stack's ops will use (a use_block's, equip's or use_item's code, a fight_boss's armed and worn, a compose's fragments, a break_block's tool). Making room never drops a reserved item, and never drops on a shop cell, where a dropped item turns into shop stock. The character never picks what to drop on its own: when a buy or fetch_item needs a slot and the pack is full, it drops only what the op names in drop, and an op that names nothing it may drop comes back to you as dropped, with the items it could drop. A bigger carried chest is the other way to make room: upgrades_for_sale lists any chest seen for sale with more slots than the pack has (carry slots now -> with it), so weigh its price against giving an item up. So before a buy into a full pack, weigh what each held item is good for (held: its use, such as attack, cut, smash or burn, and its damage, defense and heal) against the purchase, and name what to give up in drop. An item not used yet is not worthless: a mallet smashes rocks and fights, matches burn.
 
+Death chests: a death drops what the character carried into a chest where it fell, which anyone may empty and which otherwise stays. State death_chests lists every one of the character's death chests still remembered, nearest first: chest_id, cell with distance and direction (or another map), contents (the item codes last seen in it, unknown until the character has stood next to it) and in_view. To take one back, travel to "point" at its x, y (with its map_id when on another map): once it is in reach the character withdraws all that fits by itself, best items first with a full pack. Weigh the walk and the ground on the way against what is in it.
+
 Weapons and the hunting ground: which weapon is armed follows one rule, by the job at hand. For fighting (an equip with no code), the best weapon held: one that keeps strength within the highest hunting-ground ceiling known beats one that would put it over; among those alike, more damage wins; with no ceiling known, damage alone decides. For cutting grass (gather_gems), the best held item that cuts, by the same order. So a weapon that would put strength over the ceiling is not armed while a held weapon keeps it within, one armed over it is swapped back, and a weapon that cannot cut (a mallet) is put away while gathering and armed again once the gather work ends. State hunting_strength gives the strength as armed and worn now (attack power 2, plus the armed weapon's damage, plus worn armor's defense) and that ceiling; upgrades_for_sale lists weapons by the fighting rule, with cuts (whether it can cut grass). Weigh a weapon by the work it will do: one that cannot cut adds nothing to gem gathering. To arm or wear an item the rule does not pick (a stronger weapon for a level boss, say), name it: an equip with a code arms or wears exactly that held item, and a later equip with no code applies the rule again. A gather_gems arms by the cutting rule, so it can set aside a named weapon that cuts but would put strength over the ceiling, and does not arm it again afterwards; name it again once the gather work ends.
 
 Potions: {POTION_RULE} State potions counts the potions held and stowed. Plan a reserve (potion_reserve) by that rule: the character will not drink one to top up a scratch. A heal_supplies trigger (hurt, with no food, no potion due and no rest to be had) also counts potions: any held are that reserve, kept back until health is low, so weigh food, a rest elsewhere or waiting before buying more.
@@ -621,6 +623,7 @@ def build_prompt(
         f"stall={stall or 'none'}",
         f"ops_ended_recently={json.dumps(list(ended_ops), sort_keys=True) if ended_ops else 'none'}",
         *entrance_lines(w, knowledge),
+        death_chests_line(w),
         shop_price_line(w, knowledge),
         eaten_on_pickup_line(w, knowledge),
         no_seller_line(w, knowledge),
@@ -1001,6 +1004,34 @@ def entrance_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     shown = [entry for _, entry in rows]
     more = f" (+{count - len(shown)} more)" if count > len(shown) else ""
     return [f"level_entrances={json.dumps(shown, sort_keys=True)}{more}"]
+
+
+# Death chests State lists, nearest first.
+DEATH_CHESTS_SHOWN = 8
+
+
+def death_chests_line(w: WorldModel) -> str:
+    """Our remembered death chests (A122), nearest first, at most
+    ``DEATH_CHESTS_SHOWN`` and a count of the rest: cell and bearing,
+    the item codes last seen in it (``unknown`` until seen in reach), and
+    ``in_view`` while its cell is in sight. So the planner weighs going back
+    for one (a ``travel`` to its cell; Recover takes back what fits)."""
+    rows = []
+    for chest_id, c in w.death_chests.items():
+        here = w.map_id == c.map_id and w.pos is not None
+        d = chebyshev(w.pos, c.pos) if here else 0
+        entry = {
+            "chest_id": chest_id,
+            "cell": _bearing(w, (c.map_id, c.pos)),
+            "contents": c.contents if c.contents is not None else "unknown",
+            "in_view": here and d <= w.perception,
+        }
+        rows.append(((0 if here else 1, d, c.map_id, chest_id), entry))
+    if not rows:
+        return "death_chests=none known"
+    shown = [e for _, e in sorted(rows, key=lambda t: t[0])[:DEATH_CHESTS_SHOWN]]
+    more = f" (+{len(rows) - len(shown)} more)" if len(rows) > len(shown) else ""
+    return f"death_chests={json.dumps(shown, sort_keys=True)}{more}"
 
 
 def shop_price_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:

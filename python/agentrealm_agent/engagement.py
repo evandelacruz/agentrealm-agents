@@ -40,6 +40,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Callable
 
 from .survival import (
+    GAP_PROBE_TICKS,
     combat_group,
     effective_fight_margin,
     effective_risk,
@@ -62,8 +63,8 @@ BREAK_EVEN = 1.0
 
 # Ticks a chase after a member out of range gets to bring the gap below the
 # nearest it has been; then the member is out of reach and the fight ends.
-# The same window Flee's probe gives running away (``flee.FLEE_PROBE_TICKS``).
-CHASE_PROBE_TICKS = 30
+# The same window Flee's probe gives running away (``survival.GAP_PROBE_TICKS``).
+CHASE_PROBE_TICKS = GAP_PROBE_TICKS
 
 
 @dataclass(frozen=True)

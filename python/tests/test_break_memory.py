@@ -251,6 +251,13 @@ class StalledBreakTest(unittest.TestCase):
         BreakState().act(w, c)
         self.assertEqual(nav_stuck.break_target(att), (1, 0))
 
+    def test_the_same_cell_on_another_map_keeps_this_maps_record(self):
+        w = _sword_world([".b..."], at=(0, 0))
+        records = self.remembered(w, self.BUSH)
+        remember_stalled(records, self.BUSH, "Break paced walking to it", 0, retry_basis(w, None), w.map_id + 1)
+        self.assertEqual(break_cells(records, w.map_id), {(1, 0)})
+        self.assertEqual(break_cells(records, w.map_id + 1), {(1, 0)})
+
 
 class BreakOpRefusalTest(unittest.TestCase):
     """A break_block op the block's openers rule out is dropped with the reason (A103)."""

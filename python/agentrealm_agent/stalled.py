@@ -90,9 +90,11 @@ def retry_reason(record: StalledOp, now: RetryBasis) -> str:
 def remember(
     records: list[StalledOp], op: dict[str, Any], why: str, tick: int, basis: RetryBasis, map_id: int | None = None
 ) -> None:
-    """Record ``op`` as stalled on ``map_id``, replacing an older record of the same target."""
+    """Record ``op`` as stalled on ``map_id``, replacing an older record of the
+    same target on the same map: a block at the same cell on another map keeps
+    its own record."""
     target = target_of(op)
-    records[:] = [r for r in records if r.target != target]
+    records[:] = [r for r in records if r.target != target or r.map_id != map_id]
     records.append(StalledOp(target, why, tick, basis, map_id))
     del records[:-STALLED_KEPT]
 

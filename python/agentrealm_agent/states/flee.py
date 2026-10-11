@@ -9,7 +9,7 @@ from ..memory import Memory
 from ..navigation import cost_path, oscillation
 from ..pathing import flee_run, flee_step, grid_params, outruns, retreat_safe_goal, step_open
 from ..engagement import cannot_outrun, fights
-from ..survival import at_health_floor, combat_group, flee_from, is_attacker, on_safe_tile
+from ..survival import GAP_PROBE_TICKS, at_health_floor, combat_group, flee_from, is_attacker, on_safe_tile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
@@ -19,9 +19,8 @@ from .intents import set_position
 from .retreat import retreat_step
 
 # Ticks the gap to the nearest hostile gets to grow before Flee calls the
-# escape failed (A9). Ticks, not decisions: under urgent polling Flee decides
-# every tick or two, and a step takes several ticks.
-FLEE_PROBE_TICKS = 30
+# escape failed (A9).
+FLEE_PROBE_TICKS = GAP_PROBE_TICKS
 
 
 def _committed_step(w: WorldModel, m: Memory, hostiles: list[Entity], blocked: set[Pos]) -> Pos | None:

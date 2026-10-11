@@ -113,6 +113,7 @@ from .travel.strength import StrengthBracket
 from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
+from .navigation import entrance_routes
 from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
@@ -197,9 +198,9 @@ Signs: State signs_seen lists the signs and statues seen on this map, the unread
 
 A travel with no x, y (town, hunting_ground, a nearest shop or entrance) shows in the stack without them, with "goes_to": the cell it walks to now, which the agent works out itself. It is already on the stack: re-sending it changes nothing.
 
-State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. An op on top that makes no progress for {PLAN_STALL_SECONDS} s is moved just below the next op on the stack that can make progress, or dropped when none can (a goal_stalled trigger with the op and the op it is now_below, or goal_failed), and State stalled_ops lists it with why. It never comes back on top when the ops above it end, either: it is moved below again, or dropped. It stays there until a new item is held, a new clue comes in or a new way is known (a door's warp learned, a level entrance): until then a reply that puts it back on top has it moved below again, or left out when nothing in the reply can make progress, and last_reply_rejected says so. So put work that can make progress (gather_gems, say) above it, or give it a reason to work: get the item that opens it, or find another way to it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id). shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
+State stall shows how long the character has neither moved, gained or spent gems, gained or lost an item, nor cleared a level, once that passes {STALL_SECONDS} s, and the decision it last made: the stack is not working, so change it. An op on top that makes no progress for {PLAN_STALL_SECONDS} s is moved just below the next op on the stack that can make progress, or dropped when none can (a goal_stalled trigger with the op and the op it is now_below, or goal_failed), and State stalled_ops lists it with why. It never comes back on top when the ops above it end, either: it is moved below again, or dropped. It stays there until a new item is held, a new clue comes in or a new way is known (a door's warp learned, a level entrance): until then a reply that puts it back on top has it moved below again, or left out when nothing in the reply can make progress, and last_reply_rejected says so. So put work that can make progress (gather_gems, say) above it, or give it a reason to work: get the item that opens it, or find another way to it. level_entrances lists the known level entrances nearest first (travel to one with to "entrance", its x, y and map_id), each on this map with its route by what is known of the map and steps, the cells a walk there takes: path_known (known ground reaches it), frontier_only (the way runs through unexplored ground, unexplored of those cells not seen yet, so it may be walled off), known_blocked (what is known walls it off from here: it takes a break or another way in) or not_searched (too far to check now; steps is the straight line); other_map for one on another map. shop_prices lists the gem price of every item seen for sale, and which ones the gems held can buy; a buy op takes only the item it names.
 
-Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage, defense (armor protects only while worn, never in hand; worn, it lowers both how often and how hard a hostile hits), chest_capacity, and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed); none seen means no better gear is known for sale anywhere, so there is no upgrade to save gems toward until a shop shows one. Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held.
+Held items and purchases: State held lists each item the character carries, with count (held) and stowed (in a carried chest), and what the Supplies reference says it does: its use effects, heal, damage, defense (armor protects only while worn, never in hand; worn, it lowers both how often and how hard a hostile hits), and used_up_on_break (true means each block broken with it uses one up, so one item opens one block; false means it is kept). upgrades_for_sale lists the gear seen for sale that beats the best weapon or armor owned for its slot, cheapest first, with its price, what it gains and gems_short (the gems still needed); none seen means no better gear is known for sale anywhere, so there is no upgrade to save gems toward until a shop shows one. Gems are spent once: every buy delays the next upgrade by its price. Before you put a buy on the stack, weigh what it is for against what is already held and what the gems are saving toward. Buy another of an item only when the ones held will not cover what you mean to use them for before the next chance to restock, and the use is worth more than getting the upgrade sooner. A rumor or a clue that an item might be useful is reason to keep one, not to buy more when one is already held. A chest shows as class chest with carry_slots, the pack size it gives, and applied true once the pack has those slots (State pack slots_total): it is not a consumable to use up, and buying it again adds nothing. State finished_since_last_reply lists the ops that finished (outcome done) or were dropped (outcome dropped, with why) since your last reply. A done op is done: leave it off the stack. A buy is done once its gems are spent and the item is held, or for a chest once the pack has its slots.
 
 Pack room: State pack gives the carry slots used and the total (held, stowed, worn and armed each take one; gems and lives take none) and reserved, the carried items the stack's ops will use (a use_block's or equip's code, a fight_boss's armed and worn, a compose's fragments, a break_block's tool). Making room never drops a reserved item, and never drops on a shop cell, where a dropped item turns into shop stock. The character never picks what to drop on its own: when a buy or fetch_item needs a slot and the pack is full, it drops only what the op names in drop, and an op that names nothing it may drop comes back to you as dropped, with the items it could drop. A bigger carried chest is the other way to make room: upgrades_for_sale lists any chest seen for sale with more slots than the pack has (carry slots now -> with it), so weigh its price against giving an item up. So before a buy into a full pack, weigh what each held item is good for (held: its use, such as attack, cut, smash or burn, and its damage, defense and heal) against the purchase, and name what to give up in drop. An item not used yet is not worthless: a mallet smashes rocks and fights, matches burn.
 
@@ -227,7 +228,7 @@ The character's arc, in order. Judge the stage from State (health, gems, armed, 
 
 1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known. To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and does nothing while no door has been seen here; so explore_area out past the town toward ground not yet seen, read the signs and ask the NPCs where the levels are, and travel to a door once one shows. A later stage that needs an entrance and knows none comes back here to find one.
 2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip them (gather_gems, break_block, fetch_item, buy, equip; equip arms the best weapon by the rule under Weapons and the hunting ground, so a weapon that would shut the hunting ground stays unarmed unless named). Ready when health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions are held, a weapon better than the starting weapon by the rule under Weapons and the hunting ground is armed, and armor is worn (State readiness stage_2). Better gear helps in levels, but once these are met, more gems are worth gathering only toward an upgrade listed under upgrades_for_sale.
-3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). A boss has no defense, so swings hit it 65% of the time for up to the weapon's damage plus 2; bosses were tuned for a tier's gear before that base, so the stage 2 bar leaves a margin. Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar.
+3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). Pick the entrance by its route and cost under level_entrances, not by distance alone: a path_known entrance in fewer steps beats a nearer one whose way is frontier_only through many unexplored cells, and a known_blocked one needs a break or another way first. When the best option is an entrance no known path reaches yet, explore toward it (explore_area around the way there) rather than send one long travel into unexplored ground. A boss has no defense, so swings hit it 65% of the time for up to the weapon's damage plus 2; bosses were tuned for a tier's gear before that base, so the stage 2 bar leaves a margin. Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar.
 4. Beat the world. Clear every level to transcend: done when levels_cleared holds level_count levels.
 
 Gems by area (stage 2). Gem drops from grass vary by area, and some areas drop none. State gem_yield is measured from the character's own cuts: expected_yield, the gems a cut drops on this map (the manual's rate until enough cuts measure it), the region it stands in (here, once cut there), the best regions at any distance with their yield (gems per cut) and distance in blocks, and the barren ones nearby. A good region far behind is still worth a travel back. Hunt gems where the yield is good, leave a region that shows no gems after a fair sample, and explore regions not yet sampled to sample them.
@@ -578,6 +579,7 @@ def build_prompt(
     stall: str = "",
     strength: StrengthBracket | None = None,
     stalled_ops: Collection[StalledOp] = (),
+    ended_ops: Collection[dict[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -597,6 +599,7 @@ def build_prompt(
         *_gather_line(plan, gather_status),
         f"gather_run={json.dumps(gather_run or {}, sort_keys=True)}",
         f"stall={stall or 'none'}",
+        f"finished_since_last_reply={json.dumps(list(ended_ops), sort_keys=True) if ended_ops else 'none'}",
         *entrance_lines(w, knowledge),
         shop_price_line(w, knowledge),
         upgrade_line(w, knowledge),
@@ -815,7 +818,12 @@ ENTRANCES_SHOWN = 8
 
 def entrance_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     """The known level entrances (``kb.entrances``), nearest first: cell,
-    bearing, and what a look at it filed (``block_type``, ``locked``, ``needs``)."""
+    bearing, what a look at it filed (``block_type``, ``locked``, ``needs``),
+    and for one on this map whether a walk reaches it by what is known of
+    the map (A107, ``navigation.entrance_routes``): ``route`` path_known,
+    frontier_only (``unexplored`` cells of it not seen yet), known_blocked
+    or not_searched, with ``steps``. One on another map shows ``route``
+    other_map. So the planner picks by reachability and cost, not distance alone."""
     rows = []
     for map_id, pos, row in iter_entrances(knowledge):
         entry: dict[str, Any] = {"cell": _bearing(w, (map_id, pos))}
@@ -827,8 +835,19 @@ def entrance_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
     if not rows:
         return ["level_entrances=none known"]
     rows.sort(key=lambda t: t[0])
-    shown = [entry for _, entry in rows[:ENTRANCES_SHOWN]]
-    more = f" (+{len(rows) - len(shown)} more)" if len(rows) > len(shown) else ""
+    count, rows = len(rows), rows[:ENTRANCES_SHOWN]
+    on_map = [key[3] for key, _ in rows if key[0] == 0]
+    routes = entrance_routes(w, on_map) if on_map else {}
+    for key, entry in rows:
+        route = routes.get(key[3]) if key[0] == 0 else None
+        if route is None:
+            entry["route"] = "other_map"
+            continue
+        entry.update({"route": route.kind, "steps": route.steps})
+        if route.unexplored:
+            entry["unexplored"] = route.unexplored
+    shown = [entry for _, entry in rows]
+    more = f" (+{count - len(shown)} more)" if count > len(shown) else ""
     return [f"level_entrances={json.dumps(shown, sort_keys=True)}{more}"]
 
 
@@ -849,8 +868,9 @@ def held_line(w: WorldModel, knowledge: KnowledgeBase | None = None) -> str:
     carried chest, what it does by the Supplies reference
     (:func:`supplies.what_it_does`: ``use`` lists attack, cut, smash, burn…),
     plus ``breaks`` for the capabilities learned in play that the reference
-    does not list (A102), so a purchase, or a drop to make room for one, can
-    be weighed against them."""
+    does not list (A102), and a chest as a chest (A106): the ``carry_slots``
+    it gives and whether the pack has them (``applied``), so a purchase, or a
+    drop to make room for one, can be weighed against them."""
     held = Counter(s.code for s in w.held_supplies if s.code)
     stowed = Counter(s.code for s in w.chest_supplies if s.code)
     rows: dict[str, dict[str, Any]] = {}
@@ -859,6 +879,11 @@ def held_line(w: WorldModel, knowledge: KnowledgeBase | None = None) -> str:
         if stowed[code]:
             entry["stowed"] = stowed[code]
         entry.update(what_it_does(code))
+        slots = entry.pop("chest_capacity", None)
+        if slots is not None:
+            # A chest is the pack's size, not a consumable (A106): carry_slots
+            # it gives, applied once the pack has them (State pack slots_total).
+            entry.update({"class": "chest", "carry_slots": slots, "applied": w.carry_capacity >= slots})
         breaks = capabilities_for_code(code, knowledge) - set(entry.get("use", []))
         if breaks:
             entry["breaks"] = sorted(breaks)
@@ -989,6 +1014,43 @@ class StallClock:
         return json.dumps({"seconds": seconds, "last_decision": reason or "unknown"}, sort_keys=True)
 
 
+# Ops State lists as finished since the last reply, newest kept.
+ENDED_SHOWN = 12
+
+
+@dataclass
+class EndedOps:
+    """The ops that finished or were dropped since the last reply (A106), from
+    their ``goal_done`` and ``goal_failed`` triggers, so State says what is
+    done even when the trigger went out with an earlier call. A reply clears
+    the ones its prompt showed; those that ended while it was out stay for the next."""
+
+    seen: list[tuple[int, dict[str, Any]]] = field(default_factory=list)
+    count: int = 0  # ops noted so far, each one's number
+    shown: int = 0  # the number of the last one the call in flight was shown
+
+    def note(self, trigger: dict[str, Any]) -> None:
+        kind, op = trigger.get("trigger"), trigger.get("op")
+        if kind not in ("goal_done", "goal_failed") or not isinstance(op, dict):
+            return
+        row: dict[str, Any] = {"op": op, "outcome": "done" if kind == "goal_done" else "dropped"}
+        if kind == "goal_failed" and trigger.get("reason"):
+            row["why"] = trigger["reason"]
+        self.count += 1
+        self.seen = [*self.seen, (self.count, row)][-ENDED_SHOWN:]
+
+    def rows(self) -> list[dict[str, Any]]:
+        return [row for _, row in self.seen]
+
+    def asked(self) -> None:
+        """A prompt showed every op noted so far."""
+        self.shown = self.count
+
+    def answered(self) -> None:
+        """A reply came: forget the ops its prompt showed."""
+        self.seen = [(n, row) for n, row in self.seen if n > self.shown]
+
+
 @dataclass
 class Asked:
     """What the prompt of the call in flight showed, and what has changed
@@ -1083,6 +1145,7 @@ class Strategist:
     discoveries: Discoveries = field(default_factory=Discoveries)  # what this run has seen, for discovery triggers (A71)
     deferred: tuple[Plan, dict[str, Any], int, float, dict | None] | None = None  # (plan, record, pinned, since, head it replaces) waiting for an action boundary (A71)
     asked: Asked | None = None  # what the call in flight was asked from, and what changed since
+    ended: EndedOps = field(default_factory=EndedOps)  # ops finished or dropped since the last reply (A106)
     _requests: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=1), repr=False)
     _answers: queue.Queue = field(default_factory=queue.Queue, repr=False)
     _stop: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -1276,6 +1339,8 @@ class Strategist:
                 pending["finds"].extend(finds)
                 del pending["finds"][:-FINDS_KEPT]  # a crowded view or a new map never floods the prompt
         drained = drain_triggers(m)
+        for trigger in drained:
+            self.ended.note(trigger)
         if self.asked is not None:
             for trigger in drained:
                 self.asked.note(trigger)
@@ -1315,7 +1380,9 @@ class Strategist:
             stall=self.stall.line(runner.world, runner.tick_hz, runner.mem.last_decision),
             strength=runner.mem.strength,
             stalled_ops=runner.mem.stalled_ops,
+            ended_ops=self.ended.rows(),
         )
+        self.ended.asked()
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1
         self.last_call_at = self.clock()
@@ -1379,6 +1446,7 @@ class Strategist:
             self._fail(runner, triggers, unreadable, record)
             return
         self.failures_in_a_row, self.retry_at = 0, 0.0
+        self.ended.answered()  # the reply was planned with those in view
         d = runner.directives.directives
         (goals, params, notes), self.rejected = collect_rejections(
             lambda: parse_plan_payload(reply, floor_params=dict(d.params), current_params=runner.plan.params)

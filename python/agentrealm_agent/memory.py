@@ -153,6 +153,9 @@ class Memory:
     # of the Take in flight. Settled on an applied Take or a gem drop, counted
     # as a refusal on a rejection; it expires on leaving the shop cell or a timeout.
     shop_pending: tuple[int, str, int | None, tuple[int, int], int | None, int] | None = None
+    # Shop (A106): (code, gems before) of the purchase that landed last, until
+    # the ``buy`` on top for it is done (``Plan.advance``) or another op is on top.
+    shop_bought: tuple[str, int | None] | None = None
     # Shop (A21): supply id -> rejected Take count; cleared when shop_refusal_key
     # (loadout, gems, map) changes, since any of those can turn a refusal around.
     shop_refusals: dict[int, int] = field(default_factory=dict)

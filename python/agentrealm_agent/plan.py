@@ -16,7 +16,8 @@ from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
 from .stalled import below_progress, find as find_stalled, forget as forget_stalled
-from .supplies import CAPABILITIES
+from .item_table import DEFAULT_CARRY_CAPACITY
+from .supplies import CAPABILITIES, chest_capacity
 from .travel.ops import parse_travel_string, travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
 
@@ -612,7 +613,7 @@ class Plan:
                 # A drink, a drop or a death lowers the bar: the buy still adds one.
                 held = count_held(world, op["code"])
                 self.held_before = held if self.held_before is None else min(self.held_before, held)
-            if not goal_done(op, world, self):
+            if not (goal_done(op, world, self) or bought(op, world, memory)):
                 stall = find_stalled(memory.stalled_ops, op) if memory is not None else None
                 if stall is not None:
                     # An op that stalled and has no reason to retry yet never comes
@@ -621,11 +622,15 @@ class Plan:
                     continue
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
+                _forget_purchase(memory, op)
                 return
             note_goal_done(memory, op, "goal_done")
             if memory is not None:
                 forget_stalled(memory.stalled_ops, op)
+                if op["op"] == "buy":
+                    memory.shop_bought = None  # one purchase finishes one buy
             self._pop_current()
+        _forget_purchase(memory, None)
 
     def drop_current(self, reason: str, memory: Memory | None = None) -> None:
         op = self.current()
@@ -838,6 +843,29 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
     # defeat (A38), Investigate once read or greeted (A30), Equip and Level
     # when nothing is left to do.
     return False
+
+
+def bought(op: GoalOp, world: WorldModel, memory: Memory | None) -> bool:
+    """A ``buy`` is done once its purchase landed (A106): the gems for it are
+    spent (``shop.sync_shop``) and the item is owned, held or stowed, or a
+    chest whose carry slots the pack now has."""
+    got = memory.shop_bought if memory is not None else None
+    if op["op"] != "buy" or got is None or not supply_matches(op["code"], got[0]):
+        return False
+    code, gems_before = got
+    spent = gems_before is None or (world.gems is not None and world.gems < gems_before)
+    slots = chest_capacity(code)
+    applied = slots is not None and slots > DEFAULT_CARRY_CAPACITY and world.carry_capacity >= slots
+    return spent and (count_held(world, op["code"]) > 0 or applied)
+
+
+def _forget_purchase(memory: Memory | None, top: GoalOp | None) -> None:
+    """A purchase finishes only the ``buy`` on top for it: with another op on
+    top, or none, it is forgotten, so a later buy is never done by it."""
+    if memory is None or memory.shop_bought is None:
+        return
+    if top is None or top["op"] != "buy" or not supply_matches(top["code"], memory.shop_bought[0]):
+        memory.shop_bought = None
 
 
 def count_held(world: WorldModel, code: str) -> int:

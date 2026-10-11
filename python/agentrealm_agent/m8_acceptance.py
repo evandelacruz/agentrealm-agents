@@ -67,7 +67,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
     armor_worn: bool = False
     shop_weapon: bool = False
     potion_reserve_met: bool = False
-    heal_food_take: bool = False
+    food_taken_hurt: bool = False
     heal_potion: bool = False
     kills: int = 0
     weak_hostile_kills: int = 0
@@ -75,10 +75,11 @@ class M8AcceptanceMetrics(TimedRunHooks):
     _prev_gems: int | None = field(default=None, repr=False)
     _seen_worn: set[str] = field(default_factory=set, repr=False)
     _fighting: bool = field(default=False, repr=False)  # an attack was sent since entering Fight
-    # Per NPC we attacked: whether it was a lone weak hostile at our first attack on it.
+    # Per NPC in sight we attacked: whether it was a lone weak hostile at our
+    # first attack on it.
     _lone_weak: dict[int, bool] = field(default_factory=dict, repr=False)
-    # Food supplies seen in sight, id to code, for our ``SupplyTaken`` (which
-    # arrives after the supply has left the entity list).
+    # Food supplies in sight at the last decision, id to code, for our
+    # ``SupplyTaken`` (which arrives after the supply has left the entity list).
     _food_seen: dict[int, str] = field(default_factory=dict, repr=False)
     _hurt: bool = field(default=False, repr=False)  # at the last decision
     _character_id: int | None = field(default=None, repr=False)
@@ -115,7 +116,9 @@ class M8AcceptanceMetrics(TimedRunHooks):
         self._character_id = w.character_id
         self._note_drink_used_up(w)
         self._hurt = hurt(w)
-        self._food_seen.update((e.id, e.code) for e in w.entities if e.kind == "supply" and is_food(e.code))
+        self._food_seen = {e.id: e.code for e in w.entities if e.kind == "supply" and is_food(e.code)}
+        in_sight = {e.id for e in w.entities if e.kind == "npc"}
+        self._lone_weak = {npc: v for npc, v in self._lone_weak.items() if npc in in_sight}
         if potion_count(w) >= self.potion_reserve:
             self.potion_reserve_met = True
         if intents is not None:
@@ -160,12 +163,12 @@ class M8AcceptanceMetrics(TimedRunHooks):
 
     def _note_npc_died(self, died: dict, events: list[dict]) -> None:
         """Our kill: our ``NPCDamaged`` on the dead NPC lands on the tick it died."""
-        npc = died.get("npc_id")
+        npc, tick = died.get("npc_id"), died.get("tick")
         lone_weak = self._lone_weak.pop(npc, False)
-        killing_blow = any(
+        killing_blow = tick is not None and any(
             ev.get("kind") == "NPCDamaged"
             and ev.get("npc_id") == npc
-            and ev.get("tick") == died.get("tick")
+            and ev.get("tick") == tick
             and self._ours(ev)
             for ev in events
         )
@@ -182,7 +185,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
         if code is None or self._character_id is None or ev.get("taker_id") != self._character_id:
             return
         if self._hurt:
-            self.heal_food_take = True
+            self.food_taken_hurt = True
 
     def _note_gems(self, w: WorldModel) -> None:
         if w.gems is None:
@@ -275,7 +278,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
             and self.armor_worn
             and self.shop_weapon
             and self.potion_reserve_met
-            and self.heal_food_take
+            and self.food_taken_hurt
             and self.heal_potion
             and self.weak_hostile_kills >= 1
         )
@@ -296,7 +299,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
             out.append("no shop weapon armed (still pocket knife or unarmed)")
         if not self.potion_reserve_met:
             out.append(f"potion reserve {self.potion_reserve} never reached")
-        if not self.heal_food_take:
+        if not self.food_taken_hurt:
             out.append("never took ground food while hurt")
         if not self.heal_potion:
             out.append("Heal never drank a carried potion")
@@ -309,7 +312,7 @@ class M8AcceptanceMetrics(TimedRunHooks):
             f"gems: start {self.start_gems}, max {self.max_gems}, earned: {self.gems_earned}",
             f"armor worn: {self.armor_worn}, shop weapon: {self.shop_weapon}",
             f"potion reserve {self.potion_reserve} met: {self.potion_reserve_met}",
-            f"food taken while hurt: {self.heal_food_take}, heal potion: {self.heal_potion}",
+            f"food taken while hurt: {self.food_taken_hurt}, heal potion: {self.heal_potion}",
             f"kills: {self.kills}, lone weak: {self.weak_hostile_kills}",
             f"fight below health floor: {self.fight_below_floor}",
             f"deaths: {self.deaths}",

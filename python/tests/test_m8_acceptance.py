@@ -120,9 +120,9 @@ class MilestoneGateTest(unittest.TestCase):
             state="Heal",
             intents=[{"verb": "Take", "supply_id": 9}],
         )
-        self.assertFalse(m.heal_food_take, "sent is not taken")
+        self.assertFalse(m.food_taken_hurt, "sent is not taken")
         m.on_events([SUPPLY_TAKEN])
-        self.assertTrue(m.heal_food_take)
+        self.assertTrue(m.food_taken_hurt)
         w.armed_code = "small_potion"
         w.held_supplies = [InventorySupply(4, "small_potion")]
         decide(m, w, state="Heal", intents=[DRINK])
@@ -140,7 +140,7 @@ class MilestoneGateTest(unittest.TestCase):
         decide(m, w, state="Heal", intents=[{"verb": "Step", "direction": "E"}])
         w.entities = []
         m.on_events([SUPPLY_TAKEN])
-        self.assertTrue(m.heal_food_take)
+        self.assertTrue(m.food_taken_hurt)
 
     def test_food_taken_on_a_detour_counts(self):
         # Hurt, Detour picks up an apple on its way: the food heals all the same.
@@ -150,7 +150,7 @@ class MilestoneGateTest(unittest.TestCase):
         decide(m, w, state="Detour", intents=[{"verb": "Take", "supply_id": 9}])
         w.entities = []  # SupplyTaken removes it before the gate reads the events
         m.on_events([SUPPLY_TAKEN])
-        self.assertTrue(m.heal_food_take)
+        self.assertTrue(m.food_taken_hurt)
 
     def test_food_taken_at_full_health_or_by_another_or_not_food_is_not_counted(self):
         m = metrics()
@@ -158,12 +158,12 @@ class MilestoneGateTest(unittest.TestCase):
         w.entities = [Entity("supply", 9, (1, 0), code="apple")]
         decide(m, w, state="Detour", intents=[{"verb": "Take", "supply_id": 9}])
         m.on_events([SUPPLY_TAKEN])
-        self.assertFalse(m.heal_food_take, "full health: it healed nothing")
+        self.assertFalse(m.food_taken_hurt, "full health: it healed nothing")
         w = world(health=9, max_health=10)
         w.entities = [Entity("supply", 9, (1, 0), code="apple"), Entity("supply", 10, (1, 1), code="gem")]
         decide(m, w)
         m.on_events([{**SUPPLY_TAKEN, "taker_id": 2}, {**SUPPLY_TAKEN, "supply_id": 10}])
-        self.assertFalse(m.heal_food_take)
+        self.assertFalse(m.food_taken_hurt)
 
     def test_heal_arm_and_use_potion_while_weapon_still_armed(self):
         # Heal's first drink: [Arm potion, Use self] while armed_code is still the weapon.
@@ -341,6 +341,22 @@ class KillTest(unittest.TestCase):
         hit, died = killed(5)
         m.on_events([{**hit, "tick": died["tick"] - 1}, died])
         self.assertEqual(m.kills, 0)
+
+    def test_events_with_no_tick_are_not_a_killing_blow(self):
+        m = metrics()
+        decide(m, weak_fight_world(), state="Fight", intents=SWING)
+        m.on_events([{k: v for k, v in ev.items() if k != "tick"} for ev in killed(5)])
+        self.assertEqual(m.kills, 0)
+
+    def test_an_npc_out_of_sight_is_judged_again_at_the_next_attack(self):
+        m = metrics()
+        w = weak_fight_world()
+        w.entities.append(Entity("npc", 6, (2, 0), code="snotling"))
+        decide(m, w, state="Fight", intents=SWING)  # in a group: not lone
+        decide(m, world(health=10, max_health=10))  # both out of sight
+        decide(m, weak_fight_world(), state="Fight", intents=SWING)  # alone now
+        m.on_events(killed(5))
+        self.assertEqual(m.weak_hostile_kills, 1)
 
     def test_kill_after_fight_hands_over_to_another_state_counts(self):
         # The swing that kills may be sent by Flee's "not outrunning" fight or

@@ -1677,6 +1677,10 @@ class ParseReplyTest(unittest.TestCase):
         raw = f"{json.dumps(first)}\nCorrection:\n{json.dumps(second)}"
         self.assertEqual(parse_reply(raw), second)
 
+    def test_correction_with_an_extra_key_still_wins(self):
+        raw = '{"goals": [{"op": "wait"}]}\nCorrection: {"goals": [], "reason": "rest first"}'
+        self.assertEqual(parse_reply(raw), {"goals": [], "reason": "rest first"})
+
     def test_prose_between_and_around(self):
         raw = 'Plan:\n```json\n{"goals": []}\n```\nOn second thought, rest first.\n```json\n{"goals": [{"op": "wait"}], "notes": "rest"}\n```\nDone.'
         self.assertEqual(parse_reply(raw), {"goals": [{"op": "wait"}], "notes": "rest"})

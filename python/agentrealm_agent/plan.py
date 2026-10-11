@@ -462,6 +462,21 @@ def parse_directives_goals(lines: list[str]) -> list[GoalOp]:
     return out
 
 
+# A reply's top-level keys: the type each must have, and its name in a refusal.
+PLAN_FIELDS: dict[str, tuple[type, str]] = {"goals": (list, "a list"), "params": (dict, "an object"), "notes": (str, "a string")}
+
+
+def is_plan_payload(raw: object) -> bool:
+    """Whether :func:`parse_plan_payload` reads ``raw`` as a plan: an object
+    carrying at least one reply key, each it carries of its type. Other keys
+    are dropped there, not refused, so they do not count against it."""
+    return (
+        isinstance(raw, dict)
+        and any(k in raw for k in PLAN_FIELDS)
+        and all(isinstance(raw[k], t) for k, (t, _) in PLAN_FIELDS.items() if k in raw)
+    )
+
+
 def parse_plan_payload(
     raw: object,
     *,
@@ -478,13 +493,15 @@ def parse_plan_payload(
     if not isinstance(raw, dict):
         _reject("payload is not an object")
         return [], current, ""
-    extra = set(raw) - {"goals", "params", "notes"}
+    extra = set(raw) - set(PLAN_FIELDS)
     if extra:
         _reject(f"dropped unknown top-level keys {sorted(extra)}")
+    raw = dict(raw)
+    for key, (kind, name) in PLAN_FIELDS.items():
+        if key in raw and not isinstance(raw[key], kind):
+            _reject(f"`{key}` must be {name}")
+            del raw[key]
     goals_raw = raw.get("goals", [])
-    if not isinstance(goals_raw, list):
-        _reject("`goals` must be a list")
-        goals_raw = []
     goals: list[GoalOp] = []
     for item in goals_raw:
         op = validate_goal_op(item)
@@ -496,16 +513,10 @@ def parse_plan_payload(
         if op is not None:
             goals.append(op)
     notes = raw.get("notes", "")
-    if not isinstance(notes, str):
-        _reject("`notes` must be a string")
-        notes = ""
     params = current
     incoming = raw.get("params")
     if incoming is not None:
-        if not isinstance(incoming, dict):
-            _reject("`params` must be an object")
-        else:
-            params = apply_strategist_params(floor_params, params, incoming)
+        params = apply_strategist_params(floor_params, params, incoming)
     return goals, params, notes
 
 

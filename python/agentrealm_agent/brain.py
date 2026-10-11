@@ -8,7 +8,7 @@ whole queues (M6). Both paths are pure in the world model and policy.
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import Policy
 from .directives import Directives, default_directives
@@ -108,6 +108,8 @@ class Decision:
     submit_queue: list[dict] | None = None
     # The state that decided, so the runner knows whose intent it submits (A65).
     state: str = ""
+    # Why each state above it that ran sent nothing (``StateOutcome.yielded``): the trace keeps them (A120).
+    yielded: list[str] = field(default_factory=list)
 
 
 def decide(
@@ -150,7 +152,9 @@ def decide(
     intents = outcome.intents
     intent = intents[0] if intents else None
     submit_queue = intents if intents and outcome.paced else None
-    return Decision(intent, outcome.reason, outcome.reflex, submit_queue=submit_queue, state=outcome.state)
+    return Decision(
+        intent, outcome.reason, outcome.reflex, submit_queue=submit_queue, state=outcome.state, yielded=list(outcome.yielded)
+    )
 
 
 def walkable_prefix(

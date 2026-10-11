@@ -241,5 +241,7 @@
 
   "A118": {"state": "todo"},
 
-  "A119": {"state": "todo"}
+  "A119": {"state": "todo"},
+
+  "A120": {"state": "partial", "remaining": "Travel is done in #219 (holds its walk, asks no_way_on, never falls through to Explore). Remaining: the same rule for every other op with a target, per Evan: \"if a goal or target is obstructed we need to try to unobstruct it, not get distracted.\" The op's own executor keeps the walk; obstructed, it routes round, then opens or breaks the block with a held capability (break_toward, the opener table), or deals with a hostile under the A114 fight rules; only when it cannot clear the way does it raise no_way_on with what blocks it and what it tried, and hold (survival preempting). Ops left: gather_gems (Gather), fetch_item (Loot), buy (Shop), read and say (Investigate), use_block and compose (Solve), break_block (Break), enter_level (Level), fight_boss (Boss), fight (Fight), equip, use_item, wait. Then remove the safe-default fallback (explore.HOLD_THEIR_WALK becomes every executor; Explore runs only for explore_area, no op, or the --no-planner answer), update the DispatcherFallThrough tests, and the PLAN.md Architecture, A34 and A114 notes and AGENTS.md."}
 }

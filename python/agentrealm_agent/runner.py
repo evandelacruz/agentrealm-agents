@@ -763,6 +763,8 @@ class Runner:
             "events": events,
             "dropped": r.get("events_dropped", 0),
         }
+        if d.yielded:
+            record["yielded"] = d.yielded  # why each state above the one that decided sent nothing (A120)
         record.update(
             tick_trace_extras(
                 tick_response=r,

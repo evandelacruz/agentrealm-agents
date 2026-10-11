@@ -141,11 +141,13 @@ def supply_code_for_take(intent: dict | None, entities: list[Entity]) -> str | N
 
 
 def learn_chest_upgrade(w: WorldModel, code: str | None) -> None:
-    """An applied ``Take`` of a chest raises carry capacity to its Supplies
-    reference ``chest_capacity`` when that is larger; one no larger (the blue
-    chest, the size a character starts with) changes nothing. Assumed, not
-    measured (GAME_NOTES "Assumed until measured"): ``carry_capacity_full``
-    still lowers it to what was really carried (A47)."""
+    """A ``Use`` on yourself of a chest that went through (it was used up)
+    raises carry capacity to its Supplies reference ``chest_capacity`` when
+    that is larger; one no larger (the blue chest, the size a character starts
+    with) changes nothing. Taking or holding a chest raises nothing (A108):
+    the snapshot gives no capacity, so this is assumed, not measured
+    (GAME_NOTES "Assumed until measured"), and ``carry_capacity_full`` still
+    lowers it to what was really carried (A47)."""
     cap = chest_capacity(code)
     if cap is not None:
         w.carry_capacity = max(w.carry_capacity, cap)

@@ -48,7 +48,7 @@ from .break_memory import capabilities_for_code, held_supplies
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
 from .loot import NON_TRANSFERABLE
-from .supplies import heals, is_weapon, kept_on_break, weapon_damage, worn, worn_armor_defense, worn_slot
+from .supplies import heals, is_weapon, kept_on_break, used_on_self, weapon_damage, worn, worn_armor_defense, worn_slot
 from .memory import Memory
 from .survival import BASE_ATTACK_POWER
 from .threat import ThreatTable
@@ -248,7 +248,7 @@ def named_equip(w: WorldModel, m: Memory, code: str, armed_owned: bool = False) 
     """Arm or wear held ``code`` as the planner named it, whatever the rule
     ranks it; None once it is on, or when it is not held or was refused, or
     is a weapon while another state holds the armed slot (``armed_owned``)."""
-    if code == w.armed_code or code in w.worn_codes.values():
+    if is_on(w, code):
         return None
     if armed_owned and is_weapon(code):
         return None
@@ -265,6 +265,22 @@ def named_equip(w: WorldModel, m: Memory, code: str, armed_owned: bool = False) 
     if (code, slot) in m.equip_refused or (w.worn_codes.get(slot) is not None and (None, slot) in m.equip_refused):
         return None
     return EquipUpgrade(slot, s.id, code, remove_first=w.worn_codes.get(slot) is not None)
+
+
+def is_on(w: WorldModel, code: str) -> bool:
+    """Whether ``code`` is armed or worn."""
+    return code == w.armed_code or code in w.worn_codes.values()
+
+
+def cannot_equip_reason(w: WorldModel, code: str) -> str:
+    """Why :func:`named_equip` puts nothing on for ``code`` while it is not on."""
+    if not any(h.code == code for h in w.held_supplies):
+        return f"{code} not held"
+    if used_on_self(code):
+        return f"{code} is not armed or worn: a use_item applies it"
+    if never_worn(code) and not is_weapon(code):
+        return f"{code} is not armed or worn"
+    return f"{code} was refused"
 
 
 def best_equip_upgrade(

@@ -165,8 +165,8 @@ class Memory:
     heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
     heal_safe_given_up: tuple[int | None, int] | None = None  # (map id, tick) Heal's walk to safe ground gave its one tile up; holds until a full heal, or at low health for SAFE_UNREACHABLE_TICKS (run 9, A84)
     heal_refusals: dict[tuple[str, int], HealRefusal | NoopDrink] = field(default_factory=dict)  # ("take"|"use", supply id) -> its last refusal (A80) or no-op drink (A76) and what Heal does about it
-    heal_drink: int | None = None  # supply id of the drink sent, until its Use applies or is refused or another queue replaces it (A24)
-    heal_rearm: str | None = None  # weapon code armed before a drink; restored once, on Heal's next decision (A24)
+    heal_drink: int | None = None  # supply id of the Use on yourself sent (a drink or a chest, A108), until its Use applies or is refused or another queue replaces it (A24)
+    heal_rearm: str | None = None  # weapon code armed before a Use on yourself; restored once, on Heal's next decision (A24)
     last_weapon: str | None = None  # the last weapon seen armed this run (equip.note_last_weapon): what a drink re-arms
     heal_pending: tuple[int, str, str] | None = None  # (health before, supply code, "take"|"use") awaiting observation
     # Boss (A38): the fight under way, or None. Set and cleared only by states/boss.sync_boss.

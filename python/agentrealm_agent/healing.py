@@ -174,8 +174,9 @@ class NoopDrink:
 
 @dataclass
 class AppliedDrink:
-    """Heal's drink whose ``Use`` applied, kept until the next decision reads
-    from the observation whether a supply went (A76)."""
+    """A ``Use`` on yourself that applied (a drink, or a chest, A108), kept
+    until the next decision reads from the observation whether a supply went
+    (A76)."""
 
     supply_id: int
     code: str | None
@@ -228,15 +229,19 @@ def drank(events: list[dict], character_id: int | None, code: str | None) -> boo
 def noop_drink_cause(w: WorldModel, d: AppliedDrink) -> NoopCause | None:
     """Why an applied drink drank nothing, from the observation after it
     (``NOOP_CAUSES``), or None when it went through: our ``SupplyUsed``
-    named it, we no longer carry it, or health rose."""
+    named it, we no longer carry it, or, for an item that heals, health rose.
+    A "drink" is any ``Use`` on yourself, a chest's too (A108)."""
     if d.used or d.supply_id not in carried_ids(w):
         return None
-    if w.health is not None and d.health is not None and w.health > d.health:
+    # Health is a drink's own measure: a chest used on yourself (A108) went
+    # through only once it is used up, whatever health did meanwhile.
+    drink = heals(d.code)
+    if drink and w.health is not None and d.health is not None and w.health > d.health:
         return None
     in_slot = w.armed_id == d.supply_id if w.armed_id is not None else w.armed_code == d.code
     if not in_slot:
         return "not_armed"
-    if w.health is not None and w.max_health is not None and w.health >= w.max_health:
+    if drink and w.health is not None and w.max_health is not None and w.health >= w.max_health:
         return "full_health"
     return "no_change"
 
@@ -294,12 +299,15 @@ def clear_refusal(m: Memory, kind: str, supply_id: int) -> None:
 
 def can_try(m: Memory, w: WorldModel, kind: str, supply_id: int, target: Pos | None = None) -> bool:
     """Whether Heal may send a ``Take`` (``kind`` "take", ``target`` the food's
-    cell) or a drink ("use") of ``supply_id`` now, by its last refusal."""
+    cell), or Heal or UseItem a ``Use`` on yourself ("use") of ``supply_id``
+    now, by its last refusal."""
     r = m.heal_refusals.get((kind, supply_id))
     if r is None or r.action in ("arm", "walk"):
         return True
     if isinstance(r, NoopDrink):
-        fell = w.health is not None and r.health is not None and w.health < r.health
+        # Lower health is a reason to drink again, never to use a chest again (A108).
+        code = next((h.code for h in in_hand(w) if h.id == supply_id), None)
+        fell = heals(code) and w.health is not None and r.health is not None and w.health < r.health
         return fell or (r.action == "hold" and drink_situation(w) != r.situation)
     if r.action == "forget":
         return False
@@ -332,6 +340,16 @@ def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
     return out
 
 
+def in_hand(w: WorldModel) -> list[InventorySupply]:
+    """The held supplies, and the armed one: the snapshot may leave it out of
+    ``held`` (GAME_NOTES open questions). What a ``Use`` on yourself can be
+    sent with, after its ``Arm``."""
+    carried = list(w.held_supplies)
+    if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):
+        carried.append(InventorySupply(w.armed_id, w.armed_code))
+    return carried
+
+
 def carried_heal(
     w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]
 ) -> InventorySupply | None:
@@ -340,10 +358,7 @@ def carried_heal(
     The armed supply counts too: the snapshot may leave it out of ``held``
     (GAME_NOTES open questions), and a potion a drink left armed is still one
     to drink (A76)."""
-    carried = list(w.held_supplies)
-    if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):
-        carried.append(InventorySupply(w.armed_id, w.armed_code))
-    usable = [h for h in carried if can_try(m, w, "use", h.id)]
+    usable = [h for h in in_hand(w) if can_try(m, w, "use", h.id)]
     for h in usable:
         if is_food(h.code):
             return h

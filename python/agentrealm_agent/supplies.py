@@ -54,6 +54,12 @@ FETCH_TIMEOUT_SECONDS = 5.0
 CAPABILITIES = frozenset({"cut", "chop", "smash", "burn", "blast"})
 # The classes that go in a worn slot; every other class is armed, used or carried.
 WORN_CLASSES = frozenset({"armor", "accessory"})
+# The ``use_effects`` a ``Use`` on yourself applies to the holder (A108): a
+# potion's ``heal`` and a chest's ``chest`` (a bigger carried chest; saims
+# docs Gameplay.md supply classes: "A chest upgrade is a consumable too").
+# A new effect of that kind (a timed one, say) is added here, and the one
+# Use-self path (``states/use_item.py``) applies it.
+SELF_EFFECTS = frozenset({"heal", "chest"})
 
 
 @dataclass(frozen=True)
@@ -70,6 +76,7 @@ class Supply:
     chest_capacity: int | None = None
     used_up_on_break: bool | None = None
     eaten_on_pickup: bool = False
+    sold: bool = False  # a shop sells it in some world: ``gem_prices`` names one
 
 
 def parse(raw: Any) -> dict[str, Supply]:
@@ -96,8 +103,14 @@ def parse(raw: Any) -> dict[str, Supply]:
             chest_capacity=_positive_int(row.get("chest_capacity")),
             used_up_on_break=used_up if isinstance(used_up, bool) else None,
             eaten_on_pickup=row.get("eaten_on_pickup") is True,
+            sold=_sold(row.get("gem_prices")),
         )
     return out
+
+
+def _sold(prices: Any) -> bool:
+    """Whether ``gem_prices`` gives a price in at least one world."""
+    return isinstance(prices, dict) and any(_positive_int(v) is not None for v in prices.values())
 
 
 def _non_negative_int(v: Any) -> int | None:
@@ -241,11 +254,25 @@ def worn_armor_defense(worn_codes: Iterable[str]) -> int:
     return sum(armor_defense(code) or 0 for code in worn_codes)
 
 
+def sold_codes() -> list[str]:
+    """Every subtype a shop sells in some world (``gem_prices``), sorted: what
+    a buy can ever get. Gems, lives, the starting kit, worn-slot rows and
+    anything else never priced are left out (A110)."""
+    return sorted(code for code, r in _table.items() if r.sold)
+
+
+def used_on_self(code: str | None) -> bool:
+    """A consumable whose ``Use`` on yourself applies its effect to the holder
+    (``SELF_EFFECTS``): a potion, a chest. Held, it does nothing until used."""
+    r = row(code)
+    return r is not None and r.supply_class == "consumable" and bool(r.use_effects & SELF_EFFECTS)
+
+
 def chest_capacity(code: str | None) -> int | None:
     """The carry capacity a listed chest gives the carried chest when that is
     larger (the blue chest, 10, is the size a character starts with), or None
-    for anything that is not a chest. The Manual raises it on ``Use``; Loot
-    assumes it on the ``Take`` (``loot.learn_chest_upgrade``)."""
+    for anything that is not a chest. A ``Use`` of it on yourself raises the
+    pack (``loot.learn_chest_upgrade``, A108); holding it does not."""
     r = row(code)
     return r.chest_capacity if r is not None else None
 
@@ -256,6 +283,13 @@ def chest_applied(code: str | None, carry_capacity: int) -> bool:
     holds at least that many now."""
     slots = chest_capacity(code)
     return slots is not None and slots > DEFAULT_CARRY_CAPACITY and carry_capacity >= slots
+
+
+def chest_upgrade(code: str | None, carry_capacity: int) -> bool:
+    """Whether using ``code`` on yourself would give the pack more slots than
+    ``carry_capacity``: a bigger chest, always worth applying (A108)."""
+    slots = chest_capacity(code)
+    return slots is not None and slots > carry_capacity
 
 
 def worn(code: str | None) -> bool | None:

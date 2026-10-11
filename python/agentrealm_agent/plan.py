@@ -16,7 +16,7 @@ from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
 from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
 from .stalled import below_progress, find as find_stalled, forget as forget_stalled
-from .supplies import CAPABILITIES, chest_applied
+from .supplies import CAPABILITIES, chest_applied, used_on_self
 from .travel.ops import parse_travel_string, travel_op_from_plan_goal
 from .world import DOORS, Pos, WorldModel, chebyshev
 
@@ -46,6 +46,7 @@ OP_STATE: dict[str, str | None] = {
     "fetch_item": "Loot",
     "gather_gems": "Gather",
     "equip": "Equip",
+    "use_item": "UseItem",
     "hunt": None,
     "enter_level": "Level",
     "fight_boss": "Boss",
@@ -70,7 +71,8 @@ OP_FIELDS: dict[str, str] = {
     "compose": "composes_into (the whole item to make)",
     "fetch_item": "code, optional x, y, optional drop (as buy's)",
     "gather_gems": "count (the gem total to reach; with no x, y Gather works the ground where the character is, weighing the grass it knows against exploring nearby by walk and yield), optional fight (true: gather on ground a known hostile holds, and walk through its reach, taking the fight; left out, Gather keeps clear of it), optional x, y (a block of the region to gather in: Gather walks there and cuts only there, and walks to gem piles only there, while it has a cell to cut; it lifts that region's barren mark. The region is committed: a reply that moves it keeps the old one unless that region is barren or poor, Gather went 30 s without getting nearer it or, once there, without a cut there taking effect, or a death, new map, hurt or hostile pack came up)",
-    "equip": "optional code (arms or wears exactly that held item; else the best held gear is armed and worn)",
+    "equip": "optional code (arms or wears exactly that held item; else the best held gear is armed and worn). Dropped, not done, when the named item cannot be armed or worn",
+    "use_item": "code (a held consumable a Use on yourself applies: a potion heals, a chest raises the pack's carry slots). Done once that item is used up; dropped when none is held or its Use was refused or did nothing. A bigger chest is applied as soon as one is held, without this op",
     "enter_level": "x, y (the level door)",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
     "wait": "seconds, why",
@@ -338,6 +340,15 @@ def _validate_equip(op: dict[str, Any]) -> bool:
     return True
 
 
+def _validate_use_item(op: dict[str, Any]) -> bool:
+    if not _require_fields(op, ("code",)):
+        return False
+    if not _is_str(op["code"]) or not used_on_self(op["code"]):
+        _drop("use_item takes a consumable used on yourself (a potion, a chest)", op)
+        return False
+    return True
+
+
 def _validate_set_param(op: dict[str, Any]) -> bool:
     if not _require_fields(op, ("name", "value")):
         return False
@@ -370,6 +381,7 @@ _VALIDATORS: dict[str, Any] = {
     "avoid": _validate_avoid,
     "wait": _validate_wait,
     "equip": _validate_equip,
+    "use_item": _validate_use_item,
     "set_param": _validate_set_param,
 }
 
@@ -555,6 +567,7 @@ class Plan:
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
     paid_from: int | None = None  # gems held when Shop last sent a Take for the head `buy` op (A106)
+    used_id: int | None = None  # supply UseItem sent a Use on yourself for, for the head `use_item` op (A108)
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
 
@@ -570,6 +583,7 @@ class Plan:
             self.block_before,
             self.held_before,
             self.paid_from,
+            self.used_id,
             self.directive_end,
         )
 
@@ -585,6 +599,7 @@ class Plan:
             self.block_before,
             self.held_before,
             self.paid_from,
+            self.used_id,
             self.directive_end,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
@@ -708,7 +723,7 @@ class Plan:
 
     def _new_head(self) -> None:
         """Forget the progress kept for the old head op: a new one starts its own."""
-        self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = self.paid_from = None
+        self.wait_started_tick = self.stalled_since_tick = self.block_before = self.held_before = self.paid_from = self.used_id = None
 
     @classmethod
     def from_directives(
@@ -846,7 +861,7 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         return world.gems is not None and world.gems >= op["count"]
     # Their executors finish the rest: Travel on arrival (A27), Boss on the
     # defeat (A38), Investigate once read or greeted (A30), Equip and Level
-    # when nothing is left to do.
+    # when nothing is left to do, UseItem once its item is used up (A108).
     return False
 
 

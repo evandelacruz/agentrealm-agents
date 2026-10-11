@@ -16,7 +16,7 @@ from agentrealm_agent.navigation import entrance_routes
 from agentrealm_agent.navigation import planner as P
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states.shop import shop_outcome
-from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, held_line
+from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, held_line, no_seller_line
 from agentrealm_agent.travel.knowledge import entrance_key
 from agentrealm_agent.world import Entity, WorldModel
 
@@ -146,6 +146,52 @@ class HeldChestTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(1, "middle_chest")]
         held = json.loads(held_line(w).split("=", 1)[1])
         self.assertFalse(held["middle_chest"]["applied"])
+
+
+class NoSellerTest(unittest.TestCase):
+    """A buy needs a seller (A110): State names the items no known shop sells
+    and none is found or owned, and the contract says not to save gems for them."""
+
+    def unsold(self, w: WorldModel, kb: KnowledgeBase | None = None) -> list[str]:
+        value = no_seller_line(w, kb).split("=", 1)[1]
+        return [] if value == "none" else json.loads(value)
+
+    def test_an_item_no_known_shop_sells_is_listed(self):
+        kb = KnowledgeBase.empty("sandbox")
+        kb.items["potion"] = {"gem_price": 5}
+        unsold = self.unsold(world(), kb)
+        self.assertIn("raft", unsold)
+        self.assertNotIn("potion", unsold, "a known price is a known seller")
+
+    def test_only_items_some_shop_sells_are_listed(self):
+        # Gems, lives, food eaten on pickup, the starting kit, slot rows and
+        # traps have no price in any world: there is no seller to find.
+        unsold = self.unsold(world())
+        for code in ("gem", "gem_cache_5", "heart", "apple", "mushroom", "blue_chest", "pocket_knife", "feet", "trap_grade_2"):
+            self.assertNotIn(code, unsold, code)
+        for code in ("raft", "middle_chest", "golden_cap", "potion"):
+            self.assertIn(code, unsold, code)
+
+    def test_one_for_sale_in_sight_lying_found_or_owned_is_not_listed(self):
+        w = world()
+        w.entities = [Entity("supply", 5, (1, 0), "raft", gem_price=40), Entity("supply", 6, (2, 0), "torch")]
+        w.chest_contents = {9: [InventorySupply(7, "bomb")]}
+        w.held_supplies = [InventorySupply(8, "lantern")]
+        unsold = self.unsold(w)
+        for code in ("raft", "torch", "bomb", "lantern"):
+            self.assertNotIn(code, unsold)
+
+    def test_the_contract_says_find_a_seller_not_save_gems(self):
+        self.assertIn("no_seller_known", SYSTEM_PROMPT)
+        self.assertIn("A gem price in the Supplies reference is not a seller", SYSTEM_PROMPT)
+        self.assertIn("no_seller_known is no reason to gather gems", PROGRESSION)
+
+    def test_state_carries_the_line(self):
+        llm = FakeLLM(WAIT)
+        s, r = make(llm), fake_runner()
+        queue_signal(r.mem, {"trigger": "death", "tick": 1})
+        round_trip(s, r)
+        self.assertIn("raft", json.loads(state_line(llm.messages[0], "no_seller_known").split("=", 1)[1]))
 
 
 def state_line(messages: list[dict], key: str) -> str:

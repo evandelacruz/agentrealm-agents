@@ -57,13 +57,15 @@ from .shop import ShopState
 from .solve import SolveState
 from .sync import SyncState
 from .travel import TravelState
+from .use_item import UseItemState
 from .wait import WaitState
 
 # Act on what is happening now (PLAYABLE_AGENT_PLAN.md State machine). Sync
 # and Downed only wait, the forced waits. Escape, Retreat and Heal (A10)
 # are survival; Fight (A23) slots in before Flee; then Pickup in reach (A20),
-# Recover (A11), Detour (A71, A73) to a valuable in view worth the steps it adds, and
-# Greet (A65), a one-tick hello to an NPC in sight.
+# Recover (A11), Detour (A71, A73) to a valuable in view worth the steps it adds,
+# Greet (A65), a one-tick hello to an NPC in sight, and UseItem (A108), which
+# applies a bigger chest once held and is also the ``use_item`` op's executor.
 REFLEXES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
@@ -76,6 +78,7 @@ REFLEXES: tuple[State, ...] = (
     RecoverState(),
     DetourState(),
     GreetState(),
+    UseItemState(),
 )
 
 # Run only for the plan's top op (``plan.OP_STATE``). At most one guards for
@@ -109,11 +112,11 @@ PARK_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name in SURVIVAL
 
 # The runner's held-queue probe (A64): the states that can answer with a
 # reflex, so a poll while a queue runs skips every executor's search. Greet
-# is left out: its hello waits for a decision window (A65). Boss is the one
+# and UseItem are left out: a hello (A65) and a chest wait for a decision window. Boss is the one
 # executor whose fight moves are reflexes, so it comes last and runs only
 # once a boss fight is engaged (``Memory.boss``).
 _BOSS = next(s for s in EXECUTORS if s.name == "Boss")
-PROBE_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name != GreetState.name) + (_BOSS,)
+PROBE_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name not in (GreetState.name, UseItemState.name)) + (_BOSS,)
 
 
 def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:

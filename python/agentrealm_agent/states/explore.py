@@ -52,8 +52,9 @@ KEEP_AWAY_HOLD_TICKS = 100
 # Why the safe default had no step: the ground in reach is all seen.
 NOTHING_TO_EXPLORE = "nothing left to explore"
 # The executors whose op the safe default never stands in for (A120): each
-# holds its own walk, and with no step asks the planner and holds. Today
-# Travel only; the rest still fall through to the safe default.
+# holds its own walk, and with no step asks the planner and holds. The rule
+# is every executor's; today Travel only, the rest still fall through to the
+# safe default (PLAN.md A120, partial).
 HOLD_THEIR_WALK = frozenset({"Travel"})
 
 

@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from functools import cache
 from typing import Callable, Iterable
 
+from .. import targets as targets_mod
 from ..config import Policy
 from ..directives import attack_forbidden
 from ..executor import DEFAULT_TICK_RATE_HZ
@@ -421,7 +422,8 @@ def _gather_cells(
     it is reached, gone (cut, taken), proven out of reach, or found unsafe (in
     a known hostile's reach, or reached only through one), even when another
     state walked in between or another cell became nearer (``_still_wanted``,
-    ``_replan_gather``). ``d`` is the decision's ``Danger``: remembered
+    ``_replan_gather``), unless the walk to it balloons past a cheaper cut
+    target (``_outpriced``). ``d`` is the decision's ``Danger``: remembered
     hostiles' ground, and whether the op chose to fight for it;
     ``pile_region`` bounds the piles it walks to; one in reach is taken anywhere;
     ``odds()`` weighs the grass against unexplored ground (``_explore_instead``)."""
@@ -674,6 +676,8 @@ def _still_wanted(
 
 # Target kinds ``_replan_gather`` walks back to once another state took the path.
 KEPT_KINDS = ("pile", "grass", OUT, CLEAR, FRONTIER)
+# Kept target kinds a cut is made at: priced again against each other when the walk to one ballooned (A109).
+CUT_KINDS = ("pile", "grass")
 # Gather waits this long for a taken first step toward its target (an
 # occupant), then gives the target up (5 s at 10 ticks/s, as a walk's fog hold).
 HOLD_TICKS = 50
@@ -718,10 +722,12 @@ def _replan_gather(
     (``Memory.reprice_targets``), so a target it turned us back from costs
     more from then on.
 
-    A kept target is given up only when no path reaches it at all, or its
-    path has started on a taken cell for ``HOLD_TICKS``; until then it is
-    held, and True says so: the caller waits instead of letting the safe
-    default walk away and back (A71). The
+    A kept target is given up only when no path reaches it at all, its
+    path has started on a taken cell for ``HOLD_TICKS``, or, for a pile or
+    grass, its walk rose in price since last priced and another known cut
+    target is cheaper by a clear margin (``_outpriced``, A109); until then
+    it is held, and True says so: the caller waits instead of letting the
+    safe default walk away and back (A71). The
     nearest ``GATHER_CANDIDATES`` of each kind are tried. A failed plan
     keeps another state's path.
     """
@@ -738,28 +744,30 @@ def _replan_gather(
     if m.goal == GOAL:
         m.path, m.goal = [], ""
     m.gather_target = None
+    piles = {
+        e.pos for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
+    }
     if kept is not None and kept[0] in KEPT_KINDS and kept[0] != CLEAR:
         path = _path_to(w, kept, params)
         if path and not clear(path):
             path = None  # unsafe: a valid reason to drop it (A71)
+        if path and kept[0] in CUT_KINDS and _outpriced(w, m, kept, path, params, piles, preferred, blocked, clear):
+            path = None  # its walk ballooned past a cheaper cut target: pick again (A109)
         held = _keep(w, m, kept, path, blocked)
         if held is not None:
             return held
 
-    piles = {
-        e.pos for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
-    }
     pile = _nearest_clear(w, piles, params, blocked, clear)
     grass = _nearest_clear(w, set(preferred), params, blocked, clear)
-    if pile and (grass is None or _price(pile[1], params) - GEM_PILE_STEPS <= _price(grass[1], params)):
-        m.path, m.goal, m.gather_target = pile[1], GOAL, ("pile", pile[0])
+    if pile and (grass is None or _cut_price("pile", pile[1], params) <= _cut_price("grass", grass[1], params)):
+        _commit_cut(w, m, "pile", pile)
         return False
     if grass:
         explore = _explore_instead(w, m, policy, grass, params, blocked, clear, safe, odds(), d) if odds else None
         if explore:
             m.path, m.goal, m.gather_target = explore[1], GOAL, (FRONTIER, explore[0])
         else:
-            m.path, m.goal, m.gather_target = grass[1], GOAL, ("grass", grass[0])
+            _commit_cut(w, m, "grass", grass)
         return False
 
     if kept is not None and kept[0] == CLEAR and _clear_of_hostiles(w, policy, kept[1], d):
@@ -777,6 +785,57 @@ def _replan_gather(
         m.gather_clear_seen = _in_sight(w, policy, preferred, d, pile_region)
         _plan_clear(w, m, policy, blocked, params, clear, d)
     return False
+
+
+def _commit_cut(w: WorldModel, m: Memory, kind: str, found: tuple[Pos, list[Pos]]) -> None:
+    """Commit to the cut target ``found`` (a cell and its path), and remember
+    the walk it was priced on (``_outpriced``)."""
+    m.path, m.goal, m.gather_target = found[1], GOAL, (kind, found[0])
+    m.gather_walk = _walk_from_here(m.gather_target, m.path, w)
+
+
+def _walk_from_here(target: tuple[str, Pos], path: list[Pos], w: WorldModel) -> tuple[tuple[str, Pos], tuple[Pos, ...]]:
+    """``target`` and the walk to it on ``path``, from the cell the character stands on."""
+    assert w.pos is not None
+    return target, (w.pos, *path)
+
+
+def _cut_price(kind: str, path: list[Pos], params: CostGridParams) -> int:
+    """A walk to a cut target priced as Gather picks one: ``_price``, a pile
+    ``GEM_PILE_STEPS`` cheaper, for it is a gem for sure."""
+    return _price(path, params) - (GEM_PILE_STEPS if kind == "pile" else 0)
+
+
+def _outpriced(
+    w: WorldModel,
+    m: Memory,
+    kept: tuple[str, Pos],
+    path: list[Pos],
+    params: CostGridParams,
+    piles: set[Pos],
+    grass: set[Pos],
+    blocked: set[Pos],
+    clear: Callable[[list[Pos]], bool],
+) -> bool:
+    """The kept cut target's walk on ``path`` costs more than the rest of the
+    walk it was last priced on, from the cell the character stands on (a
+    wall found ahead, a long way round), and more than the cheapest other
+    known cut target, pile or grass, by a clear margin (``targets.outpriced``,
+    A109). The other targets are priced only on such a rise. Standing off
+    that walk (another state walked the character away) is no rise. Either
+    way it records the walk on ``path`` in ``m.gather_walk``: the price the
+    next replan measures against."""
+    ahead = _cut_price(kept[0], path, params)
+    walk = m.gather_walk[1] if m.gather_walk is not None and m.gather_walk[0] == kept else ()
+    m.gather_walk = _walk_from_here(kept, path, w)
+    here = w.pos
+    last = _cut_price(kept[0], list(walk[walk.index(here) + 1 :]), params) if here in walk else None
+
+    def cheapest() -> int | None:
+        found = ((kind, _nearest_clear(w, cells - {kept[1]}, params, blocked, clear)) for kind, cells in (("pile", piles), ("grass", grass)))
+        return min((_cut_price(kind, f[1], params) for kind, f in found if f), default=None)
+
+    return targets_mod.outpriced(ahead, last, cheapest)
 
 
 def _keep(w: WorldModel, m: Memory, kept: tuple[str, Pos], path: list[Pos] | None, blocked: set[Pos]) -> bool | None:

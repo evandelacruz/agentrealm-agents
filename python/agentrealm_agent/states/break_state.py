@@ -26,12 +26,13 @@ from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, nav_search, next_step
 from ..plan import GoalOp
+from ..reach import supply_reach
 from ..stalled import break_cells
 from ..world import WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets
 from .intents import arm, set_position, use_block
-from .solve import held_supply, use_reach
+from .solve import held_supply
 
 GOAL = nav_stuck.BREAK_GOAL
 GOAL_STATE = "Break"  # only Break's own arming counts against stuck step 2, not Heal's
@@ -128,7 +129,7 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
     """
     m = ctx.memory
     _, plan_avoid, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)
-    reach = use_reach(ctx.knowledge, choice.supply.code)
+    reach = supply_reach(ctx.knowledge, choice.supply.code)
 
     here = w.pos
     if here is None or w.map_id is None:

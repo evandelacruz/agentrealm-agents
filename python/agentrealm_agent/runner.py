@@ -48,7 +48,14 @@ from .hostile_memory import load_hostiles, save_hostiles
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
-from .loot import learn_chest_upgrade, learn_life_code, learn_loot_rejection, supply_code_for_take
+from .loot import (
+    learn_chest_upgrade,
+    learn_life_code,
+    learn_loot_rejection,
+    load_carried_chest,
+    save_carried_chest,
+    supply_code_for_take,
+)
 from .healing import (
     AppliedDrink,
     HealRefusal,
@@ -86,6 +93,7 @@ from .executor import (
 )
 from .acceptance import AcceptanceHooks
 from .poll_cadence import calm_poll_interval, is_urgent
+from .reach import in_reach_from
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, Pos, WorldModel, terrain_cells
 from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
@@ -195,6 +203,7 @@ class Runner:
         self.world = WorldModel(character_id)
         # Hostile types and posts earlier runs learned (free-play run 6); saved back at exit.
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
+        load_carried_chest(knowledge, self.world)  # the chest applied in an earlier run (A115)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
         self.rng = random.Random(seed)
@@ -381,6 +390,7 @@ class Runner:
                 # Tiles learned from tick deltas, which terrain reads did not merge.
                 sync_world_maps(self.knowledge, self.world)
                 save_hostiles(self.knowledge, self.world, self._loaded_hostiles)
+                save_carried_chest(self.knowledge, self.world)
             self.trace.close()
 
     def next_window(self, not_before: float) -> None:
@@ -636,10 +646,11 @@ class Runner:
                 self.drop_held_queue()
                 # Something must replace the held queue, or it keeps running.
                 intents = self._apply_never_attack(self.intents_for(d))
-                if intents and not self.steps_land_clear(intents, starts):
+                doubt = self.unconfirmed_send(intents, starts)
+                if doubt is not None:
                     # Stop where we are; position is re-read before the next plan.
                     self.clear_held_tracking()
-                    d = Decision(None, f"{d.reason}: stop, the step may land on a blocked cell")
+                    d = Decision(None, f"{d.reason}: stop, {doubt}")
                     intents = None
                 intents = intents or [wait()]
             elif m.resend_held_queue:
@@ -879,6 +890,21 @@ class Runner:
             return False
         acts = [i for i in wanted if i.get("verb") != "Wait"]
         return bool(acts) and acts == [i for i in held if i.get("verb") != "Wait"]
+
+    def unconfirmed_send(self, intents: list[dict] | None, starts: list[Pos]) -> str | None:
+        """Why ``intents`` cannot go from a position the server has not
+        confirmed, or None when they can. ``starts`` are the cells we may
+        stand on (``possible_positions``): every Step must land clear and
+        every reach-limited intent (a Take, a chest verb, a Use on a target)
+        must reach from each of them (``reach.in_reach_from``, A116), or we
+        stop and re-read position first."""
+        if not intents:
+            return None
+        if not self.steps_land_clear(intents, starts):
+            return "the step may land on a blocked cell"
+        if not in_reach_from(intents, starts, self.world, self.knowledge):
+            return "the target may be out of reach"
+        return None
 
     def steps_land_clear(self, intents: list[dict], starts: list[Pos]) -> bool:
         """Every Step in ``intents`` lands on an open cell from each of ``starts``.

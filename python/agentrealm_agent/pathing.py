@@ -22,6 +22,7 @@ from .navigation import (
 from .navigation import stuck as nav_stuck
 from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
+from .navigation.rejection import navigation_avoid_costly
 from .healing import hurt
 from . import targets as targets_mod
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
@@ -991,3 +992,19 @@ def safe_explore_path(
         m, w, SAFE_EXPLORE_GOAL, targets, leg, found[1] if leg else None, params, knowledge, op=served
     )
     return (path, leg) if path else (None, None)
+
+
+def plan_sets(
+    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None
+) -> tuple[set[Pos], set[Pos], set[Pos]]:
+    """``blocked``, ``plan_avoid``, ``plan_costly`` for this decision.
+
+    Rejection learnings and ``avoid_blocks`` hazards stay out of every choice
+    (A14, reflex 1). Standing on a hazard with no way straight off, the plan may
+    cross hazards at a high price instead.
+    """
+    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
+    hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
+    blocked = nav_avoid | hazards
+    escape = hazards if w.pos in hazards else set()
+    return blocked, blocked - escape, escape | nav_costly

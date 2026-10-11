@@ -21,7 +21,7 @@ takes a hazard's damage from the Supplies reference (``occupy_damage``).
 
 Each hostile type's swings at us are counted too: a hit per ``Damaged``, a
 miss per ``Attacked`` with no ``Damaged`` from the same attacker on its tick
-(API Events, B131). ``hostile_memory`` carries the table across runs (A85).
+(API Events, B131). ``knowledge_base.hostiles`` carries the table across runs (A85).
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class ThreatTable:
     """Max ``Damaged.amount`` seen per source type, gross of the armor worn
     when it landed (the module docstring), and per hostile type the
     swings at us that hit and missed. ``saved_hits`` and ``saved_misses``
-    are the counts already in the knowledge base (``hostile_memory``)."""
+    are the counts already in the knowledge base (``knowledge_base.hostiles``)."""
 
     by_type: dict[TypeKey, int] = field(default_factory=dict)
     hits: dict[TypeKey, int] = field(default_factory=dict)

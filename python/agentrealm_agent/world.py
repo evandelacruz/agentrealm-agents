@@ -329,12 +329,12 @@ class WorldModel:
     npc_still: dict[int, tuple[Pos, int]] = field(default_factory=dict)
     # NPC types that have shown they are hostile: one swung at or hit us, or
     # one died in view (``NPCDied`` names only hostiles), this run or an
-    # earlier one (``hostile_memory``). Townsfolk and helpers never land here,
+    # earlier one (``knowledge_base.hostiles``). Townsfolk and helpers never land here,
     # so Flee and Retreat never answer them (A9, A23).
     hostile_types: set[TypeKey] = field(default_factory=set)
     # (kind, id) -> where each NPC and character was seen, its post and the
     # reach it hit us from, kept out of view (``Sighting``, free-play run 5);
-    # hostile NPCs' sightings are kept for later runs (``hostile_memory``).
+    # hostile NPCs' sightings are kept for later runs (``knowledge_base.hostiles``).
     sightings: dict[tuple[str, int], Sighting] = field(default_factory=dict)
     # Where each entity stood before its latest move, and the tick that move
     # was seen: ``survival.approaching`` reads it (A9).

@@ -3,7 +3,7 @@
 1. Run 6 started beside the NPC that killed run 5 and did not know its type
    was hostile: hostile types and sightings lived only for one run, and the
    knowledge base's ``npc_types`` was never written. They are now saved at
-   exit and loaded at start (``hostile_memory``), and feed the same danger
+   exit and loaded at start (``knowledge_base.hostiles``), and feed the same danger
    tests as anything learned this run.
 2. Gather walked back and forth between a bush and grass by the character:
    bushes drop berries, not gems (A81), so it cuts only grass
@@ -23,7 +23,7 @@ from unittest import mock
 from agentrealm_agent import config
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.hostile_memory import SIGHTINGS_KEY, load_hostiles, save_hostiles
+from agentrealm_agent.knowledge_base.hostiles import SIGHTINGS_KEY, load_hostiles, save_hostiles
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan

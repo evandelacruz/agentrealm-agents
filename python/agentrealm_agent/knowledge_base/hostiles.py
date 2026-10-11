@@ -1,13 +1,13 @@
-"""Hostile NPC types and where hostiles keep, carried from run to run (free-play run 6).
+"""Hostile NPC types and where hostiles keep, carried from run to run.
 
 ``WorldModel.hostile_types`` and ``WorldModel.sightings`` are learned while
-the agent plays. Kept only in memory, they were lost at exit: run 6 started
-next to the NPC that killed run 5 and did not know its type was hostile. So
-the runner loads them from the world's knowledge base at start
-(:func:`load_hostiles`) and writes them back at exit (:func:`save_hostiles`).
-Loaded, they feed the same tests as anything learned this run: Flee and
-Retreat (``survival.is_hostile``), and the ground Gather and Detour keep off
-(``hostile_ground.known_reach``, ``gather_safe.route_clear``).
+the agent plays. Kept only in memory, they would be lost at exit, and the next
+run would start beside an NPC that killed the last one without knowing its
+type is hostile. So the runner loads them from the world's knowledge base at
+start (:func:`load_hostiles`) and writes them back at exit
+(:func:`save_hostiles`). Loaded, they feed the same tests as anything learned
+this run: Flee and Retreat (``survival.is_hostile``), and the ground Gather
+and Detour keep off (``hostile_ground.known_reach``, ``gather_safe.route_clear``).
 
 The threat table's per-type measurements come and go the same way (A85):
 without them every run started with every type unmeasured.
@@ -43,10 +43,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .knowledge_base import KnowledgeBase
-from .survival import known_hostile
-from .threat import ThreatTable
-from .world import Entity, Sighting, WorldModel
+from . import KnowledgeBase
+from ..survival import known_hostile
+from ..threat import ThreatTable
+from ..world import Entity, Sighting, WorldModel
 
 SIGHTINGS_KEY = "hostile_sightings"
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import random
 import threading
 import time
@@ -44,7 +43,7 @@ from .item_table import (
     use_npc_type,
     use_target_block,
 )
-from .hostile_memory import load_hostiles, save_hostiles
+from .knowledge_base.hostiles import load_hostiles, save_hostiles
 from .knowledge_base import KnowledgeBase
 from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
 from .equip import note_equip_result, sync_refusals
@@ -75,7 +74,6 @@ from .executor.supply_refusals import (
 from .healing import absorb_heal_pending, note_heal_pending
 from .shop import note_shop_result
 from .supplies import heals, is_food
-from .states.explore import plan_sets
 from .travel.resolve import given_up_travel, travel_given_up
 from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from .travel.strength import loadout_key
@@ -91,12 +89,13 @@ from .executor import (
     trim_to_horizon,
     wait,
 )
+from .executor.held_queue import held_queue_matches, possible_positions, unconfirmed_send
 from .acceptance import AcceptanceHooks
 from .poll_cadence import calm_poll_interval, is_urgent
-from .reach import in_reach_from
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, Pos, WorldModel, terrain_cells
 from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
+from .states.dispatch import probe_held_queue
 from .states.greet import GREET_STATE
 from .states.intents import is_self_use
 from .investigation import (
@@ -133,6 +132,7 @@ from .park import (
 from .survival import retreat_goal
 from .memory import queue_signal
 from .strategist import Strategist, same_ops
+from .trace import Trace, fmt_intent, oscillation_detail, tick_detail
 
 # Ticks past a queue's own length to wait for its finished_queue before giving up.
 QUEUE_RESULT_SLACK = 2
@@ -140,11 +140,6 @@ QUEUE_RESULT_SLACK = 2
 # (agentrealm.gg/docs/manual, Intent reference). Drop may take a worn supply,
 # which is not documented either way.
 LOADOUT_VERBS = ("Wear", "Remove", "Drop")
-# Memory the held-queue probe puts back even when its reflex is sent: the
-# navigation learnings and stuck attempts (only a real decision window ages or
-# escalates them, A14, A15), the boss fight (it belongs to the stack, A38), and
-# Greet's tries (its hello waits for a decision window, A65).
-PROBE_NEVER_KEEPS = ("nav", "nav_stuck", "boss", "greetings")
 
 
 @dataclass(frozen=True)
@@ -189,7 +184,6 @@ class Runner:
         self.abort = abort if abort is not None else threading.Event()
         self.park_report: ParkReport | None = None
         self.clock = time.monotonic  # the park phase's cap runs on it
-        self.out = out
         self.knowledge = knowledge
         self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
@@ -201,7 +195,7 @@ class Runner:
         self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
         self._removed_map: int | None = None  # A18: map the character was on when it was taken off
         self.world = WorldModel(character_id)
-        # Hostile types and posts earlier runs learned (free-play run 6); saved back at exit.
+        # Hostile types and posts earlier runs learned; saved back at exit.
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
         load_carried_chest(knowledge, self.world)  # the chest applied in an earlier run (A115)
         self.mem = Memory()
@@ -215,9 +209,7 @@ class Runner:
         # The latest tick a server response reported. w.tick also counts
         # windows locally and can run ahead of it; cooldowns count from this.
         self.server_tick: int | None = None
-        trace = cfg.trace_path(character_id)
-        trace.parent.mkdir(parents=True, exist_ok=True)
-        self.trace = open(trace, "a", buffering=1)
+        self.trace = Trace(cfg.trace_path(character_id), cfg.profile, out)
         self.directives = DirectivesWatch(cfg.directives_path, pinned_goals=list(cfg.pinned_goals))
         self.directives.ensure_loaded()
         self.acceptance = acceptance
@@ -342,10 +334,8 @@ class Runner:
         )
 
     def log(self, call: str, detail: str, record: dict) -> None:
-        w = self.world
-        pos = f"{w.map_id}:{w.pos[0]},{w.pos[1]}" if w.pos else "?"
-        self.out(f"[{self.cfg.profile}] t={w.tick} @{pos} {call:<8} {detail}")
-        self.trace.write(json.dumps({"t": time.time(), "tick": w.tick, "pos": w.pos, "map": w.map_id, "call": call, **record}) + "\n")
+        """One line to the console and the trace (``trace.Trace``)."""
+        self.trace.log(self.world, call, detail, record)
 
     def run(self) -> None:
         world = self.read_world()
@@ -646,11 +636,11 @@ class Runner:
             d = self.reflex_while_held()
             self.plan.acted = None  # the probe's decision is not this round's
             if d is not None:
-                starts = self.possible_positions()
+                starts = possible_positions(w, m)
                 self.drop_held_queue()
                 # Something must replace the held queue, or it keeps running.
                 intents = self._apply_never_attack(self.intents_for(d))
-                doubt = self.unconfirmed_send(intents, starts)
+                doubt = unconfirmed_send(w, m, self.cfg.policy, self.knowledge, intents, starts)
                 if doubt is not None:
                     # Stop where we are; position is re-read before the next plan.
                     self.clear_held_tracking()
@@ -736,7 +726,7 @@ class Runner:
         elif m.pending_intents is not None or m.pending is not None:
             # A lone intent (a Take, say) is a queue too: held until its result
             # or finished_queue, so it is not decided and sent again before it
-            # has run (A63 run 3).
+            # has run (A63).
             sent = m.pending_intents if m.pending_intents is not None else [m.pending]
             if w.tick > m.queue_sent_tick + len(sent) + QUEUE_RESULT_SLACK:
                 # The queue has had time to run out and the server never said
@@ -764,11 +754,7 @@ class Runner:
         else:
             m.queued_ticks = 1 if intents else 0
         m.hurt_last_poll = any(e.get("kind") == "Damaged" for e in events)
-        detail = f"{_fmt_submit(intents, d)} ({d.reason})"
-        if events:
-            detail += " | " + ", ".join(_fmt_event(e) for e in events)
-        if r.get("events_dropped"):
-            detail += f" | dropped {r['events_dropped']}"
+        detail = tick_detail(intents, d.intent, d.reason, events, r.get("events_dropped", 0))
         now = time.time()
         record = {
             "intents": intents,
@@ -797,44 +783,24 @@ class Runner:
         stuck = self.mem.nav_stuck
         events, stuck.oscillations = stuck.oscillations, []
         for event in events:
-            if "goal" in event:
-                outcome = f"gave up {event['goal']} → {tuple(event['target'])}"
-            else:
-                outcome = f"nothing given up, moved by {', '.join(event.get('states') or []) or 'no state'}"
-            self.log("oscillation", f"pacing {event['cells']}: {outcome}", event)
+            self.log("oscillation", oscillation_detail(event), event)
             if self.acceptance is not None:
                 self.acceptance.on_oscillation(event)
 
     def reflex_while_held(self) -> Decision | None:
-        """A reflex (2–4b) that fires while a queue is held, else None.
-
-        The probe has no side effects on memory unless its reflex is sent:
-        memory is snapshot before it and put back whole when nothing is sent
-        (its search caches aside, ``memory.SEARCH_CACHES``),
-        and so are the rng and the goal stack. A pick, a try, a commitment or a
-        re-arm made for an answer that is not sent never happened (A71, A24,
-        A22, A77): a ``Use`` the probe only decided spends no try. The goal
-        stack is put back even when the reflex is sent: reflexes never consume
-        its ops (A34). So is ``PROBE_NEVER_KEEPS``. It runs only the states
-        that can answer with a reflex (``dispatch.PROBE_STATES``), so a poll
-        while a queue runs costs no executor's search (A64).
-        """
-        m = self.mem
-        saved = m.snapshot()
-        saved_rng = self.rng.getstate()
-        saved_plan = self.plan.snapshot()
-        try:
-            d = self._decide(self.world, m, plan=self.plan, probe=True)
-        finally:
-            self.plan.restore(saved_plan)
-            m.restore(saved, PROBE_NEVER_KEEPS)
-        if d.reflex and not self.held_queue_matches(d):
-            return d
-        # No reflex, or one that asks for what the held queue already does:
-        # nothing is sent, so memory is exactly as it was (A63 runs 3, 4).
-        m.restore(saved)
-        self.rng.setstate(saved_rng)
-        return None
+        """A reflex (2–4b) that fires while a queue is held, else None: the
+        held-queue probe (``dispatch.probe_held_queue``, A64). A reflex that
+        asks for what the held queue already does is not sent
+        (``held_queue.held_queue_matches``), and the probe leaves memory as
+        it was."""
+        w, m = self.world, self.mem
+        return probe_held_queue(
+            m,
+            self.rng,
+            self.plan,
+            lambda: self._decide(w, m, plan=self.plan, probe=True),
+            lambda d: d.reflex and not held_queue_matches(w, m, d.intent, d.submit_queue),
+        )
 
     def note_held_path_stale(self) -> None:
         """Mark the held walk queue for replacement when its path went wrong.
@@ -847,87 +813,6 @@ class Runner:
             return
         if remaining_path_stale(self.world, m, self.cfg.policy, self.knowledge):
             m.resend_held_queue = m.need_position = True
-
-    def possible_positions(self) -> list[Pos]:
-        """Where the character may stand now: the tracked position, then each
-        cell the held queue's Steps with no result yet would have taken it to.
-
-        A Step can run before its result reaches us, so until then any of
-        these may be where the next queue starts (A63 run 3). The server runs
-        one intent a tick from the tick the queue was sent, so only the Steps
-        that elapsed ticks could have reached count.
-        """
-        w, m = self.world, self.mem
-        if w.pos is None:
-            return []
-        out, pos = [w.pos], w.pos
-        if m.pending_intents is None:
-            return out
-        ran_by = min(len(m.pending_intents), max(0, w.tick - m.queue_sent_tick) + 1)
-        for intent in m.pending_intents[m.pending_next_index : ran_by]:
-            if intent.get("verb") == "Step":
-                pos = step_landing(pos, intent["direction"])
-                out.append(pos)
-        return out
-
-    def held_queue_matches(self, d: Decision) -> bool:
-        """``d`` asks for what the held queue already does.
-
-        A walk matches when it goes to the cell the held queue's next Step
-        already enters: that queue may already have run the Step without its
-        result reaching us, and a fresh Step re-aimed from the tracked
-        position would misaim (A63 run 3). Any other intent matches when it
-        is the held queue's remaining intents, Waits aside: a Pickup re-sending
-        the Take that is still held wasted 11 of 24 Takes (A63 run 4).
-        """
-        if d.submit_queue is None and d.intent is not None and d.intent.get("verb") == "SetPosition":
-            ahead = remaining_walk_cells(self.world, self.mem)
-            return bool(ahead) and ahead[0] == (d.intent["x"], d.intent["y"])
-        wanted = d.submit_queue if d.submit_queue is not None else [d.intent] if d.intent is not None else []
-        m = self.mem
-        if m.pending is not None:
-            held = [m.pending]
-        elif m.pending_intents is not None:
-            held = m.pending_intents[m.pending_next_index :]
-        else:
-            return False
-        acts = [i for i in wanted if i.get("verb") != "Wait"]
-        return bool(acts) and acts == [i for i in held if i.get("verb") != "Wait"]
-
-    def unconfirmed_send(self, intents: list[dict] | None, starts: list[Pos]) -> str | None:
-        """Why ``intents`` cannot go from a position the server has not
-        confirmed, or None when they can. ``starts`` are the cells we may
-        stand on (``possible_positions``): every Step must land clear and
-        every reach-limited intent (a Take, a chest verb, a Use on a target)
-        must reach from each of them (``reach.in_reach_from``, A116), or we
-        stop and re-read position first."""
-        if not intents:
-            return None
-        if not self.steps_land_clear(intents, starts):
-            return "the step may land on a blocked cell"
-        if not in_reach_from(intents, starts, self.world, self.knowledge):
-            return "the target may be out of reach"
-        return None
-
-    def steps_land_clear(self, intents: list[dict], starts: list[Pos]) -> bool:
-        """Every Step in ``intents`` lands on an open cell from each of ``starts``.
-
-        Directions are aimed from the tracked position; with a Step of the
-        old queue unconfirmed, the walk may start one or more cells further
-        on and land somewhere else. Each such landing must be known walkable,
-        off ``avoid_blocks`` hazards and the learned blocked cells.
-        """
-        w, m = self.world, self.mem
-        directions = [i["direction"] for i in intents if i.get("verb") == "Step"]
-        if len(starts) < 2 or not directions:
-            return True
-        blocked, _, _ = plan_sets(w, m, self.cfg.policy, self.knowledge)
-        for pos in starts[1:]:
-            for direction in directions:
-                pos = step_landing(pos, direction)
-                if pos in blocked or not (w.view.walkable(pos) or w.view.tiles.get(pos) in DOORS):
-                    return False
-        return True
 
     def clear_held_tracking(self) -> None:
         """Stop waiting on the held queue's results without forgetting position."""
@@ -1018,7 +903,7 @@ class Runner:
 
     def _note_sent_walk(self) -> None:
         """What the queue just sent already crosses: blocked cells and hostiles'
-        reach. Only what turns up later makes it stale (A43, A63 run 4)."""
+        reach. Only what turns up later makes it stale (A43, A63)."""
         w, m = self.world, self.mem
         m.path_skip, m.walk_skip = m.walk_skip, set()
         m.path_blockers = path_blockers(w, m, self.cfg.policy, self.knowledge)
@@ -1058,7 +943,7 @@ class Runner:
         if not paced:
             self.log(
                 "pace",
-                f"{_fmt_intent(intent)} held: cooldown outlasts the {self.queue_horizon_ticks}-tick horizon",
+                f"{fmt_intent(intent)} held: cooldown outlasts the {self.queue_horizon_ticks}-tick horizon",
                 {"held": intent, "ticks_since_last": since, "horizon": self.queue_horizon_ticks},
             )
             return None
@@ -1641,52 +1526,3 @@ def _cell_refused(e: ApiError) -> bool:
     if e.status in (401, 403) or e.status >= 500:
         return False
     return e.code not in ("not_on_map", "character_not_live")
-
-
-def _fmt_submit(intents: list[dict] | None, d: Decision) -> str:
-    if intents is None:
-        return "—" if d.intent is None else _fmt_intent(d.intent)
-    if len(intents) == 1:
-        return _fmt_intent(intents[0])
-    steps = sum(1 for i in intents if i.get("verb") == "Step")
-    waits = sum(1 for i in intents if i.get("verb") == "Wait")
-    return f"queue {steps}×Step {waits}×Wait"
-
-
-def _fmt_intent(i: dict | None) -> str:
-    if i is None:
-        return "—"
-    verb = i["verb"]
-    if verb == "SetPosition":
-        return f"SetPosition({i['x']},{i['y']})"
-    if verb == "Step":
-        return f"Step({i['direction']})"
-    if verb == "Wait":
-        return "Wait"
-    if verb == "Use":
-        t = i["target"]
-        return f"Use({t.get('kind')}:{t.get('character_id', t.get('npc_id', ''))})"
-    if verb == "Take":
-        return f"Take({i['supply_id']})"
-    if verb == "WithdrawFromChest":
-        return f"WithdrawFromChest({i['chest_id']}:{','.join(map(str, i.get('supply_ids', ['all'])))})"
-    if verb == "Drop":
-        return f"Drop({i['supply_id']})"
-    return verb
-
-
-def _fmt_result(r: dict) -> str:
-    if r.get("outcome") == "rejected":
-        return f"rejected:{(r.get('rejection') or {}).get('code', '?')}"
-    return r.get("outcome", "?")
-
-
-def _fmt_event(e: dict) -> str:
-    kind = e.get("kind", "?")
-    if kind in ("SpokenTo", "BroadcastHeard"):
-        return f'{kind} {e.get("speaker_id")}: "{e.get("text", "")}"'
-    if kind == "Damaged":
-        return f"Damaged {e.get('amount', 0)} by {e.get('source_kind', '?')}"
-    if kind == "Died" and e.get("chest_id"):
-        return f"Died, chest {e['chest_id']} at {e.get('map_id')}:{e.get('x')},{e.get('y')}"
-    return kind

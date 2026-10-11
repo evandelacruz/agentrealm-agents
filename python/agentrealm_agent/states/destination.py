@@ -10,12 +10,11 @@ to it asks the planner rather than wander (``explore.safe_default``).
 from __future__ import annotations
 
 from ..navigation import route_first_leg
-from ..pathing import Toward, grid_params
+from ..pathing import Toward, grid_params, plan_sets
 from ..plan import GoalOp
 from ..stalled import map_local
 from ..world import WorldModel
 from .base import PlayContext, top_op
-from .explore import plan_sets
 from .travel import resolve_destination
 
 

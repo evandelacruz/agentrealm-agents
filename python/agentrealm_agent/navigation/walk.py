@@ -1,4 +1,4 @@
-"""The walker commits to its path (A15, A58 run 5).
+"""The walker commits to its path (A15, A58).
 
 A fresh plan every decision flips between two near-equal routes: fog shows
 one tile of the other route, that route is a step cheaper for a moment, and
@@ -22,7 +22,7 @@ the walker turns round. So a walk keeps the path it chose until one of:
 A new path whose first step goes back to the cell the walk just came from
 is taken only when the old one is blocked, or when the new one is cheaper
 overall and the old one's hostile cost is higher by more than
-``SWITCH_GAIN`` (A16 Walk run 3); never for a route that only looks cheaper. Equal
+``SWITCH_GAIN`` (A16); never for a route that only looks cheaper. Equal
 paths therefore never alternate: the one already walked wins.
 
 Each goal keeps its own walk (``Memory.walks``), so a goal whose kept path

@@ -159,10 +159,9 @@ class LevelStateTest(unittest.TestCase):
         w = grid(["....D"], at=(0, 0), map_id=8)
         w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
         m = Memory()
-        until = w.tick + 300
-        m.nav_stuck.backoff_until[nav_stuck.goal_key("doors", 8, (4, 0))] = until
+        nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("level:door", 8, (4, 0)), "level:door", w.tick)
         for p in w.view.frontier():
-            m.nav_stuck.backoff_until[nav_stuck.goal_key("explore", 8, p)] = until
+            nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("explore", 8, p), "explore", w.tick)
         ctx = PlayContext(
             m, Policy(kind="scripted", goals=[]), random.Random(0),
             knowledge=KnowledgeBase.empty("sandbox"), plan=level_plan(),

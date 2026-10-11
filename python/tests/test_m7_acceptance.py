@@ -19,8 +19,10 @@ from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.acceptance_survival import LOOP_STEP_LIMIT, OSCILLATION_ABORT_COUNT, OSCILLATION_ABORT_TICKS
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, M7AcceptanceMetrics
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.strategist import Strategist
+from agentrealm_agent.travel.resolve import given_up_travel
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
 from tests.fixtures.navigation import grids, sim
@@ -133,7 +135,7 @@ class GivenUpReturnGateTest(unittest.TestCase):
     def test_each_return_to_a_given_up_target_is_counted_and_fails(self):
         m, mem, w = metrics(), Memory(), open_world()
         decide(m, w, mem, state="Travel", acted_op=self.OP)  # walking it before any give-up
-        mem.nav_stuck.given_up_travel[(OVERWORLD, (5, 6))] = w.tick
+        nav_stuck.remember_give_up(mem.nav_stuck, nav_stuck.goal_key("travel:point", OVERWORLD, (5, 6)), "travel:point", w.tick)
         decide(m, w, mem, state="Travel", acted_op=self.OP)  # the give-up's own decision
         self.assertEqual(m.given_up_returns, 0)
         for _ in range(2):  # two separate returns, each a run of decisions on it
@@ -149,7 +151,7 @@ class GivenUpReturnGateTest(unittest.TestCase):
 
     def test_another_target_is_not_a_return(self):
         m, mem, w = metrics(), Memory(), open_world()
-        mem.nav_stuck.given_up_travel[(OVERWORLD, (5, 6))] = 0
+        nav_stuck.remember_give_up(mem.nav_stuck, nav_stuck.goal_key("travel:point", OVERWORLD, (5, 6)), "travel:point", 0)
         w.tick = 10
         decide(m, w, mem, state="Travel", acted_op={**self.OP, "x": 9})
         self.assertEqual(m.given_up_returns, 0)
@@ -652,7 +654,7 @@ class SmokeScriptTest(unittest.TestCase):
         self._give_up_on_target(r, "travel:shop", (2, 0))
         r.drop_given_up_ops()
         self.assertEqual(r.plan.current(), shop, "another shop is known: the op stays")
-        given_up = r.mem.nav_stuck.given_up_travel
+        given_up = given_up_travel(r.mem.nav_stuck, r.world.tick)
         self.assertEqual(travel_dest(shop, r.world, r.knowledge, r.mem.strength, given_up), (OVERWORLD, (8, 0)))
         self._give_up_on_target(r, "travel:shop", (8, 0))
         r.drop_given_up_ops()
@@ -722,7 +724,7 @@ class SmokeScriptTest(unittest.TestCase):
             left = [op for op in r.plan.goals[r.plan.index :] if r.travel_given_up(op)]
             self.assertEqual(left, [], f"travel to the given-up target is back at {second} s")
             decide(gate, r.world, r.mem, state="Travel", acted_op=r.plan.current())
-        self.assertGreater(r.world.tick, r.mem.nav_stuck.backoff_until[f"travel:point:{OVERWORLD}:5,6"])
+        self.assertGreater(r.world.tick, r.mem.nav_stuck.given_up[f"travel:point:{OVERWORLD}:5,6"].until)
         self.assertGreater(r.world.tick - gave_up_at, seconds * r.tick_hz - 1)
         self.assertEqual(r.directives.pinned_goals, [])
         self.assertEqual(gate.given_up_returns, 0)

@@ -9,6 +9,7 @@ from unittest import mock
 
 from agentrealm_agent import config
 from agentrealm_agent.break_memory import (
+    BREAK_GOAL,
     attempt_failed,
     attempt_open,
     break_key,
@@ -16,6 +17,7 @@ from agentrealm_agent.break_memory import (
     capabilities_for_code,
     break_costs_for_planning,
     held_capabilities,
+    given_up_blocks,
     known_openers,
     no_break_reason,
     nominate_on_path,
@@ -31,7 +33,6 @@ from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import grid_params
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.stalled import break_cells, lapse as lapse_stalled, remember as remember_stalled, retry_basis
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.break_state import BreakState
 from agentrealm_agent.states.escape import EscapeState
@@ -191,36 +192,35 @@ class StuckLadderOpenersTest(unittest.TestCase):
         self.assertEqual(att.reasons, ["no_known_opener"])
 
 
-class StalledBreakTest(unittest.TestCase):
-    """A block remembered as a stalled break_block is passed over until the record lapses (A104, A111)."""
+class GivenUpBlockTest(unittest.TestCase):
+    """A block whose walk was given up is passed over on its map until the backoff ends (A90)."""
 
-    BUSH = {"op": "break_block", "x": 1, "y": 0, "capability": "cut"}
+    def give_up(self, m, w, cell, map_id=None):
+        key = nav_stuck.goal_key(BREAK_GOAL, w.map_id if map_id is None else map_id, cell)
+        return nav_stuck.remember_give_up(m.nav_stuck, key, BREAK_GOAL, w.tick)
 
-    def remembered(self, w, *ops):
-        records = []
-        for op in ops:
-            remember_stalled(records, op, "Break paced walking to it", 0, retry_basis(w, None), w.map_id)
-        return records
-
-    def test_a_remembered_block_is_not_nominated_or_priced(self):
+    def test_a_given_up_block_is_not_nominated_or_priced(self):
         w = _sword_world([".b.b."], at=(0, 0))
-        skip = break_cells(self.remembered(w, self.BUSH), w.map_id)
+        m = Memory()
+        self.give_up(m, w, (1, 0))
+        skip = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
         self.assertEqual(skip, {(1, 0)})
         self.assertEqual(nominate_on_path(w, None, (0, 0), (4, 0), skip).pos, (3, 0))
         self.assertEqual(set(break_costs_for_planning(w, None, (4, 0), skip)), {(3, 0)})
 
-    def test_with_only_remembered_blocks_the_ladder_moves_on(self):
+    def test_with_only_given_up_blocks_the_ladder_moves_on(self):
         w = _sword_world([".b..."], at=(0, 0))
         m = Memory()
-        m.stalled_ops = self.remembered(w, self.BUSH)
-        self.assertEqual(no_break_reason(w, None, (0, 0), (4, 0), break_cells(m.stalled_ops, w.map_id)), "stalled_break")
+        self.give_up(m, w, (1, 0))
+        skip = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
+        self.assertEqual(no_break_reason(w, None, (0, 0), (4, 0), skip), "given_up_break")
         att = nav_stuck.track(m, w, "goto", (4, 0))
         att.level = nav_stuck.BREAK
         c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
         out = BreakState().act(w, c)
         self.assertIsNone(out.intents)
         self.assertEqual(att.level, nav_stuck.REVEAL)
-        self.assertEqual(att.reasons, ["stalled_break"])
+        self.assertEqual(att.reasons, ["given_up_break"])
 
     def test_the_stuck_ladder_keeps_the_block_it_walks_to(self):
         w = _sword_world([".b..."], at=(0, 0))
@@ -231,32 +231,22 @@ class StalledBreakTest(unittest.TestCase):
         BreakState().act(w, c)
         self.assertEqual((nav_stuck.break_target(att), att.break_cap), ((1, 0), "cut"))
 
-    def test_the_block_returns_once_something_gives_a_reason(self):
+    def test_the_block_returns_once_its_backoff_ends(self):
         w = _sword_world([".b..."], at=(0, 0))
-        records = self.remembered(w, self.BUSH)
-        w.held_supplies = [*w.held_supplies, InventorySupply(6, "bronze_mallet")]
-        lapse_stalled(records, retry_basis(w, None))
-        self.assertEqual(break_cells(records, w.map_id), frozenset())
-
-    def test_a_block_remembered_on_another_map_is_nominated_here(self):
-        w = _sword_world([".b..."], at=(0, 0))
-        records = []
-        remember_stalled(records, self.BUSH, "Break paced walking to it", 0, retry_basis(w, None), w.map_id + 1)
-        self.assertEqual(break_cells(records, w.map_id), frozenset())
         m = Memory()
-        m.stalled_ops = records
+        rec = self.give_up(m, w, (1, 0))
+        self.assertEqual(given_up_blocks(m.nav_stuck, w.map_id, rec.until), frozenset())
+
+    def test_a_block_given_up_on_another_map_is_nominated_here(self):
+        w = _sword_world([".b..."], at=(0, 0))
+        m = Memory()
+        self.give_up(m, w, (1, 0), map_id=w.map_id + 1)
+        self.assertEqual(given_up_blocks(m.nav_stuck, w.map_id, w.tick), frozenset())
         att = nav_stuck.track(m, w, "goto", (4, 0))
         att.level = nav_stuck.BREAK
         c = PlayContext(m, Policy(kind="scripted", goals=[], pickup=False), random.Random(0))
         BreakState().act(w, c)
         self.assertEqual(nav_stuck.break_target(att), (1, 0))
-
-    def test_the_same_cell_on_another_map_keeps_this_maps_record(self):
-        w = _sword_world([".b..."], at=(0, 0))
-        records = self.remembered(w, self.BUSH)
-        remember_stalled(records, self.BUSH, "Break paced walking to it", 0, retry_basis(w, None), w.map_id + 1)
-        self.assertEqual(break_cells(records, w.map_id), {(1, 0)})
-        self.assertEqual(break_cells(records, w.map_id + 1), {(1, 0)})
 
 
 class BreakOpRefusalTest(unittest.TestCase):

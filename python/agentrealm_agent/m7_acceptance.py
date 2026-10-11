@@ -53,7 +53,7 @@ from .acceptance_survival import (
 from .config import Policy
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .travel.resolve import travel_dest
+from .travel.resolve import TRAVEL_GOAL_PREFIX, given_up_travel, travel_dest
 from .world import Pos, WorldModel, chebyshev
 
 TARGET_SECONDS = 3600.0
@@ -167,11 +167,12 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
         self, w: WorldModel, m: Memory, acted_op: dict | None, knowledge: KnowledgeBase | None
     ) -> None:
         """Count each return to a travel destination stuck detection gave up on
-        at an earlier tick, whatever the op's ``to``: a run of decisions acting
+        at an earlier tick and still backs off from, whatever the op's ``to``: a run of decisions acting
         on its op counts once."""
-        dest = travel_dest(acted_op, w, knowledge, m.strength, m.nav_stuck.given_up_travel) if acted_op else None
-        gave_up_at = m.nav_stuck.given_up_travel.get(dest) if dest is not None else None
-        on_it = gave_up_at is not None and gave_up_at < w.tick
+        given_up = given_up_travel(m.nav_stuck, w.tick)
+        dest = travel_dest(acted_op, w, knowledge, m.strength, given_up) if acted_op else None
+        rec = next((r for r in m.nav_stuck.given_up.values() if r.goal.startswith(TRAVEL_GOAL_PREFIX) and (r.map_id, r.target) == dest), None)
+        on_it = dest in given_up and rec is not None and rec.since < w.tick
         if on_it and not self._on_given_up:
             self.given_up_returns += 1
         self._on_given_up = on_it

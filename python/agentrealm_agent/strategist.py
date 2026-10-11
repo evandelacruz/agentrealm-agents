@@ -105,16 +105,15 @@ import urllib.error
 import urllib.request
 from collections import Counter, deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Collection, Protocol
+from typing import Any, Callable, Collection, Mapping, Protocol
 
 from .directives import Directives
-from .travel.resolve import travel_dest, travel_given_up
+from .travel.resolve import given_up_travel, travel_dest, travel_given_up
 from .travel.strength import StrengthBracket
 from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import entrance_routes
-from .navigation.stuck import HUB_GIVE_UP_CELLS, NavStuckMemory, hub_give_up_lapses
 from .gem_yield import keep_gather_region, summary as gem_yield_summary
 from .healing import POTION_RULE, low_health_line, potion_count, supply_matches
 from .equip import CUT, does_job, hunting_ceiling, loadout_strength, weapon_rank
@@ -195,7 +194,7 @@ Reply with one JSON object only, no markdown, with these keys:
 Each goal is an object with "op" and that op's fields; every op may also carry "why". These are the only ops (anything else is dropped):
 {_op_table()}
 
-State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel, of any kind, whose destination is a cell listed under given_up_travel: stuck detection gave up on it. A town or shop cell there is also under given_up_hubs, with when that give-up lapses: at retry_at_tick, or once the character stands or_after_moving_cells cells from where it gave up (from); it then leaves both lists and may be travelled to again. Any other listed cell is given up for the rest of the run.
+State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel, of any kind, whose destination is a cell listed under given_up_travel: stuck detection gave up on it. Each give-up lapses at its retry_at_tick, when the cell leaves the list; whether to travel there again is then your call, and a give-up there again backs off twice as long. A stuck trigger says which walk was given up and its retry_at_tick: drop or replace the goal behind it if it keeps getting stuck.
 
 The survival params ("params" under State, set by "params" or a set_param op). Survival params may only tighten past params_floor; a change that loosens one is ignored:
 {_param_table()}
@@ -557,22 +556,6 @@ def stalled_lines(records: Collection[StalledOp]) -> str:
     )
 
 
-def hub_give_up_lines(stuck: NavStuckMemory) -> list[dict[str, Any]]:
-    """The planner's ``given_up_hubs``: each town or shop give-up and when it
-    lapses (``stuck.HUB_GIVE_UP_TICKS``, ``stuck.HUB_GIVE_UP_CELLS``)."""
-    out = []
-    for mid, (x, y) in sorted(stuck.given_up_hubs, key=str):
-        lapse = hub_give_up_lapses(stuck, (mid, (x, y)))
-        if lapse is None:
-            continue
-        tick, start = lapse
-        entry: dict[str, Any] = {"cell": f"{mid}:{x},{y}", "retry_at_tick": tick, "or_after_moving_cells": HUB_GIVE_UP_CELLS}
-        if start is not None:
-            entry["from"] = f"{start[0]},{start[1]}"
-        out.append(entry)
-    return out
-
-
 def build_prompt(
     *,
     triggers: list[dict[str, Any]],
@@ -581,8 +564,7 @@ def build_prompt(
     directives: Directives,
     knowledge: KnowledgeBase | None,
     reference_sections: str = "",
-    given_up_travel: Collection[tuple[int, tuple[int, int]]] = (),
-    given_up_hubs: Collection[dict[str, Any]] = (),
+    given_up_travel: Mapping[tuple[int, tuple[int, int]], int] | None = None,
     gather_status: str = "",
     gather_run: dict[str, int] | None = None,
     rejected: Collection[str] = (),
@@ -623,13 +605,11 @@ def build_prompt(
     if plan.notes:
         state_lines.append(f"plan_notes={plan.notes!r}")
     bracket = strength or StrengthBracket()
-    lines = stack_lines(plan, lambda op: travel_dest(op, w, knowledge, bracket, given_up_travel))
+    lines = stack_lines(plan, lambda op: travel_dest(op, w, knowledge, bracket, given_up_travel or ()))
     state_lines.append("stack (top first):" + "".join(f"\n  {line}" for line in lines) if lines else "stack: (empty)")
     if given_up_travel:
-        cells = [f"{mid}:{x},{y}" for mid, (x, y) in sorted(given_up_travel, key=str)]
-        state_lines.append(f"given_up_travel={json.dumps(cells)} (cells stuck detection gave up on: never travel to them while listed)")
-    if given_up_hubs:
-        state_lines.append(f"given_up_hubs={json.dumps(list(given_up_hubs), sort_keys=True)} (town and shop give-ups: each lapses at retry_at_tick or after moving or_after_moving_cells from where it gave up)")
+        rows = [{"cell": f"{mid}:{x},{y}", "retry_at_tick": until} for (mid, (x, y)), until in sorted(given_up_travel.items(), key=str)]
+        state_lines.append(f"given_up_travel={json.dumps(rows, sort_keys=True)} (cells stuck detection gave up on: never travel to them before retry_at_tick)")
     stalled = stalled_lines(stalled_ops)
     if stalled:
         state_lines.append(stalled)
@@ -1409,8 +1389,7 @@ class Strategist:
             directives=runner.directives.directives,
             knowledge=runner.knowledge,
             reference_sections=self.config.reference_sections,
-            given_up_travel=runner.mem.nav_stuck.given_up_travel,
-            given_up_hubs=hub_give_up_lines(runner.mem.nav_stuck),
+            given_up_travel=given_up_travel(runner.mem.nav_stuck, runner.world.tick),
             gather_status=runner.mem.gather_status,
             gather_run=runner.gem_cuts.run_counts(),
             rejected=self.rejected,  # replaced when this call's reply is read; kept if the call fails
@@ -1501,7 +1480,7 @@ class Strategist:
             goals, stale = asked.drop_ended(goals)
             if stale:
                 record["ended_since_ask"] = stale
-        given_up = runner.mem.nav_stuck.given_up_travel
+        given_up = given_up_travel(runner.mem.nav_stuck, runner.world.tick)
         if given_up:
             # A travel to a cell stuck detection gave up on never reaches the
             # stack (A16): filtered here, so a re-send raises no goal_failed

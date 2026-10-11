@@ -1003,9 +1003,13 @@ class KeepsClearTest(unittest.TestCase):
 
     def test_the_walk_to_an_unseen_region_takes_no_way_past_a_remembered_post(self):
         w, m = self.corridor(), Memory()
+        w.view.tiles[(4, 10)] = "grass"
         out = gather_outcome(w, m, self.POLICY, op={"op": "gather_gems", "count": 99, "x": 40, "y": 10})
         self.assertFalse(set(m.path) & self.POST_GROUND, (out.reason, m.path))
-        self.assertNotEqual((m.gather_target or ("",))[0], gather_mod.REGION)
+        self.assertEqual(m.gather_target, ("grass", (4, 10)), "no way to the region: it works anywhere")
+        self.assertEqual(m.gather_status, "walking to grass")
+        w.pos = (4, 10)
+        self.assertEqual(gather_outcome(w, m, self.POLICY, op={"op": "gather_gems", "count": 99, "x": 40, "y": 10}).reason, "cut grass")
 
     def test_the_walk_to_an_unseen_region_takes_the_fight_when_the_op_says(self):
         w, m = self.corridor(), Memory()

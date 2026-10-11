@@ -33,8 +33,8 @@ walk, so it is worked unless the walk Gather would take costs less in all.
 
 The calls that depend on the situation are the planner's. Which region:
 a ``gather_gems`` with ``x, y`` names a target region; Gather works only
-there while it has a target there, walks toward its middle while no cell
-of it is known, and works anywhere once it knows none there. Whether to
+there while it has a target there that a way reaches (its middle while no
+cell of it is known), and works anywhere otherwise. Whether to
 work near a hostile: ``fight`` lifts the remembered ground and the route
 bar. Gather itself only keeps clear: a hostile that stays near without
 attacking bars the cells near it, and the price sends Gather to other grass.
@@ -192,7 +192,8 @@ class Ground:
     (``_cut_ground``). ``named``: the region the op names, if any;
     ``region``: the target region Gather works only in, else None.
     ``targets``: every place it may go for, by kind and cell, with its work
-    (``GemOdds.work``)."""
+    (``GemOdds.work``); ``anywhere``: the same with no region bound
+    (``lift_region``)."""
 
     danger: Danger
     skip: set[tuple[int, int]]
@@ -203,6 +204,11 @@ class Ground:
     region: tuple[int, int] | None
     odds: GemOdds
     targets: dict[Target, float]
+    anywhere: dict[Target, float]
+
+    def lift_region(self) -> None:
+        """Work anywhere: nothing in the target region can be reached."""
+        self.region, self.targets = None, self.anywhere
 
 
 def ground(
@@ -223,8 +229,8 @@ def ground(
     rate, by_region = region_yields(knowledge, w.map_id)
     need = max(1, int(op["count"]) - (w.gems or 0)) if op is not None and "count" in op else 1
     odds = GemOdds(need, rate, by_region, _steps_to_grass(w))
-    g = Ground(d, skip, spent, dead_regions, dead_cells, named, None, odds, {})
-    found = _targets(w, m, policy, g)
+    g = Ground(d, skip, spent, dead_regions, dead_cells, named, None, odds, {}, {})
+    found = g.anywhere = _targets(w, m, policy, g)
     if named is not None and not _seen_region(w, named):
         x0, y0 = region_corner(named)
         middle = (x0 + REGION_SIZE // 2, y0 + REGION_SIZE // 2)
@@ -386,6 +392,8 @@ def _work(
         m.path, m.goal = [], ""  # the way ahead entered a known reach: a way round, or the target goes
     _, blocked, costly = plan_sets(w, m, policy, knowledge)
     params = cache(lambda: _walk_params(w, policy, g, blocked, costly))
+    if g.region is not None and m.gather_target is None and _cheapest(w, g, params(), blocked) is None:
+        g.lift_region()  # the region holds Gather only while a way reaches something there
     near = _in_reach(w, m, g, params, blocked)
     if near is not None and near[0] == PILE:
         pile = min((e for e in w.entities if is_gem_pile(e) and e.pos == near[1]), key=lambda e: e.id)

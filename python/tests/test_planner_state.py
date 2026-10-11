@@ -163,6 +163,15 @@ class NoSellerTest(unittest.TestCase):
         self.assertIn("raft", unsold)
         self.assertNotIn("potion", unsold, "a known price is a known seller")
 
+    def test_only_items_some_shop_sells_are_listed(self):
+        # Gems, lives, food eaten on pickup, the starting kit, slot rows and
+        # traps have no price in any world: there is no seller to find.
+        unsold = self.unsold(world())
+        for code in ("gem", "gem_cache_5", "heart", "apple", "mushroom", "blue_chest", "pocket_knife", "feet", "trap_grade_2"):
+            self.assertNotIn(code, unsold, code)
+        for code in ("raft", "middle_chest", "golden_cap", "potion"):
+            self.assertIn(code, unsold, code)
+
     def test_one_for_sale_in_sight_lying_found_or_owned_is_not_listed(self):
         w = world()
         w.entities = [Entity("supply", 5, (1, 0), "raft", gem_price=40), Entity("supply", 6, (2, 0), "torch")]

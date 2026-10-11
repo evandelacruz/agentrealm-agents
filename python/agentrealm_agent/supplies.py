@@ -76,6 +76,7 @@ class Supply:
     chest_capacity: int | None = None
     used_up_on_break: bool | None = None
     eaten_on_pickup: bool = False
+    sold: bool = False  # a shop sells it in some world: ``gem_prices`` names one
 
 
 def parse(raw: Any) -> dict[str, Supply]:
@@ -102,8 +103,14 @@ def parse(raw: Any) -> dict[str, Supply]:
             chest_capacity=_positive_int(row.get("chest_capacity")),
             used_up_on_break=used_up if isinstance(used_up, bool) else None,
             eaten_on_pickup=row.get("eaten_on_pickup") is True,
+            sold=_sold(row.get("gem_prices")),
         )
     return out
+
+
+def _sold(prices: Any) -> bool:
+    """Whether ``gem_prices`` gives a price in at least one world."""
+    return isinstance(prices, dict) and any(_positive_int(v) is not None for v in prices.values())
 
 
 def _non_negative_int(v: Any) -> int | None:
@@ -247,9 +254,11 @@ def worn_armor_defense(worn_codes: Iterable[str]) -> int:
     return sum(armor_defense(code) or 0 for code in worn_codes)
 
 
-def listed_codes() -> list[str]:
-    """Every subtype the reference lists, sorted."""
-    return sorted(_table)
+def sold_codes() -> list[str]:
+    """Every subtype a shop sells in some world (``gem_prices``), sorted: what
+    a buy can ever get. Gems, lives, the starting kit, worn-slot rows and
+    anything else never priced are left out (A110)."""
+    return sorted(code for code, r in _table.items() if r.sold)
 
 
 def used_on_self(code: str | None) -> bool:

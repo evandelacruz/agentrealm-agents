@@ -22,7 +22,7 @@ from ..shop import (
 )
 from ..travel.knowledge import iter_shop_cells
 from ..travel.ops import TravelOp
-from ..travel.resolve import ResolvedDestination, resolve_travel
+from ..travel.resolve import ResolvedDestination, given_up_travel, resolve_travel
 from ..world import Entity, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
 from .explore import explore_outcome, plan_sets
@@ -133,7 +133,7 @@ def _toward_shop(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
     if prices:
         # For sale here, but each one refused or no room for it: its stall clock runs.
         return StateOutcome(None, f"buy {code}: none here to take", state=state)
-    given_up = m.nav_stuck.given_up_travel
+    given_up = given_up_travel(m.nav_stuck, w.tick)
     dest = targets_mod.hold(
         m,
         w,
@@ -162,7 +162,7 @@ def _sale_price(e: Entity, code: str, items: dict) -> int | None:
 
 def _shop_cells_out_of_sight(w: WorldModel, ctx: PlayContext) -> list[ResolvedDestination]:
     """Known shop cells not given up and out of sight: one in sight shows what it sells."""
-    given_up = ctx.memory.nav_stuck.given_up_travel
+    given_up = given_up_travel(ctx.memory.nav_stuck, w.tick)
     here = w.pos
     assert here is not None
     out = []
@@ -190,7 +190,7 @@ def _find_shop(w: WorldModel, ctx: PlayContext, op: GoalOp, code: str, state: st
     m, plan = ctx.memory, ctx.plan
     assert plan is not None and w.pos is not None
     town = resolve_travel(TravelOp(to="town"), w, ctx.knowledge, m.strength)
-    if town is None or (town.map_id, town.pos) in m.nav_stuck.given_up_travel:
+    if town is None or (town.map_id, town.pos) in given_up_travel(m.nav_stuck, w.tick):
         return StateOutcome(None, f"buy {code}: no shop or town known", state=state)
     if town.map_id != w.map_id or not in_sight(w, town.map_id, w.pos, town.pos):
         out = walk_to(w, ctx, op, town, state)

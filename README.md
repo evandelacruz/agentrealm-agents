@@ -120,7 +120,7 @@ Pass criteria (PLAN.md A16, checked in [`m7_acceptance.py`](python/agentrealm_ag
 - no loop: 24 Step-sending decisions in a row at one cell with one reason (waiting, such as Heal resting, is not a loop);
 - no sustained oscillation: more than 3 `oscillation` events that gave up a target within 6000 ticks stops the run at once (events where survival states did the moving and nothing was given up do not count; a Heal or Loot walk given up by the guard counts);
 - no API error;
-- no return to a given-up target: acting again on a `travel` op that resolves to a cell stuck detection gave up on fails the run (`given_up_returns`, printed in the summary). A give-up on town or a shop lapses after 1200 ticks or once the agent stands 16 cells from where it gave up, and a travel there after that is not a return;
+- no return to a given-up target: acting again on a `travel` op that resolves to a cell stuck detection gave up on fails the run (`given_up_returns`, printed in the summary). Every give-up lapses when its backoff ends (300 ticks, doubling on each give-up of that target, A90), and a travel there after that is not a return;
 - with the planner on, no 3 planner errors in a row (a failed call, a reply that is not a JSON object, or one whose ops are all invalid; a lone error the backoff recovers from is reported, not fatal), no refused key (401/403), and at least one plan accepted; the summary prints both totals (every smoke script does);
 - on a run of at least 95% of an hour, safe-zone regen measured (yes or no), and the navigation target reached or given up on.
 

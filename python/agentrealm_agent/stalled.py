@@ -12,10 +12,12 @@ A record holds until something changes that gives a reason to retry
 opener), a new clue, or a new way known (a door whose warp is learned, a
 level entrance). The planner sees the records in State ``stalled_ops``.
 
-A block the stuck ladder walked to open and the oscillation guard caught
-pacing on is remembered the same way, as the ``break_block`` it was
-(``navigation/oscillation.py``, A111): ``break_cells`` keeps the ladder from
-nominating it again until the record lapses.
+This is the planner-side half of what failed where. The walk-side half is
+stuck detection's give-ups (``navigation/stuck.py`` ``NavStuckMemory.given_up``,
+A90): a walk target given up there, a block included, is backed off by time
+and raises a ``stuck`` trigger; it is not an op, so it is not remembered here.
+Both are kept per map for a target that names a cell (``map_local`` here, the
+map in ``stuck.goal_key`` there).
 """
 
 from __future__ import annotations
@@ -130,23 +132,6 @@ def find(records: list[StalledOp], op: dict[str, Any], map_id: int | None = None
     map-local target's record counts only on its own map (A111)."""
     target = target_of(op)
     return next((r for r in records if _same(r, target, map_id)), None)
-
-
-def break_cells(records: list[StalledOp], map_id: int | None) -> frozenset[tuple[int, int]]:
-    """The cells on ``map_id`` of the remembered ``break_block`` targets: a
-    block no walk is sent to open again, by the stuck ladder
-    (``break_memory.nominate_on_path``) or Heal, while its record holds
-    (A111). A record from another map, or with no map, names no cell here."""
-    if map_id is None:
-        return frozenset()
-    return frozenset(
-        (r.target["x"], r.target["y"])
-        for r in records
-        if r.map_id == map_id
-        and r.target.get("op") == "break_block"
-        and isinstance(r.target.get("x"), int)
-        and isinstance(r.target.get("y"), int)
-    )
 
 
 def lapse(records: list[StalledOp], now: RetryBasis) -> list[tuple[StalledOp, str]]:

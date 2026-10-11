@@ -522,7 +522,7 @@ class HealStateTest(unittest.TestCase):
         w, kb = self.zone_column()
         m = Memory()
         for cell in ((0, 1), (0, 3)):
-            m.nav_stuck.backoff_until[nav_stuck.goal_key("explore", 7, cell)] = 10_000
+            nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("explore", 7, cell), "explore", 10_000)
         out = dispatch(w, ctx(m, kb))
         self.assertEqual(out.state, "Heal")
         self.assertRegex(out.reason, r"heal_explore → \(0, [04]\)")  # the next edge cells, not the backed-off ones
@@ -533,7 +533,7 @@ class HealStateTest(unittest.TestCase):
 
         w, _ = self.zone_column()
         m = Memory()
-        m.nav_stuck.backoff_until[nav_stuck.goal_key("heal_explore", 7, (0, 1))] = 10_000
+        nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("heal_explore", 7, (0, 1)), "heal_explore", 10_000)
         self.assertNotIn((0, 1), safe_explore_targets(w, m, Policy(kind="scripted")))
         self.assertIn((0, 3), safe_explore_targets(w, m, Policy(kind="scripted")))
 

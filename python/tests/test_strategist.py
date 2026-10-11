@@ -22,6 +22,7 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent import __main__ as cli
 from agentrealm_agent.pathing import path_owned_by, plan_op_goal
+from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.item_table import InventorySupply
@@ -396,7 +397,7 @@ class AnswerTest(unittest.TestCase):
         )
         state = messages[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
         self.assertIn(f"stack (top first):\n  pinned {json.dumps(pinned, sort_keys=True)}\n  planner {json.dumps(mine, sort_keys=True)}", state)
-        self.assertIn('given_up_travel=["1:8,9"]', state)
+        self.assertIn('given_up_travel=[{"cell": "1:8,9", "retry_at_tick": 4}]', state)
         system = messages[0]["content"]
         self.assertIn("You cannot remove, reorder or replace them", system)
         self.assertIn("Plan around them", system)
@@ -430,7 +431,7 @@ class AnswerTest(unittest.TestCase):
         given_up = {"op": "travel", "to": "point", "x": 5, "y": 6, "map_id": 7}
         s = make(FakeLLM({"goals": [given_up, WAIT_ANSWER["goals"][0]]}, {"goals": [given_up]}))
         r = fake_runner()
-        r.mem.nav_stuck.given_up_travel[(7, (5, 6))] = 1
+        nav_stuck.remember_give_up(r.mem.nav_stuck, nav_stuck.goal_key("travel:point", 7, (5, 6)), "travel:point", r.world.tick)
         round_trip(s, r)
         self.assertEqual([g["op"] for g in r.plan.goals[r.plan.index :]], ["wait"])
         self.assertEqual(r.mem.strategist_signals, [])
@@ -441,7 +442,7 @@ class AnswerTest(unittest.TestCase):
     def test_a_resent_given_up_shop_is_filtered_whatever_its_to(self):
         shop = {"op": "travel", "to": "shop", "x": 5, "y": 6}
         s, r = make(FakeLLM({"goals": [shop, WAIT_ANSWER["goals"][0]]})), fake_runner()
-        r.mem.nav_stuck.given_up_travel[(7, (5, 6))] = 1
+        nav_stuck.remember_give_up(r.mem.nav_stuck, nav_stuck.goal_key("travel:point", 7, (5, 6)), "travel:point", r.world.tick)
         round_trip(s, r)
         self.assertEqual([g["op"] for g in r.plan.goals[r.plan.index :]], ["wait"])
 

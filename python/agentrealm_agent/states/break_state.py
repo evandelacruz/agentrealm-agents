@@ -14,9 +14,11 @@ from __future__ import annotations
 
 from ..break_memory import (
     BLOCK_OPENERS,
+    BREAK_GOAL,
     BreakChoice,
     attempt_failed,
     break_step_cost,
+    given_up_blocks,
     known_openers,
     no_break_reason,
     nominate_on_path,
@@ -26,14 +28,13 @@ from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, nav_search, next_step
 from ..plan import GoalOp
-from ..stalled import break_cells
 from ..world import WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op
 from .explore import plan_sets
 from .intents import arm, set_position, use_block
 from .solve import held_supply, use_reach
 
-GOAL = nav_stuck.BREAK_GOAL
+GOAL = BREAK_GOAL
 GOAL_STATE = "Break"  # only Break's own arming counts against stuck step 2, not Heal's
 
 
@@ -52,9 +53,9 @@ def _stuck_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
         nav_stuck.clear_break_target(att)
     if w.pos is None:
         return None
-    choice = nominate_on_path(w, ctx.knowledge, w.pos, att.target, break_cells(ctx.memory.stalled_ops, w.map_id))
+    choice = nominate_on_path(w, ctx.knowledge, w.pos, att.target, given_up_blocks(ctx.memory.nav_stuck, w.map_id, w.tick))
     if choice is not None:
-        # Kept on the attempt, so the walk to it is the one the oscillation guard gives up (A111).
+        # Kept on the attempt: Break walks to it until it opens, or a give-up of it ends step 2.
         nav_stuck.set_break_target(att, choice.pos, choice.capability)
     return choice
 
@@ -62,13 +63,16 @@ def _stuck_choice(w: WorldModel, ctx: PlayContext) -> BreakChoice | None:
 def _op_refusal(w: WorldModel, ctx: PlayContext, op: GoalOp) -> str | None:
     """Why the ``break_block`` op cannot open its block, or None to go on.
 
-    Its capability failed on that cell before, nothing held has it, or the
-    block in view is one that capability is not known to open (A103). A
-    block not yet in view is walked to first.
+    Its capability failed on that cell before, nothing held has it, the
+    block in view is one that capability is not known to open (A103), or a
+    walk to it was given up and is still backed off (A90). A block not yet
+    in view is walked to first.
     """
     pos = (op["x"], op["y"])
     cap = op["capability"]
     block = w.view.tiles.get(pos)
+    if pos in given_up_blocks(ctx.memory.nav_stuck, w.map_id, w.tick):
+        return f"no way to the {block or 'block'} at {pos[0]},{pos[1]}: the walk to it was given up"
     if attempt_failed(ctx.knowledge, w.map_id, pos, cap):
         return f"{cap} already failed on the {block or 'block'} at {pos[0]},{pos[1]}"
     if pick_supply_for_capability(w, cap, ctx.knowledge) is None:
@@ -110,7 +114,7 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
     if choice is None:
         att = nav_stuck.active(m, w)
         if att is not None and att.level == nav_stuck.BREAK:
-            skip = break_cells(m.stalled_ops, w.map_id)
+            skip = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
             why = no_break_reason(w, ctx.knowledge, w.pos, att.target, skip) if w.pos is not None else "no_break"
             nav_stuck.escalate(m, w, att, why)
         return StateOutcome(None, "nothing to break", state=state)

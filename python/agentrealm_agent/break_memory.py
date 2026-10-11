@@ -18,7 +18,7 @@ walk routes around it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Iterator
+from typing import TYPE_CHECKING, Any, Iterable, Iterator
 
 from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
 from .item_table import InventorySupply, merge_capability
@@ -26,6 +26,13 @@ from .knowledge_base import KnowledgeBase
 from .plan import CAPABILITIES
 from .supplies import break_capabilities, kept_on_break, listed
 from .world import Pos, WorldModel
+
+if TYPE_CHECKING:
+    from .navigation.stuck import NavStuckMemory
+
+# The ``Memory.goal`` of every walk to a block to break it: Break's, for the
+# plan's op or a stuck ladder's step 2, and Heal's cut toward food.
+BREAK_GOAL = "break"
 
 BREAKABLE = frozenset({"bush", "tree", "rock", "mountain", "wall"})
 REGROWTH_TICKS = 600  # cut bush grew back in 60 s (GAME_NOTES Breaking blocks)
@@ -243,7 +250,7 @@ def _choice_at(
 ) -> BreakChoice | None:
     """The cheapest way to open ``pos`` with what is held: a capability known
     to open it (``known_openers``) that has not failed there. None for a
-    cell in ``skip``: a block remembered as stalled (``stalled.break_cells``, A111)."""
+    cell in ``skip``: a block given up (``given_up_blocks``)."""
     if w.map_id is None or pos in skip or breakable_block(w, pos) is None:
         return None
     for cap in untried_capabilities(kb, w.map_id, pos, held & known_openers(w, kb, pos)):
@@ -259,15 +266,15 @@ def no_break_reason(
 ) -> str:
     """Why ``nominate_on_path`` found nothing, for stuck escalation's reasons:
     ``no_known_opener`` when a breakable stands on the route that nothing held
-    is known to open (or every known opener failed on), ``stalled_break``
-    when the only ones are remembered as stalled (``skip``), else ``no_break``."""
+    is known to open (or every known opener failed on), ``given_up_break``
+    when the only ones were given up (``skip``), else ``no_break``."""
     held = held_capabilities(w, kb)
     reason = "no_break"
     for p in _route(start, goal):
         if breakable_block(w, p) is None:
             continue
         if p in skip:
-            reason = "stalled_break"
+            reason = "given_up_break"
         elif _choice_at(w, kb, p, held) is None:
             return "no_known_opener"
     return reason
@@ -284,7 +291,7 @@ def nominate_on_path(
 
     Only cells on that route are candidates: a breakable beside or behind us
     does not open the way to ``goal``. A block no held item is known to open,
-    or one in ``skip`` (remembered as stalled), is passed over (``_choice_at``).
+    or one in ``skip`` (given up), is passed over (``_choice_at``).
     """
     held = held_capabilities(w, kb)
     if not held or w.map_id is None:
@@ -304,7 +311,7 @@ def break_costs_for_planning(
 ) -> dict[Pos, int]:
     """Break step costs for breakables on the straight route to ``goal`` that a
     held item is known to open with a capability not yet failed there, and
-    that are not in ``skip`` (remembered as stalled)."""
+    that are not in ``skip`` (given up)."""
     if w.map_id is None or w.pos is None:
         return {}
     held = held_capabilities(w, kb)
@@ -319,3 +326,14 @@ def break_costs_for_planning(
         if choice is not None:
             costs[p] = choice.cost
     return costs
+
+
+def given_up_blocks(stuck: NavStuckMemory, map_id: int | None, tick: int) -> frozenset[Pos]:
+    """The blocks on ``map_id`` a walk to break them was given up on and is
+    still backed off from: no ladder, cost grid or Heal walk nominates them
+    until the backoff ends (A90)."""
+    if map_id is None:
+        return frozenset()
+    return frozenset(
+        r.target for r in stuck.given_up.values() if r.goal == BREAK_GOAL and r.map_id == map_id and tick < r.until
+    )

@@ -1077,3 +1077,11 @@ Per A87, each names the rule a fix should generalize.
 3. **The first planner call is asked before the first full sync** (`strategist.py:1156`, the `map` trigger). Call 1, at tick 3, saw `armed=None`, `worn={}`, `held={}` and unread gems. It planned to buy the sword and mail the character already had. Call 2 dropped them 10 s later, so it cost one wasted call and no gems. Runs 9–11 show the same first State. **Rule:** the planner's first ask waits until self and inventory have been read once. (Addressed in A100: `WorldModel.synced`.)
 
 **Minor:** No Detour went for the (413–415, 414) piles, in view for most of the run 15–20 cells from the cutting ground. Grass yield fell from 27% (run 11) to 18% in the same region.
+
+### Run 13: stage 2 readiness met all run, and the planner kept gathering for iron gear no shop sells
+
+Reported defect only; the full run write-up is not filed here.
+
+#### Defects
+
+1. **A met stage does not move on** (`strategist.py` PROGRESSION, `upgrade_line`). Every stage 2 readiness test passed all run: 10/10 health, 3 potions, bronze sword armed, bronze mail worn. The planner kept gathering gems "for iron gear" with `upgrades_for_sale=none seen`: no iron item was known for sale anywhere, so it never moved on to levels. **Rule:** a stage whose readiness is met moves on unless the planner names a concrete, reachable reason to stay (an upgrade actually for sale and affordable soon); saving for an item not known to be for sale is not a reason. The planner gets the facts in State. (Addressed in A101: State `readiness`, per stage and check; the arc and the `upgrades_for_sale` contract say the rule; stage 1 says how to find an entrance when none is known.)

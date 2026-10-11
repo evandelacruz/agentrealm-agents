@@ -43,6 +43,12 @@ POST_REACH_CAP = GATHER_HOSTILE_RADIUS
 # would work inside its ground, in steps of walk: it prices that grass, so
 # free grass this much further off is picked first, and never bars it.
 FADED_POST_STEPS = 6
+# Ground within this many steps of what a known hostile holds, or of one in
+# view, is priced at ``NEAR_GROUND_STEPS`` a cell, never barred: a target or
+# a walk there may draw it out. The radius inside which the path planner
+# prices a hostile's cells as dangerous.
+NEAR_GROUND_RADIUS = GATHER_HOSTILE_RADIUS
+NEAR_GROUND_STEPS = FADED_POST_STEPS
 
 HostileKey = tuple[str, int]
 
@@ -63,31 +69,47 @@ def gather_bar(w: WorldModel, e: Entity, policy: Policy) -> int:
 class Danger:
     """What one decision knows of hostile ground, worked out once (``danger``):
     ``held``, the ground remembered hostiles hold (``known_reach``),
-    ``priced``, the ground of faded posts with the steps each adds to a cell
-    in it (``faded_reach``), and ``fight``, the op chose to fight for its
-    ground, so remembered ground and routes bar nothing."""
+    ``priced``, ground with the steps it adds to a cell in it: faded posts'
+    (``faded_reach``) and the ground near what a hostile holds or where one
+    in view stands (``near_reach``), and ``fight``, the op chose to fight for
+    its ground, so remembered ground and routes bar nothing."""
 
     held: tuple[tuple[Pos, int], ...] = ()
     priced: tuple[tuple[Pos, int, int], ...] = ()
     fight: bool = False
 
     def price(self, pos: Pos) -> int:
-        """Steps the faded posts whose ground covers ``pos`` add to it: the
-        dearest one's, so it stays at most ``FADED_POST_STEPS``."""
+        """Steps the priced ground covering ``pos`` adds to it: the dearest
+        zone's, so it stays at most ``FADED_POST_STEPS``."""
         return max((steps for c, r, steps in self.priced if chebyshev(c, pos) <= r), default=0)
 
     def priced_cells(self) -> dict[Pos, int]:
-        """Every cell faded ground covers, with its ``price``: a walk through
+        """Every cell priced ground covers, with its ``price``: a walk through
         it costs that much more, as a target in it does."""
-        return {p: self.price(p) for p in zone_cells([(c, r) for c, r, _ in self.priced])}
+        out: dict[Pos, int] = {}
+        for c, r, steps in self.priced:
+            for p in zone_cells([(c, r)]):
+                if out.get(p, 0) < steps:
+                    out[p] = steps
+        return out
 
 
 def danger(w: WorldModel, policy: Policy, fight: bool = False) -> Danger:
     """This decision's ``Danger``: nothing held or priced when ``fight``, else
-    ``known_reach`` and ``faded_reach``."""
+    ``known_reach``, and ``faded_reach`` with ``near_reach``."""
     if fight:
         return Danger(fight=True)
-    return Danger(tuple(known_reach(w, policy)), tuple(faded_reach(w, policy)))
+    held = known_reach(w, policy)
+    return Danger(tuple(held), tuple(faded_reach(w, policy) + near_reach(w, policy, held)))
+
+
+def near_reach(w: WorldModel, policy: Policy, held: list[tuple[Pos, int]]) -> list[tuple[Pos, int, int]]:
+    """The ground within ``NEAR_GROUND_RADIUS`` of ``held`` zones and of every
+    hostile in view's ``hostile_range``, each cell at ``NEAR_GROUND_STEPS``.
+    A post's reach grows when its guard comes out for us
+    (``WorldModel.note_came_for_us``), and this ground with it."""
+    zones = held + [(e.pos, policy.hostile_range) for e in w.entities if is_hostile(w, policy, e)]
+    return [(c, r + NEAR_GROUND_RADIUS, NEAR_GROUND_STEPS) for c, r in zones]
 
 
 def held_by_hostile(

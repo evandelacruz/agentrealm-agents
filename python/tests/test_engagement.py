@@ -241,5 +241,47 @@ class PricedTargetTest(unittest.TestCase):
         self.assertIsNone(detour_find(w, c, Danger(priced=(((14, 17), 1, 6),))))
 
 
+class NearGroundTest(unittest.TestCase):
+    """Ground near what a hostile holds is priced, and a pile there competes with grass on that price."""
+
+    POST = (30, 10)
+
+    def setUp(self):
+        self.policy = ctx(on_hostile="flee").policy
+        self.w = world(at=(20, 10))
+        self.guard = biter(7, self.POST)
+        guard_post(self.w, self.guard, self.POST)
+        self.w.entities = [gem(50, (25, 10))]  # 5 from the post: outside its ground, near it
+        self.w.view.tiles[(20, 16)] = "grass"  # 6 steps off, far from the post
+
+    def pick(self) -> tuple:
+        m = Memory()
+        gather_outcome(self.w, m, self.policy, op={"op": "gather_gems", "count": 5})
+        return m.gather_target
+
+    def test_grass_further_off_beats_a_pile_near_a_post(self):
+        self.assertEqual(self.pick(), ("grass", (20, 16)))
+
+    def test_with_no_hostile_known_the_pile_is_taken(self):
+        self.w.sightings.clear()
+        self.assertEqual(self.pick(), ("pile", (25, 10)))
+
+    def test_a_pile_counts_its_sure_gem_against_grass(self):
+        self.w.sightings.clear()
+        self.w.entities = [gem(50, (20, 22))]  # 12 steps, against grass at 6
+        self.assertEqual(self.pick(), ("pile", (20, 22)))
+
+
+class RepriceTest(unittest.TestCase):
+    def test_a_hostile_joining_a_fight_has_committed_targets_priced_again(self):
+        w, c = world(), ctx()
+        m = c.memory
+        m.gather_target, m.goal, m.path = ("pile", (14, 10)), "gather", [(11, 10), (12, 10)]
+        w.entities = [biter()]
+        fight_or_flee(w, m, c.policy, c.params)
+        self.assertIsNone(m.gather_target)
+        self.assertEqual((m.goal, m.path), ("", []))
+
+
 if __name__ == "__main__":
     unittest.main()

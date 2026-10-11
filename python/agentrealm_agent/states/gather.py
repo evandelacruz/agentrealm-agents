@@ -59,6 +59,7 @@ from ..survival import is_attacker, is_hostile, recently_attacked, would_lose
 from ..world import Entity, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
+from .detour import GEM_PILE_STEPS
 from .explore import plan_sets, safe_default
 from .fight import engage
 from .gather_safe import gather_ground, route_clear
@@ -651,23 +652,27 @@ def _replan_gather(
     barred: Callable[[], bool] = lambda: False,
 ) -> bool:
     """Plan to the committed target (``m.gather_target``) while one is kept,
-    else pick: the cheapest pile (in ``pile_region`` when set), then the
-    cheapest grass (``preferred``: field cells before safe ones),
+    else pick the cheaper of the cheapest pile (in ``pile_region`` when set)
+    and the cheapest grass (``preferred``: field cells before safe ones),
+    a pile counting ``GEM_PILE_STEPS`` cheaper: it is a gem for sure;
     then a kept walk to ground clear of hostiles (``CLEAR``, tried after the
     picks: it ends for something it can reach), then, on safe ground,
     out to field ground or the frontier; else, when ``barred()`` (known cells
     to cut held by a hostile), the nearest frontier clear of every known
     hostile (``_plan_clear``); leave ``m.path`` alone if none.
 
-    A target's price is its walk with danger on it: known hostiles' reach is
-    costly unless ``d.fight`` (``reach_cells``), a hostile in view prices the
-    cells round it, and faded ground adds its steps (``Danger.priced_cells``),
-    on the path and at the target alike (``_nearest_clear``). A target
-    whose path still crosses known reach is not taken (``route_clear``): a
-    kept one is let go at once, and the next cheapest is tried, up to
-    ``ROUTE_TRIES`` per kind. A hostile that came out to fight us holds the
-    ground out to where it did (``WorldModel.note_came_for_us``), so a
-    target it turned us back from is priced as held from then on.
+    A target's price is its walk with the danger on it (``_price``): known
+    hostiles' reach is costly unless ``d.fight`` (``reach_cells``), and
+    ground near what a hostile holds or where one stands, and faded posts'
+    ground, add their steps to each cell (``Danger.priced_cells``), on the
+    path and at the target alike. A target whose path still crosses known
+    reach is not taken (``route_clear``): a kept one is let go at once, and
+    the next cheapest is tried, up to ``ROUTE_TRIES`` per kind. A hostile
+    that comes out to fight us stretches the ground it holds, and the ground
+    priced round it, out to where it did (``WorldModel.note_came_for_us``),
+    and the fight has every committed target priced again
+    (``Memory.reprice_targets``), so a target it turned us back from costs
+    more from then on.
 
     A kept target is given up only when no path reaches it at all, or its
     path has started on a taken cell for ``HOLD_TICKS``; until then it is
@@ -700,14 +705,13 @@ def _replan_gather(
     piles = {
         e.pos for e in w.entities if is_gem_pile(e) and _pile_in(e.pos, pile_region) and gather_ground(w, e.pos, policy, d)
     }
-    found = _nearest_clear(w, piles, params, blocked, clear)
-    if found:
-        m.path, m.goal, m.gather_target = found[1], GOAL, ("pile", found[0])
+    pile = _nearest_clear(w, piles, params, blocked, clear)
+    grass = _nearest_clear(w, set(preferred), params, blocked, clear)
+    if pile and (grass is None or _price(pile[1], params) - GEM_PILE_STEPS <= _price(grass[1], params)):
+        m.path, m.goal, m.gather_target = pile[1], GOAL, ("pile", pile[0])
         return False
-
-    found = _nearest_clear(w, set(preferred), params, blocked, clear)
-    if found:
-        m.path, m.goal, m.gather_target = found[1], GOAL, ("grass", found[0])
+    if grass:
+        m.path, m.goal, m.gather_target = grass[1], GOAL, ("grass", grass[0])
         return False
 
     if kept is not None and kept[0] == CLEAR and _clear_of_hostiles(w, policy, kept[1], d):
@@ -743,6 +747,12 @@ def _keep(w: WorldModel, m: Memory, kept: tuple[str, Pos], path: list[Pos] | Non
             return True
     m.gather_hold = None  # no way there, or the way stayed taken: pick again
     return None
+
+
+def _price(path: list[Pos], params) -> int:
+    """A walk's price: its steps, and the steps priced ground adds to each
+    cell of it, the target's included (``Danger.priced_cells``)."""
+    return len(path) + sum(params.priced.get(p, 0) for p in path)
 
 
 def _pile_in(pos: Pos, region: tuple[int, int] | None) -> bool:

@@ -183,6 +183,14 @@ class Memory:
         if self.held_queue is not None and self.goal == SAFE_EXPLORE_GOAL:
             self.resend_held_queue = self.need_position = True
 
+    def reprice_targets(self) -> None:
+        """A hostile came into a fight with us: the danger picture changed,
+        so Gather's committed target and Detour's find are priced again on
+        their next decision, against everything else, instead of kept."""
+        if self.goal in ("gather", "detour"):
+            self.path, self.goal = [], ""
+        self.gather_target = self.gather_hold = self.detour = None
+
     def snapshot(self) -> Memory:
         """A deep copy, for :meth:`restore` after a probe that must leave no trace.
 

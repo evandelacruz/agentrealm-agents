@@ -65,6 +65,8 @@ def fight_or_flee(w: WorldModel, m: Memory, policy: Policy, params: dict[str, fl
 
     A hostile that joins the engagement stretches its post's reach to where
     we stand (``WorldModel.note_came_for_us``): it came out that far for us.
+    That changes what ground costs, so committed targets are priced again
+    (``Memory.reprice_targets``).
     """
     if policy.on_hostile == "ignore" or not w.alive or w.pos is None:
         m.engagement = None
@@ -75,9 +77,11 @@ def fight_or_flee(w: WorldModel, m: Memory, policy: Policy, params: dict[str, fl
         m.engagement = None
         return None
     known = e.group if e is not None else frozenset()
-    for h in joined:
-        if (h.kind, h.id) not in known:
-            w.note_came_for_us(h)
+    newcomers = [h for h in joined if (h.kind, h.id) not in known]
+    for h in newcomers:
+        w.note_came_for_us(h)
+    if newcomers:
+        m.reprice_targets()
     group = known | {(h.kind, h.id) for h in joined}
     m.engagement = decide(w, policy, params, group, e is not None and e.cannot_outrun)
     return m.engagement

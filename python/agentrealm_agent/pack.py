@@ -59,7 +59,7 @@ class Room:
 
 def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: KnowledgeBase | None) -> list[InventorySupply]:
     """Held and stowed supplies the plan will use, one per op that needs one:
-    ``use_block``'s ``code``, ``equip``'s ``code``, ``fight_boss``'s ``armed``
+    ``use_block``'s, ``equip``'s and ``use_item``'s ``code``, ``fight_boss``'s ``armed``
     and ``worn``, ``compose``'s held fragments (one per slot, from what is held,
     as Solve composes them), and ``break_block``'s tool for its ``capability`` (none when the
     armed supply has it, one kept for every break when a break does not use it
@@ -75,7 +75,7 @@ def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: K
 
     for op in ops:
         kind = op.get("op")
-        if kind in ("use_block", "equip") and isinstance(op.get("code"), str):
+        if kind in ("use_block", "equip", "use_item") and isinstance(op.get("code"), str):
             code = op["code"]
             claim(lambda s, c=code: supply_matches(c, s.code))
         elif kind == "compose" and isinstance(op.get("composes_into"), str):

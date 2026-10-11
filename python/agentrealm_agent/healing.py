@@ -231,12 +231,15 @@ def noop_drink_cause(w: WorldModel, d: AppliedDrink) -> NoopCause | None:
     named it, we no longer carry it, or health rose."""
     if d.used or d.supply_id not in carried_ids(w):
         return None
-    if w.health is not None and d.health is not None and w.health > d.health:
+    # Health is a drink's own measure: a chest used on yourself (A108) went
+    # through only once it is used up, whatever health did meanwhile.
+    drink = heals(d.code)
+    if drink and w.health is not None and d.health is not None and w.health > d.health:
         return None
     in_slot = w.armed_id == d.supply_id if w.armed_id is not None else w.armed_code == d.code
     if not in_slot:
         return "not_armed"
-    if w.health is not None and w.max_health is not None and w.health >= w.max_health:
+    if drink and w.health is not None and w.max_health is not None and w.health >= w.max_health:
         return "full_health"
     return "no_change"
 
@@ -332,6 +335,16 @@ def food_in_sight(w: WorldModel, m: Memory) -> list[Entity]:
     return out
 
 
+def in_hand(w: WorldModel) -> list[InventorySupply]:
+    """The held supplies, and the armed one: the snapshot may leave it out of
+    ``held`` (GAME_NOTES open questions). What a ``Use`` on yourself can be
+    sent with, after its ``Arm``."""
+    carried = list(w.held_supplies)
+    if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):
+        carried.append(InventorySupply(w.armed_id, w.armed_code))
+    return carried
+
+
 def carried_heal(
     w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]
 ) -> InventorySupply | None:
@@ -340,10 +353,7 @@ def carried_heal(
     The armed supply counts too: the snapshot may leave it out of ``held``
     (GAME_NOTES open questions), and a potion a drink left armed is still one
     to drink (A76)."""
-    carried = list(w.held_supplies)
-    if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):
-        carried.append(InventorySupply(w.armed_id, w.armed_code))
-    usable = [h for h in carried if can_try(m, w, "use", h.id)]
+    usable = [h for h in in_hand(w) if can_try(m, w, "use", h.id)]
     for h in usable:
         if is_food(h.code):
             return h

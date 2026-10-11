@@ -1165,7 +1165,6 @@ class Runner:
                 clear_refusal(m, "take", intent.get("supply_id"))
                 if take_raises_gems(code):
                     self.gem_cuts.note_take()
-                learn_chest_upgrade(w, code)
             self._note_heal_intent(intent, index)
             self._note_investigation(intent, result)
             if m.pending is not None and index == 0:
@@ -1272,8 +1271,8 @@ class Runner:
         m.heal_drink = None
 
     def _note_applied_drink(self, index: int, result: dict) -> None:
-        """Keep Heal's applied drink (``Memory.heal_drink``) for
-        ``file_heal_refusals`` to see whether it drank anything (A76)."""
+        """Keep the applied self-``Use`` (``Memory.heal_drink``: a drink or a
+        chest) for ``file_heal_refusals`` to see whether it went through (A76)."""
         w, m = self.world, self.mem
         sid = m.heal_drink
         assert sid is not None
@@ -1285,14 +1284,19 @@ class Runner:
     def file_noop_drink(self) -> None:
         """An applied drink that left its supply carried drank nothing: file
         why (``healing.noop_drink_cause``) and what Heal does about it, so the
-        same drink is not resent until something relevant changes (A76).
+        same drink is not resent until something relevant changes (A76). A
+        "drink" is any self-``Use`` (``states.use_item.use_on_self``): one of a
+        chest that went through raises the pack's carry slots (A108).
 
         Read at the next decision, from the observation after the drink and
         our own ``SupplyUsed``, never in the held-queue probe.
         """
         w, m = self.world, self.mem
         d, self._applied_drink = self._applied_drink, None
-        if d is None or (cause := noop_drink_cause(w, d)) is None:
+        if d is None:
+            return
+        if (cause := noop_drink_cause(w, d)) is None:
+            learn_chest_upgrade(w, d.code)  # a chest used up raised the pack (A108)
             return
         action = noop_action(cause, armed_first=d.armed_first)
         note_refusal(

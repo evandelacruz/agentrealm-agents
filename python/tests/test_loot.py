@@ -17,6 +17,7 @@ from agentrealm_agent.item_table import (
     InventorySupply,
     carried_from_inventory,
 )
+from agentrealm_agent.healing import AppliedDrink
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.loot import (
     LIFE_SCORE,
@@ -546,15 +547,32 @@ class RunnerLootLearningTest(unittest.TestCase):
         )
         self.assertEqual(self.kb.items, {})
 
-    def test_middle_chest_raises_capacity_to_the_manual_default_until_respawn(self):
+    def test_taking_a_middle_chest_leaves_capacity_alone(self):
+        # Held, a chest does nothing: only its Use on yourself raises the pack (A108).
         r = self.run_tick(
             [{"verb": "Take", "supply_id": 9}],
             [{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}],
             lives_after=10,
         )
+        self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
+
+    def test_a_middle_chest_used_up_raises_capacity_until_respawn(self):
+        r = self.run_tick([{"verb": "Wait"}], [], lives_after=10)
+        r.world.held_supplies = []
+        r._applied_drink = AppliedDrink(9, "middle_chest", 11, True, None)
+        r.file_noop_drink()
         self.assertEqual(r.world.carry_capacity, 30)
         r.world.apply_events([{"tick": 20, "events": [{"kind": "Respawned", "map_id": 1, "x": 2, "y": 3}]}])
         self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
+
+    def test_a_chest_use_that_left_it_carried_raises_nothing(self):
+        r = self.run_tick([{"verb": "Wait"}], [], lives_after=10)
+        r.world.held_supplies = [InventorySupply(9, "middle_chest")]
+        r.world.health, r.world.max_health = 8, 10
+        r._applied_drink = AppliedDrink(9, "middle_chest", 11, True, 5)  # health rose meanwhile: not the chest's doing
+        r.file_noop_drink()
+        self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
+        self.assertIn(("use", 9), r.mem.heal_refusals)
 
     def test_rejected_middle_chest_take_leaves_capacity_alone(self):
         rejection = {"category": "state", "code": "insufficient_gems", "retryability": "permanent"}

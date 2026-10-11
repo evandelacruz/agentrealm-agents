@@ -322,6 +322,7 @@ This is what makes a second run better than the first, and it is what the strate
   | `use_block` | `x`, `y`, `code` (the supply to arm, such as a key) | `Solve` |
   | `compose` | `composes_into` | `Solve` |
   | `fetch_item` | `code`, optional `x`, `y` | `Loot` |
+  | `use_item` | `code` (a held potion or chest, used on yourself) | `UseItem` |
   | `gather_gems` | `count` | `Gather` |
   | `hunt` | `npc_type`, optional `x`, `y` of the ground | `Fight` |
   | `enter_level` | `x`, `y` of the entrance | `Level` |

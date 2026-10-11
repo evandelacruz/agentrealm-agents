@@ -5,14 +5,12 @@ from __future__ import annotations
 
 from ..break_memory import nominate_on_path
 from ..config import Policy
-from ..equip import weapon_to_rearm
 from ..healing import (
     carried_heal,
     food_in_sight,
     health_low,
     hurt,
     known_safe_cells,
-    must_arm,
     must_stand_on,
     note_regen_sample,
     potion_count,
@@ -43,7 +41,8 @@ from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, top_op
 from .break_state import break_toward
 from .gather_safe import hostiles_near
-from .intents import arm_and_use, set_position, take, use_self
+from .intents import set_position, take
+from .use_item import use_on_self
 from ..executor.intents import wait
 
 # Food lying in sight that Heal tries to path to, nearest first.
@@ -374,7 +373,8 @@ def _cut_toward(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext, at: 
 
 def use_carried_heal(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
     """``Arm`` + ``Use`` self on carried food or a potion (API Use), one
-    paced queue so both are sent. Retreat runs it too, when it is losing
+    paced queue so both are sent, by the one Use-self path
+    (``use_item.use_on_self``, A108). Retreat runs it too, when it is losing
     ground (A9). A potion goes only when ``healing.spend_potion`` says it is
     worth drinking now: health low, or the drink turns the fight (A96).
 
@@ -393,25 +393,10 @@ def use_carried_heal(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
     The ``Arm`` never goes out without its ``Use``: a cooldown that does not
     leave room for both in one queue sends nothing yet (``arm_then_use``).
     """
-    m = ctx.memory
-    item = carried_heal(w, m, ctx.policy, ctx.params)
+    item = carried_heal(w, ctx.memory, ctx.policy, ctx.params)
     if item is None:
         return None
-    # Another supply of the same code in the slot is not this one: arm it (A76).
-    in_slot = w.armed_code == item.code and w.armed_id in (None, item.id)
-    if in_slot and not must_arm(m, item.id):
-        out = _out([use_self()], f"use {item.code}")
-    elif queue := arm_and_use(w, m, item.id, use_self()):
-        out = _out(queue, f"arm and use {item.code}")
-        out.paced = True
-    else:
-        out = _out(None, f"wait out the cooldown to arm and use {item.code}")
-        out.wait = True
-        return out
-    m.heal_drink = item.id
-    if m.heal_rearm is None:
-        m.heal_rearm = weapon_to_rearm(w, m)
-    return out
+    return use_on_self(w, ctx.memory, item, HealState.name)
 
 
 def _rearm_weapon(w: WorldModel, m: Memory) -> StateOutcome:

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from ..equip import ARMED, EquipUpgrade, best_equip_upgrade, hunting_ceiling, named_equip
+from ..equip import ARMED, EquipUpgrade, best_equip_upgrade, cannot_equip_reason, hunting_ceiling, is_on, named_equip
+from ..supplies import is_weapon
 from ..knowledge_base import knowledge_items
 from ..navigation import stuck as nav_stuck
 from ..world import WorldModel
@@ -14,8 +15,10 @@ class EquipState(State):
     """Executor for ``equip``: one upgrade per decision, best first, by the one
     best-weapon rule the planner is told (``equip.weapon_rank``). An op with a
     ``code`` arms or wears that held item instead, the planner's call. The op
-    is finished once nothing is left to do: no upgrade, or the named item on,
-    not held or refused."""
+    is finished once nothing is left to do: no upgrade, or the named item on.
+    A named item that is not held, cannot be armed or worn (a potion or a
+    chest is used, ``use_item``), or was refused, drops the op with why:
+    nothing was applied, so it is not done (A108)."""
 
     name = "Equip"
 
@@ -31,7 +34,15 @@ class EquipState(State):
         op = my_op(ctx, self.name)
         assert op is not None and ctx.plan is not None
         code = op.get("code")
-        up = named_equip(world, ctx.memory, code, _armed_owned(world, ctx)) if code else _upgrade(world, ctx)
+        armed_owned = _armed_owned(world, ctx)
+        up = named_equip(world, ctx.memory, code, armed_owned) if code else _upgrade(world, ctx)
+        if up is None and code and armed_owned and is_weapon(code):
+            return StateOutcome(None, f"the armed slot is busy: {code} waits", state=self.name)
+        if up is None and code and not is_on(world, code):
+            # Done means the named item is on; nothing applied is a drop (A108).
+            why = cannot_equip_reason(world, code)
+            ctx.plan.drop_current(why, memory=ctx.memory)
+            return StateOutcome(None, why, state=self.name)
         if up is None:
             ctx.plan.finish_current("nothing left to equip", memory=ctx.memory)
             return StateOutcome(None, "nothing to equip", state=self.name)

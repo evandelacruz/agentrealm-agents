@@ -5,7 +5,7 @@ from __future__ import annotations
 from ..config import Policy
 from ..item_table import InventorySupply
 from ..knowledge_base import KnowledgeBase, knowledge_items
-from ..loot import carry_slots_used, loot_score, worst_droppable
+from ..loot import carry_slots_used, loot_score
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
@@ -14,7 +14,7 @@ from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .explore import plan_sets
-from .intents import drop, set_position, withdraw, withdraw_all
+from .intents import set_position, withdraw, withdraw_all
 
 
 def _map_view(w: WorldModel, map_id: int):
@@ -54,7 +54,8 @@ def _chest_supplies(contents: list) -> list[InventorySupply]:
 def death_chest_recover_intents(
     w: WorldModel, chest_id: int, contents: list, items: dict
 ) -> list[dict] | None:
-    """``WithdrawFromChest`` when there is room; ``Drop`` junk when full but worth it; else skip (A20).
+    """``WithdrawFromChest`` when there is room; with a full pack, skip: what to
+    give up is the planner's call, never a reflex's (``pack``, A102; A20).
 
     When only some fit, withdraw the best by id: a bare withdraw takes the
     lowest ids first (B117), which could be junk instead of what the drop was for.
@@ -68,13 +69,7 @@ def death_chest_recover_intents(
     if room > 0:
         best_first = sorted(supplies, key=lambda s: (-loot_score(s.code, items), s.id))
         return [withdraw(chest_id, [s.id for s in best_first[:room]])]
-    shed = worst_droppable(w, items)
-    if shed is None:
-        return None
-    best = max(loot_score(s.code, items) for s in supplies)
-    if best <= loot_score(shed.code, items):
-        return None
-    return [drop(shed.id)]
+    return None
 
 
 def recover_outcome(
@@ -108,13 +103,7 @@ def recover_outcome(
             items = knowledge_items(knowledge)
             intents = death_chest_recover_intents(w, chest_id, contents, items)
             if intents is not None:
-                verb = intents[0]["verb"]
-                reason = (
-                    f"recover from chest {chest_id}"
-                    if verb == "WithdrawFromChest"
-                    else f"drop for chest {chest_id}"
-                )
-                return StateOutcome(intents, reason, reflex=True, state=state)
+                return StateOutcome(intents, f"recover from chest {chest_id}", reflex=True, state=state)
         if contents is None:
             return StateOutcome(None, f"open chest {chest_id}", state=state, wait=True)
 

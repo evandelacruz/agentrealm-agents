@@ -63,11 +63,11 @@ OP_FIELDS: dict[str, str] = {
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
     "say": "text, and exactly one of npc_id (an id from State nearby_npcs) or npc_type (an NPC type code; the nearest NPC of that type in sight)",
-    "buy": "code (a potion, a tool, gear). Buys one more, whatever is already held: holding some does not skip it or finish it, it spends the price again (State held shows how many are held). It is done once one more is held than the fewest held since it reached the top (one picked up for free counts too), so put two buy ops on the stack to buy two. With none in sight it walks to the nearest known shop, or to town to look for one; it is dropped when no known shop sells it or it costs more gems than are held",
+    "buy": "code (a potion, a tool, gear). Buys one more, whatever is already held: holding some does not skip it or finish it, it spends the price again (State held shows how many are held). It is done once one more is held than the fewest held since it reached the top (one picked up for free counts too), so put two buy ops on the stack to buy two. With none in sight it walks to the nearest known shop, or to town to look for one; it is dropped when no known shop sells it or it costs more gems than are held. Optional drop (the code of a held item to drop for room when the pack is full; see State pack)",
     "break_block": 'x, y, capability ("cut"|"chop"|"smash"|"burn"|"blast")',
     "use_block": "x, y, code (the supply to use on it)",
     "compose": "composes_into (the whole item to make)",
-    "fetch_item": "code, optional x, y",
+    "fetch_item": "code, optional x, y, optional drop (as buy's)",
     "gather_gems": "count (the gem total to reach), optional fight (true: gather on ground a known hostile holds, and walk through its reach, taking the fight; left out, Gather keeps clear of it), optional x, y (a block of the region to gather in: Gather walks there and cuts only there, and walks to gem piles only there, while it has a cell to cut; it lifts that region's barren mark. The region is committed: a reply that moves it keeps the old one unless that region is barren or poor, Gather went 30 s without getting nearer it or, once there, without a cut there taking effect, or a death, new map, hurt or hostile pack came up)",
     "equip": "optional code (arms or wears exactly that held item; else the best held gear is armed and worn)",
     "enter_level": "x, y (the level door)",
@@ -210,8 +210,16 @@ def _validate_say(op: dict[str, Any]) -> bool:
     return True
 
 
+def _validate_drop(op: dict[str, Any]) -> bool:
+    """``drop`` on a ``buy`` or ``fetch_item``: the held item to give up for room (A102)."""
+    if "drop" in op and not _is_str(op["drop"]):
+        _drop("bad drop", op)
+        return False
+    return True
+
+
 def _validate_buy(op: dict[str, Any]) -> bool:
-    return _require_fields(op, ("code",)) and _is_str(op["code"])
+    return _require_fields(op, ("code",)) and _is_str(op["code"]) and _validate_drop(op)
 
 
 def _validate_break_block(op: dict[str, Any]) -> bool:
@@ -240,7 +248,7 @@ def _validate_compose(op: dict[str, Any]) -> bool:
 
 
 def _validate_fetch_item(op: dict[str, Any]) -> bool:
-    if not _require_fields(op, ("code",)) or not _is_str(op["code"]):
+    if not _require_fields(op, ("code",)) or not _is_str(op["code"]) or not _validate_drop(op):
         return False
     if "x" in op or "y" in op:
         if not _is_int(op.get("x")) or not _is_int(op.get("y")):
@@ -579,6 +587,10 @@ class Plan:
     def current(self) -> GoalOp | None:
         """The op at the top of the stack, or None when it is empty."""
         return self.goals[self.index] if self.index < len(self.goals) else None
+
+    def ops_left(self) -> list[GoalOp]:
+        """Every op still on the stack, top first: what the plan will yet use (A102)."""
+        return self.goals[self.index :]
 
     def directive_ops(self) -> list[GoalOp]:
         """The directives ops still left: the planner's goals go below these (A35)."""

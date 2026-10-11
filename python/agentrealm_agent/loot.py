@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from .item_table import InventorySupply
 from .supplies import chest_capacity, heals
-from .world import Entity, Pos, WorldModel, chebyshev
+from .world import Entity, Pos, WorldModel
 
 if TYPE_CHECKING:
     from .knowledge_base import KnowledgeBase
@@ -97,13 +97,6 @@ def droppable_supplies(w: WorldModel) -> list[InventorySupply]:
     return [s for s in w.held_supplies if s.code not in NON_TRANSFERABLE and s.id not in w.undroppable]
 
 
-def worst_droppable(w: WorldModel, items: dict[str, dict[str, Any]]) -> InventorySupply | None:
-    candidates = droppable_supplies(w)
-    if not candidates:
-        return None
-    return min(candidates, key=lambda s: (loot_score(s.code, items), s.id))
-
-
 @dataclass(frozen=True)
 class Pickup:
     """One supply worth carrying: on the ground (``chest_id`` None) or in a chest."""
@@ -113,21 +106,6 @@ class Pickup:
     pos: Pos
     chest_id: int | None
     score: int
-
-
-def pickup_room(w: WorldModel, p: Pickup, items: dict[str, dict[str, Any]]) -> InventorySupply | None | bool:
-    """True when ``p`` fits now; the supply to drop for it; False to skip it.
-
-    A full pack skips a pickup that does not beat the worst droppable supply.
-    """
-    if p.chest_id is None and is_counter_supply(p.code, items):
-        return True
-    if not inventory_full(w):
-        return True
-    shed = worst_droppable(w, items)
-    if shed is None or p.score <= loot_score(shed.code, items):
-        return False
-    return shed
 
 
 def pickups(w: WorldModel, items: dict[str, dict[str, Any]]) -> list[Pickup]:
@@ -147,16 +125,6 @@ def pickups(w: WorldModel, items: dict[str, dict[str, Any]]) -> list[Pickup]:
         for s in w.chest_contents.get(e.id) or []:
             out.append(Pickup(s.id, s.code, e.pos, e.id, loot_score(s.code, items)))
     return out
-
-
-def worthwhile_pickups(w: WorldModel, items: dict[str, dict[str, Any]]) -> list[Pickup]:
-    """Pickups that fit or are worth a drop, best first, then nearest."""
-    here = w.pos
-    if here is None:
-        return []
-    keep = [p for p in pickups(w, items) if pickup_room(w, p, items) is not False]
-    keep.sort(key=lambda p: (-p.score, chebyshev(p.pos, here), p.supply_id))
-    return keep
 
 
 def supply_code_for_take(intent: dict | None, entities: list[Entity]) -> str | None:

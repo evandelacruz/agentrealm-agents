@@ -22,10 +22,16 @@ yield), the best better region known nearby (``gem_yield.better_region``).
 Gather walks to it and cuts only there while it has a cell to cut; poor
 regions are left alone while a better one is known. With nothing known to
 cut there, a named region it has not seen is walked toward, and otherwise
-Gather works as if there were no target (free-play run 2)."""
+Gather works as if there were no target (free-play run 2).
+
+Working anywhere, the cheapest grass is weighed against the nearest
+unexplored ground (``_explore_instead``), each priced as its walk plus a cut
+for each gem the op still needs at the yield there (``GemOdds``): known
+grass far off wins only when its yield outweighs the walk (A105)."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import cache
 from typing import Callable, Iterable
 
@@ -40,6 +46,7 @@ from ..gem_yield import (
     better_region,
     exhausted_cells,
     poor_regions,
+    region_yields,
     STALL_SECONDS,
     blocks_to_region,
     cut_or_since,
@@ -53,6 +60,7 @@ from ..knowledge_base import KnowledgeBase
 from ..loot import GEM_PILE_STEPS
 from ..memory import Memory
 from ..navigation import CostGridParams, cost_path, nearest_target
+from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, next_step
 from ..plan import GoalOp
 from ..engagement import would_fight
@@ -76,6 +84,7 @@ OUT = "out"  # ``m.gather_target`` kind: walking off safe ground to field ground
 OFF = "off"  # ``m.gather_target`` kind: moving off from a hostile that shadows us
 REGION = "region"  # ``m.gather_target`` kind: walking toward a target region with no cuttable cell seen yet
 CLEAR = "clear"  # ``m.gather_target`` kind: walking to the frontier clear of hostiles, every known cell to cut barred by one
+FRONTIER = "frontier"  # ``m.gather_target`` kind: walking to unexplored ground priced cheaper than the known grass
 # Known targets tried per replan, nearest first: bounds the searches when the
 # closest ones turn out unreachable (across water, say).
 GATHER_CANDIDATES = 16
@@ -104,7 +113,13 @@ MOVING_OFF = "moving off from a hostile that shadows"
 FIGHTING = "fighting a hostile that shadows"
 WAITING = "way to {} taken, waiting"
 STALLED = "{}, no cut for {} s"
-WALK_TARGETS = {"grass": "grass", "pile": "a gem pile", REGION: "a target region", CLEAR: "ground clear of hostiles"}
+WALK_TARGETS = {
+    "grass": "grass",
+    "pile": "a gem pile",
+    REGION: "a target region",
+    CLEAR: "ground clear of hostiles",
+    FRONTIER: "unexplored ground",
+}
 IN_REGION = "{} (region {},{})"  # any status while Gather works only in a target region
 
 
@@ -248,8 +263,9 @@ def gather_outcome(
     dead_regions, dead_cells = gem_cuts.uncuttable(w, safe) if gem_cuts is not None else (set(), set())
     exhausted = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | dead_cells
     barred = cache(lambda: _barred_by_hostile(w, policy, skip | dead_regions, exhausted, d))
+    odds = cache(lambda: gem_odds(w, knowledge, op, skip | dead_regions))
     out, worked = _gather_step(
-        w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state, shadow, target, named, d, barred
+        w, m, policy, here, skip | dead_regions, exhausted, safe, knowledge, state, shadow, target, named, d, barred, odds
     )
     walk = m.gather_target[0] if m.gather_target is not None and m.goal == GOAL else None
     if out.wait and m.gather_target is not None:
@@ -343,13 +359,16 @@ def _gather_step(
     named: bool = False,
     d: Danger | None = None,
     barred: Callable[[], bool] = lambda: False,
+    odds: Callable[[], GemOdds] | None = None,
 ) -> tuple[StateOutcome, tuple[int, int] | None]:
     """Gather's move, and the target region it works only in (None when it
     works anywhere).
 
     While Gather works only in a target region, it walks to gem piles only
     there (free-play run 5: piles outside the named region drew it to a
-    hostile's post); one in reach is taken wherever it lies."""
+    hostile's post); one in reach is taken wherever it lies. Working
+    anywhere, it weighs the grass it knows against unexplored ground by
+    ``odds()`` (``_explore_instead``)."""
     view = w.view
     cuttable = {
         p
@@ -370,7 +389,10 @@ def _gather_step(
                 return out, target
     # Field cells first; safe ones only when no field cell is left to cut.
     preferred = {p for p in cuttable if p not in safe} or cuttable
-    out = _gather_cells(w, m, policy, here, preferred, cuttable, safe, knowledge, state, shadow, d, worked, barred)
+    out = _gather_cells(
+        w, m, policy, here, preferred, cuttable, safe, knowledge, state, shadow, d, worked, barred,
+        odds if worked is None else None,
+    )
     return out, worked
 
 
@@ -388,6 +410,7 @@ def _gather_cells(
     d: Danger | None = None,
     pile_region: tuple[int, int] | None = None,
     barred: Callable[[], bool] = lambda: False,
+    odds: Callable[[], GemOdds] | None = None,
 ) -> StateOutcome:
     """Take or cut what is in reach, else walk to the committed target (A71),
     else to the nearest of ``preferred``; ``barred()``: known cells to cut are
@@ -400,7 +423,8 @@ def _gather_cells(
     state walked in between or another cell became nearer (``_still_wanted``,
     ``_replan_gather``). ``d`` is the decision's ``Danger``: remembered
     hostiles' ground, and whether the op chose to fight for it;
-    ``pile_region`` bounds the piles it walks to; one in reach is taken anywhere."""
+    ``pile_region`` bounds the piles it walks to; one in reach is taken anywhere;
+    ``odds()`` weighs the grass against unexplored ground (``_explore_instead``)."""
     view = w.view
 
     _, plan_avoid, plan_costly = plan_sets(w, m, policy, knowledge)
@@ -425,7 +449,7 @@ def _gather_cells(
         return _cut(w, m, knowledge, here, "cut grass", state)
 
     # A target that no longer qualifies is let go, whoever walked last.
-    if not _still_wanted(w, m.gather_target, policy, cuttable, here in safe, d, pile_region):
+    if not _still_wanted(w, m.gather_target, policy, cuttable, here in safe, d, pile_region, odds):
         if m.goal == GOAL:
             m.path, m.goal = [], ""
         m.gather_target = None
@@ -439,7 +463,9 @@ def _gather_cells(
     ):
         m.path, m.goal = [], ""  # something new to cut or take: ``_replan_gather`` tries it before the walk
     step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
-    if step is None and _replan_gather(w, m, policy, plan_avoid, plan_costly, preferred, safe, d, pile_region, barred):
+    if step is None and _replan_gather(
+        w, m, policy, plan_avoid, plan_costly, preferred, safe, d, pile_region, barred, odds
+    ):
         return StateOutcome(None, f"gather → {m.gather_target[1]}: way taken, waiting", state=state, wait=True, progress=False)
     step = next_step(w, plan_avoid, m.path) if m.goal == GOAL else None
     if step is not None:
@@ -603,6 +629,7 @@ def _still_wanted(
     on_safe: bool,
     d: Danger | None = None,
     pile_region: tuple[int, int] | None = None,
+    odds: Callable[[], GemOdds] | None = None,
 ) -> bool:
     """The committed target still exists and may still be worked (A71).
 
@@ -626,6 +653,17 @@ def _still_wanted(
         # Dropped once a hostile comes to hold the cell it walks to; a cell
         # to cut or a pile coming into sight is ``_gather_cells``'s to judge.
         return _clear_of_hostiles(w, policy, pos, d)
+    if kind == FRONTIER:
+        # Kept until its cell is no longer unexplored ground's edge (what the
+        # walk revealed is then priced again), and only while it would still
+        # be priced: Gather works anywhere (``odds``, None once it works only
+        # in a target region) and the edge's region is not skipped.
+        return (
+            odds is not None
+            and region_of(pos) not in odds().skip
+            and pos in w.view.frontier()
+            and gather_ground(w, pos, policy, d)
+        )
     if kind == OUT:
         # Kept while on safe ground: it was planned because no cut was
         # reachable, so re-checking ``preferred`` each tick would only replan
@@ -635,7 +673,7 @@ def _still_wanted(
 
 
 # Target kinds ``_replan_gather`` walks back to once another state took the path.
-KEPT_KINDS = ("pile", "grass", OUT, CLEAR)
+KEPT_KINDS = ("pile", "grass", OUT, CLEAR, FRONTIER)
 # Gather waits this long for a taken first step toward its target (an
 # occupant), then gives the target up (5 s at 10 ticks/s, as a walk's fog hold).
 HOLD_TICKS = 50
@@ -652,12 +690,15 @@ def _replan_gather(
     d: Danger | None = None,
     pile_region: tuple[int, int] | None = None,
     barred: Callable[[], bool] = lambda: False,
+    odds: Callable[[], GemOdds] | None = None,
 ) -> bool:
     """Plan to the committed target (``m.gather_target``) while one is kept,
     else pick: the pile (in ``pile_region`` when set) and the grass
     (``preferred``: field cells before safe ones) each cheapest by path cost
     (``_nearest_clear``), then the cheaper of the two by ``_price``, a pile
-    counting ``GEM_PILE_STEPS`` cheaper: it is a gem for sure;
+    counting ``GEM_PILE_STEPS`` cheaper: it is a gem for sure; the grass only
+    when, by ``odds()``, it is no dearer than the nearest unexplored ground
+    (``_explore_instead``), else that ground (``FRONTIER``);
     then a kept walk to ground clear of hostiles (``CLEAR``, tried after the
     picks: it ends for something it can reach), then, on safe ground,
     out to field ground or the frontier; else, when ``barred()`` (known cells
@@ -714,7 +755,11 @@ def _replan_gather(
         m.path, m.goal, m.gather_target = pile[1], GOAL, ("pile", pile[0])
         return False
     if grass:
-        m.path, m.goal, m.gather_target = grass[1], GOAL, ("grass", grass[0])
+        explore = _explore_instead(w, m, policy, grass, params, blocked, clear, safe, odds(), d) if odds else None
+        if explore:
+            m.path, m.goal, m.gather_target = explore[1], GOAL, (FRONTIER, explore[0])
+        else:
+            m.path, m.goal, m.gather_target = grass[1], GOAL, ("grass", grass[0])
         return False
 
     if kept is not None and kept[0] == CLEAR and _clear_of_hostiles(w, policy, kept[1], d):
@@ -750,6 +795,86 @@ def _keep(w: WorldModel, m: Memory, kept: tuple[str, Pos], path: list[Pos] | Non
             return True
     m.gather_hold = None  # no way there, or the way stayed taken: pick again
     return None
+
+
+@dataclass(frozen=True)
+class GemOdds:
+    """What Gather weighs a walk against: the gems the op still needs, and
+    the gems a cut drops in each region of this map (``gem_yield.region_yield``,
+    the map's ``expected_yield`` where no cut was made), and the regions
+    Gather skips."""
+
+    need: int
+    rate: float
+    by_region: dict[tuple[int, int], float]
+    skip: frozenset[tuple[int, int]]
+
+    def cost(self, walk: int, at: Pos) -> float:
+        """A target's price: the walk to it, then a cut, an action like a
+        step, for each gem a cut there is expected to drop, until the op has
+        its count."""
+        return walk + self.need / max(self.by_region.get(region_of(at), self.rate), 1e-6)
+
+
+def gem_odds(
+    w: WorldModel, knowledge: KnowledgeBase | None, op: GoalOp | None, skip: set[tuple[int, int]]
+) -> GemOdds:
+    """``GemOdds`` for this decision."""
+    rate, by_region = region_yields(knowledge, w.map_id)
+    need = max(1, int(op["count"]) - (w.gems or 0)) if op is not None and "count" in op else 1
+    return GemOdds(need, rate, by_region, frozenset(skip))
+
+
+def _steps_to_grass(w: WorldModel) -> float:
+    """Steps past the edge of unexplored ground to grass: grass is expected
+    there as often as on the ground known, one cell in (walkable cells + 1)
+    / (grass cells + 1) of this map."""
+    view = w.view
+    walkable = sum(1 for p in view.tiles if view.walkable(p))
+    grass = sum(1 for block in view.tiles.values() if block in GATHER_BLOCKS)
+    return (walkable + 1) / (grass + 1)
+
+
+def _explore_instead(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    grass: tuple[Pos, list[Pos]],
+    params: CostGridParams,
+    blocked: set[Pos],
+    clear: Callable[[list[Pos]], bool],
+    safe: set[Pos],
+    odds: GemOdds,
+    d: Danger | None = None,
+) -> tuple[Pos, list[Pos]] | None:
+    """The nearest edge of unexplored ground and its path, when it is the
+    cheaper place to work than ``grass``, else None.
+
+    Both are priced alike (``GemOdds.cost``): the walk by ``_price``, then the
+    cuts for the gems still needed at the yield there, measured or the map's
+    ``expected_yield`` on unsampled ground. The edge also pays the steps past
+    it to grass (``_steps_to_grass``). So known grass far off wins
+    only when its yield makes up for the longer walk, and grass as near as
+    the edge always wins. Edges on safe ground (no gems), in a skipped
+    region, or off ``gather_ground`` are not priced, nor are edges the
+    explorers' stuck detection gave up on and still backs off
+    (``nav_stuck.filter_frontiers``). An edge cannot stay one once Gather
+    walks up to it: the terrain read there fills every cell of the
+    perception window, ground or none (``WorldModel.apply_terrain``)."""
+    here = w.pos
+    edges = {
+        p
+        for p in nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier(), w.tick)
+        if p != here
+        and p not in safe
+        and region_of(p) not in odds.skip
+        and gather_ground(w, p, policy, d)
+    }
+    edge = _nearest_clear(w, edges, params, blocked, clear) if edges else None
+    if edge is None:
+        return None
+    there = odds.cost(_price(edge[1], params), edge[0]) + _steps_to_grass(w)
+    return edge if there < odds.cost(_price(grass[1], params), grass[0]) else None
 
 
 def _price(path: list[Pos], params: CostGridParams) -> int:

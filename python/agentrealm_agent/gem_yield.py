@@ -361,6 +361,24 @@ def expected_yield(by_region: dict[str, dict[str, Any]]) -> float:
     return (gems + PRIOR_YIELD * PRIOR_CUTS) / (cuts + PRIOR_CUTS)
 
 
+def region_yield(region: dict[str, Any] | None, rate: float) -> float:
+    """Gems a cut drops in one region, from its own totals pulled toward the
+    map's ``rate`` (:func:`expected_yield`) as that one is toward the prior:
+    unsampled ground is worth ``rate``, and a few lucky or unlucky cuts move it
+    only a little."""
+    cuts = int(region.get("cuts", 0)) if region else 0
+    gems = int(region.get("gems", 0)) if region else 0
+    return (gems + rate * PRIOR_CUTS) / (cuts + PRIOR_CUTS)
+
+
+def region_yields(kb: KnowledgeBase | None, map_id: int | None) -> tuple[float, dict[tuple[int, int], float]]:
+    """This map's :func:`expected_yield`, and each region's :func:`region_yield`
+    by ``(rx, ry)``; a region missing is unsampled, worth the map's rate."""
+    by_region = regions(kb, map_id)
+    rate = expected_yield(by_region)
+    return rate, {r: region_yield(v, rate) for key, v in by_region.items() if (r := _parse(key)) is not None}
+
+
 def barren_min_cuts(rate: float = PRIOR_YIELD) -> int:
     """Cuts with no gem after which ground dropping at ``rate`` would have
     shown one at least ``1 - BARREN_FALSE_RATE`` of the time (15 at 20%)."""

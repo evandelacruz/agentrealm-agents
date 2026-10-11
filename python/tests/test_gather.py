@@ -15,16 +15,20 @@ from agentrealm_agent.states import gather as gather_mod
 from agentrealm_agent.hostile_ground import GATHER_HOSTILE_RADIUS, GATHER_SHADOW_MARGIN
 from agentrealm_agent.states.gather_safe import gather_ground, is_safe_ish
 from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.gem_yield import NO_EFFECT_ZONE_CUTS, GemYieldTracker
+from agentrealm_agent.gem_yield import NO_EFFECT_ZONE_CUTS, GemYieldTracker, record_cut
+from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.zone_discovery import apply_zone
 
 
 def grid(rows: list[str], at=(1, 1)) -> WorldModel:
+    """A world from ``rows``; a space is a cell not known yet."""
     glyph = {".": "dirt", "g": "grass", "b": "bush", "#": "wall", "l": "lava"}
     w = WorldModel(character_id=1, map_id=7, pos=at, perception=5)
     for y, row in enumerate(rows):
         for x, ch in enumerate(row):
-            w.view.tiles[(x, y)] = glyph.get(ch, "dirt")
+            if ch != " ":
+                w.view.tiles[(x, y)] = glyph.get(ch, "dirt")
     w.terrain_center, w.terrain_map = at, 7
     w.attack_range = 1
     w.gems = 0
@@ -494,11 +498,12 @@ class GatherFallbackTest(unittest.TestCase):
     """Nothing to cut in reach: walk to known cuttable ground before exploring (A63 run 1)."""
 
     def test_walks_to_known_grass_far_away_rather_than_exploring(self):
-        w = grid(["." * 30 + "g"], at=(0, 0))
+        # Walled in: no unexplored ground to weigh it against (A105).
+        w = grid(["#" * 33, "#" + "." * 30 + "g#", "#" * 33], at=(1, 1))
         c = ctx(w, ["gather_gems:3"])
         out = dispatch(w, c)
         self.assertEqual(out.state, "Gather")
-        self.assertEqual(c.memory.gather_target, ("grass", (30, 0)))
+        self.assertEqual(c.memory.gather_target, ("grass", (31, 1)))
         self.assertEqual(c.memory.gather_status, "walking to grass", "a walk is not a cut (A63 run 3)")
 
     def test_explores_when_no_known_cell_is_cuttable(self):
@@ -702,7 +707,7 @@ class GatherStatusTest(unittest.TestCase):
         self.assertEqual(m.gather_status, gather_mod.BLOCKED)
 
     def test_flags_no_cut_for_a_while(self):
-        w = grid(["." * 30 + "g"], at=(0, 0))
+        w = grid(["#" * 33, "#" + "." * 30 + "g#", "#" * 33], at=(1, 1))
         m = Memory()
         tracker = GemYieldTracker()
         gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
@@ -714,3 +719,109 @@ class GatherStatusTest(unittest.TestCase):
         tracker.last_cut_tick = w.tick
         gather_outcome(w, m, Policy(on_hostile="ignore"), gem_cuts=tracker)
         self.assertEqual(m.gather_status, "walking to grass", "a cut restarts the clock")
+
+
+class GatherPricesUnexploredGroundTest(unittest.TestCase):
+    """A105: with no region named, known grass is weighed against the nearest
+    unexplored ground, each by its walk and the cuts the gems still needed
+    take at the yield there."""
+
+    # Walled in but for an opening at (0, 1): unexplored ground two steps
+    # from (3, 1), known grass 37 steps off at (40, 1).
+    ROWS = ["#" * 42, " " + "." * 39 + "g#", "#" * 42]
+
+    def world(self) -> WorldModel:
+        w = grid(self.ROWS, at=(3, 1))
+        w.tick = 10_000  # the recorded cuts below have grown back
+        return w
+
+    def rich_far_region(self) -> KnowledgeBase:
+        """The far grass's region gave 1 gem in 2 cuts over 40 cuts."""
+        k = KnowledgeBase.empty("fake-world")
+        for i in range(40):
+            record_cut(k, 7, (40, 2 + i % 10), "grass", i, i % 2 == 0)
+        return k
+
+    def test_explores_near_rather_than_walk_to_far_grass_of_the_same_yield(self):
+        w, m = self.world(), Memory()
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
+        self.assertEqual(m.gather_status, "walking to unexplored ground")
+
+    def test_far_grass_wins_when_its_yield_outweighs_the_walk(self):
+        k = self.rich_far_region()
+        few, many = {"op": "gather_gems", "count": 3}, {"op": "gather_gems", "count": 100}
+        m = Memory()
+        gather_outcome(self.world(), m, Policy(on_hostile="ignore"), knowledge=k, op=few)
+        self.assertEqual(m.gather_target[0], gather_mod.FRONTIER, "a few gems do not pay for the walk")
+        m = Memory()
+        gather_outcome(self.world(), m, Policy(on_hostile="ignore"), knowledge=k, op=many)
+        self.assertEqual(m.gather_target, ("grass", (40, 1)), "many gems at a better yield do")
+
+    def test_grass_as_near_as_the_edge_is_cut_first(self):
+        w = self.world()
+        w.view.tiles[(4, 1)] = "grass"
+        m = Memory()
+        out = gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
+        self.assertEqual(m.gather_target, ("grass", (4, 1)))
+        self.assertEqual(out.intents[0]["verb"], "SetPosition")
+
+    def test_a_named_region_is_worked_without_weighing_the_edge(self):
+        w, m = self.world(), Memory()
+        op = {"op": "gather_gems", "count": 3, "x": 40, "y": 1}
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))
+
+    def test_the_edge_is_priced_again_once_the_walk_reveals_it(self):
+        w, m = self.world(), Memory()
+        op = {"op": "gather_gems", "count": 3}
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
+        w.view.tiles[(0, 1)] = "grass"  # revealed: grass beyond, the corridor closed off
+        for p in ((-1, 0), (-1, 1), (-1, 2), (0, 0), (0, 2)):
+            w.view.tiles[p] = "wall"
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, ("grass", (0, 1)))
+
+    def test_an_edge_explore_gave_up_on_loses_to_known_grass(self):
+        w, m = self.world(), Memory()
+        m.nav_stuck.backoff_until[nav_stuck.goal_key("explore", 7, (1, 1))] = w.tick + 100
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))
+
+    def test_an_edge_with_no_ground_past_it_stops_being_one_at_the_read_there(self):
+        """Reaching the edge, the terrain read marks the cells past it with no
+        ground: the edge is gone and the known grass is weighed alone."""
+        w, m = self.world(), Memory()
+        op = {"op": "gather_gems", "count": 3}
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
+        w.pos = (1, 1)
+        w.apply_terrain({"map_id": 7, "x0": -4, "y0": -4, "width": 11, "height": 11, "rows": ["?" * 11] * 11})
+        self.assertNotIn((1, 1), w.view.frontier())
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))
+
+    def test_a_walk_to_an_edge_ends_once_a_target_region_is_worked(self):
+        w, m = self.world(), Memory()
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
+        named = {"op": "gather_gems", "count": 3, "x": 40, "y": 1}
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=named)
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))
+
+    def test_a_walk_to_an_edge_ends_once_its_region_is_skipped(self):
+        w, m = self.world(), Memory()
+        op = {"op": "gather_gems", "count": 3}
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
+        with mock.patch.object(gather_mod, "barren_regions", return_value={(0, 0)}):
+            gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))
+
+    def test_safe_ground_edges_are_not_priced(self):
+        w = self.world()
+        safe(w, (0, 1), (1, 1))
+        m = Memory()
+        gather_outcome(w, m, Policy(on_hostile="ignore"), op={"op": "gather_gems", "count": 3})
+        self.assertEqual(m.gather_target, ("grass", (40, 1)))

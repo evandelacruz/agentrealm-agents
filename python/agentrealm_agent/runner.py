@@ -56,23 +56,23 @@ from .loot import (
     save_carried_chest,
     supply_code_for_take,
 )
-from .healing import (
-    AppliedDrink,
-    HealRefusal,
-    NoopDrink,
-    absorb_heal_pending,
+from .executor.supply_refusals import (
+    AppliedSelfUse,
+    NoopUse,
+    Refusal,
     clear_refusal,
     code_in_hand,
-    drank,
-    drink_situation,
-    heal_situation,
+    effect_measure,
     known_refusal,
     noop_action,
-    noop_drink_cause,
-    note_heal_pending,
+    noop_cause,
+    noop_situation,
     note_refusal,
     refusal_action,
+    refusal_situation,
+    used_up,
 )
+from .healing import absorb_heal_pending, note_heal_pending
 from .shop import note_shop_result
 from .supplies import heals, is_food
 from .states.explore import plan_sets
@@ -148,15 +148,15 @@ PROBE_NEVER_KEEPS = ("nav", "nav_stuck", "boss", "greetings")
 
 
 @dataclass(frozen=True)
-class HealRefused:
-    """A refused food ``Take`` or drink, kept until the next decision files it (A80)."""
+class SupplyRefused:
+    """A refused food ``Take`` or ``Use`` on yourself, kept until the next decision files it (A80)."""
 
     kind: str  # "take" | "use"
     supply_id: int
     verb: str
     rejection: dict
     tick: int
-    armed_first: bool  # the refused drink's queue had already sent its Arm
+    armed_first: bool  # the refused Use's queue had already sent its Arm
     target: Pos | None = None
 
 
@@ -195,8 +195,8 @@ class Runner:
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
         self._applied_take_codes: list[str | None] = []  # A47: codes of this response's applied Takes
         self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
-        self._heal_refused: list[HealRefused] = []  # A80: refused heal intents, filed at the next decision
-        self._applied_drink: AppliedDrink | None = None  # A76: an applied drink, checked at the next decision
+        self._supply_refused: list[SupplyRefused] = []  # A80: refused heal intents, filed at the next decision
+        self._applied_self_use: AppliedSelfUse | None = None  # A76: an applied Use on yourself, checked at the next decision
         self.gem_cuts = GemYieldTracker()  # A63: our cuts waiting to see whether a gem came of them
         self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
         self._removed_map: int | None = None  # A18: map the character was on when it was taken off
@@ -630,7 +630,7 @@ class Runner:
 
     def tick(self) -> float:
         w, m = self.world, self.mem
-        self.file_heal_refusals()
+        self.file_supply_refusals()
         self.plan.acted = None  # set again only by a state acting on the head op this round (A36)
         m.walk_skip = set()  # only a walk decided this round sets it
         if m.cancel_queue:
@@ -702,12 +702,12 @@ class Runner:
                 m.pending_queue = qid
         lives_before = w.lives
         rejected = self.apply_intent_results(r.get("intent_results") or [])
-        self._forget_replaced_drink(intents)
+        self._forget_replaced_self_use(intents)
         earlier = w.entities
         worn_before = dict(w.worn_codes)
         events = w.apply_events(r.get("events_by_tick") or [])
-        if self._applied_drink is not None and drank(events, self.cid, self._applied_drink.code):
-            self._applied_drink.used = True
+        if self._applied_self_use is not None and used_up(events, self.cid, self._applied_self_use.code):
+            self._applied_self_use.used = True
         w.apply_observation(r.get("observation"))
         absorb_heal_pending(m, w, self.knowledge, events)
         self._learn_life_code(lives_before)
@@ -813,8 +813,7 @@ class Runner:
         (its search caches aside, ``memory.SEARCH_CACHES``),
         and so are the rng and the goal stack. A pick, a try, a commitment or a
         re-arm made for an answer that is not sent never happened (A71, A24,
-        A22; free-play run 5: Heal's drink tries were spent by probes whose
-        drink was never sent, and both potions were written off). The goal
+        A22, A77): a ``Use`` the probe only decided spends no try. The goal
         stack is put back even when the reflex is sent: reflexes never consume
         its ops (A34). So is ``PROBE_NEVER_KEEPS``. It runs only the states
         that can answer with a reflex (``dispatch.PROBE_STATES``), so a poll
@@ -1160,10 +1159,10 @@ class Runner:
                     m.need_position, m.path = True, []
                     m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
                     m.held_queue, m.cancel_queue = None, True
-            if is_self_use(intent) and m.heal_drink is not None:
-                clear_refusal(m, "use", m.heal_drink)  # it applied; whether it drank is read next (A76)
-                self._note_applied_drink(index, result)
-                m.heal_drink = None
+            if is_self_use(intent) and m.self_use is not None:
+                clear_refusal(m, "use", m.self_use)  # it applied; whether it drank is read next (A76)
+                self._note_applied_self_use(index, result)
+                m.self_use = None
             if intent and intent.get("verb") == "Use":
                 m.last_use_tick = int(result.get("tick", w.tick))
                 block = use_target_block(intent, w.entities)
@@ -1212,7 +1211,7 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
-        self._note_heal_refused(index, result)
+        self._note_supply_refused(index, result)
         target = use_target_block(intent, w.entities) if intent and intent.get("verb") == "Use" else None
         self._note_break_use(intent, result, target, index)
         if self.acceptance is not None:
@@ -1257,21 +1256,20 @@ class Runner:
         if heals(code):
             note_heal_pending(m, w, code, "use")
 
-    def _forget_replaced_drink(self, intents: list[dict] | None) -> None:
-        """A sent queue with no self-``Use`` replaced the drink's queue, if any:
-        its results are no longer read, so ``heal_drink`` has nothing left to
+    def _forget_replaced_self_use(self, intents: list[dict] | None) -> None:
+        """A sent queue with no self-``Use`` replaced the self-``Use``'s queue, if any:
+        its results are no longer read, so ``self_use`` has nothing left to
         count (A24). Called after the response's results, which may still
-        carry the drink's own."""
+        carry the self-``Use``'s own."""
         if intents is not None and not any(is_self_use(i) for i in intents):
-            self.mem.heal_drink = None
+            self.mem.self_use = None
 
-    def _note_heal_refused(self, index: int, result: dict) -> None:
-        """Keep a refused food ``Take`` or drink for ``file_heal_refusals`` (A80).
+    def _note_supply_refused(self, index: int, result: dict) -> None:
+        """Keep a refused food ``Take`` or ``Use`` on yourself for ``file_supply_refusals`` (A80).
 
         Only a sent intent the server rejected is kept, never one only
-        decided (free-play run 5: probes whose drink was never sent wrote both
-        potions off). A drink is kept once, against the supply it was decided
-        for (``Memory.heal_drink``), whether its ``Arm`` or its ``Use`` self was
+        decided (A77). A ``Use`` on yourself is kept once, against the supply it was decided
+        for (``Memory.self_use``), whether its ``Arm`` or its ``Use`` self was
         rejected; a rejected food ``Take``, from any state, against that food.
         """
         w, m = self.world, self.mem
@@ -1285,73 +1283,75 @@ class Runner:
             sid = intent.get("supply_id")
             food = next((e for e in w.entities if e.kind == "supply" and e.id == sid and is_food(e.code)), None)
             if food is not None:
-                self._heal_refused.append(HealRefused("take", sid, verb, rejection, tick, False, food.pos))
+                self._supply_refused.append(SupplyRefused("take", sid, verb, rejection, tick, False, food.pos))
             return
         queue = self._held_intents()
-        if verb == "Arm" and intent.get("supply_id") == m.heal_drink:
+        if verb == "Arm" and intent.get("supply_id") == m.self_use:
             after = next((i for i in queue[index + 1 :] if i.get("verb") != "Wait"), None)
-            drink = is_self_use(after)
+            self_use = is_self_use(after)
         else:
-            drink = is_self_use(intent)
-        if not drink or m.heal_drink is None:
+            self_use = is_self_use(intent)
+        if not self_use or m.self_use is None:
             return
-        sid = m.heal_drink
+        sid = m.self_use
         armed_first = any(i.get("verb") == "Arm" and i.get("supply_id") == sid for i in queue[:index])
-        self._heal_refused.append(HealRefused("use", sid, verb, rejection, tick, armed_first))
-        m.heal_drink = None
+        self._supply_refused.append(SupplyRefused("use", sid, verb, rejection, tick, armed_first))
+        m.self_use = None
 
-    def _note_applied_drink(self, index: int, result: dict) -> None:
-        """Keep the applied self-``Use`` (``Memory.heal_drink``: a drink or a
-        chest) for ``file_heal_refusals`` to see whether it went through (A76)."""
+    def _note_applied_self_use(self, index: int, result: dict) -> None:
+        """Keep the applied self-``Use`` (``Memory.self_use``: a potion, food or a
+        chest) for ``file_supply_refusals`` to see whether it went through (A76)."""
         w, m = self.world, self.mem
-        sid = m.heal_drink
+        sid = m.self_use
         assert sid is not None
         queue = self._held_intents()
         code = next((h.code for h in w.held_supplies if h.id == sid), None) or code_in_hand(w, queue, index)
         armed_first = any(i.get("verb") == "Arm" and i.get("supply_id") == sid for i in queue[:index])
-        self._applied_drink = AppliedDrink(sid, code, int(result.get("tick", w.tick)), armed_first, w.health)
+        self._applied_self_use = AppliedSelfUse(
+            sid, code, int(result.get("tick", w.tick)), armed_first, effect_measure(w, code)
+        )
 
-    def file_noop_drink(self) -> None:
-        """An applied drink that left its supply carried drank nothing: file
-        why (``healing.noop_drink_cause``) and what Heal does about it, so the
-        same drink is not resent until something relevant changes (A76). A
-        "drink" is any self-``Use`` (``states.use_item.use_on_self``): one of a
-        chest that went through raises the pack's carry slots (A108).
+    def file_noop_use(self) -> None:
+        """An applied ``Use`` on yourself that left its supply carried and its
+        effect unshown did nothing: file why (``supply_refusals.noop_cause``)
+        and what is sent next, so the same ``Use`` is not resent until
+        something relevant changes (A76). One of a chest that went through
+        raises the pack's carry slots (A108).
 
-        Read at the next decision, from the observation after the drink and
+        Read at the next decision, from the observation after the ``Use`` and
         our own ``SupplyUsed``, never in the held-queue probe.
         """
         w, m = self.world, self.mem
-        d, self._applied_drink = self._applied_drink, None
+        d, self._applied_self_use = self._applied_self_use, None
         if d is None:
             return
-        if (cause := noop_drink_cause(w, d)) is None:
+        if (cause := noop_cause(w, d)) is None:
             learn_chest_upgrade(w, d.code)  # a chest used up raised the pack (A108)
             return
         action = noop_action(cause, armed_first=d.armed_first)
         note_refusal(
-            m, "use", d.supply_id, NoopDrink(cause, action, d.tick, drink_situation(w), w.health)
+            m, "use", d.supply_id, NoopUse(cause, action, d.tick, noop_situation(w), effect_measure(w, d.code))
         )
         self.log(
             "heal_noop",
-            f"Use of supply {d.supply_id} ({d.code}) applied and drank nothing ({cause}): {action}",
+            f"Use of supply {d.supply_id} ({d.code}) applied and did nothing ({cause}): {action}",
             {"supply_id": d.supply_id, "code": d.code, "cause": cause, "action": action, "health": w.health},
         )
 
-    def file_heal_refusals(self) -> None:
+    def file_supply_refusals(self) -> None:
         """File the refusals kept since the last decision, and trace each (A80).
 
         Filed here, before the decision and after the observation and any
         position read, so the situation is the one the next decision sees,
         not the world before the refused queue ran (its Steps, an applied
-        ``Arm``). What Heal does next follows from the code
-        (``healing.refusal_action``), never from a count; an unknown code is
-        traced as one. An applied drink that drank nothing is filed first
-        (``file_noop_drink``, A76). Never called in the held-queue probe.
+        ``Arm``). What is sent next follows from the code
+        (``supply_refusals.refusal_action``), never from a count; an unknown code is
+        traced as one. An applied ``Use`` on yourself that did nothing is filed first
+        (``file_noop_use``, A76). Never called in the held-queue probe.
         """
         w, m = self.world, self.mem
-        self.file_noop_drink()
-        refused, self._heal_refused = self._heal_refused, []
+        self.file_noop_use()
+        refused, self._supply_refused = self._supply_refused, []
         for r in refused:
             target = None
             if r.kind == "take":
@@ -1361,7 +1361,7 @@ class Runner:
                 r.rejection, verb=r.verb, armed_first=r.armed_first, on_target=target is not None and w.pos == target
             )
             code = r.rejection.get("code") or "?"
-            note_refusal(m, r.kind, r.supply_id, HealRefusal(code, action, r.tick, heal_situation(w, target)))
+            note_refusal(m, r.kind, r.supply_id, Refusal(code, action, r.tick, refusal_situation(w, target)))
             known = known_refusal(r.rejection)
             self.log(
                 "heal_refusal",

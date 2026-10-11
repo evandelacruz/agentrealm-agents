@@ -582,7 +582,7 @@ def build_prompt(
         f"worn={json.dumps(w.worn_codes, sort_keys=True)}",
         held_line(w, knowledge),
         pack_line(w, plan, knowledge),
-        potion_line(w),
+        potion_line(w, plan.params),
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
@@ -631,10 +631,11 @@ def build_prompt(
     ]
 
 
-def potion_line(w: WorldModel) -> str:
+def potion_line(w: WorldModel, params: dict[str, float | int]) -> str:
     """Potions held and stowed, and the health at or below which one is
-    drunk out of a fight (``healing.spend_potion``, A96)."""
-    line = low_health_line(w)
+    drunk out of a fight (``healing.spend_potion``, A96): the ``low_health``
+    param's line."""
+    line = low_health_line(w, params)
     at = f"health<={line}" if line is not None else "unknown"
     return f"potions={potion_count(w)} potion_drunk_at={at}"
 

@@ -1,10 +1,11 @@
-"""A80: Heal acts on why the server refused a food ``Take`` or a drink.
+"""A80: what is sent after the server refuses a food ``Take`` or a ``Use`` on yourself.
 
-There is no try cap. Each refusal's code decides what Heal sends next
-(``healing.refusal_action``): arm and retry, forget the supply, walk onto the
-food, wait for a later tick, or hold the supply until the situation it was
-refused in changes. Free-play run 5 wrote both potions off under the old cap
-and died at 2/10 holding them.
+There is no try cap. Each refusal's code decides what is sent next
+(``supply_refusals.refusal_action``): arm and retry, forget the supply, walk
+onto the food, wait for a later tick, or hold the supply until the situation
+it was refused in changes. Only a refusal the server sent is filed, never
+what a held-queue probe only decided, so a potion is never written off
+before it was tried.
 """
 
 from __future__ import annotations
@@ -14,7 +15,9 @@ import unittest
 from pathlib import Path
 
 from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.healing import REFUSAL_WAIT_TICKS, refusal_action
+from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_agent.executor.supply_refusals import REFUSAL_WAIT_TICKS, refusal_action
+from agentrealm_agent.healing import carried_heal
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
@@ -52,20 +55,20 @@ class RefusalTest(unittest.TestCase):
     def decide(self) -> list[dict]:
         """One decision, sent the way the runner sends it."""
         r = self.r
-        r.file_heal_refusals()  # as ``Runner.tick`` does before deciding
+        r.file_supply_refusals()  # as ``Runner.tick`` does before deciding
         d = r._decide(r.world, r.mem)
         intents = r.intents_for(d) or []
-        r._forget_replaced_drink(intents)
+        r._forget_replaced_self_use(intents)
         return [i for i in intents if i.get("verb") != "Wait"]
 
     def refuse(self, index: int, code: str, *, category: str = "", retryability: str = "") -> None:
         rejection = {"code": code, "category": category, "retryability": retryability}
         self.r.on_result({"outcome": "rejected", "rejection": rejection, "tick": self.r.world.tick}, index)
-        self.r.file_heal_refusals()  # the next round trip files it before deciding
+        self.r.file_supply_refusals()  # the next round trip files it before deciding
 
     def next_tick(self, n: int = 1) -> None:
         self.r.world.tick += n
-        self.r.mem.heal_rearm = None  # the re-arm a drink leaves due is A24's, not under test here
+        self.r.mem.self_use_rearm = None  # the re-arm a drink leaves due is A24's, not under test here
 
 
 class DrinkRefusalTest(RefusalTest):
@@ -95,7 +98,7 @@ class DrinkRefusalTest(RefusalTest):
         w.health, w.pos = 6, (2, 2)  # whatever changes, potion 4 is not carried
         self.next_tick()
         self.assertEqual(self.decide()[0], {"verb": "Arm", "supply_id": 5})
-        self.assertEqual(self.r.mem.heal_refusals[("use", 4)].action, "forget")
+        self.assertEqual(self.r.mem.supply_refusals[("use", 4)].action, "forget")
 
     def test_dead_or_on_cooldown_waits_for_a_later_tick(self):
         self.decide()
@@ -171,14 +174,14 @@ class DrinkRefusalTest(RefusalTest):
         r.world.held_supplies = [KNIFE, POTION_A]
         self.decide()
         self.refuse(0, "odd_code")
-        r.file_heal_refusals()
-        filed = dict(r.mem.heal_refusals)
+        r.file_supply_refusals()
+        filed = dict(r.mem.supply_refusals)
         r.mem.held_queue = {"queue_id": "q", "next_index": 0}
         r.mem.pending_intents = [{"verb": "Step", "direction": "north"}] * 5
         r.world.health = 5
         for _ in range(3):
             r.reflex_while_held()
-        self.assertEqual(r.mem.heal_refusals, filed)
+        self.assertEqual(r.mem.supply_refusals, filed)
 
 
 class FoodRefusalTest(RefusalTest):
@@ -221,7 +224,91 @@ class FoodRefusalTest(RefusalTest):
         self.refuse(0, "odd_code")
         self.r.mem.pending = {"verb": "Take", "supply_id": 8}
         self.r.on_result({"outcome": "applied"}, 0)
-        self.assertEqual(self.r.mem.heal_refusals, {})
+        self.assertEqual(self.r.mem.supply_refusals, {})
+
+
+SELF_USE = [{"verb": "Arm", "supply_id": 4}, USE_SELF]
+
+
+def make_runner(test: unittest.TestCase) -> Runner:
+    cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[]), Path("t.toml"))
+    r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=KnowledgeBase.empty("sandbox"))
+    test.addCleanup(r.trace.close)
+    r.world = hurt_world()
+    r.mem = Memory(need_self=False, need_position=False)
+    return r
+
+
+class FiledOnceTest(unittest.TestCase):
+    """A ``Use`` on yourself is filed once, against the supply it was decided
+    for, and only once the server refused it."""
+
+    def test_probes_spend_no_drink_tries(self):
+        r = make_runner(self)
+        # A walk queue is held; Heal picks a drink in each probe, which is not sent.
+        r.mem.held_queue = {"queue_id": "q", "next_index": 0}
+        r.mem.pending_intents = [{"verb": "Step", "direction": "north"}] * 5
+        before = r.mem.snapshot()
+        for _ in range(6):
+            self.assertIsNone(r.reflex_while_held())
+        self.assertEqual(r.mem.supply_refusals, {})
+        self.assertEqual(r.mem, before, "a probe whose answer is not sent leaves memory as it was")
+        self.assertIsNotNone(carried_heal(r.world, r.mem, Policy(), dict(PARAM_DEFAULTS)), "both potions are still drinkable")
+
+    def sent(self, r: Runner, queue: list[dict], drink: int | None = 4) -> None:
+        r.mem.pending_intents, r.mem.pending_next_index = [dict(i) for i in queue], 0
+        r.mem.self_use = drink  # use_carried_heal records the supply it decided on
+
+    def test_a_rejected_arm_is_filed_against_the_drink(self):
+        r = make_runner(self)
+        self.sent(r, [SELF_USE[0], {"verb": "Wait"}, SELF_USE[1]])
+        r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
+        r.file_supply_refusals()
+        self.assertEqual(list(r.mem.supply_refusals), [("use", 4)])
+
+    def test_an_applied_drink_files_nothing(self):
+        r = make_runner(self)
+        self.sent(r, SELF_USE)
+        r.on_result({"outcome": "applied"}, 0)
+        r.on_result({"outcome": "applied"}, 1)
+        self.assertEqual(r.mem.supply_refusals, {})
+        self.assertIsNone(r.mem.self_use)
+
+    def test_a_rejected_arm_and_use_file_once(self):
+        r = make_runner(self)
+        self.sent(r, SELF_USE)
+        r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
+        self.assertIsNone(r.mem.self_use)
+        self.sent(r, SELF_USE, drink=None)  # the same drink's Use, read after the Arm
+        r.on_result({"outcome": "rejected", "rejection": {"code": "y"}}, 1)
+        r.file_supply_refusals()
+        self.assertEqual(r.mem.supply_refusals[("use", 4)].code, "x")
+
+    def test_a_queue_that_replaces_the_drink_forgets_it(self):
+        # The drink's queue was replaced (a reflex, a death's resync): a later
+        # refused self-Use must not be filed against that potion.
+        r = make_runner(self)
+        self.sent(r, SELF_USE)
+        r._forget_replaced_self_use([{"verb": "Step", "direction": "north"}])
+        self.assertIsNone(r.mem.self_use)
+        self.sent(r, SELF_USE, drink=None)
+        r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 1)
+        r.file_supply_refusals()
+        self.assertEqual(r.mem.supply_refusals, {})
+
+    def test_the_drink_survives_a_round_that_sends_nothing_or_drinks(self):
+        r = make_runner(self)
+        self.sent(r, SELF_USE)
+        r._forget_replaced_self_use(None)  # nothing sent: the drink's queue runs on
+        r._forget_replaced_self_use(SELF_USE)  # the drink itself was sent
+        self.assertEqual(r.mem.self_use, 4)
+
+    def test_a_rejected_weapon_arm_is_no_drink(self):
+        r = make_runner(self)
+        self.sent(r, [{"verb": "Arm", "supply_id": 1}])
+        r.on_result({"outcome": "rejected", "rejection": {"code": "x"}}, 0)
+        r.file_supply_refusals()
+        self.assertEqual(r.mem.supply_refusals, {})
 
 
 class FakeClient:
@@ -265,7 +352,7 @@ class FiledAfterTheObservationTest(unittest.TestCase):
         r.mem.held_queue = r.mem.pending_intents = r.mem.pending = None
         r.tick()
         self.assertNotIn(USE_SELF, client.sent[1] or [], "the same situation: the Use is not sent again")
-        self.assertEqual(r.mem.heal_refusals[("use", 4)].situation[2], "small_potion")
+        self.assertEqual(r.mem.supply_refusals[("use", 4)].situation[2], "small_potion")
 
 
 class RefusalActionTest(unittest.TestCase):

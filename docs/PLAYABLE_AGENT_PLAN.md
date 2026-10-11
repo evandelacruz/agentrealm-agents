@@ -94,7 +94,7 @@ States are checked in priority order once per round trip: after each `POST tick`
 | 0 | `Downed` | `Died` | Waits for `Respawned`, then queues `Recover` |
 | 1 | `Escape` | Standing on damage, or trapped | Steps off; crosses as little hazard as possible |
 | 1 | `Retreat` | The next `retreat_hits` expected hits could kill (per-type damage from the threat table), or the threat outclasses us while it is coming for us (hit us recently, in reach, approaching, or a boss) | Goes to the nearest known safe tile a path reaches, else the town cell, then `Heal` (see Health and lives) |
-| 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Food in reach: walk onto it or `Take` it; food eaten on pickup heals there, carried food is then `Arm` + `Use` self. Else a carried potion, only when health is low or the drink turns a fight (A96): `Arm` + `Use` self. After each drink, re-`Arm` the weapon it swapped out, even at full health or with a hostile in range. Else, only if safe-zone regeneration has been measured, rests in a safe zone; ahead of a plan op in progress only when health is low; it walks to one safe tile, and a give-up of it ends safe ground until a full heal, or at low health for 300 ticks (A84). Else goes to town and waits in the safe zone for the next goal to need less, raising a `buy` for potions (`Shop`, M8) |
+| 1 | `Heal` | Hurt and no hostile in range, or health too low for the next goal | Food in reach: walk onto it or `Take` it; food eaten on pickup heals there, carried food is then `Arm` + `Use` self. Else a carried potion, only when health is low or the drink turns a fight (A96): `Arm` + `Use` self. After each drink, re-`Arm` the weapon it swapped out, even at full health or with a hostile in range. Else, only if safe-zone regeneration has been measured, rests in a safe zone; ahead of a plan op in progress only at or below the planner's `low_health` line (A89); it walks to one safe tile, and a give-up of it ends safe ground while that give-up backs off (A84, A89, A90). Else goes to town and waits in the safe zone for the next goal to need less, raising a `buy` for potions (`Shop`, M8) |
 | 2 | `Fight` | A hostile is in range, it is not of a kind in `never_attack`, and the win estimate clears the margin, counting every hostile within 2 blocks of it | Closes to `attack_range`, `Use` on the NPC by id (its block on the tick the swing runs), with the retreat queued behind |
 | 2 | `Flee` | A hostile is in range and we would lose | Opens distance toward safety; safe zones stop all damage |
 | 3 | `Recover` | Our death chest is on a reachable map | Walks next to it (a safe tile next to it is enough), `WithdrawFromChest` |
@@ -244,7 +244,7 @@ Below a floor, 3 lives by default, it fights only what the win estimate says it 
 
 **Healing:**
 - **Food first, it's free.** Food lying in sight is picked up (walk onto it or `Take`) when the amount missing is at least what it heals, and is remembered as a source. Some food is eaten on pickup, like Olympuff's golden cap (M §16); carried food is eaten with `Arm` + `Use` self, the same call as a potion (API Use). Which kind each type is, and how much it heals, is learned from the `health` change.
-- **Potions are a reserve.** The agent keeps N potions (the `potion_reserve` directive, default 2). Below that, the planner adds a `buy` op before any trip away from town, and `Shop` carries it out (A61). Out of a fight a potion is drunk only when health is low (at or below half of max) and no food is near; otherwise the character eats or rests, so the reserve lasts (A96). The planner is told the same rule.
+- **Potions are a reserve.** The agent keeps N potions (the `potion_reserve` directive, default 2). Below that, the planner adds a `buy` op before any trip away from town, and `Shop` carries it out (A61). Out of a fight a potion is drunk only when health is low (at or below the `low_health` share of max, default half, A89) and no food is near; otherwise the character eats or rests, so the reserve lasts (A96). The planner is told the same rule.
 - **Safe zones.** Health returning in a safe zone has not been observed yet. `Heal` (A10) measures it: a "yes" is saved to the knowledge base, a "no" (200 ticks in a safe zone with no health back) holds for that run. If it returns, healing while exploring safe ground is the free fallback; if not, the fallback is potions and food, and buying more is the planner's `buy` op (A61): Heal raises nothing on its own.
 
 **Raising health and protection over time:**
@@ -301,13 +301,13 @@ This is what makes a second run better than the first, and it is what the strate
              {"op": "travel", "to": "entrance", "x": 120, "y": 40},
              {"op": "break_block", "x": 118, "y": 41, "capability": "burn"}],
    "params": {"fight_margin": 1.5, "retreat_hits": 2, "curiosity": 0.2,
-              "lives_floor": 3, "risk": 0.5, "potion_reserve": 2},
+              "lives_floor": 3, "risk": 0.5, "potion_reserve": 2, "low_health": 0.5},
    "notes": "The sign says the door is behind the burnt hedge."}
   ```
 
   Top level has exactly three keys. `goals` replaces the goal stack, tried in order. `params` is applied at once, within the limits below. `notes` is free text for the trace. Everything the agent should do, speech included, is a goal op; a `set_param` op changes a param only when the goal stack reaches it, within the same limits.
 
-- **Param limits.** The strategist may only tighten survival params, never loosen them past the directives file's value (or the default when the file sets none): it may raise `fight_margin`, `retreat_hits`, `lives_floor` and `potion_reserve`, and lower `risk`. `curiosity` it may set anywhere in its range. A value that loosens a survival param, or is out of range (see the param table), is dropped and logged, and so is a `set_param` op that would loosen one. The next prompt's State repeats each such rejection with its reason and the param's meaning (`last_reply_rejected`), so the planner learns which way a param goes. Only the directives file loosens them.
+- **Param limits.** The strategist may only tighten survival params, never loosen them past the directives file's value (or the default when the file sets none): it may raise `fight_margin`, `retreat_hits`, `lives_floor` and `potion_reserve`, and lower `risk`. `curiosity` and `low_health` it may set anywhere in their range. A value that loosens a survival param, or is out of range (see the param table), is dropped and logged, and so is a `set_param` op that would loosen one. The next prompt's State repeats each such rejection with its reason and the param's meaning (`last_reply_rejected`), so the planner learns which way a param goes. Only the directives file loosens them.
 
 - **Operations** form a fixed set. Each maps onto a state and has fixed fields; every op may also carry `why` (free text, logged). An op with an unknown name, a missing field, or a field of the wrong type is dropped and logged.
 
@@ -337,7 +337,7 @@ This is what makes a second run better than the first, and it is what the strate
 A per-character file, `characters/<name>.directives.toml`, re-read whenever it changes:
 
 ```toml
-params = { fight_margin = 2.0, retreat_hits = 2, curiosity = 0.2, lives_floor = 3, risk = 0.5, potion_reserve = 2 }
+params = { fight_margin = 2.0, retreat_hits = 2, curiosity = 0.2, lives_floor = 3, risk = 0.5, potion_reserve = 2, low_health = 0.5 }
 never_attack = ["character"]                            # hard constraint, enforced by state guards
 goals = ["gather_gems:20", "buy:bronze_mail"]           # replaces the goal stack
 instructions = """
@@ -357,6 +357,7 @@ Hard constraints are never free text. `never_attack` lists what may not be attac
 | `lives_floor` | 3 | ≥ 1, integer | raise | At or below this many lives, fight only measured weak hostiles and stay inside explored ground |
 | `risk` | 0.5 | 0 to 1 | lower | 0 cautious to 1 bold; scales the fight margin, retreat threshold, untested types and level entry (see Health and lives) |
 | `potion_reserve` | 2 | ≥ 0, integer | raise | Potions to keep. Planner-only since A61: the planner adds a `buy` below it; no state restocks on its own |
+| `low_health` | 0.5 | 0 to 1 | set | Share of max health at or below which health is low: a carried potion is drunk out of a fight, and **Heal**'s rest on safe ground goes ahead of the op on top (A89) |
 
 A directives value out of range is ignored and logged, and the default stays.
 

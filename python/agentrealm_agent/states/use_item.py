@@ -10,7 +10,7 @@ item does nothing; only its ``Use`` applies it.
 from __future__ import annotations
 
 from ..equip import weapon_to_rearm
-from ..healing import can_try, carried_ids, in_hand, must_arm
+from ..executor.supply_refusals import can_try, carried_ids, in_hand, must_arm
 from ..item_table import InventorySupply
 from ..memory import Memory
 from ..supplies import chest_capacity, chest_upgrade, used_on_self
@@ -29,7 +29,7 @@ class UseItemState(State):
     With no op it applies a bigger carried chest as soon as one is held and
     no hostile is in range: more carry slots are always better, so that call
     is not the planner's. The weapon the ``Arm`` swapped out goes back on
-    Heal's next decision (``heal_rearm``), as after a drink."""
+    Heal's next decision (``rearm_after_use``), as after a potion."""
 
     name = "UseItem"
 
@@ -74,7 +74,7 @@ def _use_op(world: WorldModel, ctx: PlayContext) -> StateOutcome:
 
 def self_use_item(w: WorldModel, m: Memory, code: str) -> InventorySupply | None:
     """A held (or armed) ``code`` a ``Use`` on yourself applies and may be
-    sent now (``healing.can_try``: not refused, or no longer for the reason
+    sent now (``supply_refusals.can_try``: not refused, or no longer for the reason
     it was), lowest id first."""
     if not used_on_self(code):
         return None
@@ -92,11 +92,14 @@ def use_on_self(w: WorldModel, m: Memory, item: InventorySupply, state: str) -> 
     """``Use`` ``item`` on yourself (API Use), with its ``Arm`` first in one
     paced queue unless it is already in the slot, so both are sent.
 
-    The self-``Use`` is remembered in ``heal_drink`` so the runner files a
+    The self-``Use`` is remembered in ``self_use`` so the runner files a
     refusal, or one that applied and did nothing, against this supply
-    (A76, A80); and the weapon to put back in ``heal_rearm``, re-armed on
-    Heal's next decision. The ``Arm`` never goes out without its ``Use``: a
-    cooldown that leaves no room for both in one queue sends nothing yet."""
+    (A76, A80); and the weapon to put back in ``self_use_rearm``, re-armed on
+    Heal's next decision (``rearm_after_use``). It is always a weapon
+    (``equip.weapon_to_rearm``): the one armed now, else the last one armed
+    this run, never the potion or tool in the slot. The ``Arm`` never goes
+    out without its ``Use``: a cooldown that leaves no room for both in one
+    queue sends nothing yet."""
     # Another supply of the same code in the slot is not this one: arm it (A76).
     in_slot = w.armed_code == item.code and w.armed_id in (None, item.id)
     if in_slot and not must_arm(m, item.id):
@@ -108,7 +111,22 @@ def use_on_self(w: WorldModel, m: Memory, item: InventorySupply, state: str) -> 
         out = StateOutcome(None, f"wait out the cooldown to arm and use {item.code}", state=state)
         out.wait = True
         return out
-    m.heal_drink = item.id
-    if m.heal_rearm is None:
-        m.heal_rearm = weapon_to_rearm(w, m)
+    m.self_use = item.id
+    if m.self_use_rearm is None:
+        m.self_use_rearm = weapon_to_rearm(w, m)
     return out
+
+
+def rearm_after_use(w: WorldModel, m: Memory) -> list[dict] | None:
+    """One ``Arm`` for the weapon a ``Use`` on yourself swapped out, sent once (A24).
+
+    Clears ``self_use_rearm`` either way, so a rejected ``Arm`` or a weapon no
+    longer in hand cannot keep Heal (or Equip, which waits on it) stuck.
+    """
+    code, m.self_use_rearm = m.self_use_rearm, None
+    if code is None or w.armed_code == code:
+        return None
+    for h in w.held_supplies:
+        if h.code == code:
+            return [{"verb": "Arm", "supply_id": h.id}]
+    return None

@@ -197,10 +197,10 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         self.assertEqual(dispatch(w, c).reason, f"heal_measure → {OPEN}")
         w.tick += SAFE_THREATENED_TICKS
         # It never got nearer OPEN, so that walk gives up, and with it safe
-        # ground for this hurt spell: never back toward the pack (run 9).
+        # ground while the give-up backs off: never back toward the pack (A89).
         out = dispatch(w, c)
         self.assertNotEqual(out.state, "Heal")
-        self.assertEqual(c.memory.heal_safe_given_up[0], MAP)
+        self.assertTrue(nav_stuck.backed_off(c.memory, "heal_measure", MAP, OPEN, w.tick))
 
     def test_retreat_keeps_its_pick_when_the_pack_leaves_view(self):
         w, c = world(health=4), ctx(on_hostile="fight")

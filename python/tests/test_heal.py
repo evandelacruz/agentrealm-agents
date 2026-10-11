@@ -13,12 +13,10 @@ from agentrealm_agent.healing import (
     absorb_heal_pending,
     hurt,
     note_heal_pending,
-    HealRefusal,
-    heal_situation,
-    note_refusal,
     regen_known,
     save_regen_yes,
 )
+from agentrealm_agent.executor.supply_refusals import Refusal, note_refusal, refusal_situation
 from agentrealm_agent.item_table import InventorySupply, carried_from_inventory
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
@@ -86,12 +84,12 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 2, "y": 2}])
 
     def test_a_held_take_waits_for_the_situation_to_change(self):
-        # The runner files each refusal (``Runner._note_heal_refused``).
+        # The runner files each refusal (``Runner._note_supply_refused``).
         w = grid(at=(1, 1))
         w.entities = [Entity("supply", 8, (2, 1), "apple")]
         m = Memory()
         self.assertEqual(verbs(dispatch(w, ctx(m))), ["Take"])
-        note_refusal(m, "take", 8, HealRefusal("odd_code", "hold", w.tick, heal_situation(w, (2, 1))))
+        note_refusal(m, "take", 8, Refusal("odd_code", "hold", w.tick, refusal_situation(w, (2, 1))))
         w.tick += 7
         self.assertNotIn("Take", verbs(dispatch(w, ctx(m))), "nothing changed: not sent again")
         w.held_supplies = [InventorySupply(3, "bronze_sword")]
@@ -109,7 +107,7 @@ class HealStateTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(4, "small_potion")]
         m = Memory()
         self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
-        note_refusal(m, "use", 4, HealRefusal("odd_code", "hold", w.tick, heal_situation(w)))
+        note_refusal(m, "use", 4, Refusal("odd_code", "hold", w.tick, refusal_situation(w)))
         w.tick += 7
         self.assertNotIn("Use", verbs(dispatch(w, ctx(m))))
 
@@ -120,12 +118,12 @@ class HealStateTest(unittest.TestCase):
         m = Memory()
         out = dispatch(w, ctx(m))
         self.assertEqual(verbs(out), ["Arm", "Use"])
-        self.assertEqual(m.heal_rearm, "pocket_knife")
+        self.assertEqual(m.self_use_rearm, "pocket_knife")
         w.armed_code = None
         w.held_supplies = [InventorySupply(1, "pocket_knife")]
         out = dispatch(w, ctx(m))
         self.assertEqual(verbs(out), ["Arm"])
-        self.assertIsNone(m.heal_rearm)
+        self.assertIsNone(m.self_use_rearm)
 
     def test_rearms_weapon_once_the_drink_heals_to_full(self):
         # A potion that fills health ends the hurt guard; the re-arm still runs.
@@ -133,11 +131,11 @@ class HealStateTest(unittest.TestCase):
         w.armed_code = "small_potion"
         w.health = 10
         w.held_supplies = [InventorySupply(1, "pocket_knife")]
-        m = Memory(heal_rearm="pocket_knife")
+        m = Memory(self_use_rearm="pocket_knife")
         out = dispatch(w, ctx(m))
         self.assertEqual(out.state, "Heal")
         self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 1}])
-        self.assertIsNone(m.heal_rearm)
+        self.assertIsNone(m.self_use_rearm)
         w.armed_code = "pocket_knife"
         self.assertNotEqual(dispatch(w, ctx(m)).state, "Heal")
 
@@ -147,25 +145,25 @@ class HealStateTest(unittest.TestCase):
         w.armed_code = "small_potion"
         w.held_supplies = [InventorySupply(1, "pocket_knife")]
         w.entities = [Entity("npc", 3, (2, 2), "slime")]
-        m = Memory(heal_rearm="pocket_knife")
+        m = Memory(self_use_rearm="pocket_knife")
         out = dispatch(w, ctx(m))
         self.assertEqual(out.state, "Heal")
         self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 1}])
 
     def test_the_weapon_goes_back_before_a_second_potion(self):
-        # Free-play run 3: heal_rearm held from 191 s to the end. It never
+        # Free-play run 3: self_use_rearm held from 191 s to the end. It never
         # outlives one drink now, so Equip is never kept waiting on it.
         w = grid()
         w.armed_code = "small_potion"
         w.held_supplies = [InventorySupply(1, "pocket_knife"), InventorySupply(4, "small_potion")]
-        m = Memory(heal_rearm="pocket_knife")
+        m = Memory(self_use_rearm="pocket_knife")
         out = dispatch(w, ctx(m))
         self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 1}])
-        self.assertIsNone(m.heal_rearm)
+        self.assertIsNone(m.self_use_rearm)
         w.armed_code = "pocket_knife"
         w.held_supplies = [InventorySupply(4, "small_potion")]
         self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
-        self.assertEqual(m.heal_rearm, "pocket_knife")
+        self.assertEqual(m.self_use_rearm, "pocket_knife")
 
     def test_a_drink_sends_the_use_with_the_arm(self):
         """Free-play run 3: the drink's Arm went out and its Use never did."""
@@ -200,23 +198,23 @@ class HealStateTest(unittest.TestCase):
         r.world = grid()
         r.world.armed_code = "small_potion"
         r.world.held_supplies = [InventorySupply(1, "pocket_knife")]
-        r.mem = Memory(need_self=False, need_position=False, heal_rearm="pocket_knife")
+        r.mem = Memory(need_self=False, need_position=False, self_use_rearm="pocket_knife")
         self.assertIsNone(r.reflex_while_held())
-        self.assertEqual(r.mem.heal_rearm, "pocket_knife")
+        self.assertEqual(r.mem.self_use_rearm, "pocket_knife")
 
     def test_a_drink_with_nothing_armed_leaves_nothing_to_rearm(self):
         w = grid()
         w.held_supplies = [InventorySupply(4, "small_potion")]
         m = Memory()
         self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
-        self.assertIsNone(m.heal_rearm)
+        self.assertIsNone(m.self_use_rearm)
 
     def test_weapon_gone_clears_rearm(self):
         w = grid()
         w.health = 10
-        m = Memory(heal_rearm="pocket_knife")
+        m = Memory(self_use_rearm="pocket_knife")
         self.assertNotEqual(dispatch(w, ctx(m)).state, "Heal")
-        self.assertIsNone(m.heal_rearm)
+        self.assertIsNone(m.self_use_rearm)
 
     def test_takes_food_even_when_it_would_overheal(self):
         # Free food beats a potion or a walk to town, whatever its heal.
@@ -561,7 +559,7 @@ class RearmTheLastWeaponTest(unittest.TestCase):
         m = Memory()
         out = dispatch(w, ctx(m))
         self.assertEqual(out.intents, [{"verb": "Use", "target": {"kind": "self"}}])
-        self.assertEqual(m.heal_rearm, "bronze_sword")
+        self.assertEqual(m.self_use_rearm, "bronze_sword")
         w.armed_code = None
         w.held_supplies = [InventorySupply(1, "bronze_sword"), InventorySupply(4, "small_potion")]
         self.assertEqual(dispatch(w, ctx(m)).intents, [{"verb": "Arm", "supply_id": 1}])
@@ -572,7 +570,7 @@ class RearmTheLastWeaponTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(4, "small_potion")]
         m = Memory()
         self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
-        self.assertIsNone(m.heal_rearm, "no weapon held: nothing to re-arm, never the potion")
+        self.assertIsNone(m.self_use_rearm, "no weapon held: nothing to re-arm, never the potion")
 
     def test_the_last_weapon_armed_comes_back_over_another_held_one(self):
         w = grid()
@@ -589,7 +587,7 @@ class RearmTheLastWeaponTest(unittest.TestCase):
             InventorySupply(4, "small_potion"),
         ]
         self.assertEqual(verbs(dispatch(w, ctx(m))), ["Arm", "Use"])
-        self.assertEqual(m.heal_rearm, "bronze_sword")
+        self.assertEqual(m.self_use_rearm, "bronze_sword")
 
 
 class DrinkTargetsSelfTest(unittest.TestCase):
@@ -616,3 +614,242 @@ class DrinkTargetsSelfTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# The health line and the one safe cell (A89), on open ground with a cluster
+# of safe cells west of the character.
+CLUSTER = [(4, 10), (4, 11), (3, 10), (3, 11)]
+TRAVEL = {"op": "travel", "to": "point", "x": 30, "y": 10}
+
+
+def open_ground(health: int):
+    from tests.test_survival_runs import world
+
+    return world(health=health)
+
+
+def line_ctx(plan=None, **params) -> PlayContext:
+    from agentrealm_agent.directives import PARAM_DEFAULTS
+
+    policy = Policy(kind="scripted", goals=[], hostile=["npc"])
+    return PlayContext(Memory(), policy, random.Random(0), params={**PARAM_DEFAULTS, **params}, plan=plan)
+
+
+def travel_plan():
+    from agentrealm_agent.directives import PARAM_DEFAULTS
+    from agentrealm_agent.plan import Plan
+
+    return Plan([dict(TRAVEL)], dict(PARAM_DEFAULTS))
+
+
+def wall_in(w: WorldModel, cells) -> None:
+    """A wall ring round ``cells``: no way in from any side."""
+    xs, ys = [p[0] for p in cells], [p[1] for p in cells]
+    for x in range(min(xs) - 1, max(xs) + 2):
+        for y in range(min(ys) - 1, max(ys) + 2):
+            if (x, y) not in cells:
+                w.view.tiles[(x, y)] = "wall"
+
+
+def measure_targets(outs) -> list[str]:
+    return [o.reason for o in outs if o.state == "Heal" and o.reason.startswith("heal_measure")]
+
+
+class LowHealthLineTest(unittest.TestCase):
+    """Whether resting is worth leaving the plan's op for is the planner's
+    ``low_health`` line: above it the op goes first, at or below it Heal rests."""
+
+    def test_above_the_line_the_plans_op_goes_first(self):
+        from tests.test_freeplay_run3 import safe
+
+        w, c = open_ground(9), line_ctx(travel_plan())
+        safe(w, *CLUSTER)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Travel")
+        self.assertIn("Heal: health above low_health: the plan's travel goes first", out.yielded)
+
+    def test_above_the_line_unreachable_safe_cells_never_hold_off_the_op(self):
+        from tests.test_freeplay_run3 import safe, stand_still
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w, c = open_ground(9), line_ctx(travel_plan())
+        safe(w, *CLUSTER)
+        wall_in(w, CLUSTER)
+        outs = stand_still(w, c, 6 * nav_stuck.PROGRESS_TICK_LIMIT)
+        self.assertEqual(measure_targets(outs), [])
+        self.assertNotIn("Heal", {o.state for o in outs})
+
+    def test_at_the_line_heal_rests_first(self):
+        from tests.test_freeplay_run3 import safe
+
+        w, c = open_ground(4), line_ctx(travel_plan())
+        safe(w, *CLUSTER)
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.reason), ("Heal", f"heal_measure → {CLUSTER[0]}"))
+
+    def test_the_planner_moves_the_line(self):
+        from tests.test_freeplay_run3 import safe
+
+        w, c = open_ground(9), line_ctx(travel_plan(), low_health=0.9)
+        safe(w, *CLUSTER)
+        self.assertEqual(dispatch(w, c).state, "Heal")
+        w, c = open_ground(4), line_ctx(travel_plan(), low_health=0.3)
+        safe(w, *CLUSTER)
+        self.assertEqual(dispatch(w, c).state, "Travel")
+
+    def test_the_planner_may_move_the_line_either_way(self):
+        from agentrealm_agent.directives import PARAM_DEFAULTS
+        from agentrealm_agent.plan import apply_set_param, validate_goal_op
+
+        for value in (0.2, 0.8):
+            op = {"op": "set_param", "name": "low_health", "value": value}
+            self.assertIsNotNone(validate_goal_op(op))
+            params = apply_set_param(dict(PARAM_DEFAULTS), dict(PARAM_DEFAULTS), op)
+            self.assertEqual(params["low_health"], value)
+        self.assertIsNone(validate_goal_op({"op": "set_param", "name": "low_health", "value": 1.5}))
+
+    def test_on_safe_ground_above_the_line_no_regen_sample(self):
+        from tests.test_freeplay_run3 import safe
+
+        w, c = open_ground(9), line_ctx(travel_plan())
+        safe(w, (10, 10), *CLUSTER)
+        self.assertEqual(dispatch(w, c).state, "Travel")
+        self.assertIsNone(c.memory.heal_regen_sample, "no sample while the plan's op runs")
+
+    def test_with_no_plan_op_it_rests_whatever_the_health(self):
+        from tests.test_freeplay_run3 import safe
+
+        w, c = open_ground(9), line_ctx()
+        safe(w, *CLUSTER)
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.reason), ("Heal", f"heal_measure → {CLUSTER[0]}"))
+
+
+class OneSafeCellTest(unittest.TestCase):
+    """Heal commits to one safe cell. A walk to it that is given up, or a
+    check that rules it out, gives it up in the one give-up memory (A90), and
+    safe ground with it while that backs off: never the next cell at once."""
+
+    def test_walled_in_safe_cells_are_never_walked_to(self):
+        from tests.test_freeplay_run3 import safe
+        from tests.test_survival_runs import MAP
+
+        w, c = open_ground(4), line_ctx()
+        safe(w, *CLUSTER)
+        wall_in(w, CLUSTER)
+        out = dispatch(w, c)
+        self.assertNotEqual(out.state, "Heal")
+        self.assertIn("Heal: no reachable safe tile", out.yielded)
+        for cell in CLUSTER:
+            self.assertIn((MAP, cell), c.memory.safe_unreachable)
+        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "heal_supplies"]
+        self.assertEqual([a.get("safe_ground") for a in asks], ["unreachable"])
+
+    def test_a_cell_ruled_out_is_given_up_like_a_walk(self):
+        # One reachability for every safe walk: a cell Retreat or Park ruled
+        # out is out for Heal too, and gives safe ground up.
+        from tests.test_freeplay_run3 import safe
+        from tests.test_survival_runs import MAP
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w, c = open_ground(7), line_ctx()
+        safe(w, *CLUSTER)
+        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {CLUSTER[0]}")
+        c.memory.safe_unreachable[(MAP, CLUSTER[0])] = w.tick  # as retreat.no_progress marks it
+        w.tick += 10
+        self.assertNotEqual(dispatch(w, c).state, "Heal")
+        self.assertTrue(nav_stuck.backed_off(c.memory, "heal_measure", MAP, CLUSTER[0], w.tick))
+        signals = c.memory.nav_stuck.stuck_signals
+        self.assertEqual([(s["goal"], s["target"]) for s in signals], [("heal_measure", list(CLUSTER[0]))])
+        w.tick += 10
+        self.assertIn("Heal: safe ground given up while its walk backs off", dispatch(w, c).yielded)
+
+    def test_cells_it_cannot_reach_do_not_chain(self):
+        # Reachable by budget, never nearer: one cell is walked to, given up,
+        # and no other is started on while it backs off.
+        from tests.test_freeplay_run3 import safe, stand_still
+        from tests.test_survival_runs import MAP
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w, c = open_ground(7), line_ctx()
+        safe(w, *CLUSTER)
+        outs = stand_still(w, c, nav_stuck.PROGRESS_TICK_LIMIT + nav_stuck.BACKOFF_BASE_TICKS // 2)
+        self.assertEqual(set(measure_targets(outs)), {f"heal_measure → {CLUSTER[0]}"})
+        self.assertTrue(nav_stuck.backed_off(c.memory, "heal_measure", MAP, CLUSTER[0], w.tick))
+        self.assertNotEqual(outs[-1].state, "Heal")
+        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "heal_supplies"]
+        self.assertEqual(len(asks), 1)
+        self.assertEqual(asks[0]["safe_ground"], "unreachable")
+        self.assertNotIn("regen", asks[0], "regen was never measured")
+
+    def test_safe_ground_comes_back_when_the_give_up_lapses(self):
+        # A give-up that never lapsed would shut every safe cell out, even
+        # reachable ones; it lapses with its backoff, whatever the health.
+        from tests.test_freeplay_run3 import safe, stand_still
+        from agentrealm_agent.navigation import stuck as nav_stuck
+
+        w, c = open_ground(7), line_ctx()
+        safe(w, *CLUSTER)
+        stand_still(w, c, nav_stuck.PROGRESS_TICK_LIMIT + 20)
+        until = max(r.until for r in c.memory.nav_stuck.given_up.values() if r.goal == "heal_measure")
+        w.tick = until - 1
+        self.assertNotEqual(dispatch(w, c).state, "Heal", "still given up")
+        w.tick = until
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Heal")
+        self.assertTrue(out.reason.startswith("heal_measure → "), out.reason)
+
+
+def ringed(w: WorldModel, size: int) -> WorldModel:
+    """A wall ring round the ``size`` grid: no way round through unknown ground."""
+    for i in range(-1, size + 1):
+        for p in ((i, -1), (i, size), (-1, i), (size, i)):
+            w.view.tiles[p] = "wall"
+    return w
+
+
+class FoodByPriceTest(unittest.TestCase):
+    """Food within ``FOOD_REACH`` is picked by one price: its walk on Heal's
+    ground, a block on the straight way a held item opens costed at its break."""
+
+    def test_the_cheapest_walk_wins_not_the_nearest_cell(self):
+        w = grid(at=(3, 4), size=8)
+        w.zones[7] = {}
+        for x in range(0, 7):
+            w.view.tiles[(x, 3)] = "wall"  # the near food is behind a wall, the way round is long
+        w.entities = [Entity("supply", 1, (3, 2), "apple"), Entity("supply", 2, (6, 6), "apple")]
+        out = dispatch(w, ctx())
+        self.assertEqual(out.state, "Heal")
+        self.assertEqual(out.reason, "heal_food → (6, 6)")
+
+    def test_food_behind_a_bush_a_held_blade_cuts(self):
+        w = ringed(grid(at=(1, 2), size=6), 6)
+        w.zones[7] = {}
+        for y in range(6):
+            w.view.tiles[(2, y)] = "bush"  # no way round: the bush is the way
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        w.armed_code = "bronze_sword"
+        w.entities = [Entity("supply", 1, (3, 2), "apple")]
+        out = dispatch(w, ctx())
+        self.assertEqual(out.state, "Heal")
+        self.assertTrue(out.reason.startswith("heal_food: break cut @ (2, 2)"), out.reason)
+        self.assertIn({"verb": "Use", "target": {"kind": "block", "x": 2, "y": 2}}, out.intents)
+
+    def test_a_walk_round_cheaper_than_the_cut_is_walked(self):
+        w = grid(at=(1, 2), size=6)
+        w.zones[7] = {}
+        w.view.tiles[(2, 2)] = "bush"  # one bush, open ground round it
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        w.armed_code = "bronze_sword"
+        w.entities = [Entity("supply", 1, (3, 2), "apple")]
+        out = dispatch(w, ctx())
+        self.assertEqual((out.state, out.reason), ("Heal", "heal_food → (3, 2)"))
+
+    def test_food_no_walk_reaches_is_no_target(self):
+        w = ringed(grid(at=(1, 2), size=6), 6)
+        w.zones[7] = {}
+        for y in range(6):
+            w.view.tiles[(2, y)] = "wall"
+        w.entities = [Entity("supply", 1, (3, 2), "apple")]
+        out = dispatch(w, ctx())
+        self.assertNotEqual(out.state, "Heal")

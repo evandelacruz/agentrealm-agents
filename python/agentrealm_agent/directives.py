@@ -21,6 +21,7 @@ PARAM_DEFAULTS: dict[str, float | int] = {
     "lives_floor": 3,
     "risk": 0.5,
     "potion_reserve": 2,  # planner-only (A61): no state reads it; the planner buys below it
+    "low_health": 0.5,  # share of max health at or below which a potion is spent and resting outranks the op (A89)
 }
 
 
@@ -44,7 +45,7 @@ def _valid_param(name: str, value: object) -> float | int | None:
         if value < 1:
             return None
         return float(value)
-    if name == "curiosity" or name == "risk":
+    if name in ("curiosity", "risk", "low_health"):
         if value < 0 or value > 1:
             return None
         return float(value)

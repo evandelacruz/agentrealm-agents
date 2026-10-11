@@ -20,10 +20,10 @@ from ..healing import (
     health_low,
     hurt,
     known_safe_cells,
+    note_regen_rate,
     note_regen_sample,
     potion_count,
     regen_known,
-    regen_per_tick,
     save_regen_yes,
     standing_in_safe_zone,
 )
@@ -117,10 +117,10 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
 
     # Health changes from food or a potion must not count as regen.
     if out := _act_food(w, ctx):
-        m.heal_regen_sample = None
+        m.heal_regen_sample = m.heal_regen_rise = None
         return out
     if out := use_carried_heal(w, ctx):
-        m.heal_regen_sample = None
+        m.heal_regen_sample = m.heal_regen_rise = None
         return out
 
     known = regen_known(ctx.knowledge, m)
@@ -143,13 +143,13 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
             # up: tell the planner. A step held this decision keeps the cell.
             _ask_for_supplies(w, m, safe_ground="unreachable")
         return _out(None, "no reachable safe tile")
-    # A "yes" saved with no rate is measured again on the next rest, so the
-    # planner's rest estimate (A124) comes to every world that has regen.
-    if known is None or regen_per_tick(ctx.knowledge) is None:
+    # Every rest measures regen's rate, refining the planner's estimate (A124).
+    note_regen_rate(m, w, ctx.knowledge)
+    if known is None:
         verdict = note_regen_sample(m, w)
         if verdict == "yes":
-            save_regen_yes(ctx.knowledge, m.heal_regen_per_tick)
-        elif verdict == "no" and known is None:
+            save_regen_yes(ctx.knowledge)
+        elif verdict == "no":
             m.heal_regen_absent = True  # this run only: never saved (one noisy window)
             _ask_for_supplies(w, m)
             return _out(None, "no safe-zone regen this run")

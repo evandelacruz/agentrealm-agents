@@ -50,8 +50,11 @@ REGEN_MEASURE_TICKS = 200
 REGEN_SAMPLE_GAP_TICKS = 50
 SURVIVAL_KEY = "survival"
 REGEN_KEY = "safe_zone_regen"
-# Health a tick the "yes" window showed: rough, a floor (A124).
-REGEN_RATE_KEY = "safe_zone_regen_per_tick"
+# Safe-zone regen's rate (A124): the health gained and the ticks it took,
+# summed over every stretch measured from one rise to a later one, so each
+# rest refines it. Rough: a decision can see a rise up to a gap late.
+REGEN_GAIN_KEY = "safe_zone_regen_health"
+REGEN_TICKS_KEY = "safe_zone_regen_ticks"
 
 
 def hurt(w: WorldModel) -> bool:
@@ -151,9 +154,8 @@ def regen_known(knowledge: KnowledgeBase | None, m: Memory) -> str | None:
     return "no" if m.heal_regen_absent else None
 
 
-def save_regen_yes(knowledge: KnowledgeBase | None, per_tick: float | None = None) -> None:
-    """Health came back in a safe zone: a fact for every run on this world,
-    with the health a tick the window showed when it is known (A124)."""
+def save_regen_yes(knowledge: KnowledgeBase | None) -> None:
+    """Health came back in a safe zone: a fact for every run on this world."""
     if knowledge is None:
         return
     with knowledge.lock:
@@ -161,20 +163,59 @@ def save_regen_yes(knowledge: KnowledgeBase | None, per_tick: float | None = Non
         if not isinstance(surv, dict):
             knowledge.extra[SURVIVAL_KEY] = surv = {}
         surv[REGEN_KEY] = "yes"
-        if per_tick is not None and per_tick > 0:
-            surv[REGEN_RATE_KEY] = per_tick
 
 
 def regen_per_tick(knowledge: KnowledgeBase | None) -> float | None:
-    """Safe-zone regen measured on this world, health a tick, or None: the
-    published docs give health back only from a heal or a respawn, so with
-    none measured a rest heals nothing (A124)."""
+    """The estimate of safe-zone regen on this world, health a tick, or None
+    when none was measured: the published docs give health back only from a
+    heal or a respawn, so with none measured a rest heals nothing (A124)."""
     if knowledge is None:
         return None
     with knowledge.lock:
         surv = knowledge.extra.get(SURVIVAL_KEY)
-        rate = surv.get(REGEN_RATE_KEY) if isinstance(surv, dict) and surv.get(REGEN_KEY) == "yes" else None
-    return float(rate) if isinstance(rate, (int, float)) and rate > 0 else None
+        if not isinstance(surv, dict):
+            return None
+        gain, ticks = surv.get(REGEN_GAIN_KEY), surv.get(REGEN_TICKS_KEY)
+    if not isinstance(gain, (int, float)) or not isinstance(ticks, (int, float)) or gain <= 0 or ticks <= 0:
+        return None
+    return gain / ticks
+
+
+def note_regen_rate(m: Memory, w: WorldModel, knowledge: KnowledgeBase | None) -> None:
+    """One decision resting hurt in a safe zone: measure regen's rate between
+    rises (A124). Timing from a rise to a later rise spans whole regen
+    periods, wherever the rest began; each such stretch adds its health and
+    ticks to the world's totals (``regen_per_tick``), and the later rise
+    starts the next stretch. Health that falls, or a decision too far after
+    the last (the character left the zone, or another state ran), starts
+    over at the next rise. Heal resets it for food and potions."""
+    r = m.heal_regen_rise
+    health = w.health
+    if health is None:
+        m.heal_regen_rise = None
+        return
+    fresh = r is not None and health >= r[3] and w.tick - r[2] <= REGEN_SAMPLE_GAP_TICKS
+    if not fresh:
+        m.heal_regen_rise = (None, None, w.tick, health)
+        return
+    rise_tick, rise_health, _, last_health = r
+    if health > last_health:
+        if rise_tick is not None and rise_health is not None and w.tick > rise_tick:
+            add_regen(knowledge, health - rise_health, w.tick - rise_tick)
+        m.heal_regen_rise = (w.tick, health, w.tick, health)
+    else:
+        m.heal_regen_rise = (rise_tick, rise_health, w.tick, health)
+
+
+def add_regen(knowledge: KnowledgeBase | None, gain: int, ticks: int) -> None:
+    if knowledge is None:
+        return
+    with knowledge.lock:
+        surv = knowledge.extra.get(SURVIVAL_KEY)
+        if not isinstance(surv, dict):
+            knowledge.extra[SURVIVAL_KEY] = surv = {}
+        surv[REGEN_GAIN_KEY] = surv.get(REGEN_GAIN_KEY, 0) + gain
+        surv[REGEN_TICKS_KEY] = surv.get(REGEN_TICKS_KEY, 0) + ticks
 
 
 def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
@@ -182,8 +223,6 @@ def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
 
     The sample restarts when health falls or the last window seen is too far
     back (the character left the zone, or another state ran meanwhile).
-
-    A "yes" leaves the health a tick it showed in ``heal_regen_per_tick``.
 
     Only a hurt character can show regen: health back counts as "yes" even
     when it reaches full, but a window at full health (or with ``max_health``
@@ -197,7 +236,6 @@ def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
     fresh = s is not None and w.health >= s[1] and w.tick - s[2] <= REGEN_SAMPLE_GAP_TICKS
     if fresh and w.health > s[1]:
         m.heal_regen_sample = None
-        m.heal_regen_per_tick = (w.health - s[1]) / max(1, w.tick - s[0])
         return "yes"
     if not hurt(w):
         m.heal_regen_sample = None

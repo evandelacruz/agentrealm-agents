@@ -69,9 +69,6 @@ class HealingHelpersTest(unittest.TestCase):
         self.assertIsNone(regen_known(kb, Memory()))
         save_regen_yes(kb)
         self.assertEqual(regen_known(kb, Memory()), "yes")
-        self.assertIsNone(regen_per_tick(kb), "a yes with no rate gives no rest estimate")
-        save_regen_yes(kb, 0.05)
-        self.assertEqual(regen_per_tick(kb), 0.05)
 
 
 class HealStateTest(unittest.TestCase):
@@ -365,26 +362,44 @@ class HealStateTest(unittest.TestCase):
         out = dispatch(w, ctx(m, kb))
         self.assert_heals_in_zone(out)
         self.assertEqual(regen_known(kb, Memory()), "yes")
-        # A124: the window's rate is kept, for the planner's rest estimate.
-        self.assertEqual(regen_per_tick(kb), 1 / 7)
+        self.assertIsNone(regen_per_tick(kb), "one rise gives a yes, not a rate (A124)")
 
-    def test_a_saved_yes_with_no_rate_is_measured_again(self):
-        # A124 review: a world saved with regen "yes" before the rate was kept
-        # measures it on its next rest; a quiet window there stays "yes".
+    def test_regen_rate_is_timed_between_rises_and_refined_by_each_rest(self):
+        # A124 review: a rate timed from wherever the rest began reads high;
+        # timed from one rise to the next it spans whole regen periods.
         w = grid(at=(0, 0))
         m, kb = Memory(), KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
-        for t in range(0, REGEN_MEASURE_TICKS + 1, 10):
-            w.tick = t
+        save_regen_yes(kb)  # a world saved before the rate was kept
+
+        def rest(tick: int, health: int) -> None:
+            w.tick, w.health = tick, health
             self.assert_heals_in_zone(dispatch(w, ctx(m, kb)))
-        self.assertFalse(m.heal_regen_absent, "a saved yes is never undone by one quiet window")
-        self.assertEqual(regen_known(kb, Memory()), "yes")
+
+        rest(0, 5)
+        rest(1, 6)  # the first rise, 1 tick in: no rate from it
         self.assertIsNone(regen_per_tick(kb))
-        w.tick += 10
+        for t in range(10, 100, 10):
+            rest(t, 6)
+        rest(101, 7)  # the next rise, 100 ticks after the first
+        self.assertEqual(regen_per_tick(kb), 1 / 100)
+        rest(140, 7)
+        rest(201, 8)  # each rise adds its stretch to the world's totals
+        self.assertEqual(regen_per_tick(kb), 2 / 200)
+        rest(300, 8)  # a gap past REGEN_SAMPLE_GAP_TICKS starts over
+        rest(301, 9)
+        self.assertEqual(regen_per_tick(kb), 2 / 200, "a rise after a gap starts a stretch, it ends none")
+
+    def test_food_eaten_is_no_regen_rise(self):
+        # A124: a rise from food or a potion is not regen.
+        w = grid(at=(0, 0))
+        m, kb = Memory(), KnowledgeBase.empty("sandbox")
         dispatch(w, ctx(m, kb))
-        w.tick, w.health = w.tick + 10, 6
+        w.tick, w.health = 5, 6
         dispatch(w, ctx(m, kb))
-        self.assertEqual(regen_per_tick(kb), 1 / 10)
+        w.held_supplies = [InventorySupply(4, "apple")]
+        w.tick = 10
+        dispatch(w, ctx(m, kb))
+        self.assertIsNone(m.heal_regen_rise)
 
     def test_regen_absent_is_kept_for_this_run_only(self):
         w = grid(at=(0, 0))
@@ -426,11 +441,11 @@ class HealStateTest(unittest.TestCase):
     def test_rests_when_regen_known(self):
         w = grid(at=(0, 0))
         kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb, 0.05)
+        save_regen_yes(kb)
         m = Memory()
         out = dispatch(w, ctx(m, kb=kb))
         self.assert_heals_in_zone(out)
-        self.assertIsNone(m.heal_regen_sample)  # known, with its rate: no sample taken
+        self.assertIsNone(m.heal_regen_sample)  # known: no sample taken
 
     def test_no_regen_stops_the_measure_walk_flip_flop(self):
         # Live: at 3/10, no food, no regen, Heal swapped between `heal_measure`

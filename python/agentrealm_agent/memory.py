@@ -158,7 +158,9 @@ class Memory:
     # "yes" is saved to the knowledge base; a "no" holds for this run only.
     heal_regen_sample: tuple[int, int, int] | None = None
     heal_regen_absent: bool = False
-    heal_regen_per_tick: float | None = None  # the last "yes" window's health a tick (A124)
+    # Safe-zone regen's rate between rises (A124): (last rise tick, health at
+    # it, last tick seen, health then); no rise yet is (None, None, ...).
+    heal_regen_rise: tuple[int | None, int | None, int, int] | None = None
     heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
     supply_refusals: dict[tuple[str, int], Refusal | NoopUse] = field(default_factory=dict)  # ("take"|"use", supply id) -> its last refusal (A80) or no-effect Use (A76) and what is sent next (executor.supply_refusals)
     self_use: int | None = None  # supply id of the Use on yourself sent (a potion, food or a chest, A108), until its Use applies or is refused or another queue replaces it (A24)

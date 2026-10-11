@@ -873,6 +873,13 @@ class PlannerViewTest(unittest.TestCase):
         self.assertIn(f"Once the current gather_gems has been on top for {RATE_MIN_SECONDS} s, gather_run also shows its measured rate", prompt)
         self.assertIn(f"at least {READY_POTIONS} potions are held", prompt)
 
+    def test_a_check_skipped_for_its_cost_sends_no_drop_back_or_restock(self):
+        # A121 review: drop back and restock would otherwise undo a skipped bar.
+        prompt = system_prompt()
+        self.assertIn("Drop back a stage when its readiness no longer is met (after a death, say), except for a check skipped for its cost", prompt)
+        self.assertIn("A check whose minutes still outweigh what it buys stays skipped: by itself it sends the character back to no stage and calls for no restock", prompt)
+        self.assertIn("whenever health or potions fall below the stage 2 bar, unless the check is one skipped for its cost", prompt)
+
     def test_a_met_stage_with_no_upgrade_for_sale_has_nothing_to_save_toward(self):
         # A101: readiness met and no better gear known for sale; State says
         # both, and the arc says a met stage moves on unless an upgrade is listed.

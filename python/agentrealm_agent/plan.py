@@ -59,7 +59,7 @@ OP_STATE: dict[str, str | None] = {
 # planner needs and the states lack becomes a new op here (with its validator
 # and the state that runs it), never a state that starts itself.
 OP_FIELDS: dict[str, str] = {
-    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" and "entrance" take x, y for a given one, else the nearest known',
+    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" takes x, y for a given one, else the nearest known; "entrance" takes x, y for a given one (a cell from State level_entrances), else walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and resolves nothing while no door has been seen here',
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
     "say": "text, and exactly one of npc_id (an id from State nearby_npcs) or npc_type (an NPC type code; the nearest NPC of that type in sight)",

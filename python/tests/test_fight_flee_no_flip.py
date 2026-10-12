@@ -205,12 +205,29 @@ class FlipGuardTest(unittest.TestCase):
         self.assertFalse(oscillation.benched(self.m, self.w, "Flee"), "a new danger may still flee")
 
     def test_retreat_is_never_benched(self):
-        """Retreat runs at the survival floor: a flip with it benches the other side."""
+        """Retreat runs at the survival floor: with no engagement, a flip with
+        it benches the other side."""
+        self.m.engagement = None
         event = pace(self.m, self.w, ["Fight", "Retreat"] * 4)
         self.assertEqual(event["benched"], "Fight")
         self.assertFalse(oscillation.benched(self.m, self.w, "Retreat"))
-        self.m.nav_stuck.benched["Retreat"] = oscillation.nav_stuck.Bench(self.w.tick + 100, True)
+        self.m.nav_stuck.benched["Retreat"] = oscillation.nav_stuck.Bench(self.w.tick + 100, None)
         self.assertFalse(oscillation.benched(self.m, self.w, "Retreat"))
+
+    def test_fight_is_never_benched_while_it_says_fight(self):
+        """Fight carries out the decision: a flip with another state benches that state."""
+        event = pace(self.m, self.w, ["Fight", "Gather"] * 4)
+        self.assertEqual(event["benched"], "Gather")
+        self.assertFalse(oscillation.benched(self.m, self.w, "Fight"))
+
+    def test_only_the_deciding_sides_pacing_asks_the_planner_at_once(self):
+        """Fight (the decision) and Retreat (the floor) may neither be benched:
+        the planner is asked on the first flip."""
+        event = pace(self.m, self.w, ["Fight", "Retreat"] * 4)
+        self.assertNotIn("benched", event)
+        self.assertTrue(event.get("asked"))
+        self.assertFalse(oscillation.benched(self.m, self.w, "Fight"))
+        self.assertEqual([s["trigger"] for s in self.m.strategist_signals], ["pacing"])
 
     def test_a_swing_in_the_window_is_progress(self):
         self.m.last_use_tick = self.w.tick + 12

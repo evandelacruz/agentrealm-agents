@@ -46,8 +46,10 @@ that were no walk and nothing came of it (no hit taken, no swing sent since
 the window began), the losing side is benched for ``FLIP_COOLDOWN_TICKS``
 (``bench``): the side going against the engagement's decision (Flee while
 it says fight, Fight while it says flee), else the state that
-took the last step; Retreat, which runs at the survival floor, is never
-benched. Dispatch skips a benched state (``benched``); the bench
+took the last step. The side carrying out the decision (Fight while it
+says fight, Flee and Retreat while it says flee) is never benched, nor is
+Retreat, which runs at the survival floor; when only those paced, the
+planner is asked at once. Dispatch skips a benched state (``benched``); the bench
 lifts early once the engagement's decision changes, so a real danger still
 sends the character running. When the same states flip again within twice
 the cool-down, the bench has not settled it: a ``pacing`` trigger asks the
@@ -89,6 +91,7 @@ FLIP_COOLDOWN_TICKS = nav_stuck.BACKOFF_BASE_TICKS
 # The states that carry out each engagement decision: while it says fight,
 # Flee goes against it, and while it says flee, Fight does.
 AGAINST_FIGHT = ("Flee",)
+FOR_FIGHT = ("Fight",)
 
 # Never benched: Retreat runs at the survival floor, whatever else paced.
 NEVER_BENCHED = frozenset({"Retreat"})
@@ -166,7 +169,6 @@ def check(m: Memory, w: WorldModel) -> dict | None:
         not given
         and not event.get("escape")
         and len(flippers) > 1
-        and set(flippers) - NEVER_BENCHED
         and not _came_of_it(m, w, since)
     ):
         event.update(bench(m, w, flippers, moves))
@@ -217,15 +219,18 @@ def bench(m: Memory, w: WorldModel, states: list[str], moves: list[tuple[str, st
     """Settle a flip between ``states`` that paced with no walk (module
     docstring): bench the losing side for ``FLIP_COOLDOWN_TICKS``, and ask
     the planner (a ``pacing`` trigger) when the same states flipped within
-    twice that before. Returns what the ``oscillation`` event records."""
+    twice that before, or at once when no side may be benched. Returns what
+    the ``oscillation`` event records."""
     stuck, e = m.nav_stuck, m.engagement
     loser = losing_side(m, states, moves)
-    stuck.benched[loser] = nav_stuck.Bench(w.tick + FLIP_COOLDOWN_TICKS, e.fight if e is not None else None)
+    out: dict = {}
+    if loser is not None:
+        stuck.benched[loser] = nav_stuck.Bench(w.tick + FLIP_COOLDOWN_TICKS, e.fight if e is not None else None)
+        out.update(benched=loser, benched_until=w.tick + FLIP_COOLDOWN_TICKS)
     flip = tuple(states)
     again = stuck.last_flip is not None and stuck.last_flip[0] == flip and w.tick - stuck.last_flip[1] <= 2 * FLIP_COOLDOWN_TICKS
     stuck.last_flip = (flip, w.tick)
-    out: dict = {"benched": loser, "benched_until": w.tick + FLIP_COOLDOWN_TICKS}
-    if again:
+    if again or loser is None:
         queue_signal(
             m,
             {
@@ -243,14 +248,19 @@ def bench(m: Memory, w: WorldModel, states: list[str], moves: list[tuple[str, st
     return out
 
 
-def losing_side(m: Memory, states: list[str], moves: list[tuple[str, str, str]]) -> str:
+def losing_side(m: Memory, states: list[str], moves: list[tuple[str, str, str]]) -> str | None:
     """Which of ``states`` a flip benches: the one going against the
-    engagement's decision, else the one that took the last step; never one
-    of ``NEVER_BENCHED``."""
-    may = [state for state in states if state not in NEVER_BENCHED]
+    engagement's decision, else the one that took the last step. Never one
+    of ``NEVER_BENCHED``, nor the side carrying out the decision (Fight while
+    it says fight, Flee and Retreat while it says flee): None when only
+    those paced."""
     e = m.engagement
+    carrying = (FOR_FIGHT if e.fight else AGAINST_FIGHT + tuple(NEVER_BENCHED)) if e is not None else ()
+    may = [state for state in states if state not in NEVER_BENCHED and state not in carrying]
+    if not may:
+        return None
     if e is not None:
-        against = AGAINST_FIGHT if e.fight else ("Fight",)
+        against = AGAINST_FIGHT if e.fight else FOR_FIGHT
         for state in may:
             if state in against:
                 return state

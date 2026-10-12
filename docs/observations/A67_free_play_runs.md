@@ -2008,3 +2008,86 @@ Per A87, each names the rule a fix should generalize.
 2. **An `equip` cannot arm a tool, however its row is slotted** (`equip.py:309–317`, `cannot_equip_reason`; `named_equip` at 281). The raft's row is class `tool`, slot `armed`, capability `fords` on trigger `equipped`. The equip rule arms only weapons, so `equip raft` was dropped as "not armed or worn" and the lake crossing never began. **Rule:** an item the Supplies reference slots as `armed` can be armed by a named `equip`, whatever its class.
 
 3. **Shop walks to the nearest unseen shop, not to the known seller** (`states/shop.py:181–203`, `_shop_cells_out_of_sight` and `_shop_out_of_sight`). In part 1 the raft walk went west through every known shop cell. The only raft seller, the lake fisher at (626, 389), is known from his clue and the price list, not as a shop cell. The planner had to send a `travel` point there itself in part 2. **Rule:** a buy walks to a seller known to sell the item (a shop cell or an NPC whose clue or stock names it) before trying shops that are not known to.
+
+### Run 25: stopped at 290 s in the Fight/Flee loop that ended run 24
+
+- **Code:** `main` at `ffbcb85`. Since run 24: A131 (a buy walks only toward a seller of its item), A133 (walks cross water with a fording supply, and nothing strands them there), A134 (oddities shown to the planner), A135 (food first out of a fight; a potion is for a fight), A137 (three agents, docs only).
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile. Planned as three chained 600 s parts; **stopped by hand at 290 s** of part 1, on the supervisor's call, because the known Fight/Flee loop held from the start and its fix (A136) was about to merge. The park was cut short (`park aborted … after 23.2 s, queue cleared`), so M10 reports `FAIL: ran 290s < target 600s`.
+- **Knowledge base:** kept from run 24. **Supplies:** served.
+- **Start:** 10/10, 3 lives, 7 gems, bronze_sword armed, bronze_mail worn, 3 potions, the raft held, at (433, 415): where run 24 part 3 ended.
+
+#### What happened
+
+From **2 s** to the stop, the character paced between (432, 416) and (433, 415) about once a second: Fight "close on npc 247", then Flee "flee npc 247". Snotling 247 stood still at (435, 413), two cells off, with no swing and no damage either way. Health stayed 10/10. There were 53 oscillation events by 241 s, each with `states` and `unwalked` both [Fight, Flee] and nothing given up. This is run 24's defect 1, unchanged.
+
+The planner set `travel` entrance (659, 400), the lake door with the raft, at 65 s and answered "unchanged" through 231 s: "Keep heading to the east lake door. Health is full, 3 potions held, and the berry bushes are not needed." The op never got a decision.
+
+#### Not tested
+
+Shop walking only to a seller (A131), arming the raft and crossing water (A133), and food before potions out of a fight (A135): none came up. No buy, no water, no drink.
+
+#### Defects
+
+Only run 24's defect 1: **Fight and Flee take turns on one passive hostile, and the pacing guard has nothing to give up** (`navigation/oscillation.py:77–170`; `engagement.py:87`). It is A136, in flight in #241.
+
+### Run 26 (1800 s in three parts): the Fight/Flee loop gone, the raft carries him into a level (map 44, level 4), and he is stuck there for the last 1550 s
+
+- **Code:** `main` at `81f5966`: run 25's code plus A136 (a fight decided on holds, Fight closes by a walk, and a flip with no walk is settled).
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile, three back-to-back `--seconds 600` parts from 02:18:06 UTC. Times below are seconds from the start of part 1.
+- **Knowledge base:** kept from run 25. **Supplies:** fresh cache, `capabilities` shape.
+- **Verdict:** all three parts exit 0, `PASS` (M10). Deaths **0**, API errors **0**, planner errors **0** (50 + 55 + 55 plans). Start: 10/10, 3 lives, **7 gems**, beside snotling 247 at (433, 415), with the bronze_sword armed, the bronze_mail worn, 3 potions and the raft. End: 10/10, 3 lives, **12 gems**, on map 44. Parts 2 and 3 parked "no safe ground known".
+
+#### What happened
+
+| Time | What happened |
+|---|---|
+| 0–13 s | **Fight/Flee loop gone** (A136). Fight closed on snotling 247 by a walk, took five hits of 1, stepped once "under attack, best open step", and **killed it** at 13 s. No oscillation event all run. |
+| 15–32 s | At 5/10, Heal went "break for food" and **cut 8 bushes** for berries (A135). None dropped food, so at 32 s it drank a potion. |
+| 32–253 s | `travel` entrance (659, 400), the lake door. On the way it chopped a tree at (513, 330), took a berry try, and **killed gristlewick 214** (146 s). The raft was armed to cross water at (606, 344), the **sword re-armed on land** at (609, 354) (A133), the raft again at (627, 372). It **entered map 44 at 253 s**. |
+| 253–294 s | Map 44 is a 16 × 12 room of water inside walls, with sand islands, a rumor teller, a sign, the entry door (7, 11) and the exit door (7, 0). The stale `travel` entrance (659, 400) asked `no_way_on` six times (defect 2). Then it read the sign, spoke to the rumor teller, and walked on the raft via a gem at (12, 5) to **(7, 1), the sand under the exit door**, at 294 s. |
+| 294–300 s | There it armed the sword for "level entrance → (7, 0)", then turned to "close on npc 64": a bogmaw on its island at (6, 3). It stepped onto water, took a 3, and Ashore ("under attack on water: for land") pulled it back and forth. It ended on water at (10, 3). |
+| 300–1800 s | **Stuck in the level.** **140 `no_way_on`** asks in all. Walks to sand cells 1–3 cells away ((7, 10), (8, 10), (9, 10), (7, 1), (8, 1)) returned "no step toward it", blocked_by "no known way: walls, no ground or unseen ground", or the bogmaw. Only long straight water legs moved it: (13, 1)↔(13, 10), (11, 1)↔(11, 10). One more potion at 653 s after a second brush with the bogmaw. The planner re-applied the same travel points and `enter_level` doors, and once misread the map's ruler ((17, 1) for (7, 1)) (defect 1). |
+
+#### Pack, stage, entrance and level attempts
+
+- **Stage:** 2 all run; potions 3 → 1.
+- **Level:** **map 44 entered at 253 s**. The engine's minimap gives it `level: 4`, but the position read carries no `level`, so State showed `map_level=None` and the agent never treated the map as a level (defect 1). Not cleared; `levels_cleared=[]`.
+- **Purchases:** none, so A131 (a buy walks only to a seller) did not come up.
+- **Death chests:** only run 19's 96002 (17:1,10), unchanged.
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **7** | **12** (+5) |
+| Health | 10/10 | 10/10 |
+| Armed | bronze_sword | raft |
+| Potions | 3 | 1 |
+
+#### Run 24 and 25 defects, checked
+
+| Defect | Run 26 | |
+|---|---|---|
+| Fight and Flee take turns on one passive hostile (A136) | **Gone.** Killed at 13 s; 0 oscillation events. | |
+| `equip` cannot arm a tool slotted `armed` (A133) | **Gone.** Raft armed three times, sword re-armed on land. | |
+| Shop walks to the nearest unseen shop (A131) | **Not tested.** No buy. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens (three parts) | input 1,177,608, output 125,353, cache write 113,442, cache read 18,604,488 |
+
+#### Decision mix
+
+Intents: 483 `Step`, 1,129 `Wait`, 35 `Use`, 17 `Arm`, 4 `Take`, 1 `Read`, 1 `Say`. Call mix: 2,038 `tick`, 331 `strategist`, 212 `zone`, 206 `self`, 158 `entities`, 40 `position`, 25 `terrain`, 18 `stuck`; 140 `no_way_on` asks.
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize.
+
+1. **The agent never knows it is in a level, because it reads `level` where the engine does not serve it** (`world.py:466–483`, the position read; `states/level.py:44–52`, `inside_level`). The position read returns only `map_id`, `x`, `y`. The level number is on the minimap: map 44's entry has `level: 4`. So `map_level` stayed None, `inside_level` was false, and Level treated the room's exit door as an overworld "level entrance" to walk to. Nothing level-specific ran: no exit, no boss, no sense that the sand under the door was the way out. The 1550 s of `no_way_on` followed from there. **Rule:** facts the engine serves are read where it serves them: a map's level from the minimap's `maps` entry.
+
+2. **Entering a door does not finish the walk that led to it** (`travel/resolve.py:194–202`, `at_destination`, which needs the same map). The `travel` entrance (659, 400) op was still on the stack after the door took the character to map 44. Travel then asked `no_way_on` six times for a cell on another map. **Rule:** a walk to a door is done when the door is used, that is when the map changes through it.
+
+3. **The planner misreads the State map's ruler** (`strategist.py`, the `map` block and its two-line x ruler). At 273 s it sent `travel point 17,1`, reading the door at x 17, and asked where the door is at x 7. The ruler starts at x −2, so its tens line puts digits under the wrong columns for a reader counting from the left. **Rule:** the State map labels coordinates so a reader cannot be off by ten: every row and column numbered in full, or the cells of note listed by coordinate beside the map.

@@ -476,9 +476,12 @@ class WorldModel:
         self.asleep = asleep
 
     def apply_position(self, p: dict) -> None:
-        # `level` belongs to the map (Manual §5.3): a read that omits it keeps
-        # the map's level, and a new map starts with none until a read names
-        # it. A non-integer `level` is logged and read as omitted (A37).
+        # `level` belongs to the map (Manual §5.3) and comes from its minimap
+        # entry (`apply_minimap`, A145): the position read carries none. A new
+        # map takes the level the minimap gave it, else none until a read
+        # names it. A position read that ever names one still counts, a read
+        # that omits it keeps the map's level, and a non-integer `level` is
+        # logged and read as omitted (A37).
         has_level = "level" in p
         level = p.get("level")
         if level is not None and (isinstance(level, bool) or not isinstance(level, int)):

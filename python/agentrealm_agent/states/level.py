@@ -55,9 +55,10 @@ PREREQUISITE_TRIES = 3
 
 
 def inside_level(w: WorldModel) -> bool:
-    """True when the position read names a positive ``level`` (Manual §5.3).
+    """True when the current map's ``level`` is positive (Manual §5.3).
 
-    Interior maps carry ``level``; the overworld omits it or sends zero.
+    An interior map's minimap entry carries ``level``; the overworld's omits
+    it (A145). The position read carries none.
     """
     if not w.alive or w.map_id is None:
         return False

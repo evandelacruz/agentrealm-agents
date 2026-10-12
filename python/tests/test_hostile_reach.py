@@ -40,6 +40,7 @@ from tests.test_runner import FakeClient
 GLYPHS = {".": "dirt", "#": "wall"}
 POLICY = Policy(kind="scripted", hostile=["npc"], on_hostile="fight")
 BAR = POLICY.hostile_range + WALK_REACH_MARGIN  # how far a walk keeps from a hostile seen
+STRONG = 6  # a hit the engagement will not take on alone at full health
 
 
 def world(rows: list[str], at: tuple[int, int]) -> WorldModel:
@@ -52,9 +53,9 @@ def world(rows: list[str], at: tuple[int, int]) -> WorldModel:
     return w
 
 
-def pack(w: WorldModel, *cells: tuple[int, int]) -> list[Entity]:
-    """Hostiles of a type that has hit us before, at ``cells``."""
-    w.threat.record(("npc", "bogmaw"), 2)
+def pack(w: WorldModel, *cells: tuple[int, int], hit: int = 2) -> list[Entity]:
+    """Hostiles of a type that has hit us for ``hit`` before, at ``cells``."""
+    w.threat.record(("npc", "bogmaw"), hit)
     w.entities = [Entity("npc", 200 + i, p, code="bogmaw") for i, p in enumerate(cells)]
     return w.entities
 
@@ -121,7 +122,7 @@ class NoWayRoundAsksTest(unittest.TestCase):
     def test_the_hold_never_climbs_the_stuck_ladder(self):
         """Holding for the planner is no stuck walk: no reveal or break walk goes through the pack."""
         w = world(self.CORRIDOR, at=(1, 1))
-        pack(w, (12, 1))
+        pack(w, (12, 1), hit=STRONG)
         c = ctx(travel(21, 1))
         for _ in range(4):
             out = dispatch(w, c)
@@ -131,7 +132,7 @@ class NoWayRoundAsksTest(unittest.TestCase):
 
     def test_once_the_pack_moves_off_the_way_the_walk_goes_on(self):
         w = world(self.CORRIDOR, at=(1, 1))
-        hostiles = pack(w, (12, 1))
+        hostiles = pack(w, (12, 1), hit=STRONG)
         c = ctx(travel(21, 1))
         self.assertIsNone(dispatch(w, c).intents)
         hostiles[0].pos = (40, 1)  # gone down the corridor's far end, out of the way
@@ -140,6 +141,27 @@ class NoWayRoundAsksTest(unittest.TestCase):
         self.assertEqual(out.state, "Travel", out.reason)
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (2, 1))
 
+
+    def test_a_weak_lone_hostile_on_the_way_is_left_to_the_engagement(self):
+        """A hostile the engagement would fight holds no walk: the walk goes on and Fight takes it in range."""
+        w = world(self.CORRIDOR, at=(1, 1))
+        pack(w, (12, 1))
+        c = ctx(travel(21, 1))
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Travel", out.reason)
+        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (2, 1))
+        self.assertEqual(asks(c), [])
+        w.pos = (10, 1)  # walked up to it: now it is in range
+        w.tick += 40
+        self.assertEqual(dispatch(w, c).state, "Fight")
+
+    def test_a_strong_lone_hostile_on_the_only_way_asks(self):
+        w = world(self.CORRIDOR, at=(1, 1))
+        pack(w, (12, 1), hit=STRONG)
+        c = ctx(travel(21, 1))
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.intents, out.wait), ("Travel", None, True), out.reason)
+        self.assertEqual(len(asks(c)), 1)
 
     def held_at(self, level: int) -> PlayContext:
         """Travel down the corridor whose walk had already climbed to ``level``
@@ -153,7 +175,7 @@ class NoWayRoundAsksTest(unittest.TestCase):
             nav_stuck.set_break_target(att, (12, 1), "chop")
         elif level == nav_stuck.REVEAL:
             att.reveal_left = nav_stuck.REVEAL_MOVE_BUDGET
-        pack(w, (12, 1))
+        pack(w, (12, 1), hit=STRONG)
         w.tick += 4
         out = dispatch(w, c)
         self.assertIsNone(out.intents, out.reason)
@@ -171,7 +193,7 @@ class NoWayRoundAsksTest(unittest.TestCase):
         c = ctx(travel(21, 1))
         dispatch(w, c)
         att = nav_stuck.active(c.memory, w)
-        pack(w, (12, 1))
+        pack(w, (12, 1), hit=STRONG)
         w.tick += nav_stuck.PROGRESS_TICK_LIMIT + 1  # the window failed before the pack was seen
         att.window_tick = 0
         c.plan.stalled_since_tick = None
@@ -279,22 +301,49 @@ class WalkUnderAttackDoesNotWaitTest(unittest.TestCase):
         self.assertIn("best open step", got.reason)
         self.assertEqual(got.state, "Retreat")
 
-    def test_with_no_open_step_it_hands_to_flee(self):
+    def cornered(self, tick_hz: int = 10) -> tuple[Runner, Decision, list[dict], str | None]:
+        """Walled in but for the cell the held Step may have taken us to, and
+        the hitter's beside us: no Step lands open from both cells we may stand on."""
         r = self.runner(attacked=True)
+        r.plan.tick_hz = tick_hz
         w = r.world
-        # Walled in but for the cell the held Step may have taken us to, and
-        # the hitter's: no Step lands open from both cells we may stand on.
         w.view.tiles.update({p: "wall" for p in [(4, 4), (4, 5), (4, 6), (5, 4), (5, 6), (6, 6), (7, 5)]})
         w.entities[0].pos = (6, 4)
         w.view.tiles[(6, 4)] = "dirt"
         intents, d = self.retreat()
         starts = possible_positions(w, r.mem)
         self.assertIsNone(open_step(w, r.mem, POLICY, None, intents, starts, [(6, 4)]))
-        got, sent, doubt = r.move_under_attack(d, intents, starts)
+        return (r, *r.move_under_attack(d, intents, starts))
+
+    def test_with_no_open_step_it_hands_to_flee(self):
+        _, got, sent, doubt = self.cornered()
         self.assertIsNone(doubt)
         self.assertEqual(got.state, "Flee")
         self.assertIn("no open step, cornered", got.reason)
         self.assertTrue(any(i.get("verb") == "Use" for i in sent), sent)
+
+    def test_the_cornered_move_is_paced_at_the_worlds_tick_rate(self):
+        """It runs in the plan's context, as every decision does: every Use is
+        paced at the world's tick rate (A99), not the default."""
+        from agentrealm_agent import brain
+
+        seen = []
+        real = brain.cornered
+
+        def spy(w, ctx, hostiles):
+            seen.append((ctx.tick_hz, ctx.plan))
+            return real(w, ctx, hostiles)
+
+        with mock.patch.object(brain, "cornered", spy):
+            r, *_ = self.cornered(tick_hz=20)
+        self.assertEqual(seen, [(20, r.plan)])
+
+    def test_while_parking_the_cornered_move_runs_with_no_op(self):
+        r = self.runner(attacked=True)
+        r.mem.parking = True
+        self.assertIsNone(r._play_args(r.plan)["plan"])
+        r.mem.parking = False
+        self.assertIs(r._play_args(r.plan)["plan"], r.plan)
 
     def tick(self, attacked: bool) -> list[dict] | None:
         """One runner tick in which Retreat's walk replaces the held queue: what is sent."""

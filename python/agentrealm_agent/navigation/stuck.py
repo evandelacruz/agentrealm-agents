@@ -553,6 +553,7 @@ def hold(m: Memory, att: NavAttempt, tick: int) -> None:
     att.level = WALK
     att.reveal_left = 0
     att.reset_closest = att.reset_level = None
+    att.net_best = None
     clear_break_target(att)
     _fresh_window(att, tick)
     _drop_path(m, att)

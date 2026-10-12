@@ -26,6 +26,8 @@ from .navigation.rejection import navigation_avoid_costly
 from .healing import hurt
 from . import targets as targets_mod
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
+from .directives import attack_forbidden
+from .engagement import would_fight
 from .hostile_ground import ground_by_hostile, walk_reach
 from .survival import hostiles_in_range, is_hostile, pursuer_peaks, safe_goals, town_cell
 from .executor.movement import step_landing
@@ -1001,16 +1003,34 @@ def safe_explore_path(
 
 
 def op_walk_sets(
-    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    knowledge: KnowledgeBase | None,
+    params: dict[str, float | int],
+    never_attack: list[str],
 ) -> tuple[set[Pos], set[Pos], set[Pos]]:
     """``plan_avoid``, ``plan_costly`` and ``reach`` for a walk on an op's behalf (A128).
 
     As ``plan_sets``, with the reach of the hostiles seen (``walk_reach``)
     priced ``costly`` too, so the walk routes round a pack it has seen;
     ``guided_step`` takes ``reach`` to refuse a way that still crosses it.
+    A hostile in view the engagement would fight (``engagement.would_fight``,
+    its pack counted, and not one ``never_attack`` forbids) is no reach to
+    keep out of: a hostile on the way is the engagement's (A120), so the walk
+    goes on and Fight takes it once it is in range. Only the ones the
+    engagement would not take on, and remembered ones out of view, which it
+    cannot weigh, are kept out of.
     """
     _, avoid, costly = plan_sets(w, m, policy, knowledge)
-    reach = walk_reach(w, policy)
+    fought = {
+        (e.kind, e.id)
+        for e in w.entities
+        if is_hostile(w, policy, e)
+        and not attack_forbidden(e, never_attack)
+        and would_fight(w, policy, params, also=e)
+    }
+    reach = walk_reach(w, policy, skip=fought)
     return avoid, costly | reach, reach
 
 

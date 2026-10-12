@@ -161,7 +161,7 @@ def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcom
     targets_mod.commit(m, w, ENTRANCE_GOAL, (w.map_id, door), top_op(ctx))
     if out := _prerequisite_step(w, ctx, door):
         return out
-    plan_avoid, plan_costly, reach = op_walk_sets(w, m, policy, ctx.knowledge)
+    plan_avoid, plan_costly, reach = op_walk_sets(w, m, policy, ctx.knowledge, ctx.params, ctx.never_attack)
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)

@@ -35,6 +35,7 @@ __all__ = [
     "decide",
     "path_blockers",
     "path_threats",
+    "play_context",
     "remaining_path_stale",
     "set_position",
     "take",
@@ -133,6 +134,51 @@ def decide(
     ``probe`` runs only the states that can answer with a reflex, for the
     runner's held-queue probe (A64).
     """
+    ctx = play_context(
+        m,
+        policy,
+        rng,
+        never_attack=never_attack,
+        params=params,
+        knowledge=knowledge,
+        directives=directives,
+        plan=plan,
+        gem_cuts=gem_cuts,
+        probe=probe,
+    )
+    outcome = dispatch(w, ctx)
+    if outcome.state != "Gather" and not (probe and not outcome.state):
+        # Gather did not decide: its last word is stale. A probe no state
+        # answered leaves the decision that sent the held queue standing.
+        m.gather_status = ""
+    return _decision(outcome)
+
+
+def cornered_decision(w: WorldModel, ctx: PlayContext, hostiles: list[Entity]) -> Decision:
+    """Flee's move with no Step open (``flee.cornered``), in ``ctx``
+    (``play_context``, as ``decide`` builds it): for the runner, when a walk
+    under attack has no Step sound from every possible position
+    (``held_queue.open_step``, A128). It drinks a heal that is due, else
+    swings at a hostile in reach, else asks the planner; it never just stops."""
+    return _decision(cornered(w, ctx, hostiles))
+
+
+def play_context(
+    m: Memory,
+    policy: Policy,
+    rng: random.Random,
+    *,
+    never_attack: list[str] | None = None,
+    params: dict[str, float | int] | None = None,
+    knowledge: KnowledgeBase | None = None,
+    directives: Directives | None = None,
+    plan: Plan | None = None,
+    gem_cuts: GemYieldTracker | None = None,
+    probe: bool = False,
+) -> PlayContext:
+    """The ``PlayContext`` a decision runs in: one build for ``decide`` and
+    ``cornered_decision``, so the two never drift apart (the plan's tick
+    rate paces every ``Use``, A99)."""
     ctx = PlayContext(
         m,
         policy,
@@ -146,43 +192,7 @@ def decide(
     )
     if params is not None:
         ctx.params = params
-    outcome = dispatch(w, ctx)
-    if outcome.state != "Gather" and not (probe and not outcome.state):
-        # Gather did not decide: its last word is stale. A probe no state
-        # answered leaves the decision that sent the held queue standing.
-        m.gather_status = ""
-    return _decision(outcome)
-
-
-def cornered_decision(
-    w: WorldModel,
-    m: Memory,
-    policy: Policy,
-    rng: random.Random,
-    hostiles: list[Entity],
-    *,
-    never_attack: list[str] | None = None,
-    params: dict[str, float | int] | None = None,
-    knowledge: KnowledgeBase | None = None,
-    directives: Directives | None = None,
-    plan: Plan | None = None,
-) -> Decision:
-    """Flee's move with no Step open (``flee.cornered``): for the runner, when
-    a walk under attack has no Step sound from every possible position
-    (``held_queue.open_step``, A128). It drinks a heal that is due, else
-    swings at a hostile in reach, else asks the planner; it never just stops."""
-    ctx = PlayContext(
-        m,
-        policy,
-        rng,
-        never_attack=never_attack or [],
-        knowledge=knowledge,
-        directives=directives or default_directives(),
-        plan=plan,
-    )
-    if params is not None:
-        ctx.params = params
-    return _decision(cornered(w, ctx, hostiles))
+    return ctx
 
 
 def _decision(outcome: StateOutcome) -> Decision:

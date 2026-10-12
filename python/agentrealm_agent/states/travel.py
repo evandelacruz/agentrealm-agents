@@ -111,7 +111,7 @@ def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDesti
         if m.goal.startswith("travel:"):
             m.path, m.goal = [], ""
         m.goal_op = dict(op)
-    plan_avoid, plan_costly, reach = op_walk_sets(world, m, policy, ctx.knowledge)
+    plan_avoid, plan_costly, reach = op_walk_sets(world, m, policy, ctx.knowledge, ctx.params, ctx.never_attack)
     out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly, state, reach)
     if out is not None:
         return out

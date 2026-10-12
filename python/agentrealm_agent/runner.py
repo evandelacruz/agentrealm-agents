@@ -18,6 +18,7 @@ from .brain import (
     decide,
     path_blockers,
     path_threats,
+    play_context,
     remaining_path_stale,
     remaining_walk_cells,
     walkable_prefix,
@@ -322,21 +323,19 @@ class Runner:
         )
 
     def _decide(self, w, m, *, plan: Plan | None = None, probe: bool = False):
-        if m.parking:
-            plan = None  # the run is over: no op runs while parking (A66)
-        return decide(
-            w,
-            m,
-            self.cfg.policy,
-            self.rng,
-            never_attack=self.directives.directives.never_attack,
-            params=self.plan.params,  # directives params, tightened by the strategist or a set_param op (A34, A35)
-            knowledge=self.knowledge,
-            directives=self.directives.directives,
-            plan=plan,
-            gem_cuts=self.gem_cuts,
-            probe=probe,
-        )
+        return decide(w, m, self.cfg.policy, self.rng, **self._play_args(plan), probe=probe)
+
+    def _play_args(self, plan: Plan | None) -> dict:
+        """What every decision runs with (``brain.play_context``): ``_decide``'s
+        and the cornered move's under attack (A128) alike."""
+        return {
+            "never_attack": self.directives.directives.never_attack,
+            "params": self.plan.params,  # directives params, tightened by the strategist or a set_param op (A34, A35)
+            "knowledge": self.knowledge,
+            "directives": self.directives.directives,
+            "plan": None if self.mem.parking else plan,  # the run is over: no op runs while parking (A66)
+            "gem_cuts": self.gem_cuts,
+        }
 
     def log(self, call: str, detail: str, record: dict) -> None:
         """One line to the console and the trace (``trace.Trace``)."""
@@ -831,17 +830,7 @@ class Runner:
             return Decision(one[0], f"{d.reason}: under attack, best open step", d.reflex, state=d.state), one, None
         if not hostiles:
             return d, intents, STEP_DOUBT
-        c = cornered_decision(
-            w,
-            m,
-            policy,
-            self.rng,
-            hostiles,
-            never_attack=self.directives.directives.never_attack,
-            params=self.plan.params,
-            knowledge=self.knowledge,
-            directives=self.directives.directives,
-        )
+        c = cornered_decision(w, play_context(m, policy, self.rng, **self._play_args(self.plan)), hostiles)
         moves = self._apply_never_attack(self.intents_for(c))
         doubt = unconfirmed_send(w, m, policy, self.knowledge, moves, starts) if moves else STEP_DOUBT
         if doubt is not None:

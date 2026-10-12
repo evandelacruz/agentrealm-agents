@@ -618,18 +618,19 @@ class BreakRearmTest(unittest.TestCase):
 
     def test_another_walk_at_step_two_never_stands_in_for_a_stalled_op(self):
         # The safe default's own stuck walk is at step 2 while the top op's
-        # executor (Shop, nothing priced in sight) cannot act: that walk is not
+        # executor (Shop, nothing priced in sight, its seller's walk given up) cannot act: that walk is not
         # the op's, so Shop asks the planner and holds rather than leave the
         # round to Break (A120), and the buy op still stalls and is dropped.
         w, m = self.r.world, self.r.mem
+        plan = Plan([{"op": "buy", "code": "torch", "x": 30, "y": 0}], dict(PARAM_DEFAULTS))
+        plan.stalled_since_tick = 0
+        self.ctx.plan = plan
+        w.tick = PLAN_STALL_SECONDS * plan.tick_hz * 2
+        nav_stuck.give_up(m, w, nav_stuck.track(m, w, "travel:seller", (30, 0)), "time")
         m.nav_stuck.attempts.clear()
         att = nav_stuck.track(m, w, "explore", (4, 0))
         att.level = nav_stuck.BREAK
         att.break_x, att.break_y, att.break_cap = 2, 0, "smash"
-        plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
-        plan.stalled_since_tick = 0
-        self.ctx.plan = plan
-        w.tick = PLAN_STALL_SECONDS * plan.tick_hz * 2
         with self.assertLogs("agentrealm_agent.plan", "WARNING"):
             out = dispatch(w, self.ctx)
         self.assertEqual((out.state, out.intents, out.wait), ("Shop", None, True), out.reason)

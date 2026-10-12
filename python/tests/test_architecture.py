@@ -152,13 +152,17 @@ class PlanOpTest(unittest.TestCase):
         self.assertEqual(out.intents[0]["verb"], "Take")
 
     def test_an_op_its_executor_cannot_act_on_holds_for_the_planner_then_stalls(self):
-        # Nothing priced in sight and no shop known: Shop asks the planner and
-        # holds; the safe default never stands in for it (A120). Unanswered,
-        # the op is dropped once it has stalled long enough (A104).
+        # Nothing priced in sight and the walk to its one seller given up:
+        # Shop asks the planner and holds; the safe default never stands in
+        # for it (A120). Unanswered, the op is dropped once it has stalled
+        # long enough (A104).
         w = field_world()
-        plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
+        m = Memory()
+        nav_stuck.give_up(m, w, nav_stuck.track(m, w, "travel:seller", (18, 4)), "time")
+        m.nav_stuck.attempts.clear()
+        plan = Plan([{"op": "buy", "code": "torch", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
         plan.tick_hz = 1  # PLAN_STALL_SECONDS ticks
-        outs = play(w, plan, decisions=12)
+        outs = play(w, plan, decisions=12, m=m)
         held = [o for o in outs if o.state == "Shop"]
         self.assertTrue(held)
         for o in held:
@@ -257,7 +261,7 @@ class A58PacingPairsTest(unittest.TestCase):
 # terms; the run that found it is cited in PLAN.md and docs/observations. This
 # count is of citations, not lines, and only falls: lower it in the PR that
 # removes some.
-RUN_CITATION_CEILING = 64
+RUN_CITATION_CEILING = 63
 # ``run 4``, ``Run 4``, ``runs 3, 4``: any form that names a live run.
 RUN_CITATION = re.compile(r"\bruns? \d+\b", re.IGNORECASE)
 PYTHON_DIR = Path(__file__).resolve().parents[1]

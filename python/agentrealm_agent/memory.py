@@ -167,6 +167,9 @@ class Memory:
     # (loadout, gems, map) changes, since any of those can turn a refusal around.
     shop_refusals: dict[int, int] = field(default_factory=dict)
     shop_refusal_key: tuple = ()
+    # Shop (A131): (code, map id, cell) of each seller's place searched round
+    # without finding the item for sale; a buy of that code walks there no more.
+    sellers_searched: set[tuple[str, int, tuple[int, int]]] = field(default_factory=set)
     # Safe-zone regen sample: (start tick, start health, last tick seen). Only a
     # "yes" is saved to the knowledge base; a "no" holds for this run only.
     heal_regen_sample: tuple[int, int, int] | None = None

@@ -18,7 +18,8 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.shop import note_shop_result, sync_shop
 from agentrealm_agent.states.shop import shop_outcome
 from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, eaten_on_pickup_line, held_line, no_seller_line
-from agentrealm_agent.travel.knowledge import entrance_key
+from agentrealm_agent.sellers import sellers_line
+from agentrealm_agent.travel.knowledge import entrance_key, record_shop_cell
 from agentrealm_agent.world import Entity, WorldModel
 
 from .test_strategist import FakeLLM, fake_runner, make, round_trip
@@ -240,10 +241,17 @@ class NoSellerTest(unittest.TestCase):
 
     def test_an_item_no_known_shop_sells_is_listed(self):
         kb = KnowledgeBase.empty("sandbox")
-        kb.items["potion"] = {"gem_price": 5}
+        record_shop_cell(kb, 1, (9, 9), "potion", 5)
+        kb.items["torch"] = {"gem_price": 2}
         unsold = self.unsold(world(), kb)
         self.assertIn("raft", unsold)
-        self.assertNotIn("potion", unsold, "a known price is a known seller")
+        self.assertNotIn("potion", unsold, "a shop seen selling it is a known seller")
+        self.assertIn("torch", unsold, "a price seen with no place is no seller (A131)")
+
+    def test_a_clue_naming_it_with_a_gem_price_is_a_seller(self):
+        kb = KnowledgeBase.empty("sandbox")
+        kb.clues.append({"kind": "npc", "text": "Raft, thirty gems", "map_id": 1, "x": 50, "y": 0, "tick": 1})
+        self.assertNotIn("raft", self.unsold(world(), kb))
 
     def test_only_items_some_shop_sells_are_listed(self):
         # Gems, lives, food eaten on pickup, the starting kit, slot rows and
@@ -274,6 +282,51 @@ class NoSellerTest(unittest.TestCase):
         queue_signal(r.mem, {"trigger": "death", "tick": 1})
         round_trip(s, r)
         self.assertIn("raft", json.loads(state_line(llm.messages[0], "no_seller_known").split("=", 1)[1]))
+
+
+class SellersLineTest(unittest.TestCase):
+    """State says, per item, where it is sold and roughly how far (A131)."""
+
+    def test_each_item_lists_its_sellers_nearest_first(self):
+        kb = KnowledgeBase.empty("sandbox")
+        record_shop_cell(kb, 7, (30, 0), "torch", 2)
+        record_shop_cell(kb, 7, (5, 0), "torch", 3)
+        record_shop_cell(kb, 2, (1, 1), "torch", 2)
+        kb.clues.append({"kind": "npc", "text": "Raft, thirty gems", "map_id": 7, "x": 0, "y": 200, "tick": 1})
+        rows = json.loads(sellers_line(world(), kb, ["raft", "rope"]).split("=", 1)[1])
+        self.assertEqual(
+            rows["torch"],
+            [
+                {"by": "shop", "at": [5, 0], "map_id": 7, "steps": 5, "price": 3},
+                {"by": "shop", "at": [30, 0], "map_id": 7, "steps": 30, "price": 2},
+                {"by": "shop", "at": [1, 1], "map_id": 2, "steps": "other_map", "price": 2},
+            ],
+        )
+        self.assertEqual(rows["raft"], [{"by": "clue", "at": [0, 200], "map_id": 7, "steps": 200, "search_radius": 20}])
+        self.assertEqual(rows["rope"], "none known")
+
+    def test_state_carries_the_line_for_the_stacks_buys(self):
+        llm = FakeLLM(WAIT)
+        s, r = make(llm), fake_runner()
+        r.plan = buy_plan("raft")
+        queue_signal(r.mem, {"trigger": "death", "tick": 1})
+        round_trip(s, r)
+        self.assertEqual(json.loads(state_line(llm.messages[0], "sellers").split("=", 1)[1])["raft"], "none known")
+
+    def test_a_reply_buy_with_no_seller_known_is_refused_with_why(self):
+        llm = FakeLLM(json.dumps({"goals": [{"op": "buy", "code": "raft"}, {"op": "buy", "code": "torch"}]}), WAIT)
+        s, r = make(llm), fake_runner()
+        queue_signal(r.mem, {"trigger": "death", "tick": 1})
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals, [{"op": "buy", "code": "torch"}], "torch has a seller; raft has none")
+        self.assertTrue(any("no seller of raft is known" in why for why in s.rejected), s.rejected)
+
+    def test_a_reply_buy_that_names_its_sellers_place_is_kept(self):
+        llm = FakeLLM(json.dumps({"goals": [{"op": "buy", "code": "raft", "x": 600, "y": 380}]}), WAIT)
+        s, r = make(llm), fake_runner()
+        queue_signal(r.mem, {"trigger": "death", "tick": 1})
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals, [{"op": "buy", "code": "raft", "x": 600, "y": 380}])
 
 
 def state_line(messages: list[dict], key: str) -> str:

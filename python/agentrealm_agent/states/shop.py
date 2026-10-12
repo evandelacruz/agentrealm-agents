@@ -20,9 +20,8 @@ from ..shop import (
     price_of,
     wanted_codes,
 )
-from ..travel.knowledge import iter_shop_cells
-from ..travel.ops import TravelOp
-from ..travel.resolve import ResolvedDestination, given_up_travel, resolve_travel
+from ..sellers import SELLER_SEARCH_RADIUS, Seller, sellers_of
+from ..travel.resolve import ResolvedDestination, given_up_travel
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, op_walk, top_op
 from .explore import explore_outcome
@@ -31,23 +30,24 @@ from .room import planned_take
 from .travel import walk_to
 from .way import clear_the_way
 
-# The commitment of the shop cell a ``buy`` walks to while its item is out of sight (A71).
+# The commitment of the seller a ``buy`` walks to while its item is out of sight (A71, A131).
 SHOP_TARGET = "shop"
-# With no shop known yet, how far around the town cell Shop explores for one.
-SHOP_SEARCH_RADIUS = 20
 
 
 class ShopState(State):
     """Executor for ``buy``: takes a priced supply in sight that the op wants,
     walking up beside it first.
 
-    With none in sight, the shop is a prerequisite (A71): Shop walks to the
-    nearest known shop cell out of sight, committed until it comes into sight;
-    with no shop known yet it walks to town and explores around it. It never
-    leaves the buy to the safe default, which wandered off into a pack
-    (free-play run 4): with no way it opens the block on the way a held item
-    opens, else asks the planner and holds (``way``, A120). The op is dropped when every known shop is in sight
-    without the item, or the item is in sight and costs more gems than we have.
+    With none in sight, a seller is a prerequisite (A71): Shop walks only
+    toward a seller known to sell the item (``sellers``, A131), the cheapest
+    walk first, committed until it comes into sight: a shop cell seen selling
+    it, or the place a clue or the op names, searched round once there. It
+    never walks to a shop that does not sell it, and never leaves the buy to
+    the safe default: with no way it opens the block on the way a held item
+    opens, else asks the planner and holds (``way``, A120). The op is dropped
+    when no seller of the item is known, when every known seller has been
+    reached without it for sale, or when it is in sight and costs more gems
+    than we have.
     With a full pack, room is the pack rule's (``pack.make_room``, A102): the
     op's ``drop`` is the only way to make room; without one the op goes back
     to the planner.
@@ -136,7 +136,7 @@ def _step_toward(
 
 
 def _toward_shop(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
-    """Nothing the op wants in sight: walk to a shop, else find one (A71)."""
+    """Nothing the op wants in sight: walk to a seller of it (A71, A131)."""
     m, plan = ctx.memory, ctx.plan
     op = top_op(ctx)
     wants = wanted_codes(w, ctx)
@@ -151,24 +151,33 @@ def _toward_shop(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
     if prices:
         # For sale here, but each one refused or no room for it: its stall clock runs.
         return StateOutcome(None, f"buy {code}: none here to take", state=state)
+    while True:
+        seller = targets_mod.hold(
+            m,
+            w,
+            SHOP_TARGET,
+            lambda: next(iter(_sellers_to_walk(w, ctx, code, op)), None),
+            lambda s: s in _sellers_to_walk(w, ctx, code, op),
+            op,
+        )
+        if seller is None:
+            break
+        out = _to_seller(w, ctx, op, code, seller, state)
+        if out is not None:
+            return out
+        # Searched round it and not found: on to the next seller.
+        m.sellers_searched.add((code, seller.map_id, seller.pos))
+    known = sellers_of(code, w, ctx.knowledge, op)
     given_up = given_up_travel(m.nav_stuck, w.tick)
-    dest = targets_mod.hold(
-        m,
-        w,
-        SHOP_TARGET,
-        lambda: _shop_out_of_sight(w, ctx),
-        lambda d: d in _shop_cells_out_of_sight(w, ctx),
-        op,
-    )
-    if dest is not None:
-        out = walk_to(w, ctx, op, dest, state)
-        out.reason = f"buy {code}: {out.reason}"
-        return out
-    if any(s not in given_up for s in iter_shop_cells(ctx.knowledge)):
-        # Every shop we know of is in sight, and none sells it.
-        plan.drop_current(f"no {code} for sale at a known shop", memory=m)
-        return StateOutcome(None, f"buy {code}: not for sale at a known shop", state=state)
-    return _find_shop(w, ctx, op, code, state)
+    if any((s.map_id, s.pos) in given_up and (code, s.map_id, s.pos) not in m.sellers_searched for s in known):
+        # The walk to a seller was given up and is backed off: ``ShopState`` asks and holds (A120).
+        return StateOutcome(None, f"buy {code}: the walk to its seller was given up", state=state)
+    if known:
+        plan.drop_current(f"no {code} for sale at any known seller", memory=m)
+        return StateOutcome(None, f"buy {code}: not for sale at any known seller", state=state)
+    # No seller known (A110): never a walk to shops that do not sell it.
+    plan.drop_current(f"no seller of {code} known", memory=m)
+    return StateOutcome(None, f"buy {code}: no seller known", state=state)
 
 
 def _sale_price(e: Entity, code: str, items: dict) -> int | None:
@@ -178,51 +187,42 @@ def _sale_price(e: Entity, code: str, items: dict) -> int | None:
     return price_of(e, items)
 
 
-def _shop_cells_out_of_sight(w: WorldModel, ctx: PlayContext) -> list[ResolvedDestination]:
-    """Known shop cells not given up and out of sight: one in sight shows what it sells."""
-    given_up = given_up_travel(ctx.memory.nav_stuck, w.tick)
+def _sellers_to_walk(w: WorldModel, ctx: PlayContext, code: str, op: GoalOp) -> list[Seller]:
+    """The sellers of ``code`` still worth the walk, cheapest walk first: not
+    given up, a shop cell out of sight (one in sight shows what it sells), a
+    place to search not searched yet."""
+    m = ctx.memory
+    given_up = given_up_travel(m.nav_stuck, w.tick)
     here = w.pos
     assert here is not None
     out = []
-    for mid, pos in iter_shop_cells(ctx.knowledge):
-        if (mid, pos) in given_up or (mid == w.map_id and in_sight(w, mid, here, pos)):
+    for s in sellers_of(code, w, ctx.knowledge, op):
+        if (s.map_id, s.pos) in given_up or (code, s.map_id, s.pos) in m.sellers_searched:
             continue
-        out.append(ResolvedDestination(mid, pos, "shop"))
+        if s.exact and s.map_id == w.map_id and in_sight(w, s.map_id, here, s.pos):
+            continue
+        out.append(s)
     return out
 
 
-def _shop_out_of_sight(w: WorldModel, ctx: PlayContext) -> ResolvedDestination | None:
-    """The nearest known shop cell out of sight, on this map first."""
-    here = w.pos
-    assert here is not None
-    cells = _shop_cells_out_of_sight(w, ctx)
-    if not cells:
-        return None
-    return min(cells, key=lambda d: (d.map_id != w.map_id, chebyshev(here, d.pos), d.map_id, d.pos))
-
-
-def _find_shop(w: WorldModel, ctx: PlayContext, op: GoalOp, code: str, state: str) -> StateOutcome:
-    """No shop known: walk to town, then explore around it for one. With no
-    town known either Shop sends nothing, and ``ShopState`` asks the planner
-    and holds while the buy's stall clock runs (A34, A120)."""
-    m, plan = ctx.memory, ctx.plan
-    assert plan is not None and w.pos is not None
-    town = resolve_travel(TravelOp(to="town"), w, ctx.knowledge, m.strength)
-    if town is None or (town.map_id, town.pos) in given_up_travel(m.nav_stuck, w.tick):
-        return StateOutcome(None, f"buy {code}: no shop or town known", state=state)
-    if town.map_id != w.map_id or not in_sight(w, town.map_id, w.pos, town.pos):
-        out = walk_to(w, ctx, op, town, state)
-        out.reason = f"buy {code}: no shop known, to town: {out.reason}"
+def _to_seller(w: WorldModel, ctx: PlayContext, op: GoalOp, code: str, seller: Seller, state: str) -> StateOutcome | None:
+    """One step toward ``seller``; at a place to search, one step of the search
+    round it. None once the search round it has run out."""
+    m = ctx.memory
+    assert w.pos is not None
+    dest = ResolvedDestination(seller.map_id, seller.pos, "shop" if seller.exact else "seller")
+    if seller.exact or seller.map_id != w.map_id or not in_sight(w, seller.map_id, w.pos, seller.pos):
+        out = walk_to(w, ctx, op, dest, state)
+        out.reason = f"buy {code}: {seller.by} seller: {out.reason}"
         return out
     att = nav_stuck.active(m, w)
     if att is not None and att.level == nav_stuck.BREAK:
         # Stuck step 2: Break, below, opens the way this decision.
         return StateOutcome(None, f"buy {code}: {att.goal} blocked", state=state)
-    area: GoalOp = {"op": "explore_area", "x": town.pos[0], "y": town.pos[1], "radius": SHOP_SEARCH_RADIUS}
-    if explore_targets(area, w):
-        out = explore_outcome(w, m, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=area, state=state)
-        # No step this decision (a taken cell, a wait) is not the search running out: its stall clock runs.
-        out.reason = f"buy {code}: no shop known, exploring town: {out.reason}"
-        return out
-    plan.drop_current(f"no shop found within {SHOP_SEARCH_RADIUS} of town", memory=m)
-    return StateOutcome(None, f"buy {code}: no shop found around town", state=state)
+    area: GoalOp = {"op": "explore_area", "x": seller.pos[0], "y": seller.pos[1], "radius": SELLER_SEARCH_RADIUS}
+    if not explore_targets(area, w):
+        return None
+    out = explore_outcome(w, m, ctx.policy, ctx.rng, knowledge=ctx.knowledge, op=area, state=state)
+    # No step this decision (a taken cell, a wait) is not the search running out: its stall clock runs.
+    out.reason = f"buy {code}: searching round its {seller.by} seller: {out.reason}"
+    return out

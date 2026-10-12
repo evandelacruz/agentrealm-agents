@@ -35,6 +35,7 @@ from agentrealm_agent.states.retreat import retreat_step
 from agentrealm_agent.strategist import Asked, Strategist, StrategistConfig
 from agentrealm_agent.world import POST_STILL_TICKS, Entity, WorldModel, chebyshev
 from agentrealm_agent.zone_discovery import apply_zone
+from tests.test_strategist import SOLD_HERE, shop_selling
 
 MAP = 1
 HOSTILE = ("npc", "fake_gristle")
@@ -220,7 +221,7 @@ def runner(goals: list[dict]) -> SimpleNamespace:
         mem=Memory(),
         plan=Plan([dict(g) for g in goals], dict(PARAM_DEFAULTS)),
         directives=SimpleNamespace(directives=Directives(params=dict(PARAM_DEFAULTS), goals=[])),
-        knowledge=None,
+        knowledge=shop_selling(*SOLD_HERE),
         tick_hz=10,
         server_tick=10,
         log=mock.MagicMock(),

@@ -13,6 +13,7 @@ from agentrealm_agent import config
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import note_goto_reached, path_for_plan_op, path_owned_by, replan
 from agentrealm_agent.plan import (
     EXPLORE_ANYWHERE,
@@ -166,12 +167,15 @@ class GoalStackTest(unittest.TestCase):
         self.assertIsNone(plan.current())
 
     def test_buy_stays_on_stack_for_shop(self):
-        # No shop known: Shop asks the planner and holds, the safe default
-        # never walks for it (A120), and the op stays on top while its stall clock runs.
-        plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
-        m = Memory()
-        out = run(open_world(), m, plan)
-        self.assertEqual(plan.current(), {"op": "buy", "code": "torch"})
+        # The walk to its seller given up: Shop asks the planner and holds, the
+        # safe default never walks for it (A120), and the op stays on top while its stall clock runs.
+        op = {"op": "buy", "code": "torch", "x": 30, "y": 0}
+        plan = Plan([dict(op)], dict(PARAM_DEFAULTS))
+        m, w = Memory(), open_world()
+        nav_stuck.give_up(m, w, nav_stuck.track(m, w, "travel:seller", (30, 0)), "time")
+        m.nav_stuck.attempts.clear()
+        out = run(w, m, plan)
+        self.assertEqual(plan.current(), op)
         self.assertEqual((out.state, out.intents, out.wait, m.goal), ("Shop", None, True, ""))
         self.assertIsNotNone(plan.stalled_since_tick)
 

@@ -537,7 +537,7 @@ class Runner:
         """A cell holding a supply with a ``gem_price`` is where it can be
         bought: a priced supply "spends those gems when picked up" (manual
         §11, https://agentrealm.gg/docs/manual#11-game-rules). ``travel:shop``
-        heads for one (A27)."""
+        heads for one (A27); the cell keeps what it sells, for a ``buy`` (A131)."""
         if self.knowledge is None or self.world.map_id is None:
             return
         for s in payload.get("supplies") or []:
@@ -547,15 +547,14 @@ class Runner:
             if price is None or isinstance(price, bool):
                 continue
             try:
-                if int(price) <= 0:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            try:
+                price = int(price)
                 pos = (int(s["x"]), int(s["y"]))
             except (KeyError, TypeError, ValueError):
                 continue
-            record_shop_cell(self.knowledge, self.world.map_id, pos)
+            if price <= 0:
+                continue
+            code = s.get("supply_subtype_code")
+            record_shop_cell(self.knowledge, self.world.map_id, pos, code if isinstance(code, str) else None, price)
 
     def read_world(self) -> dict | None:
         """The world read that sets the pace, retried like any other call."""

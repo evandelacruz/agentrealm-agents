@@ -118,12 +118,44 @@ def iter_hunting_cells(kb: KnowledgeBase | None) -> list[tuple[int, Pos, dict[st
     return out
 
 
-def record_shop_cell(kb: KnowledgeBase | None, map_id: int, pos: Pos) -> None:
+def record_shop_cell(
+    kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str | None = None, price: int | None = None
+) -> None:
+    """A shop cell, and what it was seen selling there (A131): ``sells`` maps
+    each item code seen for sale on the cell to its gem price."""
     if kb is None:
         return
     with kb.lock:
         shops = kb.maps.setdefault(str(map_id), {}).setdefault(SHOPS, {})
-        shops[_cell_key(pos)] = {}
+        row = shops.setdefault(_cell_key(pos), {})
+        if not isinstance(row, dict):
+            row = shops[_cell_key(pos)] = {}
+        if code:
+            row.setdefault("sells", {})[code] = price
+
+
+def iter_shop_sales(kb: KnowledgeBase | None) -> list[tuple[int, Pos, str, int | None]]:
+    """Each item a known shop cell was seen selling: map, cell, code and price (A131)."""
+    if kb is None:
+        return []
+    out: list[tuple[int, Pos, str, int | None]] = []
+    with kb.lock:
+        for mid, entry in kb.maps.items():
+            shops = entry.get(SHOPS) if isinstance(entry, dict) else None
+            if not isinstance(shops, dict):
+                continue
+            for key, row in shops.items():
+                sells = row.get("sells") if isinstance(row, dict) else None
+                if not isinstance(sells, dict):
+                    continue
+                try:
+                    map_id = int(mid)
+                    x, y = (int(p) for p in key.split(",", 1))
+                except ValueError:
+                    continue
+                for code, price in sells.items():
+                    out.append((map_id, (x, y), code, price if isinstance(price, int) else None))
+    return out
 
 
 def iter_shop_cells(kb: KnowledgeBase | None) -> list[tuple[int, Pos]]:

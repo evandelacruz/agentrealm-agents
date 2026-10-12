@@ -49,6 +49,7 @@ OP_STATE: dict[str, str | None] = {
     "use_item": "UseItem",
     "hunt": None,
     "enter_level": "Level",
+    "leave_level": "Level",
     "fight_boss": "Boss",
     "fight": "Fight",
     "avoid": None,
@@ -74,7 +75,8 @@ OP_FIELDS: dict[str, str] = {
     "gather_gems": "count (the gem total to reach; with no x, y Gather works the ground where the character is, the grass, gem piles and unexplored ground it knows priced alike by walk and yield), optional fight (true: gather on ground a known hostile holds, and walk through its reach, taking the fight; left out, Gather keeps clear of it), optional x, y (a block of the region to gather in: Gather goes only for grass, gem piles and unexplored ground there while it knows one there that a way reaches, walks toward the region while it knows no cell of it, and works the ground where the character is when no way reaches anything there; it lifts that region's barren mark. The region is committed: a reply that moves it keeps the old one unless that region is barren or poor, Gather went 30 s without getting nearer it or, once there, without a cut there taking effect, or a death, new map, hurt or hostile pack came up)",
     "equip": "optional code (arms or wears exactly that held item; else the best held gear is armed and worn). Dropped, not done, when the named item cannot be armed or worn",
     "use_item": "code (a held consumable a Use on yourself applies: a potion heals, a chest raises the pack's carry slots). Done once that item is used up; dropped when none is held or its Use was refused or did nothing. A bigger chest is applied as soon as one is held, without this op",
-    "enter_level": "x, y (the level door)",
+    "enter_level": "x, y (the level door). Refused for an entrance known to be a level above level_target (levels are taken in order)",
+    "leave_level": "no fields. Walks out of the level the way the character came in. Put on top by itself inside a level above level_target",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
     "fight": "exactly one of npc_id (an id from State nearby_npcs) or npc_type (the nearest NPC of that type in sight, kept as the op's one NPC once seen: one fight, not the whole type). Closes on it and swings until it is dead or out of sight, stepping off safe ground to swing (no attack is made from a safe zone) and back behind the swings; Retreat still pulls back at the health floor, and at the floor it never steps off safe ground (dropped then, so you make the call). Dropped for a boss (fight_boss), an NPC the directives forbid attacking, or one no swing or open step reaches",
     "wait": "seconds, why",
@@ -394,6 +396,7 @@ _VALIDATORS: dict[str, Any] = {
     "gather_gems": _validate_gather_gems,
     "hunt": _validate_hunt,
     "enter_level": _validate_enter_level,
+    "leave_level": lambda op: True,
     "fight_boss": _validate_fight_boss,
     "avoid": _validate_avoid,
     "wait": _validate_wait,
@@ -955,6 +958,8 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
                 and e.pos == here
                 for e in world.entities
             )
+    if name == "leave_level":
+        return not (world.map_level is not None and world.map_level > 0)
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
     if name == "fight":

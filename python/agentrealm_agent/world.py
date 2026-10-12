@@ -792,9 +792,13 @@ class WorldModel:
                 self.apply_position(pos)
 
     def note_level_clear(self, ceremony: dict | None) -> None:
-        """Records a round trip's one-shot ``level_clear_ceremony`` (A38)."""
+        """Records a round trip's one-shot ``level_clear_ceremony`` (A38), and
+        its ``level_number`` as cleared before the next snapshot says so (A145)."""
         if ceremony:
             self.level_clear_tick = self.tick
+            level = _opt_int(ceremony.get("level_number")) if isinstance(ceremony, dict) else None
+            if level is not None and level not in self.levels_cleared:
+                self.levels_cleared = sorted({*self.levels_cleared, level})
 
     def _apply_boss_fight_clock(self, body: dict, *, complete: bool) -> None:
         if complete or "boss_fight_end_tick" in body:

@@ -1,4 +1,4 @@
-"""Level: carry out the plan's ``enter_level`` op (A37).
+"""Level: carry out the plan's ``enter_level`` and ``leave_level`` ops (A37, A145).
 
 Walks to the level's entrance at the op's cell and through it, then walks
 the level's rooms toward unexplored doors, then frontier tiles. The op is
@@ -10,7 +10,12 @@ filed as locked and needing an item (``needs``) that is not carried, with
 one in sight, gets that item as a prerequisite stop before it: Level walks
 to it and takes it first, then resumes toward the entrance. With no way to
 the entrance it clears the way (stuck step 2 is Break's) or asks the planner
-and holds (``way``, A120).
+and holds (``way``, A120). An ``enter_level`` at an entrance known to be a
+level above the target is dropped with why: levels are taken in order (A145).
+
+``leave_level`` walks back out the way the character came: to the door
+nearest the cell it landed on coming in, and onto it. It is done once the
+character stands outside every level.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from ..memory import Memory
 from ..navigation import cost_path, doors_goal_path, nearest_target
 from ..navigation import stuck as nav_stuck
 from ..pathing import bounded_step, grid_params, guided_step, nav_search, next_step, plan_sets
+from ..level_order import op_barred_level, target_level
 from ..travel.knowledge import iter_entrances
 from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, op_walk, top_op
@@ -34,6 +40,7 @@ from .way import clear_the_way
 
 DOOR_GOAL, FRONTIER_GOAL, ENTRANCE_GOAL = "level:door", "level:frontier", "level:entrance"
 PREREQUISITE_GOAL = "level:prerequisite"
+EXIT_GOAL = "level:exit"
 GOALS = (DOOR_GOAL, FRONTIER_GOAL)
 # The commitment of the door or frontier Level walks to inside a level (A71).
 LEVEL_TARGET = "level"
@@ -132,7 +139,7 @@ def _level_target(
 
 
 class LevelState(State):
-    """Executor for ``enter_level``."""
+    """Executor for ``enter_level`` and ``leave_level`` (A145)."""
 
     name = "Level"
 
@@ -148,7 +155,12 @@ class LevelState(State):
         m, policy = ctx.memory, ctx.policy
         op = my_op(ctx, self.name)
         assert op is not None and ctx.plan is not None
+        if op["op"] == "leave_level":
+            return _walk_out(world, ctx)
         if not inside_level(world):
+            if (barred := op_barred_level(op, world, ctx.knowledge)) is not None:
+                ctx.plan.drop_current(f"entrance is level {barred}, above level {target_level(world)} not yet cleared", memory=m)
+                return StateOutcome(None, "entrance barred: levels in order", state=self.name)
             return _walk_to_entrance(world, ctx, (op["x"], op["y"]))
         out = level_outcome(world, m, policy, knowledge=ctx.knowledge, state=self.name)
         if out.intents is None:
@@ -175,6 +187,46 @@ def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcom
         why = f"no path to level entrance {door[0]},{door[1]}"
         return clear_the_way(w, ctx, door, why, LevelState.name, top_op(ctx), reach=reach)
     return StateOutcome([set_position(step)], f"level entrance → {door}", state=LevelState.name)
+
+
+def _way_out(w: WorldModel, m: Memory) -> Pos | None:
+    """Where the walk out of a level goes (A145): the door nearest the cell
+    the character landed on coming in, else that cell itself while no door
+    is seen near it. Off the landing map, the nearest door on this one."""
+    doors = {p for p, b in w.view.tiles.items() if b in DOORS}
+    way_in = m.level_way_in
+    if way_in is not None and way_in[0] == w.map_id:
+        landing = way_in[1]
+        if doors:
+            return min(doors, key=lambda p: (chebyshev(p, landing), p))
+        return landing if landing != w.pos else None
+    here = w.pos
+    assert here is not None
+    return min(doors, key=lambda p: (chebyshev(p, here), p)) if doors else None
+
+
+def _walk_out(w: WorldModel, ctx: PlayContext) -> StateOutcome:
+    """Carry out ``leave_level`` (A145): walk back out of the level the way
+    the character came, onto the door by its landing. No exploring, loot or
+    boss on the way; the reflexes act above it as always."""
+    m, policy = ctx.memory, ctx.policy
+    if not inside_level(w):
+        return StateOutcome(None, "out of the level", state=LevelState.name)
+    door = _way_out(w, m)
+    plan_avoid, plan_costly, reach = op_walk(w, ctx)
+    if door is None:
+        return clear_the_way(w, ctx, None, "no way out of the level seen", LevelState.name, top_op(ctx), reach=reach)
+
+    def params():
+        return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
+
+    def plan(att):
+        return cost_path(w, door, params(), nav=nav_search(m, w, EXIT_GOAL, door))
+
+    step = guided_step(m, w, EXIT_GOAL, door, plan_avoid, plan, params=params, reach=reach)
+    if step is None:
+        return clear_the_way(w, ctx, door, f"no path out of the level to {door[0]},{door[1]}", LevelState.name, top_op(ctx), reach=reach)
+    return StateOutcome([set_position(step)], f"leave level → {door}", state=LevelState.name)
 
 
 def _needs(w: WorldModel, ctx: PlayContext, door: Pos) -> str | None:

@@ -50,7 +50,8 @@ from .item_table import (
 from .knowledge_base.death_chests import load_death_chests, save_death_chests
 from .knowledge_base.hostiles import load_hostiles, save_hostiles
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
+from .knowledge_maps import is_level_interior, record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
+from .level_order import record_entrance_level
 from .equip import note_equip_result, sync_refusals
 from .loot import (
     learn_chest_upgrade,
@@ -499,6 +500,10 @@ class Runner:
         from_map, from_pos, block_type = warp
         if (w.map_id, w.pos) != (from_map, from_pos):
             record_warp(self.knowledge, from_map, from_pos, block_type, w.map_id, w.pos)
+            if w.map_level and not is_level_interior(self.knowledge, from_map):
+                # Stepped into a level from outside: the entrance's number, and the way back out (A145).
+                record_entrance_level(self.knowledge, from_map, from_pos, w.map_level)
+                m.level_way_in = (w.map_id, w.pos)
 
     def sync_terrain(self, t: dict) -> None:
         """Merge the cells of this terrain read's window into the knowledge base (A26)."""

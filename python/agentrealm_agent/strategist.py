@@ -113,6 +113,7 @@ from .travel.resolve import given_up_travel, travel_dest, travel_given_up
 from .travel.strength import StrengthBracket
 from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from .sellers import codes_with_sellers, refuse_unsold, sellers_line
+from .level_order import CLEARED, TARGET, UNKNOWN, entrance_level, entrance_rank, order_line, refuse_barred
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import entrance_routes
@@ -284,7 +285,7 @@ The character's arc, in order. Judge the stage from State (health, gems, armed, 
 
 1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known. To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and does nothing while no door has been seen here; so explore_area out past the town toward ground not yet seen, read the signs and ask the NPCs where the levels are, and travel to a door once one shows. A later stage that needs an entrance and knows none comes back here to find one.
 2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip them (gather_gems, break_block, fetch_item, buy, equip; equip arms the best weapon by the rule under Weapons and the hunting ground, so a weapon that would shut the hunting ground stays unarmed unless named). Ready when health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions are held, a weapon better than the starting weapon by the rule under Weapons and the hunting ground is armed, and armor is worn (State readiness stage_2), each weighed against its minutes under to_close. Better gear helps in levels, but once these are met, more gems are worth gathering only toward an upgrade listed under upgrades_for_sale.
-3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). Pick the entrance by its route and cost under level_entrances, not by distance alone: a path_known entrance beats a nearer one whose way is frontier_only through many unexplored cells, unless its steps are far more, and a known_blocked one needs a break or another way first. When the best option is an entrance no known path reaches yet, explore toward it (explore_area around the way there) rather than send one long travel into unexplored ground. A boss has no defense, so swings hit it 65% of the time for up to the weapon's damage plus 2; bosses were tuned for a tier's gear before that base, so the stage 2 bar leaves a margin. Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar, unless the check is one skipped for its cost.
+3. Beat levels. When geared, enter a level door, solve it, fight its boss (travel, enter_level, break_block, use_block, compose, fight_boss). Levels are taken in order: level_target is the lowest level not cleared, and an entrance's level is learned only by going in, so take an entrance whose order under level_entrances is target first, then unknown ones nearest first, and never a barred one (a level above level_target; an op aimed at one is refused); inside a level above level_target the character leaves at once by itself (leave_level). Pick the entrance by its route and cost under level_entrances, not by distance alone: a path_known entrance beats a nearer one whose way is frontier_only through many unexplored cells, unless its steps are far more, and a known_blocked one needs a break or another way first. When the best option is an entrance no known path reaches yet, explore toward it (explore_area around the way there) rather than send one long travel into unexplored ground. A boss has no defense, so swings hit it 65% of the time for up to the weapon's damage plus 2; bosses were tuned for a tier's gear before that base, so the stage 2 bar leaves a margin. Restock (stage 2) between levels and whenever health or potions fall below the stage 2 bar, unless the check is one skipped for its cost.
 4. Beat the world. Clear every level to transcend: done when levels_cleared holds level_count levels.
 
 Gems by area (stage 2). Gem drops from grass vary by area, and some areas drop none. State gem_yield is measured from the character's own cuts: expected_yield, the gems a cut drops on this map (the manual's rate until enough cuts measure it), the region it stands in (here, once cut there), the best regions at any distance with their yield (gems per cut) and distance in blocks, and the barren ones nearby. A good region far behind is still worth a travel back. Hunt gems where the yield is good, leave a region that shows no gems after a fair sample, and explore regions not yet sampled to sample them.
@@ -689,6 +690,7 @@ def build_prompt(
         potion_line(w, plan.params),
         *([food_line(w, knowledge, memory)] if memory is not None else []),
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
+        order_line(w),
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
         *sign_lines(w, knowledge),
@@ -1073,6 +1075,8 @@ def shown_op(op: dict[str, Any], goes_to: Callable[[dict[str, Any]], tuple[int, 
     return shown
 
 
+# Each entrance's place in the order levels are taken (A145).
+ENTRANCE_ORDER = {TARGET: "target", UNKNOWN: "unknown", CLEARED: "cleared"}
 # Level entrances State lists, nearest first.
 ENTRANCES_SHOWN = 8
 
@@ -1091,6 +1095,10 @@ def entrance_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
         for key in ("block_type", "locked", "needs"):
             if row.get(key) is not None:
                 entry[key] = row[key]
+        if (level := entrance_level(row)) is not None:
+            entry["level"] = level
+        rank = entrance_rank(row, w)
+        entry["order"] = ENTRANCE_ORDER[rank] if rank is not None else "barred"
         here = w.map_id == map_id and w.pos is not None
         rows.append(((0 if here else 1, chebyshev(w.pos, pos) if here else 0, map_id, pos), entry))
     if not rows:
@@ -1916,6 +1924,11 @@ class Strategist:
             if len(kept) < len(goals):
                 record["given_up_filtered"] = [g for g in goals if g not in kept]
                 goals = kept
+        goals, barred = refuse_barred(goals, runner.world, runner.knowledge)
+        if barred:
+            # Levels are taken in order (A145): never an entrance known to be a higher, uncleared level.
+            record["barred_level_refused"] = barred
+            self.rejected = [*self.rejected, *barred]
         goals, unsold = refuse_unsold(goals, runner.world, runner.knowledge)
         if unsold:
             # A buy needs a known seller (A110, A131): never a walk to shops that do not sell it.

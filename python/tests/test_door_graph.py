@@ -178,6 +178,14 @@ class RunnerWarpRecordingTest(KbTestCase):
         door = self.kb.maps["1"]["doors"][0]
         self.assertEqual((door["x"], door["y"], door["to_map_id"], door["to_x"], door["to_y"]), (2, 0, 2, 4, 6))
 
+    def test_stepping_into_a_level_records_the_entrance_number(self) -> None:
+        # A145: the number is learned only by going in, and the landing is the way back out.
+        r = self.runner(FakeReads(position={"map_id": 2, "x": 4, "y": 6, "level": 3}))
+        self.door_step(r)
+        r.step("position")
+        self.assertEqual(self.kb.entrances["1:2,0"]["level"], 3)
+        self.assertEqual(r.mem.level_way_in, (2, (4, 6)))
+
     def test_read_still_on_the_door_records_no_self_loop(self) -> None:
         r = self.runner(FakeReads(position={"map_id": 1, "x": 2, "y": 0}))
         self.door_step(r)

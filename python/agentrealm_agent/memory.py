@@ -92,6 +92,7 @@ class Memory:
     zone_probe: tuple[int, Pos] | None = None  # cell choose_call picked for this window's zone read (A7)
     hunt_search: HuntSearch | None = None  # Travel's search for a hunting ground when none is known (A27)
     warp_from: tuple[int, Pos, str] | None = None  # door stepped onto, awaiting position read (A26)
+    level_way_in: tuple[int, Pos] | None = None  # (level map, landing cell) of the last step into a level from outside: the way back out (A145)
     goto_reached: tuple[int | None, Pos] | None = None  # (policy.goto_map, cell) of the policy goto once stood on: satisfied, not owed again (A16)
     investigate_rejections: dict[str, int] = field(default_factory=dict)  # Read/Say key -> refused count (A30)
     greetings: dict[int, tuple[int, int | None]] = field(default_factory=dict)  # npc id -> (greetings sent, tick of the last), Greet (A65)

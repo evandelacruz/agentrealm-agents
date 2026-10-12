@@ -201,3 +201,12 @@ class CrossingKeepsOffReachTest(unittest.TestCase):
         water = [p for p in path if w.view.tiles[p] == "water"]
         self.assertTrue(water)
         self.assertTrue(all(max(abs(p[0] - rock.pos[0]), abs(p[1] - rock.pos[1])) > BAR for p in water), path)
+
+
+class EquipRaftTest(unittest.TestCase):
+    def test_the_planners_equip_op_arms_the_raft(self):
+        w = lake(at=(1, 1), armed="bronze_sword")
+        plan = Plan([{"op": "equip", "code": "raft"}], dict(PARAM_DEFAULTS))
+        out = dispatch(w, ctx_for(Memory(), plan))
+        self.assertEqual((out.state, out.intents), ("Equip", [arm(RAFT)]), out.reason)
+        self.assertIsNotNone(plan.current(), "not dropped as not armed or worn")

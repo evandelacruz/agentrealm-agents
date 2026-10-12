@@ -327,6 +327,14 @@ def is_weapon(code: str | None) -> bool:
     return r is not None and r.supply_class == "weapon"
 
 
+def armed_in_hand(code: str | None) -> bool:
+    """Armed to work, by the Supplies reference: a weapon, or a tool whose
+    row's ``slot`` is ``armed`` (a raft, A133). A consumable is used, not
+    armed by Equip."""
+    r = row(code)
+    return r is not None and r.supply_class != "consumable" and (r.supply_class == "weapon" or r.slot == "armed")
+
+
 def fords(code: str | None) -> bool:
     """Water is walkable while it is armed or worn (a raft; Manual Supplies
     capability table, ``fords``)."""

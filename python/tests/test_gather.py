@@ -742,15 +742,19 @@ class GatherPricesUnexploredGroundTest(unittest.TestCase):
         self.assertEqual(m.gather_target, ("grass", (40, 1)))
 
     def test_an_edge_with_no_ground_past_it_stops_being_one_at_the_read_there(self):
-        """Reaching the edge, the terrain read marks the cells past it with no
-        ground: the edge is gone and the known grass is weighed alone."""
+        """Reaching the edge, the terrain read shows what lies past it: no
+        ground past the map's edge, and a wall in the opening. The edge is
+        gone and the known grass is weighed alone."""
         w, m = self.world(), Memory()
         op = {"op": "gather_gems", "count": 3}
         gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
         self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
         w.pos = (1, 1)
-        w.apply_terrain({"map_id": 7, "x0": -4, "y0": -4, "width": 11, "height": 11, "rows": ["?" * 11] * 11})
-        self.assertNotIn((1, 1), w.view.frontier())
+        rows = ["?" * 11] * 11
+        rows[5] = "?" * 4 + "#" + "?" * 6  # (0, 1): the opening, a wall
+        w.apply_terrain({"map_id": 7, "x0": -4, "y0": -4, "width": 11, "height": 11, "rows": rows,
+                         "legend": {"#": {"block_type": "wall"}}, "map_width": 42, "map_height": 3})
+        self.assertNotIn((1, 1), w.view.frontier(fords=False))
         gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
         self.assertEqual(m.gather_target, ("grass", (40, 1)))
 
@@ -982,7 +986,7 @@ class KeepsClearTest(unittest.TestCase):
 
     def test_with_nowhere_clear_to_go_it_is_blocked(self):
         w, m = fence(self.blocked()), Memory()
-        self.assertEqual(w.view.frontier(), set())
+        self.assertEqual(w.view.frontier(fords=False), set())
         out = gather_outcome(w, m, self.POLICY, op=self.GATHER)
         self.assertIsNone(out.intents)
         self.assertEqual(m.gather_status, gather_mod.BLOCKED)

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Callable, Collection
+from dataclasses import dataclass, field
+from typing import Callable, Collection, Iterator
 
 from .break_memory import break_costs_for_planning, given_up_blocks, no_break_reason, nominate_on_path
 from .clues import direction_hint, nearest_explore_target, on_hint_side
@@ -18,6 +19,7 @@ from .navigation import (
     known_prefix,
     nearest_target,
     no_way,
+    shut_off,
 )
 from .navigation import stuck as nav_stuck
 from .navigation import walk as nav_walk
@@ -27,10 +29,21 @@ from .healing import hurt
 from . import targets as targets_mod
 from .directives import attack_forbidden
 from .engagement import would_fight
-from .hostile_ground import ground_by_hostile, hostiles_near, is_safe_ish, walk_reach
-from .survival import hostiles_in_range, is_hostile, pursuer_peaks, safe_goals, town_cell
+from .hostile_ground import WALK_REACH_MARGIN, ground_by_hostile, hostiles_near, is_safe_ish, walk_reach
+from .executor.pacing import DEFAULT_TICK_RATE_HZ
+from .survival import (
+    estimate_health,
+    expected_damage,
+    health_floor,
+    hostiles_in_range,
+    is_hostile,
+    pursuer_peaks,
+    safe_goals,
+    town_cell,
+    worn_defense,
+)
+from .executor.movement import step_landing, ticks_per_step
 from .targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
-from .executor.movement import step_landing
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -195,7 +208,7 @@ def route_ahead(w: WorldModel, m: Memory) -> list[Pos]:
 
 def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos | None:
     """The path's first step when it is seen and open, else None."""
-    prefix = known_prefix(path or [], w.view, w.fords)
+    prefix = known_prefix(path or [], w)
     if prefix and step_open(w, blocked, prefix[0]):
         return prefix[0]
     return None
@@ -777,7 +790,7 @@ def guided_step(
     knowledge: KnowledgeBase | None = None,
     *,
     params: Callable[[], CostGridParams] | None = None,
-    reach: Collection[Pos] = (),
+    reach: HostileReach | Collection[Pos] = (),
 ) -> Pos | None:
     """One move toward ``target`` on this map, with stuck detection and escalation (A15).
 
@@ -795,7 +808,9 @@ def guided_step(
     (``op_walk_sets``, A128): a kept path that comes to enter it is planned
     again, and when the new plan still enters it, at any escalation level,
     the walk does not go through: None, the path dropped and the walk back
-    at its first level (``nav_stuck.hold``), so the caller asks the planner.
+    at its first level (``nav_stuck.hold``), so the caller asks the planner;
+    every such test, a reveal step's too, is ``enters_reach`` with the leg's
+    target, so a pass ``HostileReach`` allows (A146) is walked at every level.
     """
     leg = target if isinstance(target, Leg) else Leg(target)
     backoff = leg.backoff_key or nav_stuck.goal_key(goal, w.map_id, leg.target)
@@ -815,18 +830,18 @@ def guided_step(
         # An escalating walk's plan is held to the reach as a walk's is: at
         # every level, so no reveal, alternative or break walk goes through it.
         found = plan(att)
-        if enters_reach(w, found, reach):
+        if enters_reach(w, found, reach, leg.target):
             return _hold_for_reach(m, att, w.tick)
         plan = _once(plan, att, found)
     if reason is None and att.level not in (nav_stuck.REVEAL, nav_stuck.BREAK):
-        if m.goal == goal and next_step(w, avoid, m.path) and not enters_reach(w, m.path, reach):
+        if m.goal == goal and next_step(w, avoid, m.path) and not enters_reach(w, m.path, reach, leg.target):
             nav_stuck.observe(att, w, m.path, nav_stuck.corridor_for(m, w, att))
             return next_step(w, avoid, m.path)
         kept = nav_walk.rest(m.walks.get(goal), w, goal, leg.target)
-        if kept is not None and enters_reach(w, kept[0], reach):
+        if kept is not None and enters_reach(w, kept[0], reach, leg.target):
             nav_walk.drop(m, goal)  # a committed path into the reach is never kept over a new plan
         found = commit_walk(m, w, goal, leg.target, plan(att), _walk_grid(params, avoid))
-        if enters_reach(w, found, reach):
+        if enters_reach(w, found, reach, leg.target):
             return _hold_for_reach(m, att, w.tick)
         if next_step(w, avoid, found):
             m.path, m.goal = found, goal
@@ -840,12 +855,12 @@ def guided_step(
     def held(a: NavAttempt) -> list[Pos] | None:
         # Each level the ladder climbs to this decision plans under the same rule.
         found = plan(a)
-        if enters_reach(w, found, reach):
+        if enters_reach(w, found, reach, leg.target):
             barred.append(a.level)
         return found
 
     step = escalation_step(m, w, att, avoid, held if reach else plan, reason, knowledge)
-    if barred or (step is not None and step in reach and w.pos not in reach):
+    if barred or (step is not None and enters_reach(w, [step], reach, leg.target)):
         return _hold_for_reach(m, att, w.tick)  # a level's plan, or a reveal step, into the reach
     return step
 
@@ -877,7 +892,7 @@ def bounded_step(
     plan: Callable[[], "list[Pos] | None"],
     *,
     params: Callable[[], CostGridParams] | None = None,
-    reach: Collection[Pos] = (),
+    reach: HostileReach | Collection[Pos] = (),
 ) -> Pos | None:
     """One move toward ``at`` on a walk that gives up instead of escalating (A15).
 
@@ -910,9 +925,9 @@ def bounded_step(
         return None
     nav_stuck.resume(m, att, w.tick)
     kept = m.goal == goal and m.path and m.path[-1] == at and next_step(w, avoid, m.path)
-    if not kept or enters_reach(w, m.path, reach):
+    if not kept or enters_reach(w, m.path, reach, at):
         found = commit_walk(m, w, goal, at, plan(), _walk_grid(params, avoid))
-        if enters_reach(w, found, reach):
+        if enters_reach(w, found, reach, at):
             # No way clear of the hostiles seen: no move and no give-up, the
             # caller asks (A128), as ``guided_step`` holds.
             nav_stuck.hold(m, att, w.tick)
@@ -1012,6 +1027,87 @@ def safe_explore_path(
     return (path, leg) if path else (None, None)
 
 
+@dataclass
+class HostileReach:
+    """The ground a walk on an op's behalf keeps out of (A128): ``cells``,
+    within reach of the hostiles seen that the engagement would not fight,
+    and the one case such a walk may pass through it anyway (A146,
+    ``passes``). Every walk test of the reach goes through ``enters_reach``,
+    which asks ``passes`` with the walk's own goal; a bare set of cells, as
+    tests and walks with no op behind them hand in, has no pass.
+
+    ``fleeing``: the engagement says flee (Flee and Retreat run above every
+    walk), so no walk passes then."""
+
+    cells: frozenset[Pos]
+    w: WorldModel
+    policy: Policy
+    params: dict[str, float | int]
+    avoid: set[Pos]
+    costly: set[Pos]
+    tick_hz: int
+    fleeing: bool = False
+    _only_way: dict[tuple[Pos | None, Pos], bool] = field(default_factory=dict)
+
+    def __contains__(self, p: object) -> bool:
+        return p in self.cells
+
+    def __iter__(self) -> Iterator[Pos]:
+        return iter(self.cells)
+
+    def __len__(self) -> int:
+        return len(self.cells)
+
+    def passes(self, path: list[Pos], goal: Pos) -> bool:
+        """``path``, which enters the reach on its way to ``goal``, may be
+        walked anyway: the reach is the only way to ``goal`` (``only_way``),
+        the engagement does not say flee, and ``covers_pass`` holds."""
+        if self.fleeing:
+            return False
+        return self.only_way(goal) and covers_pass(self.w, self.policy, self.params, path, self.cells, self.tick_hz)
+
+    def only_way(self, goal: Pos) -> bool:
+        """It is proven that no way kept out of the reach gets to ``goal``,
+        on the grid the walk plans on (unseen ground at fog cost): either
+        end's ground outside the reach closes without the other
+        (``navigation.shut_off``). A search its budget cuts off proves
+        nothing, so it is no only way and the walk asks. ``goal`` itself is
+        left out of the reach, so a goal in it is still a goal. One search
+        per position and goal, however many plans one decision tests."""
+        key = (self.w.pos, goal)
+        if key not in self._only_way:
+            avoid = (set(self.avoid) | self.cells) - {goal}
+            params = CostGridParams(avoid=avoid, costly=set(self.costly), allow_goal_door=True)
+            self._only_way[key] = shut_off(self.w, goal, params)
+        return self._only_way[key]
+
+
+def covers_pass(
+    w: WorldModel, policy: Policy, params: dict[str, float | int], path: list[Pos], reach: Collection[Pos], tick_hz: int
+) -> bool:
+    """The pass along ``path``'s cells in ``reach`` can be made (A146):
+
+    - every such cell is held by a hostile in view: a remembered one's
+      ground cannot be weighed;
+    - none is within ``policy.hostile_range`` of one of them: there the
+      engagement, which would not fight them, says flee, so a pass runs only
+      where Flee does not;
+    - what they are expected to deal while we cross those cells at our
+      movement speed (``survival.expected_damage``, priced as the win
+      estimate prices their hits, through the armor worn) leaves health above
+      Retreat's floor against them (``survival.health_floor``)."""
+    inside = [p for p in path if p in reach]
+    bar = policy.hostile_range + WALK_REACH_MARGIN
+    hostiles = [e for e in w.entities if is_hostile(w, policy, e) and any(chebyshev(e.pos, p) <= bar for p in inside)]
+    if not inside or any(all(chebyshev(e.pos, p) > bar for e in hostiles) for p in inside):
+        return False
+    if any(chebyshev(e.pos, p) <= policy.hostile_range for e in hostiles for p in inside):
+        return False
+    ticks = len(inside) * ticks_per_step(tick_rate_hz=tick_hz, movement_speed_milli=max(1, w.movement_speed))
+    left = estimate_health(w) - expected_damage(hostiles, w.threat, ticks, worn_defense(w))
+    return left > health_floor(w, params, hostiles)
+
+
 def op_walk_sets(
     w: WorldModel,
     m: Memory,
@@ -1019,7 +1115,8 @@ def op_walk_sets(
     knowledge: KnowledgeBase | None,
     params: dict[str, float | int],
     never_attack: list[str],
-) -> tuple[set[Pos], set[Pos], set[Pos]]:
+    tick_hz: int = DEFAULT_TICK_RATE_HZ,
+) -> tuple[set[Pos], set[Pos], HostileReach]:
     """``plan_avoid``, ``plan_costly`` and ``reach`` for a walk on an op's behalf (A128).
 
     As ``plan_sets``, with the reach of the hostiles seen (``walk_reach``)
@@ -1038,15 +1135,19 @@ def op_walk_sets(
         for e in w.entities
         if is_hostile(w, policy, e)
         and not attack_forbidden(e, never_attack)
-        and would_fight(w, policy, params, also=e)
+        and would_fight(w, policy, params, also=e, m=m)
     }
     reach = walk_reach(w, policy, skip=fought)
-    return avoid, costly | reach, reach
+    fleeing = m.engagement is not None and not m.engagement.fight
+    return avoid, costly | reach, HostileReach(frozenset(reach), w, policy, params, avoid, costly | reach, tick_hz, fleeing)
 
 
-def enters_reach(w: WorldModel, path: list[Pos] | None, reach: Collection[Pos]) -> bool:
+def enters_reach(w: WorldModel, path: list[Pos] | None, reach: Collection[Pos], goal: Pos | None = None) -> bool:
     """``path`` steps into ``reach`` from outside it. Cells it walks while
-    leaving the reach it starts in do not count: that is the way out."""
+    leaving the reach it starts in do not count: that is the way out. A walk
+    that names its ``goal`` and keeps out of a ``HostileReach`` may pass it
+    when ``HostileReach.passes`` says so (A146); without a goal, or with bare
+    cells, it never does."""
     if not path or not reach:
         return False
     outside = w.pos not in reach
@@ -1054,7 +1155,7 @@ def enters_reach(w: WorldModel, path: list[Pos] | None, reach: Collection[Pos]) 
         if p not in reach:
             outside = True
         elif outside:
-            return True
+            return not (goal is not None and isinstance(reach, HostileReach) and reach.passes(path, goal))
     return False
 
 

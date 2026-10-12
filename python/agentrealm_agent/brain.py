@@ -218,7 +218,7 @@ def walkable_prefix(
     """
     avoid = _plan_avoid(w, m, policy, knowledge)
     out: list[Pos] = []
-    for p in known_prefix(path, w.view, w.fords):
+    for p in known_prefix(path, w):
         if _cell_on_path_blocked(w, avoid, p):
             break
         out.append(p)

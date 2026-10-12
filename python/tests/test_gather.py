@@ -12,8 +12,8 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan, parse_directives_goal
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
 from agentrealm_agent.states import gather as gather_mod
-from agentrealm_agent.hostile_ground import GATHER_HOSTILE_RADIUS, GATHER_SHADOW_MARGIN, danger
-from agentrealm_agent.states.gather_safe import gather_ground, is_safe_ish, route_clear
+from agentrealm_agent.hostile_ground import GATHER_HOSTILE_RADIUS, GATHER_SHADOW_MARGIN, danger, is_safe_ish
+from agentrealm_agent.states.gather_safe import gather_ground, route_clear
 from agentrealm_agent.world import POST_STILL_TICKS, Entity, WorldModel, chebyshev
 from agentrealm_agent.gem_yield import NO_EFFECT_ZONE_CUTS, REGION_SIZE, GemYieldTracker, record_cut, region_of
 from agentrealm_agent.knowledge_base import KnowledgeBase

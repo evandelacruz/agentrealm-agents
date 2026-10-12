@@ -25,12 +25,14 @@ from .navigation import stuck as nav_stuck
 from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
 from .navigation.rejection import navigation_avoid_costly
-from .healing import hurt
+from .healing import heals_carried, hurt
 from . import targets as targets_mod
 from .directives import attack_forbidden
 from .engagement import would_fight
-from .hostile_ground import WALK_REACH_MARGIN, ground_by_hostile, hostiles_near, is_safe_ish, walk_reach
-from .executor.pacing import DEFAULT_TICK_RATE_HZ
+from .hostile_ground import HostileKey, WalkGround, ground_by_hostile, hostiles_near, is_safe_ish, walk_ground
+from .executor.pacing import DEFAULT_TICK_RATE_HZ, attack_cooldown_ticks
+from .fording import on_water
+from .supplies import afloat
 from .survival import (
     estimate_health,
     expected_damage,
@@ -1030,16 +1032,18 @@ def safe_explore_path(
 @dataclass
 class HostileReach:
     """The ground a walk on an op's behalf keeps out of (A128): ``cells``,
-    within reach of the hostiles seen that the engagement would not fight,
-    and the one case such a walk may pass through it anyway (A146,
-    ``passes``). Every walk test of the reach goes through ``enters_reach``,
-    which asks ``passes`` with the walk's own goal; a bare set of cells, as
-    tests and walks with no op behind them hand in, has no pass.
+    the ground of the hostiles known (``ground``, ``walk_ground``: seen,
+    that the engagement would not fight, and remembered), and the one case
+    such a walk may pass through it anyway (A146, A151, ``passes``). Every
+    walk test of the reach goes through ``enters_reach``, which asks
+    ``passes`` with the walk's own goal; a bare set of cells, as tests and
+    walks with no op behind them hand in, has no pass.
 
     ``fleeing``: the engagement says flee (Flee and Retreat run above every
     walk), so no walk passes then."""
 
     cells: frozenset[Pos]
+    ground: dict[HostileKey, WalkGround]
     w: WorldModel
     policy: Policy
     params: dict[str, float | int]
@@ -1047,6 +1051,7 @@ class HostileReach:
     costly: set[Pos]
     tick_hz: int
     fleeing: bool = False
+    memory: Memory | None = None  # the water cells a refusal marked (``fording.on_water``)
     _only_way: dict[tuple[Pos | None, Pos], bool] = field(default_factory=dict)
 
     def __contains__(self, p: object) -> bool:
@@ -1064,7 +1069,9 @@ class HostileReach:
         the engagement does not say flee, and ``covers_pass`` holds."""
         if self.fleeing:
             return False
-        return self.only_way(goal) and covers_pass(self.w, self.policy, self.params, path, self.cells, self.tick_hz)
+        return self.only_way(goal) and covers_pass(
+            self.w, self.policy, self.params, path, self.cells, self.tick_hz, self.ground, self.memory
+        )
 
     def only_way(self, goal: Pos) -> bool:
         """It is proven that no way kept out of the reach gets to ``goal``,
@@ -1081,31 +1088,75 @@ class HostileReach:
             self._only_way[key] = shut_off(self.w, goal, params)
         return self._only_way[key]
 
+    def crossed(self, cells: Collection[Pos]) -> list[WalkGround]:
+        """The hostiles whose ground holds one of ``cells``."""
+        return [g for g in self.ground.values() if not g.cells.isdisjoint(cells)]
+
 
 def covers_pass(
-    w: WorldModel, policy: Policy, params: dict[str, float | int], path: list[Pos], reach: Collection[Pos], tick_hz: int
+    w: WorldModel,
+    policy: Policy,
+    params: dict[str, float | int],
+    path: list[Pos],
+    reach: Collection[Pos],
+    tick_hz: int,
+    ground: dict[HostileKey, WalkGround],
+    m: Memory | None = None,
 ) -> bool:
-    """The pass along ``path``'s cells in ``reach`` can be made (A146):
+    """The pass along ``path``'s cells in ``reach`` can be made (A146, A151):
 
-    - every such cell is held by a hostile in view: a remembered one's
-      ground cannot be weighed;
-    - none is within ``policy.hostile_range`` of one of them: there the
-      engagement, which would not fight them, says flee, so a pass runs only
-      where Flee does not;
+    - every such cell is ground a known hostile holds (``ground``, the
+      ``walk_ground`` the walk's reach was built from), one in view or one
+      remembered, out of view, priced from the threat table as one in view
+      is (its largest hit known, else the published roll);
+    - none is within ``policy.hostile_range`` of where one of them is known
+      to stand: there the engagement, which would not fight them, says flee,
+      so a pass runs only where Flee does not;
     - what they are expected to deal while we cross those cells at our
       movement speed (``survival.expected_damage``, priced as the win
-      estimate prices their hits, through the armor worn) leaves health above
-      Retreat's floor against them (``survival.health_floor``)."""
+      estimate prices their hits, through the armor worn), less what the
+      heals carried can win back on the pass (``heal_on_pass``), leaves
+      health above Retreat's floor against them (``survival.health_floor``)."""
     inside = [p for p in path if p in reach]
-    bar = policy.hostile_range + WALK_REACH_MARGIN
-    hostiles = [e for e in w.entities if is_hostile(w, policy, e) and any(chebyshev(e.pos, p) <= bar for p in inside)]
-    if not inside or any(all(chebyshev(e.pos, p) > bar for e in hostiles) for p in inside):
+    crossed = [g for g in ground.values() if any(p in g.cells for p in inside)]
+    if not inside or any(all(p not in g.cells for g in crossed) for p in inside):
         return False
-    if any(chebyshev(e.pos, p) <= policy.hostile_range for e in hostiles for p in inside):
+    if any(chebyshev(c, p) <= policy.hostile_range for g in crossed for c in g.stands for p in inside):
         return False
+    hostiles = [g.entity for g in crossed]
     ticks = len(inside) * ticks_per_step(tick_rate_hz=tick_hz, movement_speed_milli=max(1, w.movement_speed))
-    left = estimate_health(w) - expected_damage(hostiles, w.threat, ticks, worn_defense(w))
+    per_tick = expected_damage(hostiles, w.threat, 1, worn_defense(w))
+    healed, drinking = heal_on_pass(w, inside, per_tick, tick_hz, m)
+    taken = per_tick * (ticks + drinking)
+    left = estimate_health(w) - taken + min(healed, taken)
     return left > health_floor(w, params, hostiles)
+
+
+def heal_on_pass(
+    w: WorldModel, inside: list[Pos], per_tick: float, tick_hz: int, m: Memory | None = None
+) -> tuple[int, int]:
+    """What the heals carried win back on a pass over ``inside`` taking
+    ``per_tick`` a tick, and the ticks spent using them: (healed, ticks).
+
+    Held heals count toward a pass only where they can be used: each is an
+    ``Arm`` and a ``Use`` on yourself, which on water with no fording supply
+    worn would leave none armed (``would_strand``, A133), so a pass with a
+    water cell (``fording.on_water``, Ashore's test, a would_strand-marked
+    cell included) counts none unless the fording supply is worn. Each one used
+    takes its ``Arm`` tick and its ``Use``'s cooldown, the largest heal
+    first, and only while it gives back more than those ticks cost; never
+    more than the pass takes (``covers_pass`` caps it), so a heal never
+    counts above the health we start with."""
+    worn = afloat(None, w.worn_codes.values())
+    if not worn and any(on_water(w, m, p) for p in inside):
+        return 0, 0
+    healed = drinking = 0
+    for code, heal in heals_carried(w):
+        cost = 1 + attack_cooldown_ticks(code, tick_hz)
+        if heal <= per_tick * cost:
+            break
+        healed, drinking = healed + heal, drinking + cost
+    return healed, drinking
 
 
 def op_walk_sets(
@@ -1119,7 +1170,7 @@ def op_walk_sets(
 ) -> tuple[set[Pos], set[Pos], HostileReach]:
     """``plan_avoid``, ``plan_costly`` and ``reach`` for a walk on an op's behalf (A128).
 
-    As ``plan_sets``, with the reach of the hostiles seen (``walk_reach``)
+    As ``plan_sets``, with the ground of the hostiles known (``walk_ground``)
     priced ``costly`` too, so the walk routes round a pack it has seen;
     ``guided_step`` takes ``reach`` to refuse a way that still crosses it.
     A hostile in view the engagement would fight (``engagement.would_fight``,
@@ -1137,9 +1188,10 @@ def op_walk_sets(
         and not attack_forbidden(e, never_attack)
         and would_fight(w, policy, params, also=e, m=m)
     }
-    reach = walk_reach(w, policy, skip=fought)
+    ground = walk_ground(w, policy, skip=fought)
+    reach = frozenset(p for g in ground.values() for p in g.cells)
     fleeing = m.engagement is not None and not m.engagement.fight
-    return avoid, costly | reach, HostileReach(frozenset(reach), w, policy, params, avoid, costly | reach, tick_hz, fleeing)
+    return avoid, costly | reach, HostileReach(reach, ground, w, policy, params, avoid, costly | reach, tick_hz, fleeing, m)
 
 
 def enters_reach(w: WorldModel, path: list[Pos] | None, reach: Collection[Pos], goal: Pos | None = None) -> bool:

@@ -93,10 +93,11 @@ def is_hostile(w: WorldModel, policy: Policy, e: Entity) -> bool:
     return e.kind != "npc" or known_hostile(w, e)
 
 
-def hostiles_in_range(w: WorldModel, policy: Policy) -> list[Entity]:
-    if w.pos is None:
+def hostiles_in_range(w: WorldModel, policy: Policy, at: Pos | None = None) -> list[Entity]:
+    """Hostiles in view within ``policy.hostile_range`` of us, or of ``at``."""
+    here = w.pos if at is None else at
+    if here is None:
         return []
-    here = w.pos
     return [
         e
         for e in w.entities
@@ -165,14 +166,16 @@ def known_hostile(w: WorldModel, e: Entity) -> bool:
     return key is not None and (key in w.hostile_types or w.threat.measured(key))
 
 
-def combat_group(w: WorldModel, policy: Policy, also: Entity | None = None) -> list[Entity]:
-    """Hostiles in range, and ``also`` when given, plus any within ``GROUP_JOIN_RADIUS`` of the nearest."""
-    in_range = hostiles_in_range(w, policy)
+def combat_group(w: WorldModel, policy: Policy, also: Entity | None = None, at: Pos | None = None) -> list[Entity]:
+    """Hostiles in range, and ``also`` when given, plus any within ``GROUP_JOIN_RADIUS`` of the nearest:
+    as we stand, or standing on ``at``."""
+    here = w.pos if at is None else at
+    in_range = hostiles_in_range(w, policy, here)
     if also is not None and also not in in_range:
         in_range.append(also)
-    if not in_range or w.pos is None:
+    if not in_range or here is None:
         return []
-    focus = min(in_range, key=lambda e: (chebyshev(e.pos, w.pos), e.id))
+    focus = min(in_range, key=lambda e: (chebyshev(e.pos, here), e.id))
     group = [focus]
     for e in w.entities:
         if not is_hostile(w, policy, e) or e.id == focus.id:
@@ -182,12 +185,13 @@ def combat_group(w: WorldModel, policy: Policy, also: Entity | None = None) -> l
     return group
 
 
-def can_reach_us(w: WorldModel, policy: Policy, group: list[Entity]) -> list[Entity]:
+def can_reach_us(w: WorldModel, policy: Policy, group: list[Entity], at: Pos | None = None) -> list[Entity]:
     """``group`` and every other hostile in view that can reach us in a fight
     with it (A128): within ``FIGHT_REACH_RADIUS`` of us, or within
     ``GROUP_JOIN_RADIUS`` of one already counted, so a pack counts whole.
-    Fighting one of a pack is fighting the pack."""
-    if w.pos is None:
+    Fighting one of a pack is fighting the pack. ``at``: standing there instead."""
+    here = w.pos if at is None else at
+    if here is None:
         return list(group)
     out = list(group)
     rest = [e for e in w.entities if is_hostile(w, policy, e) and e not in out]
@@ -195,7 +199,7 @@ def can_reach_us(w: WorldModel, policy: Policy, group: list[Entity]) -> list[Ent
     while joined:
         joined = False
         for e in list(rest):
-            if chebyshev(e.pos, w.pos) <= FIGHT_REACH_RADIUS or any(
+            if chebyshev(e.pos, here) <= FIGHT_REACH_RADIUS or any(
                 chebyshev(e.pos, g.pos) <= GROUP_JOIN_RADIUS for g in out
             ):
                 out.append(e)

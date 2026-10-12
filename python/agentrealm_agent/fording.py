@@ -108,12 +108,13 @@ def stranded_unarmed(w: WorldModel) -> bool:
     return fords(w.armed_code) and not afloat(None, w.worn_codes.values())
 
 
-def swings_nothing(w: WorldModel, m: Memory | None) -> bool:
+def swings_nothing(w: WorldModel, m: Memory | None, at: Pos | None = None) -> bool:
     """Standing on water (``on_water``, the test Ashore uses) with only a
     fording supply in hand (``stranded_unarmed``): no weapon can be armed
     there, so the engagement counts no swing and decides against a fight
     until the character is ashore (A146)."""
-    return w.pos is not None and on_water(w, m, w.pos) and stranded_unarmed(w)
+    here = w.pos if at is None else at
+    return here is not None and on_water(w, m, here) and stranded_unarmed(w)
 
 
 def ford_gate(

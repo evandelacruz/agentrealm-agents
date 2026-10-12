@@ -1917,3 +1917,10 @@ Per A87, each names the rule a fix should generalize.
 2. **`no_way_on` says opening a block was tried when it was not** (`states/way.py:136–139`, `_tried`; `open_the_way` at 66–92). The ask named "tree at 521,352" and "tried … opening a block on the way with a held item". No `Use` went to (521, 352), and the knowledge base has no break record there, though the armed bronze_sword chops. `_tried` reports from what is held, not what was done. `open_the_way` prices a path to the target with breaks, and with (532, 311) past unexplored ground no such path is found, so no break is chosen. **Rule:** `tried` lists what was actually attempted. An op whose target lies past unexplored ground opens a block on the straight route toward it when a held item opens it, before asking.
 
 3. **Pack capacity reads 10 after the death, down from the applied chest's 30** (`world.py:960–968`, `sync_carry_capacity`). The middle_chest was used up when applied in run 22, so it was not among the 6 supplies dropped at death. From the first State after respawn to the end, `pack` showed `slots_total` 10. Whether the server drops the capacity at death or the agent's derivation from the carried chest loses it is not shown by the trace. **Rule:** carry capacity is the server's number. Where it is derived, the derivation survives a death and a reclaim the same way the server's does.
+
+### Run 24 (in progress): a raft bought for the lake door, and no walk that can use it
+
+Reported live while the run was under way; the full write-up follows the run.
+
+- The character bought a raft and headed for the lake door at (659, 400).
+- **Defect (A133):** `supplies.py` read the raft's `fords` capability as the `water` effect, but no walk, Equip or Travel code read it. Water stayed blocked ground to every walk, nothing armed the raft before a water step, and nothing kept another state from arming a weapon or a potion over it while on water, which the server refuses `would_strand` (Manual, Supplies capability table). Rule: one fording rule for every queue (`fording.ford_queue`, PLAN.md A133).

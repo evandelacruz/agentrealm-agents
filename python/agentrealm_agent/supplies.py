@@ -114,6 +114,7 @@ class Supply:
     chest_capacity: int | None = None
     used_up_on_break: bool | None = None
     eaten_on_pickup: bool = False
+    fords: bool = False  # water is walkable while it is armed or worn (``fords``, A133)
     sold: bool = False  # a shop sells it in some world: ``gem_prices`` names one
 
 
@@ -169,6 +170,7 @@ def _capability_stats(caps: list[Any], supply_class: str) -> dict[str, Any]:
         "defense": defense,
         "heal": _positive_int(by_name.get("heals", {}).get("amount")),
         "chest_capacity": _positive_int(by_name.get("holds", {}).get("amount")),
+        "fords": "fords" in by_name,
     }
 
 
@@ -182,6 +184,7 @@ def _stat_fields(row: dict[str, Any]) -> dict[str, Any]:
         "defense": _non_negative_int(row.get("defense")),
         "heal": _positive_int(row.get("heal")),
         "chest_capacity": _positive_int(row.get("chest_capacity")),
+        "fords": isinstance(effects, list) and "water" in effects,
     }
 
 
@@ -324,6 +327,13 @@ def is_weapon(code: str | None) -> bool:
     return r is not None and r.supply_class == "weapon"
 
 
+def fords(code: str | None) -> bool:
+    """Water is walkable while it is armed or worn (a raft; Manual Supplies
+    capability table, ``fords``)."""
+    r = row(code)
+    return r is not None and r.fords
+
+
 def kept_on_break(code: str | None) -> bool:
     """A break with it armed does not use it up (``used_up_on_break`` false)."""
     r = row(code)
@@ -432,8 +442,9 @@ def what_it_does(code: str | None) -> dict[str, Any]:
     ``damage``, ``defense``, ``chest_capacity`` and ``slot`` apply (``defense``
     counts only while worn), a weapon's ``cooldown_ms`` between swings (A123),
     ``used_up_on_break`` when
-    listed (true: each block broken with it uses one up), and ``eaten_on_pickup``
-    when it is used up on its ``Take`` (A112). ``{}`` when unlisted."""
+    listed (true: each block broken with it uses one up), ``eaten_on_pickup``
+    when it is used up on its ``Take`` (A112), and ``fords`` when water is
+    walkable while it is armed or worn (A133). ``{}`` when unlisted."""
     r = row(code)
     if r is None:
         return {}
@@ -449,6 +460,8 @@ def what_it_does(code: str | None) -> dict[str, Any]:
         out["used_up_on_break"] = r.used_up_on_break
     if r.eaten_on_pickup:
         out["eaten_on_pickup"] = True
+    if r.fords:
+        out["fords"] = True
     return out
 
 

@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 
 from ..supplies import worn_armor_defense
-from ..world import DOORS, NEIGHBOURS, VOID, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
+from ..world import DOORS, NEIGHBOURS, VOID, Entity, MapView, Pos, WorldModel, chebyshev
 
 # Base step costs (PLAYABLE_AGENT_PLAN Navigation §1). Every step costs at
 # least KNOWN_WALKABLE, so Chebyshev distance * KNOWN_WALKABLE is a lower
@@ -102,7 +102,7 @@ def known_prefix(path: list[Pos], view: MapView) -> list[Pos]:
     out: list[Pos] = []
     for p in path:
         block = view.tiles.get(p)
-        if block is None or block == VOID or not (block in WALKABLE or block in DOORS):
+        if block is None or block == VOID or not (view.walkable_block(block) or block in DOORS):
             break
         out.append(p)
     return out
@@ -148,6 +148,7 @@ class _Grid:
         # The single goal of a cost_path search (A13); None for a flood.
         self.goal: Pos | None = next(iter(goals)) if len(goals) == 1 else None
         self.tiles = w.view.tiles
+        self.walkable = w.view.walkable_block  # water too while a fording supply is carried (A133)
         self.armor = worn_armor_defense(w.worn_codes.values())  # cuts occupy_damage
         if same_world is not None:
             assert same_world.w is w and same_world.params is params
@@ -219,7 +220,7 @@ class _Grid:
             if params.fog_cost is None:
                 return None
             base = params.fog_cost
-        elif block in WALKABLE:
+        elif self.walkable(block):
             base = KNOWN_WALKABLE
         else:
             return None  # void, blocked, or an unknown type

@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .supplies import chest_capacity, worn_armor_defense
+from .supplies import chest_capacity, fords, worn_armor_defense
 from .threat import (
     ThreatTable,
     TypeKey,
@@ -23,6 +23,9 @@ log = logging.getLogger(__name__)
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
 # warp: never occupied, but stepping onto one warps.
 WALKABLE = {"grass", "dirt", "tile", "fire", "lava"}
+# Walkable while a fording supply (a raft) is armed or worn (Manual Supplies
+# capability table, ``fords``); a walk plans over it while one is carried (A133).
+WATER = "water"
 DOORS = {"framed_door", "rock_entry"}
 VOID = ""  # inside a terrain read but no ground there
 UNKNOWN = "?"  # terrain grid symbol for a cell the read carries no block for
@@ -269,13 +272,21 @@ class MapView:
     # or a respawn patch alike (Manual §9.2 legend, B127). A full read leaves
     # the flag off elsewhere.
     safe: set[Pos] = field(default_factory=set)
+    # Water is ground to walk on: the character carries a fording supply
+    # (``WorldModel.fords``, set on every ``WorldModel.view``; A133).
+    fords: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.tiles, Tiles):
             self.tiles = Tiles(self.tiles)
 
     def walkable(self, p: Pos) -> bool:
-        return self.tiles.get(p) in WALKABLE
+        return self.walkable_block(self.tiles.get(p))
+
+    def walkable_block(self, block: str | None) -> bool:
+        """Whether a block type is ground a walk may step on: ``WALKABLE``,
+        and water while a fording supply is carried (A133)."""
+        return block in WALKABLE or (self.fords and block == WATER)
 
     def occupy_damage(self, p: Pos) -> int | None:
         """The tile's occupy_damage, or None when no read has named it."""
@@ -395,7 +406,17 @@ class WorldModel:
     @property
     def view(self) -> MapView:
         assert self.map_id is not None
-        return self.maps.setdefault(self.map_id, MapView())
+        view = self.maps.setdefault(self.map_id, MapView())
+        view.fords = self.fords
+        return view
+
+    @property
+    def fords(self) -> bool:
+        """A carried supply fords water (A133): held, armed or worn. Holding
+        one is enough to plan a walk over water; the walk arms it before the
+        first water step (``fording.ford_queue``)."""
+        carried = [h.code for h in self.held_supplies] + list(self.worn_codes.values())
+        return any(fords(code) for code in carried + [self.armed_code])
 
     # Applying reads.
 

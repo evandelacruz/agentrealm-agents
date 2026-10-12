@@ -75,6 +75,7 @@ from .executor.supply_refusals import (
     refusal_situation,
     used_up,
 )
+from .fording import note_would_strand
 from .healing import absorb_heal_pending, note_heal_pending
 from .shop import note_shop_result
 from .supplies import heals, is_food
@@ -1134,6 +1135,7 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
+        note_would_strand(m, (result.get("rejection") or {}).get("code"))
         self._note_supply_refused(index, result)
         target = use_target_block(intent, w.entities) if intent and intent.get("verb") == "Use" else None
         self._note_break_use(intent, result, target, index)

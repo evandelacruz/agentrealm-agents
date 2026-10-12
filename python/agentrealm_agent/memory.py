@@ -185,6 +185,10 @@ class Memory:
     gather_rearm: tuple[str, str] | None = None
     break_rearm: str | None = None  # code armed before Break, restored when break finishes (A28)
     break_pending: tuple[int, Pos, str] | None = None  # map, block and capability a Use in flight targets (A28)
+    # Water the server says we stand on (A133): a ``would_strand`` refusal is
+    # noted (``stranded``) and placed at the next decision (``fording.sync``).
+    stranded: bool = False
+    water_at: tuple[int, Pos] | None = None
     # The last no_way_on ask (A114, A120): map, cell, why and the op (``ask.ask_key``). One ask per op, cell and reason: the safe
     # default with nothing left to explore, or an executor whose way is shut (``states.ask``).
     no_way_on: tuple[int, Pos, str, tuple | None] | None = None

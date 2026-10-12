@@ -44,9 +44,10 @@ hostile and Flee stepping back from it (A136). With no walk to give up, the
 guard settles the flip itself: when two or more states paced with steps
 that were no walk and nothing came of it (no hit taken, no swing sent since
 the window began), the losing side is benched for ``FLIP_COOLDOWN_TICKS``
-(``bench``): the side going against the engagement's decision (Flee or
-Retreat while it says fight, Fight while it says flee), else the state that
-took the last step. Dispatch skips a benched state (``benched``); the bench
+(``bench``): the side going against the engagement's decision (Flee while
+it says fight, Fight while it says flee), else the state that
+took the last step; Retreat, which runs at the survival floor, is never
+benched. Dispatch skips a benched state (``benched``); the bench
 lifts early once the engagement's decision changes, so a real danger still
 sends the character running. When the same states flip again within twice
 the cool-down, the bench has not settled it: a ``pacing`` trigger asks the
@@ -86,8 +87,11 @@ ESCAPE_STATES = frozenset({"Flee", "Retreat"})
 FLIP_COOLDOWN_TICKS = nav_stuck.BACKOFF_BASE_TICKS
 
 # The states that carry out each engagement decision: while it says fight,
-# these go against it, and while it says flee, Fight does.
-AGAINST_FIGHT = ("Flee", "Retreat")
+# Flee goes against it, and while it says flee, Fight does.
+AGAINST_FIGHT = ("Flee",)
+
+# Never benched: Retreat runs at the survival floor, whatever else paced.
+NEVER_BENCHED = frozenset({"Retreat"})
 
 
 def pacing(cells: list[Pos]) -> bool:
@@ -158,7 +162,13 @@ def check(m: Memory, w: WorldModel) -> dict | None:
     if escalated:
         event["escalated"] = escalated
     flippers = event["unwalked"]
-    if not given and not event.get("escape") and len(flippers) > 1 and not _came_of_it(m, w, since):
+    if (
+        not given
+        and not event.get("escape")
+        and len(flippers) > 1
+        and set(flippers) - NEVER_BENCHED
+        and not _came_of_it(m, w, since)
+    ):
         event.update(bench(m, w, flippers, moves))
     stuck.oscillations.append(event)
     del stuck.oscillations[:-EVENTS_KEPT]
@@ -235,15 +245,17 @@ def bench(m: Memory, w: WorldModel, states: list[str], moves: list[tuple[str, st
 
 def losing_side(m: Memory, states: list[str], moves: list[tuple[str, str, str]]) -> str:
     """Which of ``states`` a flip benches: the one going against the
-    engagement's decision, else the one that took the last step."""
+    engagement's decision, else the one that took the last step; never one
+    of ``NEVER_BENCHED``."""
+    may = [state for state in states if state not in NEVER_BENCHED]
     e = m.engagement
     if e is not None:
         against = AGAINST_FIGHT if e.fight else ("Fight",)
-        for state in states:
+        for state in may:
             if state in against:
                 return state
-    last = [state for _, state, _ in moves if state in states]
-    return last[-1] if last else states[-1]
+    last = [state for _, state, _ in moves if state in may]
+    return last[-1] if last else may[-1]
 
 
 def benched(m: Memory, w: WorldModel, state: str) -> bool:
@@ -251,7 +263,7 @@ def benched(m: Memory, w: WorldModel, state: str) -> bool:
     ended and the engagement's decision (or no engagement) is the one it was
     benched under."""
     b = m.nav_stuck.benched.get(state)
-    if b is None:
+    if b is None or state in NEVER_BENCHED:
         return False
     e = m.engagement
     if w.tick < b.until and (e.fight if e is not None else None) == b.fight:

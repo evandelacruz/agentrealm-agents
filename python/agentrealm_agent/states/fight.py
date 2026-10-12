@@ -32,9 +32,10 @@ from .way import clear_the_way
 # ``Use`` swings queued per submit, ahead of the retreat tail.
 ATTACK_USES = 3
 
-# Cells a walk to close on a hostile may stray beyond the gap it starts at,
-# to get round what stands between (``close_step``).
-APPROACH_DETOUR = 4
+# How far round a hostile a walk to close on it may go at the least
+# (``close_step``); a character that sees further searches all it sees.
+# Fixed round the target, so closing in never shrinks it.
+APPROACH_RADIUS = 12
 
 
 def fight_target(w: WorldModel, policy, never_attack: list[str], engagement: Engagement | None = None) -> Entity | None:
@@ -140,24 +141,27 @@ def off_safe_step(w: WorldModel, target: Entity, blocked: set[Pos], reach: int) 
 def close_step(w: WorldModel, target: Entity, blocked: set[Pos], reach: int = 1) -> Pos | None:
     """The first step of the shortest walk to a cell within ``reach`` of
     ``target``, round whatever stands in the way; None when no walk over open
-    ground within ``APPROACH_DETOUR`` of the straight line gets there.
+    ground within ``APPROACH_RADIUS`` of the target, or the character's
+    perception when that is further, gets there.
 
     A walk, not a greedy step closer: a step that only looks closer can end
     beside a wall with nowhere nearer, and then Fight cannot close where it
-    could a step back, so Fight and Flee would take turns there (A136). Every
-    cell of a shortest walk can still reach, so whether Fight can close
-    never changes as it closes."""
+    could a step back, so Fight and Flee would take turns there (A136). The
+    ground searched is fixed round the target, never measured from where we
+    stand, so every cell of a shortest walk can still close the rest of it:
+    whether Fight can close never changes as it closes."""
     here = w.pos
     if here is None:
         return None
-    bound = chebyshev(here, target.pos) + APPROACH_DETOUR
+    radius = max(APPROACH_RADIUS, w.perception)
+    shut = w.occupied() | w.for_sale() | blocked
     first: dict[Pos, Pos] = {}
     frontier = deque([here])
     seen = {here}
     while frontier:
         p = frontier.popleft()
-        for n in w.open_neighbours(p, blocked):
-            if n in seen or chebyshev(n, target.pos) > bound:
+        for n in w.neighbours(p):
+            if n in seen or n in shut or not w.view.walkable(n) or chebyshev(n, target.pos) > radius:
                 continue
             seen.add(n)
             first[n] = first.get(p, n)

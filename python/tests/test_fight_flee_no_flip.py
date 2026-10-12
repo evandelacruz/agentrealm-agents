@@ -67,6 +67,29 @@ class StandingHostileTest(unittest.TestCase):
         self.assertIsNotNone(step)
         self.assertNotIn(step, {(12, 11), (13, 11)})
 
+    def test_a_walk_that_loops_out_can_close_from_every_cell_of_it(self):
+        """The only way in leaves the straight line by more than the gap it
+        started at: one step in, then out to 9 cells off and back. Every cell
+        of the walk can still close (the ground searched is fixed round the
+        target, never measured from where Fight stands)."""
+        w = world(at=(15, 20))
+        for x in range(30):
+            for y in range(30):
+                w.view.tiles[(x, y)] = "stone"
+        corridor = [(15, 20), (16, 20)] + [(16, y) for y in range(19, 10, -1)]
+        corridor += [(x, 11) for x in range(17, 21)] + [(20, y) for y in range(12, 20)]
+        for p in corridor:
+            w.view.tiles[p] = "dirt"
+        npc = biter(at=(20, 20))
+        w.entities = [npc]
+        for _ in range(40):
+            if chebyshev(w.pos, npc.pos) <= 1:
+                break
+            step = close_step(w, npc, set())
+            self.assertIsNotNone(step, f"no walk in from {w.pos}")
+            w.pos = step
+        self.assertLessEqual(chebyshev(w.pos, npc.pos), 1)
+
     def test_it_is_closed_on_and_killed_with_no_flee_between(self):
         w, c = world(), ctx()
         npc = biter()
@@ -110,6 +133,16 @@ class FightHoldsTest(unittest.TestCase):
         w.health = 1
         with mock.patch.object(engagement, "win_ratio", return_value=0.1):
             self.assertFalse(sync_engagement(w, c.memory, c.policy, c.params).fight)
+
+    def test_a_fight_with_no_weighed_hostile_in_view_ends(self):
+        w, c = world(at=(12, 10)), ctx()
+        w.entities = [biter()]
+        self.assertTrue(sync_engagement(w, c.memory, c.policy, c.params).fight)
+        w.attacked_tick = w.tick  # still hitting us, so the engagement goes on
+        w.entities = []
+        e = sync_engagement(w, c.memory, c.policy, c.params)
+        self.assertIsNotNone(e)
+        self.assertFalse(e.fight, "nothing it weighs is left to fight")
 
     def test_a_second_hostile_can_still_send_it_running(self):
         w, c = world(at=(12, 10)), ctx()
@@ -160,6 +193,14 @@ class FlipGuardTest(unittest.TestCase):
         self.assertTrue(oscillation.benched(self.m, self.w, "Flee"))
         self.m.engagement = Engagement(frozenset({("npc", 7), ("npc", 8)}), fight=False)
         self.assertFalse(oscillation.benched(self.m, self.w, "Flee"), "a new danger may still flee")
+
+    def test_retreat_is_never_benched(self):
+        """Retreat runs at the survival floor: a flip with it benches the other side."""
+        event = pace(self.m, self.w, ["Fight", "Retreat"] * 4)
+        self.assertEqual(event["benched"], "Fight")
+        self.assertFalse(oscillation.benched(self.m, self.w, "Retreat"))
+        self.m.nav_stuck.benched["Retreat"] = oscillation.nav_stuck.Bench(self.w.tick + 100, True)
+        self.assertFalse(oscillation.benched(self.m, self.w, "Retreat"))
 
     def test_a_swing_in_the_window_is_progress(self):
         self.m.last_use_tick = self.w.tick + 12

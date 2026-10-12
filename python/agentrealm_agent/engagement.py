@@ -147,12 +147,13 @@ def sync_engagement(
 
 def fight_holds(w: WorldModel, params: dict[str, float | int], before: Engagement, now: Engagement) -> bool:
     """A fight decided on (``before``) holds against a decision ``now`` that
-    turned: no hostile joined what the estimate weighs, and health is above
-    the survival floor against those it weighs (module docstring)."""
+    turned: no hostile joined what the estimate weighs, one it weighs is still
+    in view (a fight with none left ends), and health is above the survival
+    floor against them (module docstring)."""
     if not now.weighed <= before.weighed:
         return False
     weighed = [h for h in w.entities if (h.kind, h.id) in now.weighed]
-    return not at_health_floor(w, params, weighed)
+    return bool(weighed) and not at_health_floor(w, params, weighed)
 
 
 def held_members(w: WorldModel, e: Engagement | None) -> list[Entity]:

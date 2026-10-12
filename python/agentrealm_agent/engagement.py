@@ -66,7 +66,7 @@ from .survival import (
     win_ratio,
     worn_defense,
 )
-from .world import Entity, WorldModel, chebyshev
+from .world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -204,16 +204,18 @@ def decide(
     health: int | None = None,
     *,
     m: Memory | None = None,
+    at: Pos | None = None,
 ) -> Engagement:
     """The estimate against the group's members in view and every other
     hostile that can reach us with them (``survival.can_reach_us``, A128), and
-    the decision it gives; at ``health`` instead of live health when given.
+    the decision it gives; at ``health`` instead of live health when given,
+    and standing on ``at`` instead of where we stand.
     So a pack the estimate cannot beat is fled or retreated from, never
     closed on one at a time."""
     members = [h for h in w.entities if (h.kind, h.id) in group]
     if members:
-        members = can_reach_us(w, policy, members)
-    if swings_nothing(w, m):
+        members = can_reach_us(w, policy, members, at)
+    if swings_nothing(w, m, at):
         ratio = 0.0  # afloat with only a fording supply in hand: no swing (A146)
     else:
         ratio = win_ratio(
@@ -270,13 +272,19 @@ def drink_turns_fight(w: WorldModel, m: Memory, policy: Policy, params: dict[str
 
 
 def would_fight(
-    w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity | None = None, m: Memory | None = None
+    w: WorldModel,
+    policy: Policy,
+    params: dict[str, float | int],
+    also: Entity | None = None,
+    m: Memory | None = None,
+    at: Pos | None = None,
 ) -> bool:
     """The decision an engagement would start with against the hostiles in
     range, and ``also``, one further off a state would go for (``m``: the
-    water cells a refusal marked, for ``fording.swings_nothing``)."""
-    group = frozenset((h.kind, h.id) for h in combat_group(w, policy, also))
-    return decide(w, policy, params, group, False, m=m).fight
+    water cells a refusal marked, for ``fording.swings_nothing``), as we
+    stand or, with ``at``, standing on that cell as loaded now."""
+    group = frozenset((h.kind, h.id) for h in combat_group(w, policy, also, at))
+    return decide(w, policy, params, group, False, m=m, at=at).fight
 
 
 def fights(m: Memory) -> bool:

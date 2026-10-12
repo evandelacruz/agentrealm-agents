@@ -300,6 +300,29 @@ class RulesNotRunPatchesTest(unittest.TestCase):
         self.assertEqual(hits, [], "A87: Lorraine states rules in game terms and cites no run.")
 
 
+# A line a merge left unresolved: seven <, =, or > at its start.
+CONFLICT_MARKER = re.compile(r"^(<{7}|={7}|>{7})", re.MULTILINE)
+
+
+class NoConflictMarkersTest(unittest.TestCase):
+    def test_no_tracked_text_file_holds_a_conflict_marker(self):
+        """A merge that left a conflict unresolved never lands: no tracked
+        text file has a line starting with a conflict marker."""
+        repo = PYTHON_DIR.parent
+        listed = subprocess.run(["git", "ls-files", "-z"], cwd=repo, capture_output=True, check=True).stdout
+        hits = []
+        for name in filter(None, listed.decode().split("\0")):
+            path = repo / name
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue  # not a text file
+            hits += [f"{name}:{text.count(chr(10), 0, m.start()) + 1}" for m in CONFLICT_MARKER.finditer(text)]
+        self.assertEqual(hits, [], "conflict markers left by a merge")
+
+
 # Gary's planner and states (A138). Everything else in ``agentrealm_agent`` is
 # plumbing Lorraine may use.
 GARY_ONLY = ("agentrealm_agent.strategist", "agentrealm_agent.plan", "agentrealm_agent.brain", "agentrealm_agent.runner")

@@ -169,7 +169,7 @@ class GoalStackTest(unittest.TestCase):
     def test_buy_stays_on_stack_for_shop(self):
         # The walk to its seller given up: Shop asks the planner and holds, the
         # safe default never walks for it (A120), and the op stays on top while its stall clock runs.
-        op = {"op": "buy", "code": "torch", "x": 30, "y": 0}
+        op = {"op": "buy", "code": "torch", "x": 30, "y": 0, "map_id": 1}
         plan = Plan([dict(op)], dict(PARAM_DEFAULTS))
         m, w = Memory(), open_world()
         nav_stuck.give_up(m, w, nav_stuck.track(m, w, "travel:seller", (30, 0)), "time")

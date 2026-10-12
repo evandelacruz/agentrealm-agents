@@ -160,7 +160,7 @@ class PlanOpTest(unittest.TestCase):
         m = Memory()
         nav_stuck.give_up(m, w, nav_stuck.track(m, w, "travel:seller", (18, 4)), "time")
         m.nav_stuck.attempts.clear()
-        plan = Plan([{"op": "buy", "code": "torch", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
+        plan = Plan([{"op": "buy", "code": "torch", "x": 18, "y": 4, "map_id": w.map_id}], dict(PARAM_DEFAULTS))
         plan.tick_hz = 1  # PLAN_STALL_SECONDS ticks
         outs = play(w, plan, decisions=12, m=m)
         held = [o for o in outs if o.state == "Shop"]

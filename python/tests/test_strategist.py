@@ -94,10 +94,10 @@ SOLD_HERE = ("iron_mail", "matches", "middle_chest", "potion", "rope", "small_po
 
 
 def shop_selling(*codes: str, map_id: int = 7) -> KnowledgeBase:
-    """A knowledge base with one shop cell known to sell each of ``codes``."""
+    """A knowledge base with a shop cell known to sell each of ``codes``."""
     kb = KnowledgeBase.empty("sandbox")
-    for code in codes:
-        record_shop_cell(kb, map_id, (40, 0), code, 5)
+    for i, code in enumerate(codes):
+        record_shop_cell(kb, map_id, (40, i), code, 5)
     return kb
 
 

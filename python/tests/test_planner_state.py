@@ -18,7 +18,7 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.shop import note_shop_result, sync_shop
 from agentrealm_agent.states.shop import shop_outcome
 from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, eaten_on_pickup_line, held_line, no_seller_line
-from agentrealm_agent.sellers import sellers_line
+from agentrealm_agent.sellers import SELLER_ITEMS_SHOWN, sellers_line
 from agentrealm_agent.travel.knowledge import entrance_key, record_shop_cell
 from agentrealm_agent.world import Entity, WorldModel
 
@@ -305,6 +305,17 @@ class SellersLineTest(unittest.TestCase):
         self.assertEqual(rows["raft"], [{"by": "clue", "at": [0, 200], "map_id": 7, "steps": 200, "search_radius": 20}])
         self.assertEqual(rows["rope"], "none known")
 
+    def test_the_line_shows_a_few_items_beside_the_wanted_ones(self):
+        kb = KnowledgeBase.empty("sandbox")
+        for i in range(SELLER_ITEMS_SHOWN + 3):
+            record_shop_cell(kb, 7, (i + 1, 0), f"item_{i}", 2)
+        line = sellers_line(world(), kb, ["raft"])
+        rows = json.loads(line.split("=", 1)[1].split(" (+", 1)[0])
+        self.assertEqual(len(rows), SELLER_ITEMS_SHOWN + 1)
+        self.assertIn("raft", rows)
+        self.assertIn("item_0", rows, "nearest first")
+        self.assertTrue(line.endswith("(+3 more items sold)"), line)
+
     def test_state_carries_the_line_for_the_stacks_buys(self):
         llm = FakeLLM(WAIT)
         s, r = make(llm), fake_runner()
@@ -322,11 +333,11 @@ class SellersLineTest(unittest.TestCase):
         self.assertTrue(any("no seller of raft is known" in why for why in s.rejected), s.rejected)
 
     def test_a_reply_buy_that_names_its_sellers_place_is_kept(self):
-        llm = FakeLLM(json.dumps({"goals": [{"op": "buy", "code": "raft", "x": 600, "y": 380}]}), WAIT)
+        llm = FakeLLM(json.dumps({"goals": [{"op": "buy", "code": "raft", "x": 600, "y": 380, "map_id": 7}]}), WAIT)
         s, r = make(llm), fake_runner()
         queue_signal(r.mem, {"trigger": "death", "tick": 1})
         round_trip(s, r)
-        self.assertEqual(r.plan.goals, [{"op": "buy", "code": "raft", "x": 600, "y": 380}])
+        self.assertEqual(r.plan.goals, [{"op": "buy", "code": "raft", "x": 600, "y": 380, "map_id": 7}])
 
 
 def state_line(messages: list[dict], key: str) -> str:

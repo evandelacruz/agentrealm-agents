@@ -622,7 +622,7 @@ class BreakRearmTest(unittest.TestCase):
         # the op's, so Shop asks the planner and holds rather than leave the
         # round to Break (A120), and the buy op still stalls and is dropped.
         w, m = self.r.world, self.r.mem
-        plan = Plan([{"op": "buy", "code": "torch", "x": 30, "y": 0}], dict(PARAM_DEFAULTS))
+        plan = Plan([{"op": "buy", "code": "torch", "x": 30, "y": 0, "map_id": w.map_id}], dict(PARAM_DEFAULTS))
         plan.stalled_since_tick = 0
         self.ctx.plan = plan
         w.tick = PLAN_STALL_SECONDS * plan.tick_hz * 2

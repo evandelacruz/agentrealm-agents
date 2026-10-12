@@ -10,4 +10,4 @@
 
 **Will not.** Add a rule for a situation (A87, at zero from day one). Import from Gary's planner or states. Gather, shop or explore for its own sake.
 
-**Lineage.** Built on Gary's plumbing (client, world model, pathing, executor, supplies) to test one claim: a goal tree with the situational calls delegated to the planner beats accreted rules. Becomes the reference agent if the metrics say so (A139).
+**Lineage.** Built on Gary's plumbing (client, world model, pathing, executor, supplies) to test one claim: a goal tree with the situational calls delegated to the planner beats accreted rules. Becomes the reference agent if the metrics say so (A143).

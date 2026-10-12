@@ -69,6 +69,15 @@ class RememberedTest(unittest.TestCase):
         self.assertEqual(row["last_try"], {"capability": "smash", "result": "opened", "tick": 1200})
         self.assertEqual(row["back_at_tick"], 1200 + RETURN_SECONDS * TICK_HZ)
 
+    def test_a_remembered_oddity_seen_more_fully_and_no_longer_odd_is_dropped(self):
+        kb = KnowledgeBase.empty("w")
+        w = _world(GARDEN, at=(1, 1))
+        oddities_line(w, kb, TICK_HZ)
+        self.assertIn("7,4,4", kb.extra[ODDITIES_KEY])
+        w.view.tiles[(5, 5)] = "rock"  # more seen: another rock beside it
+        self.assertEqual(oddities_line(w, kb, TICK_HZ), "oddities=none seen")
+        self.assertNotIn("7,4,4", kb.extra[ODDITIES_KEY])
+
     def test_a_failed_capability_is_recorded_and_not_offered(self):
         kb = KnowledgeBase.empty("w")
         w = _world(GARDEN, at=(1, 1), held=("mallet", "bomb"))

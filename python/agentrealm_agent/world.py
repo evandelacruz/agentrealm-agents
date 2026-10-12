@@ -538,14 +538,22 @@ class WorldModel:
     def apply_terrain(self, t: dict) -> None:
         """Records a terrain read of our perception window.
 
-        Everything inside perception is visible, so an unknown cell in the
-        read has no ground: it is recorded as VOID, known and not walkable.
+        A ``?`` in the read is unknown, never empty ground (API Tiles, B102):
+        ground the character has neither in sight nor revealed, which in a
+        dark zone is most of the window, since sight there is perception
+        scaled by brightness (A146). Only a ``?`` past the map's edge, by the
+        read's ``map_width`` and ``map_height``, has no ground: it is recorded
+        as VOID, known and not walkable. A ``?`` inside the map stays unknown,
+        so a walk plans through it at fog cost and Explore goes to see it.
         """
         view = self.maps.setdefault(int(t["map_id"]), MapView())
         x0, y0 = int(t["x0"]), int(t["y0"])
-        for y in range(y0, y0 + int(t["height"])):
-            for x in range(x0, x0 + int(t["width"])):
-                view.tiles.setdefault((x, y), VOID)
+        width, height = _opt_int(t.get("map_width")), _opt_int(t.get("map_height"))
+        if width is not None and height is not None:
+            for y in range(y0, y0 + int(t["height"])):
+                for x in range(x0, x0 + int(t["width"])):
+                    if not (0 <= x < width and 0 <= y < height):
+                        view.tiles.setdefault((x, y), VOID)
         for (x, y), cell in terrain_cells(t).items():
             p = (x, y)
             view.tiles[p] = cell["block_type"]

@@ -543,3 +543,67 @@ class WaterCellsOnlyTest(unittest.TestCase):
         m.engagement = None
         m.water_cells[(w.map_id, (1, 1))] = None  # a would_strand came from it
         self.assertFalse(sync_engagement(w, m, POLICY, dict(PARAM_DEFAULTS)).fight)
+
+
+class LiveLevelMapTest(unittest.TestCase):
+    """A146's live level map, through real terrain reads: water with tile
+    islands, doors at (7, 0) and (7, 11), the raft armed and bronze mail worn
+    at 7/10. Travel from open water to island cells steps, lit or dark, with
+    the level read or not. In the dark only the ground near where he had
+    walked was revealed and the rest read ``?``, which was recorded as no
+    ground: every walk off those lines found "no known way"."""
+
+    ROWS = [
+        "wwwwwwwfwwwwwwww",
+        "wWWWWWWtWWWWWWWw",
+        "wWWWWWWWWWWWWWWw",
+        "wWWWtttWWWWWWWWw",
+        "wWWWtttWWWWttWWw",
+        "wWWWtttWWWWttWWw",
+        "wWWWWWWWWWWttWWw",
+        "wWWWWWWWWWWWWWWw",
+        "wWWWWWtttWWWWWWw",
+        "wWWWWWtttTWWWWWw",
+        "wWWWWWtttWWWWWWw",
+        "wwwwwwwfwwwwwwww",
+    ]
+    LEGEND = {
+        "w": {"block_type": "wall"},
+        "W": {"block_type": "water"},
+        "t": {"block_type": "tile"},
+        "f": {"block_type": "framed_door"},
+        "T": {"block_type": "tile", "readable": True},
+    }
+
+    def live(self, at, level, rows) -> WorldModel:
+        w = WorldModel(character_id=1, map_id=44, pos=at, perception=25)
+        w.apply_position({"map_id": 44, "x": at[0], "y": at[1], **({"level": level} if level is not None else {})})
+        w.apply_terrain({"map_id": 44, "x0": 0, "y0": 0, "width": 16, "height": 12, "rows": rows,
+                         "legend": self.LEGEND, "map_width": 16, "map_height": 12})
+        w.armed_code, w.armed_id = "raft", RAFT
+        w.worn_codes = {"body": "bronze_mail"}
+        w.held_supplies = [InventorySupply(SWORD, "bronze_sword")]
+        w.alive, w.health, w.max_health = True, 7, 10
+        w.self_read = w.inventory_read = True
+        return w
+
+    def dark_rows(self) -> list[str]:
+        """The read in the dark: revealed only round the columns he walked, x 11 and 13."""
+        walked = [(x, y) for x in (11, 13) for y in range(1, 11)]
+        near = {(x + dx, y + dy) for x, y in walked for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+        return ["".join(c if (x, y) in near else "?" for x, c in enumerate(row)) for y, row in enumerate(self.ROWS)]
+
+    def test_travel_from_open_water_to_an_island_steps(self):
+        for rows, light in ((self.ROWS, "lit"), (self.dark_rows(), "dark")):
+            for level in (4, None):
+                for dest in ((7, 1), (8, 10)):
+                    with self.subTest(light=light, level=level, dest=dest):
+                        w = self.live((13, 1), level, rows)
+                        self.assertEqual(w.map_level, level)
+                        m = Memory()
+                        out = dispatch(w, ctx_for(m, travel_to(*dest)))
+                        self.assertEqual(out.state, "Travel", out.reason)
+                        self.assertTrue(out.intents, out.reason)
+                        (step,) = [i for i in out.intents if i["verb"] == "SetPosition"][:1]
+                        self.assertLess(abs(step["x"] - dest[0]) + abs(step["y"] - dest[1]), abs(13 - dest[0]) + abs(1 - dest[1]))
+                        self.assertNotIn("no_way_on", [s["trigger"] for s in m.strategist_signals])

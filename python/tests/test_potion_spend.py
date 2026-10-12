@@ -82,6 +82,16 @@ class DrinkInAFightTest(unittest.TestCase):
         self.assertTrue(drink_turns_fight(w, c.memory, c.policy, c.params, 10))
         self.assertTrue(spend_potion(w, c.memory, c.policy, c.params, POTION.code))
 
+    def test_a_fight_held_on_lower_odds_keeps_the_potion(self):
+        """Decided at 9/10 and held at 6/10 (A136): the live odds are down and
+        a drink would lift them, but the decision is already fight."""
+        w, c = self.engaged(9, 1)
+        self.assertTrue(c.memory.engagement.fight)
+        w.health = 6
+        self.assertTrue(sync_engagement(w, c.memory, c.policy, c.params).fight, "the fight holds")
+        self.assertFalse(drink_turns_fight(w, c.memory, c.policy, c.params, 10))
+        self.assertFalse(spend_potion(w, c.memory, c.policy, c.params, POTION.code))
+
     def test_a_fight_already_won_keeps_the_potion(self):
         w, c = self.engaged(9, 1)
         self.assertTrue(c.memory.engagement.fight)

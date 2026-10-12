@@ -144,6 +144,16 @@ class FightHoldsTest(unittest.TestCase):
         self.assertIsNotNone(e)
         self.assertFalse(e.fight, "nothing it weighs is left to fight")
 
+    def test_running_found_not_to_work_keeps_what_was_weighed(self):
+        w, c = world(at=(12, 10)), ctx()
+        w.entities = [biter(), biter(8, (16, 16))]
+        sync_engagement(w, c.memory, c.policy, c.params)
+        weighed = c.memory.engagement.weighed
+        w.entities = [biter()]  # one weighed member out of view now
+        e = engagement.cannot_outrun(w, c.memory, c.policy, c.params)
+        self.assertTrue(e.cannot_outrun)
+        self.assertLessEqual(weighed, e.weighed)
+
     def test_a_second_hostile_can_still_send_it_running(self):
         w, c = world(at=(12, 10)), ctx()
         w.entities = [biter()]

@@ -83,6 +83,20 @@ class ExploreTest(unittest.TestCase):
         self.assertNotIn((0, 0), w.view.tiles)
         self.assertEqual(w.view.frontier(fords=False), {(1, 1)})
 
+    def test_a_read_with_no_map_size_uses_the_size_known_else_the_near_edges(self):
+        """A146: a read may leave the size out; the edge is then the size a
+        minimap or an earlier read gave, else only below x 0 and y 0."""
+        read = {"map_id": 7, "x0": -1, "y0": -1, "width": 4, "height": 4,
+                "legend": {"d": {"block_type": "dirt"}}, "rows": ["????", "?d??", "????", "????"]}
+        w = WorldModel(character_id=1, pos=(0, 0), map_id=7)
+        w.apply_terrain(read)
+        self.assertEqual(w.view.tiles[(-1, 0)], "")
+        self.assertNotIn((2, 0), w.view.tiles, "no size known: unknown, not no ground")
+        w = WorldModel(character_id=1, pos=(0, 0), map_id=7)
+        w.apply_minimap({"maps": [{"map_id": 7, "map_width": 1, "map_height": 1}]})
+        w.apply_terrain(read)
+        self.assertEqual(w.view.frontier(fords=False), set(), "the minimap's size closes the far edges")
+
     def test_terrain_grid_decodes_cells_and_art(self):
         # docs/API.md Tiles (B102): rows are y0+j, symbols x0+i, art rides beside the grid.
         cells = terrain_cells({"x0": 4, "y0": 6, "legend": {"s": {"block_type": "statue"}, "g": {"block_type": "grass"}},

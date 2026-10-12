@@ -369,6 +369,20 @@ def no_way(w: WorldModel, goal: Pos, params: CostGridParams | None = None) -> bo
     return grid.cost(goal) is None or _walled_in(grid, goal, w.pos, FINE_NODE_BUDGET)
 
 
+def shut_off(w: WorldModel, goal: Pos, params: CostGridParams) -> bool:
+    """Proven that no way joins ``w.pos`` and ``goal`` on ``params``'s grid:
+    ``goal`` is impassable, or the passable cells joined to either end run
+    out within ``FINE_NODE_BUDGET`` without reaching the other. A search the
+    budget cuts off proves nothing, so it is False then (A146)."""
+    assert w.pos is not None
+    if w.pos == goal:
+        return False
+    grid = _Grid(w, {goal}, params)
+    if grid.cost(goal) is None:
+        return True
+    return _walled_in(grid, goal, w.pos, FINE_NODE_BUDGET) or _walled_in(grid, w.pos, goal, FINE_NODE_BUDGET)
+
+
 def _walled_in(grid: _Grid, goal: Pos, start: Pos, max_cells: int) -> bool:
     """The passable cells joined to ``goal`` number at most ``max_cells`` and
     do not touch ``start``."""

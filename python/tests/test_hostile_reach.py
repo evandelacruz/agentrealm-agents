@@ -312,6 +312,52 @@ class OnlyWayPassTest(unittest.TestCase):
         self.assertFalse(reach.passes([(x, 1) for x in range(2, 22)], (21, 1)))
 
 
+class OnlyWayIsProvenTest(unittest.TestCase):
+    """A146: only a search that closes proves the reach is the only way; one
+    its budget cuts off proves nothing, so the walk asks."""
+
+    def test_a_cut_off_search_is_no_only_way(self):
+        from agentrealm_agent.pathing import op_walk_sets
+
+        # Two rooms of 24 x 20 joined by one corridor along y 1 that passes a
+        # pocket hostile's reach: each room alone is past the search budget.
+        room = "." * 24
+        rows = ["#" * 64]
+        rows += ["#" + room + "." * 15 + room + "#"]
+        rows += ["#" + room + "#" * 15 + room + "#"] * 2
+        rows += ["#" + room + "#" * 7 + "." + "#" * 7 + room + "#"]
+        rows += ["#" + room + "#" * 15 + room + "#"] * 17
+        rows += ["#" * 64]
+        w = world(rows, at=(5, 10))
+        w.max_health = w.health = 100
+        pack(w, (32, 4), hit=OnlyWayPassTest.HIT)
+        _, _, reach = op_walk_sets(w, Memory(), POLICY, None, dict(PARAM_DEFAULTS), [])
+        self.assertIn((32, 1), reach)
+        self.assertFalse(reach.only_way((50, 10)), "both rooms outrun the budget: nothing proven")
+
+    def test_a_search_its_budget_cuts_off_proves_nothing(self):
+        """The corridor's far side holds more cells than the search may
+        expand: the search is cut off before it closes, so it is no proof."""
+        from agentrealm_agent.navigation import planner
+        from agentrealm_agent.pathing import op_walk_sets
+
+        w = world(OnlyWayPassTest.BAND, at=(1, 1))
+        w.max_health = w.health = 100
+        pack(w, (12, 4), hit=OnlyWayPassTest.HIT)
+        _, _, reach = op_walk_sets(w, Memory(), POLICY, None, dict(PARAM_DEFAULTS), [])
+        with mock.patch.object(planner, "FINE_NODE_BUDGET", 3):
+            self.assertFalse(reach.only_way((21, 1)))
+
+    def test_a_search_that_closes_proves_it(self):
+        from agentrealm_agent.pathing import op_walk_sets
+
+        w = world(OnlyWayPassTest.BAND, at=(1, 1))
+        w.max_health = w.health = 100
+        pack(w, (12, 4), hit=OnlyWayPassTest.HIT)
+        _, _, reach = op_walk_sets(w, Memory(), POLICY, None, dict(PARAM_DEFAULTS), [])
+        self.assertTrue(reach.only_way((21, 1)))
+
+
 class CoversPassTest(unittest.TestCase):
     """``pathing.covers_pass``'s branches (A146)."""
 

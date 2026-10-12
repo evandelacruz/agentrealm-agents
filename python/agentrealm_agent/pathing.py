@@ -19,6 +19,7 @@ from .navigation import (
     known_prefix,
     nearest_target,
     no_way,
+    shut_off,
 )
 from .navigation import stuck as nav_stuck
 from .navigation import walk as nav_walk
@@ -42,7 +43,7 @@ from .survival import (
     town_cell,
     worn_defense,
 )
-from .executor.movement import step_landing
+from .executor.movement import step_landing, ticks_per_step
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -1068,15 +1069,18 @@ class HostileReach:
         return self.only_way(goal) and covers_pass(self.w, self.policy, self.params, path, self.cells, self.tick_hz)
 
     def only_way(self, goal: Pos) -> bool:
-        """No plan that keeps out of the reach gets to ``goal``, on the grid
-        the walk plans on (unseen ground at fog cost); ``goal`` itself is left
-        out of the reach, so a goal in it is still a goal. One search per
-        position and goal, however many plans one decision tests."""
+        """It is proven that no way kept out of the reach gets to ``goal``,
+        on the grid the walk plans on (unseen ground at fog cost): either
+        end's ground outside the reach closes without the other
+        (``navigation.shut_off``). A search its budget cuts off proves
+        nothing, so it is no only way and the walk asks. ``goal`` itself is
+        left out of the reach, so a goal in it is still a goal. One search
+        per position and goal, however many plans one decision tests."""
         key = (self.w.pos, goal)
         if key not in self._only_way:
             avoid = (set(self.avoid) | self.cells) - {goal}
             params = CostGridParams(avoid=avoid, costly=set(self.costly), allow_goal_door=True)
-            self._only_way[key] = cost_path(self.w, goal, params) is None
+            self._only_way[key] = shut_off(self.w, goal, params)
         return self._only_way[key]
 
 
@@ -1101,7 +1105,7 @@ def covers_pass(
         return False
     if any(chebyshev(e.pos, p) <= policy.hostile_range for e in hostiles for p in inside):
         return False
-    ticks = len(inside) * 1000 * tick_hz / max(1, w.movement_speed)
+    ticks = len(inside) * ticks_per_step(tick_rate_hz=tick_hz, movement_speed_milli=max(1, w.movement_speed))
     left = estimate_health(w) - expected_damage(hostiles, w.threat, ticks, worn_defense(w))
     return left > health_floor(w, params, hostiles)
 

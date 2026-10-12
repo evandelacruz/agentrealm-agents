@@ -34,7 +34,7 @@ def walkable_block(block: str | None, fords: bool = False) -> bool:
     water while a fording supply is carried (``fords``, A133)."""
     return block in WALKABLE or (fords and block == WATER)
 DOORS = {"framed_door", "rock_entry"}
-VOID = ""  # inside a terrain read but no ground there
+VOID = ""  # no ground: a cell past the map's edge (a ``?`` inside the map is unknown, A146)
 UNKNOWN = "?"  # terrain grid symbol for a cell the read carries no block for
 
 
@@ -324,6 +324,7 @@ class WorldModel:
     map_id: int | None = None
     map_level: int | None = None  # level number of the current map: 0 outside every level, None while unread (A145)
     map_levels: dict[int, int] = field(default_factory=dict)  # map id -> its level from the minimap, 0 outside every level (A145)
+    map_sizes: dict[int, tuple[int, int]] = field(default_factory=dict)  # map id -> (width, height), from a minimap or terrain read (A146)
     pos: Pos | None = None
     perception: int = 1
     movement: int = 1
@@ -537,8 +538,15 @@ class WorldModel:
             if map_id is None:
                 continue
             self.map_levels[map_id] = level if level is not None and level > 0 else 0
+            self._note_map_size(map_id, m)
         if self.map_id in self.map_levels:
             self.map_level = self.map_levels[self.map_id]
+
+    def _note_map_size(self, map_id: int, body: dict) -> None:
+        """Keep a map's ``map_width`` and ``map_height`` when a read names both."""
+        width, height = _opt_int(body.get("map_width")), _opt_int(body.get("map_height"))
+        if width is not None and height is not None:
+            self.map_sizes[map_id] = (width, height)
 
     def perception_rect(self) -> tuple[int, int, int, int]:
         """x0, y0, width, height of the perception window around us."""
@@ -560,19 +568,22 @@ class WorldModel:
         A ``?`` in the read is unknown, never empty ground (API Tiles, B102):
         ground the character has neither in sight nor revealed, which in a
         dark zone is most of the window, since sight there is perception
-        scaled by brightness (A146). Only a ``?`` past the map's edge, by the
-        read's ``map_width`` and ``map_height``, has no ground: it is recorded
-        as VOID, known and not walkable. A ``?`` inside the map stays unknown,
-        so a walk plans through it at fog cost and Explore goes to see it.
+        scaled by brightness (A146). Only a ``?`` past the map's edge has no
+        ground: it is recorded as VOID, known and not walkable. The edge is
+        the map's size as this read gives it, else as a minimap or an earlier
+        read gave it (``map_sizes``), else only the near edges, below x 0 and
+        y 0, are known. A ``?`` inside the map stays unknown, so a walk plans
+        through it at fog cost and Explore goes to see it.
         """
-        view = self.maps.setdefault(int(t["map_id"]), MapView())
+        map_id = int(t["map_id"])
+        view = self.maps.setdefault(map_id, MapView())
+        self._note_map_size(map_id, t)
         x0, y0 = int(t["x0"]), int(t["y0"])
-        width, height = _opt_int(t.get("map_width")), _opt_int(t.get("map_height"))
-        if width is not None and height is not None:
-            for y in range(y0, y0 + int(t["height"])):
-                for x in range(x0, x0 + int(t["width"])):
-                    if not (0 <= x < width and 0 <= y < height):
-                        view.tiles.setdefault((x, y), VOID)
+        width, height = self.map_sizes.get(map_id, (None, None))
+        for y in range(y0, y0 + int(t["height"])):
+            for x in range(x0, x0 + int(t["width"])):
+                if x < 0 or y < 0 or (width is not None and (x >= width or y >= height)):
+                    view.tiles.setdefault((x, y), VOID)
         for (x, y), cell in terrain_cells(t).items():
             p = (x, y)
             view.tiles[p] = cell["block_type"]

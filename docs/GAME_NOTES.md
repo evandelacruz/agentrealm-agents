@@ -197,7 +197,7 @@ The agent finds those in play. It keeps them in its per-world knowledge base und
 
 ## Levels and bosses
 
-- **Finding entrances.** `get_minimap` lists every level entrance on revealed maps, found or not, with no level number. A map inside a level carries `level` (M §5.3). Olympuff's overworld (800×800) showed 8 marks from town (Obs).
+- **Finding entrances.** `get_minimap` lists every level entrance on revealed maps, found or not, with no level number. A map inside a level carries `level` (M §5.3), served on `GET minimap`'s `maps` entry for that map; `GET position` returns only `map_id`, `x`, `y` (free-play run 26: map 44's entry had `level: 4`, and the position read had no `level`). Olympuff's overworld (800×800) showed 8 marks from town (Obs).
 - **Entering.** An entrance is a door. It may be hidden behind a breakable block, locked (`locked: true`, needing a key), or out of reach across water (M §5.3, §9.2, §11).
 - **Boss room door:**
   - it admits one character at a time;

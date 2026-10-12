@@ -168,13 +168,13 @@ class MapTest(unittest.TestCase):
         self.assertIn("T tree (hedges are trees)", head)
         self.assertNotIn("~ water", head, "only the marks on the map are in the legend")
 
-    def test_the_ruler_reads_x_top_to_bottom(self):
+    def test_the_ruler_gives_whole_numbers(self):
         w = garden(at=(120, 40))
         w.view.tiles.clear()
-        ruler = [l[6:] for l in map_lines(w)[1:4]]
-        column = "".join(r[0] for r in ruler)
-        self.assertEqual(column, "105")
-        self.assertEqual("".join(r[MAP_RADIUS] for r in ruler), "120")
+        labels, ticks = (l[6:] for l in map_lines(w)[1:3])
+        self.assertEqual(labels.split(), ["105", "110", "115", "120", "125", "130", "135"])
+        self.assertEqual(labels[MAP_RADIUS : MAP_RADIUS + 3], "120")
+        self.assertEqual(ticks[MAP_RADIUS], "|")
 
     def test_a_locked_door_shows_apart(self):
         w = garden()

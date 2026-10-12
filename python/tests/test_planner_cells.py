@@ -1,0 +1,150 @@
+"""A148: the planner takes x, y from State's lists, not from the map ruler.
+
+The ruler gives every fifth column's whole x, State lists every door on the
+map with its cell (the one under the character too), and an op whose cell is
+off the map or a wall to stand on is refused with why before it reaches a
+state.
+"""
+
+from __future__ import annotations
+
+import json
+import unittest
+
+from agentrealm_agent.cells import refuse_bad_cells
+from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
+from agentrealm_agent.plan import Plan
+from agentrealm_agent.strategist import build_prompt, door_lines, ground_lines, map_lines, ruler_lines
+from agentrealm_agent.world import Entity, WorldModel
+from tests.test_strategist import WAIT_ANSWER, FakeLLM, fake_runner, make, round_trip
+
+# A 16 by 12 level room walled round, with a door in the top wall at x 7.
+ROOM_W, ROOM_H, DOOR = 16, 12, (7, 0)
+
+
+def level_room(at=(7, 1)) -> WorldModel:
+    w = WorldModel(character_id=1, map_id=40, pos=at, perception=8)
+    w.map_level = 1
+    for y in range(ROOM_H):
+        for x in range(ROOM_W):
+            edge = x in (0, ROOM_W - 1) or y in (0, ROOM_H - 1)
+            w.view.tiles[(x, y)] = "wall" if edge else "tile"
+    w.view.tiles[DOOR] = "framed_door"
+    w.view.size = (ROOM_W, ROOM_H)
+    w.alive, w.health, w.max_health = True, 10, 10
+    return w
+
+
+def labelled(line: str) -> dict[int, int]:
+    """Each ruler label by the column index it starts at."""
+    out, i = {}, 0
+    while i < len(line):
+        if line[i] != " ":
+            j = i
+            while j < len(line) and line[j] != " ":
+                j += 1
+            out[i] = int(line[i:j])
+            i = j
+        else:
+            i += 1
+    return out
+
+
+class RulerTest(unittest.TestCase):
+    def check(self, xs: range) -> dict[int, int]:
+        labels, ticks = (l[6:] for l in ruler_lines(xs))
+        found = labelled(labels)
+        self.assertTrue(found)
+        for i, x in found.items():
+            self.assertEqual(x, xs[i], "a label starts over its own column")
+            self.assertEqual(x % 5, 0)
+            self.assertEqual(ticks[i], "|")
+        self.assertEqual(ticks.count("|"), len(found))
+        return found
+
+    def test_a_16_wide_window(self):
+        self.assertEqual(sorted(self.check(range(0, 16)).values()), [0, 5, 10, 15])
+
+    def test_an_800_wide_window(self):
+        found = self.check(range(785, 816))
+        self.assertEqual(sorted(found.values()), [785, 790, 795, 800, 805, 810, 815])
+
+    def test_a_label_that_would_run_into_the_next_is_left_out(self):
+        found = self.check(range(9995, 10026))
+        self.assertNotIn(10005, found.values(), "10000 runs into 10005's column")
+
+    def test_the_map_stops_at_the_level_edge(self):
+        w = level_room()
+        lines = map_lines(w)
+        self.assertIn("x 0..15 left to right, y 0..11 top to bottom, the whole map is x 0..15, y 0..11", lines[0])
+        rows = [l for l in lines[3:]]
+        self.assertEqual(len(rows), ROOM_H)
+        self.assertTrue(all(len(r) == 6 + ROOM_W for r in rows))
+        self.assertEqual(labelled(lines[1][6:]), {0: 0, 5: 5, 10: 10, 15: 15})
+
+
+class DoorListTest(unittest.TestCase):
+    def test_the_level_door_is_listed_with_its_cell(self):
+        w = level_room()
+        (line,) = door_lines(w)
+        rows = json.loads(line.split("=", 1)[1].rsplit(" of=", 1)[0])
+        self.assertEqual((rows[0]["x"], rows[0]["y"]), DOOR)
+        self.assertEqual(rows[0]["step_from"], [{"x": 7, "y": 1}])
+        self.assertFalse(rows[0]["here"])
+
+    def test_the_door_under_the_character_is_listed(self):
+        w = level_room(at=DOOR)
+        (line,) = door_lines(w)
+        rows = json.loads(line.split("=", 1)[1].rsplit(" of=", 1)[0])
+        self.assertEqual((rows[0]["x"], rows[0]["y"], rows[0]["here"]), (7, 0, True))
+
+    def test_state_carries_doors_and_what_lies_on_the_ground(self):
+        w = level_room()
+        w.entities = [Entity("supply", 9, (3, 4), "potion", gem_price=6), Entity("chest", 10, (12, 9))]
+        prompt = build_prompt(
+            triggers=[], w=w, plan=Plan([], dict(PARAM_DEFAULTS)), directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=None
+        )[1]["content"]
+        self.assertIn('doors_seen=[{"block": "framed_door"', prompt)
+        self.assertIn('"x": 7, "y": 0', prompt)
+        (ground,) = ground_lines(w)
+        rows = json.loads(ground.split("=", 1)[1].rsplit(" of=", 1)[0])
+        self.assertEqual([(r["kind"], r["x"], r["y"]) for r in rows], [("supply", 3, 4), ("chest", 12, 9)])
+        self.assertEqual(rows[0]["gem_price"], 6)
+        self.assertIn("on_the_ground=", prompt)
+
+
+class BadCellTest(unittest.TestCase):
+    def test_off_the_map_and_wall_cells_are_refused_with_why(self):
+        w = level_room()
+        off = {"op": "travel", "to": "point", "x": 17, "y": 1}
+        wall = {"op": "travel", "to": "point", "x": 6, "y": 0}
+        door = {"op": "travel", "to": "point", "x": 7, "y": 0}
+        elsewhere = {"op": "travel", "to": "point", "x": 17, "y": 1, "map_id": 3}
+        smash = {"op": "break_block", "x": 6, "y": 0, "capability": "smash"}
+        kept, refused = refuse_bad_cells([off, wall, door, elsewhere, smash], w)
+        self.assertEqual(kept, [door, elsewhere, smash], "another map's cell, and a block to act on, are not judged here")
+        self.assertIn("17,1 is off map 40, which is x 0..15, y 0..11", refused[0])
+        self.assertIn("6,0 on map 40 is a wall", refused[1])
+        self.assertIn("never by counting map columns", refused[0])
+
+    def test_a_map_of_unknown_size_refuses_nothing_off_it(self):
+        w = level_room()
+        w.view.size = None
+        self.assertEqual(refuse_bad_cells([{"op": "travel", "to": "point", "x": 17, "y": 1}], w)[1], [])
+
+    def test_the_planner_hears_of_it_in_the_next_state(self):
+        bad = {"op": "travel", "to": "point", "x": 17, "y": 1}
+        s = make(FakeLLM({"goals": [bad]}, WAIT_ANSWER))
+        r = fake_runner()
+        r.world.view.size = (16, 12)
+        round_trip(s, r)
+        self.assertNotIn(bad, r.plan.goals, "it never reaches a state")
+        s.clock.now += 60
+        round_trip(s, r)
+        state = s.client.messages[1][1]["content"]
+        self.assertIn("last_reply_rejected=", state)
+        self.assertIn("17,1 is off map 7", state)
+
+
+if __name__ == "__main__":
+    unittest.main()

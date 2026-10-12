@@ -289,5 +289,7 @@
 
   "A142": {"state": "todo"},
 
-  "A143": {"state": "todo"}
+  "A143": {"state": "todo"},
+
+  "A148": {"state": "done"}
 }

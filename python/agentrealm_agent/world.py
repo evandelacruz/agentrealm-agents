@@ -284,6 +284,9 @@ class MapView:
     # or a respawn patch alike (Manual §9.2 legend, B127). A full read leaves
     # the flag off elsewhere.
     safe: set[Pos] = field(default_factory=set)
+    # The whole map's width and height in cells, from a terrain read's
+    # ``map_width`` and ``map_height`` (Manual §9.2); None until one gives it.
+    size: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.tiles, Tiles):
@@ -503,6 +506,8 @@ class WorldModel:
         read has no ground: it is recorded as VOID, known and not walkable.
         """
         view = self.maps.setdefault(int(t["map_id"]), MapView())
+        if "map_width" in t and "map_height" in t:
+            view.size = (int(t["map_width"]), int(t["map_height"]))
         x0, y0 = int(t["x0"]), int(t["y0"])
         for y in range(y0, y0 + int(t["height"])):
             for x in range(x0, x0 + int(t["width"])):

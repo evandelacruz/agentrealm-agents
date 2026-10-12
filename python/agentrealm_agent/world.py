@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .supplies import chest_capacity, worn_armor_defense
+from .supplies import afloat, chest_capacity, fords, worn_armor_defense
 from .threat import (
     ThreatTable,
     TypeKey,
@@ -23,6 +23,15 @@ log = logging.getLogger(__name__)
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
 # warp: never occupied, but stepping onto one warps.
 WALKABLE = {"grass", "dirt", "tile", "fire", "lava"}
+# Walkable while a fording supply (a raft) is armed or worn (Manual Supplies
+# capability table, ``fords``); a walk plans over it while one is carried (A133).
+WATER = "water"
+
+
+def walkable_block(block: str | None, fords: bool = False) -> bool:
+    """Whether a block type is ground a walk may step on: ``WALKABLE``, and
+    water while a fording supply is carried (``fords``, A133)."""
+    return block in WALKABLE or (fords and block == WATER)
 DOORS = {"framed_door", "rock_entry"}
 VOID = ""  # inside a terrain read but no ground there
 UNKNOWN = "?"  # terrain grid symbol for a cell the read carries no block for
@@ -172,32 +181,35 @@ class Tiles(dict):
     called directly) leaves the frontier stale.
     """
 
-    # The frontier as last found, and the cells changed since. Either None:
-    # find it afresh.
-    _frontier: set[Pos] | None = None
-    _changes: set[Pos] | None = None
+    # The frontier as last found, and the cells changed since, kept apart
+    # for each ``fords`` (A133). A changes entry None: find it afresh.
+    _frontier: dict[bool, set[Pos]] | None = None
+    _changes: dict[bool, set[Pos] | None] | None = None
     MAX_CHANGES = 4096  # more than this and a fresh pass is as quick
     # Counts the calls that may have changed a tile, so a search over this map
     # can be kept until it does (A120, ``states.way``).
     revision: int = 0
 
-    def frontier(self) -> set[Pos]:
-        """Known walkable tiles that touch an unknown one."""
-        found, changes = self._frontier, self._changes
+    def frontier(self, fords: bool = False) -> set[Pos]:
+        """Known walkable tiles that touch an unknown one: water too when
+        ``fords`` (a fording supply is carried, A133)."""
+        if self._frontier is None or self._changes is None:
+            self._frontier, self._changes = {}, {}
+        found, changes = self._frontier.get(fords), self._changes.get(fords)
         if found is None or changes is None:
-            found = {p for p in self if self._on_frontier(p)}
+            found = {p for p in self if self._on_frontier(p, fords)}
         else:
             for c in changes:
                 for p in [c] + [(c[0] + dx, c[1] + dy) for dx, dy in NEIGHBOURS]:
-                    if self._on_frontier(p):
+                    if self._on_frontier(p, fords):
                         found.add(p)
                     else:
                         found.discard(p)
-        self._frontier, self._changes = found, set()
+        self._frontier[fords], self._changes[fords] = found, set()
         return set(found)
 
-    def _on_frontier(self, p: Pos) -> bool:
-        if self.get(p) not in WALKABLE:
+    def _on_frontier(self, p: Pos, fords: bool = False) -> bool:
+        if not walkable_block(self.get(p), fords):
             return False
         x, y = p
         for dx, dy in NEIGHBOURS:
@@ -207,12 +219,15 @@ class Tiles(dict):
 
     def _changed(self, keys) -> None:
         self.revision += 1
-        changes = self._changes
-        if changes is None:
+        if not self._changes:
             return
-        changes.update(keys)
-        if len(changes) > self.MAX_CHANGES:
-            self._changes = None
+        keys = list(keys)
+        for fords, changes in self._changes.items():
+            if changes is None:
+                continue
+            changes.update(keys)
+            if len(changes) > self.MAX_CHANGES:
+                self._changes[fords] = None
 
     def __setitem__(self, key, value) -> None:
         super().__setitem__(key, value)
@@ -274,16 +289,20 @@ class MapView:
         if not isinstance(self.tiles, Tiles):
             self.tiles = Tiles(self.tiles)
 
-    def walkable(self, p: Pos) -> bool:
-        return self.tiles.get(p) in WALKABLE
+    def walkable(self, p: Pos, fords: bool = False) -> bool:
+        """Whether ``p`` is ground a walk may step on (``walkable_block``).
+        ``fords``: a fording supply is carried (``WorldModel.fords``), passed
+        in by the caller, never kept on the view (A133)."""
+        return walkable_block(self.tiles.get(p), fords)
 
     def occupy_damage(self, p: Pos) -> int | None:
         """The tile's occupy_damage, or None when no read has named it."""
         return self.damage.get(p)
 
-    def frontier(self) -> set[Pos]:
-        """Known walkable tiles that touch an unknown one (``Tiles.frontier``)."""
-        return self.tiles.frontier()
+    def frontier(self, fords: bool = False) -> set[Pos]:
+        """Known walkable tiles that touch an unknown one (``Tiles.frontier``),
+        water among them when ``fords``."""
+        return self.tiles.frontier(fords)
 
 
 @dataclass
@@ -396,6 +415,30 @@ class WorldModel:
     def view(self) -> MapView:
         assert self.map_id is not None
         return self.maps.setdefault(self.map_id, MapView())
+
+    @property
+    def fords(self) -> bool:
+        """A carried supply fords water (A133): held, armed or worn. Holding
+        one is enough to plan a walk over water; the walk arms it before the
+        first water step (``fording.ford_queue``)."""
+        carried = [h.code for h in self.held_supplies] + list(self.worn_codes.values())
+        return any(fords(code) for code in carried + [self.armed_code])
+
+    @property
+    def afloat(self) -> bool:
+        """A fording supply is armed or worn: water may be stepped on now,
+        with no ``Arm`` first (``supplies.afloat``, A133)."""
+        return afloat(self.armed_code, self.worn_codes.values())
+
+    def walkable(self, p: Pos) -> bool:
+        """``p`` on the current map is ground a walk may step on, water too
+        while a fording supply is carried (A133)."""
+        return self.view.walkable(p, self.fords)
+
+    def frontier(self) -> set[Pos]:
+        """The current map's frontier (``MapView.frontier``), water's edge
+        too while a fording supply is carried (A133)."""
+        return self.view.frontier(self.fords)
 
     # Applying reads.
 
@@ -1001,7 +1044,7 @@ class WorldModel:
     def open_neighbours(self, p: Pos, avoid: set[Pos] = frozenset()) -> list[Pos]:
         """Walkable, unoccupied tiles one step from p, minus avoid."""
         occ = self.occupied() | self.for_sale() | avoid
-        return [n for n in self.neighbours(p) if self.view.walkable(n) and n not in occ]
+        return [n for n in self.neighbours(p) if self.walkable(n) and n not in occ]
 
 
 def _set_damage(view: MapView, p: Pos, cell: dict) -> None:

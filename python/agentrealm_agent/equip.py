@@ -54,6 +54,7 @@ from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
 from .loot import NON_TRANSFERABLE
 from .supplies import (
+    armed_in_hand,
     heals,
     is_weapon,
     kept_on_break,
@@ -281,15 +282,18 @@ def weapon_to_arm(
 def named_equip(w: WorldModel, m: Memory, code: str, armed_owned: bool = False) -> EquipUpgrade | None:
     """Arm or wear held ``code`` as the planner named it, whatever the rule
     ranks it; None once it is on, or when it is not held or was refused, or
-    is a weapon while another state holds the armed slot (``armed_owned``)."""
+    goes in the armed slot while another state holds it (``armed_owned``).
+    Anything the Supplies reference puts in the armed slot is armed: a
+    weapon, or a tool such as a raft (A133)."""
     if is_on(w, code):
         return None
-    if armed_owned and is_weapon(code):
+    armed = is_weapon(code) or armed_in_hand(code)
+    if armed_owned and armed:
         return None
     s = next((h for h in sorted(_candidates(w), key=lambda h: h.id) if h.code == code), None)
     if s is None:
         return None
-    if is_weapon(code):
+    if armed:
         return None if (code, ARMED) in m.equip_refused else EquipUpgrade(ARMED, s.id, code)
     slot = wear_slot(code, w)
     if slot is None:
@@ -312,7 +316,7 @@ def cannot_equip_reason(w: WorldModel, code: str) -> str:
         return f"{code} not held"
     if used_on_self(code):
         return f"{code} is not armed or worn: a use_item applies it"
-    if never_worn(code) and not is_weapon(code):
+    if never_worn(code) and not is_weapon(code) and not armed_in_hand(code):
         return f"{code} is not armed or worn"
     return f"{code} was refused"
 

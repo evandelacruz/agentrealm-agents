@@ -31,7 +31,10 @@ class _Graph:
     def __init__(self, w: WorldModel, kb: KnowledgeBase | None, params: CostGridParams):
         self.w, self.kb = w, kb
         # Door cells are flood targets, so they must be enterable.
-        self.here_params = replace(params, allow_goal_door=True)
+        # Every map is searched in a scratch world that carries nothing, so
+        # whether water is passable is the character's, passed in (A133).
+        fords = w.fords if params.fords is None else params.fords
+        self.here_params = replace(params, allow_goal_door=True, fords=fords)
         # avoid/costly are cells on the current map; they mean nothing elsewhere.
         self.away_params = replace(self.here_params, avoid=set(), costly=set())
         self._views: dict[int, MapView] = {}

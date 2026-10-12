@@ -103,7 +103,7 @@ def _level_target(
         if not nav_stuck.done(att, w):
             return att.goal, att.target
         nav_stuck.finish(m, att)
-    frontier = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
+    frontier = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.frontier() - {w.pos}, w.tick)
 
     def keep(t: tuple[str, int | None, Pos]) -> bool:
         # Still a door not given up on, or still a frontier: kept even when

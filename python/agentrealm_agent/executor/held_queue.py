@@ -174,5 +174,7 @@ def open_step(
 
 
 def _lands_open(w: WorldModel, blocked: set[Pos], pos: Pos) -> bool:
-    """A Step may land on ``pos``: known walkable or a door, and off the blocked cells."""
-    return pos not in blocked and (w.view.walkable(pos) or w.view.tiles.get(pos) in DOORS)
+    """A Step may land on ``pos``: known walkable or a door, and off the
+    blocked cells. A lone Step sent here has no ``Arm`` before it, so water
+    is open only while a fording supply is already armed or worn (A133)."""
+    return pos not in blocked and (w.view.walkable(pos, w.afloat) or w.view.tiles.get(pos) in DOORS)

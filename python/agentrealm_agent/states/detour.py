@@ -175,7 +175,7 @@ def extra_steps(w: WorldModel, here: Pos, find: Pos, route: list[Pos], limit: in
 
     def open_(p: Pos) -> bool:
         tile = w.view.tiles.get(p)
-        return p in on_route or (tile not in avoid and (w.view.walkable(p) or tile in DOORS))
+        return p in on_route or (tile not in avoid and (w.walkable(p) or tile in DOORS))
 
     dist, frontier = {find: 0}, [find]
     for steps in range(1, reach + limit + 1):

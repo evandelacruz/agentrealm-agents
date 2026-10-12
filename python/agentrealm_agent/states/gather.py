@@ -265,7 +265,7 @@ def _targets(w: WorldModel, m: Memory, policy: Policy, g: Ground) -> dict[Target
     if kept is not None and kept[0] == PILE and chebyshev(kept[1], here) > w.perception:
         piles.add(kept[1])
     out += [(PILE, p) for p in piles if may_work(p)]
-    edges = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier(), w.tick)
+    edges = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.frontier(), w.tick)
     out += [(FRONTIER, p) for p in edges if p != here and may_cut(p)]
     return {t: g.odds.work(*t) for t in out}
 

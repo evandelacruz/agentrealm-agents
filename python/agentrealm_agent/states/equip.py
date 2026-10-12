@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..equip import ARMED, EquipUpgrade, best_equip_upgrade, cannot_equip_reason, hunting_ceiling, is_on, named_equip
-from ..supplies import is_weapon
+from ..supplies import armed_in_hand, is_weapon
 from ..knowledge_base import knowledge_items
 from ..navigation import stuck as nav_stuck
 from ..world import WorldModel
@@ -38,7 +38,7 @@ class EquipState(State):
         armed_owned = _armed_owned(world, ctx)
         up = named_equip(world, ctx.memory, code, armed_owned) if code else _upgrade(world, ctx)
         if up is None and code and not is_on(world, code):
-            if armed_owned and is_weapon(code):
+            if armed_owned and (is_weapon(code) or armed_in_hand(code)):
                 # Heal, Solve or Break holds the armed slot: the named weapon waits,
                 # sending nothing, so the states below run; the op's stall clock
                 # runs meanwhile (A104).

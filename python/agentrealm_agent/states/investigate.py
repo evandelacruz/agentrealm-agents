@@ -66,7 +66,7 @@ def _read(w: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
         return _out([read_block(pos)], f"read sign @{pos[0]},{pos[1]}")
     # A sign is usually a wall cell: walk to the nearest cell it is in sight from.
     map_id = w.map_id
-    stands = {p for p in w.view.tiles if w.view.walkable(p) and in_sight(w, map_id, p, pos)} - w.occupied()
+    stands = {p for p in w.view.tiles if w.walkable(p) and in_sight(w, map_id, p, pos)} - w.occupied()
     _, plan_avoid, plan_costly = plan_sets(w, ctx.memory, ctx.policy, ctx.knowledge)
     found = nearest_target(w, stands - plan_avoid, grid_params(ctx.policy, plan_avoid, plan_costly))
     if found is None:

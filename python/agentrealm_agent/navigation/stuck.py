@@ -58,7 +58,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
-from ..world import NEIGHBOURS, WALKABLE, Pos, WorldModel, chebyshev
+from ..world import NEIGHBOURS, Pos, WorldModel, chebyshev, walkable_block
 from . import walk as nav_walk
 from .planner import CostGridParams, NavSearchState, rest_estimate
 
@@ -353,7 +353,7 @@ def done(att: NavAttempt, w: WorldModel) -> bool:
     """Reached, or a frontier target that is no longer frontier."""
     if w.pos == att.target:
         return True
-    return att.goal in FRONTIER_GOALS and att.target not in w.view.frontier()
+    return att.goal in FRONTIER_GOALS and att.target not in w.frontier()
 
 
 def planning_params(m: Memory, params: CostGridParams) -> CostGridParams:
@@ -522,7 +522,7 @@ def _blocking_types(w: WorldModel, att: NavAttempt) -> set[str]:
     for p in att.outline | {att.target} | ({w.pos} if w.pos else set()):
         for dx, dy in NEIGHBOURS:
             block = w.view.tiles.get((p[0] + dx, p[1] + dy))
-            if block is not None and block not in WALKABLE:
+            if block is not None and not walkable_block(block, w.fords):
                 out.add(block)
     return out
 
@@ -675,7 +675,7 @@ def level_note(att: NavAttempt | None) -> str:
 
 
 def _open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:
-    return p not in blocked and w.view.walkable(p) and p not in w.occupied() and p not in w.for_sale()
+    return p not in blocked and w.walkable(p) and p not in w.occupied() and p not in w.for_sale()
 
 
 def reveal_step(w: WorldModel, att: NavAttempt, blocked: set[Pos]) -> Pos | None:
@@ -690,7 +690,7 @@ def reveal_step(w: WorldModel, att: NavAttempt, blocked: set[Pos]) -> Pos | None
     if att.level != REVEAL or att.reveal_left <= 0 or w.pos is None:
         return None
     start = w.pos
-    frontier = w.view.frontier()
+    frontier = w.frontier()
     first: dict[Pos, Pos] = {}
     queue = deque([start])
     seen = {start}

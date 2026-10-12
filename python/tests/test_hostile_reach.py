@@ -214,49 +214,85 @@ class NoWayRoundAsksTest(unittest.TestCase):
         self.assertIn("remembered hostile bogmaw 200, out of view, holding ground round 12,1", ask["blocked_by"])
 
 
+def step_to(w: WorldModel, m: Memory, cell: tuple[int, int]) -> None:
+    """Apply a step the way the runner does."""
+    w.pos = cell
+    if m.path and m.path[0] == cell:
+        m.path = m.path[1:]
+    nav_stuck.on_step(m, w)
+    w.tick += 4
+
+
 class OnlyWayPassTest(unittest.TestCase):
     """A146: a walk may pass a hostile's reach that is the only thing between
-    it and its goal when health covers the hits expected on the pass, leaving
-    it above Retreat's floor; otherwise it asks, as A128 has it."""
+    it and its goal, when the pass keeps out of the hostile's range (where the
+    engagement, which would not fight it, says flee) and the hits expected on
+    it leave health above Retreat's floor; otherwise it asks, as A128 has it."""
 
-    CORRIDOR = NoWayRoundAsksTest.CORRIDOR
+    # A corridor along y 1, and a pocket at (12, 4) three rows below it: the
+    # corridor runs through the hostile's walk reach but never its range.
+    BAND = ["#" * 23, "#" + "." * 21 + "#", "#" * 23, "#" * 23, "#" * 12 + "." + "#" * 10, "#" * 23]
+    HIT = 15  # a hit the engagement will not take on, at any health here
 
-    def test_health_that_covers_the_pass_walks_through(self):
-        w = world(self.CORRIDOR, at=(1, 1))
-        w.health = w.max_health = 100
-        pack(w, (12, 1), hit=STRONG)
-        c = ctx(travel(21, 1))
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Travel", out.reason)
-        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (2, 1))
+    def corridor(self, health: int, rows=None, at_pocket=(12, 4)) -> tuple[WorldModel, PlayContext]:
+        w = world(rows or self.BAND, at=(1, 1))
+        w.max_health, w.health = 100, health
+        pack(w, at_pocket, hit=self.HIT)
+        return w, ctx(travel(21, 1))
+
+    def test_a_covered_pass_walks_the_whole_way_and_flee_never_turns_it(self):
+        w, c = self.corridor(100)
+        states = []
+        while w.pos != (21, 1) and len(states) < 40:
+            out = dispatch(w, c)
+            states.append(out.state)
+            if not out.intents:
+                break
+            step_to(w, c.memory, (out.intents[0]["x"], out.intents[0]["y"]))
+        self.assertEqual(w.pos, (21, 1), states)
+        self.assertEqual(set(states) - {"Travel"}, set(), states)
         self.assertEqual(asks(c), [])
 
-    def test_health_that_does_not_cover_it_asks_with_the_hostile(self):
-        w = world(self.CORRIDOR, at=(1, 1))
-        w.health, w.max_health = 25, 100  # the pass would leave it under the floor
-        pack(w, (12, 1), hit=STRONG)
-        c = ctx(travel(21, 1))
+    def test_health_that_does_not_cover_it_asks(self):
+        w, c = self.corridor(60)
         out = dispatch(w, c)
         self.assertEqual((out.state, out.intents), ("Travel", None), out.reason)
-        [ask] = asks(c)
-        self.assertIn("hostile bogmaw 200 at 12,1", ask["blocked_by"])
+        self.assertEqual(len(asks(c)), 1)
+
+    def test_a_pass_never_comes_within_the_hostiles_range(self):
+        rows = list(self.BAND)
+        rows[3] = "#" * 12 + "." + "#" * 10  # the pocket opens a row nearer: (12, 3) is 2 from the corridor
+        w, c = self.corridor(100, rows, at_pocket=(12, 3))
+        self.assertIsNone(dispatch(w, c).intents)
+        self.assertEqual(len(asks(c)), 1)
 
     def test_with_a_way_round_it_never_passes(self):
-        w = world(["." * 23] * 9, at=(1, 4))
-        w.health = w.max_health = 100
-        hostile = pack(w, (12, 4), hit=STRONG)[0]
-        c = ctx(travel(21, 4))
-        for _ in range(25):
+        w = world(["#" * 23] + ["#" + "." * 21 + "#"] * 11 + ["#" * 23], at=(1, 6))
+        w.max_health = w.health = 100
+        hostile = pack(w, (12, 6), hit=self.HIT)[0]  # its reach leaves rows 1, 2, 10 and 11 open
+        c = ctx(travel(21, 6))
+        while w.pos != (21, 6):
             out = dispatch(w, c)
             if not out.intents:
                 break
             step = (out.intents[0]["x"], out.intents[0]["y"])
             self.assertGreater(chebyshev(step, hostile.pos), BAR, f"{step} in the reach with a way round")
-            w.pos = step
-            w.tick += 4
+            step_to(w, c.memory, step)
+        self.assertEqual(w.pos, (21, 6), "and it gets there")
+
+    def test_a_goal_inside_the_reach_is_no_only_way_while_a_way_round_reaches_it(self):
+        from agentrealm_agent.pathing import op_walk_sets
+
+        w = world(["." * 23] * 9, at=(1, 4))
+        w.max_health = w.health = 100
+        pack(w, (12, 4), hit=self.HIT)
+        _, _, reach = op_walk_sets(w, Memory(), POLICY, None, dict(PARAM_DEFAULTS), [])
+        goal = (12 + BAR, 4)  # the reach's far edge
+        self.assertIn(goal, reach)
+        self.assertFalse(reach.only_way(goal), "reached round the reach: the goal is left out of it")
 
     def test_a_remembered_hostiles_ground_is_never_passed(self):
-        w = world(self.CORRIDOR, at=(1, 1))
+        w = world(NoWayRoundAsksTest.CORRIDOR, at=(1, 1))
         w.health = w.max_health = 100
         guard = pack(w, (12, 1))[0]
         w.entities = []  # its post still holds the corridor, but it cannot be weighed
@@ -264,6 +300,56 @@ class OnlyWayPassTest(unittest.TestCase):
         c = ctx(travel(21, 1))
         self.assertIsNone(dispatch(w, c).intents)
         self.assertEqual(len(asks(c)), 1)
+
+    def test_no_pass_while_the_engagement_says_flee(self):
+        from agentrealm_agent.engagement import Engagement
+        from agentrealm_agent.pathing import op_walk_sets
+
+        w, _ = self.corridor(100)
+        m = Memory()
+        m.engagement = Engagement(frozenset({("npc", 200)}), fight=False)
+        _, _, reach = op_walk_sets(w, m, POLICY, None, dict(PARAM_DEFAULTS), [])
+        self.assertFalse(reach.passes([(x, 1) for x in range(2, 22)], (21, 1)))
+
+
+class CoversPassTest(unittest.TestCase):
+    """``pathing.covers_pass``'s branches (A146)."""
+
+    PATH = [(x, 1) for x in range(2, 22)]
+
+    def setUp(self):
+        from agentrealm_agent.hostile_ground import walk_reach
+
+        self.w = world(OnlyWayPassTest.BAND, at=(1, 1))
+        self.w.max_health = self.w.health = 100
+        pack(self.w, (12, 4), hit=OnlyWayPassTest.HIT)
+        self.reach = walk_reach(self.w, POLICY)
+
+    def covers(self) -> bool:
+        from agentrealm_agent.pathing import covers_pass
+
+        return covers_pass(self.w, POLICY, dict(PARAM_DEFAULTS), self.PATH, self.reach, 10)
+
+    def test_a_cell_no_hostile_in_view_holds_is_never_covered(self):
+        self.assertTrue(self.covers())
+        self.reach = set(self.reach) | {(3, 1)}  # ground held by something out of view
+        self.assertFalse(self.covers())
+
+    def test_every_hostile_whose_reach_it_crosses_is_counted(self):
+        self.assertTrue(self.covers())
+        self.w.entities.append(Entity("npc", 201, (13, 4), code="bogmaw"))  # a second in the pocket's reach
+        self.reach = set(self.reach) | {(x, 1) for x in range(10, 17)}
+        self.assertFalse(self.covers(), "two hostiles' hits on the same pass")
+
+    def test_health_left_must_be_above_the_floor(self):
+        from agentrealm_agent.survival import health_floor
+
+        floor = health_floor(self.w, dict(PARAM_DEFAULTS), self.w.entities)
+        with mock.patch("agentrealm_agent.pathing.expected_damage", return_value=10.0):
+            self.w.health = floor + 10
+            self.assertFalse(self.covers(), "left exactly at the floor: Retreat's ground")
+            self.w.health = floor + 11
+            self.assertTrue(self.covers())
 
 
 class EscalationPlansAreHeldTest(unittest.TestCase):

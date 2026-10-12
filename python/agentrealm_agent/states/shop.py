@@ -21,7 +21,7 @@ from ..shop import (
     wanted_codes,
 )
 from ..sellers import SELLER_SEARCH_RADIUS, Seller, sellers_of
-from ..travel.knowledge import forget_sale, iter_shop_sales
+from ..travel.knowledge import forget_sale, iter_shop_sales, note_not_sold
 from ..travel.resolve import ResolvedDestination, given_up_travel
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, op_walk, top_op
@@ -168,8 +168,9 @@ def _toward_shop(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
         out = _to_seller(w, ctx, op, code, seller, state)
         if out is not None:
             return out
-        # Searched round it and not found: on to the next seller.
+        # Searched round it and not found: no seller of it until newer evidence, on to the next.
         _note_searched(plan, seller)
+        note_not_sold(ctx.knowledge, seller.map_id, seller.pos, code, w.tick)
     searched = plan.sellers_searched or frozenset()
     known = [s for s in sellers_of(code, w, ctx.knowledge, op) if (s.map_id, s.pos) not in searched]
     given_up = given_up_travel(m.nav_stuck, w.tick)

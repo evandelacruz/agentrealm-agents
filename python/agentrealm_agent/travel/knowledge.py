@@ -9,6 +9,7 @@ from ..knowledge_maps import HUNTING
 from ..world import Pos
 
 SHOPS = "shops"
+NOT_SOLD = "not_sold"
 TOWN = "town"
 
 
@@ -146,6 +147,39 @@ def forget_sale(kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str) -> N
             return
         sells = row.get("sells")
         row["sells"] = {c: p for c, p in sells.items() if c != code} if isinstance(sells, dict) else {}
+
+
+def note_not_sold(kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str, tick: int) -> None:
+    """A seller's place (a clue's cell, a place a buy named) was searched round
+    without ``code`` for sale, at ``tick`` (A131): it is no seller of it until
+    newer evidence, a clue found after then or a shop seen selling it."""
+    if kb is None:
+        return
+    with kb.lock:
+        rows = kb.maps.setdefault(str(map_id), {}).setdefault(NOT_SOLD, {})
+        rows.setdefault(_cell_key(pos), {})[code] = tick
+
+
+def iter_not_sold(kb: KnowledgeBase | None) -> dict[tuple[int, Pos, str], int]:
+    """Every place searched without an item for sale: (map, cell, code) -> tick."""
+    if kb is None:
+        return {}
+    out: dict[tuple[int, Pos, str], int] = {}
+    with kb.lock:
+        for mid, entry in kb.maps.items():
+            rows = entry.get(NOT_SOLD) if isinstance(entry, dict) else None
+            if not isinstance(rows, dict):
+                continue
+            for key, codes in rows.items():
+                try:
+                    map_id = int(mid)
+                    x, y = (int(p) for p in key.split(",", 1))
+                except ValueError:
+                    continue
+                for code, tick in (codes.items() if isinstance(codes, dict) else ()):
+                    if isinstance(tick, int):
+                        out[(map_id, (x, y), code)] = tick
+    return out
 
 
 def iter_unchecked_shop_cells(kb: KnowledgeBase | None) -> list[tuple[int, Pos]]:

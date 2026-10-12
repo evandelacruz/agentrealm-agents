@@ -293,7 +293,7 @@ class SellersLineTest(unittest.TestCase):
         record_shop_cell(kb, 7, (5, 0), "torch", 3)
         record_shop_cell(kb, 2, (1, 1), "torch", 2)
         kb.clues.append({"kind": "npc", "text": "Raft, thirty gems", "map_id": 7, "x": 0, "y": 200, "tick": 1})
-        rows = json.loads(sellers_line(world(), kb, ["raft", "rope"]).split("=", 1)[1])
+        rows = json.loads(sellers_line(world(), kb, [{"op": "buy", "code": "raft"}, {"op": "buy", "code": "rope"}]).split("=", 1)[1])
         self.assertEqual(
             rows["torch"],
             [
@@ -309,12 +309,21 @@ class SellersLineTest(unittest.TestCase):
         kb = KnowledgeBase.empty("sandbox")
         for i in range(SELLER_ITEMS_SHOWN + 3):
             record_shop_cell(kb, 7, (i + 1, 0), f"item_{i}", 2)
-        line = sellers_line(world(), kb, ["raft"])
+        line = sellers_line(world(), kb, [{"op": "buy", "code": "raft"}])
         rows = json.loads(line.split("=", 1)[1].split(" (+", 1)[0])
         self.assertEqual(len(rows), SELLER_ITEMS_SHOWN + 1)
         self.assertIn("raft", rows)
         self.assertIn("item_0", rows, "nearest first")
         self.assertTrue(line.endswith("(+3 more items sold)"), line)
+
+    def test_a_buy_that_names_its_sellers_place_shows_that_seller(self):
+        # The stack's buy op is resolved as Shop resolves it: its own place is a seller.
+        op = {"op": "buy", "code": "raft", "x": 60, "y": 0, "map_id": 7}
+        kb = KnowledgeBase.empty("sandbox")
+        rows = json.loads(sellers_line(world(), kb, [op]).split("=", 1)[1])
+        self.assertEqual(rows["raft"], [{"by": "plan", "at": [60, 0], "map_id": 7, "steps": 60, "search_radius": 20}])
+        self.assertNotIn("raft", json.loads(no_seller_line(world(), kb, [op]).split("=", 1)[1]))
+        self.assertIn("raft", json.loads(no_seller_line(world(), kb).split("=", 1)[1]), "off the stack, no seller")
 
     def test_state_carries_the_line_for_the_stacks_buys(self):
         llm = FakeLLM(WAIT)

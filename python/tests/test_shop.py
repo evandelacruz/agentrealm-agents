@@ -26,9 +26,9 @@ from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext, StateOutcome
 from agentrealm_agent.brain import walkable_prefix
 from agentrealm_agent.plan import parse_directives_goals, validate_goal_op
-from agentrealm_agent.sellers import Seller, sellers_of
+from agentrealm_agent.sellers import Seller, refuse_unsold, sellers_of
 from agentrealm_agent.travel import record_shop_cell
-from agentrealm_agent.travel.knowledge import iter_shop_sales
+from agentrealm_agent.travel.knowledge import iter_not_sold, iter_shop_sales
 from agentrealm_agent.world import Entity, WorldModel
 
 
@@ -591,6 +591,40 @@ class SellerPlaceTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertNotIn("searching round", out.reason)
         self.assertIsNone(plan.sellers_searched, "not searched for on this map")
+
+
+class SearchedPlaceTest(unittest.TestCase):
+    """A seller's place searched round without the item is no seller of it,
+    for any buy, until newer evidence: a clue found since (A131)."""
+
+    def searched(self) -> tuple[WorldModel, PlayContext]:
+        w = big_world(at=(25, 25), size=60, perception=3)  # every cell round the clue seen: the search runs out
+        plan = Plan([{"op": "buy", "code": "raft"}], dict(PARAM_DEFAULTS))
+        c = ctx(w, plan=plan)
+        c.knowledge.clues.append({"kind": "npc", "text": "Raft, thirty gems", "map_id": 1, "x": 25, "y": 25, "tick": 5})
+        w.tick = 100
+        with self.assertLogs("agentrealm_agent.plan", "WARNING"):
+            dispatch(w, c)
+        self.assertIsNone(plan.current())
+        return w, c
+
+    def test_it_is_remembered_in_the_knowledge_base(self):
+        w, c = self.searched()
+        self.assertEqual(iter_not_sold(c.knowledge), {(1, (25, 25), "raft"): 100})
+        self.assertEqual(sellers_of("raft", w, c.knowledge), [])
+
+    def test_a_resent_buy_is_refused_not_walked_back(self):
+        w, c = self.searched()
+        kept, refused = refuse_unsold([{"op": "buy", "code": "raft"}], w, c.knowledge)
+        self.assertEqual(kept, [])
+        self.assertIn("no seller of raft is known", refused[0])
+        named = {"op": "buy", "code": "raft", "x": 25, "y": 25, "map_id": 1}
+        self.assertEqual(refuse_unsold([named], w, c.knowledge)[0], [], "the same place named by the op too")
+
+    def test_a_clue_found_since_brings_it_back(self):
+        w, c = self.searched()
+        c.knowledge.clues.append({"kind": "sign", "text": "Rafts restocked: thirty gems", "map_id": 1, "x": 25, "y": 25, "tick": 150})
+        self.assertEqual(sellers_of("raft", w, c.knowledge), [Seller(1, (25, 25), "clue", False)])
 
 
 class RunnerLearnsWhatAShopSellsTest(unittest.TestCase):

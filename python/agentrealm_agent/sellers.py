@@ -31,7 +31,7 @@ from typing import Any
 
 from .healing import supply_matches
 from .knowledge_base import KnowledgeBase, knowledge_items
-from .travel.knowledge import iter_shop_sales, iter_unchecked_shop_cells
+from .travel.knowledge import iter_not_sold, iter_shop_sales, iter_unchecked_shop_cells
 from .world import Pos, WorldModel, chebyshev
 
 # How far round a seller's place (a clue's cell, a place the op names) Shop searches for it.
@@ -65,11 +65,12 @@ class _Known:
     clues: list[dict[str, Any]]
     unchecked: list[tuple[int, Pos]]
     priced: dict[str, int]
+    not_sold: dict[tuple[int, Pos, str], int]
 
 
 def _known(kb: KnowledgeBase | None) -> _Known:
     if kb is None:
-        return _Known([], [], [], {})
+        return _Known([], [], [], {}, {})
     with kb.lock:
         clues = list(kb.clues)
     priced = {
@@ -77,7 +78,7 @@ def _known(kb: KnowledgeBase | None) -> _Known:
         for code, row in knowledge_items(kb).items()
         if isinstance(row, dict) and isinstance(row.get("gem_price"), int) and row["gem_price"] > 0
     }
-    return _Known(iter_shop_sales(kb), clues, iter_unchecked_shop_cells(kb), priced)
+    return _Known(iter_shop_sales(kb), clues, iter_unchecked_shop_cells(kb), priced, iter_not_sold(kb))
 
 
 def _names(code: str, text: str) -> bool:
@@ -91,32 +92,40 @@ def _offers(code: str, text: str) -> bool:
     return any(_GEMS.search(p) and _names(code, p) for p in _PHRASE.split(text.lower()))
 
 
-def _clue_sellers(code: str, rows: list[dict[str, Any]]) -> list[Seller]:
+def _clue_sellers(code: str, known: _Known) -> list[Seller]:
+    """A clue's place, unless it was searched without the item since the clue was found."""
     out = []
-    for row in rows:
+    for row in known.clues:
         text = row.get("text")
         if not isinstance(text, str) or not _offers(code, text):
             continue
         try:
-            out.append(Seller(int(row["map_id"]), (int(row["x"]), int(row["y"])), "clue", False))
+            s = Seller(int(row["map_id"]), (int(row["x"]), int(row["y"])), "clue", False)
         except (KeyError, TypeError, ValueError):
             continue
+        searched = known.not_sold.get((s.map_id, s.pos, code))
+        found = row.get("tick")
+        if searched is not None and not (isinstance(found, int) and found > searched):
+            continue
+        out.append(s)
     return out
 
 
-def _op_seller(op: dict[str, Any] | None) -> Seller | None:
-    """The place the op names; ``_validate_buy`` takes it only with its map."""
+def _op_seller(code: str, op: dict[str, Any] | None, known: _Known) -> Seller | None:
+    """The place the op names (``_validate_buy`` takes it only with its map),
+    unless it was searched without the item: a clue found since revives it."""
     if not op or not all(k in op for k in ("x", "y", "map_id")):
         return None
-    return Seller(int(op["map_id"]), (int(op["x"]), int(op["y"])), "plan", False)
+    s = Seller(int(op["map_id"]), (int(op["x"]), int(op["y"])), "plan", False)
+    return None if (s.map_id, s.pos, code) in known.not_sold else s
 
 
 def _sellers(code: str, w: WorldModel, known: _Known, op: dict[str, Any] | None = None) -> list[Seller]:
     found: list[Seller] = []
-    if (named := _op_seller(op)) is not None:
+    if (named := _op_seller(code, op, known)) is not None:
         found.append(named)
     found += [Seller(mid, pos, "shop", True, price) for mid, pos, sold, price in known.sales if supply_matches(code, sold)]
-    found += _clue_sellers(code, known.clues)
+    found += _clue_sellers(code, known)
     price = next((p for c, p in known.priced.items() if supply_matches(code, c)), None)
     if price is not None:
         found += [Seller(mid, pos, "unchecked", True) for mid, pos in known.unchecked]
@@ -167,14 +176,31 @@ def refuse_unsold(
     return kept, refused
 
 
-def sellers_line(w: WorldModel, kb: KnowledgeBase | None, wanted: Collection[str] = ()) -> str:
+def _buys(ops: Collection[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """The stack's buy ops by the code each buys."""
+    out: dict[str, list[dict[str, Any]]] = {}
+    for op in ops:
+        if op.get("op") == "buy" and isinstance(op.get("code"), str):
+            out.setdefault(op["code"], []).append(op)
+    return out
+
+
+def _sellers_for_ops(code: str, w: WorldModel, known: _Known, ops: Collection[dict[str, Any]]) -> list[Seller]:
+    """``code``'s sellers, each buy op's own place among them (the op's own resolution)."""
+    found = [s for op in ops for s in _sellers(code, w, known, op)] or _sellers(code, w, known)
+    return sorted(dict.fromkeys(found), key=lambda s: walk_order(s, w))
+
+
+def sellers_line(w: WorldModel, kb: KnowledgeBase | None, stack: Collection[dict[str, Any]] = ()) -> str:
     """Where each item is sold, nearest first with roughly how far (A131):
-    each item the plan wants to buy (``none known`` when it has none), then
-    up to ``SELLER_ITEMS_SHOWN`` more a shop is known to sell, nearest first."""
+    each item a buy op on ``stack`` wants (its own place included; ``none
+    known`` when it has none), then up to ``SELLER_ITEMS_SHOWN`` more a shop
+    is known to sell, nearest first."""
     known = _known(kb)
+    wanted = _buys(stack)
     rows: dict[str, Any] = {}
-    for code in sorted(set(wanted)):
-        found = _sellers(code, w, known)
+    for code in sorted(wanted):
+        found = _sellers_for_ops(code, w, known, wanted[code])
         rows[code] = [_row(s, w) for s in found[:SELLERS_SHOWN]] if found else "none known"
     others = {sold for _, _, sold, _ in known.sales} - set(wanted)
     nearest = sorted((walk_order(f[0], w), code, f) for code in others if (f := _sellers(code, w, known)))
@@ -197,7 +223,9 @@ def _row(s: Seller, w: WorldModel) -> dict[str, Any]:
     return row
 
 
-def codes_with_sellers(w: WorldModel, kb: KnowledgeBase | None, codes: Collection[str]) -> set[str]:
-    """Those of ``codes`` a seller is known for."""
-    known = _known(kb)
-    return {c for c in codes if _sellers(c, w, known)}
+def codes_with_sellers(
+    w: WorldModel, kb: KnowledgeBase | None, codes: Collection[str], stack: Collection[dict[str, Any]] = ()
+) -> set[str]:
+    """Those of ``codes`` a seller is known for, a stack buy op's own place included."""
+    known, wanted = _known(kb), _buys(stack)
+    return {c for c in codes if _sellers_for_ops(c, w, known, wanted.get(c, ()))}

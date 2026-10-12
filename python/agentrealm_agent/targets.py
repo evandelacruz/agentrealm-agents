@@ -53,9 +53,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
-from .world import Pos, WorldModel
+from .world import Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .memory import Memory
@@ -72,6 +72,11 @@ MISS_LIMIT = 10
 # and this many steps more (``outpriced``).
 OUTPRICE_RATIO = 1.5
 OUTPRICE_STEPS = 8
+
+# A plan op: ``{"op": name, ...}``, the shape ``plan.validate_goal_op`` checks.
+GoalOp = dict[str, Any]
+# Built-in `explore` explores the whole map: no center, no radius bound.
+EXPLORE_ANYWHERE = 1 << 30
 
 
 @dataclass
@@ -222,3 +227,12 @@ def finish_stop(m: Memory, goal: str, stop: Stop, *, given_up: bool = False) -> 
         c.stops.remove(stop)
         if given_up:
             c.given_up.add(stop.pos)
+
+
+def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:
+    """Frontier cells inside an ``explore_area`` op, other than where we stand."""
+    frontier = world.frontier() - {world.pos}
+    if op["radius"] >= EXPLORE_ANYWHERE:
+        return frontier
+    center = (op["x"], op["y"])
+    return {p for p in frontier if chebyshev(p, center) <= op["radius"]}

@@ -7,8 +7,8 @@ known hostile's reach (``route_bar``, ``route_clear``). Detour (A71) uses the sa
 tests for its finds. That includes the
 open field, where the gems are, and safe zones, where breaking a block is
 allowed; Gather learns which ground does not cut (``gem_yield``). Staying alive in the field is the reflexes' job (Retreat,
-Flee, Fight, Heal), not Gather's. ``is_safe_ish`` is the stricter safe-zone
-ground a hurt character walks first (``safe_explore_path``).
+Flee, Fight, Heal), not Gather's. The stricter safe-zone ground a hurt
+character walks first is ``hostile_ground.is_safe_ish`` (``safe_explore_path``).
 """
 
 from __future__ import annotations
@@ -16,15 +16,7 @@ from __future__ import annotations
 from ..config import Policy
 from ..hostile_ground import Danger, danger, gather_bar, zone_cells
 from ..survival import hostile_reach, is_hostile
-from ..world import NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
-from ..zone_discovery import RESPAWN_PROBE_RADIUS, safe_tiles
-
-
-def hostiles_near(w: WorldModel, pos: Pos, policy: Policy, radius: int | None = None) -> bool:
-    """A threat (``is_hostile``) in view within ``radius`` of ``pos``
-    (``policy.hostile_range`` by default). Townsfolk are not one."""
-    reach = policy.hostile_range if radius is None else radius
-    return any(is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= reach for e in w.entities)
+from ..world import Entity, Pos, WorldModel, chebyshev
 
 
 def gather_ground(w: WorldModel, pos: Pos, policy: Policy, d: Danger | None = None) -> bool:
@@ -74,37 +66,3 @@ def route_clear(w: WorldModel, policy: Policy, path: list[Pos], d: Danger | None
     route still crosses a known hostile's reach is not free to take."""
     bar = route_bar(w, policy, d)
     return not any(p in bar for p in path)
-
-
-def near_respawn_anchor(w: WorldModel, pos: Pos) -> bool:
-    if w.map_id is None:
-        return False
-    for map_id, anchor in w.respawn_anchors:
-        if map_id == w.map_id and chebyshev(pos, anchor) <= RESPAWN_PROBE_RADIUS:
-            return True
-    return False
-
-
-def touches_safe_zone(w: WorldModel, pos: Pos) -> bool:
-    if w.map_id is None:
-        return False
-    safe = safe_tiles(w, w.map_id)
-    if pos in safe:
-        return True
-    return any((pos[0] + dx, pos[1] + dy) in safe for dx, dy in NEIGHBOURS)
-
-
-def is_safe_ish(w: WorldModel, pos: Pos, policy: Policy) -> bool:
-    """Known safe-zone ground: what a hurt character walks first.
-
-    The cell must be revealed, not on a hazard tile, and free of hostiles in
-    range. It qualifies when it is a known safe zone, touches one, or lies
-    within the respawn probe ring around town.
-    """
-    if w.map_id is None or pos not in w.view.tiles:
-        return False
-    if w.view.tiles.get(pos) in policy.avoid_blocks:
-        return False
-    if hostiles_near(w, pos, policy):
-        return False
-    return touches_safe_zone(w, pos) or near_respawn_anchor(w, pos)

@@ -27,10 +27,9 @@ from .navigation.stuck import Leg, NavAttempt
 from .navigation.rejection import navigation_avoid_costly
 from .healing import hurt
 from . import targets as targets_mod
-from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from .directives import attack_forbidden
 from .engagement import would_fight
-from .hostile_ground import WALK_REACH_MARGIN, ground_by_hostile, walk_reach
+from .hostile_ground import WALK_REACH_MARGIN, ground_by_hostile, hostiles_near, is_safe_ish, walk_reach
 from .executor.pacing import DEFAULT_TICK_RATE_HZ
 from .survival import (
     estimate_health,
@@ -44,6 +43,7 @@ from .survival import (
     worn_defense,
 )
 from .executor.movement import step_landing, ticks_per_step
+from .targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
@@ -988,8 +988,6 @@ def safe_explore_targets(w: WorldModel, m: Memory, policy: Policy, *, push: bool
     ``push`` drops the hurt rule (safe-zone ground only): the frontier just
     outside safe ground, still off hazards and away from hostiles.
     """
-    from .states.gather_safe import hostiles_near, is_safe_ish
-
     targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.frontier() - {w.pos}, w.tick)
     targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
     if hurt(w) and not push:

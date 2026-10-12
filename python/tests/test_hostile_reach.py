@@ -487,7 +487,7 @@ class WalkUnderAttackDoesNotWaitTest(unittest.TestCase):
         [one] = sent
         self.assertEqual(one["verb"], "Step")
         for pos in starts:
-            self.assertTrue(r.world.view.walkable(step_landing(pos, one["direction"])), pos)
+            self.assertTrue(r.world.view.walkable(step_landing(pos, one["direction"]), fords=False), pos)
         self.assertGreaterEqual(chebyshev(step_landing((5, 5), one["direction"]), (7, 5)), 2, "never nearer the hitter")
         self.assertIn("best open step", got.reason)
         self.assertEqual(got.state, "Retreat")

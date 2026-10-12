@@ -161,10 +161,11 @@ def close_step(w: WorldModel, target: Entity, blocked: set[Pos], reach: int = 1)
     first: dict[Pos, Pos] = {}
     frontier = deque([here])
     seen = {here}
+    ground = w.walkable_test(swing=True)
     while frontier:
         p = frontier.popleft()
         for n in w.neighbours(p):
-            if n in seen or n in shut or not w.walkable(n, swing=True) or chebyshev(n, target.pos) > radius:
+            if n in seen or n in shut or not ground(n) or chebyshev(n, target.pos) > radius:
                 continue
             seen.add(n)
             first[n] = first.get(p, n)

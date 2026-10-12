@@ -160,7 +160,7 @@ class LevelStateTest(unittest.TestCase):
         w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
         m = Memory()
         nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("level:door", 8, (4, 0)), "level:door", w.tick)
-        for p in w.view.frontier():
+        for p in w.view.frontier(fords=False):
             nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("explore", 8, p), "explore", w.tick)
         ctx = PlayContext(
             m, Policy(kind="scripted", goals=[]), random.Random(0),

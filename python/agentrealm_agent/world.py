@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
@@ -289,19 +290,20 @@ class MapView:
         if not isinstance(self.tiles, Tiles):
             self.tiles = Tiles(self.tiles)
 
-    def walkable(self, p: Pos, fords: bool = False) -> bool:
+    def walkable(self, p: Pos, *, fords: bool) -> bool:
         """Whether ``p`` is ground a walk may step on (``walkable_block``).
-        ``fords``: a fording supply is carried (``WorldModel.fords``), passed
-        in by the caller, never kept on the view (A133)."""
+        ``fords``: a fording supply is carried, always named by the caller
+        and never kept on the view (A133); outside this module only
+        ``WorldModel.walkable`` decides it (A146)."""
         return walkable_block(self.tiles.get(p), fords)
 
     def occupy_damage(self, p: Pos) -> int | None:
         """The tile's occupy_damage, or None when no read has named it."""
         return self.damage.get(p)
 
-    def frontier(self, fords: bool = False) -> set[Pos]:
+    def frontier(self, *, fords: bool) -> set[Pos]:
         """Known walkable tiles that touch an unknown one (``Tiles.frontier``),
-        water among them when ``fords``."""
+        water among them when ``fords`` (named, as for ``walkable``)."""
         return self.tiles.frontier(fords)
 
 
@@ -434,13 +436,22 @@ class WorldModel:
         """``p`` is ground a walk may step on, water too while a fording
         supply is carried (A133): the one test of whether water is ground
         (A146). Every route search, grid and step check asks it, on any map,
-        a level's or a room's as much as the overworld's.
+        a level's or a room's as much as the overworld's; one that asks for
+        many cells takes ``walkable_test`` once instead.
 
         ``map_id``: another map than the current one. ``now``: water only
         while a fording supply is already armed or worn (``afloat``), for a
         lone Step with no ``Arm`` before it. ``swing``: a walk to swing at a
         hostile from, water only while a fording supply is worn, since one in
         the hand leaves no weapon there (A146)."""
+        return self.walkable_test(map_id=map_id, now=now, swing=swing)(p)
+
+    def walkable_test(
+        self, *, map_id: int | None = None, now: bool = False, swing: bool = False
+    ) -> Callable[[Pos], bool]:
+        """``walkable`` as a test of one cell, with whether water is ground
+        worked out once from what is carried: for a search or a loop over
+        many cells, which must not change the loadout while it runs."""
         if map_id is None or map_id == self.map_id:
             view = self.view
         else:
@@ -449,12 +460,12 @@ class WorldModel:
             water = afloat(None, self.worn_codes.values())
         else:
             water = self.afloat if now else self.fords
-        return view.walkable(p, water)
+        return lambda p: view.walkable(p, fords=water)
 
     def frontier(self) -> set[Pos]:
         """The current map's frontier (``MapView.frontier``), water's edge
         too while a fording supply is carried (A133)."""
-        return self.view.frontier(self.fords)
+        return self.view.frontier(fords=self.fords)
 
     # Applying reads.
 

@@ -110,7 +110,7 @@ def walk_step(world: WorldModel, mem: StarterMemory, rng: random.Random) -> Pos 
     blocked = blocked_tiles(world, mem.policy)
     if mem.path:
         nxt = mem.path[0]
-        if chebyshev(world.pos, nxt) <= world.movement and nxt not in blocked and world.view.walkable(nxt):
+        if chebyshev(world.pos, nxt) <= world.movement and nxt not in blocked and world.walkable(nxt, now=True):
             if nxt not in world.occupied():
                 mem.path = mem.path[1:]
                 return nxt
@@ -132,7 +132,7 @@ def _path_to_frontier(world: WorldModel, blocked: set[Pos]) -> list[Pos]:
     """Steps to the nearest reachable frontier tile, by breadth-first search
     over known walkable tiles, so walls never trap it the way a greedy step can."""
     start = world.pos
-    frontier = world.view.frontier() - {start}
+    frontier = world.view.frontier(fords=world.afloat) - {start}  # water only while afloat: Stan arms nothing
     came_from: dict[Pos, Pos | None] = {start: None}
     queue = deque([start])
     while queue:

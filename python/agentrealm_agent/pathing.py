@@ -1104,7 +1104,7 @@ def op_walk_sets(
         for e in w.entities
         if is_hostile(w, policy, e)
         and not attack_forbidden(e, never_attack)
-        and would_fight(w, policy, params, also=e)
+        and would_fight(w, policy, params, also=e, m=m)
     }
     reach = walk_reach(w, policy, skip=fought)
     return avoid, costly | reach, WalkReach(reach, w, policy, params, avoid, costly | reach, tick_hz)

@@ -72,7 +72,7 @@ class ExploreTest(unittest.TestCase):
         w = WorldModel(character_id=1, pos=(1, 1), map_id=7)
         w.apply_terrain({"map_id": 7, "x0": 0, "y0": 0, "width": 3, "height": 3,
                          "legend": {"d": {"block_type": "dirt"}}, "rows": ["???", "?d?", "???"]})
-        self.assertEqual(w.view.frontier(), set())
+        self.assertEqual(w.view.frontier(fords=False), set())
 
     def test_terrain_grid_decodes_cells_and_art(self):
         # docs/API.md Tiles (B102): rows are y0+j, symbols x0+i, art rides beside the grid.
@@ -164,7 +164,7 @@ class ReflexTest(unittest.TestCase):
             for y in range(-1, 5):
                 if (x, y) != (5, 2):
                     w.view.tiles.setdefault((x, y), "")
-        self.assertEqual(w.view.frontier(), {(4, 1), (4, 2), (4, 3)})
+        self.assertEqual(w.view.frontier(fords=False), {(4, 1), (4, 2), (4, 3)})
         m = Memory()
         d = planned(w, m, scripted(goals=["goto"], goto=(4, 2), pickup=False), random.Random(0))
         self.assertEqual((d.intent["x"], d.intent["y"]), (2, 1), d.reason)

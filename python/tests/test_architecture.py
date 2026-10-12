@@ -290,7 +290,9 @@ class RulesNotRunPatchesTest(unittest.TestCase):
 class OneWaterTestTest(unittest.TestCase):
     """A146: only ``WorldModel.walkable`` decides whether water is ground. Every
     route search, grid and step check in Gary asks it, on any map, so no grid
-    (a level's, a room's, a scratch world's) builds its own water test."""
+    (a level's, a room's, a scratch world's) builds its own water test. A map
+    view's ``walkable`` and ``frontier`` take ``fords`` as a required keyword,
+    so any call of them outside ``world.py`` shows as a ``fords`` passed."""
 
     def test_only_world_model_walkable_decides_whether_water_is_ground(self):
         world = PYTHON_DIR / "agentrealm_agent" / "world.py"
@@ -309,12 +311,8 @@ class OneWaterTestTest(unittest.TestCase):
                 if any(k.arg == "fords" for k in node.keywords):
                     hits.append(f"{where} passes fords")
                 fn = node.func
-                if isinstance(fn, ast.Attribute) and fn.attr in ("walkable", "frontier"):
-                    receiver = ast.unparse(fn.value)
-                    if receiver.endswith("view") or "maps" in receiver or "tiles" in receiver:
-                        hits.append(f"{where} asks a map view, not WorldModel.{fn.attr}")
-                    if fn.attr == "walkable" and len(node.args) != 1:
-                        hits.append(f"{where} passes its own water test to walkable")
+                if isinstance(fn, ast.Attribute) and fn.attr == "walkable" and len(node.args) != 1:
+                    hits.append(f"{where} passes its own water test to walkable")
         self.assertEqual(hits, [], "A146: ask WorldModel.walkable (and WorldModel.frontier) instead")
 
 

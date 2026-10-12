@@ -614,7 +614,8 @@ def _steps_to_grass(w: WorldModel) -> float:
     walks up to it: the terrain read there fills every cell of the
     perception window, ground or none (``WorldModel.apply_terrain``)."""
     view = w.view
-    walkable = sum(1 for p in view.tiles if w.walkable(p))
+    ground = w.walkable_test()
+    walkable = sum(1 for p in view.tiles if ground(p))
     grass = sum(1 for block in view.tiles.values() if block in GATHER_BLOCKS)
     return (walkable + 1) / (grass + 1)
 

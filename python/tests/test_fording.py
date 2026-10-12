@@ -336,7 +336,7 @@ class WaterIsGroundEverywhereTest(unittest.TestCase):
         w = lake(armed="raft")
         view = w.view
         self.assertTrue(w.walkable((3, 1)))
-        self.assertFalse(view.walkable((3, 1)), "the view keeps no fording flag")
+        self.assertFalse(view.walkable((3, 1), fords=False), "the view keeps no fording flag")
         self.assertTrue(view.walkable((3, 1), fords=True))
 
     def test_a_route_through_a_door_crosses_water(self):
@@ -363,7 +363,7 @@ class WaterIsGroundEverywhereTest(unittest.TestCase):
         w = lake()
         frontier = w.frontier()
         self.assertTrue(any(w.view.tiles[p] == "water" for p in frontier), frontier)
-        self.assertFalse(any(w.view.tiles[p] == "water" for p in w.view.frontier()), "kept apart per fords")
+        self.assertFalse(any(w.view.tiles[p] == "water" for p in w.view.frontier(fords=False)), "kept apart per fords")
 
 
 class FightAshoreTest(unittest.TestCase):
@@ -526,3 +526,20 @@ class FightClosesOnlyOnLandTest(unittest.TestCase):
         self.assertNotEqual(out.state, "Fight", out.reason)
         if arm(RAFT) in (out.intents or []):
             self.assertIn(out.state, ESCAPES, "only an escape takes to the water, never a walk in to swing")
+
+
+class WaterCellsOnlyTest(unittest.TestCase):
+    def test_a_cell_known_as_water_only_from_a_refusal_is_afloat_to_the_engagement(self):
+        """A146: the engagement's afloat test is Ashore's (``on_water``), so a
+        cell a ``would_strand`` marked counts though the map shows ground."""
+        from agentrealm_agent.engagement import sync_engagement
+        from tests.test_hostile_reach import POLICY, pack
+
+        w = level_lake(at=(1, 1))  # dirt on the map
+        (rat,) = pack(w, (2, 2), hit=1)
+        w.attacker, w.attacked_tick = ("npc", rat.id), w.tick
+        m = Memory()
+        self.assertTrue(sync_engagement(w, m, POLICY, dict(PARAM_DEFAULTS)).fight, "ground: fought")
+        m.engagement = None
+        m.water_cells[(w.map_id, (1, 1))] = None  # a would_strand came from it
+        self.assertFalse(sync_engagement(w, m, POLICY, dict(PARAM_DEFAULTS)).fight)

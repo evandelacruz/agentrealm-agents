@@ -102,9 +102,10 @@ def known_prefix(path: list[Pos], w: WorldModel) -> list[Pos]:
     on the current map (``WorldModel.walkable``: water too with a fording
     supply, A133, A146)."""
     out: list[Pos] = []
+    walkable = w.walkable_test()
     for p in path:
         block = w.view.tiles.get(p)
-        if block is None or block == VOID or not (w.walkable(p) or block in DOORS):
+        if block is None or block == VOID or not (walkable(p) or block in DOORS):
             break
         out.append(p)
     return out
@@ -150,6 +151,7 @@ class _Grid:
         # The single goal of a cost_path search (A13); None for a flood.
         self.goal: Pos | None = next(iter(goals)) if len(goals) == 1 else None
         self.tiles = w.view.tiles
+        self.walkable = w.walkable_test()  # water too with a fording supply (A133, A146)
         self.armor = worn_armor_defense(w.worn_codes.values())  # cuts occupy_damage
         if same_world is not None:
             assert same_world.w is w and same_world.params is params
@@ -221,7 +223,7 @@ class _Grid:
             if params.fog_cost is None:
                 return None
             base = params.fog_cost
-        elif self.w.walkable(p):  # water too with a fording supply (A133, A146)
+        elif self.walkable(p):
             base = KNOWN_WALKABLE
         else:
             return None  # void, blocked, or an unknown type

@@ -750,7 +750,7 @@ class GatherPricesUnexploredGroundTest(unittest.TestCase):
         self.assertEqual(m.gather_target, (gather_mod.FRONTIER, (1, 1)))
         w.pos = (1, 1)
         w.apply_terrain({"map_id": 7, "x0": -4, "y0": -4, "width": 11, "height": 11, "rows": ["?" * 11] * 11})
-        self.assertNotIn((1, 1), w.view.frontier())
+        self.assertNotIn((1, 1), w.view.frontier(fords=False))
         gather_outcome(w, m, Policy(on_hostile="ignore"), op=op)
         self.assertEqual(m.gather_target, ("grass", (40, 1)))
 
@@ -982,7 +982,7 @@ class KeepsClearTest(unittest.TestCase):
 
     def test_with_nowhere_clear_to_go_it_is_blocked(self):
         w, m = fence(self.blocked()), Memory()
-        self.assertEqual(w.view.frontier(), set())
+        self.assertEqual(w.view.frontier(fords=False), set())
         out = gather_outcome(w, m, self.POLICY, op=self.GATHER)
         self.assertIsNone(out.intents)
         self.assertEqual(m.gather_status, gather_mod.BLOCKED)

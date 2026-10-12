@@ -129,6 +129,7 @@ class UseItemOpTest(unittest.TestCase):
     def test_uses_the_named_item_then_is_done_once_it_is_used_up(self):
         w = world()
         w.health = 6
+        w.map_level = 1  # inside a level: a potion is for a fight, and this is one (A135)
         w.held_supplies = [InventorySupply(9, "potion")]
         c = ctx(plan({"op": "use_item", "code": "potion"}))
         out = dispatch(w, c)

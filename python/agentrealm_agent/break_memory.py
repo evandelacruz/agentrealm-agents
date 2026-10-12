@@ -23,8 +23,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Iterator
 from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
 from .item_table import InventorySupply, merge_capability
 from .knowledge_base import KnowledgeBase
-from .plan import CAPABILITIES
-from .supplies import break_capabilities, kept_on_break, listed
+from .supplies import CAPABILITIES, break_capabilities, kept_on_break, listed
 from .world import Pos, WorldModel
 
 if TYPE_CHECKING:

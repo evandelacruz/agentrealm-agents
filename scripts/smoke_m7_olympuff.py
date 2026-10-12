@@ -139,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     for line in metrics.summary_lines():
         print(line, flush=True)
     # A shorter practice run still fails on deaths, misses, loops and API
-    # errors; navigation and regen are judged only on (nearly) the full hour.
+    # errors; navigation is judged only on (nearly) the full hour.
     full_hour = args.seconds >= TARGET_SECONDS * 0.95
     failures = list(metrics.failures(full_hour=full_hour))
     if elapsed + 1.0 < args.seconds:

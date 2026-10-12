@@ -9,6 +9,7 @@ from agentrealm_agent import survival
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.survival import (
@@ -223,7 +224,9 @@ class RetreatTest(unittest.TestCase):
         self.assertEqual(dispatch(w, ctx(hostile=["npc"], on_hostile="ignore")).state, "Explore")
 
     def test_survival_outranks_a_pinned_travel_op(self):
-        """A16 Walk run 3: a pinned walk never takes the move from Retreat or Heal."""
+        """A16 Walk run 3: a pinned walk never takes the move from Retreat or Heal.
+        Out of combat with nothing to heal with, Heal sends nothing and the
+        walk goes on (A130: resting heals nothing)."""
         from agentrealm_agent.plan import Plan
 
         w = self.hurt()
@@ -232,6 +235,8 @@ class RetreatTest(unittest.TestCase):
         c.plan = Plan([{"op": "travel", "to": "point", "x": 4, "y": 1}], dict(PARAM_DEFAULTS), directive_end=1)
         self.assertEqual(dispatch(w, c).state, "Retreat")
         w.entities = []  # out of combat, still hurt
+        self.assertEqual(dispatch(w, c).state, "Travel")
+        w.held_supplies = [InventorySupply(4, "apple")]
         self.assertEqual(dispatch(w, c).state, "Heal")
 
     def test_done_once_on_the_safe_tile(self):

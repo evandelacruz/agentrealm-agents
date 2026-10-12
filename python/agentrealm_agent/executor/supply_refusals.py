@@ -145,7 +145,7 @@ def refusal_situation(w: WorldModel, target: Pos | None = None) -> Situation:
     supply is tried again only once one of these differs (a step, a new item,
     a new max health, the food moved).
 
-    Health itself is left out: regen, poison or a hit moves it every few
+    Health itself is left out: a heal, poison or a hit moves it every few
     ticks without touching anything a refusal depends on, and would resend
     the same refusal each time.
     """

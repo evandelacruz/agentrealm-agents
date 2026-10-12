@@ -15,7 +15,7 @@ counted as worn (``survival.worn_defense``). A goal may cost a share of what
 she has, by its value (``VALUE_RISK_SHARE``): an ordinary goal half of it,
 a valuable one (a boss, a gem cache) three quarters. "Ready for its risk" is
 this function at level scale; "stay alive" is the same function on the goal
-being worked.
+being worked, counting only the heals usable now (``now``).
 
 **What is missing.** :func:`missing` lists what the next level still needs
 bought, from either branch of the tree: the item its entrance needs (a look's
@@ -46,7 +46,7 @@ from agentrealm_agent.survival import (
     ticks_to_kill_them,
     worn_defense,
 )
-from agentrealm_agent.travel.knowledge import iter_entrances
+from agentrealm_agent.travel.knowledge import iter_entrances, iter_shop_sales
 from agentrealm_agent.world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -68,6 +68,9 @@ PRIOR_FOE = Entity("npc", 0, (0, 0))
 
 # The most purchases :func:`missing` plans to close a level's risk.
 MOST_RISK_BUYS = 6
+# Why a purchase is on the list, as :func:`missing` files it.
+NEED_WHY = "the entrance needs {}"
+RISK_WHY = "the level's risk"
 
 
 class RiskyGoal(Protocol):
@@ -142,19 +145,46 @@ def fight_cost(foe: Entity, w: WorldModel, loadout: Loadout) -> float:
 
 
 def risk_budget(
-    goal: RiskyGoal, world: WorldModel, kb: KnowledgeBase | None, loadout: Loadout | None = None
+    goal: RiskyGoal,
+    world: WorldModel,
+    kb: KnowledgeBase | None,
+    loadout: Loadout | None = None,
+    *,
+    now: bool = False,
 ) -> Budget:
     """The one risk function: health plus held heals against the expected
     cost of ``goal``'s hostiles, fought one by one with ``loadout`` (as
-    armed and worn now by default), within the share its value allows."""
+    armed and worn now by default), within the share its value allows.
+
+    ``now`` counts only the heals that can be used now: up to max health, so
+    a heal past it, wasted if used, counts for nothing. A goal being worked
+    ("stay alive", the reflexes) is priced so; a level ahead, where heals are
+    spent across many fights, counts them all."""
     lo = loadout or Loadout.now(world)
     cost = sum(fight_cost(f, world, lo) for f in goal.foes(world, kb))
-    return Budget(estimate_health(world), lo.heal, cost, goal.value)
+    health = estimate_health(world)
+    heal = min(lo.heal, room(world, health)) if now else lo.heal
+    return Budget(health, heal, cost, goal.value)
+
+
+def room(w: WorldModel, health: int) -> int:
+    """Health a heal can still add: max health less ``health``."""
+    return max(0, (w.max_health or health) - health)
+
+
+def margin_after(goal: RiskyGoal, world: WorldModel, kb: KnowledgeBase | None, *, eat: int = 0, carry: int = 0) -> Budget:
+    """The margin now (``risk_budget`` with ``now``) once ``eat`` health is
+    eaten (food in sight) or ``carry`` more heal is held (a potion bought).
+    A heal carried and then drunk leaves it as it was: it counted already."""
+    now = risk_budget(goal, world, kb, now=True)
+    health = min(now.health + eat, now.health + room(world, now.health))
+    heal = min(held_heal(world) + carry, room(world, health))
+    return Budget(health, heal, now.cost, now.value)
 
 
 def margin_now(goal: RiskyGoal, world: WorldModel, kb: KnowledgeBase | None) -> Budget:
     """The hook the reflexes (A141) read: the goal being worked, priced now."""
-    return risk_budget(goal, world, kb)
+    return risk_budget(goal, world, kb, now=True)
 
 
 # The next level and what it holds.
@@ -233,8 +263,12 @@ class Missing:
 
 
 def price(code: str, w: WorldModel, kb: KnowledgeBase | None) -> int | None:
-    """``code``'s price from a seller known to sell it (A131), else None."""
-    sellers = sellers_of(code, w, kb)
+    """``code``'s price from a seller known to sell it (A131), else None. A
+    shop cell counts only for the very item it was seen selling: the seller
+    test takes any potion for a potion (A21), but what a potion heals is
+    priced by the one on the shelf."""
+    shelves = {(mid, pos) for mid, pos, sold, _ in iter_shop_sales(kb) if sold == code}
+    sellers = [s for s in sellers_of(code, w, kb) if s.by != "shop" or (s.map_id, s.pos) in shelves]
     if not sellers:
         return None
     quoted = [s.price for s in sellers if s.price]
@@ -295,7 +329,7 @@ def missing(w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal) -> Missin
     if need and not in_sight(w, need):
         offers = sorted((p, c) for c, p in sale.items() if meets(c, need))
         if offers:
-            out.buys.append(Purchase(offers[0][1], offers[0][0], f"the entrance needs {need}"))
+            out.buys.append(Purchase(offers[0][1], offers[0][0], NEED_WHY.format(need)))
         else:
             out.unpriced.append(need)
     lo = best_owned(w, kb)
@@ -312,16 +346,10 @@ def missing(w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal) -> Missin
             out.unpriced.append(f"{budget.short} health or heals")
             break
         _, code, p = best
-        out.buys.append(Purchase(code, p, "the level's risk"))
+        out.buys.append(Purchase(code, p, RISK_WHY))
         lo = _with(lo, code, w, kb)
         budget = risk_budget(level, w, kb, lo)
     return out
-
-
-def held_food_or_potion(w: WorldModel) -> str | None:
-    """A carried heal to use, the smallest first."""
-    carried = [s.code for s in w.held_supplies + w.chest_supplies if heals(s.code)]
-    return min(carried, key=lambda c: (heal_of(c), c), default=None)
 
 
 def food_in_sight(w: WorldModel) -> Entity | None:

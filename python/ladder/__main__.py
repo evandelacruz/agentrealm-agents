@@ -92,13 +92,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
-    """The self read, then the goal tree's readiness (A139) from it and the
-    world's knowledge base. Inventory, gems and levels cleared come only with
-    a round trip, which a status never makes, so they read as none here; a run
-    prints the same dump with them each turn (A141)."""
+    """The self line, then the goal tree's readiness (A139). The world model
+    is filled by its own sync from three reads, inside the burst of 3: the
+    self read, the world read (levels authored) and one round trip that sends
+    no intents (``intents`` left out, so the held queue is untouched) for the
+    snapshot (health, inventory, gems, levels cleared, position), with the
+    world's knowledge base. The round trip takes the events since the last
+    one, so never run it on a character another client is playing."""
     try:
         s = client.self_(cid)
         print(f"{cfg.profile} ({cid}): lives={s['lives']} alive={s['alive']} placed={s['placed']}")
+        body = client.world(cid)
+        r = client.tick(cid, None)
     except ApiError as e:
         print(f"{cfg.profile} ({cid}): {e}", file=sys.stderr)
         return 1
@@ -109,8 +114,16 @@ def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
         return 1
     w = WorldModel(character_id=cid)
     w.apply_self(s)
-    w.health, w.max_health = (v if isinstance(v, int) and not isinstance(v, bool) else None for v in (s.get("health"), s.get("max_health")))
+    if isinstance(body.get("level_count"), int):
+        w.level_count = body["level_count"]
+    w.apply_observation(r.get("observation"))
     load_hostiles(kb, w)
+    held = ", ".join(sorted(x.code for x in w.held_supplies + w.chest_supplies)) or "nothing"
+    worn = ", ".join(sorted(w.worn_codes.values())) or "nothing"
+    print(
+        f"health={w.health}/{w.max_health} gems={w.gems} levels_cleared={w.levels_cleared}"
+        f" armed={w.armed_code} worn={worn} held={held}"
+    )
     for line in dump(w, kb):
         print(line)
     return 0

@@ -18,9 +18,11 @@ So there is one rule, applied to every queue a state sends
 - under attack on water with only the fording supply in hand, the
   character makes for the nearest land (``states.ashore``);
 - ashore, with a fording supply armed and no water within
-  ``REARM_LOOKAHEAD`` cells of the walk ahead, a queue that is no reflex or
-  attack queue first arms the weapon the one weapon rule picks (A99,
-  ``equip.weapon_to_arm``), unless it arms something itself;
+  ``REARM_LOOKAHEAD`` cells of the walk ahead, a queue first arms the
+  weapon the one weapon rule picks (A99, ``equip.weapon_to_arm``), unless
+  it arms something itself; an escape (``ESCAPES``: Flee, Retreat, Escape)
+  is never slowed by it, and Fight puts it in its own attack queue, paced
+  by the weapon's cooldown, since a fording supply swings nothing;
 - what a state wrote to memory for a loadout change the queue then cuts
   (``LOADOUT_MEMORY``) is put back (``dispatch._run_states``), so memory
   never describes an ``Arm`` that was not sent.
@@ -40,6 +42,9 @@ from .supplies import fords, worn_slot
 from .world import WATER, Pos, WorldModel
 
 LOADOUT_VERBS = ("Arm", "Wear", "Remove", "Drop")
+# The states whose steps are an escape: a tick spent arming costs more there
+# than a weapon in hand is worth, so no re-arm goes in front of them.
+ESCAPES = ("Flee", "Retreat", "Escape")
 WOULD_STRAND = "would_strand"
 # How far along the walk ahead water keeps the fording supply in hand, so a
 # hop between islands or a walk along the shore does not swap the loadout.

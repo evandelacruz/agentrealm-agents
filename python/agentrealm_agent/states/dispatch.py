@@ -29,7 +29,7 @@ from ..navigation import oscillation
 from ..navigation.rejection import end_decision
 from ..engagement import sync_engagement
 from ..equip import note_last_weapon
-from ..fording import ford_queue, loadout_memory, restore_loadout_memory
+from ..fording import ESCAPES, ford_queue, loadout_memory, restore_loadout_memory
 from ..healing import note_heal_window
 from ..pathing import note_goto_reached
 from ..plan import OP_STATE, PLAN_STALL_SECONDS, Plan
@@ -327,7 +327,8 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
     held fording supply is armed before the first water step, and on water
     the queue stops before a loadout change that would strand us, and what
     the state wrote to memory for it is put back; ashore, the weapon is
-    armed again in front of a queue that is no reflex or attack queue. A
+    armed again in front of any queue but an escape's or a paced one
+    (Fight arms it in its own attack queue). A
     queue cut to nothing falls through like a state that sends nothing.
 
     In the held-queue probe, when none does, ``Memory.state`` stays the state
@@ -341,7 +342,7 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
         saved = loadout_memory(m)
         outcome = state.act(world, ctx)
         if outcome.intents:
-            rearm = not (outcome.reflex or outcome.paced)
+            rearm = outcome.state not in ESCAPES and not outcome.paced
             outcome.intents, why = ford_queue(world, m, outcome.intents, ctx.knowledge, rearm=rearm)
             if why:
                 # The loadout change the state wrote memory for was cut: put it back.

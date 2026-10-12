@@ -17,7 +17,7 @@ from agentrealm_agent.supplies import fords, what_it_does
 from agentrealm_agent.strategist import held_line
 from agentrealm_agent.world import WorldModel
 
-RAFT, SWORD, POTION = 7, 8, 9
+RAFT, SWORD, POTION, MALLET = 7, 8, 9, 10
 
 # A lake between the shore at x 0..1 and the far shore at x 5..6.
 LAKE = [
@@ -34,7 +34,7 @@ def lake(at=(0, 1), held=("raft", "bronze_sword"), armed: str | None = None) -> 
         for x, g in enumerate(row):
             w.view.tiles[(x, y)] = glyph[g]
     w.terrain_center, w.terrain_map = at, 1
-    ids = {"raft": RAFT, "bronze_sword": SWORD, "small_potion": POTION}
+    ids = {"raft": RAFT, "bronze_sword": SWORD, "small_potion": POTION, "bronze_mallet": MALLET}
     w.held_supplies = [InventorySupply(ids[c], c) for c in held if c != armed]
     if armed is not None:
         w.armed_code, w.armed_id = armed, ids[armed]
@@ -197,8 +197,8 @@ if __name__ == "__main__":
 WIDE = ["..~~~.~~~.."] + ["..~~~~~~~.."] * 9
 
 
-def wide(at, armed="raft", rows=WIDE) -> WorldModel:
-    w = lake(at=at, armed=armed)
+def wide(at, armed="raft", rows=WIDE, held=("raft", "bronze_sword")) -> WorldModel:
+    w = lake(at=at, armed=armed, held=held)
     w.view.tiles.clear()
     glyph = {".": "dirt", "#": "wall", "~": "water"}
     for y, row in enumerate(rows):
@@ -267,6 +267,42 @@ class WaterIsGroundEverywhereTest(unittest.TestCase):
         frontier = w.frontier()
         self.assertTrue(any(w.view.tiles[p] == "water" for p in frontier), frontier)
         self.assertFalse(any(w.view.tiles[p] == "water" for p in w.view.frontier()), "kept apart per fords")
+
+
+class FightAshoreTest(unittest.TestCase):
+    def test_landed_with_the_raft_in_hand_fight_arms_the_weapon_first(self):
+        from agentrealm_agent.executor import attack_cooldown_ticks
+        from tests.test_hostile_reach import POLICY, pack
+
+        w = wide(at=(9, 5), held=("raft", "bronze_mallet"))  # a weapon slower than the 1 s default
+        (rat,) = pack(w, (10, 5), hit=1)
+        w.attacker, w.attacked_tick = ("npc", rat.id), w.tick
+        m = Memory()
+        m.calm_poll_interval = 100  # room for two swings in the queue
+        c = PlayContext(m, POLICY, random.Random(0), knowledge=KnowledgeBase.empty("sandbox"), plan=travel_to(10, 1))
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Fight", out.reason)
+        self.assertEqual(out.intents[0], arm(MALLET), "the raft swings nothing")
+        uses = [i for i, x in enumerate(out.intents) if x.get("verb") == "Use"]
+        self.assertGreaterEqual(len(uses), 2, out.intents)
+        gap = attack_cooldown_ticks("bronze_mallet", c.tick_hz)
+        self.assertNotEqual(gap, attack_cooldown_ticks("raft", c.tick_hz), "the test tells the two apart")
+        self.assertEqual(uses[1] - uses[0], gap, "swings paced by the weapon's cooldown, not the raft's")
+
+    def test_on_water_no_weapon_is_armed_for_a_fight(self):
+        from tests.test_hostile_reach import POLICY, pack
+
+        w = wide(at=(8, 5))
+        (rat,) = pack(w, (9, 5), hit=1)
+        w.attacker, w.attacked_tick = ("npc", rat.id), w.tick
+        c = PlayContext(Memory(), POLICY, random.Random(0), knowledge=KnowledgeBase.empty("sandbox"), plan=None)
+        out = dispatch(w, c)
+        self.assertNotIn("Arm", [i.get("verb") for i in out.intents or []], out.reason)
+
+    def test_an_escape_is_never_slowed_by_the_rearm(self):
+        from agentrealm_agent.fording import ESCAPES
+
+        self.assertEqual(set(ESCAPES), {"Flee", "Retreat", "Escape"})
 
 
 class CrossingKeepsOffReachTest(unittest.TestCase):

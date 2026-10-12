@@ -34,6 +34,12 @@ joins, or running is found not to work. Where a hostile is, how far, and
 whether a step closes on it do not change it; they decide how the decision
 is carried out.
 
+Afloat with only a fording supply in hand there is no swing (A146,
+``fording.swings_nothing``): no weapon can be armed on water, so the estimate
+counts the character unarmed and the decision is never fight there, a fight
+decided on ashore included; Ashore makes for land (A133) and the engagement
+decides again there.
+
 A fight decided on holds (A136): once the decision is fight, a turn in the
 estimate ends it only when health is at the survival floor against the
 hostiles weighed (``survival.at_health_floor``) or a hostile the estimate
@@ -59,6 +65,7 @@ from .survival import (
     win_ratio,
     worn_defense,
 )
+from .fording import swings_nothing
 from .world import Entity, WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -148,9 +155,10 @@ def sync_engagement(
 def fight_holds(w: WorldModel, params: dict[str, float | int], before: Engagement, now: Engagement) -> bool:
     """A fight decided on (``before``) holds against a decision ``now`` that
     turned: no hostile joined what the estimate weighs, one it weighs is still
-    in view (a fight with none left ends), and health is above the survival
-    floor against them (module docstring)."""
-    if not now.weighed <= before.weighed:
+    in view (a fight with none left ends), health is above the survival
+    floor against them, and the character can swing (not afloat with only a
+    fording supply in hand, A146) (module docstring)."""
+    if not now.weighed <= before.weighed or swings_nothing(w):
         return False
     weighed = [h for h in w.entities if (h.kind, h.id) in now.weighed]
     return bool(weighed) and not at_health_floor(w, params, weighed)
@@ -201,9 +209,12 @@ def decide(
     members = [h for h in w.entities if (h.kind, h.id) in group]
     if members:
         members = can_reach_us(w, policy, members)
-    ratio = win_ratio(
-        estimate_health(w) if health is None else health, members, w.threat, w.armed_code, worn_defense(w)
-    )
+    if swings_nothing(w):
+        ratio = 0.0  # afloat with only a fording supply in hand: no swing (A146)
+    else:
+        ratio = win_ratio(
+            estimate_health(w) if health is None else health, members, w.threat, w.armed_code, worn_defense(w)
+        )
     bar = fight_bar(w, policy, params, outrun_failed)
     weighed = frozenset((h.kind, h.id) for h in members)
     return Engagement(group, outrun_failed, ratio, bool(members) and ratio > bar, weighed=weighed)

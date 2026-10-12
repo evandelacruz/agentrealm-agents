@@ -195,7 +195,7 @@ def route_ahead(w: WorldModel, m: Memory) -> list[Pos]:
 
 def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos | None:
     """The path's first step when it is seen and open, else None."""
-    prefix = known_prefix(path or [], w.view, w.fords)
+    prefix = known_prefix(path or [], w)
     if prefix and step_open(w, blocked, prefix[0]):
         return prefix[0]
     return None

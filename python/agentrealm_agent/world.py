@@ -430,10 +430,20 @@ class WorldModel:
         with no ``Arm`` first (``supplies.afloat``, A133)."""
         return afloat(self.armed_code, self.worn_codes.values())
 
-    def walkable(self, p: Pos) -> bool:
-        """``p`` on the current map is ground a walk may step on, water too
-        while a fording supply is carried (A133)."""
-        return self.view.walkable(p, self.fords)
+    def walkable(self, p: Pos, *, map_id: int | None = None, now: bool = False) -> bool:
+        """``p`` is ground a walk may step on, water too while a fording
+        supply is carried (A133): the one test of whether water is ground
+        (A146). Every route search, grid and step check asks it, on any map,
+        a level's or a room's as much as the overworld's.
+
+        ``map_id``: another map than the current one. ``now``: water only
+        while a fording supply is already armed or worn (``afloat``), for a
+        lone Step with no ``Arm`` before it."""
+        if map_id is None or map_id == self.map_id:
+            view = self.view
+        else:
+            view = self.maps.get(map_id) or MapView()
+        return view.walkable(p, self.afloat if now else self.fords)
 
     def frontier(self) -> set[Pos]:
         """The current map's frontier (``MapView.frontier``), water's edge

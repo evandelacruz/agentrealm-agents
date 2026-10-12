@@ -10,7 +10,8 @@ So there is one rule, applied to every queue a state sends
 (``states.dispatch``):
 
 - a walk plans over water while a fording supply is carried, held or armed
-  (``WorldModel.fords``, passed in, never set on the view: ``WorldModel.walkable``, ``CostGridParams.fords``);
+  (``WorldModel.fords``, never set on the view), and only ``WorldModel.walkable``
+  says whether water is ground, on every map, a level's too (A146);
 - before the first ``Step`` onto water, the queue arms a held fording supply
   unless one is armed or worn already (``ford_queue``);
 - on water, the queue stops before any loadout change that would strand: no
@@ -102,6 +103,13 @@ def stranded_unarmed(w: WorldModel) -> bool:
     """Only a fording supply is in hand and none is worn: on water no weapon
     can be armed, so there is no fight to have (``states.ashore``)."""
     return fords(w.armed_code) and not afloat(None, w.worn_codes.values())
+
+
+def swings_nothing(w: WorldModel) -> bool:
+    """Standing on water with only a fording supply in hand (``stranded_unarmed``):
+    no weapon can be armed there, so the engagement counts no swing and
+    decides against a fight until the character is ashore (A146)."""
+    return w.pos is not None and w.map_id is not None and w.view.tiles.get(w.pos) == WATER and stranded_unarmed(w)
 
 
 def ford_gate(

@@ -435,3 +435,71 @@ class EquipRaftTest(unittest.TestCase):
         out = dispatch(w, ctx_for(Memory(), plan))
         self.assertEqual((out.state, out.intents), ("Equip", [arm(RAFT)]), out.reason)
         self.assertIsNotNone(plan.current(), "not dropped as not armed or worn")
+
+
+# A146: a level map that is almost all water, with dirt islands at its corners.
+def level_lake(at, armed: str | None = "raft", held=("raft", "bronze_sword")) -> WorldModel:
+    rows = ["~" * 24] * 24
+    w = wide(at=at, armed=armed, held=held, rows=rows)
+    for p in [(1, 1), (2, 1), (1, 2), (21, 21), (22, 21), (21, 22)]:
+        w.view.tiles[p] = "dirt"
+    w.map_id, w.map_level = 9, 2  # an interior map: a level
+    w.maps = {9: w.maps[1]}
+    return w
+
+
+class LevelWalkTest(unittest.TestCase):
+    def test_a_walk_inside_a_level_crosses_water_with_the_raft_armed(self):
+        w = level_lake(at=(10, 10))
+        out = dispatch(w, ctx_for(Memory(), travel_to(21, 21)))
+        self.assertEqual(out.state, "Travel", out.reason)
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 11, "y": 11}], out.reason)
+
+    def test_the_same_walk_with_no_ford_finds_no_way(self):
+        w = level_lake(at=(1, 1), armed="bronze_sword", held=("bronze_sword",))
+        m = Memory()
+        out = dispatch(w, ctx_for(m, travel_to(21, 21)))
+        self.assertFalse(out.intents, out.reason)
+        self.assertIn("no step toward it", out.reason)
+        self.assertEqual([s["trigger"] for s in m.strategist_signals], ["no_way_on"])
+
+
+class AfloatEngagementTest(unittest.TestCase):
+    def engaged(self, w: WorldModel, m: Memory | None = None):
+        from agentrealm_agent.engagement import sync_engagement
+        from tests.test_hostile_reach import POLICY, pack
+
+        if not w.entities:
+            (rat,) = pack(w, (w.pos[0] + 1, w.pos[1]), hit=1)  # one the estimate beats with a weapon
+            w.attacker, w.attacked_tick = ("npc", rat.id), w.tick
+        m = m or Memory()
+        return m, sync_engagement(w, m, POLICY, dict(PARAM_DEFAULTS))
+
+    def test_afloat_with_the_raft_and_a_hostile_adjacent_it_is_not_fight(self):
+        _, e = self.engaged(level_lake(at=(10, 10)))
+        self.assertIsNotNone(e)
+        self.assertFalse(e.fight, "the raft swings nothing, and no weapon can be armed on water")
+
+    def test_ashore_the_same_hostile_is_fought(self):
+        _, e = self.engaged(level_lake(at=(1, 1)))
+        self.assertTrue(e.fight, "on land the weapon is armed for the fight (A133)")
+
+    def test_a_fight_decided_ashore_does_not_hold_once_afloat(self):
+        w = level_lake(at=(2, 1))
+        m, e = self.engaged(w)
+        self.assertTrue(e.fight)
+        w.pos = (3, 1)  # stepped onto water, the hostile follows
+        w.entities[0].pos = (4, 1)
+        _, e = self.engaged(w, m)
+        self.assertFalse(e.fight)
+
+    def test_the_decision_afloat_is_never_fight(self):
+        from tests.test_hostile_reach import POLICY
+
+        w = level_lake(at=(10, 10))
+        self.engaged(w)
+        c = PlayContext(Memory(), POLICY, random.Random(0), knowledge=KnowledgeBase.empty("sandbox"), plan=None)
+        out = dispatch(w, c)
+        self.assertNotEqual(out.state, "Fight", out.reason)
+        self.assertFalse(c.memory.engagement.fight)
+        self.assertNotIn("Use", [i.get("verb") for i in out.intents or []], "no swing from the water")

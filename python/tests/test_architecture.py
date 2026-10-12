@@ -9,6 +9,7 @@ explore or open never steps in place: it asks the planner (A114).
 
 from __future__ import annotations
 
+import ast
 import random
 import re
 import unittest
@@ -284,6 +285,37 @@ class RulesNotRunPatchesTest(unittest.TestCase):
         )
         if total < RUN_CITATION_CEILING:
             self.fail(f"A87: {total} run citations; lower RUN_CITATION_CEILING to match.")
+
+
+class OneWaterTestTest(unittest.TestCase):
+    """A146: only ``WorldModel.walkable`` decides whether water is ground. Every
+    route search, grid and step check in Gary asks it, on any map, so no grid
+    (a level's, a room's, a scratch world's) builds its own water test."""
+
+    def test_only_world_model_walkable_decides_whether_water_is_ground(self):
+        world = PYTHON_DIR / "agentrealm_agent" / "world.py"
+        hits = []
+        for f in (PYTHON_DIR / "agentrealm_agent").rglob("*.py"):
+            if f == world:
+                continue
+            for node in ast.walk(ast.parse(f.read_text())):
+                where = f"{f.relative_to(PYTHON_DIR)}:{getattr(node, 'lineno', 0)}"
+                if isinstance(node, ast.Name) and node.id in ("walkable_block", "WALKABLE"):
+                    hits.append(f"{where} uses {node.id}")
+                if isinstance(node, ast.alias) and node.name in ("walkable_block", "WALKABLE"):
+                    hits.append(f"{where} imports {node.name}")
+                if not isinstance(node, ast.Call):
+                    continue
+                if any(k.arg == "fords" for k in node.keywords):
+                    hits.append(f"{where} passes fords")
+                fn = node.func
+                if isinstance(fn, ast.Attribute) and fn.attr in ("walkable", "frontier"):
+                    receiver = ast.unparse(fn.value)
+                    if receiver.endswith("view") or "maps" in receiver or "tiles" in receiver:
+                        hits.append(f"{where} asks a map view, not WorldModel.{fn.attr}")
+                    if fn.attr == "walkable" and len(node.args) != 1:
+                        hits.append(f"{where} passes its own water test to walkable")
+        self.assertEqual(hits, [], "A146: ask WorldModel.walkable (and WorldModel.frontier) instead")
 
 
 if __name__ == "__main__":

@@ -126,7 +126,7 @@ class CostGridTest(unittest.TestCase):
 
     def test_known_prefix_stops_at_fog(self):
         w = grid([".."])
-        self.assertEqual(known_prefix([(1, 0), (2, 0), (3, 0)], w.view), [(1, 0)])
+        self.assertEqual(known_prefix([(1, 0), (2, 0), (3, 0)], w), [(1, 0)])
 
 
 def strip(length: int, at=(0, 0), perception=3) -> WorldModel:

@@ -1,6 +1,6 @@
 # Ladder Lorraine
 
-**Short name:** `lorraine`. **Package:** `python/ladder/` (M14). Run from `python/` with `python3 -m ladder create|run|status <profile>`, the same commands and profile files as Gary. Until her goal tree replaces it (A139–A141), `run` calls Stan's loop (`starter_agent.run`: sync, flee, explore). That tie is temporary and is her one import of Stan.
+**Short name:** `lorraine`. **Package:** `python/ladder/` (M14). Run from `python/` with `python3 -m ladder create|run|status <profile>`, the same commands and profile files as Gary. Her command-line parser and `status` mirror Gary's until A149 moves them into the shared ADK. Until her goal tree replaces it (A139–A141), `run` calls Stan's loop (`starter_agent.run`: sync, flee, explore). That tie is temporary and is her one import of Stan.
 
 **Plays to:** levels cleared per hour. Everything else is a means to that.
 

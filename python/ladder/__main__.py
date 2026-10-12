@@ -1,4 +1,9 @@
-"""python -m ladder create|run|status ...: the same commands and profile files as Gary."""
+"""python -m ladder create|run|status ...: the same commands and profile files as Gary.
+
+The parser and ``status`` mirror Gary's ``agentrealm_agent.__main__`` until A149
+moves them into the shared ADK; his module loads his runner and planner, so she
+cannot import it.
+"""
 
 from __future__ import annotations
 

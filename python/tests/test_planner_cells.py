@@ -154,6 +154,16 @@ class BadCellTest(unittest.TestCase):
         self.assertIn("6,0 on map 40 is a wall", refused[1])
         self.assertIn("never by counting map columns", refused[0])
 
+    def test_a_symbolic_travel_names_no_cell(self):
+        w = level_room()
+        self.assertEqual(w.view.tiles[(0, 0)], "wall")
+        nearest_shop = {"op": "travel", "to": "shop", "x": 0, "y": 0}
+        nearest_entrance = {"op": "travel", "to": "entrance", "x": 0, "y": 0, "map_id": 40}
+        point = {"op": "travel", "to": "point", "x": 0, "y": 0}
+        kept, refused = refuse_bad_cells([nearest_shop, nearest_entrance, point], w)
+        self.assertEqual(kept, [nearest_shop, nearest_entrance], "0, 0 there is the agent's to find")
+        self.assertIn("0,0 on map 40 is a wall", refused[0])
+
     def test_a_map_of_unknown_size_refuses_nothing_off_it(self):
         w = level_room()
         w.view.size = None

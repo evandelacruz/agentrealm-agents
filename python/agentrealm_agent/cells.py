@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .plan import TRAVEL_SYMBOLIC
 from .world import DOORS, Pos, WorldModel
 
 # Ops whose x, y is a cell the character walks onto, so it cannot be a wall.
@@ -40,11 +41,14 @@ def is_wall(w: WorldModel, p: Pos) -> bool:
 def target_here(op: dict[str, Any], w: WorldModel) -> Pos | None:
     """The cell ``op`` targets on the current map, or None when it names no
     cell, or one on another map (its own ``map_id``, or an entrance that
-    names none)."""
+    names none). A symbolic travel's ``0, 0`` (the nearest shop or entrance,
+    which the agent finds) names no cell."""
     x, y = op.get("x"), op.get("y")
     if not isinstance(x, int) or not isinstance(y, int) or isinstance(x, bool) or isinstance(y, bool):
         return None
     if op.get("op") == "travel" and op.get("to") not in TRAVEL_TO_CELL:
+        return None
+    if op.get("op") == "travel" and op.get("to") in TRAVEL_SYMBOLIC and (x, y) == (0, 0):
         return None
     map_id = op.get("map_id")
     if map_id is None and op.get("op") == "travel" and op.get("to") == "entrance":

@@ -8,6 +8,9 @@ Arriving finishes the op; for an entrance, going through it onto the map it
 leads to does (``passage.went_through``, A144). A destination on another
 map with no known warp there is walked toward by the way off this map
 (``navigation.walk_toward``), never asked about.
+A level entrance whose recorded need nothing carried meets is never
+walked onto (A147, ``entrance_needs``): a travel to one, or a step onto
+one, drops the op with why.
 
 A ``hunting_ground`` with none known searches for one: it explores the
 map's frontier while spare windows read zones in widening rings around the
@@ -39,6 +42,7 @@ from ..travel.ops import travel_op_from_plan_goal
 from .. import targets as targets_mod
 from ..navigation.rejection import locked_doors_from_kb
 from ..travel.resolve import ResolvedDestination, at_destination, given_up_travel, picks_nearest, resolve_travel, still_candidate
+from ..entrance_needs import unmet_need, why_refused
 from ..world import DOORS, Pos, WorldModel
 from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .explore import explore_outcome
@@ -94,13 +98,37 @@ class TravelState(State):
         m.hunt_search = None
         if dest is None:
             return StateOutcome(None, f"travel:{op['to']} not resolved yet", state=self.name)
+        if dest.label == "entrance" and (need := unmet_need(world, ctx.knowledge, dest.map_id, dest.pos)) is not None:
+            # An entrance is never entered with its need unmet (A147): the item comes first.
+            why = why_refused(need, dest.map_id, dest.pos)
+            targets_mod.release(m, TRAVEL_TARGET)
+            ctx.plan.drop_current(why, memory=m)
+            return StateOutcome(None, why, state=self.name)
         if at_destination(world, dest):
             targets_mod.release(m, TRAVEL_TARGET)
             ctx.plan.finish_current(f"at {dest.label}", memory=m)
             if m.goal == f"travel:{dest.label}":
                 m.path, m.goal = [], ""
             return StateOutcome(None, f"travel:{dest.label} arrived", state=self.name)
-        return walk_to(world, ctx, op, dest, self.name)
+        out = walk_to(world, ctx, op, dest, self.name)
+        need = _gated_step(world, ctx, out)
+        if need is not None:
+            # A walk to anywhere never steps onto an entrance whose need is unmet (A147).
+            why = why_refused(need[0], world.map_id, need[1])
+            ctx.plan.drop_current(why, memory=m)
+            return StateOutcome(None, why, state=self.name)
+        return out
+
+
+def _gated_step(world: WorldModel, ctx: PlayContext, out: StateOutcome) -> tuple[str, Pos] | None:
+    """The need and cell of a level entrance ``out`` would step onto with that need unmet."""
+    for intent in out.intents or []:
+        if intent.get("verb") == "SetPosition":
+            cell = (intent["x"], intent["y"])
+            need = unmet_need(world, ctx.knowledge, world.map_id, cell)
+            if need is not None:
+                return need, cell
+    return None
 
 
 def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDestination, state: str) -> StateOutcome:

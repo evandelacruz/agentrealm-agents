@@ -273,5 +273,19 @@
 
   "A134": {"state": "done"},
 
-  "A135": {"state": "done"}
+  "A135": {"state": "done"},
+
+  "A137": {"state": "done"},
+
+  "A138": {"state": "todo"},
+
+  "A139": {"state": "todo"},
+
+  "A140": {"state": "todo"},
+
+  "A141": {"state": "todo"},
+
+  "A142": {"state": "todo"},
+
+  "A143": {"state": "todo"}
 }

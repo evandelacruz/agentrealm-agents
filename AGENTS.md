@@ -8,14 +8,17 @@ Reference agents that play Agent Realm through its public API. Read [README.md](
 
 The goal is for people to build their own agents for Agent Realm (agentrealm.gg), and for that to be easy and fun. Our agent is the starting point they copy, edit and grow, so it has to be easy to read and easy to change, not only correct.
 
+**Three agents, three names.** Each agent in this repo has a short name that is also how commits, run notes and observations refer to it, and one meta file under [`docs/agents/`](docs/agents/) with the same six fields: name, plays to, how it thinks, temperament, will not, lineage. Grinding Gary (`gary`, `python/agentrealm_agent/`) is the full agent grown run by run. Ladder Lorraine (`lorraine`, `python/ladder/`, M14) is the goal-tree agent built on Gary's plumbing. Starter Stan (`stan`, `python/starter_agent.py`) is the one-file starter. Lorraine imports nothing from Gary's planner or states; A138 adds the architecture test that holds that line. Gary and Stan play any character today; Lorraine joins them when A138 lands, and from then on you pick one at run time.
+
 ## Where truth lives
 
 | File | Role |
 |---|---|
-| [PLAN.md](PLAN.md) | Design, what the API allows today, server gaps, and the backlog: PR-sized items (A1, A2, …) with their dependencies, grouped under milestone headings (M0–M13). |
+| [PLAN.md](PLAN.md) | Design, what the API allows today, server gaps, and the backlog: PR-sized items (A1, A2, …) with their dependencies, grouped under milestone headings (M0–M14). |
 | [docs/PLAYABLE_AGENT_PLAN.md](docs/PLAYABLE_AGENT_PLAN.md) | Scope and done-when of the milestones M0, M4 and M6–M12. PLAN.md owns the item IDs and dependencies. |
 | [docs/GAME_NOTES.md](docs/GAME_NOTES.md) | Game facts the plan relies on, each with its source. |
 | [status.json](status.json) | Per-item work state. Not a source of truth. |
+| [docs/agents/](docs/agents/) | One meta file per agent (Gary, Lorraine, Stan): what it plays to, how it thinks, its temperament, what it will not do, and its lineage. Authoritative for how the agents differ; PLAN.md owns their backlog. |
 | The site's [docs](https://agentrealm.gg/docs) and [guides](https://agentrealm.gg/guides) | The API the agents play against. |
 | `main` + open PRs | What shipped, what is in flight. |
 

@@ -76,6 +76,16 @@ Copy and edit a file in `python/characters/` to try different behavior (`policy.
 
 Every state and policy key: [`docs/CHARACTER_AND_STATES.md`](docs/CHARACTER_AND_STATES.md). Tables in [`PLAN.md`](PLAN.md): [Scheduler](PLAN.md#scheduler-which-call-this-window), [Reflexes](PLAN.md#reflexes-every-round-trip-no-model), [Plan](PLAN.md#plan-goal-and-path).
 
+## The agents
+
+Three agents share this repo and its plumbing. All three run from `python/`, as in the quick start. Each has a meta file under [`docs/agents/`](docs/agents/) saying what it plays to, how it thinks, and what it will not do.
+
+| Agent | Run | What it is |
+|---|---|---|
+| **Grinding Gary** ([`gary`](docs/agents/gary.md)) | `python3 -m agentrealm_agent run …` | The full agent: AI planner over a state machine, grown through the A67 free-play runs. |
+| **Ladder Lorraine** ([`lorraine`](docs/agents/lorraine.md)) | `python3 -m ladder run …` (M14, in progress) | A goal tree with the situational calls handed to the planner. Plays to levels cleared per hour. |
+| **Starter Stan** ([`stan`](docs/agents/stan.md)) | `python3 starter_agent.py run …` | One file that syncs, flees and explores. Copy this one first. |
+
 ## Make it yours
 
 This repo is meant for you to fork and extend, not only to run the shipped profiles (`wren`, `kit`) on a character you choose. Start from [`python/starter_agent.py`](python/starter_agent.py): one file that syncs, flees, and explores on its own — copy it and grow your own loop before you touch the full reference agent. It moves one tile at a time with `SetPosition`, waiting out the movement cooldown between moves, where the reference agent sends paced `Step` queues.

@@ -113,7 +113,7 @@ from .travel.resolve import given_up_travel, travel_dest, travel_given_up
 from .travel.strength import StrengthBracket
 from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from .sellers import codes_with_sellers, refuse_unsold, sellers_line
-from .level_order import CLEARED, TARGET, UNKNOWN, entrance_level, entrance_rank, order_line, refuse_barred
+from .level_order import CLEARED, TARGET, UNKNOWN, entrance_level, entrance_rank, level_pending, order_line, refuse_barred
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import entrance_routes
@@ -1759,7 +1759,8 @@ class Strategist:
         """Move queued signals into the inbox and raise the map, hurt, idle and discovery triggers."""
         w, m = runner.world, runner.mem
         self.stall.note(w)
-        where = (w.map_id, w.map_level) if w.map_id is not None else None
+        # A landing map's level is read from the minimap just after (A145): the trigger waits for it.
+        where = (w.map_id, w.map_level) if w.map_id is not None and not level_pending(w, m) else None
         if where is not None and where != self._last_map:
             # Every change of map or level, re-entering one included (after a death, a retry).
             self._last_map = where

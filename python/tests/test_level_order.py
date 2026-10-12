@@ -13,7 +13,10 @@ from agentrealm_agent.level_order import (
     refuse_barred,
     target_level,
 )
+from agentrealm_agent.knowledge_maps import record_warp
+from agentrealm_agent.level_order import LEAVE_OP, sync_leave, way_out
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.stalled import RetryBasis, remember
 from agentrealm_agent.navigation import CostGridParams
 from agentrealm_agent.navigation.door_graph import doors_goal_path
 from agentrealm_agent.plan import Plan
@@ -133,8 +136,9 @@ class LeaveTest(unittest.TestCase):
         w = grid(["D....", "....."], at=(1, 1), map_id=8)
         w.apply_position({"map_id": 8, "x": 1, "y": 1, "level": 2})
         kb = kb_with(1, (5, 5))
+        record_warp(kb, 1, (5, 5), "framed_door", 8, (1, 1))
         record_entrance_level(kb, 1, (5, 5), 2)
-        m = Memory(level_way_in=(8, (1, 1)))
+        m = Memory()
         plan = Plan([{"op": "fight_boss", "x": 4, "y": 0}], dict(PARAM_DEFAULTS))
         out = dispatch(w, ctx_for(m, kb, plan))
         self.assertEqual(plan.current(), {"op": "leave_level"}, "leaving goes on top of the stack")
@@ -147,8 +151,10 @@ class LeaveTest(unittest.TestCase):
         w.apply_position({"map_id": 44, "x": 1, "y": 1})
         w.apply_minimap({"maps": [{"map_id": 44, "level": 4}]})
         self.assertEqual(w.map_level, 4, "the minimap's level for the current map")
+        kb = kb_with(1, (5, 5))
+        record_warp(kb, 1, (5, 5), "framed_door", 44, (1, 1))
         plan = Plan([{"op": "explore_area", "x": 0, "y": 0, "radius": 3}], dict(PARAM_DEFAULTS))
-        out = dispatch(w, ctx_for(Memory(level_way_in=(44, (1, 1))), KnowledgeBase.empty("sandbox"), plan))
+        out = dispatch(w, ctx_for(Memory(), kb, plan))
         self.assertEqual(plan.current(), {"op": "leave_level"})
         self.assertEqual(out.state, "Level")
 
@@ -162,6 +168,23 @@ class LeaveTest(unittest.TestCase):
         dispatch(w, ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan))
         self.assertEqual(plan.current()["op"], "explore_area")
 
+    def test_a_leave_on_the_stack_is_not_pushed_again(self):
+        w = grid(["....."], at=(1, 0), map_id=8)
+        w.apply_position({"map_id": 8, "x": 1, "y": 0, "level": 2})
+        plan = Plan([{"op": "wait", "seconds": 5, "why": "t"}, dict(LEAVE_OP)], dict(PARAM_DEFAULTS))
+        sync_leave(plan, w, Memory())
+        self.assertEqual([op["op"] for op in plan.ops_left()], ["wait", "leave_level"], "demoted below: it stays there")
+
+    def test_a_stalled_leave_waits_for_a_reason_to_retry(self):
+        # A104: a leave_level that stalled is moved or dropped like any op, and not pushed back.
+        w = grid(["....."], at=(1, 0), map_id=8)
+        w.apply_position({"map_id": 8, "x": 1, "y": 0, "level": 2})
+        m = Memory()
+        remember(m.stalled_ops, dict(LEAVE_OP), "no progress", 0, RetryBasis(frozenset(), 0, 0), 8)
+        plan = Plan([{"op": "wait", "seconds": 5, "why": "t"}], dict(PARAM_DEFAULTS))
+        sync_leave(plan, w, m)
+        self.assertEqual(plan.current()["op"], "wait")
+
     def test_the_target_level_is_not_left(self):
         w = grid(["....D"], at=(0, 0), map_id=8)
         w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 2})
@@ -170,6 +193,50 @@ class LeaveTest(unittest.TestCase):
         out = dispatch(w, ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan))
         self.assertEqual(plan.current()["op"], "enter_level")
         self.assertEqual(out.state, "Level")
+
+
+
+class WayOutTest(unittest.TestCase):
+    def level_map(self) -> WorldModel:
+        w = grid(["D...D", ".....", "D...."], at=(2, 1), map_id=8)
+        w.apply_position({"map_id": 8, "x": 2, "y": 1, "level": 2})
+        return w
+
+    def test_a_door_known_to_lead_out_comes_first(self):
+        w = self.level_map()
+        kb = kb_with(1, (5, 5))
+        record_warp(kb, 1, (5, 5), "framed_door", 8, (4, 1))  # came in beside (4, 0)
+        record_warp(kb, 8, (0, 2), "framed_door", 1, (6, 6))  # known to lead out
+        self.assertEqual(way_out(kb, w), (0, 2))
+
+    def test_back_the_way_he_came_never_deeper_in(self):
+        w = self.level_map()
+        kb = kb_with(1, (5, 5))
+        record_warp(kb, 1, (5, 5), "framed_door", 8, (4, 1))
+        record_warp(kb, 8, (4, 0), "framed_door", 9, (0, 0))  # a door between the level's rooms
+        kb.maps["9"] = {"level": 2}
+        self.assertEqual(way_out(kb, w), (0, 0), "the door by the landing leads deeper: the next nearest")
+
+    def test_no_known_way_in_or_out_asks_the_planner(self):
+        w = self.level_map()
+        kb = KnowledgeBase.empty("sandbox")
+        self.assertIsNone(way_out(kb, w), "no guess on proximity alone")
+        plan = Plan([dict(LEAVE_OP)], dict(PARAM_DEFAULTS))
+        m = Memory()
+        out = dispatch(w, ctx_for(m, kb, plan))
+        self.assertNotIn("SetPosition", [i.get("verb") for i in out.intents or []])
+        self.assertIn("no known way out", str(m.no_way_on) + out.reason)
+
+
+class BarredEnterLevelTest(unittest.TestCase):
+    def test_a_barred_enter_level_on_top_is_dropped_with_why(self):
+        w = grid(["....D"], at=(0, 0))
+        w.apply_position({"map_id": 1, "x": 0, "y": 0})
+        kb = kb_with(1, (4, 0), levels={(4, 0): 3})
+        plan = Plan([{"op": "enter_level", "x": 4, "y": 0}], dict(PARAM_DEFAULTS))
+        out = dispatch(w, ctx_for(Memory(), kb, plan))
+        self.assertIsNone(plan.current())
+        self.assertNotEqual(out.state, "Level")
 
 
 if __name__ == "__main__":

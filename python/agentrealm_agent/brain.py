@@ -15,6 +15,7 @@ from .directives import Directives, default_directives
 from .plan import Plan
 from .gem_yield import GemYieldTracker
 from .knowledge_base import KnowledgeBase
+from .level_order import minimap_due
 from .memory import Memory
 from .navigation import known_prefix
 from .navigation.rejection import navigation_avoid_costly
@@ -92,23 +93,6 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh or w.entity_read_due(policy.entity_refresh):
         return "entities"
     return _tick_zone_or_skip(w, m, policy)
-
-
-# Minimap reads spent on one map to learn its level before giving up on it
-# (A145): a map is on the minimap once one of its tiles is revealed.
-MINIMAP_TRIES = 2
-
-
-def minimap_due(w: WorldModel, m: Memory) -> bool:
-    """A door step landed on a map whose level is unread: only the minimap
-    carries it, and it says whether that door was a level entrance (A145)."""
-    entry = m.level_entry
-    return (
-        entry is not None
-        and w.map_id == entry[2]
-        and w.map_id not in w.map_levels
-        and m.minimap_reads.get(w.map_id, 0) < MINIMAP_TRIES
-    )
 
 
 def _tick_zone_or_skip(w: WorldModel, m: Memory, policy: Policy) -> str:

@@ -50,8 +50,8 @@ from .item_table import (
 from .knowledge_base.death_chests import load_death_chests, save_death_chests
 from .knowledge_base.hostiles import load_hostiles, save_hostiles
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import is_level_interior, record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
-from .level_order import record_entrance_level
+from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
+from .level_order import note_door_step, settle_entry
 from .equip import note_equip_result, sync_refusals
 from .loot import (
     learn_chest_upgrade,
@@ -500,24 +500,9 @@ class Runner:
         from_map, from_pos, block_type = warp
         if (w.map_id, w.pos) != (from_map, from_pos):
             record_warp(self.knowledge, from_map, from_pos, block_type, w.map_id, w.pos)
-            if not is_level_interior(self.knowledge, from_map) and w.map_id != from_map:
-                # Off a map outside every level: an entrance once the landing map's level is read (A145).
-                m.level_entry = (from_map, from_pos, w.map_id, w.pos)
-                self.note_level_entry()
-
-    def note_level_entry(self) -> None:
-        """Once the landing map's level is read, a step into a level from
-        outside records the entrance's number and the way back out (A145)."""
-        w, m = self.world, self.mem
-        entry = m.level_entry
-        if entry is None or (w.map_level is None and w.map_id == entry[2]):
-            return
-        m.level_entry = None
-        from_map, from_pos, landing_map, landing = entry
-        if w.map_id != landing_map or not w.map_level:
-            return
-        record_entrance_level(self.knowledge, from_map, from_pos, w.map_level)
-        m.level_way_in = (landing_map, landing)
+            # An entrance's number once the landing map's level is read (A145).
+            note_door_step(m, from_map, from_pos, w.map_id, w.pos)
+            settle_entry(self.knowledge, w, m)
 
     def sync_terrain(self, t: dict) -> None:
         """Merge the cells of this terrain read's window into the knowledge base (A26)."""
@@ -631,7 +616,7 @@ class Runner:
             if self.knowledge is not None:
                 sync_entrances(self.knowledge, body)
                 record_map_level(self.knowledge, w)
-            self.note_level_entry()
+            settle_entry(self.knowledge, w, m)
             self.log(call, f"map {w.map_id} level={w.map_level}", {"minimap": body})
         elif call == "zone":
             probe, m.zone_probe = m.zone_probe, None

@@ -76,12 +76,16 @@ OP_FIELDS: dict[str, str] = {
     "equip": "optional code (arms or wears exactly that held item; else the best held gear is armed and worn). Dropped, not done, when the named item cannot be armed or worn",
     "use_item": "code (a held consumable a Use on yourself applies: a potion heals, a chest raises the pack's carry slots). Done once that item is used up; dropped when none is held or its Use was refused or did nothing. A bigger chest is applied as soon as one is held, without this op",
     "enter_level": "x, y (the level door). Refused for an entrance known to be a level above level_target (levels are taken in order)",
-    "leave_level": "no fields. Walks out of the level the way the character came in. Put on top by itself inside a level above level_target",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
     "fight": "exactly one of npc_id (an id from State nearby_npcs) or npc_type (the nearest NPC of that type in sight, kept as the op's one NPC once seen: one fight, not the whole type). Closes on it and swings until it is dead or out of sight, stepping off safe ground to swing (no attack is made from a safe zone) and back behind the swings; Retreat still pulls back at the health floor, and at the floor it never steps off safe ground (dropped then, so you make the call). Dropped for a boss (fight_boss), an NPC the directives forbid attacking, or one no swing or open step reaches",
     "wait": "seconds, why",
     "set_param": "name, value",
 }
+
+# Ops the agent puts on the stack itself, never offered to the planner nor
+# accepted from it: ``leave_level`` (A145) goes on top inside a level above
+# the target.
+INTERNAL_OPS = frozenset({"leave_level"})
 
 # Ops done once their target block changes from what it was when the op reached the top.
 BLOCK_CHANGE_OPS = frozenset({"use_block", "break_block"})
@@ -396,7 +400,6 @@ _VALIDATORS: dict[str, Any] = {
     "gather_gems": _validate_gather_gems,
     "hunt": _validate_hunt,
     "enter_level": _validate_enter_level,
-    "leave_level": lambda op: True,
     "fight_boss": _validate_fight_boss,
     "avoid": _validate_avoid,
     "wait": _validate_wait,

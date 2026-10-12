@@ -107,5 +107,6 @@ def op_walk(w: WorldModel, ctx: PlayContext) -> tuple[set[Pos], set[Pos], set[Po
     """``plan_avoid``, ``plan_costly`` and ``reach`` for a walk on the op's
     behalf (``pathing.op_walk_sets``, A128): every op executor's walk, and the
     way it clears, keeps out of the reach of the hostiles seen that the
-    engagement would not fight."""
-    return op_walk_sets(w, ctx.memory, ctx.policy, ctx.knowledge, ctx.params, ctx.never_attack)
+    engagement would not fight, passing it only when it is the only way and
+    health covers the pass (``pathing.WalkReach``, A146)."""
+    return op_walk_sets(w, ctx.memory, ctx.policy, ctx.knowledge, ctx.params, ctx.never_attack, ctx.tick_hz)

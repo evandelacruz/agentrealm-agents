@@ -503,3 +503,26 @@ class AfloatEngagementTest(unittest.TestCase):
         self.assertNotEqual(out.state, "Fight", out.reason)
         self.assertFalse(c.memory.engagement.fight)
         self.assertNotIn("Use", [i.get("verb") for i in out.intents or []], "no swing from the water")
+
+
+class FightClosesOnlyOnLandTest(unittest.TestCase):
+    def test_no_raft_is_armed_to_close_on_a_hostile_across_water(self):
+        """A146: Fight closes only over ground it can swing from, so with the
+        raft held, the sword armed and a hostile across water with no way
+        round by land, there is no Arm of the raft and no Fight."""
+        from tests.test_hostile_reach import POLICY, pack
+
+        w = level_lake(at=(1, 1), armed="bronze_sword")
+        w.view.tiles.update({(2, 1): "water", (1, 2): "water", (3, 1): "dirt"})  # our islet and its
+        (rat,) = pack(w, (3, 1), hit=1)  # one the estimate would fight, on its own islet
+        plan = Plan([{"op": "wait", "seconds": 30, "why": "hold here"}], dict(PARAM_DEFAULTS))  # no walk of its own
+        c = PlayContext(Memory(), POLICY, random.Random(0), knowledge=KnowledgeBase.empty("sandbox"), plan=plan)
+        out = dispatch(w, c)
+        self.assertTrue(c.memory.engagement.fight, "the estimate would take it on, from land")
+        from agentrealm_agent.fording import ESCAPES
+        from agentrealm_agent.states.fight import close_step
+
+        self.assertIsNone(close_step(w, rat, set()), "no walk in over ground it can swing from")
+        self.assertNotEqual(out.state, "Fight", out.reason)
+        if arm(RAFT) in (out.intents or []):
+            self.assertIn(out.state, ESCAPES, "only an escape takes to the water, never a walk in to swing")

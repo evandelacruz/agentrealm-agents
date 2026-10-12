@@ -214,6 +214,58 @@ class NoWayRoundAsksTest(unittest.TestCase):
         self.assertIn("remembered hostile bogmaw 200, out of view, holding ground round 12,1", ask["blocked_by"])
 
 
+class OnlyWayPassTest(unittest.TestCase):
+    """A146: a walk may pass a hostile's reach that is the only thing between
+    it and its goal when health covers the hits expected on the pass, leaving
+    it above Retreat's floor; otherwise it asks, as A128 has it."""
+
+    CORRIDOR = NoWayRoundAsksTest.CORRIDOR
+
+    def test_health_that_covers_the_pass_walks_through(self):
+        w = world(self.CORRIDOR, at=(1, 1))
+        w.health = w.max_health = 100
+        pack(w, (12, 1), hit=STRONG)
+        c = ctx(travel(21, 1))
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Travel", out.reason)
+        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (2, 1))
+        self.assertEqual(asks(c), [])
+
+    def test_health_that_does_not_cover_it_asks_with_the_hostile(self):
+        w = world(self.CORRIDOR, at=(1, 1))
+        w.health, w.max_health = 25, 100  # the pass would leave it under the floor
+        pack(w, (12, 1), hit=STRONG)
+        c = ctx(travel(21, 1))
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.intents), ("Travel", None), out.reason)
+        [ask] = asks(c)
+        self.assertIn("hostile bogmaw 200 at 12,1", ask["blocked_by"])
+
+    def test_with_a_way_round_it_never_passes(self):
+        w = world(["." * 23] * 9, at=(1, 4))
+        w.health = w.max_health = 100
+        hostile = pack(w, (12, 4), hit=STRONG)[0]
+        c = ctx(travel(21, 4))
+        for _ in range(25):
+            out = dispatch(w, c)
+            if not out.intents:
+                break
+            step = (out.intents[0]["x"], out.intents[0]["y"])
+            self.assertGreater(chebyshev(step, hostile.pos), BAR, f"{step} in the reach with a way round")
+            w.pos = step
+            w.tick += 4
+
+    def test_a_remembered_hostiles_ground_is_never_passed(self):
+        w = world(self.CORRIDOR, at=(1, 1))
+        w.health = w.max_health = 100
+        guard = pack(w, (12, 1))[0]
+        w.entities = []  # its post still holds the corridor, but it cannot be weighed
+        w.sightings[(guard.kind, guard.id)] = Sighting(guard, 7, w.tick, (12, 1), post=True)
+        c = ctx(travel(21, 1))
+        self.assertIsNone(dispatch(w, c).intents)
+        self.assertEqual(len(asks(c)), 1)
+
+
 class EscalationPlansAreHeldTest(unittest.TestCase):
     def test_a_level_the_ladder_climbs_to_this_decision_is_held_to_the_reach(self):
         """At WALK with a failed window, the ladder climbs to CAUTIOUS this
@@ -338,6 +390,7 @@ class PrerequisiteWalkHoldsTest(unittest.TestCase):
         kb = KnowledgeBase("sandbox")
         kb.entrances[entrance_key(MAP, (18, 4))] = {"map_id": MAP, "x": 18, "y": 4, "locked": True, "needs": "key"}
         w = field(at=(10, 4))
+        w.health = 30  # too little to pass the pack's reach (A146)
         w.view.tiles[(18, 4)] = "framed_door"
         hostiles = pack(w, (6, 2), (6, 6), hit=STRONG)  # across every row between us and the key
         w.entities = [*hostiles, Entity("supply", 51, (1, 4), "key")]

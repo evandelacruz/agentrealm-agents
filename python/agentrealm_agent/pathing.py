@@ -29,7 +29,19 @@ from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from .directives import attack_forbidden
 from .engagement import would_fight
 from .hostile_ground import ground_by_hostile, walk_reach
-from .survival import hostiles_in_range, is_hostile, pursuer_peaks, safe_goals, town_cell
+from .executor.pacing import DEFAULT_TICK_RATE_HZ
+from .hostile_ground import WALK_REACH_MARGIN
+from .survival import (
+    estimate_health,
+    expected_damage,
+    health_floor,
+    hostiles_in_range,
+    is_hostile,
+    pursuer_peaks,
+    safe_goals,
+    town_cell,
+    worn_defense,
+)
 from .executor.movement import step_landing
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
@@ -1014,6 +1026,57 @@ def safe_explore_path(
     return (path, leg) if path else (None, None)
 
 
+class WalkReach(frozenset):
+    """The reach a walk on an op's behalf keeps out of (A128), and the one
+    case it may pass through it (A146): when it is the only thing between the
+    walk and its goal (no plan that keeps out of it gets there) and health
+    covers the hits expected on the pass (``covers_pass``). Otherwise a walk
+    whose plan enters it holds and asks the planner, as before."""
+
+    def __new__(
+        cls, cells, w: WorldModel, policy: Policy, params: dict[str, float | int], avoid: set[Pos], costly: set[Pos], tick_hz: int
+    ):
+        out = super().__new__(cls, cells)
+        out.w, out.policy, out.params, out.avoid, out.costly, out.tick_hz = w, policy, params, avoid, costly, tick_hz
+        out._passes: dict[tuple[Pos | None, tuple[Pos, ...]], bool] = {}
+        return out
+
+    def passes(self, path: list[Pos]) -> bool:
+        """``path``, which enters the reach, may be walked anyway: worked out
+        once per position and path, since one decision asks again."""
+        key = (self.w.pos, tuple(path))
+        if key not in self._passes:
+            self._passes[key] = self._only_way(path[-1]) and covers_pass(self.w, self.policy, self.params, path, self, self.tick_hz)
+        return self._passes[key]
+
+    def _only_way(self, goal: Pos) -> bool:
+        """No plan that keeps out of the reach gets to ``goal``, on the grid
+        the walk plans on (unseen ground at fog cost)."""
+        params = CostGridParams(avoid=set(self.avoid) | set(self), costly=set(self.costly), allow_goal_door=True)
+        return cost_path(self.w, goal, params) is None
+
+
+def covers_pass(
+    w: WorldModel, policy: Policy, params: dict[str, float | int], path: list[Pos], reach: Collection[Pos], tick_hz: int
+) -> bool:
+    """Health covers the hits expected on ``path``'s cells in ``reach`` (A146):
+    what the hostiles in view whose reach those cells are in are expected to
+    deal while we cross them at our movement speed (``survival.expected_damage``,
+    priced as the win estimate prices their hits, through the armor worn)
+    leaves health above Retreat's floor against them (``survival.health_floor``),
+    so the pass never ends where Retreat would take over. A cell held by no
+    hostile in view (a remembered one's ground) cannot be weighed, so no pass
+    is covered then."""
+    inside = [p for p in path if p in reach]
+    bar = policy.hostile_range + WALK_REACH_MARGIN
+    hostiles = [e for e in w.entities if is_hostile(w, policy, e) and any(chebyshev(e.pos, p) <= bar for p in inside)]
+    if not inside or any(all(chebyshev(e.pos, p) > bar for e in hostiles) for p in inside):
+        return False
+    ticks = len(inside) * 1000 * tick_hz / max(1, w.movement_speed)
+    left = estimate_health(w) - expected_damage(hostiles, w.threat, ticks, worn_defense(w))
+    return left > health_floor(w, params, hostiles)
+
+
 def op_walk_sets(
     w: WorldModel,
     m: Memory,
@@ -1021,7 +1084,8 @@ def op_walk_sets(
     knowledge: KnowledgeBase | None,
     params: dict[str, float | int],
     never_attack: list[str],
-) -> tuple[set[Pos], set[Pos], set[Pos]]:
+    tick_hz: int = DEFAULT_TICK_RATE_HZ,
+) -> tuple[set[Pos], set[Pos], WalkReach]:
     """``plan_avoid``, ``plan_costly`` and ``reach`` for a walk on an op's behalf (A128).
 
     As ``plan_sets``, with the reach of the hostiles seen (``walk_reach``)
@@ -1043,12 +1107,14 @@ def op_walk_sets(
         and would_fight(w, policy, params, also=e)
     }
     reach = walk_reach(w, policy, skip=fought)
-    return avoid, costly | reach, reach
+    return avoid, costly | reach, WalkReach(reach, w, policy, params, avoid, costly | reach, tick_hz)
 
 
 def enters_reach(w: WorldModel, path: list[Pos] | None, reach: Collection[Pos]) -> bool:
     """``path`` steps into ``reach`` from outside it. Cells it walks while
-    leaving the reach it starts in do not count: that is the way out."""
+    leaving the reach it starts in do not count: that is the way out. A pass
+    a ``WalkReach`` allows (the reach is the only way and health covers it,
+    A146) does not count either."""
     if not path or not reach:
         return False
     outside = w.pos not in reach
@@ -1056,7 +1122,7 @@ def enters_reach(w: WorldModel, path: list[Pos] | None, reach: Collection[Pos]) 
         if p not in reach:
             outside = True
         elif outside:
-            return True
+            return not (isinstance(reach, WalkReach) and reach.passes(path))
     return False
 
 

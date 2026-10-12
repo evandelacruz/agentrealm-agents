@@ -55,7 +55,7 @@ from .break_state import break_toward
 # rather than escalate to Break, so they need no entry.
 OWNER_WALKS: dict[str, tuple[str, ...]] = {
     "Travel": ("travel:", "explore_area"),
-    "Shop": ("travel:", "explore_area"),  # its walk to a shop or town, and its search round town
+    "Shop": ("travel:", "explore_area"),  # its walk to a seller, and its search round one
     "Explore": ("explore_area",),
     "Level": ("level:",),
     "Boss": ("boss:",),

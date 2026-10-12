@@ -9,6 +9,7 @@ from ..knowledge_maps import HUNTING
 from ..world import Pos
 
 SHOPS = "shops"
+NOT_SOLD = "not_sold"
 TOWN = "town"
 
 
@@ -118,12 +119,137 @@ def iter_hunting_cells(kb: KnowledgeBase | None) -> list[tuple[int, Pos, dict[st
     return out
 
 
-def record_shop_cell(kb: KnowledgeBase | None, map_id: int, pos: Pos) -> None:
+def record_shop_cell(
+    kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str | None = None, price: int | None = None
+) -> None:
+    """A shop cell, and what it was last seen selling there (A131): ``sells``
+    maps the item seen for sale on the cell to its gem price. A cell holds one
+    supply, so a new sighting replaces what it sold before."""
     if kb is None:
         return
     with kb.lock:
         shops = kb.maps.setdefault(str(map_id), {}).setdefault(SHOPS, {})
-        shops[_cell_key(pos)] = {}
+        row = shops.get(_cell_key(pos))
+        if not isinstance(row, dict):
+            row = shops[_cell_key(pos)] = {}
+        if code:
+            row["sells"] = {code: price}
+            _lapse_locked(kb, {code})
+
+
+def forget_sale(kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str) -> None:
+    """The shop cell was seen without ``code`` for sale: it sells it no more (A131).
+    A cell saved before A131 (no ``sells``) is then checked: it sells nothing known."""
+    if kb is None:
+        return
+    with kb.lock:
+        row = kb.maps.get(str(map_id), {}).get(SHOPS, {}).get(_cell_key(pos))
+        if not isinstance(row, dict):
+            return
+        sells = row.get("sells")
+        row["sells"] = {c: p for c, p in sells.items() if c != code} if isinstance(sells, dict) else {}
+
+
+def note_not_sold(kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str, tick: int) -> None:
+    """A seller's place (a clue's cell, a place a buy named) was searched round
+    without ``code`` for sale, at ``tick`` (A131): it is no seller of it until
+    newer evidence, a clue found after then or a shop seen selling it."""
+    if kb is None:
+        return
+    with kb.lock:
+        rows = kb.maps.setdefault(str(map_id), {}).setdefault(NOT_SOLD, {})
+        rows.setdefault(_cell_key(pos), {})[code] = tick
+
+
+def lapse_not_sold(kb: KnowledgeBase | None, codes: set[str]) -> None:
+    """Newer evidence ``codes`` are sold (a clue offering one, a shop seen
+    selling one): every place searched without them is a seller again (A131)."""
+    if kb is None or not codes:
+        return
+    with kb.lock:
+        _lapse_locked(kb, codes)
+
+
+def _lapse_locked(kb: KnowledgeBase, codes: set[str]) -> None:
+    for entry in kb.maps.values():
+        rows = entry.get(NOT_SOLD) if isinstance(entry, dict) else None
+        if not isinstance(rows, dict):
+            continue
+        for key in list(rows):
+            left = {c: t for c, t in rows[key].items() if c not in codes} if isinstance(rows[key], dict) else {}
+            if left:
+                rows[key] = left
+            else:
+                del rows[key]
+
+
+def iter_not_sold(kb: KnowledgeBase | None) -> dict[tuple[int, Pos, str], int]:
+    """Every place searched without an item for sale: (map, cell, code) -> tick."""
+    if kb is None:
+        return {}
+    out: dict[tuple[int, Pos, str], int] = {}
+    with kb.lock:
+        for mid, entry in kb.maps.items():
+            rows = entry.get(NOT_SOLD) if isinstance(entry, dict) else None
+            if not isinstance(rows, dict):
+                continue
+            for key, codes in rows.items():
+                try:
+                    map_id = int(mid)
+                    x, y = (int(p) for p in key.split(",", 1))
+                except ValueError:
+                    continue
+                for code, tick in (codes.items() if isinstance(codes, dict) else ()):
+                    if isinstance(tick, int):
+                        out[(map_id, (x, y), code)] = tick
+    return out
+
+
+def iter_unchecked_shop_cells(kb: KnowledgeBase | None) -> list[tuple[int, Pos]]:
+    """Shop cells saved before A131, with no record of what they sell: each
+    may sell any item a price was seen for, until it is seen again."""
+    if kb is None:
+        return []
+    out: list[tuple[int, Pos]] = []
+    with kb.lock:
+        for mid, entry in kb.maps.items():
+            shops = entry.get(SHOPS) if isinstance(entry, dict) else None
+            if not isinstance(shops, dict):
+                continue
+            for key, row in shops.items():
+                if isinstance(row, dict) and "sells" in row:
+                    continue
+                try:
+                    map_id = int(mid)
+                    x, y = (int(p) for p in key.split(",", 1))
+                except ValueError:
+                    continue
+                out.append((map_id, (x, y)))
+    return out
+
+
+def iter_shop_sales(kb: KnowledgeBase | None) -> list[tuple[int, Pos, str, int | None]]:
+    """Each item a known shop cell was seen selling: map, cell, code and price (A131)."""
+    if kb is None:
+        return []
+    out: list[tuple[int, Pos, str, int | None]] = []
+    with kb.lock:
+        for mid, entry in kb.maps.items():
+            shops = entry.get(SHOPS) if isinstance(entry, dict) else None
+            if not isinstance(shops, dict):
+                continue
+            for key, row in shops.items():
+                sells = row.get("sells") if isinstance(row, dict) else None
+                if not isinstance(sells, dict):
+                    continue
+                try:
+                    map_id = int(mid)
+                    x, y = (int(p) for p in key.split(",", 1))
+                except ValueError:
+                    continue
+                for code, price in sells.items():
+                    out.append((map_id, (x, y), code, price if isinstance(price, int) else None))
+    return out
 
 
 def iter_shop_cells(kb: KnowledgeBase | None) -> list[tuple[int, Pos]]:

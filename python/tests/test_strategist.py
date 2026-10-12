@@ -29,7 +29,7 @@ from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.supplies import row as supply_row
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_hunting_zone
-from agentrealm_agent.travel.knowledge import entrance_key, sync_town
+from agentrealm_agent.travel.knowledge import entrance_key, record_shop_cell, sync_town
 from agentrealm_agent.gem_yield import RATE_MIN_SECONDS
 from agentrealm_agent.strategist import (
     NO_GEMS_EARNED,
@@ -89,6 +89,18 @@ class Clock:
         return self.now
 
 
+# What these tests buy: a shop on the map is known to sell each (A131).
+SOLD_HERE = ("iron_mail", "matches", "middle_chest", "potion", "rope", "small_potion", "torch")
+
+
+def shop_selling(*codes: str, map_id: int = 7) -> KnowledgeBase:
+    """A knowledge base with a shop cell known to sell each of ``codes``."""
+    kb = KnowledgeBase.empty("sandbox")
+    for i, code in enumerate(codes):
+        record_shop_cell(kb, map_id, (40, i), code, 5)
+    return kb
+
+
 def fake_runner(goals: list[str] | None = None) -> SimpleNamespace:
     """The parts of a Runner the strategist reads and writes."""
     w = WorldModel(character_id=1, map_id=7, pos=(0, 0), tick=10)
@@ -100,7 +112,7 @@ def fake_runner(goals: list[str] | None = None) -> SimpleNamespace:
         mem=Memory(),
         plan=plan or Plan([{"op": "explore_area", "x": 0, "y": 0, "radius": 9999}], dict(PARAM_DEFAULTS)),
         directives=SimpleNamespace(directives=Directives(params=dict(PARAM_DEFAULTS), goals=goals or [])),
-        knowledge=None,
+        knowledge=shop_selling(*SOLD_HERE),
         tick_hz=10,
         server_tick=10,
         log=mock.MagicMock(),

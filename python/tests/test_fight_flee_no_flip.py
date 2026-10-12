@@ -1,0 +1,196 @@
+"""A fight decided on holds, and two states never take turns for nothing (A136).
+
+Rebuilt offline: a weak hostile stands still behind a corner, so the one
+step that only looks closer ends beside a wall. Fight closes on it round the
+corner and kills it, with no Flee in between; the engagement keeps a fight
+it decided on until health reaches the floor or a new hostile joins; and the
+oscillation guard benches the losing side of a flip that has no walk to give
+up, and asks the planner when that does not settle it.
+"""
+
+from __future__ import annotations
+
+import random
+import unittest
+from unittest import mock
+
+from agentrealm_agent import engagement
+from agentrealm_agent.config import Policy
+from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_agent.engagement import Engagement, sync_engagement
+from agentrealm_agent.memory import Memory
+from agentrealm_agent.navigation import oscillation
+from agentrealm_agent.states import dispatch
+from agentrealm_agent.states.base import PlayContext
+from agentrealm_agent.states.fight import close_step, held_target
+from agentrealm_agent.world import Entity, WorldModel, chebyshev
+
+MAP = 1
+CODE = "fake_biter"
+POST = (13, 10)  # where the biter stands, and never leaves
+CORNER = (12, 11)  # the one cell beside it a greedy step from (11, 12) would take
+
+
+def world(at=(11, 12), health=10) -> WorldModel:
+    """Open dirt with a stone at ``CORNER``: from ``at`` a step closer exists
+    (to nowhere nearer), and the way in is round the stone."""
+    w = WorldModel(character_id=1, map_id=MAP, pos=at, perception=8, health=health, max_health=10, lives=9)
+    for x in range(30):
+        for y in range(30):
+            w.view.tiles[(x, y)] = "dirt"
+    w.view.tiles[CORNER] = "stone"
+    w.terrain_center, w.terrain_map = at, MAP
+    w.hostile_types.add(("npc", CODE))
+    w.attack_range = 1
+    w.armed_code = "sword"
+    return w
+
+
+def ctx() -> PlayContext:
+    policy = Policy(kind="scripted", goals=["explore"], on_hostile="fight", hostile=["npc"])
+    return PlayContext(Memory(), policy, random.Random(0), params=dict(PARAM_DEFAULTS))
+
+
+def biter(npc_id=7, at=POST) -> Entity:
+    return Entity("npc", npc_id, at, code=CODE)
+
+
+class StandingHostileTest(unittest.TestCase):
+    """A weak hostile that never moves is closed on and fought to the end."""
+
+    def test_close_step_walks_round_the_corner(self):
+        w = world(at=(12, 12))
+        w.view.tiles[(13, 11)] = "stone"
+        w.view.tiles[(12, 11)] = "stone"
+        # Every cell beside (12, 12) nearer the biter is shut; the walk goes round.
+        step = close_step(w, biter(), set())
+        self.assertIsNotNone(step)
+        self.assertNotIn(step, {(12, 11), (13, 11)})
+
+    def test_it_is_closed_on_and_killed_with_no_flee_between(self):
+        w, c = world(), ctx()
+        npc = biter()
+        w.entities = [npc]
+        states, swung = [], 0
+        for _ in range(40):
+            w.tick += 5
+            out = dispatch(w, c)
+            states.append(out.state)
+            uses = [i for i in out.intents or [] if i["verb"] == "Use"]
+            if uses:
+                swung += 1
+                c.memory.last_use_tick = w.tick
+                if swung == 3:
+                    w.entities = []  # it went down
+                    break
+            elif out.intents and out.intents[0]["verb"] == "SetPosition":
+                w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+        self.assertEqual(swung, 3, states)
+        self.assertNotIn("Flee", states)
+        self.assertEqual(set(states), {"Fight"}, states)
+        self.assertNotEqual(dispatch(w, c).state, "Fight")
+
+
+class FightHoldsTest(unittest.TestCase):
+    """Once it says fight, the decision holds on the same facts (A136)."""
+
+    def test_a_drop_in_the_odds_alone_does_not_turn_a_fight(self):
+        w, c = world(at=(12, 10)), ctx()
+        w.entities = [biter()]
+        self.assertTrue(sync_engagement(w, c.memory, c.policy, c.params).fight)
+        with mock.patch.object(engagement, "win_ratio", return_value=0.1):
+            e = sync_engagement(w, c.memory, c.policy, c.params)
+        self.assertTrue(e.fight, "the same hostile, health above the floor: the fight holds")
+        self.assertEqual(e.ratio, 0.1)
+
+    def test_health_at_the_floor_turns_it(self):
+        w, c = world(at=(12, 10)), ctx()
+        w.entities = [biter()]
+        self.assertTrue(sync_engagement(w, c.memory, c.policy, c.params).fight)
+        w.health = 1
+        with mock.patch.object(engagement, "win_ratio", return_value=0.1):
+            self.assertFalse(sync_engagement(w, c.memory, c.policy, c.params).fight)
+
+    def test_a_second_hostile_can_still_send_it_running(self):
+        w, c = world(at=(12, 10)), ctx()
+        w.entities = [biter()]
+        self.assertTrue(sync_engagement(w, c.memory, c.policy, c.params).fight)
+        w.entities.append(biter(8, (11, 10)))
+        e = sync_engagement(w, c.memory, c.policy, c.params)
+        self.assertFalse(e.fight, "a pair is more than the sword takes at the margin")
+        self.assertEqual(dispatch(w, c).state, "Flee")
+
+
+def pace(m: Memory, w: WorldModel, moves: list[str], cells=((5, 5), (6, 5))) -> dict | None:
+    """Run the guard over decisions whose moves came from ``moves`` in turn,
+    stepping between ``cells``: the last event, if any."""
+    event = None
+    for i, state in enumerate(moves):
+        w.tick += 5
+        w.pos = cells[i % 2]
+        event = oscillation.check(m, w) or event
+        m.nav_stuck.last_move = ("", state, "")  # no walk's
+    return event
+
+
+class FlipGuardTest(unittest.TestCase):
+    """Two states pacing with no walk are settled by the guard (A136)."""
+
+    def setUp(self):
+        self.w = WorldModel(character_id=1, map_id=MAP, pos=(5, 5), health=10, max_health=10)
+        self.m = Memory()
+        self.m.engagement = Engagement(frozenset({("npc", 7)}), fight=True)
+
+    def test_an_unwalked_fight_flee_flip_benches_flee_within_the_window(self):
+        event = pace(self.m, self.w, ["Fight", "Flee"] * 4)
+        self.assertIsNotNone(event)
+        self.assertEqual(event["unwalked"], ["Fight", "Flee"])
+        self.assertEqual(event["benched"], "Flee")
+        self.assertTrue(oscillation.benched(self.m, self.w, "Flee"))
+        self.assertFalse(oscillation.benched(self.m, self.w, "Fight"))
+        self.w.tick = event["benched_until"]
+        self.assertFalse(oscillation.benched(self.m, self.w, "Flee"), "the cool-down ends")
+
+    def test_while_it_says_flee_fight_is_benched(self):
+        self.m.engagement = Engagement(frozenset({("npc", 7)}), fight=False)
+        self.assertEqual(pace(self.m, self.w, ["Fight", "Flee"] * 4)["benched"], "Fight")
+
+    def test_a_turn_in_the_decision_lifts_the_bench(self):
+        pace(self.m, self.w, ["Fight", "Flee"] * 4)
+        self.assertTrue(oscillation.benched(self.m, self.w, "Flee"))
+        self.m.engagement = Engagement(frozenset({("npc", 7), ("npc", 8)}), fight=False)
+        self.assertFalse(oscillation.benched(self.m, self.w, "Flee"), "a new danger may still flee")
+
+    def test_a_swing_in_the_window_is_progress(self):
+        self.m.last_use_tick = self.w.tick + 12
+        event = pace(self.m, self.w, ["Fight", "Flee"] * 4)
+        self.assertIsNotNone(event)
+        self.assertNotIn("benched", event)
+
+    def test_a_flip_the_bench_does_not_settle_asks_the_planner(self):
+        first = pace(self.m, self.w, ["Fight", "Flee"] * 4)
+        self.assertNotIn("asked", first)
+        self.assertFalse([s for s in self.m.strategist_signals if s["trigger"] == "pacing"])
+        again = pace(self.m, self.w, ["Fight", "Flee"] * 4)
+        self.assertTrue(again.get("asked"))
+        asks = [s for s in self.m.strategist_signals if s["trigger"] == "pacing"]
+        self.assertEqual(len(asks), 1)
+        self.assertEqual(asks[0]["states"], ["Fight", "Flee"])
+
+    def test_dispatch_skips_a_benched_state(self):
+        """Walled off from the biter, a fight decided on cannot close: Flee
+        would run, but it lost the flip and stays off the pick."""
+        w, c = world(at=(12, 10)), ctx()
+        w.entities = [biter()]
+        sync_engagement(w, c.memory, c.policy, c.params, lambda e: held_target(w, c, e))
+        w.pos = (11, 10)
+        for p in [(10, 9), (10, 10), (10, 11), (11, 9), (11, 11), (12, 9), (12, 10), (12, 11)]:
+            w.view.tiles[p] = "stone"
+        self.assertEqual(dispatch(w, c).state, "Flee")
+        c.memory.nav_stuck.benched["Flee"] = oscillation.nav_stuck.Bench(w.tick + 100, True)
+        self.assertNotEqual(dispatch(w, c).state, "Flee")
+        self.assertLessEqual(chebyshev(w.pos, POST), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

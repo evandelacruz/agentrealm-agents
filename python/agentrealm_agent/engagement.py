@@ -33,6 +33,13 @@ health crosses the bar, a hit or a miss moves a type's odds, a new hostile
 joins, or running is found not to work. Where a hostile is, how far, and
 whether a step closes on it do not change it; they decide how the decision
 is carried out.
+
+A fight decided on holds (A136): once the decision is fight, a turn in the
+estimate ends it only when health is at the survival floor against the
+hostiles weighed (``survival.at_health_floor``) or a hostile the estimate
+had not weighed comes into it (``Engagement.weighed``), and the fight ends
+as above. So it never flips from one decision to the next on the same
+hostiles.
 """
 
 from __future__ import annotations
@@ -42,6 +49,7 @@ from typing import TYPE_CHECKING, Callable
 
 from .survival import (
     GAP_PROBE_TICKS,
+    at_health_floor,
     can_reach_us,
     combat_group,
     effective_fight_margin,
@@ -82,6 +90,10 @@ class Engagement:
     # While Fight chases a member out of range: the nearest gap so far, and
     # the tick it was reached. None while a member is in range.
     chase: tuple[int, int] | None = None
+    # Every hostile the estimate has weighed (the group and those that can
+    # reach us with it): a fight decided on is decided again only when one
+    # joins it.
+    weighed: frozenset[HostileKey] = frozenset()
 
 
 def sync_engagement(
@@ -126,8 +138,21 @@ def sync_engagement(
     if newcomers:
         m.reprice_targets()
     group = known | {(h.kind, h.id) for h in joined}
-    m.engagement = replace(decide(w, policy, params, group, e is not None and e.cannot_outrun), chase=chase)
+    now = decide(w, policy, params, group, e is not None and e.cannot_outrun)
+    if e is not None and e.fight and not now.fight and fight_holds(w, params, e, now):
+        now = replace(now, fight=True)
+    m.engagement = replace(now, chase=chase, weighed=now.weighed | (e.weighed if e is not None else frozenset()))
     return m.engagement
+
+
+def fight_holds(w: WorldModel, params: dict[str, float | int], before: Engagement, now: Engagement) -> bool:
+    """A fight decided on (``before``) holds against a decision ``now`` that
+    turned: no hostile joined what the estimate weighs, and health is above
+    the survival floor against those it weighs (module docstring)."""
+    if not now.weighed <= before.weighed:
+        return False
+    weighed = [h for h in w.entities if (h.kind, h.id) in now.weighed]
+    return not at_health_floor(w, params, weighed)
 
 
 def held_members(w: WorldModel, e: Engagement | None) -> list[Entity]:
@@ -179,7 +204,8 @@ def decide(
         estimate_health(w) if health is None else health, members, w.threat, w.armed_code, worn_defense(w)
     )
     bar = fight_bar(w, policy, params, outrun_failed)
-    return Engagement(group, outrun_failed, ratio, bool(members) and ratio > bar)
+    weighed = frozenset((h.kind, h.id) for h in members)
+    return Engagement(group, outrun_failed, ratio, bool(members) and ratio > bar, weighed=weighed)
 
 
 def fight_bar(w: WorldModel, policy: Policy, params: dict[str, float | int], outrun_failed: bool) -> float:

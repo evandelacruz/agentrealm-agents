@@ -9,6 +9,7 @@ tile, Fight's move is the step off it toward the target.
 from __future__ import annotations
 
 import dataclasses
+from collections import deque
 
 from ..directives import attack_forbidden
 from ..executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_intents
@@ -30,6 +31,10 @@ from .way import clear_the_way
 
 # ``Use`` swings queued per submit, ahead of the retreat tail.
 ATTACK_USES = 3
+
+# Cells a walk to close on a hostile may stray beyond the gap it starts at,
+# to get round what stands between (``close_step``).
+APPROACH_DETOUR = 4
 
 
 def fight_target(w: WorldModel, policy, never_attack: list[str], engagement: Engagement | None = None) -> Entity | None:
@@ -132,21 +137,39 @@ def off_safe_step(w: WorldModel, target: Entity, blocked: set[Pos], reach: int) 
     return min(options, key=lambda p: (chebyshev(p, target.pos) > reach, chebyshev(p, target.pos), p))
 
 
-def close_step(w: WorldModel, target: Entity, blocked: set[Pos]) -> Pos | None:
-    """One step closer to ``target`` when out of weapon reach."""
+def close_step(w: WorldModel, target: Entity, blocked: set[Pos], reach: int = 1) -> Pos | None:
+    """The first step of the shortest walk to a cell within ``reach`` of
+    ``target``, round whatever stands in the way; None when no walk over open
+    ground within ``APPROACH_DETOUR`` of the straight line gets there.
+
+    A walk, not a greedy step closer: a step that only looks closer can end
+    beside a wall with nowhere nearer, and then Fight cannot close where it
+    could a step back, so Fight and Flee would take turns there (A136). Every
+    cell of a shortest walk can still reach, so whether Fight can close
+    never changes as it closes."""
     here = w.pos
     if here is None:
         return None
-    dist = chebyshev(here, target.pos)
-    options = [p for p in w.open_neighbours(here, blocked) if chebyshev(p, target.pos) < dist]
-    if not options:
-        return None
-    return min(options, key=lambda p: (chebyshev(p, target.pos), p))
+    bound = chebyshev(here, target.pos) + APPROACH_DETOUR
+    first: dict[Pos, Pos] = {}
+    frontier = deque([here])
+    seen = {here}
+    while frontier:
+        p = frontier.popleft()
+        for n in w.open_neighbours(p, blocked):
+            if n in seen or chebyshev(n, target.pos) > bound:
+                continue
+            seen.add(n)
+            first[n] = first.get(p, n)
+            if chebyshev(n, target.pos) <= reach:
+                return first[n]
+            frontier.append(n)
+    return None
 
 
 def held_target(world: WorldModel, ctx: PlayContext, engagement: Engagement) -> Entity | None:
     """The hostile Fight goes on with in ``engagement``, a fight decided on:
-    the one ``fight_target`` picks, when Fight can swing at it or step closer.
+    the one ``fight_target`` picks, when Fight can swing at it or walk closer.
     None when the fight has nothing left Fight can act on (A113); the
     engagement ends on it (``engagement.sync_engagement``)."""
     target = fight_target(world, ctx.policy, ctx.never_attack, engagement)
@@ -156,14 +179,14 @@ def held_target(world: WorldModel, ctx: PlayContext, engagement: Engagement) -> 
 
 
 def can_engage(world: WorldModel, target: Entity, ctx: PlayContext) -> bool:
-    """In weapon reach off safe ground, or one open step brings us closer
-    (or, on a safe tile, off it toward the target)."""
+    """In weapon reach off safe ground, or a walk gets within it
+    (``close_step``; on a safe tile, a step off it toward the target)."""
     blocked, _, _ = plan_sets(world, ctx.memory, ctx.policy, ctx.knowledge)
     if on_safe_tile(world):
         return off_safe_step(world, target, blocked, weapon_reach(world, ctx.knowledge)) is not None
     if in_weapon_reach(world, target, ctx.knowledge):
         return True
-    return close_step(world, target, blocked) is not None
+    return close_step(world, target, blocked, weapon_reach(world, ctx.knowledge)) is not None
 
 
 def held_on_safe_ground(world: WorldModel, ctx: PlayContext, target: Entity) -> bool:
@@ -283,7 +306,7 @@ def engage(w: WorldModel, ctx: PlayContext, target: Entity, state: str) -> State
         return StateOutcome([set_position(off)], f"off safe ground toward {target.kind} {target.id}", reflex=True, state=state)
     if not in_weapon_reach(w, target, ctx.knowledge):
         blocked, _, _ = plan_sets(w, m, policy, ctx.knowledge)
-        toward = close_step(w, target, blocked)
+        toward = close_step(w, target, blocked, weapon_reach(w, ctx.knowledge))
         if toward is None:
             return StateOutcome(None, "cannot close", state=state)
         return StateOutcome(

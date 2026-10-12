@@ -166,7 +166,7 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
     recently even out of range (``flee_from``); ``fight`` flees when there is no
     swingable target (``never_attack``), the engagement's decision is not to
     fight (``engagement.fights``), or the target is out of weapon reach with
-    no open step closer; ``ignore``
+    no walk to it (``fight.close_step``); ``ignore``
     never flees. On a known safe tile, nothing can hurt us, so it stays.
     """
     policy = ctx.policy

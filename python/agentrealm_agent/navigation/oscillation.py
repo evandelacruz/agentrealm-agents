@@ -38,12 +38,26 @@ patch of its own.
 
 Standing still never counts: a cell is remembered only when it differs from
 the one before, so resting, fighting in place or a ``Use`` are not pacing.
+
+Two states can take turns with no walk at all, such as Fight closing on a
+hostile and Flee stepping back from it (A136). With no walk to give up, the
+guard settles the flip itself: when two or more states paced with steps
+that were no walk and nothing came of it (no hit taken, no swing sent since
+the window began), the losing side is benched for ``FLIP_COOLDOWN_TICKS``
+(``bench``): the side going against the engagement's decision (Flee or
+Retreat while it says fight, Fight while it says flee), else the state that
+took the last step. Dispatch skips a benched state (``benched``); the bench
+lifts early once the engagement's decision changes, so a real danger still
+sends the character running. When the same states flip again within twice
+the cool-down, the bench has not settled it: a ``pacing`` trigger asks the
+planner.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..memory import queue_signal
 from ..world import Pos, WorldModel
 from . import stuck as nav_stuck
 
@@ -66,6 +80,14 @@ GIVE_UP_REASON = "pacing"
 # States whose pacing on their own is corrected by a forced committed escape
 # (``take_escape``) rather than by giving anything up.
 ESCAPE_STATES = frozenset({"Flee", "Retreat"})
+
+# How long a state that lost a flip stays off the pick (``bench``): a walk
+# given up's first backoff.
+FLIP_COOLDOWN_TICKS = nav_stuck.BACKOFF_BASE_TICKS
+
+# The states that carry out each engagement decision: while it says fight,
+# these go against it, and while it says flee, Fight does.
+AGAINST_FIGHT = ("Flee", "Retreat")
 
 
 def pacing(cells: list[Pos]) -> bool:
@@ -98,12 +120,14 @@ def check(m: Memory, w: WorldModel) -> dict | None:
     if w.pos is None or w.map_id is None:
         return None
     if stuck.cells_map != w.map_id:
-        stuck.cells_map, stuck.recent_cells, stuck.recent_moves = w.map_id, [], []
+        stuck.cells_map, stuck.recent_cells, stuck.recent_moves, stuck.recent_ticks = w.map_id, [], [], []
     if not stuck.recent_cells or stuck.recent_cells[-1] != w.pos:
         stuck.recent_cells.append(w.pos)
         stuck.recent_moves.append(stuck.last_move)
+        stuck.recent_ticks.append(w.tick)
         del stuck.recent_cells[:-OSCILLATION_STEPS]
         del stuck.recent_moves[:-OSCILLATION_STEPS]
+        del stuck.recent_ticks[:-OSCILLATION_STEPS]
     if not pacing(stuck.recent_cells):
         return None
 
@@ -112,7 +136,8 @@ def check(m: Memory, w: WorldModel) -> dict | None:
     # into the pacing, it is not part of it.
     moves = stuck.recent_moves[1:]
     states = sorted({state for _, state, _ in moves if state})
-    stuck.recent_cells, stuck.recent_moves = [], []
+    since = stuck.recent_ticks[0] if stuck.recent_ticks else w.tick
+    stuck.recent_cells, stuck.recent_moves, stuck.recent_ticks = [], [], []
     event: dict = {
         "event": "oscillation",
         "reason": GIVE_UP_REASON,
@@ -132,6 +157,9 @@ def check(m: Memory, w: WorldModel) -> dict | None:
         event.update(goal=given[0]["goal"], target=given[0]["target"], goals=[g["goal"] for g in given], walks=given)
     if escalated:
         event["escalated"] = escalated
+    flippers = event["unwalked"]
+    if not given and not event.get("escape") and len(flippers) > 1 and not _came_of_it(m, w, since):
+        event.update(bench(m, w, flippers, moves))
     stuck.oscillations.append(event)
     del stuck.oscillations[:-EVENTS_KEPT]
     return event
@@ -166,6 +194,70 @@ def _give_up_walks(m: Memory, w: WorldModel, moves: list[tuple[str, str, str]]) 
             nav_stuck.escalate(m, w, att, GIVE_UP_REASON)
             escalated.append({"goal": att.goal, "target": list(att.target), "block": list(block)})
     return given, escalated
+
+
+def _came_of_it(m: Memory, w: WorldModel, since: int) -> bool:
+    """Since the pacing began, a hostile hit us or we sent a swing."""
+    return (w.attacked_tick is not None and w.attacked_tick > since) or (
+        m.last_use_tick is not None and m.last_use_tick > since
+    )
+
+
+def bench(m: Memory, w: WorldModel, states: list[str], moves: list[tuple[str, str, str]]) -> dict:
+    """Settle a flip between ``states`` that paced with no walk (module
+    docstring): bench the losing side for ``FLIP_COOLDOWN_TICKS``, and ask
+    the planner (a ``pacing`` trigger) when the same states flipped within
+    twice that before. Returns what the ``oscillation`` event records."""
+    stuck, e = m.nav_stuck, m.engagement
+    loser = losing_side(m, states, moves)
+    stuck.benched[loser] = nav_stuck.Bench(w.tick + FLIP_COOLDOWN_TICKS, e.fight if e is not None else None)
+    flip = tuple(states)
+    again = stuck.last_flip is not None and stuck.last_flip[0] == flip and w.tick - stuck.last_flip[1] <= 2 * FLIP_COOLDOWN_TICKS
+    stuck.last_flip = (flip, w.tick)
+    out: dict = {"benched": loser, "benched_until": w.tick + FLIP_COOLDOWN_TICKS}
+    if again:
+        queue_signal(
+            m,
+            {
+                "trigger": "pacing",
+                "tick": w.tick,
+                "map_id": w.map_id,
+                "x": w.pos[0] if w.pos else None,
+                "y": w.pos[1] if w.pos else None,
+                "states": list(flip),
+                "benched": loser,
+                "hostiles": sorted(f"{kind} {hid}" for kind, hid in (e.group if e is not None else ())),
+            },
+        )
+        out["asked"] = True
+    return out
+
+
+def losing_side(m: Memory, states: list[str], moves: list[tuple[str, str, str]]) -> str:
+    """Which of ``states`` a flip benches: the one going against the
+    engagement's decision, else the one that took the last step."""
+    e = m.engagement
+    if e is not None:
+        against = AGAINST_FIGHT if e.fight else ("Fight",)
+        for state in states:
+            if state in against:
+                return state
+    last = [state for _, state, _ in moves if state in states]
+    return last[-1] if last else states[-1]
+
+
+def benched(m: Memory, w: WorldModel, state: str) -> bool:
+    """``state`` lost a flip and stays off the pick: its cool-down has not
+    ended and the engagement's decision (or no engagement) is the one it was
+    benched under."""
+    b = m.nav_stuck.benched.get(state)
+    if b is None:
+        return False
+    e = m.engagement
+    if w.tick < b.until and (e.fight if e is not None else None) == b.fight:
+        return True
+    del m.nav_stuck.benched[state]
+    return False
 
 
 def note_move(m: Memory, w: WorldModel, intents: list[dict] | None, state: str) -> None:

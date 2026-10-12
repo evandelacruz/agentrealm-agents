@@ -2,11 +2,10 @@
 
 A search cut short by its budget still counts as a way to a safe tile, so the
 pick kept a tile the walk never got nearer to, logging "safe tile
-unreachable" every decision. A Park, Retreat or Heal walk to a safe tile
-that goes a stuck window (A15) without its remaining path shortening now
-rules that tile out for a bounded time. Park and Retreat move on to the
-next candidate, else the town cell; Heal gives safe ground up until the next
-full heal (free-play run 9).
+unreachable" every decision. A Park or Retreat walk to a safe tile that
+goes a stuck window (A15) without its remaining path shortening now rules
+that tile out for a bounded time, and moves on to the next candidate, else
+the town cell.
 """
 
 from __future__ import annotations
@@ -84,16 +83,6 @@ class SafeWalkWithNoProgressTest(unittest.TestCase):
         self.assertEqual(outs[0].reason, f"retreat → safe {STUCK}")
         self.assertEqual(outs[-1].state, "Retreat")
         self.assertTrue(outs[-1].reason.startswith(f"retreat → safe {OPEN}"), outs[-1].reason)
-
-    def test_heal_abandons_it_too(self):
-        w, c = world(health=4), ctx()
-        safe(w, STUCK, OPEN)
-        outs = stand_still(w, c, nav_stuck.PROGRESS_TICK_LIMIT + 20)  # the give-up decision itself sends nothing
-        self.assertEqual(outs[0].reason, f"heal_measure → {STUCK}")
-        # Given up in the one give-up memory, and no next tile while it backs off (A89).
-        self.assertTrue(nav_stuck.backed_off(c.memory, "heal_measure", MAP, STUCK, w.tick))
-        self.assertNotEqual(outs[-1].state, "Heal")
-        self.assertFalse(any(o.reason == f"heal_measure → {OPEN}" for o in outs))
 
     def test_the_mark_expires_after_the_bounded_time(self):
         w, c = world(), parking()

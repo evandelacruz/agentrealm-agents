@@ -35,8 +35,7 @@ its own key (not always its ``Memory.goal`` label):
 |---|---|---|
 | ``explore``, ``explore_area`` | Explore (safe default, plan op) | (map, frontier cell) |
 | ``safe`` | Retreat and Park (``pathing.RETREAT_TARGET``) | (map, safe cell) |
-| ``heal_safe`` | Heal's rest and measure walks (``pathing.HEAL_TARGET``) | (map, safe cell) |
-| ``heal_explore``, ``heal_food`` | Heal | (map, zone edge cell); food supply id |
+| ``heal_food`` | Heal | food supply id |
 | ``travel`` | Travel, symbolic ``to`` (``states.travel.TRAVEL_TARGET``) | ``ResolvedDestination`` |
 | ``shop`` | Shop, walking to a shop out of sight (``states.shop.SHOP_TARGET``) | ``ResolvedDestination`` |
 | ``loot`` | Loot | (map, supply id, cell) |

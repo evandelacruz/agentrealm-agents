@@ -26,6 +26,7 @@ from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.item_table import InventorySupply
+from agentrealm_agent.supplies import row as supply_row
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_hunting_zone
 from agentrealm_agent.travel.knowledge import entrance_key, sync_town
@@ -831,7 +832,14 @@ class PlannerViewTest(unittest.TestCase):
         self.assertTrue(ready["stage_1"]["met"])
         self.assertEqual(
             ready["stage_2"],
-            {"armor_worn": True, "better_weapon_armed": True, "health_at_bar": True, "met": True, "potions_at_bar": True},
+            {
+                "armor_worn": True,
+                "better_weapon_armed": True,
+                "health_at_bar": True,
+                "health_with_held_heals": 40,
+                "met": True,
+                "potions_at_bar": True,
+            },
         )
 
     def test_better_weapon_follows_the_one_weapon_rule(self):
@@ -890,42 +898,95 @@ class PlannerViewTest(unittest.TestCase):
         self.assertIn("whenever health or potions fall below the stage 2 bar, unless the check is one skipped for its cost", prompt)
 
     def test_readiness_shows_how_an_unmet_health_check_closes(self):
-        # A124: health comes back only from a heal or a respawn, so to_close
-        # shows a carried potion's heal, else a potion to buy and its time,
-        # and a rest only where regen was measured on this world.
-        from agentrealm_agent.healing import add_regen, save_regen_yes
+        # A124, A130: health rises only from potions and food, so to_close
+        # shows food lying in sight and the walk to it, and a potion to buy
+        # with its time and the walk to the shop; never a rest, whatever an
+        # old knowledge base saved. A132: held heals count, so no drink.
+        from agentrealm_agent.travel.knowledge import record_shop_cell
 
         self.w.health, self.w.max_health, self.w.gems = 5, 10, 4
         health = lambda **kw: self.readiness(**kw)["stage_2"]["to_close"]["health_at_bar"]
-        self.assertEqual(health(), {"health_short": 3}, "nothing carried or seen for sale closes it")
+        self.assertEqual(health(), {"health_short": 3}, "nothing carried, in sight or for sale closes it")
         self.kb.items["small_potion"] = {"gem_price": 10}
         self.assertEqual(
             health(gather_run={"gems_per_min": 2.0}),
             {"health_short": 3, "buy": {"code": "small_potion", "gems_short": 6, "minutes": 3.0}},
         )
-        self.w.held_supplies = [InventorySupply(1, "large_potion"), InventorySupply(2, "small_potion")]
-        self.assertEqual(health(), {"health_short": 3, "drink": {"code": "small_potion", "heals": 10}}, "the smallest heal that closes it")
-        add_regen(self.kb, 0.01)
-        self.assertNotIn("rest", health(), "a rate with regen not confirmed yes: no rest")
-        save_regen_yes(self.kb)
-        self.assertNotIn("rest", health(), "no safe tile known: nowhere to rest")
-        apply_zone(self.w, 7, 10, 20, {"safe": True})
+        record_shop_cell(self.kb, 7, (10, 20))
         self.assertEqual(
-            health()["rest"],
-            {"safe": "7:10,20", "walk_seconds": 4, "rest_minutes_estimate": 0.5},
-            "10 cells at 2.5 a second, then 3 health at 0.01 a tick at 10 Hz",
+            health()["buy"],
+            {"code": "small_potion", "gems_short": 6, "at": "7:10,20", "walk_seconds": 4},
+            "10 cells at 2.5 a second",
         )
+        self.w.entities = [Entity("supply", 9, (12, 10), "apple"), Entity("supply", 8, (11, 10), "apple", gem_price=3)]
+        self.assertEqual(health()["eat"], {"code": "apple", "heals": 2, "at": "7:12,10", "walk_seconds": 1}, "free food only")
+        self.w.held_supplies = [InventorySupply(1, "berry")]
+        self.assertEqual(health()["health_short"], 2, "a held heal counts toward the bar (A132)")
+        self.assertNotIn("drink", health())
+        self.kb.extra["survival"] = {"safe_zone_regen": "yes", "safe_zone_regen_rates": [0.01]}
+        apply_zone(self.w, 7, 10, 20, {"safe": True})
+        self.assertNotIn("rest", health())
         self.w.health = 8
         self.assertNotIn("health_at_bar", self.readiness()["stage_2"].get("to_close", {}), "met: nothing to close")
 
-    def test_contract_says_health_does_not_come_back_by_itself(self):
-        # A124: the docs give no regeneration; the planner assumed health
-        # recovers while gathering off safe ground.
+    def test_eat_shows_only_food_heal_would_take(self):
+        # A130 review: food the refusal table holds, or whose walk Heal gave
+        # up, is no way to close the bar, so State never offers it.
+        from agentrealm_agent.executor.supply_refusals import Refusal, note_refusal, refusal_situation
+
+        self.w.health, self.w.max_health = 5, 10
+        self.w.entities = [Entity("supply", 9, (12, 10), "apple")]
+        m = Memory()
+        eat = lambda: self.readiness(memory=m)["stage_2"]["to_close"]["health_at_bar"].get("eat")
+        self.assertEqual(eat()["code"], "apple")
+        note_refusal(m, "take", 9, Refusal("odd_code", "hold", self.w.tick, refusal_situation(self.w, (12, 10))))
+        self.assertIsNone(eat(), "a held Take: not offered")
+        m.supply_refusals.clear()
+        nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("heal_food", 7, (12, 10)), "heal_food", self.w.tick)
+        self.assertIsNone(eat(), "its walk backed off: not offered")
+
+    def test_held_heals_count_toward_the_health_bar(self):
+        # A132: at 7/10 with potions held the health bar is met, so no potion
+        # is drunk only to meet it (which would break the potion bar).
+        self.w.health, self.w.max_health = 7, 10
+        stage_2 = self.readiness()["stage_2"]
+        self.assertFalse(stage_2["health_at_bar"])
+        self.assertEqual(stage_2["health_with_held_heals"], 7)
+        self.assertEqual(stage_2["to_close"]["health_at_bar"], {"health_short": 1})
+        self.w.held_supplies = [InventorySupply(i, "small_potion") for i in range(2)]
+        stage_2 = self.readiness()["stage_2"]
+        self.assertTrue(stage_2["health_at_bar"])
+        self.assertEqual(stage_2["health_with_held_heals"], 7 + 2 * 10, "health plus each held potion's heal")
+        self.assertNotIn("health_at_bar", stage_2.get("to_close", {}), "met: nothing to close")
+
+    def test_readiness_line_shows_health_with_held_heals(self):
+        # A132: stowed potions and held food count too, and the line shows the sum.
+        self.w.health, self.w.max_health = 3, 10
+        self.w.held_supplies = [InventorySupply(1, "apple")]
+        self.w.chest_supplies = [InventorySupply(2, "small_potion")]
+        heals = supply_row("apple").heal + supply_row("small_potion").heal
+        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("readiness="))
+        self.assertIn(f'"health_with_held_heals": {3 + heals}', line)
+
+    def test_contract_says_a_potion_is_never_drunk_only_to_meet_a_bar(self):
+        # A132: the potion bar and the health bar trade through held heals.
         prompt = system_prompt()
-        self.assertIn("Safe ground only stops damage: health does not come back by itself, on safe ground or off it", prompt)
-        self.assertIn("The game's documentation gives no regeneration", prompt)
+        self.assertIn("A potion is for an actual health need: health at the survival floor (low_health), or a fight ahead that needs the health", prompt)
+        self.assertIn("Never drink one only to meet a readiness bar: health_at_bar already counts the potions and food held", prompt)
+        self.assertIn("health_at_bar counts held heals: it is met when health plus the heal of the potions and food held reaches the bar", prompt)
+        self.assertIn("the potion bar and the health bar trade against each other through held heals", prompt)
+        self.assertIn("drinking to meet one bar breaks the other", prompt)
+
+    def test_contract_says_health_rises_only_from_potions_and_food(self):
+        # A124, A130: the game has no natural regeneration; the planner
+        # assumed health recovers by resting or on safe ground.
+        prompt = system_prompt()
+        self.assertIn("Health rises only from potions and food", prompt)
+        self.assertIn("There is no natural regeneration, on safe ground or anywhere, so resting or waiting restores nothing", prompt)
         self.assertIn("put a use_item with its code on the stack", prompt)
-        self.assertIn("For health_at_bar it shows health_short and the ways it closes", prompt)
+        self.assertIn("For health_at_bar it shows health_short and the ways it closes: eat", prompt)
+        self.assertNotIn("rest_minutes_estimate", prompt)
+        self.assertNotIn("regen is confirmed", prompt)
 
     def test_upgrades_for_sale_show_the_minutes_at_the_gem_rate(self):
         # A124: an upgrade's gems_short in time, as readiness to_close does.

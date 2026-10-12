@@ -15,6 +15,7 @@ from ..directives import attack_forbidden
 from ..executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_intents
 from ..executor.intents import step
 from ..executor.movement import direction_between
+from ..fording import rearm_ashore
 from ..knowledge_base import KnowledgeBase
 from ..navigation import cost_path
 from ..pathing import grid_params, nav_search, next_step, plan_sets, retreat_safe_goal
@@ -320,6 +321,13 @@ def engage(w: WorldModel, ctx: PlayContext, target: Entity, state: str) -> State
             state=state,
         )
     uses = [attack_intent(target) for _ in range(ATTACK_USES)]
+    # Ashore with a fording supply in hand (A133), the swings would do
+    # nothing: arm the weapon first, and pace them by its cooldown.
+    rearm = rearm_ashore(w, m, ctx.knowledge)
+    in_hand = w.armed_code
+    if rearm:
+        in_hand = next(h.code for h in w.held_supplies if h.id == rearm[0]["supply_id"])
+        uses = rearm + uses
     retreat = retreat_tail(w, m, policy, ctx, limit=8)
     horizon = queue_horizon_intents()
     queue = build_attack_queue(
@@ -327,7 +335,7 @@ def engage(w: WorldModel, ctx: PlayContext, target: Entity, state: str) -> State
         retreat,
         poll_interval_ticks=m.calm_poll_interval,
         horizon_ticks=horizon,
-        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code, ctx.tick_hz),
+        weapon_cooldown_ticks=attack_cooldown_ticks(in_hand, ctx.tick_hz),
         ticks_since_last_use=_ticks_since_use(w, m.last_use_tick),
     )
     if not queue:

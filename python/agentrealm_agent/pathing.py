@@ -137,7 +137,7 @@ def flee_run(w: WorldModel, hostiles: list[Entity], blocked: set[Pos], first: Po
             if d > FLEE_RUN_STEPS + 1:
                 continue
             for n in w.neighbours(cur):
-                if n in came or n == w.pos or n in occupied or not w.view.walkable(n):
+                if n in came or n == w.pos or n in occupied or not w.walkable(n):
                     continue
                 if _nearest(n, hostiles) <= d:
                     continue
@@ -160,7 +160,7 @@ def step_open(w: WorldModel, blocked: set[Pos], p: Pos) -> bool:
         return False
     if w.view.tiles.get(p) in DOORS:
         return True
-    return w.view.walkable(p) and p not in w.occupied() and p not in w.for_sale()
+    return w.walkable(p) and p not in w.occupied() and p not in w.for_sale()
 
 
 def remaining_walk_cells(w: WorldModel, m: Memory) -> list[Pos]:
@@ -195,7 +195,7 @@ def route_ahead(w: WorldModel, m: Memory) -> list[Pos]:
 
 def next_step(w: WorldModel, blocked: set[Pos], path: list[Pos] | None) -> Pos | None:
     """The path's first step when it is seen and open, else None."""
-    prefix = known_prefix(path or [], w.view)
+    prefix = known_prefix(path or [], w.view, w.fords)
     if prefix and step_open(w, blocked, prefix[0]):
         return prefix[0]
     return None
@@ -975,7 +975,7 @@ def safe_explore_targets(w: WorldModel, m: Memory, policy: Policy, *, push: bool
     """
     from .states.gather_safe import hostiles_near, is_safe_ish
 
-    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.view.frontier() - {w.pos}, w.tick)
+    targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.frontier() - {w.pos}, w.tick)
     targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
     if hurt(w) and not push:
         return {p for p in targets if is_safe_ish(w, p, policy)}

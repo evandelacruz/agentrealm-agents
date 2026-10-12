@@ -9,6 +9,7 @@ from ..memory import Memory, queue_signal
 from ..navigation import cost_path, oscillation
 from ..pathing import flee_run, flee_step, grid_params, outruns, plan_sets, retreat_safe_goal, step_open
 from ..engagement import cannot_outrun, fights
+from ..fording import dropped_loadout, ford_gate, loadout_memory
 from ..survival import GAP_PROBE_TICKS, at_health_floor, combat_group, flee_from, is_attacker, on_safe_tile
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -137,10 +138,19 @@ def cornered(w: WorldModel, ctx: PlayContext, hostiles: list[Entity]) -> StateOu
 
     So it drinks a carried heal when one is due (``heal.use_carried_heal``:
     a potion only when ``healing.spend_potion`` says so, health low or the
-    drink turning the fight), else swings at the nearest hostile in weapon
+    drink turning the fight, and never one whose ``Arm`` would strand us on
+    water, A133), else swings at the nearest hostile in weapon
     reach it may attack. With neither, it raises one ``cornered`` trigger
     for this cell, so the planner makes the call, and holds."""
+    saved = loadout_memory(ctx.memory)
     drink = use_carried_heal(w, ctx)
+    if drink is not None and drink.intents:
+        # On water with only a fording supply in hand the drink's Arm would
+        # strand us (A133): its memory goes, and the swing or the ask below
+        # acts instead, never a stop.
+        gated, _ = ford_gate(w, ctx.memory, saved, drink.intents, ctx.knowledge, rearm=False)
+        if dropped_loadout(drink.intents, gated):
+            drink = None
     if drink is not None and (drink.intents or drink.wait):
         drink.reason = f"cornered: {drink.reason}"
         return drink

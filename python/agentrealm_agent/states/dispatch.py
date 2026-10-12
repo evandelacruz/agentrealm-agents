@@ -29,6 +29,7 @@ from ..navigation import oscillation
 from ..navigation.rejection import end_decision
 from ..engagement import sync_engagement
 from ..equip import note_last_weapon
+from ..fording import ESCAPES, ford_gate, loadout_memory
 from ..healing import note_heal_window
 from ..pathing import note_goto_reached
 from ..plan import OP_STATE, PLAN_STALL_SECONDS, Plan
@@ -38,6 +39,7 @@ from ..shop import sync_shop
 from ..stalled import remember as remember_stalled, retry_basis
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome, top_executor
+from .ashore import AshoreState
 from .boss import BossState, sync_boss
 from .break_state import BreakState
 from .detour import DetourState
@@ -76,6 +78,7 @@ REFLEXES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
     EscapeState(),
+    AshoreState(),
     RetreatState(),
     HealState(),
     FightState(),
@@ -113,7 +116,7 @@ STATES: tuple[State, ...] = REFLEXES + EXECUTORS + (IdleState(),)
 
 # The runner's park phase, after the run ends (A66): the survival reflexes,
 # then Park walking to safe ground. No plan op runs, and nothing else.
-SURVIVAL = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee")
+SURVIVAL = ("Sync", "Downed", "Escape", "Ashore", "Retreat", "Heal", "Fight", "Flee")
 PARK_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name in SURVIVAL) + (ParkState(),)
 
 # The runner's held-queue probe (A64): the states that can answer with a
@@ -320,6 +323,16 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
     """The first state, in ``_states`` order, that runs and sends an intent or
     waits.
 
+    Every queue crosses water by one rule (A133, ``fording.ford_queue``): a
+    held fording supply is armed before the first water step, and on water
+    the queue stops before a loadout change that would strand us, and what
+    the state wrote to memory is put back only when the cut dropped a
+    loadout change (``fording.ford_gate``), never for a Step cut after
+    a kept ``Arm``; ashore, the weapon is
+    armed again in front of any queue but an escape's or a paced one
+    (Fight arms it in its own attack queue). A
+    queue cut to nothing falls through like a state that sends nothing.
+
     In the held-queue probe, when none does, ``Memory.state`` stays the state
     that sent the held queue (A64).
     """
@@ -330,7 +343,14 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
         active = state.name == m.state and not state.done(world, ctx)
         if not (active or state.guard(world, ctx)):
             continue
+        saved = loadout_memory(m)
         outcome = state.act(world, ctx)
+        if outcome.intents:
+            rearm = outcome.state not in ESCAPES and not outcome.paced
+            sent, why = ford_gate(world, m, saved, outcome.intents, ctx.knowledge, rearm=rearm)
+            if why:
+                outcome.reason = f"{outcome.reason}; {why}"
+            outcome.intents = sent
         if outcome.intents or outcome.wait:
             m.state = state.name
             outcome.yielded = yielded

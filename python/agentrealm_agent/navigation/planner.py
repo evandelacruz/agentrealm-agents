@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 
 from ..supplies import worn_armor_defense
-from ..world import DOORS, NEIGHBOURS, VOID, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
+from ..world import DOORS, NEIGHBOURS, VOID, Entity, MapView, Pos, WorldModel, chebyshev, walkable_block
 
 # Base step costs (PLAYABLE_AGENT_PLAN Navigation §1). Every step costs at
 # least KNOWN_WALKABLE, so Chebyshev distance * KNOWN_WALKABLE is a lower
@@ -56,6 +56,10 @@ class CostGridParams:
     # Danger peak per hostile (kind, id), in place of HOSTILE_DANGER: Retreat
     # sets its pursuers' to 0, so it heads straight for safety (A9).
     danger_peaks: dict[tuple[str, int], int] = field(default_factory=dict)
+    # Water is passable: a fording supply is carried (A133). None: the
+    # searched world's own ``WorldModel.fords``; a search over a scratch
+    # world (``door_graph``) passes the character's.
+    fords: bool | None = None
 
 
 @dataclass
@@ -97,12 +101,13 @@ def macro_center(m: Pos) -> Pos:
     return m[0] * MACRO_SIZE + MACRO_SIZE // 2, m[1] * MACRO_SIZE + MACRO_SIZE // 2
 
 
-def known_prefix(path: list[Pos], view: MapView) -> list[Pos]:
-    """The leading part of ``path`` on walkable or door tiles we have seen."""
+def known_prefix(path: list[Pos], view: MapView, fords: bool = False) -> list[Pos]:
+    """The leading part of ``path`` on walkable or door tiles we have seen
+    (water walkable when ``fords``, A133)."""
     out: list[Pos] = []
     for p in path:
         block = view.tiles.get(p)
-        if block is None or block == VOID or not (block in WALKABLE or block in DOORS):
+        if block is None or block == VOID or not (walkable_block(block, fords) or block in DOORS):
             break
         out.append(p)
     return out
@@ -148,6 +153,7 @@ class _Grid:
         # The single goal of a cost_path search (A13); None for a flood.
         self.goal: Pos | None = next(iter(goals)) if len(goals) == 1 else None
         self.tiles = w.view.tiles
+        self.fords = w.fords if params.fords is None else params.fords  # water passable (A133)
         self.armor = worn_armor_defense(w.worn_codes.values())  # cuts occupy_damage
         if same_world is not None:
             assert same_world.w is w and same_world.params is params
@@ -219,7 +225,7 @@ class _Grid:
             if params.fog_cost is None:
                 return None
             base = params.fog_cost
-        elif block in WALKABLE:
+        elif walkable_block(block, self.fords):
             base = KNOWN_WALKABLE
         else:
             return None  # void, blocked, or an unknown type

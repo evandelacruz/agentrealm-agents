@@ -83,7 +83,7 @@ def _op_refusal(w: WorldModel, ctx: PlayContext, op: GoalOp) -> str | None:
         return f"{cap} already failed on the {block or 'block'} at {pos[0]},{pos[1]}"
     if pick_supply_for_capability(w, cap, ctx.knowledge) is None:
         return f"nothing held can {cap}"
-    if block is not None and (block == VOID or w.view.walkable(pos)):
+    if block is not None and (block == VOID or w.walkable(pos)):
         return f"the {block or 'empty cell'} at {pos[0]},{pos[1]} holds no block to break"
     openers = known_openers(w, ctx.knowledge, pos)
     if block in BLOCK_OPENERS and cap not in openers:

@@ -153,7 +153,7 @@ def drop_spot(w: WorldModel, knowledge: KnowledgeBase | None, near: Pos) -> Pos 
         n
         for dx, dy in NEIGHBOURS
         if (n := (here[0] + dx, here[1] + dy)) not in blocked
-        and w.view.walkable(n)
+        and w.walkable(n)
         and chebyshev(n, near) <= 1
         and not drop_makes_stock(w, knowledge, n)
     ]

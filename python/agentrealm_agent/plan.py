@@ -889,7 +889,7 @@ def builtin_way_on(plan: Plan, trigger: dict, world: WorldModel) -> None:
 
 def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:
     """Frontier cells inside an ``explore_area`` op, other than where we stand."""
-    frontier = world.view.frontier() - {world.pos}
+    frontier = world.frontier() - {world.pos}
     if op["radius"] >= EXPLORE_ANYWHERE:
         return frontier
     center = (op["x"], op["y"])

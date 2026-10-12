@@ -1918,9 +1918,93 @@ Per A87, each names the rule a fix should generalize.
 
 3. **Pack capacity reads 10 after the death, down from the applied chest's 30** (`world.py:960–968`, `sync_carry_capacity`). The middle_chest was used up when applied in run 22, so it was not among the 6 supplies dropped at death. From the first State after respawn to the end, `pack` showed `slots_total` 10. Whether the server drops the capacity at death or the agent's derivation from the carried chest loses it is not shown by the trace. **Rule:** carry capacity is the server's number. Where it is derived, the derivation survives a death and a reclaim the same way the server's does.
 
-### Run 24 (in progress): a raft bought for the lake door, and no walk that can use it
+### Run 24 (1800 s in three parts): the raft bought at last, the lake door not reached, and 366 s of Fight and Flee taking turns on a snotling that never moved
 
-Reported live while the run was under way; the full write-up follows the run.
+- **Code:** `main` at `00239a9`. Since run 23: A125 (a walk on an op's behalf makes net progress toward its target), A128 (walks keep off seen hostiles' reach, a pack is fought whole, a walk under attack never waits), A129 (an op tries a held opener for real before it asks, and `tried` says only what it tried).
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile, three back-to-back `--seconds 600` parts, each chained to start the moment the one before exited: part 1 at 00:41:41 UTC, part 2 at 00:51:44, part 3 at 01:01:59. The runner's duration cannot be changed while it runs. Times below are seconds into each part.
+- **Knowledge base:** kept from run 23, and carried across the parts.
+- **Supplies reference:** served, `capabilities` shape (part 1). Parts 2 and 3 read the fresh cache.
+- **Verdict:** all three parts exit 0, `PASS` (M10). Deaths **0**, API errors **0**, planner errors **0** (36 + 51 + 40 plans accepted). The character started at 9/10, 3 lives and **12 gems** at the home town, with the bronze_sword armed, the bronze_mail worn and 3 potions. It ended at 10/10, 3 lives, 7 gems.
 
-- The character bought a raft and headed for the lake door at (659, 400).
-- **Defect (A133):** `supplies.py` read the raft's `fords` capability as the `water` effect, but no walk, Equip or Travel code read it. Water stayed blocked ground to every walk, nothing armed the raft before a water step, and nothing kept another state from arming a weapon or a potion over it while on water, which the server refuses `would_strand` (Manual, Supplies capability table). Rule: one fording rule for every queue (`fording.ford_queue`, PLAN.md A133).
+#### Planner ops over time
+
+| Part, time | Ops on the stack (top first) | What happened |
+|---|---|---|
+| 1, 0–313 s | `gather_gems` (432, 400), `buy` raft | "The lake door needs a raft, and a raft seller is known: 30 gems." Cut grass, **12 → 30**. At 238 s a planner `use_item` small_potion at 7/10: "1 short of the stage 2 bar". Killed snotling 247 (84 s). |
+| 1, 313–464 s | `buy` raft, `travel` entrance (659, 400) | Shop's walk for the raft went **west**: `travel:shop` → (408, 395), (383, 385), (389, 371), a break toward (382, 368), "Shop holds its walk", (371, 394) `[revealed]`. Those are known shop cells, none of which sells a raft; the seller is the lake fisher in the east town (defect 3). The plan swapped between the raft and a third potion twice (347 s, 436 s). |
+| 1, 464–600 s | `buy` small_potion, then `gather_gems`, `buy` raft | Bought a **small_potion** (32 → 22), gathered back to 30. At 598 s Shop started west for the raft again. |
+| 2, 0–224 s | `buy` raft, then `travel` point (626, 389) | At 58 s the planner wrote: "The raft seller is at 626,389 … The shop at town sells no raft." Travel walked 200 cells east, `[cautious]` past the pack ground, cut a bush at (563, 401), and **bought the raft** from the fisher at 224 s (33 → 3). |
+| 2, 224–450 s | `equip` raft / `use_item` raft, `travel` entrance (659, 400), `travel` point probes | The **`equip` raft was dropped**: "raft is not armed or worn" (defect 2). Travel to the lake door then asked `no_way_on` eight times along the shore (below). It cut bushes at (619, 400) and (626, 418). A bogmaw and a wartlurch nearby drew two retreats. |
+| 2, 450–600 s | `travel` entrance (532, 311), then `gather_gems` | "Check what the north entrance needs." Walked west to (535, 347), "Travel holds its walk", then went back to gather. |
+| 3, 0–234 s | `use_item` small_potion, `gather_gems`, `buy` small_potion | A second planner potion at 7/10 (60 s) after snotling 247 hit it. Killed 247 again (31 s). Bought a **small_potion** at 198 s (15 → 5). Gathered 5 → 7. |
+| 3, 234–600 s | `gather_gems`, then `explore_area` (532, 311), `travel` entrance | **366 s of pacing** between (432, 416) and (433, 415): Fight "close on npc 247", then Flee "flee npc 247", every second, until the run ended. The respawned snotling 247 stood at (435, 413) all the while. No swing, no hit and no damage either way, health 10/10. There were **91 oscillation events** (`states` Fight and Flee, `unwalked` both), and none gave anything up (defect 1). The planner's explore and travel ops never got a decision. |
+
+#### Pack, stage, entrance and level attempts
+
+- **Pack slots:** 10 in State all run. The server serves no capacity, so the agent derives it: the blue chest's 10 after a respawn, per the Manual (`world.py:861`). No `carry_capacity_full` refusal came up to test it against the server.
+- **Stage:** 2, met for most of the run. The planner twice drank a potion at 7/10 to hold the 80% bar.
+- **Entrance and level:** the lake door (659, 400) after the raft, not reached; then the north-east entrance (532, 311), not reached. No level.
+- **Death chests:** State listed only run 19's 96002 at map 17 (1, 10), and no planner reply mentioned it. Run 23's 484929 is in `death_chests_gone`.
+- **`no_way_on` asks:** eight, all in part 2:
+
+| Part 2 time | Why | `blocked_by` | Answer |
+|---|---|---|---|
+| 220 s | travel:point 626,389: no step toward it | no known way: walls, no ground or unseen ground | unchanged (Shop then reached the seller) |
+| 252 s | travel:entrance 659,400 | the same | re-applied, with `equip` raft |
+| 319 s | travel:point 627,386 | the same | re-applied |
+| 334 s | travel:point 629,383 and travel:entrance 659,400 | the same | `travel` point (621, 390), `equip` raft, `travel` entrance |
+| 353 s | travel:point 632,390 | the same | `travel` point (609, 395), `explore_area` (625, 392) |
+| 359 s | travel:point 609,395 | wall at 609,395, which nothing held opens | `travel` point (609, 400), `explore_area` (640, 400) |
+| 450 s | travel:entrance 659,400 | no known way | `travel` entrance (532, 311) |
+
+Each `tried` named the given-up ladder steps (`moves`, `no_break`, `no_frontier`, `no_path`, or `no_known_opener`), then "a way round" (A129).
+
+#### Gear and gems
+
+| | Start | End |
+|---|---|---|
+| Gems | **12** | **7** (+45 earned, −50 spent) |
+| Health | 9/10 | 10/10 |
+| Lives | 3 | 3 |
+| Armed | bronze_sword | bronze_sword |
+| Worn | bronze_mail | bronze_mail |
+| Potions | 3 | 3 (2 drunk, 2 bought) |
+| Raft | – | held, never armed |
+
+Bought: small_potion ×2 (10 each), raft (30).
+
+#### Fights
+
+| Part, time | Hostile | Outcome |
+|---|---|---|
+| 1, 84 s | snotling 247 | **Killed.** |
+| 3, 26–31 s | snotling 247 (respawned) | **Killed** after it hit for 1, 1, 1. |
+| 3, 234–600 s | snotling 247 (respawned again, standing still) | No swing: Fight and Flee took turns (defect 1). |
+
+#### Run 23 defects, checked
+
+| Defect | Run 24 | |
+|---|---|---|
+| A walk goes on through a seen pack (A128) | **Better.** Part 2's walk east went `[cautious]` past the bogmaw/wartlurch ground and retreated when they came close. No death. | |
+| `no_way_on`'s `tried` is not what was tried (A129) | **Gone.** Each `tried` names the ladder steps it gave up. | |
+| Pack capacity 30 → 10 after a death | **By the Manual's rule** (a new blue chest on respawn), not a derivation bug. The server serves no capacity to check against. | |
+
+#### Tokens
+
+| | |
+|---|---|
+| Tokens (three parts) | input 946,471, output 38,744, cache write 111,870, cache read 15,885,540 |
+
+#### Decision mix
+
+Intents over the three parts: 2,168 `Step`, 4,436 `Wait`, 239 `Use`, 49 `Take`, 4 `Arm`. Call mix: 2,990 `tick`, 727 `entities`, 537 `zone`, 272 `strategist`, 153 `self`, 9 `stuck`, and 91 `oscillation` events (all in part 3).
+
+#### Top 3 defects
+
+Per A87, each names the rule a fix should generalize.
+
+1. **Fight and Flee take turns on one hostile, and the pacing guard has nothing to give up** (`navigation/oscillation.py:77–170`, `check` and `_give_up_walks`; `engagement.py:87`, `sync_engagement`). For 366 s Fight stepped to (433, 415) to close on snotling 247 at (435, 413), and Flee stepped back to (432, 416). The snotling never moved or swung. Each of the 91 oscillation events listed both states as `unwalked`, so no walk was given up and nothing changed. **Rule:** an engagement holds its decision until the fight ends or the hostile is gone. When two states pace with no walk to give up, the guard ends the engagement or marks the hostile, so the decision cannot flip back.
+
+2. **An `equip` cannot arm a tool, however its row is slotted** (`equip.py:309–317`, `cannot_equip_reason`; `named_equip` at 281). The raft's row is class `tool`, slot `armed`, capability `fords` on trigger `equipped`. The equip rule arms only weapons, so `equip raft` was dropped as "not armed or worn" and the lake crossing never began. **Rule:** an item the Supplies reference slots as `armed` can be armed by a named `equip`, whatever its class.
+
+3. **Shop walks to the nearest unseen shop, not to the known seller** (`states/shop.py:181–203`, `_shop_cells_out_of_sight` and `_shop_out_of_sight`). In part 1 the raft walk went west through every known shop cell. The only raft seller, the lake fisher at (626, 389), is known from his clue and the price list, not as a shop cell. The planner had to send a `travel` point there itself in part 2. **Rule:** a buy walks to a seller known to sell the item (a shop cell or an NPC whose clue or stock names it) before trying shops that are not known to.

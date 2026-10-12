@@ -160,9 +160,32 @@ class BadCellTest(unittest.TestCase):
         nearest_shop = {"op": "travel", "to": "shop", "x": 0, "y": 0}
         nearest_entrance = {"op": "travel", "to": "entrance", "x": 0, "y": 0, "map_id": 40}
         point = {"op": "travel", "to": "point", "x": 0, "y": 0}
-        kept, refused = refuse_bad_cells([nearest_shop, nearest_entrance, point], w)
-        self.assertEqual(kept, [nearest_shop, nearest_entrance], "0, 0 there is the agent's to find")
+        for symbolic in (nearest_shop, nearest_entrance):
+            self.assertEqual(refuse_bad_cells([symbolic], w), ([symbolic], []), "0, 0 there is the agent's to find")
+        kept, refused = refuse_bad_cells([point], w)
+        self.assertEqual(kept, [])
         self.assertIn("0,0 on map 40 is a wall", refused[0])
+
+    def test_ops_after_one_that_leaves_the_map_are_not_judged_here(self):
+        w = level_room()
+        off = {"op": "travel", "to": "point", "x": 17, "y": 1}
+        fetch = {"op": "fetch_item", "code": "rope", "x": 300, "y": 200}
+        for leave in (
+            {"op": "fight_boss", "x": 5, "y": 5},
+            {"op": "enter_level", "x": 3, "y": 3},
+            {"op": "travel", "to": "point", "x": 7, "y": 0},  # the door: it warps
+            {"op": "travel", "to": "point", "x": 40, "y": 40, "map_id": 3},
+            {"op": "travel", "to": "town", "x": 0, "y": 0},
+        ):
+            kept, refused = refuse_bad_cells([off, leave, fetch, dict(off)], w)
+            self.assertEqual(kept, [leave, fetch, off], leave)
+            self.assertEqual(len(refused), 1, "only the op before the map changes is judged")
+
+    def test_a_pinned_op_that_leaves_the_map_leaves_the_whole_reply_unjudged(self):
+        w = level_room()
+        off = {"op": "travel", "to": "point", "x": 17, "y": 1}
+        self.assertEqual(refuse_bad_cells([off], w, ahead=[{"op": "enter_level", "x": 3, "y": 3}]), ([off], []))
+        self.assertEqual(refuse_bad_cells([off], w, ahead=[{"op": "wait", "seconds": 1}])[0], [])
 
     def test_a_map_of_unknown_size_refuses_nothing_off_it(self):
         w = level_room()

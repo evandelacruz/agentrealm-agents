@@ -5,14 +5,15 @@ cell's x and y outright (doors, NPCs, signs, items on the ground, level
 entrances, sellers), never by counting columns on the map drawing. What
 follows is the one check that a named cell can be a target at all, run on
 every reply before its ops reach a state: a cell off the current map's
-edge, or a wall where the op would stand, is refused with why, so the
+edge, or a wall where the op would stand, is refused with why (for the
+ops that run on this map: those before the first that may leave it), so the
 planner hears of it at once instead of from a walk that cannot end.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Sequence
 
 from .plan import TRAVEL_SYMBOLIC
 from .world import DOORS, Pos, WorldModel
@@ -22,6 +23,8 @@ from .world import DOORS, Pos, WorldModel
 STAND_ON_OPS = frozenset({"travel", "fetch_item"})
 # Travel destinations whose x, y is a cell (an entrance names its own map).
 TRAVEL_TO_CELL = frozenset({"point", "shop", "entrance"})
+# Ops that end on another map: into a level, or out of one once its boss is beaten.
+MAP_CHANGING_OPS = frozenset({"enter_level", "fight_boss"})
 
 
 def in_bounds(w: WorldModel, p: Pos) -> bool:
@@ -73,19 +76,40 @@ def bad_cell(op: dict[str, Any], w: WorldModel) -> str | None:
     return None
 
 
-def refuse_bad_cells(goals: list[dict[str, Any]], w: WorldModel) -> tuple[list[dict[str, Any]], list[str]]:
-    """A reply's ops whose cell is off the map or a wall to stand on are left
-    out, each with why, before any reaches a state."""
+def leaves_map(op: dict[str, Any], w: WorldModel) -> bool:
+    """``op`` may end with the character on another map: an op that enters
+    or clears a level, or a travel that names no cell here (another map's,
+    a town, a hunting ground, an entrance on a map it does not name) or
+    names a door here, which warps."""
+    if op.get("op") in MAP_CHANGING_OPS:
+        return True
+    if op.get("op") != "travel":
+        return False
+    p = target_here(op, w)
+    return p is None or w.view.tiles.get(p) in DOORS
+
+
+def refuse_bad_cells(
+    goals: list[dict[str, Any]], w: WorldModel, ahead: Sequence[dict[str, Any]] = ()
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """A reply's ops whose cell on the current map is off it, or a wall to
+    stand on, are left out, each with why, before any reaches a state. Only
+    the ops that run on this map are judged: those before the first that may
+    leave it, counting the ops ``ahead`` of the reply's on the stack (the
+    pinned directives ops). Every op after that runs on a map not known yet,
+    so it passes, and its walk finds out there."""
     kept, refused = [], []
+    here = not any(leaves_map(g, w) for g in ahead)
     for g in goals:
-        why = bad_cell(g, w)
+        why = bad_cell(g, w) if here else None
         if why is None:
             kept.append(g)
-            continue
-        refused.append(
-            f"{json.dumps(g, sort_keys=True)} left out: {why}; take x, y from a State list "
-            "(doors_seen, on_the_ground, nearby_npcs, signs_seen, level_entrances, sellers), never by counting map columns"
-        )
+        else:
+            refused.append(
+                f"{json.dumps(g, sort_keys=True)} left out: {why}; take x, y from a State list "
+                "(doors_seen, on_the_ground, nearby_npcs, signs_seen, level_entrances, sellers), never by counting map columns"
+            )
+        here = here and not leaves_map(g, w)
     return kept, refused
 
 

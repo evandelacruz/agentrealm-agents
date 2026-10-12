@@ -217,9 +217,18 @@ def doors_goal_path(
     kb: KnowledgeBase | None,
     params: CostGridParams,
 ) -> list[Pos] | None:
-    """Walk toward the nearest unvisited door, else the nearest door on this map."""
+    """Walk toward the nearest door known to be the target level's entrance,
+    else the nearest unvisited door, else the nearest door on this map; never
+    to an entrance known to be a level above the target (A145)."""
+    from ..level_order import barred_cells, target_cells  # level_order reads entrances through travel, which imports navigation
+
     if w.map_id is None or w.pos is None:
         return None
-    doors = {p for p, b in w.view.tiles.items() if b in DOORS}
-    found = nearest_target(w, unvisited_doors_on_map(kb, w), params) or nearest_target(w, doors, params)
+    barred = barred_cells(kb, w, w.map_id)
+    doors = {p for p, b in w.view.tiles.items() if b in DOORS} - barred
+    found = (
+        nearest_target(w, target_cells(kb, w, w.map_id) & doors, params)
+        or nearest_target(w, unvisited_doors_on_map(kb, w) - barred, params)
+        or nearest_target(w, doors, params)
+    )
     return found[1] if found and found[1] else None

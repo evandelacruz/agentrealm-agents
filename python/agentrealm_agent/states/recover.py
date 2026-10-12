@@ -16,28 +16,21 @@ from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
 from ..pathing import grid_params, guided_step, nav_search, plan_sets
-from ..world import NEIGHBOURS, MapView, Pos, WorldModel, chebyshev
+from ..world import NEIGHBOURS, Pos, WorldModel, chebyshev
 from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position, withdraw, withdraw_all
 
 
-def _map_view(w: WorldModel, map_id: int):
-    if w.map_id == map_id:
-        return w.view
-    return w.maps.get(map_id, MapView())
-
-
 def recover_approach_target(w: WorldModel, map_id: int, chest_at: Pos) -> Pos | None:
     """A standable cell from which the chest is in reach, known safe via a zone or terrain read (A7)."""
-    view = _map_view(w, map_id)
     safe = safe_tiles(w, map_id)
-    if chest_at in safe and view.walkable(chest_at):
+    if chest_at in safe and w.walkable(chest_at, map_id=map_id):
         return chest_at
     options = [
         n
         for dx, dy in NEIGHBOURS
-        if (n := (chest_at[0] + dx, chest_at[1] + dy)) in safe and view.walkable(n)
+        if (n := (chest_at[0] + dx, chest_at[1] + dy)) in safe and w.walkable(n, map_id=map_id)
     ]
     return min(options) if options else None
 

@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 
 from ..supplies import worn_armor_defense
-from ..world import DOORS, NEIGHBOURS, VOID, Entity, MapView, Pos, WorldModel, chebyshev, walkable_block
+from ..world import DOORS, NEIGHBOURS, VOID, Entity, MapView, Pos, WorldModel, chebyshev
 
 # Base step costs (PLAYABLE_AGENT_PLAN Navigation §1). Every step costs at
 # least KNOWN_WALKABLE, so Chebyshev distance * KNOWN_WALKABLE is a lower
@@ -56,10 +56,6 @@ class CostGridParams:
     # Danger peak per hostile (kind, id), in place of HOSTILE_DANGER: Retreat
     # sets its pursuers' to 0, so it heads straight for safety (A9).
     danger_peaks: dict[tuple[str, int], int] = field(default_factory=dict)
-    # Water is passable: a fording supply is carried (A133). None: the
-    # searched world's own ``WorldModel.fords``; a search over a scratch
-    # world (``door_graph``) passes the character's.
-    fords: bool | None = None
 
 
 @dataclass
@@ -101,13 +97,15 @@ def macro_center(m: Pos) -> Pos:
     return m[0] * MACRO_SIZE + MACRO_SIZE // 2, m[1] * MACRO_SIZE + MACRO_SIZE // 2
 
 
-def known_prefix(path: list[Pos], view: MapView, fords: bool = False) -> list[Pos]:
+def known_prefix(path: list[Pos], w: WorldModel) -> list[Pos]:
     """The leading part of ``path`` on walkable or door tiles we have seen
-    (water walkable when ``fords``, A133)."""
+    on the current map (``WorldModel.walkable``: water too with a fording
+    supply, A133, A146)."""
     out: list[Pos] = []
+    walkable = w.walkable_test()
     for p in path:
-        block = view.tiles.get(p)
-        if block is None or block == VOID or not (walkable_block(block, fords) or block in DOORS):
+        block = w.view.tiles.get(p)
+        if block is None or block == VOID or not (walkable(p) or block in DOORS):
             break
         out.append(p)
     return out
@@ -153,7 +151,7 @@ class _Grid:
         # The single goal of a cost_path search (A13); None for a flood.
         self.goal: Pos | None = next(iter(goals)) if len(goals) == 1 else None
         self.tiles = w.view.tiles
-        self.fords = w.fords if params.fords is None else params.fords  # water passable (A133)
+        self.walkable = w.walkable_test()  # water too with a fording supply (A133, A146)
         self.armor = worn_armor_defense(w.worn_codes.values())  # cuts occupy_damage
         if same_world is not None:
             assert same_world.w is w and same_world.params is params
@@ -225,7 +223,7 @@ class _Grid:
             if params.fog_cost is None:
                 return None
             base = params.fog_cost
-        elif walkable_block(block, self.fords):
+        elif self.walkable(p):
             base = KNOWN_WALKABLE
         else:
             return None  # void, blocked, or an unknown type
@@ -369,6 +367,20 @@ def no_way(w: WorldModel, goal: Pos, params: CostGridParams | None = None) -> bo
         return False
     grid = _Grid(w, {goal}, params or CostGridParams())
     return grid.cost(goal) is None or _walled_in(grid, goal, w.pos, FINE_NODE_BUDGET)
+
+
+def shut_off(w: WorldModel, goal: Pos, params: CostGridParams) -> bool:
+    """Proven that no way joins ``w.pos`` and ``goal`` on ``params``'s grid:
+    ``goal`` is impassable, or the passable cells joined to either end run
+    out within ``FINE_NODE_BUDGET`` without reaching the other. A search the
+    budget cuts off proves nothing, so it is False then (A146)."""
+    assert w.pos is not None
+    if w.pos == goal:
+        return False
+    grid = _Grid(w, {goal}, params)
+    if grid.cost(goal) is None:
+        return True
+    return _walled_in(grid, goal, w.pos, FINE_NODE_BUDGET) or _walled_in(grid, w.pos, goal, FINE_NODE_BUDGET)
 
 
 def _walled_in(grid: _Grid, goal: Pos, start: Pos, max_cells: int) -> bool:

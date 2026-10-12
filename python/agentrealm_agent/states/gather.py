@@ -611,10 +611,11 @@ def _steps_to_grass(w: WorldModel) -> float:
     """Steps past the edge of unexplored ground to grass: grass is expected
     there as often as on the ground known, one cell in (walkable cells + 1)
     / (grass cells + 1) of this map. An edge stops being one once Gather
-    walks up to it: the terrain read there fills every cell of the
-    perception window, ground or none (``WorldModel.apply_terrain``)."""
+    walks up to it: the terrain read there shows the ground in sight, and
+    no ground past the map's edge (``WorldModel.apply_terrain``)."""
     view = w.view
-    walkable = sum(1 for p in view.tiles if view.walkable(p))
+    ground = w.walkable_test()
+    walkable = sum(1 for p in view.tiles if ground(p))
     grass = sum(1 for block in view.tiles.values() if block in GATHER_BLOCKS)
     return (walkable + 1) / (grass + 1)
 

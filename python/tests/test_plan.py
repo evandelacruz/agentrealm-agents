@@ -323,7 +323,7 @@ class BuiltinPlanTest(unittest.TestCase):
         self.assertEqual(plan.current()["op"], "explore_area", "not popped while frontier remains")
         self.assertEqual(m.goal, "explore_area")
         self.assertEqual(m.goal_op, plan.current())
-        self.assertIn(m.path[-1], w.view.frontier())
+        self.assertIn(m.path[-1], w.view.frontier(fords=False))
 
     def test_builtin_goto_is_walked_by_travel(self):
         pol = Policy(kind="scripted", goals=["goto"], goto=(3, 0))
@@ -338,7 +338,7 @@ class BuiltinPlanTest(unittest.TestCase):
         m = Memory()
         self.assertIsNone(replan(w, m, Policy(kind="scripted"), set(), set()))
         self.assertEqual((m.goal, m.goal_op), ("explore", None))
-        self.assertIn(m.path[-1], w.view.frontier())
+        self.assertIn(m.path[-1], w.view.frontier(fords=False))
 
     def test_all_invalid_directive_goals_fall_back_with_a_log(self):
         with self.assertLogs("agentrealm_agent.plan", "WARNING") as logs:

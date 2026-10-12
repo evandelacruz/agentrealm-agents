@@ -10,7 +10,8 @@ So there is one rule, applied to every queue a state sends
 (``states.dispatch``):
 
 - a walk plans over water while a fording supply is carried, held or armed
-  (``WorldModel.fords``, passed in, never set on the view: ``WorldModel.walkable``, ``CostGridParams.fords``);
+  (``WorldModel.fords``, never set on the view), and only ``WorldModel.walkable``
+  says whether water is ground, on every map, a level's too (A146);
 - before the first ``Step`` onto water, the queue puts a held fording
   supply on unless one is armed or worn already (``ford_queue``): a
   wearable one is worn, so the weapon stays armed, and one that goes in the
@@ -76,10 +77,10 @@ def note_would_strand(w: WorldModel, m: Memory, code: str | None) -> None:
         del cells[next(iter(cells))]
 
 
-def on_water(w: WorldModel, m: Memory, p: Pos) -> bool:
+def on_water(w: WorldModel, m: Memory | None, p: Pos) -> bool:
     """Whether ``p`` on the current map is water: the map says so, or a
-    ``would_strand`` refusal came from it."""
-    return w.view.tiles.get(p) == WATER or (w.map_id, p) in m.water_cells
+    ``would_strand`` refusal came from it (none known without ``m``)."""
+    return w.view.tiles.get(p) == WATER or (m is not None and (w.map_id, p) in m.water_cells)
 
 
 def loadout_memory(m: Memory) -> dict:
@@ -105,6 +106,14 @@ def stranded_unarmed(w: WorldModel) -> bool:
     """Only a fording supply is in hand and none is worn: on water no weapon
     can be armed, so there is no fight to have (``states.ashore``)."""
     return fords(w.armed_code) and not afloat(None, w.worn_codes.values())
+
+
+def swings_nothing(w: WorldModel, m: Memory | None) -> bool:
+    """Standing on water (``on_water``, the test Ashore uses) with only a
+    fording supply in hand (``stranded_unarmed``): no weapon can be armed
+    there, so the engagement counts no swing and decides against a fight
+    until the character is ashore (A146)."""
+    return w.pos is not None and on_water(w, m, w.pos) and stranded_unarmed(w)
 
 
 def ford_gate(

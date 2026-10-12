@@ -268,7 +268,7 @@ class EscapeTest(unittest.TestCase):
         for x in range(-1, 4):
             for y in range(-1, 4):
                 w.view.tiles.setdefault((x, y), "")
-        self.assertEqual(w.view.frontier(), {(3, 0), (3, 1), (3, 2)})
+        self.assertEqual(w.view.frontier(fords=False), {(3, 0), (3, 1), (3, 2)})
         out = dispatch(w, ctx())
         self.assertEqual(out.state, "Escape")
         self.assertEqual(step(out)[0], 2)
@@ -527,7 +527,7 @@ class FleeRunTest(unittest.TestCase):
         hostiles = [Entity("npc", 1, (-3, 1), "gnawer"), Entity("npc", 2, (4, 0), "gnawer")]
         run = flee_run(w, hostiles, set(), (2, 1))
         self.assertNotIn((4, 1), run)
-        self.assertTrue(all(w.view.walkable(cell) for cell in run), run)
+        self.assertTrue(all(w.view.walkable(cell, fords=False) for cell in run), run)
         for depth, cell in enumerate(run[1:], start=2):
             self.assertGreater(min(chebyshev(cell, h.pos) for h in hostiles), depth, run)
 

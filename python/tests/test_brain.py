@@ -68,11 +68,34 @@ class ExploreTest(unittest.TestCase):
         self.assertEqual(d.intent["verb"], "SetPosition")
         self.assertEqual(d.intent["x"], 1)
 
-    def test_terrain_read_marks_missing_cells_as_known_void(self):
-        w = WorldModel(character_id=1, pos=(1, 1), map_id=7)
-        w.apply_terrain({"map_id": 7, "x0": 0, "y0": 0, "width": 3, "height": 3,
+    def test_terrain_read_marks_cells_past_the_map_edge_as_known_void(self):
+        w = WorldModel(character_id=1, pos=(0, 0), map_id=7)
+        w.apply_terrain({"map_id": 7, "x0": -1, "y0": -1, "width": 3, "height": 3, "map_width": 1, "map_height": 1,
                          "legend": {"d": {"block_type": "dirt"}}, "rows": ["???", "?d?", "???"]})
-        self.assertEqual(w.view.frontier(), set())
+        self.assertEqual(w.view.frontier(fords=False), set())
+
+    def test_clouds_inside_the_map_stay_unknown(self):
+        """A146: ``?`` is unknown, never empty ground (API Tiles): in a dark
+        zone most of the window is clouds, and a walk must plan through it."""
+        w = WorldModel(character_id=1, pos=(1, 1), map_id=7)
+        w.apply_terrain({"map_id": 7, "x0": 0, "y0": 0, "width": 3, "height": 3, "map_width": 16, "map_height": 12,
+                         "legend": {"d": {"block_type": "dirt"}}, "rows": ["???", "?d?", "???"]})
+        self.assertNotIn((0, 0), w.view.tiles)
+        self.assertEqual(w.view.frontier(fords=False), {(1, 1)})
+
+    def test_a_read_with_no_map_size_uses_the_size_known_else_the_near_edges(self):
+        """A146: a read may leave the size out; the edge is then the size a
+        minimap or an earlier read gave, else only below x 0 and y 0."""
+        read = {"map_id": 7, "x0": -1, "y0": -1, "width": 4, "height": 4,
+                "legend": {"d": {"block_type": "dirt"}}, "rows": ["????", "?d??", "????", "????"]}
+        w = WorldModel(character_id=1, pos=(0, 0), map_id=7)
+        w.apply_terrain(read)
+        self.assertEqual(w.view.tiles[(-1, 0)], "")
+        self.assertNotIn((2, 0), w.view.tiles, "no size known: unknown, not no ground")
+        w = WorldModel(character_id=1, pos=(0, 0), map_id=7)
+        w.apply_minimap({"maps": [{"map_id": 7, "map_width": 1, "map_height": 1}]})
+        w.apply_terrain(read)
+        self.assertEqual(w.view.frontier(fords=False), set(), "the minimap's size closes the far edges")
 
     def test_terrain_grid_decodes_cells_and_art(self):
         # docs/API.md Tiles (B102): rows are y0+j, symbols x0+i, art rides beside the grid.
@@ -164,7 +187,7 @@ class ReflexTest(unittest.TestCase):
             for y in range(-1, 5):
                 if (x, y) != (5, 2):
                     w.view.tiles.setdefault((x, y), "")
-        self.assertEqual(w.view.frontier(), {(4, 1), (4, 2), (4, 3)})
+        self.assertEqual(w.view.frontier(fords=False), {(4, 1), (4, 2), (4, 3)})
         m = Memory()
         d = planned(w, m, scripted(goals=["goto"], goto=(4, 2), pickup=False), random.Random(0))
         self.assertEqual((d.intent["x"], d.intent["y"]), (2, 1), d.reason)

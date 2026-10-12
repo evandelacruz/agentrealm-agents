@@ -90,8 +90,9 @@ class StandingHostileTest(unittest.TestCase):
             w.pos = step
         self.assertLessEqual(chebyshev(w.pos, npc.pos), 1)
 
-    def test_a_walk_in_crosses_water_with_a_fording_supply_held(self):
-        """The walk in is every walk's ground: water too while a raft is held (A133)."""
+    def test_a_walk_in_crosses_water_only_with_a_fording_supply_worn(self):
+        """The walk in is over ground Fight can swing from (A146): a raft held
+        or armed leaves no weapon on water, so only one worn opens it (A133)."""
         from agentrealm_agent.item_table import InventorySupply
 
         w = world(at=(5, 10))
@@ -102,8 +103,12 @@ class StandingHostileTest(unittest.TestCase):
         w.entities = [npc]
         self.assertIsNone(close_step(w, npc, set()), "no way over water without one")
         w.held_supplies = [InventorySupply(7, "raft")]
+        self.assertIsNone(close_step(w, npc, set()), "held, it would be armed in the hand: no swing there")
+        w.held_supplies, w.armed_code = [], "raft"
+        self.assertIsNone(close_step(w, npc, set()), "armed, the same")
+        w.armed_code, w.worn_codes = "bronze_sword", {"accessory": "raft"}
         step = close_step(w, npc, set())
-        self.assertIsNotNone(step, "the raft makes the water ground")
+        self.assertIsNotNone(step, "worn, the hand is free for the sword")
         self.assertEqual(step[0], 6, "toward the water")
 
     def test_it_is_closed_on_and_killed_with_no_flee_between(self):

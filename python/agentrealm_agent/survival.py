@@ -356,6 +356,12 @@ def ticks_to_kill_us(health: int, group: list[Entity], threat: ThreatTable, armo
     return health / dps
 
 
+def expected_damage(group: list[Entity], threat: ThreatTable, ticks: float, armor: int = 0) -> float:
+    """The damage ``group`` is expected to deal us through ``armor`` in
+    ``ticks``, at the rate ``ticks_to_kill_us`` prices it."""
+    return ticks * sum(_hostile_damage(threat, type_key_for_entity(e), armor) for e in group) / HOSTILE_ATTACK_INTERVAL_TICKS
+
+
 def hit_chance(attack_power: int = BASE_ATTACK_POWER, defense: int = 0) -> float:
     """The share of d20 faces that hit a target with ``defense``: 0.65 at
     attack power 2 against a hostile, never below 1 face nor above 19."""

@@ -132,7 +132,7 @@ def off_safe_step(w: WorldModel, target: Entity, blocked: set[Pos], reach: int) 
         return None
     dist = chebyshev(here, target.pos)
     options = [
-        p for p in w.open_neighbours(here, blocked) if not known_safe(w, w.map_id, p) and chebyshev(p, target.pos) <= dist
+        p for p in w.open_neighbours(here, blocked, swing=True) if not known_safe(w, w.map_id, p) and chebyshev(p, target.pos) <= dist
     ]
     if not options:
         return None
@@ -150,7 +150,9 @@ def close_step(w: WorldModel, target: Entity, blocked: set[Pos], reach: int = 1)
     could a step back, so Fight and Flee would take turns there (A136). The
     ground searched is fixed round the target, never measured from where we
     stand, so every cell of a shortest walk can still close the rest of it:
-    whether Fight can close never changes as it closes."""
+    whether Fight can close never changes as it closes. It closes only over
+    ground it can swing from (``WorldModel.walkable`` ``swing``): water only
+    with a fording supply worn, never by arming one in the hand (A146)."""
     here = w.pos
     if here is None:
         return None
@@ -159,10 +161,11 @@ def close_step(w: WorldModel, target: Entity, blocked: set[Pos], reach: int = 1)
     first: dict[Pos, Pos] = {}
     frontier = deque([here])
     seen = {here}
+    ground = w.walkable_test(swing=True)
     while frontier:
         p = frontier.popleft()
         for n in w.neighbours(p):
-            if n in seen or n in shut or not w.walkable(n) or chebyshev(n, target.pos) > radius:
+            if n in seen or n in shut or not ground(n) or chebyshev(n, target.pos) > radius:
                 continue
             seen.add(n)
             first[n] = first.get(p, n)

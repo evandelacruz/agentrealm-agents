@@ -577,7 +577,16 @@ def apply_set_param(
 
 # The progress a Plan keeps for its head op, all None for a new head: kept
 # across a reply that leaves the same op on top, reset when the head changes.
-HEAD_PROGRESS = ("wait_started_tick", "stalled_since_tick", "block_before", "held_before", "paid_from", "used_id", "fight_npc")
+HEAD_PROGRESS = (
+    "wait_started_tick",
+    "stalled_since_tick",
+    "top_since_tick",
+    "block_before",
+    "held_before",
+    "paid_from",
+    "used_id",
+    "fight_npc",
+)
 
 
 @dataclass
@@ -596,6 +605,7 @@ class Plan:
     floor_params: dict[str, float | int] = field(default_factory=lambda: dict(PARAM_DEFAULTS))
     wait_started_tick: int | None = None
     stalled_since_tick: int | None = None  # first tick the current op found no path
+    top_since_tick: int | None = None  # tick the head op reached the top: its own attempts are the ones since (A129)
     acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
@@ -615,6 +625,7 @@ class Plan:
             dict(self.floor_params),
             self.wait_started_tick,
             self.stalled_since_tick,
+            self.top_since_tick,
             self.block_before,
             self.held_before,
             self.paid_from,
@@ -632,6 +643,7 @@ class Plan:
             floor_params,
             self.wait_started_tick,
             self.stalled_since_tick,
+            self.top_since_tick,
             self.block_before,
             self.held_before,
             self.paid_from,
@@ -677,6 +689,8 @@ class Plan:
                     # back on top when the op above it ends (A104).
                     self.demote_current(f"still stalled: {stall.why}", memory)
                     continue
+                if self.top_since_tick is None:
+                    self.top_since_tick = world.tick
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
                 return

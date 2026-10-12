@@ -17,11 +17,11 @@ from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.break_memory import record_attempt
+from agentrealm_agent.break_memory import record_attempt, straight_route
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
-from agentrealm_agent.states import PlayContext, dispatch
+from agentrealm_agent.states import PlayContext, dispatch, way
 from agentrealm_agent.world import WorldModel
 
 TREE = (5, 5)
@@ -109,6 +109,30 @@ class TriedTest(unittest.TestCase):
         record_attempt(c.knowledge, map_id=w.map_id, pos=TREE, capability="chop", result="failed", tick=0)
         ask = self.ask_from_beside_the_tree(c, w)
         self.assertEqual(ask["tried"], "a way round, then chop on tree at 5,5: failed")
+
+
+    def test_a_use_in_flight_is_reported_as_sent(self):
+        w, c = clearing(), ctx()
+        w.held_supplies, w.armed_code, w.armed_id = [], None, None  # the sword's chop is out, nothing left to open it
+        c.memory.break_pending = (w.map_id, TREE, "chop")
+        ask = self.ask_from_beside_the_tree(c, w)
+        self.assertEqual(ask["tried"], "a way round, then chop on tree at 5,5: sent")
+
+    def test_a_block_chosen_off_the_straight_route_from_here_is_still_reported(self):
+        w, c = clearing(), ctx()
+        given_up(c, w)
+        self.assertIsNotNone(way.open_the_way(w, c, DEST, "Travel", no_step=True), "the tree is chosen from 5,7")
+        record_attempt(c.knowledge, map_id=w.map_id, pos=TREE, capability="chop", result="failed", tick=w.tick)
+        w.pos = (8, 6)  # the way from here runs north-west, clear of the tree's cell
+        self.assertNotIn(TREE, straight_route(w.pos, DEST))
+        play(w, c, 1)
+        (ask,) = asks(c)
+        self.assertEqual(ask["tried"], "a way round, then chop on tree at 5,5: failed")
+
+    def test_with_the_position_unknown_only_the_search_is_reported(self):
+        w, c = clearing(), ctx()
+        w.pos = None
+        self.assertEqual(way._tried(w, c, DEST), "a way round")
 
 
 class RetryAfterLapseTest(unittest.TestCase):

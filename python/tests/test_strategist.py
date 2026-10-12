@@ -929,6 +929,22 @@ class PlannerViewTest(unittest.TestCase):
         self.w.health = 8
         self.assertNotIn("health_at_bar", self.readiness()["stage_2"].get("to_close", {}), "met: nothing to close")
 
+    def test_eat_shows_only_food_heal_would_take(self):
+        # A130 review: food the refusal table holds, or whose walk Heal gave
+        # up, is no way to close the bar, so State never offers it.
+        from agentrealm_agent.executor.supply_refusals import Refusal, note_refusal, refusal_situation
+
+        self.w.health, self.w.max_health = 5, 10
+        self.w.entities = [Entity("supply", 9, (12, 10), "apple")]
+        m = Memory()
+        eat = lambda: self.readiness(memory=m)["stage_2"]["to_close"]["health_at_bar"].get("eat")
+        self.assertEqual(eat()["code"], "apple")
+        note_refusal(m, "take", 9, Refusal("odd_code", "hold", self.w.tick, refusal_situation(self.w, (12, 10))))
+        self.assertIsNone(eat(), "a held Take: not offered")
+        m.supply_refusals.clear()
+        nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("heal_food", 7, (12, 10)), "heal_food", self.w.tick)
+        self.assertIsNone(eat(), "its walk backed off: not offered")
+
     def test_held_heals_count_toward_the_health_bar(self):
         # A132: at 7/10 with potions held the health bar is met, so no potion
         # is drunk only to meet it (which would break the potion bar).

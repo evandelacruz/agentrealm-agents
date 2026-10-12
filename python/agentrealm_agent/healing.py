@@ -20,9 +20,10 @@ from typing import TYPE_CHECKING
 from .directives import PARAM_DEFAULTS
 from .engagement import drink_turns_fight
 from .executor.supply_refusals import can_try, in_hand
+from .navigation import stuck as nav_stuck
 from .item_table import InventorySupply, merge_heal
 from .supplies import heals, is_food, is_potion, row
-from .world import WorldModel
+from .world import Entity, WorldModel
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -124,6 +125,21 @@ def carried_heal(
         if is_potion(h.code) and spend_potion(w, m, policy, params, h.code):
             return h
     return None
+
+
+def food_to_take(w: WorldModel, m: Memory) -> list[Entity]:
+    """Food lying in sight that may be taken now: one rule for Heal's pick
+    and State's ``eat`` (A130). A ``Take`` the refusal table holds
+    (``supply_refusals.can_try``) or a walk to it still backed off
+    (``heal_food``, A90) rules it out."""
+    return [
+        e
+        for e in w.entities
+        if e.kind == "supply"
+        and is_food(e.code)
+        and can_try(m, w, "take", e.id, e.pos)
+        and not nav_stuck.backed_off(m, "heal_food", w.map_id, e.pos, w.tick)
+    ]
 
 
 def note_heal_window(m: Memory, w: WorldModel) -> None:

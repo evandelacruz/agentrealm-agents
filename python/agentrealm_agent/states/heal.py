@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from ..break_memory import choice_at, given_up_blocks
 from ..config import Policy
-from ..executor.supply_refusals import can_try, must_stand_on
-from ..healing import carried_heal, hurt, potion_count
+from ..executor.supply_refusals import must_stand_on
+from ..healing import carried_heal, food_to_take, hurt, potion_count
 from ..hostile_ground import reach_cells
 from ..memory import Memory, queue_signal
 from ..navigation import cost_path, path_cost
@@ -25,7 +25,6 @@ from ..navigation import stuck as nav_stuck
 from ..navigation.rejection import navigation_avoid_costly
 from .. import targets as targets_mod
 from ..pathing import bounded_step, grid_params, nav_search
-from ..supplies import is_food
 from ..survival import hostiles_in_range, hostiles_reaching
 from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
@@ -182,21 +181,13 @@ def _walk_toward(w: WorldModel, ctx: PlayContext, at: Pos, *, goal: str) -> Stat
 
 def _food_target(w: WorldModel, ctx: PlayContext) -> Entity | None:
     """The food Heal goes for: of the food lying within ``FOOD_REACH`` that
-    may be taken now (``supply_refusals.can_try``), the cheapest by its walk
+    may be taken now (``healing.food_to_take``), the cheapest by its walk
     (``_walk_toward``'s price; food in reach costs none). The food it went
     for first stays its target while it is one (A71)."""
     m = ctx.memory
     here = w.pos
     assert here is not None
-    foods = [
-        e
-        for e in w.entities
-        if e.kind == "supply"
-        and is_food(e.code)
-        and chebyshev(e.pos, here) <= FOOD_REACH
-        and can_try(m, w, "take", e.id, e.pos)
-        and not nav_stuck.backed_off(m, "heal_food", w.map_id, e.pos, w.tick)
-    ]
+    foods = [e for e in food_to_take(w, m) if chebyshev(e.pos, here) <= FOOD_REACH]
     c = targets_mod.committed(m, w, "heal_food")
     if (kept := next((f for f in foods if c is not None and f.id == c.target), None)) is not None:
         return kept

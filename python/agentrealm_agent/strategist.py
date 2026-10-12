@@ -116,14 +116,13 @@ from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import entrance_routes
 from .gem_yield import RATE_MIN_SECONDS, keep_gather_region, summary as gem_yield_summary
-from .healing import POTION_RULE, held_heal, low_health_line, potion_count, supply_matches
+from .healing import POTION_RULE, food_to_take, held_heal, low_health_line, potion_count, supply_matches
 from .equip import CUT, damage_per_second, does_job, hunting_ceiling, loadout_strength, weapon_rank
 from .supplies import (
     armor_defense,
     chest_applied,
     chest_capacity,
     eaten_on_pickup,
-    is_food,
     is_potion,
     is_weapon,
     row as supply_row,
@@ -164,7 +163,6 @@ from .threat import type_key_for_entity
 from .travel.knowledge import iter_entrances, iter_shop_cells, town_from_kb
 from .travel.ops import travel_op_from_plan_goal
 from .world import Pos, WorldModel, chebyshev
-from .executor import DEFAULT_TICK_RATE_HZ
 from .zone_discovery import known_safe
 
 log = logging.getLogger(__name__)
@@ -226,7 +224,7 @@ State lists the current stack, each op marked "pinned" or "planner". Pinned ops 
 The survival params ("params" under State, set by "params" or a set_param op). Survival params may only tighten past params_floor; a change that loosens one is ignored:
 {_param_table()}
 
-Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first. Safe ground only stops damage. Health rises only from potions and food: a potion drunk, food eaten (Heal eats carried food whenever hurt), or food eaten on pickup, plus a respawn, which is at full health. There is no natural regeneration, on safe ground or anywhere, so resting or waiting restores nothing. An op that leaves health below a bar leaves it there until a potion or food heals it: readiness to_close health_at_bar shows the ways that close it (eat, buy). A potion is for an actual health need: health at the survival floor (low_health), or a fight ahead that needs the health (a boss, a hostile the character means to take on). Never drink one only to meet a readiness bar: health_at_bar already counts the potions and food held, so a drink leaves it where it was and takes one off potions_at_bar. For an actual need before health is low, put a use_item with its code on the stack (or raise low_health, which makes Heal drink one sooner); to eat food lying in sight, fetch_item it; to buy a potion, buy at the shop it names.
+Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first. Safe ground only stops damage. Health rises only from potions and food: a potion drunk, food eaten (Heal eats carried food whenever hurt), or food eaten on pickup, plus a respawn, which is at full health. There is no natural regeneration, on safe ground or anywhere, so resting or waiting restores nothing. An op that leaves health below a bar leaves it there until a potion or food heals it: readiness to_close health_at_bar shows the ways that close it (eat, buy). A potion is for an actual health need: health at the survival floor (low_health), or a fight ahead that needs the health (a boss, a hostile the character means to take on). Never drink one only to meet a readiness bar: health_at_bar already counts the potions and food held, so a drink leaves it where it was and takes one off potions_at_bar. For an actual need before health is low, put a use_item with its code on the stack (or raise low_health, which makes Heal drink one sooner); to eat food lying in sight, fetch_item it; to buy a potion, buy it at a shop.
 
 NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir from here, spoken, greeted, hostile, stays_put); npcs_spoken_to counts the NPCs a say op of yours has spoken to so far, and npcs_greeted those Greet has said hello to. The game does not say which NPCs are helpers and which are monsters. "hostile" true means known hostile: a boss, the last thing that hit the character, or a type that has swung at it, hit it or died in view, in this run or an earlier one; false only means none of its type has done so yet, so it may still be a monster. "stays_put" true means it has stood on one cell for a while, as helpers do; judge the rest from its type and the clues. On safe ground (anywhere, if policy.hostile does not name NPCs), Greet says hello once to an NPC in sight that stays put and is not hostile, and marks it greeted; a helper answers any words with the same line, which lands in Clues. A greeting never counts as spoken: a say op to a greeted NPC still says your text. To talk to one further away, or with your own words, use a say op with its npc_id (from nearby_npcs) or its npc_type (any NPC of that type, the nearest first); the character walks within speech range and says your text. A helper's reply is added to Clues as a row of kind "npc".
 
@@ -266,7 +264,7 @@ NO_GEMS_EARNED = "never at gems_per_min 0"
 
 PROGRESSION = f"""# Progression
 
-The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. State readiness shows each stage's readiness check by check, and whether it is met. A stage whose readiness is met is done: move on to the next stage. Stay only for a concrete, reachable reason, and name it in the why: an upgrade listed under upgrades_for_sale whose gems_short the gems will cover soon (its minutes say how soon), say. Saving for gear that is not listed there is not a reason: an item not known to be for sale cannot be bought, however much it would help, so with upgrades_for_sale none seen there is nothing to save toward and a met stage moves on. The same holds for anything a goal needs, at any stage: an item under no_seller_known is no reason to gather gems. A goal that waits on one finds a seller or the item first (travel to a named place, explore, ask NPCs, read signs), or the stage works on a goal reachable now (another level entrance, say). Drop back a stage when its readiness no longer is met (after a death, say), except for a check skipped for its cost (below). The readiness bars are guidance you weigh, not a gate: readiness stage_2 to_close shows, for each unmet check a purchase closes, the gems_short and the minutes it takes at gather_run gems_per_min, this gather's measured rate ("{NO_GEMS_EARNED}" when that rate is 0; no minutes before a rate is measured). health_at_bar counts held heals: it is met when health plus the heal of the potions and food held reaches the bar, and readiness stage_2 health_with_held_heals shows that sum. So the potion bar and the health bar trade against each other through held heals: a potion drunk to meet the health bar takes one off potions_at_bar, so drinking to meet one bar breaks the other, and a heal held already counts toward health. For health_at_bar it shows health_short and the ways it closes: eat (the nearest food lying in sight, its heal, where it is and the walk_seconds there) and buy (the cheapest potion for sale: its gems_short and minutes, and the nearest known shop with the walk_seconds there); health_short is what health and held heals together still lack, which no drink closes. There is no rest: health never comes back by itself. With none of these listed, nothing the character has or can see for sale closes it: health stays where it is, so find food or a potion seller, or move on and name it in the why. A bar whose cost in time outweighs what it is worth may be skipped: move on, and name the trade in the why (the minutes a check costs against what it buys, say). A check whose minutes still outweigh what it buys stays skipped: by itself it sends the character back to no stage and calls for no restock; weigh it again when its minutes fall (gems gained, a cheaper seller, a better region). Applying this is yours: the code does not switch stages.
+The character's arc, in order. Judge the stage from State (health, gems, armed, worn, held, lives, map_level, levels_cleared, level_count), the plan and the clues, then pick ops that advance that stage. State readiness shows each stage's readiness check by check, and whether it is met. A stage whose readiness is met is done: move on to the next stage. Stay only for a concrete, reachable reason, and name it in the why: an upgrade listed under upgrades_for_sale whose gems_short the gems will cover soon (its minutes say how soon), say. Saving for gear that is not listed there is not a reason: an item not known to be for sale cannot be bought, however much it would help, so with upgrades_for_sale none seen there is nothing to save toward and a met stage moves on. The same holds for anything a goal needs, at any stage: an item under no_seller_known is no reason to gather gems. A goal that waits on one finds a seller or the item first (travel to a named place, explore, ask NPCs, read signs), or the stage works on a goal reachable now (another level entrance, say). Drop back a stage when its readiness no longer is met (after a death, say), except for a check skipped for its cost (below). The readiness bars are guidance you weigh, not a gate: readiness stage_2 to_close shows, for each unmet check a purchase closes, the gems_short and the minutes it takes at gather_run gems_per_min, this gather's measured rate ("{NO_GEMS_EARNED}" when that rate is 0; no minutes before a rate is measured). health_at_bar counts held heals: it is met when health plus the heal of the potions and food held reaches the bar, and readiness stage_2 health_with_held_heals shows that sum. So the potion bar and the health bar trade against each other through held heals: a potion drunk to meet the health bar takes one off potions_at_bar, so drinking to meet one bar breaks the other, and a heal held already counts toward health. For health_at_bar it shows health_short and the ways it closes: eat (the nearest food lying in sight, its heal, where it is and the walk_seconds there) and buy (the cheapest potion seen for sale: its gems_short and minutes, and at, the nearest known shop, with the walk_seconds there; nothing records which shop stocks it, so that shop may not); health_short is what health and held heals together still lack, which no drink closes. There is no rest: health never comes back by itself. With none of these listed, nothing the character has or can see for sale closes it: health stays where it is, so find food or a potion seller, or move on and name it in the why. A bar whose cost in time outweighs what it is worth may be skipped: move on, and name the trade in the why (the minutes a check costs against what it buys, say). A check whose minutes still outweigh what it buys stays skipped: by itself it sends the character back to no stage and calls for no restock; weigh it again when its minutes fall (gems gained, a cheaper seller, a better region). Applying this is yours: the code does not switch stages.
 
 1. Survive and learn. Explore safe ground, read signs, talk to NPCs, map the town (explore_area, travel, read, say). Ready when the town's shop and at least one level entrance are known. To find an entrance when none is known: a travel to "entrance" with no x, y walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and does nothing while no door has been seen here; so explore_area out past the town toward ground not yet seen, read the signs and ask the NPCs where the levels are, and travel to a door once one shows. A later stage that needs an entrance and knows none comes back here to find one.
 2. Build up loot, gear and supplies. Gem hunting is the main work here: cut grass (a gem drops 20% of the time in the ring-1 fields, 25% farther out; field work makes about 6 gems a minute; bushes drop berries, not gems), fell trees, take gem piles and break gem caches. Kills pay gems too: a slain hostile drops one more often than a grass cut on the same ground, more for stronger types, so a weak hostile the character can beat on safe-enough terms (full health, potions held, no pack nearby, safe ground close) is worth fighting rather than walking round, and the hunting ground is a place to do it. Every character swings with attack power 2, a hit 65% of the time, so even the starting knife takes one weak hostile alone (a type's damage and hit rate are measured as it fights the character and kept across runs; a type never measured is priced at attack power 2); still, do not hunt on low health, few lives or against types that have hurt the character badly, and leave the survival states to retreat when a fight turns. To hunt, put a gather_gems with fight true on ground weak hostiles hold, or travel to the hunting ground; its strength ceiling counts attack power 2 plus the armed weapon's damage and worn armor's defense, so the knife or a bronze sword gets in, with bronze mail or without, and a bronze mallet does not. Pick up food along the way. Then buy potions and gear and equip them (gather_gems, break_block, fetch_item, buy, equip; equip arms the best weapon by the rule under Weapons and the hunting ground, so a weapon that would shut the hunting ground stays unarmed unless named). Ready when health is at least {round(READY_HEALTH_FRACTION * 100)}% of max, at least {READY_POTIONS} potions are held, a weapon better than the starting weapon by the rule under Weapons and the hunting ground is armed, and armor is worn (State readiness stage_2), each weighed against its minutes under to_close. Better gear helps in levels, but once these are met, more gems are worth gathering only toward an upgrade listed under upgrades_for_sale.
@@ -661,6 +659,7 @@ def build_prompt(
     strength: StrengthBracket | None = None,
     stalled_ops: Collection[StalledOp] = (),
     ended_ops: Collection[dict[str, Any]] = (),
+    memory: Memory | None = None,
 ) -> list[dict[str, Any]]:
     """The model's input: the cached system prefix (:func:`system_prompt`), then
     one user message with triggers, state, the remaining plan, every clue, and instructions."""
@@ -689,7 +688,7 @@ def build_prompt(
         no_seller_line(w, knowledge),
         upgrade_line(w, knowledge, (gather_run or {}).get("gems_per_min")),
         hunting_strength_line(w, knowledge),
-        readiness_line(w, knowledge, (gather_run or {}).get("gems_per_min"), plan.tick_hz),
+        readiness_line(w, knowledge, (gather_run or {}).get("gems_per_min"), memory),
         f"params={json.dumps(plan.params, sort_keys=True)}",
         f"params_floor={json.dumps(directives.params, sort_keys=True)} (survival params may only tighten past these)",
     ]
@@ -1237,7 +1236,7 @@ def hunting_strength_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str
 
 
 def readiness(
-    w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None, tick_hz: int = DEFAULT_TICK_RATE_HZ
+    w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None, memory: Memory | None = None
 ) -> dict[str, dict[str, Any]]:
     """Each stage's readiness check by check, and whether it is met
     (PROGRESSION). Stage 2's bar is ``READY_HEALTH_FRACTION`` of max health,
@@ -1266,7 +1265,7 @@ def readiness(
     }
     row_2: dict[str, Any] = {**stage_2, "met": all(stage_2.values()), "health_with_held_heals": health_with_heals}
     unmet = [check for check, ok in stage_2.items() if not ok]
-    to_close = cost_to_close(w, knowledge, unmet, gems_per_min, tick_hz)
+    to_close = cost_to_close(w, knowledge, unmet, gems_per_min, memory)
     if to_close:
         row_2["to_close"] = to_close
     return {
@@ -1280,7 +1279,7 @@ def cost_to_close(
     knowledge: KnowledgeBase | None,
     unmet: Collection[str],
     gems_per_min: float | None,
-    tick_hz: int = DEFAULT_TICK_RATE_HZ,
+    memory: Memory | None = None,
 ) -> dict[str, dict[str, Any]]:
     """What each unmet stage 2 check costs (A121): for a check a purchase
     closes, the gems still short of the cheapest seen for sale that closes it
@@ -1306,7 +1305,7 @@ def cost_to_close(
         closes["armor_worn"] = (armor, 1)
     rows: dict[str, dict[str, Any]] = {}
     if "health_at_bar" in unmet and w.max_health:
-        rows["health_at_bar"] = health_to_close(w, knowledge, prices, gems_per_min, tick_hz)
+        rows["health_at_bar"] = health_to_close(w, knowledge, prices, gems_per_min, memory)
     for check, (price, count) in closes.items():
         short = max(0, price * count - (w.gems or 0))
         row: dict[str, Any] = {"gems_short": short}
@@ -1329,20 +1328,27 @@ def minutes_at(gems_short: int, gems_per_min: float | None) -> float | str | Non
 
 
 def health_to_close(
-    w: WorldModel, knowledge: KnowledgeBase | None, prices: Mapping[str, int], gems_per_min: float | None, tick_hz: int
+    w: WorldModel,
+    knowledge: KnowledgeBase | None,
+    prices: Mapping[str, int],
+    gems_per_min: float | None,
+    memory: Memory | None = None,
 ) -> dict[str, Any]:
     """How an unmet ``health_at_bar`` closes, and roughly what that costs
     (A124). Health rises only from potions and food (A130: there is no
     natural regeneration, so no rest is ever shown). The bar counts the heals
     carried (A132), so ``health_short`` is what health and held heals
     together still lack, and a drink closes none of it: ``eat``, the nearest
-    food lying in sight, its heal and the walk there; and ``buy``, the
-    cheapest potion seen for sale, its ``gems_short`` and minutes, and the
-    nearest known shop with the walk there."""
+    free food in sight that Heal's own rule lets it take
+    (``healing.food_to_take`` on ``memory``), its heal and the walk
+    there; and ``buy``, the cheapest potion seen for sale, its
+    ``gems_short`` and minutes, and the nearest known shop (``at``: a shop,
+    not one known to stock the potion; nothing records what each shop sells)
+    with the walk there."""
     short = math.ceil(READY_HEALTH_FRACTION * (w.max_health or 0)) - (w.health or 0) - held_heal(w)
     row: dict[str, Any] = {"health_short": short}
     here = w.pos
-    food = [e for e in w.entities if e.kind == "supply" and is_food(e.code) and not e.gem_price]
+    food = [e for e in food_to_take(w, memory or Memory()) if not e.gem_price]
     if food and here is not None:
         f = min(food, key=lambda e: (chebyshev(here, e.pos), e.pos))
         row["eat"] = {"code": f.code, "heals": supply_row(f.code).heal or 0, **_walk_to(w, w.map_id, f.pos)}
@@ -1370,9 +1376,9 @@ def _walk_to(w: WorldModel, map_id: int | None, cell: Pos) -> dict[str, Any]:
 
 
 def readiness_line(
-    w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None, tick_hz: int = DEFAULT_TICK_RATE_HZ
+    w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: float | None = None, memory: Memory | None = None
 ) -> str:
-    return f"readiness={json.dumps(readiness(w, knowledge, gems_per_min, tick_hz), sort_keys=True)}"
+    return f"readiness={json.dumps(readiness(w, knowledge, gems_per_min, memory), sort_keys=True)}"
 
 
 @dataclass
@@ -1766,6 +1772,7 @@ class Strategist:
             strength=runner.mem.strength,
             stalled_ops=runner.mem.stalled_ops,
             ended_ops=self.ended.rows(runner.world.tick, runner.tick_hz),
+            memory=runner.mem,
         )
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1

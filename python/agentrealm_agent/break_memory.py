@@ -38,6 +38,8 @@ REGROWTH_TICKS = 600  # cut bush grew back in 60 s (GAME_NOTES Breaking blocks)
 BREAK_BASE_COST = DEFAULT_WEAPON_COOLDOWN_TICKS + 1
 # Refusals of a break that say "not yet", not "cannot": the pair is not marked failed.
 TRANSIENT_BREAK_REJECTIONS = frozenset({"attack_cooldown"})
+# Results that mark a (block, capability) pair failed: it is not tried there again.
+FAILED_RESULTS = frozenset({"applied_no_effect", "failed", "no_effect"})
 
 # What opens each breakable block type, by the game's rules: the knife and
 # swords cut bushes, only a sword chops trees, a mallet smashes boulders,
@@ -101,8 +103,7 @@ def attempt_failed(kb: KnowledgeBase | None, map_id: int | None, pos: Pos, capab
     row = _break_row(kb, break_key(map_id, pos, capability))
     if row is None:
         return False
-    result = row.get("result")
-    return result in ("applied_no_effect", "failed", "no_effect")
+    return row.get("result") in FAILED_RESULTS
 
 
 def attempt_open(kb: KnowledgeBase | None, map_id: int | None, pos: Pos, capability: str) -> bool:

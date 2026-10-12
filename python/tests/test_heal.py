@@ -7,20 +7,7 @@ import unittest.mock
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.executor import DEFAULT_WEAPON_COOLDOWN_TICKS
-from agentrealm_agent.healing import (
-    REGEN_KEY,
-    REGEN_MEASURE_TICKS,
-    REGEN_RATES_KEPT,
-    REGEN_RATES_KEY,
-    SURVIVAL_KEY,
-    absorb_heal_pending,
-    add_regen,
-    hurt,
-    note_heal_pending,
-    regen_known,
-    regen_per_tick,
-    save_regen_yes,
-)
+from agentrealm_agent.healing import absorb_heal_pending, hurt, note_heal_pending
 from agentrealm_agent.executor.supply_refusals import Refusal, note_refusal, refusal_situation
 from agentrealm_agent.item_table import InventorySupply, carried_from_inventory
 from agentrealm_agent.knowledge_base import KnowledgeBase
@@ -65,14 +52,6 @@ class HealingHelpersTest(unittest.TestCase):
         inv = {"held": [{"id": 4, "supply_subtype_code": "apple"}], "armed": None}
         w.apply_observation({"complete": True, "snapshot": {"health": 5, "max_health": 10, "inventory": inv}})
         self.assertEqual(w.held_supplies, [InventorySupply(4, "apple")])
-
-    def test_only_yes_is_read_from_knowledge_base(self):
-        kb = KnowledgeBase.empty("sandbox")
-        kb.extra[SURVIVAL_KEY] = {REGEN_KEY: "no"}
-        self.assertIsNone(regen_known(kb, Memory()))
-        save_regen_yes(kb)
-        self.assertEqual(regen_known(kb, Memory()), "yes")
-
 
 class HealStateTest(unittest.TestCase):
     def test_takes_adjacent_food(self):
@@ -261,71 +240,6 @@ class HealStateTest(unittest.TestCase):
         note_heal_pending(m, w, "apple", "take")
         self.assertIsNone(m.heal_pending)
 
-    def test_walks_to_known_safe_tile(self):
-        w = grid(at=(2, 2))
-        out = dispatch(w, ctx())
-        self.assertEqual(out.state, "Heal")
-        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 1}])
-
-    def test_walk_to_safe_goes_round_a_known_pack_seen_since_it_was_planned(self):
-        """A63 run 4: Heal's walk to the safe tile kept the path it planned and
-        sent a 10-Step queue into a pack of known-hostile NPCs."""
-        from agentrealm_agent.navigation import walk as nav_walk
-        from agentrealm_agent.survival import hostile_reach
-
-        w, m = grid(at=(11, 0), size=12), Memory()
-        for i in range(-1, 13):  # walled in: no way round through fog
-            for cell in ((i, -1), (i, 12), (-1, i), (12, i)):
-                w.view.tiles[cell] = "wall"
-        straight = [(x, 0) for x in range(10, -1, -1)]
-        m.path, m.goal = list(straight), "heal_measure"
-        m.walks["heal_measure"] = nav_walk.start(w, "heal_measure", (0, 0), straight)
-        w.hostile_types.add(("npc", "wartlurch"))
-        w.entities = [Entity("npc", 20 + i, p, "wartlurch") for i, p in enumerate([(5, 0), (5, 1), (6, 0)])]
-        c = ctx(m)
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Heal")
-        self.assertEqual(m.path[-1], (0, 0))
-        self.assertTrue(hostile_reach(w, c.policy).isdisjoint(m.path), m.path)
-
-    def test_a_reach_the_walk_cannot_go_round_is_not_replanned_every_decision(self):
-        """Review on #137: with the reach unavoidable, the replanned path always
-        crosses it, so comparing against the reach now replanned forever."""
-        from unittest import mock
-        from agentrealm_agent.states import heal
-
-        w, m = grid(at=(8, 0), size=9), Memory()
-        for x in range(-1, 10):
-            for y in range(-1, 10):
-                if y != 0 or x in (-1, 9):
-                    w.view.tiles[(x, y)] = "wall"  # one corridor along y = 0
-        w.hostile_types.add(("npc", "wartlurch"))
-        w.entities = [Entity("npc", 20, (3, 2), "wartlurch")]  # reaches x 1..5 of the corridor
-        c = ctx(m)
-        with mock.patch.object(heal, "cost_path", wraps=heal.cost_path) as planned:
-            self.assertEqual(dispatch(w, c).state, "Heal")
-            self.assertEqual(planned.call_count, 1)
-            w.entities = [Entity("npc", 20, (4, 2), "wartlurch")]  # it moves, still in reach
-            self.assertEqual(dispatch(w, c).state, "Heal")
-            self.assertEqual(planned.call_count, 1, "no new hostile, no new plan")
-            w.entities.append(Entity("npc", 21, (5, 2), "wartlurch"))  # out of reach of us and the safe tile
-            dispatch(w, c)
-            self.assertEqual(planned.call_count, 2, "a hostile not in reach when planned is")
-
-    def test_no_safe_tile_yields_to_the_safe_default(self):
-        w = grid(at=(2, 2))
-        w.zones[7] = {}
-        m = Memory()
-        out = dispatch(w, ctx(m))
-        self.assertEqual(out.state, "Explore")
-        self.assertIsNotNone(out.intents)
-        self.assertIn("Heal: no reachable safe tile", out.yielded)
-        # No backoff: Heal looks again next window, and still yields.
-        w.tick += 7
-        out = dispatch(w, ctx(m))
-        self.assertEqual(out.state, "Explore")
-        self.assertIn("Heal: no reachable safe tile", out.yielded)
-
     def test_hostile_in_range_keeps_heal_out(self):
         # Retreat or Flee (A9) answers the hostile; Heal waits until none is in range.
         w = grid()
@@ -338,200 +252,9 @@ class HealStateTest(unittest.TestCase):
         w.health = 10
         self.assertEqual(dispatch(w, ctx()).state, "Explore")
 
-    def assert_heals_in_zone(self, out):
-        """In a one-cell safe zone every safe-default step leaves it, so Heal rests there."""
-        self.assertEqual(out.state, "Heal")
-        self.assertEqual(verbs(out), ["Wait"], out.reason)
-        self.assertEqual(out.reason, "heal: rest in the safe zone")
-
-    def test_moves_inside_a_larger_safe_zone(self):
-        # Room in the zone: Heal keeps moving via the safe default, on zone cells only.
-        w = grid(at=(0, 0))
-        for x in range(5):
-            for y in range(5):
-                w.zones[7][(x, y)] = ZoneFact(safe=True)
-        out = dispatch(w, ctx(Memory(), KnowledgeBase.empty("sandbox")))
-        self.assertEqual(out.state, "Heal")
-        self.assertEqual(verbs(out), ["SetPosition"])
-        self.assertTrue(out.reason.startswith("heal in safe ground: "), out.reason)
-
-    def test_measures_regen_then_saves_yes(self):
-        w = grid(at=(0, 0))
-        m, kb = Memory(), KnowledgeBase.empty("sandbox")
-        out = dispatch(w, ctx(m, kb))
-        self.assert_heals_in_zone(out)
-        self.assertIsNotNone(m.heal_regen_sample)
-        w.tick, w.health = 7, 6
-        out = dispatch(w, ctx(m, kb))
-        self.assert_heals_in_zone(out)
-        self.assertEqual(regen_known(kb, Memory()), "yes")
-        self.assertIsNone(regen_per_tick(kb), "one rise gives a yes, not a rate (A124)")
-
-    def rest_run(self, kb: KnowledgeBase):
-        """A character resting in the safe zone, one Heal decision per call."""
-        w, m = grid(at=(0, 0)), Memory()
-
-        def rest(tick: int, health: int) -> None:
-            w.tick, w.health = tick, health
-            self.assert_heals_in_zone(dispatch(w, ctx(m, kb)))
-
-        return w, m, rest
-
-    def test_regen_rate_is_timed_between_rises_and_refined_by_each_rest(self):
-        # A124 review: a rate timed from wherever the rest began reads high;
-        # timed from one rise to the next it spans whole regen periods.
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)  # a world saved before the rate was kept
-        _, _, rest = self.rest_run(kb)
-        rest(0, 5)
-        rest(1, 6)  # the first rise, 1 tick in: it only starts a stretch
-        self.assertIsNone(regen_per_tick(kb))
-        for t in range(10, 100, 10):
-            rest(t, 6)
-        rest(101, 7)  # the next rise, 100 ticks after the first
-        self.assertEqual(regen_per_tick(kb), 1 / 100)
-        rest(150, 7)
-        rest(181, 8)  # each stretch adds its own rate
-        self.assertEqual(kb.extra[SURVIVAL_KEY][REGEN_RATES_KEY], [1 / 100, 1 / 80])
-
-    def test_one_bad_stretch_cannot_set_the_rate(self):
-        # A124 review: the estimate is the median of the newest stretches.
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
-        for rate in (0.01, 0.012, 5.0):
-            add_regen(kb, rate)
-        self.assertEqual(regen_per_tick(kb), 0.012)
-        for _ in range(REGEN_RATES_KEPT):
-            add_regen(kb, 0.02)
-        self.assertEqual(kb.extra[SURVIVAL_KEY][REGEN_RATES_KEY], [0.02] * REGEN_RATES_KEPT, "only the newest are kept")
-
-    def test_the_rate_counts_only_once_regen_is_confirmed(self):
-        # A124 review: rest is shown only on a confirmed "yes".
-        kb = KnowledgeBase.empty("sandbox")
-        add_regen(kb, 0.01)
-        self.assertIsNone(regen_per_tick(kb))
-        kb.extra[SURVIVAL_KEY][REGEN_KEY] = "no"
-        self.assertIsNone(regen_per_tick(kb))
-        save_regen_yes(kb)
-        self.assertEqual(regen_per_tick(kb), 0.01)
-
-    def test_a_heal_sent_by_any_state_ends_the_stretch(self):
-        # A124 review: a planner use_item or Flee's drink between two rests
-        # is not regen.
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
-        w, m, rest = self.rest_run(kb)
-        rest(0, 5)
-        rest(1, 6)  # a rise: the stretch has started
-        note_heal_pending(m, w, "small_potion", "use")  # sent by UseItem, say
-        self.assertIsNone(m.heal_regen_stretch)
-        rest(10, 8)  # the drink lands: no stretch to time it against
-        rest(20, 8)
-        rest(30, 9)
-        self.assertIsNone(regen_per_tick(kb), "a heal and the rise after it give no rate")
-
-    def test_another_decision_between_rests_ends_the_stretch(self):
-        # A124 review: only rest decisions back to back are timed.
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
-        _, m, rest = self.rest_run(kb)
-        rest(0, 5)
-        rest(1, 6)
-        m.nav_stuck.decision += 1  # another state decided in between
-        rest(2, 7)
-        rest(102, 8)
-        self.assertIsNone(regen_per_tick(kb), "the rise after the break only starts a stretch")
-        rest(202, 9)
-        self.assertEqual(regen_per_tick(kb), 1 / 100)
-
-    def test_food_eaten_ends_the_stretch(self):
-        # A124: a rise from food or a potion is not regen.
-        kb = KnowledgeBase.empty("sandbox")
-        w, m, rest = self.rest_run(kb)
-        rest(0, 5)
-        rest(5, 6)
-        w.held_supplies = [InventorySupply(4, "apple")]
-        dispatch(w, ctx(m, kb))
-        self.assertIsNone(m.heal_regen_stretch)
-
-    def test_regen_absent_is_kept_for_this_run_only(self):
-        w = grid(at=(0, 0))
-        m, kb = Memory(), KnowledgeBase.empty("sandbox")
-        for t in range(0, REGEN_MEASURE_TICKS + 1, 10):
-            w.tick = t
-            out = dispatch(w, ctx(m, kb))
-        self.assertTrue(m.heal_regen_absent)
-        self.assertIsNone(regen_known(kb, Memory()))
-        self.assertNotIn(SURVIVAL_KEY, kb.extra)
-        # Regen known "no": Heal sends nothing and the safe default moves.
-        w.tick += 10
-        out = dispatch(w, ctx(m, kb))
-        self.assertEqual(out.state, "Explore")
-        self.assertIn("Heal: no safe-zone regen this run", out.yielded)
-
-    def test_sample_restarts_after_leaving_zone(self):
-        w = grid(at=(0, 0))
-        m = Memory()
-        dispatch(w, ctx(m))
-        self.assertIsNotNone(m.heal_regen_sample)
-        w.pos, w.tick = (1, 1), 10
-        dispatch(w, ctx(m))
-        self.assertIsNone(m.heal_regen_sample)
-        w.pos, w.tick = (0, 0), REGEN_MEASURE_TICKS + 20
-        out = dispatch(w, ctx(m))
-        self.assert_heals_in_zone(out)
-        self.assertEqual(m.heal_regen_sample, (REGEN_MEASURE_TICKS + 20, 5, REGEN_MEASURE_TICKS + 20))
-        self.assertFalse(m.heal_regen_absent)
-
-    def test_sample_restarts_when_health_falls(self):
-        w = grid(at=(0, 0))
-        m = Memory()
-        dispatch(w, ctx(m))
-        w.tick, w.health = 10, 4
-        dispatch(w, ctx(m))
-        self.assertEqual(m.heal_regen_sample, (10, 4, 10))
-
-    def test_rests_when_regen_known(self):
-        w = grid(at=(0, 0))
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
-        m = Memory()
-        out = dispatch(w, ctx(m, kb=kb))
-        self.assert_heals_in_zone(out)
-        self.assertIsNone(m.heal_regen_sample)  # known: no sample taken
-
-    def test_no_regen_stops_the_measure_walk_flip_flop(self):
-        # Live: at 3/10, no food, no regen, Heal swapped between `heal_measure`
-        # and "heal in safe ground" while the safe default walked out of the
-        # zone and back. Now it rests in the zone until the verdict, then
-        # never samples or walks to safe ground again, and asks the planner
-        # once for food and potions.
-        w = grid(at=(0, 0))
-        w.health = 3
-        m, kb = Memory(), KnowledgeBase.empty("sandbox")
-        reasons = []
-        for t in range(0, REGEN_MEASURE_TICKS + 1, 10):
-            w.tick = t
-            out = dispatch(w, ctx(m, kb))
-            reasons.append(out.reason)
-            self.assertEqual(w.pos, (0, 0))
-        self.assertTrue(m.heal_regen_absent)
-        self.assertFalse(any("heal_measure" in r for r in reasons), reasons)
-        asks = [s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]
-        self.assertEqual(len(asks), 1)
-        self.assertEqual((asks[0]["health"], asks[0]["regen"]), (3, "no"))
-        # Off the zone afterwards: no walk back, no new sample, no second ask.
-        for t, at in ((REGEN_MEASURE_TICKS + 10, (2, 2)), (REGEN_MEASURE_TICKS + 20, (0, 0))):
-            w.tick, w.pos = t, at
-            out = dispatch(w, ctx(m, kb))
-            self.assertNotEqual(out.state, "Heal")
-            self.assertNotIn("heal_measure", out.reason)
-        self.assertIsNone(m.heal_regen_sample)
-        self.assertEqual(len([s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]), 1)
-
     def test_heal_supplies_asked_again_after_a_full_heal(self):
         w = grid(at=(2, 2))
-        m = Memory(heal_regen_absent=True)
+        m = Memory()
         dispatch(w, ctx(m))
         w.health = 10
         dispatch(w, ctx(m))
@@ -562,83 +285,23 @@ class HealStateTest(unittest.TestCase):
         self.assertNotEqual(out.state, "Heal")
         self.assertFalse(m.heal_supplies_asked)
 
-    def test_a_long_rest_leaves_stuck_detection_untouched(self):
-        # Review repro: one-cell zone, regen "yes", health held at 3 for 1300
-        # ticks. The safe default used to commit a walk outside the zone each
-        # window and escalate it to REVEAL without one move.
-        from agentrealm_agent.navigation import stuck as nav_stuck
-
-        w = grid(at=(0, 0))
-        w.health = 3
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
+    def test_nothing_to_heal_with_never_walks_to_safe_ground_or_waits(self):
+        # A130: the game has no natural regeneration, so with no food and no
+        # potion due Heal sends nothing, off safe ground or on it, at any
+        # health: no walk to safe ground, no Wait to measure or rest. It
+        # asks the planner once for food and potions; the safe default moves.
         m = Memory()
-        for t in range(0, 1301, 10):
-            w.tick = t
-            out = dispatch(w, ctx(m, kb))
-            self.assertEqual((out.state, verbs(out)), ("Heal", ["Wait"]), out.reason)
-        self.assertEqual(m.nav_stuck.attempts, {})
-        self.assertEqual(m.nav_stuck.stuck_signals, [])
-        w.health, w.tick = 10, 1310
-        out = dispatch(w, ctx(m, kb))
-        self.assertEqual(out.state, "Explore")
-        att = nav_stuck.active(m, w)
-        self.assertTrue(att is None or att.level < nav_stuck.REVEAL, out.reason)
-        self.assertNotIn("reveal", out.reason)
-
-    def test_resting_walks_only_inside_the_zone(self):
-        # A zone with an unexplored edge: Heal walks there through zone cells only.
-        w = grid(at=(0, 2))
-        for y in range(5):
-            w.zones[7][(0, y)] = ZoneFact(safe=True)
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
-        out = dispatch(w, ctx(Memory(), kb))
-        self.assertEqual(out.state, "Heal")
-        self.assertEqual(verbs(out), ["SetPosition"])
-        step = (out.intents[0]["x"], out.intents[0]["y"])
-        self.assertEqual(step[0], 0, "never off the zone column")
-
-    def zone_column(self):
-        w = grid(at=(0, 2))
-        for y in range(5):
-            w.zones[7][(0, y)] = ZoneFact(safe=True)
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
-        return w, kb
-
-    def test_an_explore_backoff_on_a_zone_frontier_keeps_heal_off_it(self):
-        from agentrealm_agent.navigation import stuck as nav_stuck
-
-        w, kb = self.zone_column()
-        m = Memory()
-        for cell in ((0, 1), (0, 3)):
-            nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("explore", 7, cell), "explore", 10_000)
-        out = dispatch(w, ctx(m, kb))
-        self.assertEqual(out.state, "Heal")
-        self.assertRegex(out.reason, r"heal_explore → \(0, [04]\)")  # the next edge cells, not the backed-off ones
-
-    def test_a_heal_backoff_on_a_frontier_keeps_explore_off_it(self):
-        from agentrealm_agent.navigation import stuck as nav_stuck
-        from agentrealm_agent.pathing import safe_explore_targets
-
-        w, _ = self.zone_column()
-        m = Memory()
-        nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("heal_explore", 7, (0, 1)), "heal_explore", 10_000)
-        self.assertNotIn((0, 1), safe_explore_targets(w, m, Policy(kind="scripted")))
-        self.assertIn((0, 3), safe_explore_targets(w, m, Policy(kind="scripted")))
-
-    def test_regen_absent_does_not_pull_to_safe_ground(self):
-        # Once this run has measured no regen, Heal sends nothing anywhere:
-        # the plan's executor (or the safe default) moves instead.
-        w = grid(at=(2, 2))
-        m = Memory(heal_regen_absent=True)
-        out = dispatch(w, ctx(m))
-        self.assertNotEqual(out.state, "Heal")
-        self.assertIn("Heal: no safe-zone regen this run", out.yielded)
-        w.pos = (0, 0)
-        out = dispatch(w, ctx(m))
-        self.assertNotEqual(out.state, "Heal")
+        for at, health, tick in (((2, 2), 5, 0), ((2, 2), 1, 10), ((0, 0), 1, 20), ((0, 0), 1, 400)):
+            w = grid(at=at)
+            w.health, w.tick = health, tick
+            out = dispatch(w, ctx(m))
+            self.assertNotEqual(out.state, "Heal", out.reason)
+            self.assertIn("Heal: nothing to heal with", out.yielded)
+            self.assertNotIn("Wait", verbs(out))
+        asks = [s for s in m.strategist_signals if s["trigger"] == "heal_supplies"]
+        self.assertEqual(len(asks), 1)
+        self.assertEqual(set(asks[0]), {"trigger", "health", "max_health", "potions", "tick"})
+        self.assertEqual(m.nav_stuck.given_up, {})
 
 
 class RearmTheLastWeaponTest(unittest.TestCase):
@@ -706,8 +369,8 @@ class DrinkTargetsSelfTest(unittest.TestCase):
 
 
 
-# The health line and the one safe cell (A89), on open ground with a cluster
-# of safe cells west of the character.
+# The health line (A89), on open ground with a cluster of safe cells west of
+# the character.
 CLUSTER = [(4, 10), (4, 11), (3, 10), (3, 11)]
 TRAVEL = {"op": "travel", "to": "point", "x": 30, "y": 10}
 
@@ -732,63 +395,57 @@ def travel_plan():
     return Plan([dict(TRAVEL)], dict(PARAM_DEFAULTS))
 
 
-def wall_in(w: WorldModel, cells) -> None:
-    """A wall ring round ``cells``: no way in from any side."""
-    xs, ys = [p[0] for p in cells], [p[1] for p in cells]
-    for x in range(min(xs) - 1, max(xs) + 2):
-        for y in range(min(ys) - 1, max(ys) + 2):
-            if (x, y) not in cells:
-                w.view.tiles[(x, y)] = "wall"
-
-
-def measure_targets(outs) -> list[str]:
-    return [o.reason for o in outs if o.state == "Heal" and o.reason.startswith("heal_measure")]
-
-
 class LowHealthLineTest(unittest.TestCase):
-    """Whether resting is worth leaving the plan's op for is the planner's
-    ``low_health`` line: above it the op goes first, at or below it Heal rests."""
+    """The planner's ``low_health`` line says when a carried potion is spent.
+    Health never comes back by resting (A130), so no line pulls the character
+    off the plan's op to safe ground."""
 
-    def test_above_the_line_the_plans_op_goes_first(self):
+    def test_at_any_health_the_plans_op_goes_on_with_nothing_to_heal_with(self):
+        from tests.test_freeplay_run3 import safe
+
+        for health in (9, 4, 1):
+            w, c = open_ground(health), line_ctx(travel_plan())
+            safe(w, *CLUSTER)
+            out = dispatch(w, c)
+            self.assertEqual(out.state, "Travel", health)
+            self.assertIn("Heal: nothing to heal with", out.yielded)
+
+    def test_with_no_plan_op_heal_starts_no_walk_to_safe_ground(self):
+        from tests.test_freeplay_run3 import safe
+
+        w, c = open_ground(4), line_ctx()
+        safe(w, *CLUSTER)
+        out = dispatch(w, c)
+        self.assertNotEqual(out.state, "Heal")
+        self.assertIsNone(targets_committed(c.memory, w))
+
+    def test_the_line_says_when_a_carried_potion_is_drunk(self):
         from tests.test_freeplay_run3 import safe
 
         w, c = open_ground(9), line_ctx(travel_plan())
         safe(w, *CLUSTER)
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Travel")
-        self.assertIn("Heal: health above low_health: the plan's travel goes first", out.yielded)
-
-    def test_above_the_line_unreachable_safe_cells_never_hold_off_the_op(self):
-        from tests.test_freeplay_run3 import safe, stand_still
-        from agentrealm_agent.navigation import stuck as nav_stuck
-
-        w, c = open_ground(9), line_ctx(travel_plan())
-        safe(w, *CLUSTER)
-        wall_in(w, CLUSTER)
-        outs = stand_still(w, c, 6 * nav_stuck.PROGRESS_TICK_LIMIT)
-        self.assertEqual(measure_targets(outs), [])
-        self.assertNotIn("Heal", {o.state for o in outs})
-
-    def test_at_the_line_heal_rests_first(self):
-        from tests.test_freeplay_run3 import safe
-
-        w, c = open_ground(4), line_ctx(travel_plan())
-        safe(w, *CLUSTER)
-        out = dispatch(w, c)
-        self.assertEqual((out.state, out.reason), ("Heal", f"heal_measure → {CLUSTER[0]}"))
-
-    def test_the_planner_moves_the_line(self):
-        from tests.test_freeplay_run3 import safe
-
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        self.assertEqual(dispatch(w, c).state, "Travel", "above the line the potion is kept")
         w, c = open_ground(9), line_ctx(travel_plan(), low_health=0.9)
+        w.held_supplies = [InventorySupply(4, "small_potion")]
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Heal")
+        self.assertIn({"verb": "Use", "target": {"kind": "self"}}, out.intents)
+
+    def test_safe_ground_stays_the_refuge_from_attack(self):
+        # A130: Heal no longer walks there, but Retreat still does, under attack.
+        from tests.test_freeplay_run3 import safe
+        from tests.test_survival_runs import ctx as fight_ctx, hit
+
+        w, c = open_ground(4), fight_ctx(on_hostile="fight")
         safe(w, *CLUSTER)
-        self.assertEqual(dispatch(w, c).state, "Heal")
-        w, c = open_ground(4), line_ctx(travel_plan(), low_health=0.3)
-        safe(w, *CLUSTER)
-        self.assertEqual(dispatch(w, c).state, "Travel")
+        w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
+        hit(w)
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.reason), ("Retreat", f"retreat → safe {CLUSTER[0]}"))
 
     def test_the_planner_may_only_raise_the_line(self):
-        # A lower line rests and drinks later: a loosening, like any survival param.
+        # A lower line drinks later: a loosening, like any survival param.
         from agentrealm_agent.directives import PARAM_DEFAULTS
         from agentrealm_agent.plan import apply_set_param, collect_rejections, validate_goal_op
 
@@ -800,96 +457,12 @@ class LowHealthLineTest(unittest.TestCase):
         self.assertTrue(rejected)
         self.assertIsNone(validate_goal_op({"op": "set_param", "name": "low_health", "value": 1.5}))
 
-    def test_on_safe_ground_above_the_line_no_regen_sample(self):
-        from tests.test_freeplay_run3 import safe
 
-        w, c = open_ground(9), line_ctx(travel_plan())
-        safe(w, (10, 10), *CLUSTER)
-        self.assertEqual(dispatch(w, c).state, "Travel")
-        self.assertIsNone(c.memory.heal_regen_sample, "no sample while the plan's op runs")
+def targets_committed(m: Memory, w: WorldModel):
+    """Heal's only commitment, the food it walks to; no safe cell is ever one."""
+    from agentrealm_agent import targets
 
-    def test_with_no_plan_op_it_rests_whatever_the_health(self):
-        from tests.test_freeplay_run3 import safe
-
-        w, c = open_ground(9), line_ctx()
-        safe(w, *CLUSTER)
-        out = dispatch(w, c)
-        self.assertEqual((out.state, out.reason), ("Heal", f"heal_measure → {CLUSTER[0]}"))
-
-
-class OneSafeCellTest(unittest.TestCase):
-    """Heal commits to one safe cell. A walk to it that is given up, or a
-    check that rules it out, gives it up in the one give-up memory (A90), and
-    safe ground with it while that backs off: never the next cell at once."""
-
-    def test_walled_in_safe_cells_are_never_walked_to(self):
-        from tests.test_freeplay_run3 import safe
-        from tests.test_survival_runs import MAP
-
-        w, c = open_ground(4), line_ctx()
-        safe(w, *CLUSTER)
-        wall_in(w, CLUSTER)
-        out = dispatch(w, c)
-        self.assertNotEqual(out.state, "Heal")
-        self.assertIn("Heal: no reachable safe tile", out.yielded)
-        for cell in CLUSTER:
-            self.assertIn((MAP, cell), c.memory.safe_unreachable)
-        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "heal_supplies"]
-        self.assertEqual([a.get("safe_ground") for a in asks], ["unreachable"])
-
-    def test_a_cell_ruled_out_is_given_up_like_a_walk(self):
-        # One reachability for every safe walk: a cell Retreat or Park ruled
-        # out is out for Heal too, and gives safe ground up.
-        from tests.test_freeplay_run3 import safe
-        from tests.test_survival_runs import MAP
-        from agentrealm_agent.navigation import stuck as nav_stuck
-
-        w, c = open_ground(7), line_ctx()
-        safe(w, *CLUSTER)
-        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {CLUSTER[0]}")
-        c.memory.safe_unreachable[(MAP, CLUSTER[0])] = w.tick  # as retreat.no_progress marks it
-        w.tick += 10
-        self.assertNotEqual(dispatch(w, c).state, "Heal")
-        self.assertTrue(nav_stuck.backed_off(c.memory, "heal_measure", MAP, CLUSTER[0], w.tick))
-        signals = c.memory.nav_stuck.stuck_signals
-        self.assertEqual([(s["goal"], s["target"]) for s in signals], [("heal_measure", list(CLUSTER[0]))])
-        w.tick += 10
-        self.assertIn("Heal: safe ground given up while its walk backs off", dispatch(w, c).yielded)
-
-    def test_cells_it_cannot_reach_do_not_chain(self):
-        # Reachable by budget, never nearer: one cell is walked to, given up,
-        # and no other is started on while it backs off.
-        from tests.test_freeplay_run3 import safe, stand_still
-        from tests.test_survival_runs import MAP
-        from agentrealm_agent.navigation import stuck as nav_stuck
-
-        w, c = open_ground(7), line_ctx()
-        safe(w, *CLUSTER)
-        outs = stand_still(w, c, nav_stuck.PROGRESS_TICK_LIMIT + nav_stuck.BACKOFF_BASE_TICKS // 2)
-        self.assertEqual(set(measure_targets(outs)), {f"heal_measure → {CLUSTER[0]}"})
-        self.assertTrue(nav_stuck.backed_off(c.memory, "heal_measure", MAP, CLUSTER[0], w.tick))
-        self.assertNotEqual(outs[-1].state, "Heal")
-        asks = [s for s in c.memory.strategist_signals if s["trigger"] == "heal_supplies"]
-        self.assertEqual(len(asks), 1)
-        self.assertEqual(asks[0]["safe_ground"], "unreachable")
-        self.assertNotIn("regen", asks[0], "regen was never measured")
-
-    def test_safe_ground_comes_back_when_the_give_up_lapses(self):
-        # A give-up that never lapsed would shut every safe cell out, even
-        # reachable ones; it lapses with its backoff, whatever the health.
-        from tests.test_freeplay_run3 import safe, stand_still
-        from agentrealm_agent.navigation import stuck as nav_stuck
-
-        w, c = open_ground(7), line_ctx()
-        safe(w, *CLUSTER)
-        stand_still(w, c, nav_stuck.PROGRESS_TICK_LIMIT + 20)
-        until = max(r.until for r in c.memory.nav_stuck.given_up.values() if r.goal == "heal_measure")
-        w.tick = until - 1
-        self.assertNotEqual(dispatch(w, c).state, "Heal", "still given up")
-        w.tick = until
-        out = dispatch(w, c)
-        self.assertEqual(out.state, "Heal")
-        self.assertTrue(out.reason.startswith("heal_measure → "), out.reason)
+    return targets.committed(m, w, "heal_food")
 
 
 def ringed(w: WorldModel, size: int) -> WorldModel:
@@ -1002,24 +575,6 @@ class HealWalkOpensItsPricedWayTest(unittest.TestCase):
         self.assertIn((8, 0), m.path, "the way cuts the bush its price chose")
         self.assertTrue(hostile_reach(w, c.policy).isdisjoint(m.path), m.path)
         self.assertIsNotNone(heal.nav_stuck.active(m, w), "the walk is a bounded attempt")
-
-    def test_a_walk_to_the_safe_zones_edge_cuts_through(self):
-        # Resting on safe ground: the zone's unexplored edge lies past a
-        # bush column a held blade cuts, so Heal opens it like any walk.
-        w = ringed(grid(at=(0, 2), size=6), 6)
-        w.zones[7] = {(x, y): ZoneFact(safe=True) for x in range(6) for y in range(6)}
-        for y in range(6):
-            w.view.tiles[(1, y)] = "bush"
-        for y in range(6):
-            del w.view.tiles[(5, y)]  # unseen ground in the zone: its edge is at x 4
-            w.view.tiles.pop((6, y), None)
-        w.held_supplies = [InventorySupply(5, "bronze_sword")]
-        w.armed_code = "bronze_sword"
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
-        out = dispatch(w, ctx(kb=kb))
-        self.assertEqual(out.state, "Heal")
-        self.assertIn("heal_explore: break", out.reason)
 
 
 if __name__ == "__main__":

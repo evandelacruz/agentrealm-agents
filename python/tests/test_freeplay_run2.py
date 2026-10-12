@@ -1,6 +1,6 @@
 """Free-play run 2 offline: 10 minutes, no deaths, gems 6 → 17 and nothing bought.
 
-Rebuilt here (A9, A10, A66, A22, A63): Park, Retreat and Heal aimed at safe
+Rebuilt here (A9, A10, A66, A22, A63): Park and Retreat aimed at safe
 tiles walled off by bush and wall, with no fallback. They now head for the
 nearest safe cell a path reaches, else the town cell.
 
@@ -15,7 +15,6 @@ import unittest
 from agentrealm_agent.config import Policy
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import SAFE_GOAL_CHECKS, SAFE_THREATENED_TICKS, grid_params, reachable_safe_goal
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.fight import retreat_tail
@@ -24,10 +23,6 @@ from agentrealm_agent.travel import sync_town
 from agentrealm_agent.world import Entity, WorldModel
 from agentrealm_agent.zone_discovery import apply_zone
 from tests.test_survival_runs import MAP, ctx, hit, world
-
-
-def give_up(m: Memory, w: WorldModel, goal: str, cell) -> None:
-    nav_stuck.give_up(m, w, nav_stuck.track(m, w, goal, cell), "pacing")
 
 
 def wall_in(w: WorldModel, cell) -> None:
@@ -81,13 +76,6 @@ class ReachableSafeGoalTest(unittest.TestCase):
         params = grid_params(Policy(kind="scripted"), set(), set())
         self.assertEqual(reachable_safe_goal(m, w, far + [(25, 10), (12, 10)], params, None), (12, 10))
 
-    def test_skips_a_safe_tile_heal_gave_up_on(self):
-        w, m = world(), Memory()
-        give_up(m, w, "heal_rest", (8, 10))
-        params = grid_params(Policy(kind="scripted"), set(), set())
-        self.assertEqual(reachable_safe_goal(m, w, [(8, 10), OPEN], params, None), OPEN)
-
-
 class SafeWalksPickAReachableTileTest(unittest.TestCase):
     def test_retreat_heads_for_the_nearest_reachable_safe_tile(self):
         w, c = world(health=4), ctx(on_hostile="fight")
@@ -129,12 +117,6 @@ class SafeWalksPickAReachableTileTest(unittest.TestCase):
         wall_in(w, WALLED)
         self.assertTrue(retreat_tail(w, c.memory, c.policy, c, limit=3))
         self.assertEqual(c.memory.path[-1], OPEN)
-
-    def test_heal_walks_to_a_reachable_safe_tile(self):
-        w, c = world(health=4), ctx()
-        safe(w, WALLED, OPEN)
-        wall_in(w, WALLED)
-        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {OPEN}")
 
     def test_park_walks_to_a_reachable_safe_tile(self):
         w, c = world(), ctx()
@@ -178,30 +160,6 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         self.assertEqual(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, (-20, 10), pack), (-20, 10))
         self.assertIsNone(reachable_safe_goal(m, w, [self.PACKED, OPEN], params, None, pack))
 
-    def test_heal_skips_the_safe_tile_beside_a_pack(self):
-        w, c = world(health=4), ctx()
-        safe(w, self.PACKED, OPEN)
-        self.packed(w)
-        out = dispatch(w, c)
-        self.assertEqual((out.state, out.reason), ("Heal", f"heal_measure → {OPEN}"))
-
-    def test_heal_keeps_its_pick_when_the_pack_leaves_view(self):
-        # Review on #147: with the pack out of view the nearer tile looked
-        # safe again, so the walk turned back toward the pack and flip-flopped.
-        w, c = world(health=4), ctx()
-        safe(w, self.PACKED, OPEN)
-        self.packed(w)
-        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {OPEN}")
-        w.entities = []
-        w.tick += 10
-        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {OPEN}")
-        w.tick += SAFE_THREATENED_TICKS
-        # It never got nearer OPEN, so that walk gives up, and with it safe
-        # ground while the give-up backs off: never back toward the pack (A89).
-        out = dispatch(w, c)
-        self.assertNotEqual(out.state, "Heal")
-        self.assertTrue(nav_stuck.backed_off(c.memory, "heal_measure", MAP, OPEN, w.tick))
-
     def test_retreat_keeps_its_pick_when_the_pack_leaves_view(self):
         w, c = world(health=4), ctx(on_hostile="fight")
         w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
@@ -214,27 +172,15 @@ class SafePickSkipsHostileReachTest(unittest.TestCase):
         c.memory.held_queue = None
         self.assertEqual(dispatch(w, c).reason, f"retreat → safe {OPEN}")
 
-    def test_retreat_skips_a_tile_heal_marked_beside_its_chaser(self):
-        # Free-play run 7: the chaser's reach rules a tile out too, so Heal's
-        # mark from before it hit us still holds once Retreat runs from it.
+    def test_retreat_skips_a_tile_beside_its_chaser(self):
+        # Free-play run 7: the chaser's reach rules a tile out too.
         w, c = world(health=4), ctx(on_hostile="fight")
         safe(w, (12, 10), OPEN)
         w.hostile_types.add(("npc", "chaser"))
-        w.entities = [Entity("npc", 7, (13, 10), code="chaser")]  # out of hostile_range: Heal runs
-        self.assertEqual(dispatch(w, c).reason, f"heal_measure → {OPEN}")
         w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
         hit(w)
         out = dispatch(w, c)
         self.assertEqual((out.state, out.reason), ("Retreat", f"retreat → safe {OPEN}"))
-
-    def test_heal_falls_back_to_town_when_every_safe_tile_is_beside_a_pack(self):
-        kb = KnowledgeBase("sandbox")
-        sync_town(kb, {"map_id": MAP, "x": 20, "y": 10})
-        w, c = world(health=4), ctx(kb=kb)
-        safe(w, self.PACKED)
-        self.packed(w)
-        out = dispatch(w, c)
-        self.assertEqual((out.state, out.reason), ("Heal", "heal_measure → (20, 10)"))
 
     def test_retreat_skips_a_safe_tile_beside_a_pack_it_is_not_running_from(self):
         w, c = world(health=4), ctx(on_hostile="fight")

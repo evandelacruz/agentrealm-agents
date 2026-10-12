@@ -21,7 +21,7 @@ PARAM_DEFAULTS: dict[str, float | int] = {
     "lives_floor": 3,
     "risk": 0.5,
     "potion_reserve": 2,  # planner-only (A61): no state reads it; the planner buys below it
-    "low_health": 0.5,  # share of max health at or below which a potion is spent and resting outranks the op (A89)
+    "low_health": 0.5,  # share of max health at or below which a carried potion is spent (A89)
 }
 
 

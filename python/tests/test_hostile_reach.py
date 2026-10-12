@@ -366,17 +366,21 @@ class CoversPassTest(unittest.TestCase):
     PATH = [(x, 1) for x in range(2, 22)]
 
     def setUp(self):
-        from agentrealm_agent.hostile_ground import walk_reach
-
         self.w = world(OnlyWayPassTest.BAND, at=(1, 1))
         self.w.max_health = self.w.health = 100
         pack(self.w, (12, 4), hit=OnlyWayPassTest.HIT)
-        self.reach = walk_reach(self.w, POLICY)
+        self.reach = self.ground_reach()
+
+    def ground_reach(self) -> set:
+        from agentrealm_agent.hostile_ground import walk_ground
+
+        self.ground = walk_ground(self.w, POLICY)
+        return {p for g in self.ground.values() for p in g.cells}
 
     def covers(self) -> bool:
         from agentrealm_agent.pathing import covers_pass
 
-        return covers_pass(self.w, POLICY, dict(PARAM_DEFAULTS), self.PATH, self.reach, 10)
+        return covers_pass(self.w, POLICY, dict(PARAM_DEFAULTS), self.PATH, self.reach, 10, self.ground)
 
     def test_a_cell_no_known_hostile_holds_is_never_covered(self):
         self.assertTrue(self.covers())
@@ -386,18 +390,44 @@ class CoversPassTest(unittest.TestCase):
     def test_every_hostile_whose_reach_it_crosses_is_counted(self):
         self.assertTrue(self.covers())
         self.w.entities.append(Entity("npc", 201, (13, 4), code="bogmaw"))  # a second in the pocket's reach
-        self.reach = set(self.reach) | {(x, 1) for x in range(10, 17)}
+        self.reach = self.ground_reach()
         self.assertFalse(self.covers(), "two hostiles' hits on the same pass")
 
     def test_health_left_must_be_above_the_floor(self):
         from agentrealm_agent.survival import health_floor
 
         floor = health_floor(self.w, dict(PARAM_DEFAULTS), self.w.entities)
-        with mock.patch("agentrealm_agent.pathing.expected_damage", return_value=10.0):
+        inside = sum(1 for p in self.PATH if p in self.reach)
+        # One tick a step, and 10 dealt over the whole pass.
+        with mock.patch("agentrealm_agent.pathing.ticks_per_step", return_value=1), mock.patch(
+            "agentrealm_agent.pathing.expected_damage", return_value=10.0 / inside
+        ):
             self.w.health = floor + 10
             self.assertFalse(self.covers(), "left exactly at the floor: Retreat's ground")
             self.w.health = floor + 11
             self.assertTrue(self.covers())
+
+    def test_held_heals_count_only_where_they_can_be_used(self):
+        """A heal carried counts toward the pass on land, or on water with the
+        fording supply worn; on water with it only armed, no drink can be
+        sent (``would_strand``, A133), so none counts."""
+        from agentrealm_agent.item_table import InventorySupply
+        from agentrealm_agent.survival import health_floor
+
+        floor = health_floor(self.w, dict(PARAM_DEFAULTS), self.w.entities)
+        self.w.held_supplies = [InventorySupply(9, "large_potion")]
+        inside = sum(1 for p in self.PATH if p in self.reach)
+        with mock.patch("agentrealm_agent.pathing.ticks_per_step", return_value=1), mock.patch(
+            "agentrealm_agent.pathing.expected_damage", return_value=10.0 / inside
+        ):
+            self.w.health = floor + 8
+            self.assertTrue(self.covers(), "on land the potion is drunk on the way")
+            for p in self.PATH[8:12]:
+                self.w.view.tiles[p] = "water"
+            self.w.armed_code = "raft"
+            self.assertFalse(self.covers(), "on water with the raft only armed, nothing can be drunk")
+            with mock.patch("agentrealm_agent.pathing.afloat", return_value=True):  # a fording supply worn
+                self.assertTrue(self.covers(), "with the fording supply worn, it can")
 
 
 class EscalationPlansAreHeldTest(unittest.TestCase):

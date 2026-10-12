@@ -107,17 +107,21 @@ class UncoveredPassAsksTest(unittest.TestCase):
                 self.assertIn(named, ask["blocked_by"])
                 self.assertNotIn("no known way", ask["blocked_by"])
 
-    def test_heals_carried_count_toward_the_pass(self):
-        w = live(health=7, held=("bronze_sword", "small_potion"))
+    def test_heals_carried_on_water_with_the_raft_armed_do_not_count(self):
+        """The pass to (7, 0) crosses water with the raft only armed: no
+        potion can be drunk there (``would_strand``, A133), so one carried
+        does not cover it, and it asks."""
+        w = live(health=7, held=("bronze_sword", "large_potion"))
         c = ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
-        self.assertTrue(dispatch(w, c).intents, asks(c))
+        self.assertFalse(dispatch(w, c).intents)
+        self.assertEqual(len(asks(c)), 1)
 
 
 class LandsToFightTest(unittest.TestCase):
-    def test_a_pass_not_covered_lands_beside_the_hostile_and_fights_it(self):
+    def test_a_pass_not_covered_heads_for_land_beside_the_hostile(self):
         """The pass is not covered, but the engagement would fight the bogmaw
-        from its island: the walk lands there without coming within its
-        range on water, and ashore Fight arms the sword and swings."""
+        from its island: the walk heads for land beside it, never coming
+        within its range on water, and never asks."""
         from unittest import mock
 
         from agentrealm_agent.fording import on_water
@@ -125,21 +129,42 @@ class LandsToFightTest(unittest.TestCase):
         w = live()
         c = ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
         with mock.patch("agentrealm_agent.pathing.covers_pass", return_value=False):
+            out = dispatch(w, c)
+            self.assertIn("land at", out.reason)
             for _ in range(30):
-                out = dispatch(w, c)
-                if any(i["verb"] in ("Use", "Arm") for i in out.intents or []):
-                    break
                 (step,) = [(i["x"], i["y"]) for i in out.intents or [] if i["verb"] == "SetPosition"][:1] or [None]
-                self.assertIsNotNone(step, (out.reason, asks(c)))
+                if step is None:
+                    break
                 self.assertFalse(
                     on_water(w, c.memory, step) and max(abs(step[0] - POST[0]), abs(step[1] - POST[1])) <= POLICY.hostile_range,
                     f"{step}: on water within the bogmaw's range",
                 )
                 step_to(w, c.memory, step)
-        self.assertEqual(out.state, "Fight", out.reason)
-        self.assertFalse(on_water(w, c.memory, w.pos), "ashore")
-        self.assertIn({"verb": "Arm", "supply_id": 8}, out.intents, "the sword armed for the fight")
+                if w.pos == EXIT:
+                    break
+                out = dispatch(w, c)
         self.assertEqual(asks(c), [])
+
+    def test_landed_beside_it_fight_arms_the_sword(self):
+        """One step off its island the walk lands, and ashore Fight arms
+        the sword (A133) and closes."""
+        from unittest import mock
+
+        from agentrealm_agent.fording import on_water
+        from agentrealm_agent.states.base import op_walk
+        from agentrealm_agent.states.way import land_to_fight
+
+        w = live()
+        w.pos = (3, 6)  # on water, 3 from the bogmaw: out of its range
+        c = ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
+        with mock.patch("agentrealm_agent.pathing.covers_pass", return_value=False):
+            out = land_to_fight(w, c, EXIT, "Travel", op_walk(w, c)[2])
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 4, "y": 5}], out.reason)
+        step_to(w, c.memory, (4, 5))
+        self.assertFalse(on_water(w, c.memory, w.pos))
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Fight", out.reason)
+        self.assertEqual(out.intents[0], {"verb": "Arm", "supply_id": 8}, "the sword armed for the fight")
 
     def test_with_neither_it_asks(self):
         from unittest import mock
@@ -151,6 +176,69 @@ class LandsToFightTest(unittest.TestCase):
         ):
             self.assertFalse(dispatch(w, c).intents)
         self.assertIn("hostile bogmaw 200 at 6,5", asks(c)[0]["blocked_by"])
+
+
+class LandToFightExitsTest(unittest.TestCase):
+    """``way.land_to_fight`` lands only for one hostile in view, not
+    forbidden, with land in its range to fight from; else it gives None and
+    the executor asks."""
+
+    def land(self, w: WorldModel, c: PlayContext | None = None):
+        from unittest import mock
+
+        from agentrealm_agent.states.base import op_walk
+        from agentrealm_agent.states.way import land_to_fight
+
+        c = c or ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
+        with mock.patch("agentrealm_agent.pathing.covers_pass", return_value=False):
+            return land_to_fight(w, c, EXIT, "Travel", op_walk(w, c)[2])
+
+    def test_it_lands_for_the_one_hostile_in_view(self):
+        self.assertIsNotNone(self.land(live()))
+
+    def test_not_for_a_forbidden_hostile(self):
+        c = ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
+        c.never_attack = ["bogmaw"]
+        self.assertIsNone(self.land(live(), c))
+
+    def test_not_for_a_remembered_hostile(self):
+        self.assertIsNone(self.land(live(seen=False)), "out of view the engagement cannot weigh it")
+
+    def test_not_when_two_hostiles_shut_the_way(self):
+        w = live()
+        w.entities.append(Entity("npc", 201, (12, 1), code="bogmaw"))  # its ground on the way along row 1
+        self.assertIsNone(self.land(w))
+
+    def test_not_with_no_land_in_its_range(self):
+        w = live()
+        for x in range(4, 7):
+            for y in range(3, 6):
+                if (x, y) != POST:
+                    w.view.tiles[(x, y)] = "water"  # its island shrunk to the cell it stands on
+        self.assertIsNone(self.land(w))
+
+
+class WhatBlocksTest(unittest.TestCase):
+    def test_a_hostile_the_engagement_would_fight_is_named_when_its_range_reaches_the_way(self):
+        """A hostile the engagement would fight is left out of the walk's
+        ground (A128), but an ask that goes out for any reason still names
+        it when its range reaches the way."""
+        from unittest import mock
+
+        from agentrealm_agent.states.ask import what_blocks
+
+        w = live()
+        c = ctx({"op": "travel", "to": "point", "x": 4, "y": 3})
+        with mock.patch("agentrealm_agent.pathing.would_fight", return_value=True):
+            self.assertIn("hostile bogmaw 200 at 6,5", what_blocks(w, c, (4, 3)))
+
+    def test_a_remembered_hostile_is_named_with_where_it_was_last_seen(self):
+        from agentrealm_agent.states.ask import what_blocks
+
+        w = live(seen=False)
+        c = ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
+        blocked = what_blocks(w, c, EXIT)
+        self.assertIn("remembered hostile bogmaw 200, last seen at 6,5, out of view, holding ground round 6,5", blocked)
 
 
 class RememberedGroundStillBarsTest(unittest.TestCase):

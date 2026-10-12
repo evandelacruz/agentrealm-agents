@@ -33,7 +33,6 @@ keeps the walk, and the safe default never stands in for it
 
 from __future__ import annotations
 
-import copy
 import dataclasses
 from collections.abc import Collection
 
@@ -190,17 +189,18 @@ def clear_the_way(
         return StateOutcome(None, why, state=state)
     key = _shut_key(w, ctx, state, op, at)
     if at is not None and m.way_shut != key:
-        if (out := open_the_way(w, ctx, at, state, no_step=True, reach=reach)) is not None:
+        out = open_the_way(w, ctx, at, state, no_step=True, reach=reach)
+        if out is None and isinstance(reach, HostileReach):
+            out = land_to_fight(w, ctx, at, state, reach)
+        if out is not None:
             m.way_shut = None
             out.reason = f"{why}: {out.reason}"
             return out
         m.way_shut = key  # still shut until something it was found under changes
-    if at is not None and isinstance(reach, HostileReach) and (out := land_to_fight(w, ctx, at, state, reach)) is not None:
-        out.reason = f"{why}: {out.reason}"
-        return out
     blocked = tried = None
     if at is not None and m.no_way_on != ask_key(w, why, op):
-        blocked = what_blocks(w, ctx, at)  # only for an ask that goes out
+        hostile_reach = reach if isinstance(reach, HostileReach) else None
+        blocked = what_blocks(w, ctx, at, hostile_reach)  # only for an ask that goes out
         walked = walk_given_up(w, m, state, at)
         tried = f"{walked}, then {_tried(w, ctx, at)}" if walked else _tried(w, ctx, at)
     return ask_the_planner(w, ctx, why, state, op, blocked_by=blocked, tried=tried)
@@ -215,7 +215,9 @@ def land_to_fight(w: WorldModel, ctx: PlayContext, at: Pos, state: str, reach: H
     makes on landing is fight), reached on a way that comes within its
     range only on that cell. On land the engagement takes it and Fight arms
     the weapon (A133); afloat it never says fight (A146), so no step on
-    water comes within range. None when no such landing exists: then the
+    water comes within range. The landings are tried nearest first, and the
+    search runs only while the way is not known shut (``clear_the_way``'s
+    ``Memory.way_shut``). None when no such landing exists: then the
     executor asks."""
     if w.pos is None:
         return None
@@ -229,17 +231,19 @@ def land_to_fight(w: WorldModel, ctx: PlayContext, at: Pos, state: str, reach: H
     near = {p for p in reach.cells if chebyshev(p, e.pos) <= policy.hostile_range}
     others = set(reach.cells) - ground.cells
     land = w.walkable_test(swing=True)
-    best: tuple[Pos, set[Pos], int] | None = None
-    for cell in sorted(near):
-        if not land(cell) or on_water(w, m, cell) or cell == e.pos:
-            continue
+    # Cheap tests first, then one search per landing, nearest first, until one is reached.
+    landings = [
+        p
+        for p in near
+        if land(p) and not on_water(w, m, p) and p != e.pos
+        and would_fight(w, policy, ctx.params, also=e, m=m, at=p)
+    ]
+    for cell in sorted(landings, key=lambda p: (chebyshev(p, w.pos), p)):
         avoid = plan_avoid | others | (near - {cell})
-        path = cost_path(w, cell, grid_params(policy, avoid, plan_costly))
-        if path and (best is None or len(path) < best[2]) and _fights_from(w, ctx, e, cell):
-            best = (cell, avoid, len(path))
-    if best is None:
+        if cost_path(w, cell, grid_params(policy, avoid, plan_costly)):
+            break
+    else:
         return None
-    cell, avoid, _ = best
 
     def params():
         return grid_params(policy, avoid, plan_costly, m=m)
@@ -248,13 +252,6 @@ def land_to_fight(w: WorldModel, ctx: PlayContext, at: Pos, state: str, reach: H
     if step is None:
         return None
     return StateOutcome([set_position(step)], f"land at {cell[0]},{cell[1]} to fight {e.code or e.kind} {e.id}", state=state)
-
-
-def _fights_from(w: WorldModel, ctx: PlayContext, e, cell: Pos) -> bool:
-    """The engagement would fight ``e`` standing on ``cell``, as loaded now."""
-    there = copy.copy(w)
-    there.pos = cell
-    return would_fight(there, ctx.policy, ctx.params, also=e, m=ctx.memory)
 
 
 def walk_given_up(w: WorldModel, m: Memory, owner: str, at: Pos) -> str | None:

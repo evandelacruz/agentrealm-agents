@@ -25,12 +25,13 @@ from .navigation import stuck as nav_stuck
 from .navigation import walk as nav_walk
 from .navigation.stuck import Leg, NavAttempt
 from .navigation.rejection import navigation_avoid_costly
-from .healing import held_heal, hurt
+from .healing import heals_carried, hurt
 from . import targets as targets_mod
 from .directives import attack_forbidden
 from .engagement import would_fight
 from .hostile_ground import HostileKey, WalkGround, ground_by_hostile, hostiles_near, is_safe_ish, walk_ground
-from .executor.pacing import DEFAULT_TICK_RATE_HZ
+from .executor.pacing import DEFAULT_TICK_RATE_HZ, attack_cooldown_ticks
+from .supplies import afloat
 from .survival import (
     estimate_health,
     expected_damage,
@@ -44,7 +45,7 @@ from .survival import (
 )
 from .executor.movement import step_landing, ticks_per_step
 from .targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
-from .world import DOORS, Entity, Pos, WorldModel, chebyshev
+from .world import DOORS, WATER, Entity, Pos, WorldModel, chebyshev
 
 
 def goto_target(w: WorldModel, policy: Policy) -> tuple[int | None, Pos] | None:
@@ -1097,32 +1098,59 @@ def covers_pass(
     path: list[Pos],
     reach: Collection[Pos],
     tick_hz: int,
-    ground: dict[HostileKey, WalkGround] | None = None,
+    ground: dict[HostileKey, WalkGround],
 ) -> bool:
     """The pass along ``path``'s cells in ``reach`` can be made (A146, A151):
 
-    - every such cell is ground a known hostile holds (``ground``, else
-      ``walk_ground``), one in view or one remembered, out of view, priced
-      from the threat table as one in view is (its largest hit known, else
-      the published roll);
+    - every such cell is ground a known hostile holds (``ground``, the
+      ``walk_ground`` the walk's reach was built from), one in view or one
+      remembered, out of view, priced from the threat table as one in view
+      is (its largest hit known, else the published roll);
     - none is within ``policy.hostile_range`` of where one of them is known
       to stand: there the engagement, which would not fight them, says flee,
       so a pass runs only where Flee does not;
     - what they are expected to deal while we cross those cells at our
       movement speed (``survival.expected_damage``, priced as the win
-      estimate prices their hits, through the armor worn) is covered by
-      health and the heals carried (``healing.held_heal``) and leaves them
-      above Retreat's floor against them (``survival.health_floor``)."""
+      estimate prices their hits, through the armor worn), less what the
+      heals carried can win back on the pass (``heal_on_pass``), leaves
+      health above Retreat's floor against them (``survival.health_floor``)."""
     inside = [p for p in path if p in reach]
-    crossed = [g for g in (ground if ground is not None else walk_ground(w, policy)).values() if any(p in g.cells for p in inside)]
+    crossed = [g for g in ground.values() if any(p in g.cells for p in inside)]
     if not inside or any(all(p not in g.cells for g in crossed) for p in inside):
         return False
     if any(chebyshev(c, p) <= policy.hostile_range for g in crossed for c in g.stands for p in inside):
         return False
     hostiles = [g.entity for g in crossed]
     ticks = len(inside) * ticks_per_step(tick_rate_hz=tick_hz, movement_speed_milli=max(1, w.movement_speed))
-    left = estimate_health(w) + held_heal(w) - expected_damage(hostiles, w.threat, ticks, worn_defense(w))
+    per_tick = expected_damage(hostiles, w.threat, 1, worn_defense(w))
+    healed, drinking = heal_on_pass(w, inside, per_tick, tick_hz)
+    taken = per_tick * (ticks + drinking)
+    left = estimate_health(w) - taken + min(healed, taken)
     return left > health_floor(w, params, hostiles)
+
+
+def heal_on_pass(w: WorldModel, inside: list[Pos], per_tick: float, tick_hz: int) -> tuple[int, int]:
+    """What the heals carried win back on a pass over ``inside`` taking
+    ``per_tick`` a tick, and the ticks spent using them: (healed, ticks).
+
+    Held heals count toward a pass only where they can be used: each is an
+    ``Arm`` and a ``Use`` on yourself, which on water with no fording supply
+    worn would leave none armed (``would_strand``, A133), so a pass with a
+    water cell counts none unless the fording supply is worn. Each one used
+    takes its ``Arm`` tick and its ``Use``'s cooldown, the largest heal
+    first, and only while it gives back more than those ticks cost; never
+    more than the pass takes (``covers_pass`` caps it), so a heal never
+    counts above the health we start with."""
+    worn = afloat(None, w.worn_codes.values())
+    if not worn and any(w.view.tiles.get(p) == WATER for p in inside):
+        return 0, 0
+    healed = drinking = 0
+    for code, heal in heals_carried(w):
+        cost = 1 + attack_cooldown_ticks(code, tick_hz)
+        if heal <= per_tick * cost:
+            break
+        healed, drinking = healed + heal, drinking + cost
+    return healed, drinking
 
 
 def op_walk_sets(

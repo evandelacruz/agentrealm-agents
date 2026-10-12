@@ -29,7 +29,7 @@ from ..break_memory import (
 )
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..pathing import enters_reach, grid_params, nav_search, next_step, plan_sets
+from ..pathing import HostileReach, enters_reach, grid_params, nav_search, next_step, plan_sets
 from ..plan import GoalOp
 from ..reach import supply_reach
 from ..world import VOID, Pos, WorldModel, chebyshev
@@ -100,8 +100,11 @@ def _plan_choice(w: WorldModel, ctx: PlayContext, op: GoalOp) -> BreakChoice | N
     return BreakChoice(pos, cap, supply, break_step_cost(ctx.knowledge, supply.code))
 
 
-def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> StateOutcome:
-    """One Break round: the plan's ``break_block`` op, else stuck step 2."""
+def break_outcome(
+    w: WorldModel, ctx: PlayContext, state: str = "Break", reach: HostileReach | None = None
+) -> StateOutcome:
+    """One Break round: the plan's ``break_block`` op, else stuck step 2.
+    ``reach``: the op walk's (``base.op_walk``), when the caller has it."""
     m = ctx.memory
     op = my_op(ctx, state)
     att = nav_stuck.active(m, w)
@@ -126,7 +129,7 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
             why = no_break_reason(w, ctx.knowledge, w.pos, att.target, skip) if w.pos is not None else "no_break"
             nav_stuck.escalate(m, w, att, why)
         return StateOutcome(None, "nothing to break", state=state)
-    return break_toward(w, ctx, choice, state, op_walk(w, ctx)[2])
+    return break_toward(w, ctx, choice, state, op_walk(w, ctx)[2] if reach is None else reach)
 
 
 def in_break_reach(w: WorldModel, ctx: PlayContext, choice: BreakChoice) -> bool:
@@ -217,12 +220,13 @@ class BreakState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         op = my_op(ctx, self.name)
-        out = break_outcome(world, ctx, self.name)
+        reach = op_walk(world, ctx)[2] if op is not None else None  # once per decision (A128)
+        out = break_outcome(world, ctx, self.name, reach)
         if op is not None and not out.intents and ctx.plan is not None and ctx.plan.current() is op:
             # No way to the block: ask the planner, saying what shuts it, and hold (A120).
             blocked = tried = None
             if ctx.memory.no_way_on != ask_key(world, out.reason, op):  # only for an ask that goes out
-                blocked, tried = what_blocks(world, ctx, (op["x"], op["y"])), "a way to the block, round every other"
+                blocked, tried = what_blocks(world, ctx, (op["x"], op["y"]), reach), "a way to the block, round every other"
             return ask_the_planner(world, ctx, out.reason, self.name, op, blocked_by=blocked, tried=tried)
         if out.intents or out.reason != "nothing to break":
             return out

@@ -51,6 +51,9 @@ FADED_POST_STEPS = 6
 # prices a hostile's cells as dangerous.
 NEAR_GROUND_RADIUS = GATHER_HOSTILE_RADIUS
 NEAR_GROUND_STEPS = FADED_POST_STEPS
+# A walk on an op's behalf keeps this many steps clear of a seen hostile's
+# ``policy.hostile_range`` (``walk_reach``, A128).
+WALK_REACH_MARGIN = GATHER_SHADOW_MARGIN
 
 HostileKey = tuple[str, int]
 
@@ -195,6 +198,16 @@ def reach_cells(w: WorldModel, policy: Policy, d: Danger | None = None) -> set[P
     """Every cell in a known hostile's reach: ``hostile_reach`` of those in
     view and ``d.held``. A walk prices them ``costly``."""
     return hostile_reach(w, policy) | zone_cells((d or danger(w, policy)).held)
+
+
+def walk_reach(w: WorldModel, policy: Policy) -> set[Pos]:
+    """The ground a walk on an op's behalf keeps out of (A128): within
+    ``policy.hostile_range`` plus ``WALK_REACH_MARGIN`` of every hostile in
+    view, and what remembered ones hold (``known_reach``, margin included).
+    The walk prices it ``costly`` so it routes round a pack it has seen, and
+    one whose only way crosses it asks the planner (``pathing.guided_step``)."""
+    zones = [(e.pos, policy.hostile_range + WALK_REACH_MARGIN) for e in w.entities if is_hostile(w, policy, e)]
+    return zone_cells(zones + known_reach(w, policy))
 
 
 def ground_by_hostile(w: WorldModel, policy: Policy) -> dict[HostileKey, set[Pos]]:

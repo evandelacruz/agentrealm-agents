@@ -20,16 +20,18 @@ from .navigation import known_prefix
 from .navigation.rejection import navigation_avoid_costly
 from .pathing import remaining_walk_cells, step_open
 from .poll_cadence import gate_tick_call, is_urgent
-from .states import PlayContext, dispatch
+from .states import PlayContext, StateOutcome, dispatch
+from .states.flee import cornered
 from .states.intents import set_position, take, use_on, withdraw_all
 from .survival import hostiles_reaching, pursuer_peaks
-from .world import DOORS, Pos, WorldModel
+from .world import DOORS, Entity, Pos, WorldModel
 from .zone_discovery import next_zone_probe
 
 __all__ = [
     "Decision",
     "Memory",
     "choose_call",
+    "cornered_decision",
     "decide",
     "path_blockers",
     "path_threats",
@@ -149,6 +151,42 @@ def decide(
         # Gather did not decide: its last word is stale. A probe no state
         # answered leaves the decision that sent the held queue standing.
         m.gather_status = ""
+    return _decision(outcome)
+
+
+def cornered_decision(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    rng: random.Random,
+    hostiles: list[Entity],
+    *,
+    never_attack: list[str] | None = None,
+    params: dict[str, float | int] | None = None,
+    knowledge: KnowledgeBase | None = None,
+    directives: Directives | None = None,
+    plan: Plan | None = None,
+) -> Decision:
+    """Flee's move with no Step open (``flee.cornered``): for the runner, when
+    a walk under attack has no Step sound from every possible position
+    (``held_queue.open_step``, A128). It drinks a heal that is due, else
+    swings at a hostile in reach, else asks the planner; it never just stops."""
+    ctx = PlayContext(
+        m,
+        policy,
+        rng,
+        never_attack=never_attack or [],
+        knowledge=knowledge,
+        directives=directives or default_directives(),
+        plan=plan,
+    )
+    if params is not None:
+        ctx.params = params
+    return _decision(cornered(w, ctx, hostiles))
+
+
+def _decision(outcome: StateOutcome) -> Decision:
+    """A state's outcome as the runner's Decision: its first intent, or its paced queue."""
     intents = outcome.intents
     intent = intents[0] if intents else None
     submit_queue = intents if intents and outcome.paced else None

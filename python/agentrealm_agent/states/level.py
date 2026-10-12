@@ -24,7 +24,7 @@ from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..memory import Memory
 from ..navigation import cost_path, doors_goal_path, nearest_target
 from ..navigation import stuck as nav_stuck
-from ..pathing import bounded_step, grid_params, guided_step, nav_search, next_step, plan_sets
+from ..pathing import bounded_step, grid_params, guided_step, nav_search, next_step, op_walk_sets, plan_sets
 from ..travel.knowledge import iter_entrances
 from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, top_op
@@ -161,7 +161,7 @@ def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcom
     targets_mod.commit(m, w, ENTRANCE_GOAL, (w.map_id, door), top_op(ctx))
     if out := _prerequisite_step(w, ctx, door):
         return out
-    _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+    plan_avoid, plan_costly, reach = op_walk_sets(w, m, policy, ctx.knowledge)
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
@@ -169,7 +169,7 @@ def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcom
     def plan(att):
         return cost_path(w, door, params(), nav=nav_search(m, w, ENTRANCE_GOAL, door))
 
-    step = guided_step(m, w, ENTRANCE_GOAL, door, plan_avoid, plan, params=params)
+    step = guided_step(m, w, ENTRANCE_GOAL, door, plan_avoid, plan, params=params, reach=reach)
     if step is None:
         why = f"no path to level entrance {door[0]},{door[1]}"
         return clear_the_way(w, ctx, door, why, LevelState.name, top_op(ctx))

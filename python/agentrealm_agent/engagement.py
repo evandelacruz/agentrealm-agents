@@ -17,7 +17,8 @@ decision turns (the Retreat and Flee rules then run as for any engagement).
 
 The decision is the win estimate (``survival.win_ratio``: live health, the
 threat table's measured hits and misses, the armed weapon, the armor worn)
-against a bar:
+over the group and every other hostile that can reach us with it, a pack
+counted whole (``survival.can_reach_us``, A128), against a bar:
 
 - ``on_hostile = "fight"``: the effective fight margin (``fight_margin``
   scaled by risk, ``survival.effective_fight_margin``).
@@ -41,6 +42,7 @@ from typing import TYPE_CHECKING, Callable
 
 from .survival import (
     GAP_PROBE_TICKS,
+    can_reach_us,
     combat_group,
     effective_fight_margin,
     effective_risk,
@@ -165,9 +167,14 @@ def decide(
     outrun_failed: bool,
     health: int | None = None,
 ) -> Engagement:
-    """The estimate against the group's members in view, and the decision it
-    gives; at ``health`` instead of live health when given."""
+    """The estimate against the group's members in view and every other
+    hostile that can reach us with them (``survival.can_reach_us``, A128), and
+    the decision it gives; at ``health`` instead of live health when given.
+    So a pack the estimate cannot beat is fled or retreated from, never
+    closed on one at a time."""
     members = [h for h in w.entities if (h.kind, h.id) in group]
+    if members:
+        members = can_reach_us(w, policy, members)
     ratio = win_ratio(
         estimate_health(w) if health is None else health, members, w.threat, w.armed_code, worn_defense(w)
     )

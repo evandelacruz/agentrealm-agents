@@ -26,7 +26,7 @@ from .navigation.rejection import navigation_avoid_costly
 from .healing import hurt
 from . import targets as targets_mod
 from .plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
-from .hostile_ground import ground_by_hostile
+from .hostile_ground import ground_by_hostile, walk_reach
 from .survival import hostiles_in_range, is_hostile, pursuer_peaks, safe_goals, town_cell
 from .executor.movement import step_landing
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
@@ -783,6 +783,7 @@ def guided_step(
     knowledge: KnowledgeBase | None = None,
     *,
     params: Callable[[], CostGridParams] | None = None,
+    reach: Collection[Pos] = (),
 ) -> Pos | None:
     """One move toward ``target`` on this map, with stuck detection and escalation (A15).
 
@@ -795,6 +796,12 @@ def guided_step(
     ``params`` builds the grid ``plan`` searches on, so the walk prices its
     kept path on the same one (``commit_walk``); None for a plan on the
     default grid with ``avoid`` (tests).
+
+    ``reach`` is the ground a walk on an op's behalf keeps out of
+    (``op_walk_sets``, A128): a kept path that comes to enter it is planned
+    again, and when the new plan still enters it the walk does not go
+    through: None, the path dropped and the window held
+    (``nav_stuck.hold_window``), so the caller asks the planner.
     """
     leg = target if isinstance(target, Leg) else Leg(target)
     backoff = leg.backoff_key or nav_stuck.goal_key(goal, w.map_id, leg.target)
@@ -811,10 +818,19 @@ def guided_step(
         return None
     reason = None if att.level in (nav_stuck.REVEAL, nav_stuck.BREAK) else nav_stuck.stuck_reason(att, w.tick)
     if reason is None and att.level not in (nav_stuck.REVEAL, nav_stuck.BREAK):
-        if m.goal == goal and next_step(w, avoid, m.path):
+        if m.goal == goal and next_step(w, avoid, m.path) and not enters_reach(w, m.path, reach):
             nav_stuck.observe(att, w, m.path)
             return next_step(w, avoid, m.path)
+        kept = nav_walk.rest(m.walks.get(goal), w, goal, leg.target)
+        if kept is not None and enters_reach(w, kept[0], reach):
+            nav_walk.drop(m, goal)  # a committed path into the reach is never kept over a new plan
         found = commit_walk(m, w, goal, leg.target, plan(att), _walk_grid(params, avoid))
+        if enters_reach(w, found, reach):
+            if m.goal == goal:
+                m.path, m.goal = [], ""
+            nav_walk.drop(m, goal)
+            nav_stuck.hold_window(att, w.tick)
+            return None
         if next_step(w, avoid, found):
             m.path, m.goal = found, goal
             nav_stuck.observe(att, w, found)
@@ -958,6 +974,34 @@ def safe_explore_path(
     leg = Leg(found[0]) if found and found[1] else None
     path, leg = commit_explore(m, w, SAFE_EXPLORE_GOAL, targets, leg, found[1] if leg else None, params, knowledge)
     return (path, leg) if path else (None, None)
+
+
+def op_walk_sets(
+    w: WorldModel, m: Memory, policy: Policy, knowledge: KnowledgeBase | None
+) -> tuple[set[Pos], set[Pos], set[Pos]]:
+    """``plan_avoid``, ``plan_costly`` and ``reach`` for a walk on an op's behalf (A128).
+
+    As ``plan_sets``, with the reach of the hostiles seen (``walk_reach``)
+    priced ``costly`` too, so the walk routes round a pack it has seen;
+    ``guided_step`` takes ``reach`` to refuse a way that still crosses it.
+    """
+    _, avoid, costly = plan_sets(w, m, policy, knowledge)
+    reach = walk_reach(w, policy)
+    return avoid, costly | reach, reach
+
+
+def enters_reach(w: WorldModel, path: list[Pos] | None, reach: Collection[Pos]) -> bool:
+    """``path`` steps into ``reach`` from outside it. Cells it walks while
+    leaving the reach it starts in do not count: that is the way out."""
+    if not path or not reach:
+        return False
+    outside = w.pos not in reach
+    for p in path:
+        if p not in reach:
+            outside = True
+        elif outside:
+            return True
+    return False
 
 
 def plan_sets(

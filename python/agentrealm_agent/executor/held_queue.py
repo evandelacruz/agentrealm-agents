@@ -13,6 +13,9 @@ Three rules, read by the runner whenever a reflex would replace a held queue
   does is not sent, so the held queue keeps running.
 - ``unconfirmed_send``: what replaces the held queue must be sound from every
   possible position, or the character stops and re-reads position first.
+- ``open_step``: under attack a stop only takes free hits, so a walk that is
+  not sound from every possible position takes the best Step that is, or,
+  with none, the runner hands the decision to Flee's cornered move (A128).
 
 Like ``supply_refusals``, this module reads the world and memory, so the
 package does not export it.
@@ -25,8 +28,12 @@ from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..pathing import plan_sets, remaining_walk_cells
 from ..reach import in_reach_from
-from ..world import DOORS, Pos, WorldModel
-from .movement import step_landing
+from ..world import DOORS, Pos, WorldModel, chebyshev
+from .intents import step
+from .movement import DIRECTIONS, step_landing
+
+# What ``unconfirmed_send`` says of a walk whose Steps may land on a blocked cell.
+STEP_DOUBT = "the step may land on a blocked cell"
 
 
 def possible_positions(w: WorldModel, m: Memory) -> list[Pos]:
@@ -92,7 +99,7 @@ def unconfirmed_send(
     if not intents:
         return None
     if not steps_land_clear(w, m, policy, knowledge, intents, starts):
-        return "the step may land on a blocked cell"
+        return STEP_DOUBT
     if not in_reach_from(intents, starts, w, knowledge):
         return "the target may be out of reach"
     return None
@@ -120,6 +127,52 @@ def steps_land_clear(
     for pos in starts[1:]:
         for direction in directions:
             pos = step_landing(pos, direction)
-            if pos in blocked or not (w.view.walkable(pos) or w.view.tiles.get(pos) in DOORS):
+            if not _lands_open(w, blocked, pos):
                 return False
     return True
+
+
+def open_step(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    knowledge: KnowledgeBase | None,
+    intents: list[dict],
+    starts: list[Pos],
+    threats: list[Pos],
+) -> list[dict] | None:
+    """The best single Step that lands on an open cell from every one of
+    ``starts``, for a walk under attack whose Steps do not (A128); None when
+    no Step does, or the walk has none.
+
+    The walk's own first Step comes first. Else the open Step whose landing
+    from the tracked position keeps furthest from ``threats``, the hostiles
+    hitting us, then nearest to where the walk's first Step was going. A
+    Step that comes nearer the nearest threat than we stand is never taken.
+    """
+    directions = [i["direction"] for i in intents if i.get("verb") == "Step"]
+    if not directions or not starts:
+        return None
+    blocked, _, _ = plan_sets(w, m, policy, knowledge)
+    here, first = starts[0], directions[0]
+    aim = step_landing(here, first)
+
+    def gap(p: Pos) -> int:
+        return min((chebyshev(p, t) for t in threats), default=0)
+
+    def open_from_all(direction: str) -> bool:
+        return all(_lands_open(w, blocked, step_landing(pos, direction)) for pos in starts)
+
+    def rank(direction: str) -> tuple[int, int, int]:
+        land = step_landing(here, direction)
+        return (direction != first, -gap(land), chebyshev(land, aim))
+
+    for direction in sorted(DIRECTIONS, key=rank):
+        if gap(step_landing(here, direction)) >= gap(here) and open_from_all(direction):
+            return [step(direction)]
+    return None
+
+
+def _lands_open(w: WorldModel, blocked: set[Pos], pos: Pos) -> bool:
+    """A Step may land on ``pos``: known walkable or a door, and off the blocked cells."""
+    return pos not in blocked and (w.view.walkable(pos) or w.view.tiles.get(pos) in DOORS)

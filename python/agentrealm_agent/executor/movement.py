@@ -21,6 +21,9 @@ _DIRECTION_BY_DELTA: dict[tuple[int, int], StepDirection] = {
     (1, 1): "down_right",
 }
 
+# Every Step direction.
+DIRECTIONS: tuple[StepDirection, ...] = tuple(_DIRECTION_BY_DELTA.values())
+
 
 def direction_between(frm: Pos, to: Pos) -> StepDirection:
     """Chebyshev-one step direction from ``frm`` to ``to`` (docs/API.md Step)."""

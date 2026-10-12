@@ -11,9 +11,10 @@ map's frontier while spare windows read zones in widening rings around the
 character (``zone_discovery.hunt_probe``), until a read finds a hunting cell
 it may enter, the frontier runs out, or ``HUNT_SEARCH_SECONDS`` pass.
 
-Travel keeps its walk (A120): the safe default never stands in for it. With
-no step toward the destination it clears the way or asks the planner and
-holds (``way.clear_the_way``); at stuck step 2 Break, below it, opens the
+Travel keeps its walk (A120): the safe default never stands in for it. The
+walk routes round the reach of hostiles it has seen, and never walks through
+it (A128, ``pathing.op_walk_sets``). With no step toward the destination it
+clears the way or asks the planner and holds (``way.clear_the_way``); at stuck step 2 Break, below it, opens the
 block the walk's escalation nominated (A15). The survival reflexes act above
 it as always.
 """
@@ -26,7 +27,7 @@ from ..memory import HuntSearch, Memory
 from ..navigation import doors_goal_path, route_first_leg
 from ..navigation import stuck as nav_stuck
 from ..navigation import walk as nav_walk
-from ..pathing import grid_params, guided_step, nav_search, next_step, plan_sets
+from ..pathing import grid_params, guided_step, nav_search, next_step, op_walk_sets, plan_sets
 from ..plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from ..travel.ops import travel_op_from_plan_goal
 from .. import targets as targets_mod
@@ -107,8 +108,8 @@ def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDesti
         if m.goal.startswith("travel:"):
             m.path, m.goal = [], ""
         m.goal_op = dict(op)
-    _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
-    out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly, state)
+    plan_avoid, plan_costly, reach = op_walk_sets(world, m, policy, ctx.knowledge)
+    out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly, state, reach)
     if out is not None:
         return out
     goal = f"travel:{dest.label}"
@@ -204,15 +205,16 @@ def _travel_step(
     plan_avoid: set[Pos],
     plan_costly: set[Pos],
     state: str,
+    reach: set[Pos],
 ) -> StateOutcome | None:
     """One step along the route to ``dest``, across maps through known doors (A26).
-    None when no step can be planned.
+    None when no step can be planned, or the only way crosses ``reach`` (A128).
 
     Stuck detection and escalation drive each map leg, including the first leg
     toward a known door on another map (A15); escalation step 4 is M9.
     """
     goal = f"travel:{dest.label}"
-    step = route_step(w, m, policy, knowledge, plan_avoid, plan_costly, dest.map_id, dest.pos, goal)
+    step = route_step(w, m, policy, knowledge, plan_avoid, plan_costly, dest.map_id, dest.pos, goal, reach)
     if step is None:
         return None
     note = nav_stuck.level_note(nav_stuck.active(m, w))
@@ -230,12 +232,14 @@ def route_step(
     dest_map: int,
     dest: Pos,
     goal: str,
+    reach: set[Pos],
 ) -> Pos | None:
     """One step toward ``dest_map:dest`` under ``goal``, across maps through
     known door warps (A26), with stuck escalation on this map's leg (A15).
 
-    None when no step can be planned. With no known route to another map the
-    goal's path is cleared and nothing backs off.
+    None when no step can be planned, or the only way crosses ``reach``, the
+    ground the hostiles seen hold (A128). With no known route to another map
+    the goal's path is cleared and nothing backs off.
     """
     plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest_map, dest, goal)
     leg = _map_leg(m, w, goal, dest_map, dest, plan_avoid, plan)
@@ -247,7 +251,7 @@ def route_step(
     def params():
         return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
 
-    return guided_step(m, w, goal, leg, plan_avoid, plan, knowledge, params=params)
+    return guided_step(m, w, goal, leg, plan_avoid, plan, knowledge, params=params, reach=reach)
 
 
 def _map_leg(

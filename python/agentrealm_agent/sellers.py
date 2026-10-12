@@ -11,6 +11,11 @@ that does not. ``sellers_of`` is the one seller test. A seller is known by:
 - ``plan``: the place the ``buy`` op names (``x``, ``y``, ``map_id``), the
   planner's reading of where a seller is, such as a town a clue names.
   Searched round the same way.
+A clue's or the op's place searched round without the item is no seller of
+it (``note_not_sold``) until a clue offering the item is found after that
+search, which lapses the record (``lapse_not_sold``), or a shop is seen
+selling it.
+
 - ``unchecked``: a shop cell saved before A131, with no record of what it
   sells, for an item a price was seen for. It is taken only after every
   other seller, and checked off once seen (``forget_sale``).
@@ -32,6 +37,7 @@ from typing import Any
 from .healing import supply_matches
 from .knowledge_base import KnowledgeBase, knowledge_items
 from .travel.knowledge import iter_not_sold, iter_shop_sales, iter_unchecked_shop_cells
+from .travel.knowledge import lapse_not_sold as _lapse
 from .world import Pos, WorldModel, chebyshev
 
 # How far round a seller's place (a clue's cell, a place the op names) Shop searches for it.
@@ -92,8 +98,8 @@ def _offers(code: str, text: str) -> bool:
     return any(_GEMS.search(p) and _names(code, p) for p in _PHRASE.split(text.lower()))
 
 
-def _clue_sellers(code: str, known: _Known) -> list[Seller]:
-    """A clue's place, unless it was searched without the item since the clue was found."""
+def _offer_ticks(code: str, known: _Known) -> list[tuple[Seller, int | None]]:
+    """Each clue offering ``code``: its place and the tick it was found."""
     out = []
     for row in known.clues:
         text = row.get("text")
@@ -103,21 +109,40 @@ def _clue_sellers(code: str, known: _Known) -> list[Seller]:
             s = Seller(int(row["map_id"]), (int(row["x"]), int(row["y"])), "clue", False)
         except (KeyError, TypeError, ValueError):
             continue
-        searched = known.not_sold.get((s.map_id, s.pos, code))
-        found = row.get("tick")
-        if searched is not None and not (isinstance(found, int) and found > searched):
-            continue
-        out.append(s)
+        tick = row.get("tick")
+        out.append((s, tick if isinstance(tick, int) else None))
     return out
+
+
+def _barred(code: str, s: Seller, known: _Known) -> bool:
+    """``s``'s place was searched without ``code`` for sale, and no clue
+    offering it was found since: it is no seller of it (A131)."""
+    searched = known.not_sold.get((s.map_id, s.pos, code))
+    if searched is None:
+        return False
+    return not any(t is not None and t > searched for _, t in _offer_ticks(code, known))
+
+
+def _clue_sellers(code: str, known: _Known) -> list[Seller]:
+    """Each clue's place that offers ``code``, unless searched without it since."""
+    return [s for s, _ in _offer_ticks(code, known) if not _barred(code, s, known)]
 
 
 def _op_seller(code: str, op: dict[str, Any] | None, known: _Known) -> Seller | None:
     """The place the op names (``_validate_buy`` takes it only with its map),
-    unless it was searched without the item: a clue found since revives it."""
+    unless searched without the item since the newest clue offering it."""
     if not op or not all(k in op for k in ("x", "y", "map_id")):
         return None
     s = Seller(int(op["map_id"]), (int(op["x"]), int(op["y"])), "plan", False)
-    return None if (s.map_id, s.pos, code) in known.not_sold else s
+    return None if _barred(code, s, known) else s
+
+
+def lapse_not_sold(kb: KnowledgeBase | None) -> None:
+    """Drop every searched-without record a clue found since has revived: a
+    clue offering the item lapses its records, wherever they are (A131)."""
+    known = _known(kb)
+    revived = {code for (mid, pos, code) in known.not_sold if not _barred(code, Seller(mid, pos, "plan", False), known)}
+    _lapse(kb, revived)
 
 
 def _sellers(code: str, w: WorldModel, known: _Known, op: dict[str, Any] | None = None) -> list[Seller]:

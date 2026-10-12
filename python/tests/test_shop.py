@@ -26,7 +26,7 @@ from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext, StateOutcome
 from agentrealm_agent.brain import walkable_prefix
 from agentrealm_agent.plan import parse_directives_goals, validate_goal_op
-from agentrealm_agent.sellers import Seller, refuse_unsold, sellers_of
+from agentrealm_agent.sellers import Seller, lapse_not_sold, refuse_unsold, sellers_of
 from agentrealm_agent.travel import record_shop_cell
 from agentrealm_agent.travel.knowledge import iter_not_sold, iter_shop_sales
 from agentrealm_agent.world import Entity, WorldModel
@@ -620,6 +620,28 @@ class SearchedPlaceTest(unittest.TestCase):
         self.assertIn("no seller of raft is known", refused[0])
         named = {"op": "buy", "code": "raft", "x": 25, "y": 25, "map_id": 1}
         self.assertEqual(refuse_unsold([named], w, c.knowledge)[0], [], "the same place named by the op too")
+
+    def test_a_named_place_searched_is_refused_until_a_newer_clue(self):
+        w, c = self.searched()
+        named = {"op": "buy", "code": "raft", "x": 25, "y": 25, "map_id": 1}
+        self.assertEqual(refuse_unsold([named], w, c.knowledge)[0], [])
+        # A clue offering rafts found since, at another cell: the named place is a seller again.
+        c.knowledge.clues.append({"kind": "npc", "text": "A raft for thirty gems, in town", "map_id": 1, "x": 50, "y": 50, "tick": 150})
+        self.assertEqual(refuse_unsold([named], w, c.knowledge)[0], [named])
+        self.assertIn(Seller(1, (25, 25), "plan", False), sellers_of("raft", w, c.knowledge, named))
+
+    def test_a_record_lapses_on_newer_evidence(self):
+        w, c = self.searched()
+        lapse_not_sold(c.knowledge)
+        self.assertEqual(len(iter_not_sold(c.knowledge)), 1, "no newer clue: kept")
+        c.knowledge.clues.append({"kind": "sign", "text": "Rafts, thirty gems", "map_id": 1, "x": 5, "y": 5, "tick": 150})
+        lapse_not_sold(c.knowledge)
+        self.assertEqual(iter_not_sold(c.knowledge), {})
+
+    def test_a_shop_seen_selling_it_lapses_the_record(self):
+        w, c = self.searched()
+        record_shop_cell(c.knowledge, 1, (40, 40), "raft", 30)
+        self.assertEqual(iter_not_sold(c.knowledge), {})
 
     def test_a_clue_found_since_brings_it_back(self):
         w, c = self.searched()

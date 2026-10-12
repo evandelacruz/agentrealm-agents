@@ -134,6 +134,7 @@ def record_shop_cell(
             row = shops[_cell_key(pos)] = {}
         if code:
             row["sells"] = {code: price}
+            _lapse_locked(kb, {code})
 
 
 def forget_sale(kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str) -> None:
@@ -158,6 +159,28 @@ def note_not_sold(kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str, ti
     with kb.lock:
         rows = kb.maps.setdefault(str(map_id), {}).setdefault(NOT_SOLD, {})
         rows.setdefault(_cell_key(pos), {})[code] = tick
+
+
+def lapse_not_sold(kb: KnowledgeBase | None, codes: set[str]) -> None:
+    """Newer evidence ``codes`` are sold (a clue offering one, a shop seen
+    selling one): every place searched without them is a seller again (A131)."""
+    if kb is None or not codes:
+        return
+    with kb.lock:
+        _lapse_locked(kb, codes)
+
+
+def _lapse_locked(kb: KnowledgeBase, codes: set[str]) -> None:
+    for entry in kb.maps.values():
+        rows = entry.get(NOT_SOLD) if isinstance(entry, dict) else None
+        if not isinstance(rows, dict):
+            continue
+        for key in list(rows):
+            left = {c: t for c, t in rows[key].items() if c not in codes} if isinstance(rows[key], dict) else {}
+            if left:
+                rows[key] = left
+            else:
+                del rows[key]
 
 
 def iter_not_sold(kb: KnowledgeBase | None) -> dict[tuple[int, Pos, str], int]:

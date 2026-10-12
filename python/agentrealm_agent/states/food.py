@@ -80,39 +80,44 @@ def _price(w: WorldModel, ctx: PlayContext, at: Pos, near: int, tie: int) -> tup
     return None if cost is None else (cost, chebyshev(at, here), tie)
 
 
-def food_target(w: WorldModel, ctx: PlayContext) -> Entity | None:
+def food_target(w: WorldModel, ctx: PlayContext, *, heal: bool = True) -> Entity | None:
     """The food lying near Heal goes for, the cheapest by its walk (food in
-    reach costs none). The food it went for first stays its target while it
-    is one (A71)."""
+    reach costs none). For Heal (``heal``) the food it went for first stays
+    its target while it is one (A71); any other reader only looks, leaving
+    Heal's commitment as it was."""
     m = ctx.memory
     foods, _ = food_near(w, m, ctx.knowledge)
-    c = targets_mod.committed(m, w, "heal_food")
-    if (kept := next((f for f in foods if c is not None and f.id == c.target), None)) is not None:
-        return kept
-    targets_mod.release(m, "heal_food")
+    if heal:
+        c = targets_mod.committed(m, w, "heal_food")
+        if (kept := next((f for f in foods if c is not None and f.id == c.target), None)) is not None:
+            return kept
+        targets_mod.release(m, "heal_food")
     priced = [(p, f) for f in foods if (p := _price(w, ctx, f.pos, take_reach(m, f), f.id)) is not None]
     return min(priced, key=lambda pf: pf[0])[1] if priced else None
 
 
-def block_target(w: WorldModel, ctx: PlayContext) -> Pos | None:
+def block_target(w: WorldModel, ctx: PlayContext, *, heal: bool = True) -> Pos | None:
     """The block near Heal breaks for the food it drops, the cheapest by its
-    walk (the block priced at its break). The one it went for first stays its
-    target while it is one (A71)."""
+    walk (the block priced at its break). For Heal (``heal``) the one it went
+    for first stays its target while it is one (A71); any other reader only
+    looks."""
     m = ctx.memory
     _, blocks = food_near(w, m, ctx.knowledge)
-    c = targets_mod.committed(m, w, "heal_block")
-    if c is not None and c.target in blocks:
-        return c.target
-    targets_mod.release(m, "heal_block")
+    if heal:
+        c = targets_mod.committed(m, w, "heal_block")
+        if c is not None and c.target in blocks:
+            return c.target
+        targets_mod.release(m, "heal_block")
     priced = [(p, b) for b in blocks if (p := _price(w, ctx, b, 0, 0)) is not None]
     return min(priced, key=lambda pb: pb[0])[1] if priced else None
 
 
 def food_route(w: WorldModel, ctx: PlayContext) -> FoodRoute | None:
-    """Where Heal would go for food now: the food lying near it would take,
-    else the block it would break for food, else None."""
-    if (food := food_target(w, ctx)) is not None:
+    """Where Heal would go for food now: the cheapest food lying near, else
+    the cheapest block to break for food, else None. Only looks: Heal's
+    commitments are left as they were."""
+    if (food := food_target(w, ctx, heal=False)) is not None:
         return FoodRoute("food", food.pos, food)
-    if (block := block_target(w, ctx)) is not None:
+    if (block := block_target(w, ctx, heal=False)) is not None:
         return FoodRoute("block", block)
     return None

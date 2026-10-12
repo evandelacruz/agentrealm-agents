@@ -114,18 +114,31 @@ def in_combat(w: WorldModel, m: Memory, policy: Policy, *, fight_ahead: bool = F
 
 
 def spend_potion(
-    w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], code: str, *, food: bool = False
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    params: dict[str, float | int],
+    code: str,
+    *,
+    food: bool = False,
+    ordered: bool = False,
+    fight_ahead: bool = False,
 ) -> bool:
     """Whether a carried potion of ``code`` is worth drinking now (A96,
-    A135). In combat or about to be (``in_combat``): health is low
-    (``health_low``), or the drink turns the engagement under way
-    (``engagement.drink_turns_fight``). Out of combat: only at the low line
-    when no food near can be had (``food``: the caller's food it can act on
-    now), since food heals there. Otherwise the potion stays a reserve.
-    Every drink of a potion asks this."""
-    if not in_combat(w, m, policy):
+    A135). Every drink of a potion asks this: Heal's (with Flee cornered and
+    Retreat losing ground) and the planner's ``use_item``.
+
+    In combat or about to be (``in_combat``, ``fight_ahead``: a fight next on
+    the plan): health is low (``health_low``), the planner ordered the drink
+    (``ordered``: its call on the fight stands), or the drink turns the
+    engagement under way (``engagement.drink_turns_fight``). Out of combat:
+    only at the low line with no food near to go for (``food``: Heal's food
+    route, ``states.food.food_route``), since food heals there. Heal asks
+    only once it could act on no food, so it passes no ``food``. Otherwise
+    the potion stays a reserve."""
+    if not in_combat(w, m, policy, fight_ahead=fight_ahead):
         return health_low(w, params) and not food
-    if health_low(w, params):
+    if ordered or health_low(w, params):
         return True
     r = row(code)
     heal = r.heal if r is not None and r.heal else (w.max_health or 0)  # unknown: counted as a full heal
@@ -133,11 +146,10 @@ def spend_potion(
 
 
 def carried_heal(
-    w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], *, food: bool = False
+    w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int]
 ) -> InventorySupply | None:
     """Carried food first, then a potion (PLAYABLE_AGENT_PLAN.md Heal row),
-    a potion only when ``spend_potion`` says it is worth drinking now
-    (``food``: food near can be had, A135).
+    a potion only when ``spend_potion`` says it is worth drinking now.
     The armed supply counts too: the snapshot may leave it out of ``held``
     (GAME_NOTES open questions), and a potion a drink left armed is still one
     to drink (A76)."""
@@ -147,7 +159,7 @@ def carried_heal(
             return h
     # Each code heals its own amount, so each is asked: a bigger heal may turn a fight a smaller one does not.
     for h in usable:
-        if is_potion(h.code) and spend_potion(w, m, policy, params, h.code, food=food):
+        if is_potion(h.code) and spend_potion(w, m, policy, params, h.code):
             return h
     return None
 

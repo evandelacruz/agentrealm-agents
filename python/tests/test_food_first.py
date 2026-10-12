@@ -127,7 +127,8 @@ class InCombatPotionTest(unittest.TestCase):
         w.attacked_tick = w.tick
         c = ctx()
         self.assertTrue(in_combat(w, c.memory, c.policy))
-        self.assertEqual(carried_heal(w, c.memory, c.policy, dict(PARAM_DEFAULTS), food=True), POTION)
+        self.assertTrue(spend_potion(w, c.memory, c.policy, dict(PARAM_DEFAULTS), "potion", food=True))
+        self.assertEqual(carried_heal(w, c.memory, c.policy, dict(PARAM_DEFAULTS)), POTION)
         self.assertTrue(drank(use_carried_heal(w, c)))
 
     def test_recently_attacked_heal_drinks_before_cutting_a_bush(self):
@@ -170,7 +171,7 @@ class PlannerPotionRefusedTest(unittest.TestCase):
         w = world(7)
         w.entities = [berry()]
         c = ctx({"op": "use_item", "code": "potion"})
-        why = potion_refused(w, c, c.plan)
+        why = potion_refused(w, c, c.plan, "potion")
         self.assertIn("a potion is for a fight", why)
         self.assertIn("berry at 7:7,5, heal 1, 1 s walk", why)
         self.assertIn("State food_near", why)
@@ -186,7 +187,7 @@ class PlannerPotionRefusedTest(unittest.TestCase):
         w = world(10)
         w.view.tiles[(6, 5)] = "bush"
         c = ctx({"op": "use_item", "code": "potion"})
-        self.assertIn("a bush at 7:6,5 to break for berry", potion_refused(w, c, c.plan))
+        self.assertIn("a bush at 7:6,5 to break for berry", potion_refused(w, c, c.plan, "potion"))
 
     def test_food_no_walk_reaches_is_no_reason_to_refuse(self):
         # The same food test as Heal: food it cannot walk to is not named.
@@ -194,7 +195,28 @@ class PlannerPotionRefusedTest(unittest.TestCase):
         w.entities = [berry()]
         walled(w)
         c = ctx({"op": "use_item", "code": "potion"})
-        self.assertIsNone(potion_refused(w, c, c.plan))
+        self.assertIsNone(potion_refused(w, c, c.plan, "potion"))
+
+    def test_the_refusal_is_the_one_potion_rule(self):
+        # UseItem asks spend_potion, ordered, with Heal's food route.
+        w = world(10)
+        w.entities = [berry()]
+        c = ctx({"op": "use_item", "code": "potion"})
+        from agentrealm_agent.states import use_item
+
+        with mock.patch.object(use_item, "spend_potion", wraps=spend_potion) as rule:
+            potion_refused(w, c, c.plan, "potion")
+        self.assertEqual(rule.call_args.kwargs, {"food": True, "ordered": True, "fight_ahead": False})
+
+    def test_the_refusal_leaves_heals_targets_as_they_were(self):
+        from agentrealm_agent import targets
+
+        w = world(7)
+        w.entities = [berry(), berry((3, 5))]
+        c = ctx({"op": "use_item", "code": "potion"})
+        targets.commit(c.memory, w, "heal_food", 99)  # a food Heal went for, gone from view
+        potion_refused(w, c, c.plan, "potion")
+        self.assertEqual(c.memory.targets["heal_food"].target, 99)
 
     def test_out_of_combat_above_the_low_line_with_no_food_it_is_kept(self):
         c = ctx({"op": "use_item", "code": "potion"})
@@ -215,6 +237,24 @@ class StateShowsFoodNearTest(unittest.TestCase):
 
     def test_none_near(self):
         self.assertTrue(food_line(world(), None, Memory()).startswith("food_near=none"))
+
+    def test_a_given_up_bush_is_not_shown(self):
+        # The run's memory is read, so State leaves out what Heal leaves out.
+        w = world(7)
+        w.view.tiles[(6, 5)] = "bush"
+        m = Memory()
+        with mock.patch("agentrealm_agent.healing.given_up_blocks", return_value=frozenset({(6, 5)})):
+            self.assertTrue(food_line(w, None, m).startswith("food_near=none"))
+
+    def test_no_line_without_the_runs_memory(self):
+        from agentrealm_agent.directives import Directives
+        from agentrealm_agent.strategist import build_prompt
+
+        w = world(7)
+        w.entities = [berry()]
+        kw = dict(triggers=[], w=w, plan=Plan([], dict(PARAM_DEFAULTS)), directives=Directives(params=dict(PARAM_DEFAULTS)), knowledge=None)
+        self.assertNotIn("food_near=", build_prompt(**kw)[1]["content"])
+        self.assertIn("food_near=[", build_prompt(**kw, memory=Memory())[1]["content"])
 
     def test_the_contract_says_a_potion_is_for_a_fight(self):
         self.assertIn("A potion is for a fight", POTION_RULE)

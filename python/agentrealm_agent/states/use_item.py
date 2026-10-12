@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from ..equip import weapon_to_rearm
 from ..executor.supply_refusals import can_try, carried_ids, in_hand, must_arm
-from ..healing import health_low, in_combat, walk_seconds
+from ..healing import in_combat, spend_potion, walk_seconds
 from ..item_table import InventorySupply
 from ..memory import Memory
 from ..plan import Plan
@@ -71,7 +71,7 @@ def _use_op(world: WorldModel, ctx: PlayContext) -> StateOutcome:
         why = f"its Use on yourself was refused or did nothing: {code}" if held else f"{code} not held"
         plan.drop_current(why, memory=m)
         return StateOutcome(None, why, state=UseItemState.name)
-    if plan.used_id is None and is_potion(code) and (why := potion_refused(world, ctx, plan)) is not None:
+    if plan.used_id is None and is_potion(code) and (why := potion_refused(world, ctx, plan, code)) is not None:
         plan.drop_current(why, memory=m)
         return StateOutcome(None, why, state=UseItemState.name)
     out = use_on_self(world, m, item, UseItemState.name, ctx.tick_hz)
@@ -93,35 +93,34 @@ def fight_ahead(plan: Plan) -> bool:
     return nxt is not None and (nxt["op"] in FIGHT_OPS or (nxt["op"] == "gather_gems" and bool(nxt.get("fight"))))
 
 
-def potion_refused(w: WorldModel, ctx: PlayContext, plan: Plan) -> str | None:
-    """Why the planner's potion is not drunk, or None to drink it (A135).
-    A potion is for a fight: in combat or with one next on the plan
-    (``healing.in_combat``) it is drunk. Out of combat food heals: while Heal
-    has food near to go for (``food.food_route``, the one food test, priced
-    by its walk) the drink is refused and the reason names that food; above
-    the ``low_health`` line with none it is refused too, the potion kept for
-    a fight."""
-    if in_combat(w, ctx.memory, ctx.policy, fight_ahead=fight_ahead(plan)):
+def potion_refused(w: WorldModel, ctx: PlayContext, plan: Plan, code: str) -> str | None:
+    """Why the planner's potion is not drunk, or None to drink it (A135): the
+    one potion rule, ``healing.spend_potion``, with the drink ordered, a fight
+    next on the plan (``fight_ahead``) and Heal's food route
+    (``food.food_route``, the one food test). In combat or about to be the
+    planner's call stands; out of combat the reason names the food Heal
+    eats instead, or the low line the potion is kept above."""
+    m, ahead = ctx.memory, fight_ahead(plan)
+    route = None if in_combat(w, m, ctx.policy, fight_ahead=ahead) else food_route(w, ctx)
+    if spend_potion(w, m, ctx.policy, ctx.params, code, food=route is not None, ordered=True, fight_ahead=ahead):
         return None
-    if (route := food_route(w, ctx)) is not None:
+    if route is not None:
         cell = f"{w.map_id}:{route.pos[0]},{route.pos[1]}"
         if route.food is not None:
-            code = route.food.code or ""
-            what = f"{code} at {cell}"
+            food = route.food.code or ""
+            what = f"{food} at {cell}"
         else:
             block = w.view.tiles.get(route.pos) or ""
-            code = BLOCK_FOOD.get(block, "")
-            what = f"a {block} at {cell} to break for {code}"
+            food = BLOCK_FOOD.get(block, "")
+            what = f"a {block} at {cell} to break for {food}"
         return (
-            f"a potion is for a fight: out of combat with food near ({what}, heal {heal_of(code)}, "
+            f"a potion is for a fight: out of combat with food near ({what}, heal {heal_of(food)}, "
             f"{walk_seconds(w, route.pos)} s walk; State food_near), Heal eats it"
         )
-    if not health_low(w, ctx.params):
-        return (
-            "a potion is for a fight: out of combat above the low_health line it is kept; put the use_item "
-            "directly above the fight, boss or level op it is for"
-        )
-    return None
+    return (
+        "a potion is for a fight: out of combat above the low_health line it is kept; put the use_item "
+        "directly above the fight, boss or level op it is for"
+    )
 
 
 def self_use_item(w: WorldModel, m: Memory, code: str) -> InventorySupply | None:

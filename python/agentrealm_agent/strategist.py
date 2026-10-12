@@ -686,7 +686,7 @@ def build_prompt(
         held_line(w, knowledge),
         pack_line(w, plan, knowledge),
         potion_line(w, plan.params),
-        food_line(w, knowledge, memory),
+        *([food_line(w, knowledge, memory)] if memory is not None else []),
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
@@ -747,12 +747,15 @@ def potion_line(w: WorldModel, params: dict[str, float | int]) -> str:
     return f"potions={potion_count(w)} potion_drunk_at={at}"
 
 
-def food_line(w: WorldModel, knowledge: KnowledgeBase | None, memory: Memory | None) -> str:
+def food_line(w: WorldModel, knowledge: KnowledgeBase | None, memory: Memory) -> str:
     """The food candidates a short walk away (``healing.food_near``, A135):
     food lying near and blocks that drop food (a bush, for berries), each
-    with its heal and walk. Out of combat Heal goes for the cheapest by its
-    walk, ahead of any potion."""
-    foods, blocks = food_near(w, memory or Memory(), knowledge)
+    with its heal and walk (straight, a rough estimate, as ``to_close``
+    gives it). Out of combat Heal goes for the cheapest by its walk, ahead of
+    any potion. It reads the run's memory, so a refused take or a given-up
+    block is left out as Heal leaves it out; with no memory the line is not
+    shown."""
+    foods, blocks = food_near(w, memory, knowledge)
     rows = [{"kind": "food", "code": e.code, "pos": e.pos} for e in foods]
     rows += [{"kind": w.view.tiles.get(p), "code": BLOCK_FOOD.get(w.view.tiles.get(p) or ""), "pos": p} for p in blocks]
     shown = [
@@ -1413,7 +1416,7 @@ def _walk_to(w: WorldModel, map_id: int | None, cell: Pos) -> dict[str, Any]:
     straight line at the character's speed, a rough estimate)."""
     out: dict[str, Any] = {"at": f"{map_id}:{cell[0]},{cell[1]}"}
     if map_id == w.map_id and w.pos is not None:
-        out["walk_seconds"] = round(chebyshev(w.pos, cell) * 1000 / max(1, w.movement_speed))
+        out["walk_seconds"] = walk_seconds(w, cell)
     return out
 
 

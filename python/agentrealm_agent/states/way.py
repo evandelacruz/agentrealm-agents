@@ -18,6 +18,11 @@ keeps the walk, and the safe default never stands in for it
 3. **A hostile on the way** is the engagement's to fight, and Fight acts
    above every executor, or the planner's, with a ``fight`` op (A114). The
    executor never starts a fight of its own: it names the hostile in its ask.
+   A hostile's ground that is the only thing between the walk and its
+   target is passed when health covers it (``pathing.HostileReach``,
+   A146, A151); when it does not and that one hostile in view is one the
+   engagement would fight from land beside it, the walk lands there first
+   (``land_to_fight``, A151), and the engagement takes it ashore.
 4. **Ask.** One ``no_way_on`` with why, what blocks the way and what was
    tried: the searches, ``Use``s and recorded breaks, never what is merely
    held (``ask.ask_the_planner``), and the decision holds while the planner
@@ -28,6 +33,7 @@ keeps the walk, and the safe default never stands in for it
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 from collections.abc import Collection
 
@@ -35,10 +41,14 @@ from ..break_memory import attempts_at, breakable_block, choice_at, given_up_blo
 from ..navigation import cost_path
 from ..navigation.planner import CostGridParams
 from ..navigation import stuck as nav_stuck
+from ..directives import attack_forbidden
+from ..engagement import would_fight
+from ..fording import on_water
 from ..memory import Memory
-from ..pathing import grid_params, plan_sets
+from ..pathing import HostileReach, bounded_step, grid_params, plan_sets
 from ..plan import GoalOp
-from ..world import Pos, WorldModel
+from ..world import Pos, WorldModel, chebyshev
+from .intents import set_position
 from .ask import ask_key, ask_the_planner, op_key, what_blocks
 from .base import PlayContext, StateOutcome, op_walk
 from .break_state import break_toward
@@ -61,6 +71,9 @@ OWNER_WALKS: dict[str, tuple[str, ...]] = {
     "Boss": ("boss:",),
 }
 
+
+# The walk ``land_to_fight`` takes to land beside a hostile that shuts the way (A151).
+LAND_GOAL = "land"
 
 # The newest blocks the way-clearing chose that ``tried`` remembers (``Memory.way_blocks``).
 WAY_BLOCKS_KEPT = 16
@@ -182,12 +195,66 @@ def clear_the_way(
             out.reason = f"{why}: {out.reason}"
             return out
         m.way_shut = key  # still shut until something it was found under changes
+    if at is not None and isinstance(reach, HostileReach) and (out := land_to_fight(w, ctx, at, state, reach)) is not None:
+        out.reason = f"{why}: {out.reason}"
+        return out
     blocked = tried = None
     if at is not None and m.no_way_on != ask_key(w, why, op):
         blocked = what_blocks(w, ctx, at)  # only for an ask that goes out
         walked = walk_given_up(w, m, state, at)
         tried = f"{walked}, then {_tried(w, ctx, at)}" if walked else _tried(w, ctx, at)
     return ask_the_planner(w, ctx, why, state, op, blocked_by=blocked, tried=tried)
+
+
+def land_to_fight(w: WorldModel, ctx: PlayContext, at: Pos, state: str, reach: HostileReach) -> StateOutcome | None:
+    """A step toward land to fight from, when one hostile's ground is all
+    that shuts the way to ``at`` and the pass through it is not covered
+    (A151, A120): that hostile is in view, not forbidden, and the
+    engagement would fight it from a land cell within its range
+    (``engagement.would_fight`` as it would stand there, so the decision it
+    makes on landing is fight), reached on a way that comes within its
+    range only on that cell. On land the engagement takes it and Fight arms
+    the weapon (A133); afloat it never says fight (A146), so no step on
+    water comes within range. None when no such landing exists: then the
+    executor asks."""
+    if w.pos is None:
+        return None
+    m, policy = ctx.memory, ctx.policy
+    _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+    way = cost_path(w, at, grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True))
+    crossed = reach.crossed(way or [])
+    if len(crossed) != 1 or not crossed[0].in_view or attack_forbidden(crossed[0].entity, ctx.never_attack):
+        return None
+    ground, e = crossed[0], crossed[0].entity
+    near = {p for p in reach.cells if chebyshev(p, e.pos) <= policy.hostile_range}
+    others = set(reach.cells) - ground.cells
+    land = w.walkable_test(swing=True)
+    best: tuple[Pos, set[Pos], int] | None = None
+    for cell in sorted(near):
+        if not land(cell) or on_water(w, m, cell) or cell == e.pos:
+            continue
+        avoid = plan_avoid | others | (near - {cell})
+        path = cost_path(w, cell, grid_params(policy, avoid, plan_costly))
+        if path and (best is None or len(path) < best[2]) and _fights_from(w, ctx, e, cell):
+            best = (cell, avoid, len(path))
+    if best is None:
+        return None
+    cell, avoid, _ = best
+
+    def params():
+        return grid_params(policy, avoid, plan_costly, m=m)
+
+    step = bounded_step(m, w, LAND_GOAL, cell, avoid, lambda: cost_path(w, cell, params()), params=params)
+    if step is None:
+        return None
+    return StateOutcome([set_position(step)], f"land at {cell[0]},{cell[1]} to fight {e.code or e.kind} {e.id}", state=state)
+
+
+def _fights_from(w: WorldModel, ctx: PlayContext, e, cell: Pos) -> bool:
+    """The engagement would fight ``e`` standing on ``cell``, as loaded now."""
+    there = copy.copy(w)
+    there.pos = cell
+    return would_fight(there, ctx.policy, ctx.params, also=e, m=ctx.memory)
 
 
 def walk_given_up(w: WorldModel, m: Memory, owner: str, at: Pos) -> str | None:

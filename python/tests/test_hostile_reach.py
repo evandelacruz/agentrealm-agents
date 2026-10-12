@@ -211,7 +211,7 @@ class NoWayRoundAsksTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual((out.state, out.intents), ("Travel", None), out.reason)
         [ask] = asks(c)
-        self.assertIn("remembered hostile bogmaw 200, out of view, holding ground round 12,1", ask["blocked_by"])
+        self.assertIn("remembered hostile bogmaw 200, last seen at 12,1, out of view, holding ground round 12,1", ask["blocked_by"])
 
 
 def step_to(w: WorldModel, m: Memory, cell: tuple[int, int]) -> None:
@@ -291,11 +291,13 @@ class OnlyWayPassTest(unittest.TestCase):
         self.assertIn(goal, reach)
         self.assertFalse(reach.only_way(goal), "reached round the reach: the goal is left out of it")
 
-    def test_a_remembered_hostiles_ground_is_never_passed(self):
+    def test_a_remembered_hostiles_post_is_never_passed_within_its_range(self):
+        """A151: remembered ground is passed like seen ground, but never
+        within ``hostile_range`` of where its hostile is known to stand."""
         w = world(NoWayRoundAsksTest.CORRIDOR, at=(1, 1))
         w.health = w.max_health = 100
         guard = pack(w, (12, 1))[0]
-        w.entities = []  # its post still holds the corridor, but it cannot be weighed
+        w.entities = []  # its post at (12, 1) still holds the corridor, which runs through its range
         w.sightings[(guard.kind, guard.id)] = Sighting(guard, 7, w.tick, (12, 1), post=True)
         c = ctx(travel(21, 1))
         self.assertIsNone(dispatch(w, c).intents)
@@ -376,9 +378,9 @@ class CoversPassTest(unittest.TestCase):
 
         return covers_pass(self.w, POLICY, dict(PARAM_DEFAULTS), self.PATH, self.reach, 10)
 
-    def test_a_cell_no_hostile_in_view_holds_is_never_covered(self):
+    def test_a_cell_no_known_hostile_holds_is_never_covered(self):
         self.assertTrue(self.covers())
-        self.reach = set(self.reach) | {(3, 1)}  # ground held by something out of view
+        self.reach = set(self.reach) | {(3, 1)}  # ground no hostile known holds
         self.assertFalse(self.covers())
 
     def test_every_hostile_whose_reach_it_crosses_is_counted(self):

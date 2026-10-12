@@ -17,9 +17,8 @@ from ..memory import queue_signal
 from ..navigation import cost_path
 from ..pathing import grid_params, plan_sets
 from ..plan import GoalOp
-from ..survival import hostiles_reaching
 from ..world import Pos, WorldModel, chebyshev
-from .base import PlayContext, StateOutcome
+from .base import PlayContext, StateOutcome, op_walk
 
 
 def op_key(op: GoalOp | None) -> tuple | None:
@@ -71,10 +70,12 @@ def ask_the_planner(
 
 
 def what_blocks(w: WorldModel, ctx: PlayContext, at: Pos) -> str:
-    """What shuts the way to ``at``, for the planner: the known hostiles whose
-    reach the way (or, with none, the straight route) crosses, those in view
-    and those remembered out of view by the ground they hold (A128), and the
-    first block on the straight route, with whether a held item opens it."""
+    """What shuts the way to ``at``, for the planner: each known hostile
+    whose ground the op's walk keeps out of (``base.op_walk``) the way (or,
+    with none, the straight route) crosses, named with its cell, one in view
+    where it stands and one remembered out of view where it was last seen
+    and by the ground it holds (A128, A151), and the first block on the
+    straight route, with whether a held item opens it."""
     if w.pos is None:
         return "position unknown"
     m = ctx.memory
@@ -83,15 +84,17 @@ def what_blocks(w: WorldModel, ctx: PlayContext, at: Pos) -> str:
     route = straight_route(w.pos, at)
     cells = way or [w.pos, *route]
     parts = []
-    ids = hostiles_reaching(w, ctx.policy, cells)
-    for e in sorted((e for e in w.entities if (e.kind, e.id) in ids), key=lambda e: (e.kind, e.id)):
-        parts.append(f"hostile {e.code or e.kind} {e.id} at {e.pos[0]},{e.pos[1]}")
-    in_view = {(e.kind, e.id) for e in w.entities}
-    for key, zones in sorted(held_by_hostile(w, ctx.policy).items()):
-        held = next(((c, r) for c, r in zones if any(chebyshev(c, p) <= r for p in cells)), None)
-        if key not in in_view and held is not None:
-            code = w.sightings[key].entity.code or key[0]
-            parts.append(f"remembered hostile {code} {key[1]}, out of view, holding ground round {held[0][0]},{held[0][1]}")
+    for g in sorted(op_walk(w, ctx)[2].crossed(cells), key=lambda g: (g.entity.kind, g.entity.id)):
+        e = g.entity
+        if g.in_view:
+            parts.append(f"hostile {e.code or e.kind} {e.id} at {e.pos[0]},{e.pos[1]}")
+            continue
+        zones = held_by_hostile(w, ctx.policy).get((e.kind, e.id), [])
+        held = next(((c, r) for c, r in zones if any(chebyshev(c, p) <= r for p in cells)), (e.pos, 0))
+        parts.append(
+            f"remembered hostile {e.code or e.kind} {e.id}, last seen at {e.pos[0]},{e.pos[1]}, out of view,"
+            f" holding ground round {held[0][0]},{held[0][1]}"
+        )
     skip = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
     if (p := next((p for p in route if breakable_block(w, p) is not None), None)) is not None:
         opens = choice_at(w, ctx.knowledge, p, skip) is not None

@@ -201,20 +201,54 @@ def reach_cells(w: WorldModel, policy: Policy, d: Danger | None = None) -> set[P
     return hostile_reach(w, policy) | zone_cells((d or danger(w, policy)).held)
 
 
+@dataclass(frozen=True)
+class WalkGround:
+    """One known hostile's ground a walk on an op's behalf keeps out of
+    (``walk_ground``): ``entity`` as in view, or as last seen when
+    remembered, ``stands`` the cells it is known to stand on (where it is in
+    view; out of view, where it was last seen and its post), and ``cells``."""
+
+    entity: Entity
+    in_view: bool
+    stands: tuple[Pos, ...]
+    cells: frozenset[Pos]
+
+
+def walk_ground(w: WorldModel, policy: Policy, skip: Collection[HostileKey] = ()) -> dict[HostileKey, WalkGround]:
+    """Each known hostile's ground a walk on an op's behalf keeps out of
+    (A128), by (kind, id): within ``policy.hostile_range`` plus
+    ``WALK_REACH_MARGIN`` of every hostile in view but those in ``skip``,
+    and what each holds as remembered (``held_by_hostile``: a post, and out
+    of view the cell it was last seen on, margin included). ``skip`` is the
+    hostiles the engagement would fight (``pathing.op_walk_sets``): those
+    are left to it, all but a post they hold."""
+    out: dict[HostileKey, WalkGround] = {}
+    for e in w.entities:
+        if is_hostile(w, policy, e) and (e.kind, e.id) not in skip:
+            cells = zone_cells([(e.pos, policy.hostile_range + WALK_REACH_MARGIN)])
+            out[(e.kind, e.id)] = WalkGround(e, True, (e.pos,), frozenset(cells))
+    in_view = {(e.kind, e.id): e for e in w.entities}
+    for key, zones in held_by_hostile(w, policy).items():
+        held = zone_cells(zones)
+        if key in out:
+            g = out[key]
+            out[key] = WalkGround(g.entity, True, g.stands, g.cells | held)
+        elif key in in_view:
+            e = in_view[key]
+            out[key] = WalkGround(e, True, (e.pos,), frozenset(held))
+        else:
+            s = w.sightings[key]
+            stands = tuple(dict.fromkeys([s.entity.pos, *([s.home] if s.post else [])]))
+            out[key] = WalkGround(s.entity, False, stands, frozenset(held))
+    return out
+
+
 def walk_reach(w: WorldModel, policy: Policy, skip: Collection[HostileKey] = ()) -> set[Pos]:
-    """The ground a walk on an op's behalf keeps out of (A128): within
-    ``policy.hostile_range`` plus ``WALK_REACH_MARGIN`` of every hostile in
-    view but those in ``skip``, and what remembered ones hold
-    (``known_reach``, margin included). The walk prices it ``costly`` so it
-    routes round a pack it has seen, and one whose only way crosses it asks
-    the planner (``pathing.guided_step``). ``skip`` is the hostiles the
-    engagement would fight (``pathing.op_walk_sets``): those are left to it."""
-    zones = [
-        (e.pos, policy.hostile_range + WALK_REACH_MARGIN)
-        for e in w.entities
-        if is_hostile(w, policy, e) and (e.kind, e.id) not in skip
-    ]
-    return zone_cells(zones + known_reach(w, policy))
+    """The ground a walk on an op's behalf keeps out of (A128): every
+    ``walk_ground`` together. The walk prices it ``costly`` so it routes
+    round a pack it has seen, and one whose only way crosses it passes it
+    or asks the planner (``pathing.guided_step``, A146, A151)."""
+    return {p for g in walk_ground(w, policy, skip).values() for p in g.cells}
 
 
 def ground_by_hostile(w: WorldModel, policy: Policy) -> dict[HostileKey, set[Pos]]:

@@ -144,3 +144,60 @@ class AshoreTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# A wide lake: land at x 0..1 and 9..10, water between, 10 rows tall, with a
+# rock in the lake at (5, 0) a hostile pack may stand on.
+WIDE = ["..~~~.~~~.."] + ["..~~~~~~~.."] * 9
+
+
+def wide(at, armed="raft", rows=WIDE) -> WorldModel:
+    w = lake(at=at, armed=armed)
+    w.view.tiles.clear()
+    glyph = {".": "dirt", "#": "wall", "~": "water"}
+    for y, row in enumerate(rows):
+        for x, g in enumerate(row):
+            w.view.tiles[(x, y)] = glyph[g]
+    w.alive, w.health, w.max_health = True, 10, 10
+    return w
+
+
+def under_attack(w: WorldModel) -> PlayContext:
+    from tests.test_hostile_reach import POLICY, pack
+
+    pack(w, (10, 9), hit=6)
+    w.attacker, w.attacked_tick = ("npc", 200), w.tick
+    return PlayContext(Memory(), POLICY, random.Random(0), knowledge=KnowledgeBase.empty("sandbox"), plan=travel_to(10, 1))
+
+
+class AttackedOnWaterTest(unittest.TestCase):
+    def test_makes_for_the_nearest_land_without_arming_a_weapon(self):
+        w = wide(at=(3, 5))
+        out = dispatch(w, under_attack(w))
+        self.assertEqual(out.state, "Ashore", out.reason)
+        (step,) = out.intents
+        self.assertEqual((step["verb"], step["x"]), ("SetPosition", 2), "toward the west shore at x 1, not a weapon")
+
+    def test_not_with_the_fording_supply_worn(self):
+        w = wide(at=(3, 5), armed="bronze_sword")
+        w.worn_codes = {"accessory": "raft"}
+        self.assertNotEqual(dispatch(w, under_attack(w)).state, "Ashore")
+
+    def test_fights_or_flees_normally_once_ashore(self):
+        w = wide(at=(1, 5))
+        self.assertNotEqual(dispatch(w, under_attack(w)).state, "Ashore")
+
+
+class CrossingKeepsOffReachTest(unittest.TestCase):
+    def test_a_crossing_keeps_off_water_in_a_seen_hostiles_reach(self):
+        from agentrealm_agent.pathing import op_walk_sets
+        from tests.test_hostile_reach import BAR, POLICY, pack
+
+        w = wide(at=(0, 3))
+        (rock,) = pack(w, (5, 0), hit=6)  # one the engagement would not take on
+        avoid, costly, _ = op_walk_sets(w, Memory(), POLICY, None, dict(PARAM_DEFAULTS), [])
+        path = cost_path(w, (10, 3), CostGridParams(avoid=avoid, costly=costly, fog_cost=None))
+        self.assertIsNotNone(path)
+        water = [p for p in path if w.view.tiles[p] == "water"]
+        self.assertTrue(water)
+        self.assertTrue(all(max(abs(p[0] - rock.pos[0]), abs(p[1] - rock.pos[1])) > BAR for p in water), path)

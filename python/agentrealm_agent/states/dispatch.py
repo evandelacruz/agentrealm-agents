@@ -39,6 +39,7 @@ from ..shop import sync_shop
 from ..stalled import remember as remember_stalled, retry_basis
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome, top_executor
+from .ashore import AshoreState
 from .boss import BossState, sync_boss
 from .break_state import BreakState
 from .detour import DetourState
@@ -77,6 +78,7 @@ REFLEXES: tuple[State, ...] = (
     SyncState(),
     DownedState(),
     EscapeState(),
+    AshoreState(),
     RetreatState(),
     HealState(),
     FightState(),
@@ -114,7 +116,7 @@ STATES: tuple[State, ...] = REFLEXES + EXECUTORS + (IdleState(),)
 
 # The runner's park phase, after the run ends (A66): the survival reflexes,
 # then Park walking to safe ground. No plan op runs, and nothing else.
-SURVIVAL = ("Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee")
+SURVIVAL = ("Sync", "Downed", "Escape", "Ashore", "Retreat", "Heal", "Fight", "Flee")
 PARK_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name in SURVIVAL) + (ParkState(),)
 
 # The runner's held-queue probe (A64): the states that can answer with a

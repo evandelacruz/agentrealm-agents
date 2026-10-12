@@ -15,6 +15,8 @@ So there is one rule, applied to every queue a state sends
   unless one is armed or worn already (``ford_queue``);
 - on water, the queue stops before any loadout change that would strand: no
   state re-arms a weapon, cutter or potion mid-water;
+- under attack on water with only the fording supply in hand, the
+  character makes for the nearest land (``states.ashore``);
 - ashore, with a fording supply armed and no water step in the queue, the
   queue first arms the weapon the one weapon rule picks (A99,
   ``equip.weapon_to_arm``), unless it arms something itself.
@@ -60,6 +62,12 @@ def on_water(w: WorldModel, m: Memory, p: Pos) -> bool:
 def afloat(armed: str | None, worn: list[str]) -> bool:
     """A fording supply is armed or worn: water may be stepped on."""
     return fords(armed) or any(fords(code) for code in worn)
+
+
+def stranded_unarmed(w: WorldModel) -> bool:
+    """Only a fording supply is in hand and none is worn: on water no weapon
+    can be armed, so there is no fight to have (``states.ashore``)."""
+    return fords(w.armed_code) and not any(fords(code) for code in w.worn_codes.values())
 
 
 def ford_queue(

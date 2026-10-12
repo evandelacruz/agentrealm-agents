@@ -524,6 +524,14 @@ def _toward(goal: Pos, corridor: list[Pos] | None, came: dict[Pos, Pos] | None =
     return h
 
 
+def rest_estimate(nav: NavSearchState, p: Pos) -> int:
+    """The steps the corridor search estimates are left from ``p`` to its goal
+    (A125): along the search's tree (``_toward``), raised by what the window
+    search learned there. Beyond the perception window this is the way round
+    the obstacles the corridor goes round, where a straight line is not."""
+    return max(_toward(nav.goal, [macro_cell(p)], nav.came)(p), nav.learned.get(p, 0))
+
+
 def _fine_path(
     grid: _Grid,
     h: Callable[[Pos], int],

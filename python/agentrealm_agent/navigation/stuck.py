@@ -44,9 +44,11 @@ kept, so the next give-up there backs off twice as long. Every walk asks it
 Whether to drop a goal that keeps getting stuck is the planner's call: each
 give-up raises a ``stuck`` trigger saying when the target may be walked again.
 
-Progress is the remaining length of the planned path plus the straight-line
-rest to the target, read when the state plans; a move only bumps counters, so
-no search runs per move.
+Progress is the remaining length of the planned path plus the rest to the
+target from its end, read when the state plans: the corridor search's
+estimate when the walk has one for this target (a way round an obstacle
+wider than the window counts), else the straight line. A move only bumps
+counters, so no search runs per move.
 """
 
 from __future__ import annotations
@@ -58,7 +60,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from ..world import NEIGHBOURS, WALKABLE, Pos, WorldModel, chebyshev
 from . import walk as nav_walk
-from .planner import CostGridParams
+from .planner import CostGridParams, NavSearchState, rest_estimate
 
 if TYPE_CHECKING:
     from ..memory import Memory
@@ -429,17 +431,29 @@ def break_target(att: NavAttempt) -> Pos | None:
     return att.break_x, att.break_y
 
 
-def measure(path: list[Pos] | None, target: Pos) -> int | None:
-    """Remaining moves along ``path`` plus the straight-line rest to ``target``."""
+def measure(path: list[Pos] | None, target: Pos, corridor: NavSearchState | None = None) -> int | None:
+    """Remaining moves along ``path`` plus the rest to ``target``: the
+    ``corridor`` search's estimate from the path's end when it is for
+    ``target``, else the straight line."""
     if not path:
         return None
+    if corridor is not None and corridor.goal == target:
+        return len(path) + rest_estimate(corridor, path[-1])
     return len(path) + chebyshev(path[-1], target)
 
 
-def observe(att: NavAttempt, w: WorldModel, path: list[Pos] | None) -> None:
-    """Progress is the remaining measure falling below the walk's net best (A125)."""
+def corridor_for(m: Memory, w: WorldModel, att: NavAttempt) -> NavSearchState | None:
+    """The corridor search ``att``'s walk keeps for its target on this map, if any."""
+    nav = m.corridors.get(att.goal)
+    return nav if nav is not None and nav.goal == att.target and nav.map_id == w.map_id else None
+
+
+def observe(att: NavAttempt, w: WorldModel, path: list[Pos] | None, corridor: NavSearchState | None = None) -> None:
+    """Progress is the remaining measure falling below the walk's net best (A125).
+
+    ``corridor`` (``corridor_for``) prices the rest past the path's end."""
     _note_position(att, w)
-    cost = measure(path, att.target)
+    cost = measure(path, att.target, corridor)
     if cost is None:
         return
     if att.best is None or cost < att.best:

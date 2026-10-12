@@ -669,7 +669,7 @@ def _store_path(m: Memory, w: WorldModel, goal: str, path: list[Pos], leg: Leg |
     if att is None:
         m.nav_stuck.active = None
     else:
-        nav_stuck.observe(att, w, path)
+        nav_stuck.observe(att, w, path, nav_stuck.corridor_for(m, w, att))
 
 
 def _walk_grid(params: Callable[[], CostGridParams] | None, avoid: set[Pos]) -> CostGridParams:
@@ -689,7 +689,7 @@ def _walk(m: Memory, w: WorldModel, att: NavAttempt, avoid: set[Pos], path: list
         nav_walk.drop(m, att.goal)
     else:
         m.walks[att.goal] = walk
-    nav_stuck.observe(att, w, path)
+    nav_stuck.observe(att, w, path, nav_stuck.corridor_for(m, w, att))
     return next_step(w, avoid, path)
 
 
@@ -812,12 +812,12 @@ def guided_step(
     reason = None if att.level in (nav_stuck.REVEAL, nav_stuck.BREAK) else nav_stuck.stuck_reason(att, w.tick)
     if reason is None and att.level not in (nav_stuck.REVEAL, nav_stuck.BREAK):
         if m.goal == goal and next_step(w, avoid, m.path):
-            nav_stuck.observe(att, w, m.path)
+            nav_stuck.observe(att, w, m.path, nav_stuck.corridor_for(m, w, att))
             return next_step(w, avoid, m.path)
         found = commit_walk(m, w, goal, leg.target, plan(att), _walk_grid(params, avoid))
         if next_step(w, avoid, found):
             m.path, m.goal = found, goal
-            nav_stuck.observe(att, w, found)
+            nav_stuck.observe(att, w, found, nav_stuck.corridor_for(m, w, att))
             return next_step(w, avoid, found)
         if found:
             return _wait(m, att, found)
@@ -875,7 +875,7 @@ def bounded_step(
         m.path, m.goal = found, goal
     nav_stuck.track(m, w, goal, at)
     att.waiting_since = None
-    nav_stuck.observe(att, w, m.path)
+    nav_stuck.observe(att, w, m.path, nav_stuck.corridor_for(m, w, att))
     if reason := nav_stuck.stuck_reason(att, w.tick):
         nav_stuck.give_up(m, w, att, reason)
         return None

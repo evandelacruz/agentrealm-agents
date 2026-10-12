@@ -202,12 +202,45 @@ class NetProgressTest(unittest.TestCase):
         att = nav_stuck.track(m, w, "travel:point", self.TARGET)
         nav_stuck.observe(att, w, [(x, 1) for x in range(1, 11)])  # measure 10 + 190
         self.assertTrue(nav_stuck.escalate(m, w, att, "moves"))  # CAUTIOUS, a fresh window
-        nav_stuck.observe(att, w, [(0, 0)] * 20)  # a leg that leaves the target no nearer
         att.moves = 5
+        nav_stuck.observe(att, w, [(0, 0)] * 20)  # a leg that leaves the target no nearer
         self.assertEqual(att.moves, 5, "no progress: the window runs on")
         w.pos = (3, 1)
         nav_stuck.observe(att, w, [(x, 1) for x in range(4, 11)])  # nearer than ever
         self.assertEqual(att.moves, 0)
+
+    def corridor_round(self, target) -> NavSearchState:
+        """A corridor that goes round an obstacle wider than the window: north
+        one tile, east three, then south to the target's tile, far south."""
+        tiles = [(0, 0), (0, -1), (1, -1), (2, -1), (3, -1), *((3, y) for y in range(0, 13)), (2, 12), (1, 12), (0, 12)]
+        nav = NavSearchState(goal=target, map_id=MAP)
+        nav.came = dict(zip(tiles, tiles[1:]))
+        return nav
+
+    def walk_round(self, corridor: NavSearchState | None) -> list[str]:
+        """Walk the corridor's first two legs (north, then east: away from the
+        target in a straight line), one decision per step; the windows that failed."""
+        target = (8, 200)
+        w = WorldModel(character_id=1, map_id=MAP, pos=(8, 8), perception=12)
+        m = Memory()
+        att = nav_stuck.track(m, w, "travel:point", target)
+        m.goal = "travel:point"
+        legs = [[(8, y) for y in range(7, -9, -1)], [(x, -8) for x in range(9, 57)]]
+        failed = []
+        for leg in legs:
+            for i, cell in enumerate(leg):
+                nav_stuck.observe(att, w, leg[i:], corridor)
+                if reason := nav_stuck.stuck_reason(att, w.tick):
+                    failed.append(reason)
+                w.pos = cell
+                nav_stuck.on_step(m, w)
+                w.tick += 4
+        return failed
+
+    def test_a_route_round_an_obstacle_wider_than_the_window_is_progress(self):
+        target = (8, 200)
+        self.assertEqual(self.walk_round(self.corridor_round(target)), [], "the corridor's way round is progress")
+        self.assertIn("moves", self.walk_round(None), "a straight-line rest would call it stuck")
 
     def test_after_the_ladder_gives_up_the_executor_asks_with_what_it_tried(self):
         w = field(width=30, height=6, at=(2, 2))

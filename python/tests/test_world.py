@@ -191,3 +191,23 @@ class AsleepTest(unittest.TestCase):
         self.assertTrue(self.w.asleep, "a delta without the field keeps it")
         self.w.apply_observation({"version": 3, "delta": {"asleep": False}})
         self.assertFalse(self.w.asleep)
+
+
+class SelfHealthTest(unittest.TestCase):
+    """The self read serves health (A139): ``apply_self`` reads it as a snapshot does, for every runner."""
+
+    def setUp(self):
+        self.w = WorldModel(character_id=1)
+        self.w.health, self.w.max_health = 4, 10
+
+    def test_the_self_read_sets_health_and_max(self):
+        self.w.apply_self({"health": 7, "max_health": 12})
+        self.assertEqual((self.w.health, self.w.max_health), (7, 12))
+
+    def test_a_self_read_without_health_keeps_it(self):
+        self.w.apply_self({"lives": 1})
+        self.assertEqual((self.w.health, self.w.max_health), (4, 10))
+
+    def test_health_parses_as_a_snapshot_does(self):
+        self.w.apply_self({"health": "6", "max_health": None})
+        self.assertEqual((self.w.health, self.w.max_health), (6, None))

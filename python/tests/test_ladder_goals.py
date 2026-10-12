@@ -293,22 +293,36 @@ class TreeAsDataTest(unittest.TestCase):
 
 
 class BlocksTest(unittest.TestCase):
-    def test_a_blocked_goal_is_skipped_with_its_reason_and_the_walk_descends(self):
-        w = geared()
+    def test_a_blocked_goal_is_skipped_with_its_reason_and_its_ready_children_do_nothing(self):
+        w = geared()  # every child of the level ready
         blocks = Blocks()
         blocks.mark("level", "the door will not open", now=w.tick)
         turn = walk(w, knowledge(), blocks)
-        self.assertEqual(turn.goal.key, "risk")
-        self.assertEqual([(n.key, b.reason) for n, b in turn.skipped], [("level", "the door will not open")])
+        self.assertIsNone(turn.goal)  # no explore or equip for a risk already met
+        self.assertEqual(
+            [(n.key, b.reason) for n, b in turn.skipped],
+            [("level", "the door will not open"), ("world", "beat the next level: the door will not open")],
+        )
 
-    def test_a_blocked_node_on_the_way_down_is_passed_through(self):
-        w = geared()
+    def test_a_ready_node_below_a_block_has_nothing_to_do(self):
+        w = geared()  # gems short, stay alive ready
         kb = knowledge(door_need="fords", sells={"raft": 30})
         blocks = Blocks()
         blocks.mark("gather", "no ground to gather on", now=w.tick)
         turn = walk(w, kb, blocks)
-        self.assertEqual(turn.goal.key, "alive")
+        self.assertIsNone(turn.goal)  # no potion bought or walk to town with the margin fine
         self.assertEqual(turn.skipped[0][0].key, "gather")
+
+    def test_a_node_not_ready_below_a_block_is_the_goal(self):
+        w = world(health=2, gems=40)  # the raft affordable, stay alive not ready
+        hostile(w, 50, (6, 5))
+        kb = knowledge(door_need="fords", sells={"raft": 30})
+        blocks = Blocks()
+        blocks.mark("requires", "the shop is shut", now=w.tick)
+        turn = walk(w, kb, blocks)
+        self.assertEqual(turn.goal.key, "alive")
+        self.assertEqual([n.key for n in turn.path], ["world", "level", "requires", "gems", "gather", "alive"])
+        self.assertEqual(turn.skipped[0][0].key, "requires")
 
     def test_a_block_lapses_at_its_expiry(self):
         w = geared()

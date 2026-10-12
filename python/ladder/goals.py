@@ -30,7 +30,8 @@ it is the planner's answer at "gather" (A140).
 **Blocked nodes.** A node the planner says it cannot work (A140) is marked
 in ``Blocks`` with its reason and an expiry; the walk never makes it the
 goal, notes it as skipped with that reason, and descends into its children,
-taking the first with something to do. A node not ready whose whole way
+taking the first with a node not ready under it; a ready node has nothing to
+do, so it is never the goal. A node not ready whose whole way
 down is blocked blocks its parent too, with its reason, so a node is the
 goal only while all its children are ready. A block lapses at its expiry.
 """
@@ -332,7 +333,8 @@ def walk(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = No
     node whose children are all ready; only such a node is ever the goal.
 
     A node marked blocked is skipped with its reason and the walk descends
-    into its children, all ready, taking the first with something to do. A
+    into its children, all ready, taking the first with a node not ready
+    under it: a ready node has nothing to do and is never the goal. A
     child not ready whose whole way down is blocked blocks its parent too,
     with the child's reason: the walk tries the parent's next child not
     ready, and with none the parent gives no goal. ``goal`` is None when the
@@ -360,7 +362,9 @@ def walk(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = No
             return None, path, under
         block = blocks.active(n.key, world.tick)
         if block is None:
-            return (n, path, None) if n.op(n, rd) is not None else (None, path, None)
+            # A ready node has nothing to do, whatever block above sent the walk here.
+            working = not rd.check(n).ready and n.op(n, rd) is not None
+            return (n, path, None) if working else (None, path, None)
         skipped.append((n, block))
         for c in n.children:
             goal, to, _ = down(c, path)

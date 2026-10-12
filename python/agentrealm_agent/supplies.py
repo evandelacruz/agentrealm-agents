@@ -352,6 +352,12 @@ def fords(code: str | None) -> bool:
     return r is not None and r.fords
 
 
+def afloat(armed: str | None, worn: Iterable[str]) -> bool:
+    """A fording supply is armed or worn: water may be stepped on now,
+    with no ``Arm`` first (A133)."""
+    return fords(armed) or any(fords(code) for code in worn)
+
+
 def kept_on_break(code: str | None) -> bool:
     """A break with it armed does not use it up (``used_up_on_break`` false)."""
     r = row(code)

@@ -188,7 +188,7 @@ class CutMemoryTest(unittest.TestCase):
 
         w, m = lake(at=(1, 1), armed="raft"), Memory()
         keep_the_arm = lambda w_, m_, q, kb=None, rearm=True: (q[:1], "Step cut")  # noqa: E731
-        with mock.patch("agentrealm_agent.states.dispatch.ford_queue", side_effect=keep_the_arm):
+        with mock.patch("agentrealm_agent.fording.ford_queue", side_effect=keep_the_arm):
             with mock.patch("agentrealm_agent.states.dispatch._states", return_value=(ArmsThenSteps(),)):
                 out = dispatch(w, ctx_for(m, None))
         self.assertEqual(out.intents, [arm(SWORD)])
@@ -197,6 +197,41 @@ class CutMemoryTest(unittest.TestCase):
 
 
 class UnderAttackStepTest(unittest.TestCase):
+    def test_a_cornered_drink_on_water_leaves_no_memory_of_it(self):
+        import tempfile
+        import threading
+        from pathlib import Path
+
+        from agentrealm_agent.brain import Decision
+        from agentrealm_agent.config import CharacterConfig
+        from agentrealm_agent.runner import Runner
+        from agentrealm_agent.world import Entity
+        from tests.test_hostile_reach import POLICY
+        from tests.test_runner import FakeClient
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        (Path(tmp.name) / "T.directives.toml").write_text("")
+        r = Runner(CharacterConfig("T", "sandbox", POLICY, Path(tmp.name) / "T.toml"), FakeClient([]), 1, threading.Event(), out=lambda _: None)
+        self.addCleanup(r.trace.close)
+        r.world = lake(at=(3, 1), held=("raft", "bronze_sword", "small_potion"), armed="raft")
+        r.mem = m = Memory()
+        drink = [arm(POTION), {"verb": "Use", "target": {"kind": "self"}}]
+
+        def cornered(w, ctx, hostiles):
+            ctx.memory.self_use, ctx.memory.self_use_rearm = POTION, "raft"  # as use_on_self does
+            return Decision(drink[0], "cornered: drink", True, list(drink), "Flee")
+
+        hitter = Entity("npc", 200, (4, 0), code="bogmaw")
+        walk = [{"verb": "Step", "direction": "right"}]
+        with mock.patch("agentrealm_agent.runner.cornered_decision", side_effect=cornered), mock.patch(
+            "agentrealm_agent.runner.open_step", return_value=None
+        ), mock.patch("agentrealm_agent.runner.flee_from", return_value=[hitter]):
+            d, sent, doubt = r.move_under_attack(Decision(walk[0], "walk", True, state="Travel"), walk, [(3, 1)])
+        self.assertNotIn(arm(POTION), sent or [], "no drink on water: it would strand")
+        self.assertIsNone(m.self_use, "the drink was never sent: nothing is filed against it")
+        self.assertIsNone(m.self_use_rearm)
+
     def test_a_lone_step_under_attack_is_open_on_water_only_afloat(self):
         from agentrealm_agent.executor.held_queue import _lands_open
 

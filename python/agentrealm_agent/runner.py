@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import random
 import threading
 import time
@@ -75,7 +76,7 @@ from .executor.supply_refusals import (
     refusal_situation,
     used_up,
 )
-from .fording import ford_queue, note_would_strand
+from .fording import ford_gate, loadout_memory, note_would_strand
 from .healing import absorb_heal_pending, note_heal_pending
 from .shop import note_shop_result
 from .supplies import heals, is_food
@@ -831,15 +832,22 @@ class Runner:
             return Decision(one[0], f"{d.reason}: under attack, best open step", d.reflex, state=d.state), one, None
         if not hostiles:
             return d, intents, STEP_DOUBT
+        saved = loadout_memory(m)
         c = cornered_decision(w, play_context(m, policy, self.rng, **self._play_args(self.plan)), hostiles)
+        # The cornered move goes out past dispatch: the same water gate and
+        # rollback (A133), before the runner tracks what it sends.
+        planned = c.submit_queue if c.submit_queue is not None else [c.intent] if c.intent else []
+        gated, why = ford_gate(w, m, saved, planned, self.knowledge, rearm=False)
+        if why:
+            queue = gated if c.submit_queue is not None or len(gated) > 1 else None
+            c = dataclasses.replace(c, intent=gated[0] if gated else None, submit_queue=queue, reason=f"{c.reason}; {why}")
         moves = self._apply_never_attack(self.intents_for(c))
-        # The cornered move goes out past dispatch: the same water rule (A133).
-        moves, _ = ford_queue(w, m, moves, self.knowledge, rearm=False) if moves else (moves, "")
+        reason = c.reason
         doubt = unconfirmed_send(w, m, policy, self.knowledge, moves, starts) if moves else STEP_DOUBT
         if doubt is not None:
             return d, intents, doubt
         m.state = c.state
-        return Decision(c.intent, f"{d.reason}: no open step, {c.reason}", True, c.submit_queue, c.state), moves, None
+        return Decision(c.intent, f"{d.reason}: no open step, {reason}", True, c.submit_queue, c.state), moves, None
 
     def note_held_path_stale(self) -> None:
         """Mark the held walk queue for replacement when its path went wrong.

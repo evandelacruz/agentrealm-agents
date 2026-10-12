@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
-from .supplies import chest_capacity, fords, worn_armor_defense
+from .supplies import afloat, chest_capacity, fords, worn_armor_defense
 from .threat import (
     ThreatTable,
     TypeKey,
@@ -427,8 +427,8 @@ class WorldModel:
     @property
     def afloat(self) -> bool:
         """A fording supply is armed or worn: water may be stepped on now,
-        with no ``Arm`` first (A133)."""
-        return fords(self.armed_code) or any(fords(code) for code in self.worn_codes.values())
+        with no ``Arm`` first (``supplies.afloat``, A133)."""
+        return afloat(self.armed_code, self.worn_codes.values())
 
     def walkable(self, p: Pos) -> bool:
         """``p`` on the current map is ground a walk may step on, water too

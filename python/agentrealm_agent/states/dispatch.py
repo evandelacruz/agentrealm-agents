@@ -29,7 +29,7 @@ from ..navigation import oscillation
 from ..navigation.rejection import end_decision
 from ..engagement import sync_engagement
 from ..equip import note_last_weapon
-from ..fording import ESCAPES, dropped_loadout, ford_queue, loadout_memory, restore_loadout_memory
+from ..fording import ESCAPES, ford_gate, loadout_memory
 from ..healing import note_heal_window
 from ..pathing import note_goto_reached
 from ..plan import OP_STATE, PLAN_STALL_SECONDS, Plan
@@ -327,7 +327,7 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
     held fording supply is armed before the first water step, and on water
     the queue stops before a loadout change that would strand us, and what
     the state wrote to memory is put back only when the cut dropped a
-    loadout change (``fording.dropped_loadout``), never for a Step cut after
+    loadout change (``fording.ford_gate``), never for a Step cut after
     a kept ``Arm``; ashore, the weapon is
     armed again in front of any queue but an escape's or a paced one
     (Fight arms it in its own attack queue). A
@@ -345,10 +345,7 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
         outcome = state.act(world, ctx)
         if outcome.intents:
             rearm = outcome.state not in ESCAPES and not outcome.paced
-            sent, why = ford_queue(world, m, outcome.intents, ctx.knowledge, rearm=rearm)
-            if dropped_loadout(outcome.intents, sent):
-                # The loadout change the state wrote memory for was cut: put it back.
-                restore_loadout_memory(m, saved)
+            sent, why = ford_gate(world, m, saved, outcome.intents, ctx.knowledge, rearm=rearm)
             if why:
                 outcome.reason = f"{outcome.reason}; {why}"
             outcome.intents = sent

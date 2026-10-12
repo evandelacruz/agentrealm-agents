@@ -23,10 +23,14 @@ So there is one rule, applied to every queue a state sends
   it arms something itself; an escape (``ESCAPES``: Flee, Retreat, Escape)
   is never slowed by it, and Fight puts it in its own attack queue, paced
   by the weapon's cooldown, since a fording supply swings nothing;
-- what a state wrote to memory is put back (``LOADOUT_MEMORY``,
-  ``dispatch._run_states``) only when the cut dropped a loadout change
-  (``dropped_loadout``), so memory never describes an ``Arm`` that was not
-  sent, nor forgets one that was.
+- what a state wrote to memory is put back (``LOADOUT_MEMORY``) only when
+  the cut dropped a loadout change (``dropped_loadout``), so memory never
+  describes an ``Arm`` that was not sent, nor forgets one that was.
+
+Every send path takes the same gate and rollback, ``ford_gate``: dispatch
+for each state's queue, and the runner for the moves it sends past
+dispatch under attack (``Runner.move_under_attack``: the lone open Step and
+Flee's cornered move).
 
 A ``would_strand`` refusal marks the cell the character stood on when it
 was refused as water (``note_would_strand``, ``Memory.water_cells``), so a
@@ -39,7 +43,7 @@ from .equip import FIGHT, hunting_ceiling, weapon_to_arm
 from .executor.movement import step_landing
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
-from .supplies import fords, worn_slot
+from .supplies import afloat, fords, worn_slot
 from .world import WATER, Pos, WorldModel
 
 LOADOUT_VERBS = ("Arm", "Wear", "Remove", "Drop")
@@ -86,11 +90,6 @@ def restore_loadout_memory(m: Memory, saved: dict) -> None:
         setattr(m, name, value)
 
 
-def afloat(armed: str | None, worn: list[str]) -> bool:
-    """A fording supply is armed or worn: water may be stepped on."""
-    return fords(armed) or any(fords(code) for code in worn)
-
-
 def dropped_loadout(intents: list[dict], sent: list[dict]) -> bool:
     """``ford_queue`` cut a loadout change of ``intents`` out of ``sent``:
     the memory a state wrote for it must go (``LOADOUT_MEMORY``). A cut that
@@ -102,7 +101,21 @@ def dropped_loadout(intents: list[dict], sent: list[dict]) -> bool:
 def stranded_unarmed(w: WorldModel) -> bool:
     """Only a fording supply is in hand and none is worn: on water no weapon
     can be armed, so there is no fight to have (``states.ashore``)."""
-    return fords(w.armed_code) and not any(fords(code) for code in w.worn_codes.values())
+    return fords(w.armed_code) and not afloat(None, w.worn_codes.values())
+
+
+def ford_gate(
+    w: WorldModel, m: Memory, saved: dict, intents: list[dict], kb: KnowledgeBase | None = None, *, rearm: bool = True
+) -> tuple[list[dict], str]:
+    """The one water gate every send goes through (A133): ``ford_queue`` on
+    ``intents``, and when the cut dropped a loadout change, the memory the
+    state wrote for it put back from ``saved`` (``loadout_memory``, taken
+    before the state decided). Dispatch and the runner's moves under attack,
+    which go out past dispatch, both use it."""
+    sent, why = ford_queue(w, m, intents, kb, rearm=rearm)
+    if dropped_loadout(intents, sent):
+        restore_loadout_memory(m, saved)
+    return sent, why
 
 
 def ford_queue(

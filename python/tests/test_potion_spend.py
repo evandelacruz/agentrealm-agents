@@ -9,7 +9,9 @@ reserve the planner buys is kept. The planner's prompt and State say the same.
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
+from agentrealm_agent import engagement
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.engagement import drink_turns_fight, sync_engagement
 from agentrealm_agent.healing import POTION_RULE, carried_heal, spend_potion
@@ -82,15 +84,26 @@ class DrinkInAFightTest(unittest.TestCase):
         self.assertTrue(drink_turns_fight(w, c.memory, c.policy, c.params, 10))
         self.assertTrue(spend_potion(w, c.memory, c.policy, c.params, POTION.code))
 
-    def test_a_fight_held_on_lower_odds_keeps_the_potion(self):
-        """Decided at 9/10 and held at 6/10 (A136): the live odds are down and
-        a drink would lift them, but the decision is already fight."""
+    def held(self, live: float, healed: float):
+        """A fight decided at 9/10 and held at 6/10 (A136), whose estimate is
+        ``live`` now and ``healed`` at full health."""
         w, c = self.engaged(9, 1)
         self.assertTrue(c.memory.engagement.fight)
         w.health = 6
-        self.assertTrue(sync_engagement(w, c.memory, c.policy, c.params).fight, "the fight holds")
-        self.assertFalse(drink_turns_fight(w, c.memory, c.policy, c.params, 10))
-        self.assertFalse(spend_potion(w, c.memory, c.policy, c.params, POTION.code))
+        ratio = lambda health, *a, **k: healed if health >= 10 else live
+        with mock.patch.object(engagement, "win_ratio", side_effect=ratio):
+            self.assertTrue(sync_engagement(w, c.memory, c.policy, c.params).fight, "the fight holds")
+            return drink_turns_fight(w, c.memory, c.policy, c.params, 10)
+
+    def test_a_fight_held_on_lower_odds_keeps_the_potion(self):
+        """Below the bar but still a win: the decision is already fight, and
+        the drink only lifts the odds back over the bar."""
+        self.assertFalse(self.held(live=1.2, healed=3.0))
+
+    def test_a_held_fight_the_drink_lifts_from_a_loss_to_a_win_drinks(self):
+        """Below break-even, the held fight is a loss: a drink that lifts it
+        above break-even still turns it (A96)."""
+        self.assertTrue(self.held(live=0.8, healed=3.0))
 
     def test_a_fight_already_won_keeps_the_potion(self):
         w, c = self.engaged(9, 1)

@@ -234,10 +234,11 @@ def cannot_outrun(w: WorldModel, m: Memory, policy: Policy, params: dict[str, fl
 def drink_turns_fight(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], heal: int) -> bool:
     """A drink that heals ``heal`` changes this engagement (A96): the
     estimate at the healed health says fight where the live one does not, or
-    wins (above ``BREAK_EVEN``) where the live one loses. Checked against
-    the held decision: a fight held while the live odds are down (A136) is
-    already fight, so the drink turns nothing. False with no engagement, or
-    none of its hostiles in view."""
+    wins (above ``BREAK_EVEN``) where the live one loses. The first is
+    checked against the held decision: a fight held while the live odds are
+    down (A136) is already fight, so lifting them over the bar turns nothing;
+    lifting them from a loss to a win still does. False with no engagement,
+    or none of its hostiles in view."""
     e = m.engagement
     if e is None:
         return False
@@ -249,10 +250,8 @@ def drink_turns_fight(w: WorldModel, m: Memory, policy: Policy, params: dict[str
     if healed <= health:
         return False
     now = decide(w, policy, params, e.group, e.cannot_outrun)
-    if e.fight and not now.fight:
-        return False  # a fight held on lower odds (A136): the drink turns no decision
     after = decide(w, policy, params, e.group, e.cannot_outrun, health=healed)
-    return (after.fight and not now.fight) or (now.ratio <= BREAK_EVEN < after.ratio)
+    return (after.fight and not e.fight) or (now.ratio <= BREAK_EVEN < after.ratio)
 
 
 def would_fight(w: WorldModel, policy: Policy, params: dict[str, float | int], also: Entity | None = None) -> bool:

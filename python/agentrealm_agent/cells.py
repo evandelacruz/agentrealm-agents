@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from typing import Any, Sequence
 
+from .level_order import too_high
 from .plan import TRAVEL_SYMBOLIC
 from .world import DOORS, Pos, WorldModel
 
@@ -23,8 +24,8 @@ from .world import DOORS, Pos, WorldModel
 STAND_ON_OPS = frozenset({"travel", "fetch_item"})
 # Travel destinations whose x, y is a cell (an entrance names its own map).
 TRAVEL_TO_CELL = frozenset({"point", "shop", "entrance"})
-# Ops that end on another map: into a level, or out of one once its boss is beaten.
-MAP_CHANGING_OPS = frozenset({"enter_level", "fight_boss"})
+# Ops that end on another map: into a level, out of one, or out of one once its boss is beaten.
+MAP_CHANGING_OPS = frozenset({"enter_level", "leave_level", "fight_boss"})
 
 
 def in_bounds(w: WorldModel, p: Pos) -> bool:
@@ -96,10 +97,12 @@ def refuse_bad_cells(
     stand on, are left out, each with why, before any reaches a state. Only
     the ops that run on this map are judged: those before the first that may
     leave it, counting the ops ``ahead`` of the reply's on the stack (the
-    pinned directives ops). Every op after that runs on a map not known yet,
-    so it passes, and its walk finds out there."""
+    pinned directives ops) and the ``leave_level`` the agent puts on top by
+    itself inside a level above the target (``level_order.too_high``). Every
+    op after that runs on a map not known yet, so it passes, and its walk
+    finds out there."""
     kept, refused = [], []
-    here = not any(leaves_map(g, w) for g in ahead)
+    here = not too_high(w) and not any(leaves_map(g, w) for g in ahead)
     for g in goals:
         why = bad_cell(g, w) if here else None
         if why is None:

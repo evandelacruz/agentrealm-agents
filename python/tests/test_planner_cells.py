@@ -187,6 +187,14 @@ class BadCellTest(unittest.TestCase):
         self.assertEqual(refuse_bad_cells([off], w, ahead=[{"op": "enter_level", "x": 3, "y": 3}]), ([off], []))
         self.assertEqual(refuse_bad_cells([off], w, ahead=[{"op": "wait", "seconds": 1}])[0], [])
 
+    def test_inside_a_level_above_the_target_nothing_is_judged(self):
+        w = level_room()  # level 1, the target: the reply runs here
+        off = {"op": "travel", "to": "point", "x": 17, "y": 1}
+        self.assertEqual(refuse_bad_cells([off], w)[0], [])
+        self.assertEqual(refuse_bad_cells([{"op": "leave_level"}, off], w), ([{"op": "leave_level"}, off], []))
+        w.map_level = 3  # above the target: leave_level goes on top first, so the reply runs outside
+        self.assertEqual(refuse_bad_cells([off], w), ([off], []))
+
     def test_a_map_of_unknown_size_refuses_nothing_off_it(self):
         w = level_room()
         w.view.size = None

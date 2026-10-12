@@ -678,34 +678,6 @@ class RunnerTest(unittest.TestCase):
             self.assertIsNone(fake.sent[-1][0])
         self.assertFalse(r.mem.resend_held_queue)
 
-    def test_a_known_pack_in_reach_of_a_held_heal_walk_replans_it(self):
-        # A63 run 4: Heal's 10-Step queue to the safe tile walked on into a
-        # pack of known hostiles seen after it was sent. A known hostile now in
-        # reach of the rest of the walk, though not on it, replans the walk
-        # round that reach.
-        from agentrealm_agent.world import ZoneFact
-
-        fake = FakeClient([{"tick": 10 + i, "window_remaining_ms": 0} for i in range(3)])
-        r = self.runner(fake, Policy(goals=[], pickup=False))
-        w = r.world
-        for x in range(-1, 11):
-            for y in range(-1, 7):
-                w.view.tiles[(x, y)] = "wall" if x in (-1, 10) or y in (-1, 6) else "dirt"
-        w.health, w.max_health = 5, 10
-        w.zones[7] = {(9, 0): ZoneFact(safe=True), (0, 0): ZoneFact(safe=False)}
-        w.hostile_types.add(("npc", "wartlurch"))
-        r.tick()
-        self.assertEqual(r.mem.state, "Heal")
-        self.assertIn((5, 0), self._walk_cells((0, 0), fake.sent[0][0]))
-        fake.entities = lambda cid, map_id, *rect: {"tick": 10, "npcs": [
-            {"id": 9, "x": 5, "y": 2, "npc_type_code": "wartlurch"}]}
-        r.step("entities")
-        resent = self._resend(r, fake)
-        self.assertEqual(resent[0]["verb"], "Step")
-        cells = self._walk_cells((0, 0), resent)
-        reach = r.cfg.policy.hostile_range
-        self.assertTrue(all(max(abs(x - 5), abs(y - 2)) > reach for x, y in cells), cells)
-
     def test_a_hostile_already_in_reach_when_sent_does_not_resend(self):
         # The walk could not go round it, so a resend would only send it again.
         fake = FakeClient([{"tick": 10 + i, "window_remaining_ms": 0} for i in range(2)])

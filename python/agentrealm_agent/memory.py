@@ -52,19 +52,6 @@ class HuntSearch:
 
 
 @dataclass
-class RegenStretch:
-    """Safe-zone regen being timed from one health rise to the next (A124):
-    the rest decision last seen and the health then, and the last rise once
-    one is seen."""
-
-    decision: int
-    health: int
-    max_health: int | None
-    rise_tick: int | None = None
-    rise_health: int | None = None
-
-
-@dataclass
 class Memory:
     """What the brain carries between windows besides the world model."""
 
@@ -167,14 +154,6 @@ class Memory:
     # (loadout, gems, map) changes, since any of those can turn a refusal around.
     shop_refusals: dict[int, int] = field(default_factory=dict)
     shop_refusal_key: tuple = ()
-    # Shop (A131): (code, map id, cell) of each seller's place searched round
-    # without finding the item for sale; a buy of that code walks there no more.
-    sellers_searched: set[tuple[str, int, tuple[int, int]]] = field(default_factory=set)
-    # Safe-zone regen sample: (start tick, start health, last tick seen). Only a
-    # "yes" is saved to the knowledge base; a "no" holds for this run only.
-    heal_regen_sample: tuple[int, int, int] | None = None
-    heal_regen_absent: bool = False
-    heal_regen_stretch: RegenStretch | None = None  # regen timed between rises (A124); any heal sent ends it
     heal_supplies_asked: bool = False  # Heal raised `heal_supplies` for the planner this hurt spell
     supply_refusals: dict[tuple[str, int], Refusal | NoopUse] = field(default_factory=dict)  # ("take"|"use", supply id) -> its last refusal (A80) or no-effect Use (A76) and what is sent next (executor.supply_refusals)
     self_use: int | None = None  # supply id of the Use on yourself sent (a potion, food or a chest, A108), until its Use applies or is refused or another queue replaces it (A24)

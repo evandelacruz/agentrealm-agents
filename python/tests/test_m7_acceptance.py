@@ -206,16 +206,12 @@ class SurvivalGateTest(unittest.TestCase):
         self.recover(m, w, [{"verb": "SetPosition", "x": 1, "y": 0}])
         self.assertEqual((m.recover_withdraws, m.recover_unsafe), (0, 0))
 
-    def test_regen_must_be_measured_on_a_full_hour(self):
+    def test_a_full_hour_asks_no_regen_measure(self):
+        # A130: the game has no natural regeneration, so there is none to measure.
         m = metrics(target=(0, 0))
         decide(m, open_world())
-        self.assertIn("safe-zone regen never measured", m.failures())
-        self.assertNotIn("safe-zone regen never measured", m.failures(full_hour=False))
-        mem = Memory()
-        mem.heal_regen_absent = True
-        decide(m, open_world(), mem)
-        self.assertEqual(m.regen, "no")
         self.assertEqual(m.failures(), [])
+        self.assertFalse(any("regen" in line for line in m.summary_lines()))
 
     def test_a_death_fails_the_run(self):
         m = metrics(stop_on_death=True)
@@ -231,10 +227,10 @@ class LoopGateTest(unittest.TestCase):
         self.assertTrue(m.loop_detected)
         self.assertTrue(any("loop" in f for f in m.failures(full_hour=False)))
 
-    def test_heal_resting_in_place_is_not_a_loop(self):
+    def test_a_wait_in_place_is_not_a_loop(self):
         m = metrics()
         for _ in range(LOOP_STEP_LIMIT * 3):
-            decide(m, open_world(), state="Heal", reason="rest in safe zone", intents=[{"verb": "Wait"}])
+            decide(m, open_world(), state="Wait", reason="wait", intents=[{"verb": "Wait"}])
         self.assertFalse(m.loop_detected)
 
     def test_a_held_queue_neither_counts_nor_resets(self):
@@ -465,15 +461,14 @@ class SmokeScriptTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("PASS", out)
 
-    def test_full_hour_fails_without_navigation_or_regen(self):
+    def test_full_hour_fails_without_navigation(self):
         code, _, err = self.run_main(3600, lambda m: None)
         self.assertEqual(code, 1)
         self.assertIn("neither reached nor given up", err)
-        self.assertIn("regen never measured", err)
 
     def test_full_hour_passes_on_a_give_up_with_a_reason(self):
         def played(m):
-            m.target_give_up, m.regen = "no_path", "yes"
+            m.target_give_up = "no_path"
 
         code, out, _ = self.run_main(3600, played)
         self.assertEqual(code, 0, out)

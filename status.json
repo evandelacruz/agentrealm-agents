@@ -47,7 +47,7 @@
 
   "A61": {"state": "done", "note": "Steps 1 (#110), 1b walker commits (#109) and 2 planner wiring (#108) shipped; not yet run live: the next A58 live scenario checks no pacing with the planner on."},
 
-  "A60": {"state": "done", "note": "Probe, profile and offline tests shipped; not run live. A58 runs it before the hour when the knowledge base has no regen answer."},
+  "A60": {"state": "done", "note": "Superseded by A130: the game has no natural regeneration; the probe, its profile and tests are removed."},
 
   "A17": {"state": "done"},
 
@@ -262,6 +262,8 @@
   "A128": {"state": "done"},
 
   "A129": {"state": "done"},
+
+  "A130": {"state": "done"},
 
   "A131": {"state": "done"},
 

@@ -168,7 +168,7 @@ class RefugeTest(unittest.TestCase):
         self.assertIn("Flee", states)
         self.assertIn("Retreat", states)
 
-    def test_a_remembered_post_rules_a_safe_tile_out_for_heal(self):
+    def test_a_remembered_post_rules_a_safe_tile_out_of_the_refuge_pick(self):
         w, c = world(at=(9, 10), health=4), ctx(on_hostile="fight")
         w.perception = 4
         guard = gristle(at=(4, 10))
@@ -180,9 +180,10 @@ class RefugeTest(unittest.TestCase):
         w.pos = w.terrain_center = (9, 10)
         w.tick = POST_STILL_TICKS + 1
         w._set_entities([], w.tick)  # out of view now; its post is remembered
-        self.assertIn(NEAR_SAFE, ground_by_hostile(w, c.policy)[("npc", 7)])
-        out = dispatch(w, c)
-        self.assertEqual((out.state, out.reason), ("Heal", f"heal_measure → {FAR_SAFE}"))
+        reach = ground_by_hostile(w, c.policy)
+        self.assertIn(NEAR_SAFE, reach[("npc", 7)])
+        params = grid_params(c.policy, set(), set())
+        self.assertEqual(reachable_safe_goal(c.memory, w, [NEAR_SAFE, FAR_SAFE], params, None, reach), FAR_SAFE)
 
     def test_town_is_no_refuge_inside_a_hostiles_reach(self):
         w, m = world(), Memory()

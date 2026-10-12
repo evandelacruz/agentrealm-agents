@@ -35,10 +35,10 @@ def in_town(health: int) -> tuple:
 
 
 class HealKeepsTheReserveTest(unittest.TestCase):
-    def test_not_low_in_town_rests_and_keeps_the_potion(self):
+    def test_not_low_in_town_keeps_the_potion(self):
         w, c = in_town(7)
         out = dispatch(w, c)
-        self.assertEqual(out.state, "Heal")
+        self.assertNotEqual(out.state, "Heal")
         self.assertNotIn("Use", verbs(out))
         self.assertIsNone(c.memory.self_use)
 
@@ -48,7 +48,6 @@ class HealKeepsTheReserveTest(unittest.TestCase):
 
     def test_the_supplies_ask_counts_the_potions_held_back(self):
         w, c = in_town(7)
-        c.memory.heal_regen_absent = True  # no rest to be had
         out = dispatch(w, c)
         self.assertNotIn("Use", verbs(out))
         asks = [s for s in c.memory.strategist_signals if s["trigger"] == "heal_supplies"]

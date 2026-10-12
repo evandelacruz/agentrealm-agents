@@ -11,9 +11,11 @@ from __future__ import annotations
 
 from ..equip import weapon_to_rearm
 from ..executor.supply_refusals import can_try, carried_ids, in_hand, must_arm
+from ..healing import food_near, health_low, in_combat
 from ..item_table import InventorySupply
 from ..memory import Memory
-from ..supplies import chest_capacity, chest_upgrade, used_on_self
+from ..plan import Plan
+from ..supplies import chest_capacity, chest_upgrade, is_potion, used_on_self
 from ..survival import hostiles_in_range
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome, my_op
@@ -25,7 +27,9 @@ class UseItemState(State):
 
     With a ``use_item`` op on top it uses one held item of the op's code on
     the character; the op is done once that item is used up, and dropped,
-    with why, when none is held or its ``Use`` was refused or did nothing.
+    with why, when none is held or its ``Use`` was refused or did nothing,
+    or when it is a potion the one potion rule refuses (``potion_refused``,
+    A135).
     With no op it applies a bigger carried chest as soon as one is held and
     no hostile is in range: more carry slots are always better, so that call
     is not the planner's. The weapon the ``Arm`` swapped out goes back on
@@ -66,10 +70,52 @@ def _use_op(world: WorldModel, ctx: PlayContext) -> StateOutcome:
         why = f"its Use on yourself was refused or did nothing: {code}" if held else f"{code} not held"
         plan.drop_current(why, memory=m)
         return StateOutcome(None, why, state=UseItemState.name)
+    if plan.used_id is None and is_potion(code) and (why := potion_refused(world, ctx, plan)) is not None:
+        plan.drop_current(why, memory=m)
+        return StateOutcome(None, why, state=UseItemState.name)
     out = use_on_self(world, m, item, UseItemState.name, ctx.tick_hz)
     if out.intents:
         plan.used_id = item.id
     return out
+
+
+# The ops a potion drunk just above them is for (A135): a fight, a boss, a
+# level, or gathering on ground the planner means to fight on.
+FIGHT_OPS = frozenset({"fight", "fight_boss", "enter_level"})
+
+
+def fight_ahead(plan: Plan) -> bool:
+    """The op under the head is a fight (``FIGHT_OPS``, or a
+    ``gather_gems`` with ``fight``): a potion drunk now is for it."""
+    ops = plan.ops_left()
+    nxt = ops[1] if len(ops) > 1 else None
+    return nxt is not None and (nxt["op"] in FIGHT_OPS or (nxt["op"] == "gather_gems" and bool(nxt.get("fight"))))
+
+
+def potion_refused(w: WorldModel, ctx: PlayContext, plan: Plan) -> str | None:
+    """Why the planner's potion is not drunk, or None to drink it (A135).
+    A potion is for a fight: in combat or with one next on the plan
+    (``healing.in_combat``) it is drunk. Out of combat food heals: with food
+    a short walk away (``healing.food_near``, State ``food_near``) the drink
+    is refused and the reason names that food, which Heal eats; above the
+    ``low_health`` line with none near it is refused too, the potion kept
+    for a fight."""
+    if in_combat(w, ctx.memory, ctx.policy, fight_ahead=fight_ahead(plan)):
+        return None
+    if near := food_near(w, ctx.memory, ctx.knowledge):
+        f = near[0]
+        cell = f"{w.map_id}:{f.pos[0]},{f.pos[1]}"
+        what = f"{f.code} at {cell}" if f.kind == "food" else f"a bush at {cell} to cut for {f.code}"
+        return (
+            f"a potion is for a fight: out of combat with food near ({what}, heal {f.heal}, "
+            f"{f.walk_seconds} s walk; State food_near), Heal eats it"
+        )
+    if not health_low(w, ctx.params):
+        return (
+            "a potion is for a fight: out of combat above the low_health line it is kept; put the use_item "
+            "directly above the fight, boss or level op it is for"
+        )
+    return None
 
 
 def self_use_item(w: WorldModel, m: Memory, code: str) -> InventorySupply | None:

@@ -962,7 +962,7 @@ class PlannerViewTest(unittest.TestCase):
         prompt = system_prompt()
         self.assertIn("Safe ground only stops damage: health does not come back by itself, on safe ground or off it", prompt)
         self.assertIn("The game's documentation gives no regeneration", prompt)
-        self.assertIn("put a use_item with its code on the stack", prompt)
+        self.assertIn("put a use_item with its code directly above the fight, fight_boss or enter_level op it is for", prompt)
         self.assertIn("For health_at_bar it shows health_short and the ways it closes", prompt)
 
     def test_upgrades_for_sale_show_the_minutes_at_the_gem_rate(self):

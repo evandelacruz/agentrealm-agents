@@ -421,7 +421,10 @@ class PrerequisiteTest(unittest.TestCase):
             out = dispatch(w, ctx(m, plan, self.kb(), pickup=False))
             self.assertEqual((out.state, out.intents), ("Level", [{"verb": "Take", "supply_id": 51}]))
         out = dispatch(w, ctx(m, plan, self.kb(), pickup=False))
-        self.assertEqual((out.state, m.path[-1]), ("Level", (18, 4)), out.reason)
+        # Given up, with the key still unheld: the entrance is not entered (A147).
+        self.assertIsNone(plan.current(), out.reason)
+        failed = [t for t in m.strategist_signals if t["trigger"] == "goal_failed"]
+        self.assertIn("needs key", failed[-1]["reason"])
 
     def test_a_full_pack_gives_the_stop_up_without_a_drop(self):
         w = field(at=(7, 5))
@@ -432,7 +435,7 @@ class PrerequisiteTest(unittest.TestCase):
         plan = Plan([{"op": "enter_level", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
         out = dispatch(w, ctx(m, plan, self.kb(), pickup=False))
         self.assertFalse(any(i.get("verb") in ("Drop", "Take") for i in out.intents or []), out.intents)
-        self.assertEqual((out.state, m.path[-1]), ("Level", (18, 4)), out.reason)
+        self.assertIsNone(plan.current(), "no key: not entered (A147)")
 
     def test_no_stop_when_the_item_is_carried(self):
         w = field(at=(10, 4))

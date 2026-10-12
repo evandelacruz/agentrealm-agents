@@ -40,6 +40,12 @@ A slot-learn ``Wear`` that gets ``not_wearable`` is never retried for that
 subtype; any other refusal on a try is cleared when the loadout or inventory
 changes. Consumables and compose fragments are never equipped; they stay for
 Heal and Solve (PLAYABLE_AGENT_PLAN Gear).
+
+**A worn ford beats an armed one** (A147, :func:`ford_to_put_on`): of the
+fording supplies held, one with a worn slot is worn, so the weapon stays
+armed and Fight runs on water as on land; one that goes in the armed slot (a
+raft) is armed only when no wearable one is held. An ``equip`` op that names
+an armed fording supply wears the wearable one instead (:func:`worn_ford`).
 """
 
 from __future__ import annotations
@@ -55,6 +61,7 @@ from .knowledge_base import KnowledgeBase
 from .loot import NON_TRANSFERABLE
 from .supplies import (
     armed_in_hand,
+    fords,
     heals,
     is_weapon,
     kept_on_break,
@@ -303,6 +310,34 @@ def named_equip(w: WorldModel, m: Memory, code: str, armed_owned: bool = False) 
     if (code, slot) in m.equip_refused or (w.worn_codes.get(slot) is not None and (None, slot) in m.equip_refused):
         return None
     return EquipUpgrade(slot, s.id, code, remove_first=w.worn_codes.get(slot) is not None)
+
+
+def ford_to_put_on(w: WorldModel, m: Memory) -> EquipUpgrade | None:
+    """The held fording supply to put on before water (A147): the first with a
+    worn slot (worn, the weapon stays armed), else the first that is armed (a
+    raft). None when none is held, or every one was refused."""
+    fording = [s for s in sorted(_candidates(w), key=lambda h: h.id) if fords(s.code)]
+    for s in fording:
+        slot = wear_slot(s.code, w)
+        if slot and (s.code, slot) not in m.equip_refused:
+            return EquipUpgrade(slot, s.id, s.code, remove_first=w.worn_codes.get(slot) is not None)
+    for s in fording:
+        if (s.code, ARMED) not in m.equip_refused:
+            return EquipUpgrade(ARMED, s.id, s.code)
+    return None
+
+
+def worn_ford(w: WorldModel, m: Memory, code: str) -> str:
+    """The item an ``equip`` op naming ``code`` puts on: a fording supply that
+    goes in the armed slot gives way to a fording supply worn or held to wear
+    (A147); any other ``code`` is itself."""
+    if not fords(code) or wear_slot(code, w):
+        return code
+    worn_now = next((c for c in w.worn_codes.values() if fords(c)), None)
+    if worn_now is not None:
+        return worn_now
+    up = ford_to_put_on(w, m)
+    return up.code if up is not None and up.slot != ARMED else code
 
 
 def is_on(w: WorldModel, code: str) -> bool:

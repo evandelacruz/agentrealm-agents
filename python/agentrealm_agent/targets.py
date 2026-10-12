@@ -36,6 +36,7 @@ its own key (not always its ``Memory.goal`` label):
 | ``explore``, ``explore_area`` | Explore (safe default, plan op) | (map, frontier cell) |
 | ``safe`` | Retreat and Park (``pathing.RETREAT_TARGET``) | (map, safe cell) |
 | ``heal_food`` | Heal | food supply id |
+| ``heal_block`` | Heal | block cell it breaks for food (a bush, A135) |
 | ``travel`` | Travel, symbolic ``to`` (``states.travel.TRAVEL_TARGET``) | ``ResolvedDestination`` |
 | ``shop`` | Shop, walking to a shop out of sight (``states.shop.SHOP_TARGET``) | ``ResolvedDestination`` |
 | ``loot`` | Loot | (map, supply id, cell) |

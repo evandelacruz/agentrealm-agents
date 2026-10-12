@@ -171,7 +171,11 @@ class ObstructedThenAskedTest(unittest.TestCase):
                 ask = asks(c)[0]
                 self.assertEqual(ask["op"], op)
                 self.assertEqual(ask["blocked_by"], "wall at 3,1, which nothing held opens")
-                self.assertEqual(ask["tried"], "a way round, then opening a block on the way with a held item")
+                self.assertTrue(
+                    ask["tried"].endswith("a way round, then opening a block on the way with a held item"), ask["tried"]
+                )
+                if owner in LADDER:  # its walk's ladder ran and was given up: the ask says how it failed (A125)
+                    self.assertTrue(ask["tried"].startswith("the walk, given up (no_path"), ask["tried"])
                 self.assertEqual(w.pos, (1, 1), "never walked off the way")
 
     def test_a_break_block_with_no_way_to_its_block_asks_and_holds(self):

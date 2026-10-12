@@ -16,7 +16,10 @@ walk routes round the reach of hostiles it has seen, and never walks through
 it (A128, ``pathing.op_walk_sets``). With no step toward the destination it
 clears the way or asks the planner and holds (``way.clear_the_way``); at stuck step 2 Break, below it, opens the
 block the walk's escalation nominated (A15). The survival reflexes act above
-it as always.
+it as always. Its walk must make net progress (A125): each level of its
+ladder must beat the walk's best plan measure (``NavAttempt.net_best``), and
+once the ladder gives up, the ask's ``tried`` says how each level failed
+(``way.clear_the_way``).
 """
 
 from __future__ import annotations

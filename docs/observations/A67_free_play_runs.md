@@ -1747,7 +1747,7 @@ Intents: 454 `Step`, 858 `Wait`, 132 `Use` (130 on grass: 126 cuts that took eff
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 are A124 (every unmet readiness check shows how it closes and what that costs, health included, and an upgrade the plan saves toward shows its minutes at the measured gather rate), merged in #223 with its PLAN.md row. Defect 3 is queued for a row of its own: a detour find given up short is not picked again until something about it changes.
+Per A87, each names the rule a fix should generalize. Backlog: defects 1 and 2 are A124 (every unmet readiness check shows how it closes and what that costs, health included, and an upgrade the plan saves toward shows its minutes at the measured gather rate), merged in #223 with its PLAN.md row. Defect 3 is A125 (a walk makes net progress; a detour is never given up for the time it takes).
 
 1. **An unmet health check comes with no way to close it, so the plan assumes one** (`strategist.py:1174–1209`, `cost_to_close`, which leaves health out; `states/heal.py:129–131`, Heal yields to the plan's op above `low_health`). Health was 7/10 against a bar of 8 from 159 s to the end. The planner wrote "the health bar recovers while gathering", but every zone read was `safe: false` and health never moved. Heal does not rest above `low_health` while an op is on top, so nothing closed the check, and the stage stayed unmet for 440 s. **Rule:** every unmet readiness check shows how it closes and what that costs: health by resting on safe ground (minutes at the known regen) or a potion. The plan never relies on a check closing by itself.
 
@@ -1827,7 +1827,7 @@ Intents: 403 `Step`, 673 `Wait`, 155 `Use` (grass cuts and the chest), 42 `Take`
 
 #### Top 3 defects
 
-Per A87, each names the rule a fix should generalize.
+Per A87, each names the rule a fix should generalize. Backlog: defect 1 is A126, defect 2 is A127, defect 3 is A125 (a walk makes net progress toward its target).
 
 1. **A cached reference in an older shape counts as fresh** (`supplies.py:218–247`, `load`; the age check at 232–237). The cache from run 21, in the pre-deploy row shape, was under an hour old, so it won over the served table. Every weapon row lost its `cooldown_ms`, and the parser filled in the 1 s default without a word. **Rule:** a cached copy is fresh only when it carries every field the parser reads from the served shape. A row whose served field is missing is noted, not silently defaulted.
 

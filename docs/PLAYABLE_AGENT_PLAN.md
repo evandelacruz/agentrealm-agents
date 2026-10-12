@@ -157,6 +157,8 @@ An opening we cut or burned is open only until it grows back (about 60 s for a b
 - 3 moves in a row are rejected;
 - the planner finds no path, even with fog assumed open.
 
+A walk must also make net progress (A125): each escalation level counts progress only when the remaining cost falls below the lowest the walk has had since it was taken up, so a fresh level never forgives wandering; a route round an obstacle lowers it and is progress. When the whole ladder has failed, the executor asks the strategist, saying what each level tried. Each leg it walks ends where the remaining cost, as the walk has learned it, is lower than where it stands, and that learning is kept when the corridor is searched again.
+
 **4. Escalation, in order, each step only if the one before fails:**
 1. Replan with the learned blocks, and with fog optimism lowered so known ground is preferred.
 2. Break through (M9): if a nominated obstacle lies on the best blocked route and we hold a capability known to open it (its block type's documented opener, or one that opened that cell before) not yet tried on it, `Break` it. A failed try is recorded per (block, capability); that pair is never tried again, but another known opener may be. A block nothing held is known to open is not tried with every tool: the step fails (`no_known_opener`) and the ladder moves on to reveal a way round (A103).

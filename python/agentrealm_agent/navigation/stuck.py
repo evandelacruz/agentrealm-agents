@@ -24,6 +24,16 @@ progress window, so a level is left only when its own window fails:
 - Step 5: give up, back off ``BACKOFF_BASE_TICKS * 2**n`` and queue a strategist
   ``stuck`` signal.
 
+A walk must make net progress (A125): each level's window counts progress
+only when the plan's measure falls below the lowest the walk has had since
+it was taken up (``NavAttempt.net_best``), not just below that level's own.
+So a fresh level never forgives a walk that follows one leg after another
+and stands no nearer: each level must beat the walk's best or fail, the
+whole ladder runs, and its give-up leads the executor to clear the way or
+ask the planner (A120), saying how each level failed. A route round an
+obstacle lowers the measure as it is walked, so it is progress. A new way
+(a break that opened, an alternate route) starts the bar again.
+
 The ladder is the same whichever state walks: nothing in it knows Gather,
 Travel, Explore or Break. What a give-up leaves behind is one memory,
 ``NavStuckMemory.given_up``: a ``GiveUp`` per walk target, keyed by goal, map
@@ -34,9 +44,11 @@ kept, so the next give-up there backs off twice as long. Every walk asks it
 Whether to drop a goal that keeps getting stuck is the planner's call: each
 give-up raises a ``stuck`` trigger saying when the target may be walked again.
 
-Progress is the remaining length of the planned path plus the straight-line
-rest to the target, read when the state plans; a move only bumps counters, so
-no search runs per move.
+Progress is the remaining length of the planned path plus the rest to the
+target from its end, read when the state plans: the corridor search's
+estimate when the walk has one for this target (a way round an obstacle
+wider than the window counts), else the straight line. A move only bumps
+counters, so no search runs per move.
 """
 
 from __future__ import annotations
@@ -48,7 +60,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from ..world import NEIGHBOURS, WALKABLE, Pos, WorldModel, chebyshev
 from . import walk as nav_walk
-from .planner import CostGridParams
+from .planner import CostGridParams, NavSearchState, rest_estimate
 
 if TYPE_CHECKING:
     from ..memory import Memory
@@ -135,6 +147,9 @@ class NavAttempt:
     closest: int | None = None
     reset_closest: int | None = None
     reset_level: int | None = None
+    # Net progress (A125): the lowest measure since the walk was taken up or
+    # found a new way, across every level. A window makes progress only below it.
+    net_best: int | None = None
 
 
 class Leg(NamedTuple):
@@ -160,6 +175,7 @@ class GiveUp:
     until: int
     power: int
     lapse_noted: bool = False  # ``lapsed`` has reported it
+    reasons: tuple[str, ...] = ()  # why each level of the walk given up failed, in order
 
 
 @dataclass
@@ -264,6 +280,7 @@ def track(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt 
     if m.nav_stuck.active != att.key:
         att.goal = goal
         att.window_tick = w.tick  # only time spent pursuing it counts
+        att.net_best = None  # nor its bar: another walk may have led it away
     m.nav_stuck.active = att.key
     return att
 
@@ -377,6 +394,7 @@ def walk_again(att: NavAttempt, w: WorldModel, from_level: int) -> None:
         att.reset_closest = att.closest
     att.reset_level = max(att.reset_level or WALK, from_level)
     att.level = WALK
+    att.net_best = None  # a new way: its plan is measured afresh (A125)
     clear_break_target(att)
 
 
@@ -413,21 +431,35 @@ def break_target(att: NavAttempt) -> Pos | None:
     return att.break_x, att.break_y
 
 
-def measure(path: list[Pos] | None, target: Pos) -> int | None:
-    """Remaining moves along ``path`` plus the straight-line rest to ``target``."""
+def measure(path: list[Pos] | None, target: Pos, corridor: NavSearchState | None = None) -> int | None:
+    """Remaining moves along ``path`` plus the rest to ``target``: the
+    ``corridor`` search's estimate from the path's end when it is for
+    ``target``, else the straight line."""
     if not path:
         return None
+    if corridor is not None and corridor.goal == target:
+        return len(path) + rest_estimate(corridor, path[-1])
     return len(path) + chebyshev(path[-1], target)
 
 
-def observe(att: NavAttempt, w: WorldModel, path: list[Pos] | None) -> None:
-    """Progress is the remaining measure falling below this window's best."""
+def corridor_for(m: Memory, w: WorldModel, att: NavAttempt) -> NavSearchState | None:
+    """The corridor search ``att``'s walk keeps for its target on this map, if any."""
+    nav = m.corridors.get(att.goal)
+    return nav if nav is not None and nav.goal == att.target and nav.map_id == w.map_id else None
+
+
+def observe(att: NavAttempt, w: WorldModel, path: list[Pos] | None, corridor: NavSearchState | None = None) -> None:
+    """Progress is the remaining measure falling below the walk's net best (A125).
+
+    ``corridor`` (``corridor_for``) prices the rest past the path's end."""
     _note_position(att, w)
-    cost = measure(path, att.target)
+    cost = measure(path, att.target, corridor)
     if cost is None:
         return
     if att.best is None or cost < att.best:
-        att.best, att.moves, att.window_tick = cost, 0, w.tick
+        att.best = cost
+    if att.net_best is None or cost < att.net_best:
+        att.net_best, att.moves, att.window_tick = cost, 0, w.tick
     if att.best_ever is None or cost < att.best_ever:
         att.best_ever = cost
 
@@ -507,6 +539,7 @@ def resume(m: Memory, att: NavAttempt, tick: int) -> None:
     now = m.nav_stuck.decision
     if att.seen_decision not in (now, now - 1):
         _fresh_window(att, tick)
+        att.net_best = None
         att.waiting_since = None
     att.seen_decision = now
 
@@ -597,6 +630,7 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
         att.reasons.append(reason)
     stuck = m.nav_stuck
     rec = remember_give_up(stuck, att.backoff_key or att.key, att.goal, w.tick)
+    rec.reasons = tuple(att.reasons)
     stuck.stuck_signals.append(
         {
             "trigger": "stuck",

@@ -194,7 +194,7 @@ def explore_outcome(
         step = next_step(w, plan_avoid, m.path)
         att = nav_stuck.active(m, w)
         if step is not None and att is not None and m.goal == att.goal:
-            nav_stuck.observe(att, w, m.path)
+            nav_stuck.observe(att, w, m.path, nav_stuck.corridor_for(m, w, att))
     if step is None:
         missed = replan(w, m, policy, plan_avoid, plan_costly, knowledge, op=op)
         step = next_step(w, plan_avoid, m.path)
@@ -235,7 +235,7 @@ def _missed_step(
         found = target_plan(att)
         if found and not next_step(w, avoid, found):
             m.path, m.goal = found, goal
-            nav_stuck.observe(att, w, found)
+            nav_stuck.observe(att, w, found, nav_stuck.corridor_for(m, w, att))
     reason = nav_stuck.stuck_reason(att, w.tick) if routed else "no_path"
     return escalation_step(m, w, att, avoid, target_plan, reason, knowledge) if reason else None
 

@@ -1,8 +1,9 @@
 """python -m ladder create|run|status ...: the same commands and profile files as Gary.
 
-The parser and ``status`` mirror Gary's ``agentrealm_agent.__main__`` until A149
-moves them into the shared ADK; his module loads his runner and planner, so she
-cannot import it.
+The parser and ``status``'s self line mirror Gary's ``agentrealm_agent.__main__``
+until A149 moves them into the shared ADK; his module loads his runner and
+planner, so she cannot import it. ``status`` then prints her goal tree's
+readiness (A139, ``ladder.goals.dump``).
 """
 
 from __future__ import annotations
@@ -20,6 +21,12 @@ from agentrealm_agent.character_select import (
     resolve_character_id,
 )
 from agentrealm_agent.client import ApiError, Client
+from agentrealm_agent.knowledge_base import KnowledgeBaseError
+from agentrealm_agent.knowledge_base import load as load_knowledge
+from agentrealm_agent.knowledge_base.hostiles import load_hostiles
+from agentrealm_agent.world import WorldModel
+
+from ladder.goals import dump
 
 # Temporary, and the one tie to Stan: until her goal tree replaces it (A139–A141)
 # `run` is Stan's loop (sync, flee, explore). Run from `python/`, where
@@ -60,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     create_p.add_argument("--avatar", default=DEFAULT_CREATE_AVATAR, help="outfit code")
     create_p.add_argument("--model-agent", default=DEFAULT_CREATE_MODEL, help="model agent code")
     sub.add_parser("run", parents=[_profile_parser()], help="drive one character until interrupted")
-    sub.add_parser("status", parents=[_profile_parser()], help="print the character's self and position")
+    sub.add_parser("status", parents=[_profile_parser()], help="print the character's self and her goal tree's readiness")
     args = ap.parse_args(argv)
 
     try:
@@ -85,12 +92,27 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
+    """The self read, then the goal tree's readiness (A139) from it and the
+    world's knowledge base. Inventory, gems and levels cleared come only with
+    a round trip, which a status never makes, so they read as none here; a run
+    prints the same dump with them each turn (A141)."""
     try:
         s = client.self_(cid)
         print(f"{cfg.profile} ({cid}): lives={s['lives']} alive={s['alive']} placed={s['placed']}")
     except ApiError as e:
         print(f"{cfg.profile} ({cid}): {e}", file=sys.stderr)
         return 1
+    try:
+        kb = load_knowledge(cfg.world)
+    except (KnowledgeBaseError, OSError) as e:
+        print(f"{cfg.profile} ({cid}): knowledge base: {e}", file=sys.stderr)
+        return 1
+    w = WorldModel(character_id=cid)
+    w.apply_self(s)
+    w.health, w.max_health = (v if isinstance(v, int) and not isinstance(v, bool) else None for v in (s.get("health"), s.get("max_health")))
+    load_hostiles(kb, w)
+    for line in dump(w, kb):
+        print(line)
     return 0
 
 

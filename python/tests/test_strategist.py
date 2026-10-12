@@ -24,7 +24,7 @@ from agentrealm_agent import __main__ as cli
 from agentrealm_agent.pathing import path_owned_by, plan_op_goal
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation.walk import Walk
-from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
+from agentrealm_agent.plan import INTERNAL_OPS, OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.supplies import row as supply_row
 from agentrealm_agent.knowledge_base import KnowledgeBase
@@ -170,6 +170,17 @@ class TriggerTest(unittest.TestCase):
         s._collect(r)
         self.assertEqual([(t["trigger"], t["map_id"]) for t in s.inbox], [("map", 7), ("map", 8), ("map", 7), ("map", 8)])
         self.assertEqual(s.inbox[1]["level"], 2)
+
+    def test_map_trigger_waits_for_the_landing_maps_level(self):
+        # A145: the level is read from the minimap just after landing; one trigger, with it.
+        s, r = make(), fake_runner()
+        s._collect(r)
+        r.world.map_id, r.world.map_level = 44, None
+        r.mem.level_entry = (7, (1, 1), 44, (2, 2))
+        s._collect(r)
+        r.world.map_levels[44] = r.world.map_level = 4
+        s._collect(r)
+        self.assertEqual([(t["map_id"], t["level"]) for t in s.inbox], [(7, None), (44, 4)])
 
     def test_hurt_trigger_once_per_drop_below_the_threshold(self):
         s, r = make(hurt_fraction=0.5), fake_runner()
@@ -662,7 +673,7 @@ class OpTableTest(unittest.TestCase):
     def test_prompt_ops_are_exactly_the_executable_ops(self):
         """The model is offered an op only if a state carries it out (or, for
         set_param, Plan.advance applies it), so it can never plan a dead op."""
-        executable = {op for op, state in OP_STATE.items() if state is not None} | {"set_param"}
+        executable = {op for op, state in OP_STATE.items() if state is not None} - INTERNAL_OPS | {"set_param"}
         self.assertEqual(set(OP_FIELDS), executable)
         self.assertNotIn("hunt", OP_FIELDS)
         self.assertIn("equip", OP_FIELDS)

@@ -15,6 +15,7 @@ from .directives import Directives, default_directives
 from .plan import Plan
 from .gem_yield import GemYieldTracker
 from .knowledge_base import KnowledgeBase
+from .level_order import minimap_due
 from .memory import Memory
 from .navigation import known_prefix
 from .navigation.rejection import navigation_avoid_costly
@@ -87,6 +88,8 @@ def choose_call(w: WorldModel, m: Memory, policy: Policy) -> str:
         return gate_tick_call(w, m, policy)
     if w.terrain_stale():
         return "terrain"
+    if minimap_due(w, m):
+        return "minimap"
     if m.alarm or w.tick - w.entities_tick >= policy.entity_refresh or w.entity_read_due(policy.entity_refresh):
         return "entities"
     return _tick_zone_or_skip(w, m, policy)

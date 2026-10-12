@@ -124,7 +124,7 @@ class LevelStateTest(unittest.TestCase):
     def test_travel_op_on_top_outranks_level(self):
         kb = KnowledgeBase.empty("sandbox")
         w = grid(["....D"], at=(0, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 3})
+        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
         plan = level_plan({"op": "travel", "to": "point", "x": 3, "y": 0}, {"op": "enter_level", "x": 0, "y": 0})
         out = dispatch(w, ctx_for(Memory(), kb, plan))
         self.assertEqual(out.state, "Travel")
@@ -132,7 +132,7 @@ class LevelStateTest(unittest.TestCase):
     def test_level_takes_over_once_travel_arrives(self):
         kb = KnowledgeBase.empty("sandbox")
         w = grid(["....D"], at=(0, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 3})
+        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
         plan = level_plan({"op": "travel", "to": "point", "x": 0, "y": 0}, {"op": "enter_level", "x": 0, "y": 0})
         m = Memory()
         out = dispatch(w, ctx_for(m, kb, plan))  # arrival pops the travel op

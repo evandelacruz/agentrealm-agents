@@ -444,6 +444,7 @@ def level_lake(at, armed: str | None = "raft", held=("raft", "bronze_sword")) ->
     for p in [(1, 1), (2, 1), (1, 2), (21, 21), (22, 21), (21, 22)]:
         w.view.tiles[p] = "dirt"
     w.map_id, w.map_level = 9, 2  # an interior map: a level
+    w.levels_cleared = [1]  # level 2 is the one to take (A145)
     w.maps = {9: w.maps[1]}
     return w
 
@@ -584,6 +585,7 @@ class LiveLevelMapTest(unittest.TestCase):
         w.worn_codes = {"body": "bronze_mail"}
         w.held_supplies = [InventorySupply(SWORD, "bronze_sword")]
         w.alive, w.health, w.max_health = True, 7, 10
+        w.levels_cleared = [1, 2, 3]  # level 4 is the one to take (A145)
         w.self_read = w.inventory_read = True
         return w
 

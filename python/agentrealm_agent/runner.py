@@ -50,7 +50,8 @@ from .item_table import (
 from .knowledge_base.death_chests import load_death_chests, save_death_chests
 from .knowledge_base.hostiles import load_hostiles, save_hostiles
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
+from .knowledge_maps import record_hunting_zone, record_map_level, record_map_levels, record_warp, sync_tiles, sync_world_maps
+from .level_order import note_door_step, settle_entry
 from .equip import note_equip_result, sync_refusals
 from .loot import (
     learn_chest_upgrade,
@@ -503,6 +504,9 @@ class Runner:
         w.passage = Passage(from_map, from_pos, w.map_id, w.tick)
         if self.knowledge is not None:
             record_warp(self.knowledge, from_map, from_pos, block_type, w.map_id, w.pos)
+            # An entrance's number once the landing map's level is read (A145).
+            note_door_step(m, from_map, from_pos, w.map_id, w.pos)
+            settle_entry(self.knowledge, w, m)
 
     def sync_terrain(self, t: dict) -> None:
         """Merge the cells of this terrain read's window into the knowledge base (A26)."""
@@ -521,8 +525,10 @@ class Runner:
         record_map_level(self.knowledge, self.world)
 
     def _sync_minimap(self) -> None:
-        """Entrance marks into the knowledge base (A27). Read once at startup:
-        marks on maps revealed later are learned on the next run (PLAN.md A27)."""
+        """Entrance marks into the knowledge base (A27), and each revealed map's
+        level into the world model (A145). Read once at startup: marks on maps
+        revealed later are learned on the next run (PLAN.md A27), and the level
+        of a map a door step lands on by the ``minimap`` read then (A145)."""
         if self.knowledge is None:
             return
         try:
@@ -530,6 +536,8 @@ class Runner:
         except ApiError as e:
             self.log("minimap", f"failed: {e}", {"error": str(e)})
             return
+        self.world.apply_minimap(body)
+        record_map_levels(self.knowledge, self.world.map_levels)
         sync_entrances(self.knowledge, body)
 
     def _sync_loadout(self) -> None:
@@ -606,6 +614,17 @@ class Runner:
             self.note_held_path_stale()
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
+        elif call == "minimap":
+            # The current map's level is only on the minimap (A145).
+            if w.map_id is not None:
+                m.minimap_reads[w.map_id] = m.minimap_reads.get(w.map_id, 0) + 1
+            body = c.minimap(self.cid)
+            w.apply_minimap(body)
+            if self.knowledge is not None:
+                sync_entrances(self.knowledge, body)
+                record_map_levels(self.knowledge, w.map_levels)
+            settle_entry(self.knowledge, w, m)
+            self.log(call, f"map {w.map_id} level={w.map_level}", {"minimap": body})
         elif call == "zone":
             probe, m.zone_probe = m.zone_probe, None
             if probe is None:

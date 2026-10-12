@@ -126,7 +126,7 @@ class FrontierKeptUpToDateTest(unittest.TestCase):
 
     @staticmethod
     def fresh(tiles: dict) -> set:
-        return MapView(tiles=dict(tiles)).frontier()
+        return MapView(tiles=dict(tiles)).frontier(fords=False)
 
     def test_random_edits(self):
         rng = random.Random(9)
@@ -148,19 +148,19 @@ class FrontierKeptUpToDateTest(unittest.TestCase):
             elif step % 97 == 0:
                 view.tiles.clear()
             if rng.random() < 0.4:
-                self.assertEqual(view.frontier(), self.fresh(view.tiles), step)
-        self.assertEqual(view.frontier(), self.fresh(view.tiles))
+                self.assertEqual(view.frontier(fords=False), self.fresh(view.tiles), step)
+        self.assertEqual(view.frontier(fords=False), self.fresh(view.tiles))
 
     def test_callers_get_their_own_copy(self):
         view = MapView(tiles={(0, 0): "dirt"})
-        view.frontier().add((9, 9))
-        self.assertEqual(view.frontier(), {(0, 0)})
+        view.frontier(fords=False).add((9, 9))
+        self.assertEqual(view.frontier(fords=False), {(0, 0)})
 
     def test_a_dict_passed_in_is_wrapped(self):
         view = MapView(tiles={(0, 0): "dirt"})
         self.assertIsInstance(view.tiles, Tiles)
         view.tiles[(5, 5)] = "dirt"
-        self.assertEqual(view.frontier(), {(0, 0), (5, 5)})
+        self.assertEqual(view.frontier(fords=False), {(0, 0), (5, 5)})
 
 
 class BigMapDecisionSpeedTest(unittest.TestCase):

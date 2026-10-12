@@ -31,10 +31,10 @@ MAP_CHANGING_OPS = frozenset({"enter_level", "leave_level", "fight_boss"})
 
 def in_bounds(w: WorldModel, p: Pos) -> bool:
     """``p`` lies on the current map: inside the size the terrain reads
-    gave (``MapView.size``), or anywhere while no read has given one."""
-    if w.view.size is None:
+    gave (``WorldModel.map_size``), or anywhere while no read has given one."""
+    if w.map_size is None:
         return True
-    width, height = w.view.size
+    width, height = w.map_size
     return 0 <= p[0] < width and 0 <= p[1] < height
 
 
@@ -71,7 +71,7 @@ def bad_cell(op: dict[str, Any], w: WorldModel) -> str | None:
     if p is None:
         return None
     if not in_bounds(w, p):
-        width, height = w.view.size or (0, 0)
+        width, height = w.map_size or (0, 0)
         return f"{p[0]},{p[1]} is off map {w.map_id}, which is x 0..{width - 1}, y 0..{height - 1}"
     if op.get("op") in STAND_ON_OPS and is_wall(w, p):
         return f"{p[0]},{p[1]} on map {w.map_id} is a wall"

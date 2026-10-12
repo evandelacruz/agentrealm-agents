@@ -58,7 +58,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
-from ..world import NEIGHBOURS, Pos, WorldModel, chebyshev, walkable_block
+from ..world import NEIGHBOURS, Pos, WorldModel, chebyshev
 from . import walk as nav_walk
 from .planner import CostGridParams, NavSearchState, rest_estimate
 
@@ -538,8 +538,9 @@ def _blocking_types(w: WorldModel, att: NavAttempt) -> set[str]:
     out: set[str] = set()
     for p in att.outline | {att.target} | ({w.pos} if w.pos else set()):
         for dx, dy in NEIGHBOURS:
-            block = w.view.tiles.get((p[0] + dx, p[1] + dy))
-            if block is not None and not walkable_block(block, w.fords):
+            n = (p[0] + dx, p[1] + dy)
+            block = w.view.tiles.get(n)
+            if block is not None and not w.walkable(n):
                 out.add(block)
     return out
 

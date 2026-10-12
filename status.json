@@ -279,7 +279,7 @@
 
   "A137": {"state": "done"},
 
-  "A138": {"state": "todo"},
+  "A138": {"state": "done"},
 
   "A139": {"state": "todo"},
 
@@ -295,7 +295,11 @@
 
   "A145": {"state": "done"},
 
+  "A146": {"state": "done"},
+
   "A147": {"state": "done"},
 
-  "A148": {"state": "done"}
+  "A148": {"state": "done"},
+
+  "A149": {"state": "todo"}
 }

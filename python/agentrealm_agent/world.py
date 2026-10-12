@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
@@ -33,7 +34,7 @@ def walkable_block(block: str | None, fords: bool = False) -> bool:
     water while a fording supply is carried (``fords``, A133)."""
     return block in WALKABLE or (fords and block == WATER)
 DOORS = {"framed_door", "rock_entry"}
-VOID = ""  # inside a terrain read but no ground there
+VOID = ""  # no ground: a cell past the map's edge (a ``?`` inside the map is unknown, A146)
 UNKNOWN = "?"  # terrain grid symbol for a cell the read carries no block for
 
 
@@ -295,27 +296,25 @@ class MapView:
     # or a respawn patch alike (Manual §9.2 legend, B127). A full read leaves
     # the flag off elsewhere.
     safe: set[Pos] = field(default_factory=set)
-    # The whole map's width and height in cells, from a terrain read's
-    # ``map_width`` and ``map_height`` (Manual §9.2); None until one gives it.
-    size: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.tiles, Tiles):
             self.tiles = Tiles(self.tiles)
 
-    def walkable(self, p: Pos, fords: bool = False) -> bool:
+    def walkable(self, p: Pos, *, fords: bool) -> bool:
         """Whether ``p`` is ground a walk may step on (``walkable_block``).
-        ``fords``: a fording supply is carried (``WorldModel.fords``), passed
-        in by the caller, never kept on the view (A133)."""
+        ``fords``: a fording supply is carried, always named by the caller
+        and never kept on the view (A133); outside this module only
+        ``WorldModel.walkable`` decides it (A146)."""
         return walkable_block(self.tiles.get(p), fords)
 
     def occupy_damage(self, p: Pos) -> int | None:
         """The tile's occupy_damage, or None when no read has named it."""
         return self.damage.get(p)
 
-    def frontier(self, fords: bool = False) -> set[Pos]:
+    def frontier(self, *, fords: bool) -> set[Pos]:
         """Known walkable tiles that touch an unknown one (``Tiles.frontier``),
-        water among them when ``fords``."""
+        water among them when ``fords`` (named, as for ``walkable``)."""
         return self.tiles.frontier(fords)
 
 
@@ -325,6 +324,7 @@ class WorldModel:
     map_id: int | None = None
     map_level: int | None = None  # level number of the current map: 0 outside every level, None while unread (A145)
     map_levels: dict[int, int] = field(default_factory=dict)  # map id -> its level from the minimap, 0 outside every level (A145)
+    map_sizes: dict[int, tuple[int, int]] = field(default_factory=dict)  # map id -> (width, height), from a minimap or terrain read (A146)
     pos: Pos | None = None
     perception: int = 1
     movement: int = 1
@@ -446,15 +446,46 @@ class WorldModel:
         with no ``Arm`` first (``supplies.afloat``, A133)."""
         return afloat(self.armed_code, self.worn_codes.values())
 
-    def walkable(self, p: Pos) -> bool:
-        """``p`` on the current map is ground a walk may step on, water too
-        while a fording supply is carried (A133)."""
-        return self.view.walkable(p, self.fords)
+    @property
+    def map_size(self) -> tuple[int, int] | None:
+        """The current map's width and height (``map_sizes``), None until a
+        minimap or terrain read gives them."""
+        return None if self.map_id is None else self.map_sizes.get(self.map_id)
+
+    def walkable(self, p: Pos, *, map_id: int | None = None, now: bool = False, swing: bool = False) -> bool:
+        """``p`` is ground a walk may step on, water too while a fording
+        supply is carried (A133): the one test of whether water is ground
+        (A146). Every route search, grid and step check asks it, on any map,
+        a level's or a room's as much as the overworld's; one that asks for
+        many cells takes ``walkable_test`` once instead.
+
+        ``map_id``: another map than the current one. ``now``: water only
+        while a fording supply is already armed or worn (``afloat``), for a
+        lone Step with no ``Arm`` before it. ``swing``: a walk to swing at a
+        hostile from, water only while a fording supply is worn, since one in
+        the hand leaves no weapon there (A146)."""
+        return self.walkable_test(map_id=map_id, now=now, swing=swing)(p)
+
+    def walkable_test(
+        self, *, map_id: int | None = None, now: bool = False, swing: bool = False
+    ) -> Callable[[Pos], bool]:
+        """``walkable`` as a test of one cell, with whether water is ground
+        worked out once from what is carried: for a search or a loop over
+        many cells, which must not change the loadout while it runs."""
+        if map_id is None or map_id == self.map_id:
+            view = self.view
+        else:
+            view = self.maps.get(map_id) or MapView()
+        if swing:
+            water = afloat(None, self.worn_codes.values())
+        else:
+            water = self.afloat if now else self.fords
+        return lambda p: view.walkable(p, fords=water)
 
     def frontier(self) -> set[Pos]:
         """The current map's frontier (``MapView.frontier``), water's edge
         too while a fording supply is carried (A133)."""
-        return self.view.frontier(self.fords)
+        return self.view.frontier(fords=self.fords)
 
     # Applying reads.
 
@@ -513,8 +544,15 @@ class WorldModel:
             if map_id is None:
                 continue
             self.map_levels[map_id] = level if level is not None and level > 0 else 0
+            self._note_map_size(map_id, m)
         if self.map_id in self.map_levels:
             self.map_level = self.map_levels[self.map_id]
+
+    def _note_map_size(self, map_id: int, body: dict) -> None:
+        """Keep a map's ``map_width`` and ``map_height`` when a read names both."""
+        width, height = _opt_int(body.get("map_width")), _opt_int(body.get("map_height"))
+        if width is not None and height is not None:
+            self.map_sizes[map_id] = (width, height)
 
     def perception_rect(self) -> tuple[int, int, int, int]:
         """x0, y0, width, height of the perception window around us."""
@@ -533,16 +571,25 @@ class WorldModel:
     def apply_terrain(self, t: dict) -> None:
         """Records a terrain read of our perception window.
 
-        Everything inside perception is visible, so an unknown cell in the
-        read has no ground: it is recorded as VOID, known and not walkable.
+        A ``?`` in the read is unknown, never empty ground (API Tiles, B102):
+        ground the character has neither in sight nor revealed, which in a
+        dark zone is most of the window, since sight there is perception
+        scaled by brightness (A146). Only a ``?`` past the map's edge has no
+        ground: it is recorded as VOID, known and not walkable. The edge is
+        the map's size as this read gives it, else as a minimap or an earlier
+        read gave it (``map_sizes``), else only the near edges, below x 0 and
+        y 0, are known. A ``?`` inside the map stays unknown, so a walk plans
+        through it at fog cost and Explore goes to see it.
         """
-        view = self.maps.setdefault(int(t["map_id"]), MapView())
-        if "map_width" in t and "map_height" in t:
-            view.size = (int(t["map_width"]), int(t["map_height"]))
+        map_id = int(t["map_id"])
+        view = self.maps.setdefault(map_id, MapView())
+        self._note_map_size(map_id, t)
         x0, y0 = int(t["x0"]), int(t["y0"])
+        width, height = self.map_sizes.get(map_id, (None, None))
         for y in range(y0, y0 + int(t["height"])):
             for x in range(x0, x0 + int(t["width"])):
-                view.tiles.setdefault((x, y), VOID)
+                if x < 0 or y < 0 or (width is not None and (x >= width or y >= height)):
+                    view.tiles.setdefault((x, y), VOID)
         for (x, y), cell in terrain_cells(t).items():
             p = (x, y)
             view.tiles[p] = cell["block_type"]
@@ -1081,10 +1128,11 @@ class WorldModel:
     def neighbours(self, p: Pos) -> list[Pos]:
         return [(p[0] + dx, p[1] + dy) for dx, dy in NEIGHBOURS]
 
-    def open_neighbours(self, p: Pos, avoid: set[Pos] = frozenset()) -> list[Pos]:
-        """Walkable, unoccupied tiles one step from p, minus avoid."""
+    def open_neighbours(self, p: Pos, avoid: set[Pos] = frozenset(), *, swing: bool = False) -> list[Pos]:
+        """Walkable, unoccupied tiles one step from p, minus avoid (``swing``:
+        as ``walkable``)."""
         occ = self.occupied() | self.for_sale() | avoid
-        return [n for n in self.neighbours(p) if self.walkable(n) and n not in occ]
+        return [n for n in self.neighbours(p) if self.walkable(n, swing=swing) and n not in occ]
 
 
 def _set_damage(view: MapView, p: Pos, cell: dict) -> None:

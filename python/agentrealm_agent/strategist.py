@@ -996,7 +996,7 @@ def map_lines(w: WorldModel) -> list[str]:
     if w.pos is None or w.map_id is None:
         return []
     cx, cy = w.pos
-    size = w.view.size
+    size = w.map_size
     x_lo, x_hi = cx - MAP_RADIUS, cx + MAP_RADIUS
     y_lo, y_hi = cy - MAP_RADIUS, cy + MAP_RADIUS
     if size is not None:

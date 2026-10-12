@@ -14,7 +14,7 @@ from ..gem_yield import GemYieldTracker
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..plan import OP_STATE, GoalOp, Plan
-from ..pathing import op_walk_sets
+from ..pathing import HostileReach, op_walk_sets
 from ..world import Pos, WorldModel
 
 
@@ -103,9 +103,10 @@ def my_op(ctx: PlayContext, state: str) -> GoalOp | None:
     return op if op is not None and OP_STATE.get(op["op"]) == state else None
 
 
-def op_walk(w: WorldModel, ctx: PlayContext) -> tuple[set[Pos], set[Pos], set[Pos]]:
+def op_walk(w: WorldModel, ctx: PlayContext) -> tuple[set[Pos], set[Pos], HostileReach]:
     """``plan_avoid``, ``plan_costly`` and ``reach`` for a walk on the op's
     behalf (``pathing.op_walk_sets``, A128): every op executor's walk, and the
     way it clears, keeps out of the reach of the hostiles seen that the
-    engagement would not fight."""
-    return op_walk_sets(w, ctx.memory, ctx.policy, ctx.knowledge, ctx.params, ctx.never_attack)
+    engagement would not fight, passing it only when it is the only way and
+    health covers the pass (``pathing.HostileReach``, A146)."""
+    return op_walk_sets(w, ctx.memory, ctx.policy, ctx.knowledge, ctx.params, ctx.never_attack, ctx.tick_hz)

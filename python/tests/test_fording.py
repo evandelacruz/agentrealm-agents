@@ -336,7 +336,7 @@ class WaterIsGroundEverywhereTest(unittest.TestCase):
         w = lake(armed="raft")
         view = w.view
         self.assertTrue(w.walkable((3, 1)))
-        self.assertFalse(view.walkable((3, 1)), "the view keeps no fording flag")
+        self.assertFalse(view.walkable((3, 1), fords=False), "the view keeps no fording flag")
         self.assertTrue(view.walkable((3, 1), fords=True))
 
     def test_a_route_through_a_door_crosses_water(self):
@@ -363,7 +363,7 @@ class WaterIsGroundEverywhereTest(unittest.TestCase):
         w = lake()
         frontier = w.frontier()
         self.assertTrue(any(w.view.tiles[p] == "water" for p in frontier), frontier)
-        self.assertFalse(any(w.view.tiles[p] == "water" for p in w.view.frontier()), "kept apart per fords")
+        self.assertFalse(any(w.view.tiles[p] == "water" for p in w.view.frontier(fords=False)), "kept apart per fords")
 
 
 class FightAshoreTest(unittest.TestCase):
@@ -435,3 +435,177 @@ class EquipRaftTest(unittest.TestCase):
         out = dispatch(w, ctx_for(Memory(), plan))
         self.assertEqual((out.state, out.intents), ("Equip", [arm(RAFT)]), out.reason)
         self.assertIsNotNone(plan.current(), "not dropped as not armed or worn")
+
+
+# A146: a level map that is almost all water, with dirt islands at its corners.
+def level_lake(at, armed: str | None = "raft", held=("raft", "bronze_sword")) -> WorldModel:
+    rows = ["~" * 24] * 24
+    w = wide(at=at, armed=armed, held=held, rows=rows)
+    for p in [(1, 1), (2, 1), (1, 2), (21, 21), (22, 21), (21, 22)]:
+        w.view.tiles[p] = "dirt"
+    w.map_id, w.map_level = 9, 2  # an interior map: a level
+    w.levels_cleared = [1]  # level 2 is the one to take (A145)
+    w.maps = {9: w.maps[1]}
+    return w
+
+
+class LevelWalkTest(unittest.TestCase):
+    def test_a_walk_inside_a_level_crosses_water_with_the_raft_armed(self):
+        w = level_lake(at=(10, 10))
+        out = dispatch(w, ctx_for(Memory(), travel_to(21, 21)))
+        self.assertEqual(out.state, "Travel", out.reason)
+        self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 11, "y": 11}], out.reason)
+
+    def test_the_same_walk_with_no_ford_finds_no_way(self):
+        w = level_lake(at=(1, 1), armed="bronze_sword", held=("bronze_sword",))
+        m = Memory()
+        out = dispatch(w, ctx_for(m, travel_to(21, 21)))
+        self.assertFalse(out.intents, out.reason)
+        self.assertIn("no step toward it", out.reason)
+        self.assertEqual([s["trigger"] for s in m.strategist_signals], ["no_way_on"])
+
+
+class AfloatEngagementTest(unittest.TestCase):
+    def engaged(self, w: WorldModel, m: Memory | None = None):
+        from agentrealm_agent.engagement import sync_engagement
+        from tests.test_hostile_reach import POLICY, pack
+
+        if not w.entities:
+            (rat,) = pack(w, (w.pos[0] + 1, w.pos[1]), hit=1)  # one the estimate beats with a weapon
+            w.attacker, w.attacked_tick = ("npc", rat.id), w.tick
+        m = m or Memory()
+        return m, sync_engagement(w, m, POLICY, dict(PARAM_DEFAULTS))
+
+    def test_afloat_with_the_raft_and_a_hostile_adjacent_it_is_not_fight(self):
+        _, e = self.engaged(level_lake(at=(10, 10)))
+        self.assertIsNotNone(e)
+        self.assertFalse(e.fight, "the raft swings nothing, and no weapon can be armed on water")
+
+    def test_ashore_the_same_hostile_is_fought(self):
+        _, e = self.engaged(level_lake(at=(1, 1)))
+        self.assertTrue(e.fight, "on land the weapon is armed for the fight (A133)")
+
+    def test_a_fight_decided_ashore_does_not_hold_once_afloat(self):
+        w = level_lake(at=(2, 1))
+        m, e = self.engaged(w)
+        self.assertTrue(e.fight)
+        w.pos = (3, 1)  # stepped onto water, the hostile follows
+        w.entities[0].pos = (4, 1)
+        _, e = self.engaged(w, m)
+        self.assertFalse(e.fight)
+
+    def test_the_decision_afloat_is_never_fight(self):
+        from tests.test_hostile_reach import POLICY
+
+        w = level_lake(at=(10, 10))
+        self.engaged(w)
+        c = PlayContext(Memory(), POLICY, random.Random(0), knowledge=KnowledgeBase.empty("sandbox"), plan=None)
+        out = dispatch(w, c)
+        self.assertNotEqual(out.state, "Fight", out.reason)
+        self.assertFalse(c.memory.engagement.fight)
+        self.assertNotIn("Use", [i.get("verb") for i in out.intents or []], "no swing from the water")
+
+
+class FightClosesOnlyOnLandTest(unittest.TestCase):
+    def test_no_raft_is_armed_to_close_on_a_hostile_across_water(self):
+        """A146: Fight closes only over ground it can swing from, so with the
+        raft held, the sword armed and a hostile across water with no way
+        round by land, there is no Arm of the raft and no Fight."""
+        from tests.test_hostile_reach import POLICY, pack
+
+        w = level_lake(at=(1, 1), armed="bronze_sword")
+        w.view.tiles.update({(2, 1): "water", (1, 2): "water", (3, 1): "dirt"})  # our islet and its
+        (rat,) = pack(w, (3, 1), hit=1)  # one the estimate would fight, on its own islet
+        plan = Plan([{"op": "wait", "seconds": 30, "why": "hold here"}], dict(PARAM_DEFAULTS))  # no walk of its own
+        c = PlayContext(Memory(), POLICY, random.Random(0), knowledge=KnowledgeBase.empty("sandbox"), plan=plan)
+        out = dispatch(w, c)
+        self.assertTrue(c.memory.engagement.fight, "the estimate would take it on, from land")
+        from agentrealm_agent.fording import ESCAPES
+        from agentrealm_agent.states.fight import close_step
+
+        self.assertIsNone(close_step(w, rat, set()), "no walk in over ground it can swing from")
+        self.assertNotEqual(out.state, "Fight", out.reason)
+        if arm(RAFT) in (out.intents or []):
+            self.assertIn(out.state, ESCAPES, "only an escape takes to the water, never a walk in to swing")
+
+
+class WaterCellsOnlyTest(unittest.TestCase):
+    def test_a_cell_known_as_water_only_from_a_refusal_is_afloat_to_the_engagement(self):
+        """A146: the engagement's afloat test is Ashore's (``on_water``), so a
+        cell a ``would_strand`` marked counts though the map shows ground."""
+        from agentrealm_agent.engagement import sync_engagement
+        from tests.test_hostile_reach import POLICY, pack
+
+        w = level_lake(at=(1, 1))  # dirt on the map
+        (rat,) = pack(w, (2, 2), hit=1)
+        w.attacker, w.attacked_tick = ("npc", rat.id), w.tick
+        m = Memory()
+        self.assertTrue(sync_engagement(w, m, POLICY, dict(PARAM_DEFAULTS)).fight, "ground: fought")
+        m.engagement = None
+        m.water_cells[(w.map_id, (1, 1))] = None  # a would_strand came from it
+        self.assertFalse(sync_engagement(w, m, POLICY, dict(PARAM_DEFAULTS)).fight)
+
+
+class LiveLevelMapTest(unittest.TestCase):
+    """A146's live level map, through real terrain reads: water with tile
+    islands, doors at (7, 0) and (7, 11), the raft armed and bronze mail worn
+    at 7/10. Travel from open water to island cells steps, lit or dark, with
+    the level read or not. In the dark only the ground near where he had
+    walked was revealed and the rest read ``?``, which was recorded as no
+    ground: every walk off those lines found "no known way"."""
+
+    ROWS = [
+        "wwwwwwwfwwwwwwww",
+        "wWWWWWWtWWWWWWWw",
+        "wWWWWWWWWWWWWWWw",
+        "wWWWtttWWWWWWWWw",
+        "wWWWtttWWWWttWWw",
+        "wWWWtttWWWWttWWw",
+        "wWWWWWWWWWWttWWw",
+        "wWWWWWWWWWWWWWWw",
+        "wWWWWWtttWWWWWWw",
+        "wWWWWWtttTWWWWWw",
+        "wWWWWWtttWWWWWWw",
+        "wwwwwwwfwwwwwwww",
+    ]
+    LEGEND = {
+        "w": {"block_type": "wall"},
+        "W": {"block_type": "water"},
+        "t": {"block_type": "tile"},
+        "f": {"block_type": "framed_door"},
+        "T": {"block_type": "tile", "readable": True},
+    }
+
+    def live(self, at, level, rows) -> WorldModel:
+        w = WorldModel(character_id=1, map_id=44, pos=at, perception=25)
+        w.apply_position({"map_id": 44, "x": at[0], "y": at[1], **({"level": level} if level is not None else {})})
+        w.apply_terrain({"map_id": 44, "x0": 0, "y0": 0, "width": 16, "height": 12, "rows": rows,
+                         "legend": self.LEGEND, "map_width": 16, "map_height": 12})
+        w.armed_code, w.armed_id = "raft", RAFT
+        w.worn_codes = {"body": "bronze_mail"}
+        w.held_supplies = [InventorySupply(SWORD, "bronze_sword")]
+        w.alive, w.health, w.max_health = True, 7, 10
+        w.levels_cleared = [1, 2, 3]  # level 4 is the one to take (A145)
+        w.self_read = w.inventory_read = True
+        return w
+
+    def dark_rows(self) -> list[str]:
+        """The read in the dark: revealed only round the columns he walked, x 11 and 13."""
+        walked = [(x, y) for x in (11, 13) for y in range(1, 11)]
+        near = {(x + dx, y + dy) for x, y in walked for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+        return ["".join(c if (x, y) in near else "?" for x, c in enumerate(row)) for y, row in enumerate(self.ROWS)]
+
+    def test_travel_from_open_water_to_an_island_steps(self):
+        for rows, light in ((self.ROWS, "lit"), (self.dark_rows(), "dark")):
+            for level in (4, None):
+                for dest in ((7, 1), (8, 10)):
+                    with self.subTest(light=light, level=level, dest=dest):
+                        w = self.live((13, 1), level, rows)
+                        self.assertEqual(w.map_level, level)
+                        m = Memory()
+                        out = dispatch(w, ctx_for(m, travel_to(*dest)))
+                        self.assertEqual(out.state, "Travel", out.reason)
+                        self.assertTrue(out.intents, out.reason)
+                        (step,) = [i for i in out.intents if i["verb"] == "SetPosition"][:1]
+                        self.assertLess(abs(step["x"] - dest[0]) + abs(step["y"] - dest[1]), abs(13 - dest[0]) + abs(1 - dest[1]))
+                        self.assertNotIn("no_way_on", [s["trigger"] for s in m.strategist_signals])

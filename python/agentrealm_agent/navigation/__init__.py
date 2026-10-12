@@ -15,6 +15,7 @@ from .planner import (
     macro_cell,
     nearest_target,
     no_way,
+    shut_off,
     path_cost,
 )
 from .rejection import NavMemory, learn_step_rejection
@@ -38,6 +39,7 @@ __all__ = [
     "macro_cell",
     "nearest_target",
     "no_way",
+    "shut_off",
     "path_cost",
     "route_first_leg",
     "walk_toward",

@@ -42,7 +42,7 @@ from ..survival import approaching, is_hostile
 from ..world import Pos, WorldModel, chebyshev
 from .ask import ask_the_planner, op_key
 from .base import PlayContext, State, StateOutcome, my_op, top_executor, top_op
-from .gather_safe import is_safe_ish
+from ..hostile_ground import is_safe_ish
 from .intents import set_position
 from .way import break_due
 

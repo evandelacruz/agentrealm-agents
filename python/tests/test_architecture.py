@@ -9,8 +9,13 @@ explore or open never steps in place: it asks the planner (A114).
 
 from __future__ import annotations
 
+import ast
+import json
+import os
 import random
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -284,6 +289,72 @@ class RulesNotRunPatchesTest(unittest.TestCase):
         )
         if total < RUN_CITATION_CEILING:
             self.fail(f"A87: {total} run citations; lower RUN_CITATION_CEILING to match.")
+
+    def test_lorraine_cites_no_run(self):
+        # Lorraine's ceiling is 0 and never moves (A138).
+        hits = sorted(
+            (str(f.relative_to(PYTHON_DIR)), n)
+            for f in (PYTHON_DIR / "ladder").rglob("*.py")
+            if (n := len(RUN_CITATION.findall(f.read_text())))
+        )
+        self.assertEqual(hits, [], "A87: Lorraine states rules in game terms and cites no run.")
+
+
+# Gary's planner and states (A138). Everything else in ``agentrealm_agent`` is
+# plumbing Lorraine may use.
+GARY_ONLY = ("agentrealm_agent.strategist", "agentrealm_agent.plan", "agentrealm_agent.brain", "agentrealm_agent.runner")
+GARY_STATES = "agentrealm_agent.states"
+
+
+class ImportLineTest(unittest.TestCase):
+    """Lorraine imports nothing from Gary's planner or states (A138).
+
+    The line is the import closure, not a list of imports: her package is
+    imported in a fresh interpreter, with everything it runs, and no module
+    of Gary's planner or states may have been loaded on the way."""
+
+    def test_ladder_loads_none_of_garys_planner_or_states(self):
+        out = subprocess.run(
+            [sys.executable, "-c", "import json, sys, ladder, ladder.__main__; print(json.dumps(sorted(sys.modules)))"],
+            cwd=PYTHON_DIR,
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        loaded = json.loads(out.stdout)
+        crossed = [m for m in loaded if m in GARY_ONLY or m == GARY_STATES or m.startswith(GARY_STATES + ".")]
+        self.assertEqual(crossed, [], "Lorraine reached into Gary's planner or states")
+        self.assertIn("agentrealm_agent.pathing", loaded, "the closure should include the plumbing she plays on")
+
+
+class OneWaterTestTest(unittest.TestCase):
+    """A146: only ``WorldModel.walkable`` decides whether water is ground. Every
+    route search, grid and step check in Gary asks it, on any map, so no grid
+    (a level's, a room's, a scratch world's) builds its own water test. A map
+    view's ``walkable`` and ``frontier`` take ``fords`` as a required keyword,
+    so any call of them outside ``world.py`` shows as a ``fords`` passed."""
+
+    def test_only_world_model_walkable_decides_whether_water_is_ground(self):
+        world = PYTHON_DIR / "agentrealm_agent" / "world.py"
+        hits = []
+        for f in (PYTHON_DIR / "agentrealm_agent").rglob("*.py"):
+            if f == world:
+                continue
+            for node in ast.walk(ast.parse(f.read_text())):
+                where = f"{f.relative_to(PYTHON_DIR)}:{getattr(node, 'lineno', 0)}"
+                if isinstance(node, ast.Name) and node.id in ("walkable_block", "WALKABLE"):
+                    hits.append(f"{where} uses {node.id}")
+                if isinstance(node, ast.alias) and node.name in ("walkable_block", "WALKABLE"):
+                    hits.append(f"{where} imports {node.name}")
+                if not isinstance(node, ast.Call):
+                    continue
+                if any(k.arg == "fords" for k in node.keywords):
+                    hits.append(f"{where} passes fords")
+                fn = node.func
+                if isinstance(fn, ast.Attribute) and fn.attr == "walkable" and len(node.args) != 1:
+                    hits.append(f"{where} passes its own water test to walkable")
+        self.assertEqual(hits, [], "A146: ask WorldModel.walkable (and WorldModel.frontier) instead")
 
 
 if __name__ == "__main__":

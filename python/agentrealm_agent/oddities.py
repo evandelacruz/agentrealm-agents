@@ -38,7 +38,7 @@ from typing import Any
 
 from .break_memory import BLOCK_OPENERS, BREAKABLE, FAILED_RESULTS, break_key, held_capabilities
 from .knowledge_base import KnowledgeBase
-from .plan import CAPABILITIES
+from .supplies import CAPABILITIES
 from .world import Pos, WorldModel, chebyshev
 
 ODDITIES_KEY = "oddities"

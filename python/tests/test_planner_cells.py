@@ -31,7 +31,7 @@ def level_room(at=(7, 1)) -> WorldModel:
             edge = x in (0, ROOM_W - 1) or y in (0, ROOM_H - 1)
             w.view.tiles[(x, y)] = "wall" if edge else "tile"
     w.view.tiles[DOOR] = "framed_door"
-    w.view.size = (ROOM_W, ROOM_H)
+    w.map_sizes[w.map_id] = (ROOM_W, ROOM_H)
     w.alive, w.health, w.max_health = True, 10, 10
     return w
 
@@ -131,11 +131,11 @@ class MapSizeTest(unittest.TestCase):
     def test_a_terrain_read_gives_the_map_size_and_one_without_it_keeps_it(self):
         w = WorldModel(character_id=1, map_id=40, pos=(2, 1))
         w.apply_terrain(terrain_read(40))
-        self.assertIsNone(w.view.size, "no read has given it yet")
+        self.assertIsNone(w.map_size, "no read has given it yet")
         w.apply_terrain(terrain_read(40, map_width=ROOM_W, map_height=ROOM_H))
-        self.assertEqual(w.view.size, (ROOM_W, ROOM_H))
+        self.assertEqual(w.map_size, (ROOM_W, ROOM_H))
         w.apply_terrain(terrain_read(40))
-        self.assertEqual(w.view.size, (ROOM_W, ROOM_H), "a read without the fields leaves it")
+        self.assertEqual(w.map_size, (ROOM_W, ROOM_H), "a read without the fields leaves it")
         kept, refused = refuse_bad_cells([{"op": "travel", "to": "point", "x": 17, "y": 1}], w)
         self.assertEqual(kept, [])
         self.assertIn("17,1 is off map 40, which is x 0..15, y 0..11", refused[0])
@@ -201,14 +201,14 @@ class BadCellTest(unittest.TestCase):
 
     def test_a_map_of_unknown_size_refuses_nothing_off_it(self):
         w = level_room()
-        w.view.size = None
+        w.map_sizes.clear()
         self.assertEqual(refuse_bad_cells([{"op": "travel", "to": "point", "x": 17, "y": 1}], w)[1], [])
 
     def test_the_planner_hears_of_it_in_the_next_state(self):
         bad = {"op": "travel", "to": "point", "x": 17, "y": 1}
         s = make(FakeLLM({"goals": [bad]}, WAIT_ANSWER))
         r = fake_runner()
-        r.world.view.size = (16, 12)
+        r.world.map_sizes[r.world.map_id] = (16, 12)
         round_trip(s, r)
         self.assertNotIn(bad, r.plan.goals, "it never reaches a state")
         s.clock.now += 60

@@ -40,6 +40,14 @@ def potion_count(w: WorldModel) -> int:
     return n
 
 
+def held_heal(w: WorldModel) -> int:
+    """The health the potions and food carried (held, stowed and armed) give
+    back between them, each by its Supplies ``heal`` (A132): what the
+    character can heal without buying or resting."""
+    carried = in_hand(w) + list(w.chest_supplies)
+    return sum(row(s.code).heal or 0 for s in carried if heals(s.code))
+
+
 def supply_matches(want: str, code: str) -> bool:
     """``code`` satisfies a want for ``want``: the same code, or any potion for a potion (A21)."""
     return want == code or (is_potion(want) and is_potion(code))

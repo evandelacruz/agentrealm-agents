@@ -31,6 +31,7 @@ from .directives import attack_forbidden
 from .engagement import would_fight
 from .hostile_ground import HostileKey, WalkGround, ground_by_hostile, hostiles_near, is_safe_ish, walk_ground
 from .executor.pacing import DEFAULT_TICK_RATE_HZ, attack_cooldown_ticks
+from .fording import on_water
 from .supplies import afloat
 from .survival import (
     estimate_health,
@@ -45,7 +46,7 @@ from .survival import (
 )
 from .executor.movement import step_landing, ticks_per_step
 from .targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
-from .world import DOORS, WATER, Entity, Pos, WorldModel, chebyshev
+from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 
 def goto_target(w: WorldModel, policy: Policy) -> tuple[int | None, Pos] | None:
@@ -1050,6 +1051,7 @@ class HostileReach:
     costly: set[Pos]
     tick_hz: int
     fleeing: bool = False
+    memory: Memory | None = None  # the water cells a refusal marked (``fording.on_water``)
     _only_way: dict[tuple[Pos | None, Pos], bool] = field(default_factory=dict)
 
     def __contains__(self, p: object) -> bool:
@@ -1068,7 +1070,7 @@ class HostileReach:
         if self.fleeing:
             return False
         return self.only_way(goal) and covers_pass(
-            self.w, self.policy, self.params, path, self.cells, self.tick_hz, self.ground
+            self.w, self.policy, self.params, path, self.cells, self.tick_hz, self.ground, self.memory
         )
 
     def only_way(self, goal: Pos) -> bool:
@@ -1099,6 +1101,7 @@ def covers_pass(
     reach: Collection[Pos],
     tick_hz: int,
     ground: dict[HostileKey, WalkGround],
+    m: Memory | None = None,
 ) -> bool:
     """The pass along ``path``'s cells in ``reach`` can be made (A146, A151):
 
@@ -1123,26 +1126,29 @@ def covers_pass(
     hostiles = [g.entity for g in crossed]
     ticks = len(inside) * ticks_per_step(tick_rate_hz=tick_hz, movement_speed_milli=max(1, w.movement_speed))
     per_tick = expected_damage(hostiles, w.threat, 1, worn_defense(w))
-    healed, drinking = heal_on_pass(w, inside, per_tick, tick_hz)
+    healed, drinking = heal_on_pass(w, inside, per_tick, tick_hz, m)
     taken = per_tick * (ticks + drinking)
     left = estimate_health(w) - taken + min(healed, taken)
     return left > health_floor(w, params, hostiles)
 
 
-def heal_on_pass(w: WorldModel, inside: list[Pos], per_tick: float, tick_hz: int) -> tuple[int, int]:
+def heal_on_pass(
+    w: WorldModel, inside: list[Pos], per_tick: float, tick_hz: int, m: Memory | None = None
+) -> tuple[int, int]:
     """What the heals carried win back on a pass over ``inside`` taking
     ``per_tick`` a tick, and the ticks spent using them: (healed, ticks).
 
     Held heals count toward a pass only where they can be used: each is an
     ``Arm`` and a ``Use`` on yourself, which on water with no fording supply
     worn would leave none armed (``would_strand``, A133), so a pass with a
-    water cell counts none unless the fording supply is worn. Each one used
+    water cell (``fording.on_water``, Ashore's test, a would_strand-marked
+    cell included) counts none unless the fording supply is worn. Each one used
     takes its ``Arm`` tick and its ``Use``'s cooldown, the largest heal
     first, and only while it gives back more than those ticks cost; never
     more than the pass takes (``covers_pass`` caps it), so a heal never
     counts above the health we start with."""
     worn = afloat(None, w.worn_codes.values())
-    if not worn and any(w.view.tiles.get(p) == WATER for p in inside):
+    if not worn and any(on_water(w, m, p) for p in inside):
         return 0, 0
     healed = drinking = 0
     for code, heal in heals_carried(w):
@@ -1185,7 +1191,7 @@ def op_walk_sets(
     ground = walk_ground(w, policy, skip=fought)
     reach = frozenset(p for g in ground.values() for p in g.cells)
     fleeing = m.engagement is not None and not m.engagement.fight
-    return avoid, costly | reach, HostileReach(reach, ground, w, policy, params, avoid, costly | reach, tick_hz, fleeing)
+    return avoid, costly | reach, HostileReach(reach, ground, w, policy, params, avoid, costly | reach, tick_hz, fleeing, m)
 
 
 def enters_reach(w: WorldModel, path: list[Pos] | None, reach: Collection[Pos], goal: Pos | None = None) -> bool:

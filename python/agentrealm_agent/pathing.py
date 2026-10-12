@@ -843,9 +843,18 @@ def guided_step(
         if found:
             return _wait(m, att, found)
         reason = "no_path"
-    step = escalation_step(m, w, att, avoid, plan, reason, knowledge)
-    if step is not None and step in reach and w.pos not in reach:
-        return _hold_for_reach(m, att, w.tick)  # a reveal step into the reach
+    barred: list[int] = []
+
+    def held(a: NavAttempt) -> list[Pos] | None:
+        # Each level the ladder climbs to this decision plans under the same rule.
+        found = plan(a)
+        if enters_reach(w, found, reach):
+            barred.append(a.level)
+        return found
+
+    step = escalation_step(m, w, att, avoid, held if reach else plan, reason, knowledge)
+    if barred or (step is not None and step in reach and w.pos not in reach):
+        return _hold_for_reach(m, att, w.tick)  # a level's plan, or a reveal step, into the reach
     return step
 
 
@@ -876,6 +885,7 @@ def bounded_step(
     plan: Callable[[], "list[Pos] | None"],
     *,
     params: Callable[[], CostGridParams] | None = None,
+    reach: Collection[Pos] = (),
 ) -> Pos | None:
     """One move toward ``at`` on a walk that gives up instead of escalating (A15).
 
@@ -897,6 +907,10 @@ def bounded_step(
     window and the wait hold only while the walk is pursued on consecutive
     decisions (``nav_stuck.resume``). ``params`` is the grid ``plan``
     searches on, as in ``guided_step``.
+
+    ``reach``: the ground a walk on an op's behalf keeps out of (A128). A
+    path into it is planned again, and a plan that still enters it gives no
+    move and no give-up, so the caller asks the planner.
     """
     if nav_stuck.backed_off(m, goal, w.map_id, at, w.tick):
         return None
@@ -904,8 +918,15 @@ def bounded_step(
     if att is None:
         return None
     nav_stuck.resume(m, att, w.tick)
-    if not (m.goal == goal and m.path and m.path[-1] == at and next_step(w, avoid, m.path)):
+    kept = m.goal == goal and m.path and m.path[-1] == at and next_step(w, avoid, m.path)
+    if not kept or enters_reach(w, m.path, reach):
         found = commit_walk(m, w, goal, at, plan(), _walk_grid(params, avoid))
+        if enters_reach(w, found, reach):
+            # No way clear of the hostiles seen: no move and no give-up, the
+            # caller asks (A128), as ``guided_step`` holds.
+            nav_stuck.hold(m, att, w.tick)
+            att.waiting_since = None
+            return None
         if not found or not next_step(w, avoid, found):
             if att.waiting_since is None:
                 att.waiting_since = w.tick

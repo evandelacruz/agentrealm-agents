@@ -13,7 +13,7 @@ it may enter, the frontier runs out, or ``HUNT_SEARCH_SECONDS`` pass.
 
 Travel keeps its walk (A120): the safe default never stands in for it. The
 walk routes round the reach of hostiles it has seen, and never walks through
-it (A128, ``pathing.op_walk_sets``). With no step toward the destination it
+it (A128, ``base.op_walk``). With no step toward the destination it
 clears the way or asks the planner and holds (``way.clear_the_way``); at stuck step 2 Break, below it, opens the
 block the walk's escalation nominated (A15). The survival reflexes act above
 it as always. Its walk must make net progress (A125): each level of its
@@ -30,14 +30,14 @@ from ..memory import HuntSearch, Memory
 from ..navigation import doors_goal_path, route_first_leg
 from ..navigation import stuck as nav_stuck
 from ..navigation import walk as nav_walk
-from ..pathing import grid_params, guided_step, nav_search, next_step, op_walk_sets, plan_sets
+from ..pathing import grid_params, guided_step, nav_search, next_step, plan_sets
 from ..plan import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from ..travel.ops import travel_op_from_plan_goal
 from .. import targets as targets_mod
 from ..navigation.rejection import locked_doors_from_kb
 from ..travel.resolve import ResolvedDestination, at_destination, given_up_travel, picks_nearest, resolve_travel, still_candidate
 from ..world import DOORS, Pos, WorldModel
-from .base import PlayContext, State, StateOutcome, my_op
+from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .explore import explore_outcome
 from .intents import set_position
 from .way import clear_the_way
@@ -111,7 +111,7 @@ def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDesti
         if m.goal.startswith("travel:"):
             m.path, m.goal = [], ""
         m.goal_op = dict(op)
-    plan_avoid, plan_costly, reach = op_walk_sets(world, m, policy, ctx.knowledge, ctx.params, ctx.never_attack)
+    plan_avoid, plan_costly, reach = op_walk(world, ctx)
     out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly, state, reach)
     if out is not None:
         return out
@@ -129,7 +129,7 @@ def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDesti
         if first not in world.view.tiles and nav_walk.hold_for_fog(m.walks.get(goal), world):
             return StateOutcome(None, f"{goal}: next cell unseen, waiting", state=state, wait=True, progress=False)
     why = f"{goal} {dest.pos[0]},{dest.pos[1]}: no step toward it"
-    return clear_the_way(world, ctx, dest.pos if dest.map_id == world.map_id else None, why, state, op)
+    return clear_the_way(world, ctx, dest.pos if dest.map_id == world.map_id else None, why, state, op, reach=reach)
 
 
 def search_hunting_ground(world: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:

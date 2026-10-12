@@ -250,7 +250,7 @@ class FightState(State):
                 # No swing and no step toward it: clear the way, else ask the planner (A120).
                 # The ask holds nothing here, so Flee and the reflexes below still act, and the
                 # safe default holds for the op (``explore.HOLD_THEIR_WALK``).
-                out = clear_the_way(world, ctx, target.pos, f"fight {target.kind} {target.id}: {out.reason}", self.name, op)
+                out = clear_the_way(world, ctx, target.pos, f"fight {target.kind} {target.id}: {out.reason}", self.name, op, reach=())
                 out.wait = False
                 return out
             if ctx.plan is not None:

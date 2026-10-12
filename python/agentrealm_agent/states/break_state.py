@@ -12,6 +12,8 @@ failed there, is dropped with the reason, so the planner hears why.
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from ..break_memory import (
     BLOCK_OPENERS,
     BREAK_GOAL,
@@ -27,11 +29,11 @@ from ..break_memory import (
 )
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, nav_search, next_step, plan_sets
+from ..pathing import enters_reach, grid_params, nav_search, next_step, plan_sets
 from ..plan import GoalOp
 from ..reach import supply_reach
-from ..world import VOID, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome, my_op
+from ..world import VOID, Pos, WorldModel, chebyshev
+from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .ask import ask_key, ask_the_planner, what_blocks
 from .intents import arm, set_position, use_block
 
@@ -124,7 +126,7 @@ def break_outcome(w: WorldModel, ctx: PlayContext, state: str = "Break") -> Stat
             why = no_break_reason(w, ctx.knowledge, w.pos, att.target, skip) if w.pos is not None else "no_break"
             nav_stuck.escalate(m, w, att, why)
         return StateOutcome(None, "nothing to break", state=state)
-    return break_toward(w, ctx, choice, state)
+    return break_toward(w, ctx, choice, state, op_walk(w, ctx)[2])
 
 
 def in_break_reach(w: WorldModel, ctx: PlayContext, choice: BreakChoice) -> bool:
@@ -132,7 +134,9 @@ def in_break_reach(w: WorldModel, ctx: PlayContext, choice: BreakChoice) -> bool
     return w.pos is not None and chebyshev(w.pos, choice.pos) <= supply_reach(ctx.knowledge, choice.supply.code)
 
 
-def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: str = "Break") -> StateOutcome:
+def break_toward(
+    w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: str = "Break", reach: Collection[Pos] = ()
+) -> StateOutcome:
     """Open ``choice``'s block: step toward it, then in reach arm its supply and ``Use`` it.
 
     Arming waits until the block is in reach. Only a decision's first intent
@@ -140,6 +144,9 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
 
     **Break** runs it, and so does **Heal** once the block its priced way
     crosses is in reach (A10, A89); Heal walks to it on its own ground.
+
+    ``reach``: the ground an op's walk keeps out of (``base.op_walk``, A128),
+    priced costly; a walk to the block that still enters it is no step.
     """
     m = ctx.memory
     _, plan_avoid, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)
@@ -164,13 +171,15 @@ def break_toward(w: WorldModel, ctx: PlayContext, choice: BreakChoice, state: st
     params = grid_params(
         ctx.policy,
         plan_avoid,
-        set(),
+        set(reach),
         m=m,
         w=w,
         knowledge=ctx.knowledge,
         break_goal=choice.pos,
     )
     path = cost_path(w, choice.pos, params, nav=nav_search(m, w, GOAL, choice.pos))
+    if enters_reach(w, path, reach):
+        return StateOutcome(None, f"cannot reach {choice.pos} clear of the hostiles seen", state=state)
     step = next_step(w, plan_avoid, path)
     if step is None:
         att = nav_stuck.active(m, w)

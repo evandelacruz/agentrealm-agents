@@ -16,9 +16,9 @@ from ..knowledge_base import knowledge_items
 from ..loot import Pickup, loot_score
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..pathing import bounded_step, grid_params, nav_search, plan_sets
+from ..pathing import bounded_step, grid_params, nav_search
 from ..world import Entity, Pos, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome, my_op
+from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .intents import set_position
 from .room import planned_take
 from .way import clear_the_way, open_the_way
@@ -116,7 +116,7 @@ def _nearest_supply(w: WorldModel, code: str, skip=lambda pos: False) -> Entity 
 def _step_toward(w: WorldModel, ctx: PlayContext, goal: Pos) -> Pos | None:
     """Next step of the kept loot path to ``goal``, bounded like any walk (``bounded_step``, A15)."""
     m, policy = ctx.memory, ctx.policy
-    _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+    plan_avoid, plan_costly, reach = op_walk(w, ctx)
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly)
@@ -124,4 +124,4 @@ def _step_toward(w: WorldModel, ctx: PlayContext, goal: Pos) -> Pos | None:
     def plan() -> list[Pos] | None:
         return cost_path(w, goal, params(), nav=nav_search(m, w, GOAL, goal))
 
-    return bounded_step(m, w, GOAL, goal, plan_avoid, plan, params=params)
+    return bounded_step(m, w, GOAL, goal, plan_avoid, plan, params=params, reach=reach)

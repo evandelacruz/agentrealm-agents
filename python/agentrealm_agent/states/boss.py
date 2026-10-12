@@ -214,11 +214,11 @@ class BossState(State):
             ):
                 return _walk_to_door(world, m, policy, door, plan_avoid, plan_costly, "retreat out")
             if not can_engage(world, boss, ctx):
-                return clear_the_way(world, ctx, boss.pos, "cannot reach boss", self.name, op)
+                return clear_the_way(world, ctx, boss.pos, "cannot reach boss", self.name, op, reach=())
             if not in_weapon_reach(world, boss, ctx.knowledge):
                 step = close_step(world, boss, plan_avoid)
                 if step is None:
-                    return clear_the_way(world, ctx, boss.pos, "cannot close on boss", self.name, op)
+                    return clear_the_way(world, ctx, boss.pos, "cannot close on boss", self.name, op, reach=())
                 m.path = []
                 return StateOutcome([set_position(step)], f"boss close on {boss.id}", reflex=True, state=self.name)
             queue = boss_attack_queue(world, m, boss, ctx.tick_hz)
@@ -239,7 +239,7 @@ class BossState(State):
             return StateOutcome(None, "entering boss room", wait=True, state=self.name)
         if not at_boss_door(world, door):
             out = _walk_to_door(world, m, policy, door, plan_avoid, plan_costly, "approach door")
-            return out if out.intents else clear_the_way(world, ctx, door, out.reason, self.name, op)
+            return out if out.intents else clear_the_way(world, ctx, door, out.reason, self.name, op, reach=())
         return StateOutcome([set_position(door)], "boss enter door", state=self.name)
 
 

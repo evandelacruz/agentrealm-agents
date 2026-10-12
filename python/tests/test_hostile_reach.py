@@ -30,6 +30,7 @@ from agentrealm_agent.executor.movement import step_landing
 from agentrealm_agent.hostile_ground import WALK_REACH_MARGIN
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_agent.pathing import guided_step
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
@@ -210,6 +211,60 @@ class NoWayRoundAsksTest(unittest.TestCase):
         self.assertEqual((out.state, out.intents), ("Travel", None), out.reason)
         [ask] = asks(c)
         self.assertIn("remembered hostile bogmaw 200, out of view, holding ground round 12,1", ask["blocked_by"])
+
+
+class EscalationPlansAreHeldTest(unittest.TestCase):
+    def test_a_level_the_ladder_climbs_to_this_decision_is_held_to_the_reach(self):
+        """At WALK with a failed window, the ladder climbs to CAUTIOUS this
+        decision: a CAUTIOUS plan into the reach is held at once, not a tick late."""
+        w = world(["." * 21] * 9, at=(1, 4))
+        m = Memory()
+        goal, target = "travel:point", (19, 4)
+        straight = [(x, 4) for x in range(2, 20)]
+        round_ = [(x, 0 if 3 <= x <= 17 else 1) for x in range(2, 19)] + [(19, 4)]
+        reach = {(x, y) for x in range(8, 13) for y in range(2, 7)}
+
+        def plan(att):
+            return round_ if att.level == nav_stuck.WALK else straight
+
+        att = nav_stuck.track(m, w, goal, target)
+        w.tick = nav_stuck.PROGRESS_TICK_LIMIT + 1  # the window failed
+        step = guided_step(m, w, goal, target, set(), plan, reach=reach)
+        self.assertIsNone(step)
+        self.assertEqual((att.level, m.path), (nav_stuck.WALK, []))
+
+
+class OpenTheWayKeepsOffTheReachTest(unittest.TestCase):
+    """A129's opener: a walk with no step opens the block on its way. Not a
+    block it would have to walk into a pack's reach to get to."""
+
+    def clearing(self, pack_beside_the_tree: bool) -> tuple[WorldModel, PlayContext]:
+        from tests.test_way_tries import DEST, GOAL, clearing, ctx, given_up
+
+        w, c = clearing(), ctx()
+        w.pos = (1, 10)
+        if pack_beside_the_tree:
+            pack(w, (8, 6), (9, 6), hit=STRONG)
+        given_up(c, w)
+        return w, c
+
+    def test_a_block_beside_a_pack_is_neither_walked_to_nor_opened(self):
+        from tests.test_way_tries import CHOP, play
+
+        w, c = self.clearing(pack_beside_the_tree=True)
+        reach = {p for h in w.entities for p in [(h.pos[0] + dx, h.pos[1] + dy) for dx in range(-BAR, BAR + 1) for dy in range(-BAR, BAR + 1)]}
+        outs = play(w, c, 3)
+        sent = [i for o in outs for i in o.intents or []]
+        self.assertNotIn(CHOP, sent)
+        self.assertFalse(any(i.get("verb") == "SetPosition" and (i["x"], i["y"]) in reach for i in sent), sent)
+        self.assertEqual(len(asks(c)), 1, [o.reason for o in outs])
+
+    def test_with_no_pack_the_block_is_opened(self):
+        from tests.test_way_tries import CHOP, play
+
+        w, c = self.clearing(pack_beside_the_tree=False)
+        sent = [i for o in play(w, c, 8) for i in o.intents or []]
+        self.assertIn(CHOP, sent)
 
 
 class PackIsWeighedWholeTest(unittest.TestCase):

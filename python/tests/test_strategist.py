@@ -26,6 +26,7 @@ from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.navigation.walk import Walk
 from agentrealm_agent.plan import OP_FIELDS, OP_STATE, validate_goal_op
 from agentrealm_agent.item_table import InventorySupply
+from agentrealm_agent.supplies import row as supply_row
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_hunting_zone
 from agentrealm_agent.travel.knowledge import entrance_key, sync_town
@@ -831,7 +832,14 @@ class PlannerViewTest(unittest.TestCase):
         self.assertTrue(ready["stage_1"]["met"])
         self.assertEqual(
             ready["stage_2"],
-            {"armor_worn": True, "better_weapon_armed": True, "health_at_bar": True, "met": True, "potions_at_bar": True},
+            {
+                "armor_worn": True,
+                "better_weapon_armed": True,
+                "health_at_bar": True,
+                "health_with_held_heals": 40,
+                "met": True,
+                "potions_at_bar": True,
+            },
         )
 
     def test_better_weapon_follows_the_one_weapon_rule(self):
@@ -891,8 +899,8 @@ class PlannerViewTest(unittest.TestCase):
 
     def test_readiness_shows_how_an_unmet_health_check_closes(self):
         # A124: health comes back only from a heal or a respawn, so to_close
-        # shows a carried potion's heal, else a potion to buy and its time,
-        # and a rest only where regen was measured on this world.
+        # shows a potion to buy and its time, and a rest only where regen was
+        # measured on this world. A132: held heals count, so no drink.
         from agentrealm_agent.healing import add_regen, save_regen_yes
 
         self.w.health, self.w.max_health, self.w.gems = 5, 10, 4
@@ -903,8 +911,6 @@ class PlannerViewTest(unittest.TestCase):
             health(gather_run={"gems_per_min": 2.0}),
             {"health_short": 3, "buy": {"code": "small_potion", "gems_short": 6, "minutes": 3.0}},
         )
-        self.w.held_supplies = [InventorySupply(1, "large_potion"), InventorySupply(2, "small_potion")]
-        self.assertEqual(health(), {"health_short": 3, "drink": {"code": "small_potion", "heals": 10}}, "the smallest heal that closes it")
         add_regen(self.kb, 0.01)
         self.assertNotIn("rest", health(), "a rate with regen not confirmed yes: no rest")
         save_regen_yes(self.kb)
@@ -917,6 +923,38 @@ class PlannerViewTest(unittest.TestCase):
         )
         self.w.health = 8
         self.assertNotIn("health_at_bar", self.readiness()["stage_2"].get("to_close", {}), "met: nothing to close")
+
+    def test_held_heals_count_toward_the_health_bar(self):
+        # A132: at 7/10 with potions held the health bar is met, so no potion
+        # is drunk only to meet it (which would break the potion bar).
+        self.w.health, self.w.max_health = 7, 10
+        stage_2 = self.readiness()["stage_2"]
+        self.assertFalse(stage_2["health_at_bar"])
+        self.assertEqual(stage_2["health_with_held_heals"], 7)
+        self.assertEqual(stage_2["to_close"]["health_at_bar"], {"health_short": 1})
+        self.w.held_supplies = [InventorySupply(i, "small_potion") for i in range(2)]
+        stage_2 = self.readiness()["stage_2"]
+        self.assertTrue(stage_2["health_at_bar"])
+        self.assertEqual(stage_2["health_with_held_heals"], 7 + 2 * 10, "health plus each held potion's heal")
+        self.assertNotIn("health_at_bar", stage_2.get("to_close", {}), "met: nothing to close")
+
+    def test_readiness_line_shows_health_with_held_heals(self):
+        # A132: stowed potions and held food count too, and the line shows the sum.
+        self.w.health, self.w.max_health = 3, 10
+        self.w.held_supplies = [InventorySupply(1, "apple")]
+        self.w.chest_supplies = [InventorySupply(2, "small_potion")]
+        heals = supply_row("apple").heal + supply_row("small_potion").heal
+        line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("readiness="))
+        self.assertIn(f'"health_with_held_heals": {3 + heals}', line)
+
+    def test_contract_says_a_potion_is_never_drunk_only_to_meet_a_bar(self):
+        # A132: the potion bar and the health bar trade through held heals.
+        prompt = system_prompt()
+        self.assertIn("A potion is for an actual health need: health at the survival floor (low_health), or a fight ahead that needs the health", prompt)
+        self.assertIn("Never drink one only to meet a readiness bar: health_at_bar already counts the potions and food held", prompt)
+        self.assertIn("health_at_bar counts held heals: it is met when health plus the heal of the potions and food held reaches the bar", prompt)
+        self.assertIn("the potion bar and the health bar trade against each other through held heals", prompt)
+        self.assertIn("drinking to meet one bar breaks the other", prompt)
 
     def test_contract_says_health_does_not_come_back_by_itself(self):
         # A124: the docs give no regeneration; the planner assumed health

@@ -2,8 +2,10 @@
 
 The Manual: each god's region hides one hand-placed oddity, a block of a type
 that does not belong where it stands (one rock in a garden, one bush in a
-wheat field, one tree in a maze). Broken with the capability it needs it drops
-a gem cache, and it comes back. More generally a block type alone where it
+wheat field, one tree in a maze). Broken with the capability it needs, which
+may be any of the five whatever its type, it drops a gem cache every time,
+unless the last cache still lies on its block, and it grows back (Manual §11
+Regrowth, drops, and returns). More generally a block type alone where it
 does not belong is often destroyable and worth checking. So the agent points
 the planner at such blocks; whether one is worth the walk and a tool is the
 planner's call, and the ``break_block`` op does the work (A87).
@@ -48,7 +50,7 @@ DOMINANT_SHARE = 0.5  # share of the seen neighbours one other type must hold
 SCAN_RADIUS = 15  # blocks judged this far round the character: the State map
 ODDITIES_SHOWN = 5  # State lists the nearest few
 ODDITIES_KEPT = 200  # remembered per world, the latest seen kept
-RETURN_SECONDS = 600  # a broken oddity returns in 10 minutes (Manual, gem sources)
+RETURN_SECONDS = 600  # a broken oddity grows back in 10 minutes in Olympuff (Manual §11 Regrowth)
 
 
 def is_odd(tiles: Any, pos: Pos) -> bool:

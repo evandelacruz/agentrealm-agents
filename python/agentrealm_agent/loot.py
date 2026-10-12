@@ -48,6 +48,8 @@ GEM_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
 GEM_PILE_STEPS = 8
 # A life's ground code once live play confirms it (A47). Until then the item
 # table's ``life_on_pickup`` rows, learned by ``learn_life_code``, stand in.
+# The Supplies reference names it, ``heart`` (class ``life``); reading it from
+# there changes what Detour and Pickup go for, so it is A156.
 LIFE_SUPPLY_CODES: frozenset[str] = frozenset()
 
 LIFE_SCORE = 10_000
@@ -94,8 +96,9 @@ def inventory_full(w: WorldModel) -> bool:
 def droppable_supplies(w: WorldModel) -> list[InventorySupply]:
     """Held supplies ``Drop`` may shed.
 
-    Stowed supplies (``inventory.chest``) are left out: whether ``Drop`` takes
-    one is not documented and not yet observed (GAME_NOTES open questions, A57).
+    Stowed supplies (``inventory.chest``) are left out; nothing is stowed there
+    today (Manual §11 Where your supplies are). ``Drop`` also takes an armed or
+    worn supply, which this does not offer yet (A154).
     """
     return [s for s in w.held_supplies if s.code not in NON_TRANSFERABLE and s.id not in w.undroppable]
 

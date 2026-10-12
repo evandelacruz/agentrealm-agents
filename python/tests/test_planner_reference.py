@@ -29,7 +29,7 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "refresh_planner_refe
 
 def prompt() -> list[dict]:
     return build_prompt(
-        triggers=[{"trigger": "clue", "text": "a lantern"}],
+        triggers=[{"trigger": "clue", "text": "a zorbleflute"}],
         w=WorldModel(character_id=1, map_id=1, pos=(2, 3), tick=5),
         plan=Plan([{"op": "wait", "seconds": 0, "why": "test"}], dict(PARAM_DEFAULTS)),
         directives=Directives(params=dict(PARAM_DEFAULTS)),
@@ -79,8 +79,8 @@ class PromptTest(unittest.TestCase):
         messages = prompt()
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
         self.assertNotIn("cache", messages[1])
-        self.assertIn("a lantern", messages[1]["content"])
-        self.assertNotIn("a lantern", messages[0]["content"])
+        self.assertIn("a zorbleflute", messages[1]["content"])
+        self.assertNotIn("a zorbleflute", messages[0]["content"])
         self.assertIn("tick=5", messages[1]["content"])
         # Only the dynamic part is charged against tokens_per_min.
         self.assertLess(estimate_tokens(messages), 2_000)
@@ -158,6 +158,16 @@ class RefreshScriptTest(unittest.TestCase):
         self.assertNotIn("Footer text", md)
         self.assertNotIn("console.log", md)
         self.assertEqual(links, {"/docs", "/docs/api", "/guides/state-machine"})
+
+    def test_a_paragraph_in_a_list_item_stays_on_its_marker_line(self):
+        html = (FIXTURES / "reference_page.html").read_text(encoding="utf-8")
+        _, md, _ = self.mod.page_markdown(html)
+        self.assertIn("\n- **Armed**: one slot.", md)
+        self.assertIn("\n- **Worn**: five slots.", md)
+        self.assertIn("\n1. Step first.", md)
+        self.assertNotRegex(md, r"(?m)^ *(-|\d+\.) *$")  # no bare marker line
+        self.assertNotRegex(md, r"(?m)^ *(-|\d+\.) {2,}\S")  # one space after a marker
+        self.assertIn("  1. first", md)  # a nested list keeps its indent
 
     def test_refresh_fails_when_a_core_section_is_missing(self):
         pages = [("/docs/manual", "Manual", "## Manual\n\n### 1. Contract on one screen\n\nx\n")]

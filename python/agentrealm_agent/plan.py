@@ -50,6 +50,7 @@ OP_STATE: dict[str, str | None] = {
     "use_item": "UseItem",
     "hunt": None,
     "enter_level": "Level",
+    "leave_level": "Level",
     "fight_boss": "Boss",
     "fight": "Fight",
     "avoid": None,
@@ -63,7 +64,7 @@ OP_STATE: dict[str, str | None] = {
 # planner needs and the states lack becomes a new op here (with its validator
 # and the state that runs it), never a state that starts itself.
 OP_FIELDS: dict[str, str] = {
-    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" takes x, y for a given one, else the nearest known; "entrance" takes x, y for a given one (a cell from State level_entrances), else walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and resolves nothing while no door has been seen here; an entrance is reached once he goes through it onto the map it leads to',
+    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" takes x, y for a given one, else the nearest known; "entrance" takes x, y for a given one (a cell from State level_entrances), else walks to the nearest door seen on this map known to be the entrance of level_target, else the nearest whose warp is not known yet, else the nearest door seen on this map, never one known to be a level above level_target, and resolves nothing while no door has been seen here; an entrance is reached once he goes through it onto the map it leads to',
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
     "say": "text, and exactly one of npc_id (an id from State nearby_npcs) or npc_type (an NPC type code; the nearest NPC of that type in sight)",
@@ -75,12 +76,17 @@ OP_FIELDS: dict[str, str] = {
     "gather_gems": "count (the gem total to reach; with no x, y Gather works the ground where the character is, the grass, gem piles and unexplored ground it knows priced alike by walk and yield), optional fight (true: gather on ground a known hostile holds, and walk through its reach, taking the fight; left out, Gather keeps clear of it), optional x, y (a block of the region to gather in: Gather goes only for grass, gem piles and unexplored ground there while it knows one there that a way reaches, walks toward the region while it knows no cell of it, and works the ground where the character is when no way reaches anything there; it lifts that region's barren mark. The region is committed: a reply that moves it keeps the old one unless that region is barren or poor, Gather went 30 s without getting nearer it or, once there, without a cut there taking effect, or a death, new map, hurt or hostile pack came up)",
     "equip": "optional code (arms or wears exactly that held item; else the best held gear is armed and worn). Dropped, not done, when the named item cannot be armed or worn",
     "use_item": "code (a held consumable a Use on yourself applies: a potion heals, a chest raises the pack's carry slots). Done once that item is used up; dropped when none is held or its Use was refused or did nothing. A bigger chest is applied as soon as one is held, without this op",
-    "enter_level": "x, y (the level door)",
+    "enter_level": "x, y (the level door). Refused for an entrance known to be a level above level_target (levels are taken in order)",
     "fight_boss": "x, y (the boss door), optional min_health, min_potions, armed, worn (list)",
     "fight": "exactly one of npc_id (an id from State nearby_npcs) or npc_type (the nearest NPC of that type in sight, kept as the op's one NPC once seen: one fight, not the whole type). Closes on it and swings until it is dead or out of sight, stepping off safe ground to swing (no attack is made from a safe zone) and back behind the swings; Retreat still pulls back at the health floor, and at the floor it never steps off safe ground (dropped then, so you make the call). Dropped for a boss (fight_boss), an NPC the directives forbid attacking, or one no swing or open step reaches",
     "wait": "seconds, why",
     "set_param": "name, value",
 }
+
+# Ops the agent puts on the stack itself, never offered to the planner nor
+# accepted from it: ``leave_level`` (A145) goes on top inside a level above
+# the target.
+INTERNAL_OPS = frozenset({"leave_level"})
 
 # Ops done once their target block changes from what it was when the op reached the top.
 BLOCK_CHANGE_OPS = frozenset({"use_block", "break_block"})
@@ -958,6 +964,9 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
                 and e.pos == here
                 for e in world.entities
             )
+    if name == "leave_level":
+        # Out once the map's level is read as none: an unread level is unknown, not out (A145).
+        return world.map_level == 0
     if name == "compose":
         return holds_whole(world.held_supplies, op["composes_into"])
     if name == "fight":

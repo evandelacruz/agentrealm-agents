@@ -424,6 +424,12 @@ class WorldModel:
         carried = [h.code for h in self.held_supplies] + list(self.worn_codes.values())
         return any(fords(code) for code in carried + [self.armed_code])
 
+    @property
+    def afloat(self) -> bool:
+        """A fording supply is armed or worn: water may be stepped on now,
+        with no ``Arm`` first (A133)."""
+        return fords(self.armed_code) or any(fords(code) for code in self.worn_codes.values())
+
     def walkable(self, p: Pos) -> bool:
         """``p`` on the current map is ground a walk may step on, water too
         while a fording supply is carried (A133)."""

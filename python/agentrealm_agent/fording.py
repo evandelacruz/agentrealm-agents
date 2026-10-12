@@ -23,9 +23,10 @@ So there is one rule, applied to every queue a state sends
   it arms something itself; an escape (``ESCAPES``: Flee, Retreat, Escape)
   is never slowed by it, and Fight puts it in its own attack queue, paced
   by the weapon's cooldown, since a fording supply swings nothing;
-- what a state wrote to memory for a loadout change the queue then cuts
-  (``LOADOUT_MEMORY``) is put back (``dispatch._run_states``), so memory
-  never describes an ``Arm`` that was not sent.
+- what a state wrote to memory is put back (``LOADOUT_MEMORY``,
+  ``dispatch._run_states``) only when the cut dropped a loadout change
+  (``dropped_loadout``), so memory never describes an ``Arm`` that was not
+  sent, nor forgets one that was.
 
 A ``would_strand`` refusal marks the cell the character stood on when it
 was refused as water (``note_would_strand``, ``Memory.water_cells``), so a
@@ -88,6 +89,14 @@ def restore_loadout_memory(m: Memory, saved: dict) -> None:
 def afloat(armed: str | None, worn: list[str]) -> bool:
     """A fording supply is armed or worn: water may be stepped on."""
     return fords(armed) or any(fords(code) for code in worn)
+
+
+def dropped_loadout(intents: list[dict], sent: list[dict]) -> bool:
+    """``ford_queue`` cut a loadout change of ``intents`` out of ``sent``:
+    the memory a state wrote for it must go (``LOADOUT_MEMORY``). A cut that
+    kept every loadout verb, a Step cut after a kept ``Arm`` say, keeps it."""
+    kept = {id(i) for i in sent}
+    return any(id(i) not in kept and i.get("verb") in LOADOUT_VERBS for i in intents)
 
 
 def stranded_unarmed(w: WorldModel) -> bool:

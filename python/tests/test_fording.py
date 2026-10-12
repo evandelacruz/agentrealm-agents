@@ -163,6 +163,50 @@ class OnWaterTest(unittest.TestCase):
         self.assertIsNone(m.break_pending)
 
 
+class CutMemoryTest(unittest.TestCase):
+    def test_a_kept_arm_before_a_cut_step_keeps_its_memory(self):
+        from agentrealm_agent.fording import dropped_loadout
+        from agentrealm_agent.states.base import StateOutcome
+
+        queue = [arm(SWORD), {"verb": "Step", "direction": "right"}]
+        self.assertFalse(dropped_loadout(queue, queue[:1]), "only the Step was cut")
+        self.assertTrue(dropped_loadout(queue, []), "the Arm was cut")
+
+        class ArmsThenSteps:
+            name = "ArmsThenSteps"
+
+            def guard(self, world, ctx):
+                return True
+
+            def done(self, world, ctx):
+                return False
+
+            def act(self, world, ctx):
+                ctx.memory.break_rearm = "raft"  # as Break does before its Arm
+                ctx.memory.break_pending = (1, (2, 0), "chop")
+                return StateOutcome(list(queue), "break", state=self.name)
+
+        w, m = lake(at=(1, 1), armed="raft"), Memory()
+        keep_the_arm = lambda w_, m_, q, kb=None, rearm=True: (q[:1], "Step cut")  # noqa: E731
+        with mock.patch("agentrealm_agent.states.dispatch.ford_queue", side_effect=keep_the_arm):
+            with mock.patch("agentrealm_agent.states.dispatch._states", return_value=(ArmsThenSteps(),)):
+                out = dispatch(w, ctx_for(m, None))
+        self.assertEqual(out.intents, [arm(SWORD)])
+        self.assertEqual(m.break_rearm, "raft", "the Arm went out: its re-arm is kept")
+        self.assertEqual(m.break_pending, (1, (2, 0), "chop"))
+
+
+class UnderAttackStepTest(unittest.TestCase):
+    def test_a_lone_step_under_attack_is_open_on_water_only_afloat(self):
+        from agentrealm_agent.executor.held_queue import _lands_open
+
+        held = lake(at=(1, 1), armed="bronze_sword")
+        self.assertTrue(held.walkable((2, 1)), "a walk plans over it with the raft held")
+        self.assertFalse(_lands_open(held, set(), (2, 1)), "but a lone Step has no Arm before it")
+        armed = lake(at=(1, 1), armed="raft")
+        self.assertTrue(_lands_open(armed, set(), (2, 1)))
+
+
 class AshoreTest(unittest.TestCase):
     def test_never_in_front_of_a_reflex_or_attack_queue(self):
         w = lake(at=(5, 1), armed="raft")
@@ -300,9 +344,20 @@ class FightAshoreTest(unittest.TestCase):
         self.assertNotIn("Arm", [i.get("verb") for i in out.intents or []], out.reason)
 
     def test_an_escape_is_never_slowed_by_the_rearm(self):
-        from agentrealm_agent.fording import ESCAPES
+        w = lake(at=(5, 1), armed="raft")
+        w.view.tiles[(5, 1)] = "lava"  # Escape steps off it
+        out = dispatch(w, ctx_for(Memory(), None))
+        self.assertEqual(out.state, "Escape", out.reason)
+        self.assertNotEqual(out.intents[0].get("verb"), "Arm", out.intents)
 
-        self.assertEqual(set(ESCAPES), {"Flee", "Retreat", "Escape"})
+    def test_a_reflex_that_is_no_escape_gets_the_rearm(self):
+        from agentrealm_agent.world import Entity
+
+        w = lake(at=(5, 1), armed="raft")
+        w.entities = [Entity("supply", 77, (6, 1), code="small_potion")]
+        out = dispatch(w, ctx_for(Memory(), None))
+        self.assertEqual(out.state, "Pickup", out.reason)
+        self.assertEqual(out.intents[0], arm(SWORD), out.intents)
 
 
 class CrossingKeepsOffReachTest(unittest.TestCase):

@@ -590,6 +590,7 @@ HEAD_PROGRESS = (
     "wait_started_tick",
     "stalled_since_tick",
     "top_since_tick",
+    "top_map_id",
     "block_before",
     "held_before",
     "paid_from",
@@ -616,6 +617,7 @@ class Plan:
     wait_started_tick: int | None = None
     stalled_since_tick: int | None = None  # first tick the current op found no path
     top_since_tick: int | None = None  # tick the head op reached the top: its own attempts are the ones since (A129)
+    top_map_id: int | None = None  # map the character was on when the head op reached the top: an op that names no map means it (A144)
     acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
@@ -637,6 +639,7 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.top_since_tick,
+            self.top_map_id,
             self.block_before,
             self.held_before,
             self.paid_from,
@@ -656,6 +659,7 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.top_since_tick,
+            self.top_map_id,
             self.block_before,
             self.held_before,
             self.paid_from,
@@ -703,7 +707,7 @@ class Plan:
                     self.demote_current(f"still stalled: {stall.why}", memory)
                     continue
                 if self.top_since_tick is None:
-                    self.top_since_tick = world.tick
+                    self.top_since_tick, self.top_map_id = world.tick, world.map_id
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
                 return
@@ -931,7 +935,7 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         # A bounded area counts as explored only once we have seen into it.
         center = (op["x"], op["y"])
         return center in world.view.tiles or chebyshev(world.pos, center) <= op["radius"]
-    if went_through(op, world, plan.top_since_tick) and name != "enter_level":
+    if went_through(op, world, plan.top_since_tick, plan.top_map_id) and name != "enter_level":
         # Through the op's door and on the map it leads to (A144); Level
         # walks the level it entered.
         return True

@@ -151,7 +151,7 @@ class LevelState(State):
         op = my_op(ctx, self.name)
         assert op is not None and ctx.plan is not None
         if not inside_level(world):
-            if went_through(op, world, ctx.plan.top_since_tick):
+            if went_through(op, world, ctx.plan.top_since_tick, ctx.plan.top_map_id):
                 # Through the entrance onto a map that is no level (A144).
                 ctx.plan.finish_current(f"entrance led to map {world.map_id}, no level", memory=m)
                 return StateOutcome(None, "level entrance led to no level", state=self.name)

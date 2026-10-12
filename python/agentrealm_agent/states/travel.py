@@ -242,10 +242,12 @@ def route_step(
 ) -> Pos | None:
     """One step toward ``dest_map:dest`` under ``goal``, across maps through
     known door warps (A26), with stuck escalation on this map's leg (A15).
+    With no known warp to another map the leg heads for the way off this map
+    (``navigation.walk_toward``, A144).
 
     None when no step can be planned, or the only way crosses ``reach``, the
-    ground the hostiles seen hold (A128). With no known route to another map
-    the goal's path is cleared and nothing backs off.
+    ground the hostiles seen hold (A128). With neither a known route nor a
+    way off this map left, the goal's path is cleared and nothing backs off.
     """
     plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest_map, dest, goal)
     leg = _map_leg(m, w, goal, dest_map, dest, plan_avoid, plan)
@@ -304,7 +306,7 @@ def _route_plan(
         )
         if params.fog_cost not in routes:
             nav = nav_search(m, w, goal, dest) if dest_map == w.map_id else None
-            routes[params.fog_cost] = walk_toward(w, knowledge, dest_map, dest, params, nav=nav)
+            routes[params.fog_cost] = walk_toward(w, knowledge, dest_map, dest, params, nav=nav, stuck=m.nav_stuck)
         return routes[params.fog_cost]
 
     return plan

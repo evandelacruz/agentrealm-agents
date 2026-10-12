@@ -3,7 +3,9 @@
 Going through the op's door onto the map it leads to finishes the op, with
 no ``no_way_on`` asked from the new map. Going through some other door keeps
 the op, and the walk routes back toward the op's map by the way off the map
-it landed on (``navigation.walk_toward``).
+it landed on (``navigation.walk_toward``), a door not yet gone through or
+unexplored ground the stuck ladder has not given up, and asks once none is
+left.
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ from agentrealm_agent.brain import Memory
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_base import KnowledgeBase
 from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
+from agentrealm_agent.navigation import CostGridParams, way_off_map
+from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.passage import entrance_of, went_through
 from agentrealm_agent.plan import Plan, goal_done
 from agentrealm_agent.states import PlayContext, dispatch
@@ -35,9 +39,9 @@ def _map(rows: list[str]) -> MapView:
     return view
 
 
-def _plan(op: dict, top_since: int = 0) -> Plan:
+def _plan(op: dict, top_since: int = 0, top_map: int = 1) -> Plan:
     plan = Plan([dict(op)], dict(PARAM_DEFAULTS))
-    plan.top_since_tick = top_since
+    plan.top_since_tick, plan.top_map_id = top_since, top_map
     return plan
 
 
@@ -62,7 +66,7 @@ class WentThroughTest(unittest.TestCase):
     def test_a_passage_before_the_op_reached_the_top_does_not(self):
         w = self._world(Passage(1, DOOR, 2, tick=4))
         self.assertFalse(goal_done(ENTRANCE, w, _plan(ENTRANCE, top_since=5)))
-        self.assertFalse(went_through(ENTRANCE, w, None), "an op not yet on top")
+        self.assertFalse(went_through(ENTRANCE, w, None, 1), "an op not yet on top")
 
     def test_off_the_map_the_door_led_to_does_not(self):
         w = self._world(Passage(1, DOOR, 2, tick=10), map_id=3)
@@ -80,6 +84,13 @@ class WentThroughTest(unittest.TestCase):
         op = {"op": "travel", "to": "entrance", "x": 0, "y": 0}
         w = self._world(Passage(1, (6, 2), 2, tick=10))
         self.assertTrue(goal_done(op, w, _plan(op, top_since=5)))
+
+    def test_an_op_naming_no_map_means_the_map_it_reached_the_top_on(self):
+        op = {"op": "travel", "to": "point", "x": 4, "y": 0}
+        w = self._world(Passage(1, DOOR, 2, tick=10))
+        self.assertTrue(goal_done(op, w, _plan(op, top_since=5, top_map=1)))
+        w = self._world(Passage(3, DOOR, 2, tick=10))
+        self.assertFalse(goal_done(op, w, _plan(op, top_since=5, top_map=1)), "the same cell on another map")
 
     def test_a_point_on_a_door_is_done_through_it(self):
         op = {"op": "travel", "to": "point", "x": 4, "y": 0, "map_id": 1}
@@ -118,6 +129,41 @@ class TravelThroughTheEntranceTest(unittest.TestCase):
         self.assertEqual(out.state, "Travel", out.reason)
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 0, "y": 0}], out.reason)
         self.assertIsNone(m.no_way_on)
+
+
+class WayOffMapTest(unittest.TestCase):
+    def _world(self) -> WorldModel:
+        w = WorldModel(character_id=1, map_id=2, pos=(2, 0), perception=3)
+        w.maps[2] = _map(["D....D", "......"])
+        w.terrain_center, w.terrain_map = w.pos, 2
+        return w
+
+    def test_a_door_not_yet_gone_through_first(self):
+        kb = KnowledgeBase.empty("sandbox")
+        record_warp(kb, 2, (0, 0), "framed_door", 1, (6, 0))
+        self.assertEqual(way_off_map(self._world(), kb, CostGridParams())[-1], (5, 0))
+
+    def test_a_door_the_ladder_gave_up_is_left_out(self):
+        kb = KnowledgeBase.empty("sandbox")
+        w, m = self._world(), Memory()
+        nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("level:door", 2, (5, 0)), "level:door", w.tick)
+        nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("level:door", 2, (0, 0)), "level:door", w.tick)
+        path = way_off_map(w, kb, CostGridParams(), m.nav_stuck)
+        self.assertNotIn(path[-1] if path else None, {(0, 0), (5, 0)})
+        self.assertIn(path[-1], w.frontier(), "unexplored ground instead")
+
+    def test_given_up_frontier_is_left_out_and_then_there_is_no_way(self):
+        kb = KnowledgeBase.empty("sandbox")
+        record_warp(kb, 2, (0, 0), "framed_door", 1, (6, 0))
+        record_warp(kb, 2, (5, 0), "framed_door", 1, (6, 0))
+        w, m = self._world(), Memory()
+        for p in w.frontier():
+            nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("explore", 2, p), "explore", w.tick)
+        self.assertIsNone(way_off_map(w, kb, CostGridParams(), m.nav_stuck))
+
+    def test_no_door_is_taken_without_a_knowledge_base(self):
+        path = way_off_map(self._world(), None, CostGridParams())
+        self.assertNotIn(path[-1] if path else None, {(0, 0), (5, 0)})
 
 
 class LevelThroughTheEntranceTest(unittest.TestCase):

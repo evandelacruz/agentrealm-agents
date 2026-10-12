@@ -10,4 +10,4 @@
 
 **Will not.** Fight, trade, or read. Use the planner.
 
-**Lineage.** A52. The file people copy and grow before they touch Gary or Lorraine. Stays small on purpose: if a change makes him harder to read, it does not go in. Until Lorraine's goal tree replaces it (A139–A141), her `run` calls his `starter_agent.run`, so a change to his loop changes how she plays too; that tie is temporary.
+**Lineage.** A52. The file people copy and grow before they touch Gary or Lorraine. Stays small on purpose: if a change makes him harder to read, it does not go in. Until Lorraine's goal tree drives play (A140–A141), her `run` calls his `starter_agent.run`, so a change to his loop changes how she plays too; that tie is temporary.

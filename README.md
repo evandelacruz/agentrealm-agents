@@ -83,7 +83,7 @@ Three agents share this repo and its plumbing. All three run from `python/`, as 
 | Agent | Run | What it is |
 |---|---|---|
 | **Grinding Gary** ([`gary`](docs/agents/gary.md)) | `python3 -m agentrealm_agent run …` | The full agent: AI planner over a state machine, grown through the A67 free-play runs. |
-| **Ladder Lorraine** ([`lorraine`](docs/agents/lorraine.md)) | `python3 -m ladder run …` (M14, in progress) | A goal tree with the situational calls handed to the planner. Plays to levels cleared per hour. Until her tree lands (A139–A141) she plays Stan's loop. |
+| **Ladder Lorraine** ([`lorraine`](docs/agents/lorraine.md)) | `python3 -m ladder run …` (M14, in progress) | A goal tree with the situational calls handed to the planner. Plays to levels cleared per hour. Her tree and its readiness are in (A139; `python3 -m ladder status …` prints them from the self and world reads, never a round trip, but do not run it beside a live run on the same character: its reads spend that character's call budget); until the planner question and executor land (A140–A141) she plays Stan's loop. |
 | **Starter Stan** ([`stan`](docs/agents/stan.md)) | `python3 starter_agent.py run …` | One file that syncs, flees and explores. Copy this one first. |
 
 ## Make it yours

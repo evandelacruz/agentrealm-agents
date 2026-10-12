@@ -501,6 +501,7 @@ class WorldModel:
         self.placed = bool(s.get("placed", True)) or (self.woke and self.alive and not self.asleep)
         # Absent while nothing, or no weapon, is armed (B100).
         self.attack_range = _opt_int(s.get("attack_range"))
+        self._apply_vitals(s, complete=False)  # the self read serves health
         self.self_read = True
 
     def _set_asleep(self, asleep: bool) -> None:

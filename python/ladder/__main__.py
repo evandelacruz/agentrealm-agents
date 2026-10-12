@@ -1,8 +1,9 @@
 """python -m ladder create|run|status ...: the same commands and profile files as Gary.
 
-The parser and ``status`` mirror Gary's ``agentrealm_agent.__main__`` until A149
-moves them into the shared ADK; his module loads his runner and planner, so she
-cannot import it.
+The parser and ``status``'s self line mirror Gary's ``agentrealm_agent.__main__``
+until A149 moves them into the shared ADK; his module loads his runner and
+planner, so she cannot import it. ``status`` then prints her goal tree's
+readiness (A139, ``ladder.goals.dump``).
 """
 
 from __future__ import annotations
@@ -20,8 +21,14 @@ from agentrealm_agent.character_select import (
     resolve_character_id,
 )
 from agentrealm_agent.client import ApiError, Client
+from agentrealm_agent.knowledge_base import KnowledgeBaseError
+from agentrealm_agent.knowledge_base import load as load_knowledge
+from agentrealm_agent.knowledge_base.hostiles import load_hostiles
+from agentrealm_agent.world import WorldModel
 
-# Temporary, and the one tie to Stan: until her goal tree replaces it (A139–A141)
+from ladder.goals import dump
+
+# Temporary, and the one tie to Stan: until her goal tree drives play (A140–A141)
 # `run` is Stan's loop (sync, flee, explore). Run from `python/`, where
 # `starter_agent.py` is importable.
 import starter_agent
@@ -60,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     create_p.add_argument("--avatar", default=DEFAULT_CREATE_AVATAR, help="outfit code")
     create_p.add_argument("--model-agent", default=DEFAULT_CREATE_MODEL, help="model agent code")
     sub.add_parser("run", parents=[_profile_parser()], help="drive one character until interrupted")
-    sub.add_parser("status", parents=[_profile_parser()], help="print the character's self and position")
+    sub.add_parser("status", parents=[_profile_parser()], help="print the character's self and her goal tree's readiness")
     args = ap.parse_args(argv)
 
     try:
@@ -85,12 +92,32 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
+    """The self line, then the goal tree's readiness (A139), from two reads
+    that change nothing (self and world) and the world's knowledge base, by
+    the world model's own sync. A status never makes a round trip: that would
+    take the events a live run on the character is owed. So what only a
+    round trip serves (what is carried, gems, levels cleared) reads as none,
+    and the turn's goal, which rests on it, is not shown."""
     try:
         s = client.self_(cid)
         print(f"{cfg.profile} ({cid}): lives={s['lives']} alive={s['alive']} placed={s['placed']}")
+        body = client.world(cid)
     except ApiError as e:
         print(f"{cfg.profile} ({cid}): {e}", file=sys.stderr)
         return 1
+    try:
+        kb = load_knowledge(cfg.world)
+    except (KnowledgeBaseError, OSError) as e:
+        print(f"{cfg.profile} ({cid}): knowledge base: {e}", file=sys.stderr)
+        return 1
+    w = WorldModel(character_id=cid)
+    w.apply_self(s)
+    if isinstance(body.get("level_count"), int):
+        w.level_count = body["level_count"]
+    load_hostiles(kb, w)
+    print(f"health={w.health}/{w.max_health}; carried, gems and levels cleared are read only in play (none here)")
+    for line in dump(w, kb, goal=False):
+        print(line)
     return 0
 
 

@@ -29,7 +29,7 @@ from .healing import supply_matches
 from .knowledge_base import KnowledgeBase
 from .supplies import break_capabilities, fords
 from .travel.knowledge import entrance_from_kb, entrance_key
-from .world import Pos, WorldModel
+from .world import Entity, Pos, WorldModel
 
 NEEDS = "needs"  # a look's (A30)
 CLUE_NEEDS = "clue_needs"  # the planner's, from a clue
@@ -65,9 +65,14 @@ def unmet_need(w: WorldModel, kb: KnowledgeBase | None, map_id: int | None, pos:
     return next((n for n in needs_of(kb, map_id, pos) if not any(meets(c, n) for c in codes)), None)
 
 
+def lying_in_sight(w: WorldModel, need: str) -> Entity | None:
+    """A supply in sight, not for sale, that meets ``need``, else None."""
+    return next((e for e in w.entities if e.kind == "supply" and e.gem_price is None and meets(e.code, need)), None)
+
+
 def in_sight(w: WorldModel, need: str) -> bool:
     """A supply that meets ``need`` lies in sight, not for sale."""
-    return any(e.kind == "supply" and e.gem_price is None and meets(e.code, need) for e in w.entities)
+    return lying_in_sight(w, need) is not None
 
 
 def why_refused(need: str, map_id: int, pos: Pos) -> str:

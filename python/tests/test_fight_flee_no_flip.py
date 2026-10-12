@@ -90,6 +90,22 @@ class StandingHostileTest(unittest.TestCase):
             w.pos = step
         self.assertLessEqual(chebyshev(w.pos, npc.pos), 1)
 
+    def test_a_walk_in_crosses_water_with_a_fording_supply_held(self):
+        """The walk in is every walk's ground: water too while a raft is held (A133)."""
+        from agentrealm_agent.item_table import InventorySupply
+
+        w = world(at=(5, 10))
+        for y in range(30):
+            for x in (7, 8, 9):
+                w.view.tiles[(x, y)] = "water"
+        npc = biter(at=(11, 10))
+        w.entities = [npc]
+        self.assertIsNone(close_step(w, npc, set()), "no way over water without one")
+        w.held_supplies = [InventorySupply(7, "raft")]
+        step = close_step(w, npc, set())
+        self.assertIsNotNone(step, "the raft makes the water ground")
+        self.assertEqual(step[0], 6, "toward the water")
+
     def test_it_is_closed_on_and_killed_with_no_flee_between(self):
         w, c = world(), ctx()
         npc = biter()

@@ -177,6 +177,16 @@ class GiveUp:
     reasons: tuple[str, ...] = ()  # why each level of the walk given up failed, in order
 
 
+@dataclass(frozen=True)
+class Bench:
+    """A state the flip guard took off the pick (``oscillation``, A136):
+    until ``until``, while the engagement's decision is still ``fight``
+    (None: while there is still no engagement)."""
+
+    until: int
+    fight: bool | None = None
+
+
 @dataclass
 class NavStuckMemory:
     attempts: dict[str, NavAttempt] = field(default_factory=dict)
@@ -194,6 +204,11 @@ class NavStuckMemory:
     cells_map: int | None = None
     oscillations: list[dict] = field(default_factory=list)
     escape_from: set[Pos] = field(default_factory=set)
+    # The flip guard (A136): the tick each of ``recent_cells`` was stood on,
+    # the states benched by a flip caught, and the last flip (its states, tick).
+    recent_ticks: list[int] = field(default_factory=list)
+    benched: dict[str, Bench] = field(default_factory=dict)
+    last_flip: tuple[tuple[str, ...], int] | None = None
     decision: int = 0  # counts decisions (dispatch), so a short walk knows it was pursued on the last one
 
 

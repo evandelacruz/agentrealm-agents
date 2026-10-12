@@ -8,6 +8,7 @@ from ..executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_
 from ..healing import potion_count
 from ..memory import BossFight, Memory
 from ..navigation import cost_path
+from ..reach import weapon_reach
 from ..pathing import grid_params, guided_step, nav_search, next_step, plan_sets
 from ..plan import GoalOp, Plan
 from ..engagement import fights
@@ -216,7 +217,7 @@ class BossState(State):
             if not can_engage(world, boss, ctx):
                 return clear_the_way(world, ctx, boss.pos, "cannot reach boss", self.name, op, reach=())
             if not in_weapon_reach(world, boss, ctx.knowledge):
-                step = close_step(world, boss, plan_avoid)
+                step = close_step(world, boss, plan_avoid, weapon_reach(world, ctx.knowledge))
                 if step is None:
                     return clear_the_way(world, ctx, boss.pos, "cannot close on boss", self.name, op, reach=())
                 m.path = []

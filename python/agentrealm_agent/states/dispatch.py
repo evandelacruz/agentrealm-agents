@@ -338,6 +338,8 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
     """
     m = ctx.memory
     for state in _states(ctx):
+        if oscillation.benched(m, world, state.name):
+            continue  # it lost a flip with no walk (A136)
         active = state.name == m.state and not state.done(world, ctx)
         if not (active or state.guard(world, ctx)):
             continue

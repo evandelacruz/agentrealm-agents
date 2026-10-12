@@ -329,10 +329,12 @@ def leg_toward(
 ) -> Leg | None:
     """What an attempt toward ``dest`` tracks on this map (A15).
 
-    On this map, ``dest`` itself. On another map, the door that ends ``path``
-    (the route's first leg); with no route found, the door this destination's
-    active attempt was already walking to, so a blocked leg keeps escalating.
-    None when no route was ever known: that yields without a backoff.
+    On this map, ``dest`` itself. On another map, the cell that ends ``path``
+    (the route's first leg: a door with a known warp, or the way off this map,
+    a door not yet gone through or unexplored ground, A144); with no path, the
+    cell this destination's active attempt was already walking to, so a
+    blocked leg keeps escalating. None when there was never a path: that
+    yields without a backoff, and the executor asks.
     """
     if dest_map == w.map_id:
         return Leg(dest)

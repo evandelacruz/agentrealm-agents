@@ -29,6 +29,7 @@ keeps the walk, and the safe default never stands in for it
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Collection
 
 from ..break_memory import attempts_at, breakable_block, choice_at, given_up_blocks, straight_route
 from ..navigation import cost_path
@@ -39,7 +40,7 @@ from ..pathing import grid_params, plan_sets
 from ..plan import GoalOp
 from ..world import Pos, WorldModel
 from .ask import ask_key, ask_the_planner, op_key, what_blocks
-from .base import PlayContext, StateOutcome
+from .base import PlayContext, StateOutcome, op_walk
 from .break_state import break_toward
 
 
@@ -76,7 +77,13 @@ def break_due(w: WorldModel, m: Memory, owner: str | None) -> bool:
 
 
 def open_the_way(
-    w: WorldModel, ctx: PlayContext, at: Pos, state: str, *, no_step: bool = False
+    w: WorldModel,
+    ctx: PlayContext,
+    at: Pos,
+    state: str,
+    *,
+    no_step: bool = False,
+    reach: Collection[Pos] | None = None,
 ) -> StateOutcome | None:
     """A move that opens the way to ``at`` when no way round reaches it, else None.
 
@@ -92,6 +99,11 @@ def open_the_way(
     could not take: only a way round over known ground counts, and when the
     cheapest way still goes round through unexplored ground, the block is
     the first one on the straight route a held item opens (A129).
+
+    ``reach`` is the ground the op's walk keeps out of (``base.op_walk``,
+    A128; worked out here when None): the block is walked to only on a way
+    clear of it (``break_toward``), so a block beside a pack is not opened
+    and the executor asks instead.
     """
     if w.pos is None or w.map_id is None or w.pos == at:
         return None
@@ -113,7 +125,7 @@ def open_the_way(
     choice = choice_at(w, ctx.knowledge, cut, given_up_blocks(m.nav_stuck, w.map_id, w.tick)) if cut else None
     if choice is None:
         return None
-    out = break_toward(w, ctx, choice, state)
+    out = break_toward(w, ctx, choice, state, op_walk(w, ctx)[2] if reach is None else reach)
     if not out.intents:
         return None
     opened = (w.map_id, at, choice.pos)
@@ -140,7 +152,14 @@ def _way_cells(start: Pos, at: Pos, path: list[Pos]) -> list[Pos]:
 
 
 def clear_the_way(
-    w: WorldModel, ctx: PlayContext, at: Pos | None, why: str, state: str, op: GoalOp | None
+    w: WorldModel,
+    ctx: PlayContext,
+    at: Pos | None,
+    why: str,
+    state: str,
+    op: GoalOp | None,
+    *,
+    reach: Collection[Pos] | None = None,
 ) -> StateOutcome:
     """The executor's walk to ``at`` has no step: open the way, else ask and hold.
 
@@ -149,7 +168,8 @@ def clear_the_way(
     ask's ``tried`` leads with how each level of its ladder failed
     (``walk_given_up``, A125). At stuck step 2 it sends nothing and holds
     nothing, so Break, below, opens the nominated block this decision; the
-    safe default holds meanwhile (``explore.HOLD_THEIR_WALK``).
+    safe default holds meanwhile (``explore.HOLD_THEIR_WALK``). A block is
+    opened only on a way clear of ``reach`` (``open_the_way``, A128).
     """
     m = ctx.memory
     if break_due(w, m, state):
@@ -157,7 +177,7 @@ def clear_the_way(
         return StateOutcome(None, why, state=state)
     key = _shut_key(w, ctx, state, op, at)
     if at is not None and m.way_shut != key:
-        if (out := open_the_way(w, ctx, at, state, no_step=True)) is not None:
+        if (out := open_the_way(w, ctx, at, state, no_step=True, reach=reach)) is not None:
             m.way_shut = None
             out.reason = f"{why}: {out.reason}"
             return out

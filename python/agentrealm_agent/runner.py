@@ -14,9 +14,11 @@ from .brain import (
     Decision,
     Memory,
     choose_call,
+    cornered_decision,
     decide,
     path_blockers,
     path_threats,
+    play_context,
     remaining_path_stale,
     remaining_walk_cells,
     walkable_prefix,
@@ -92,7 +94,7 @@ from .executor import (
     trim_to_horizon,
     wait,
 )
-from .executor.held_queue import held_queue_matches, possible_positions, unconfirmed_send
+from .executor.held_queue import STEP_DOUBT, held_queue_matches, open_step, possible_positions, unconfirmed_send
 from .acceptance import AcceptanceHooks
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
@@ -132,7 +134,7 @@ from .park import (
     no_path_left,
     parked,
 )
-from .survival import retreat_goal
+from .survival import flee_from, recently_attacked, retreat_goal
 from .memory import queue_signal
 from .strategist import Strategist, same_ops
 from .trace import Trace, fmt_intent, oscillation_detail, tick_detail
@@ -321,21 +323,19 @@ class Runner:
         )
 
     def _decide(self, w, m, *, plan: Plan | None = None, probe: bool = False):
-        if m.parking:
-            plan = None  # the run is over: no op runs while parking (A66)
-        return decide(
-            w,
-            m,
-            self.cfg.policy,
-            self.rng,
-            never_attack=self.directives.directives.never_attack,
-            params=self.plan.params,  # directives params, tightened by the strategist or a set_param op (A34, A35)
-            knowledge=self.knowledge,
-            directives=self.directives.directives,
-            plan=plan,
-            gem_cuts=self.gem_cuts,
-            probe=probe,
-        )
+        return decide(w, m, self.cfg.policy, self.rng, **self._play_args(plan), probe=probe)
+
+    def _play_args(self, plan: Plan | None) -> dict:
+        """What every decision runs with (``brain.play_context``): ``_decide``'s
+        and the cornered move's under attack (A128) alike."""
+        return {
+            "never_attack": self.directives.directives.never_attack,
+            "params": self.plan.params,  # directives params, tightened by the strategist or a set_param op (A34, A35)
+            "knowledge": self.knowledge,
+            "directives": self.directives.directives,
+            "plan": None if self.mem.parking else plan,  # the run is over: no op runs while parking (A66)
+            "gem_cuts": self.gem_cuts,
+        }
 
     def log(self, call: str, detail: str, record: dict) -> None:
         """One line to the console and the trace (``trace.Trace``)."""
@@ -646,6 +646,9 @@ class Runner:
                 # Something must replace the held queue, or it keeps running.
                 intents = self._apply_never_attack(self.intents_for(d))
                 doubt = unconfirmed_send(w, m, self.cfg.policy, self.knowledge, intents, starts)
+                if doubt == STEP_DOUBT and recently_attacked(w):
+                    # Under attack a stop only takes free hits (A128).
+                    d, intents, doubt = self.move_under_attack(d, intents, starts)
                 if doubt is not None:
                     # Stop where we are; position is re-read before the next plan.
                     self.clear_held_tracking()
@@ -810,6 +813,30 @@ class Runner:
             lambda: self._decide(w, m, plan=self.plan, probe=True),
             lambda d: d.reflex and not held_queue_matches(w, m, d.intent, d.submit_queue),
         )
+
+    def move_under_attack(
+        self, d: Decision, intents: list[dict], starts: list[Pos]
+    ) -> tuple[Decision, list[dict] | None, str | None]:
+        """A reflex's walk under attack, not sound from every position the
+        held queue may have left us on (A128): the best Step that is
+        (``held_queue.open_step``), else Flee's cornered move
+        (``brain.cornered_decision``: a due heal, a swing in reach, or the
+        planner's call). The decision, its intents, and the doubt left: only
+        when neither can go does the character stop as before."""
+        w, m, policy = self.world, self.mem, self.cfg.policy
+        hostiles = flee_from(w, policy)
+        one = open_step(w, m, policy, self.knowledge, intents, starts, [e.pos for e in hostiles])
+        if one is not None:
+            return Decision(one[0], f"{d.reason}: under attack, best open step", d.reflex, state=d.state), one, None
+        if not hostiles:
+            return d, intents, STEP_DOUBT
+        c = cornered_decision(w, play_context(m, policy, self.rng, **self._play_args(self.plan)), hostiles)
+        moves = self._apply_never_attack(self.intents_for(c))
+        doubt = unconfirmed_send(w, m, policy, self.knowledge, moves, starts) if moves else STEP_DOUBT
+        if doubt is not None:
+            return d, intents, doubt
+        m.state = c.state
+        return Decision(c.intent, f"{d.reason}: no open step, {c.reason}", True, c.submit_queue, c.state), moves, None
 
     def note_held_path_stale(self) -> None:
         """Mark the held walk queue for replacement when its path went wrong.

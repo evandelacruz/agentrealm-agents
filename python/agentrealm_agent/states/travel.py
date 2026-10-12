@@ -11,9 +11,10 @@ map's frontier while spare windows read zones in widening rings around the
 character (``zone_discovery.hunt_probe``), until a read finds a hunting cell
 it may enter, the frontier runs out, or ``HUNT_SEARCH_SECONDS`` pass.
 
-Travel keeps its walk (A120): the safe default never stands in for it. With
-no step toward the destination it clears the way or asks the planner and
-holds (``way.clear_the_way``); at stuck step 2 Break, below it, opens the
+Travel keeps its walk (A120): the safe default never stands in for it. The
+walk routes round the reach of hostiles it has seen, and never walks through
+it (A128, ``base.op_walk``). With no step toward the destination it
+clears the way or asks the planner and holds (``way.clear_the_way``); at stuck step 2 Break, below it, opens the
 block the walk's escalation nominated (A15). The survival reflexes act above
 it as always. Its walk must make net progress (A125): each level of its
 ladder must beat the walk's best plan measure (``NavAttempt.net_best``), and
@@ -36,7 +37,7 @@ from .. import targets as targets_mod
 from ..navigation.rejection import locked_doors_from_kb
 from ..travel.resolve import ResolvedDestination, at_destination, given_up_travel, picks_nearest, resolve_travel, still_candidate
 from ..world import DOORS, Pos, WorldModel
-from .base import PlayContext, State, StateOutcome, my_op
+from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .explore import explore_outcome
 from .intents import set_position
 from .way import clear_the_way
@@ -110,8 +111,8 @@ def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDesti
         if m.goal.startswith("travel:"):
             m.path, m.goal = [], ""
         m.goal_op = dict(op)
-    _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
-    out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly, state)
+    plan_avoid, plan_costly, reach = op_walk(world, ctx)
+    out = _travel_step(world, m, policy, dest, ctx.knowledge, plan_avoid, plan_costly, state, reach)
     if out is not None:
         return out
     goal = f"travel:{dest.label}"
@@ -128,7 +129,7 @@ def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDesti
         if first not in world.view.tiles and nav_walk.hold_for_fog(m.walks.get(goal), world):
             return StateOutcome(None, f"{goal}: next cell unseen, waiting", state=state, wait=True, progress=False)
     why = f"{goal} {dest.pos[0]},{dest.pos[1]}: no step toward it"
-    return clear_the_way(world, ctx, dest.pos if dest.map_id == world.map_id else None, why, state, op)
+    return clear_the_way(world, ctx, dest.pos if dest.map_id == world.map_id else None, why, state, op, reach=reach)
 
 
 def search_hunting_ground(world: WorldModel, ctx: PlayContext, op: GoalOp) -> StateOutcome:
@@ -207,15 +208,16 @@ def _travel_step(
     plan_avoid: set[Pos],
     plan_costly: set[Pos],
     state: str,
+    reach: set[Pos],
 ) -> StateOutcome | None:
     """One step along the route to ``dest``, across maps through known doors (A26).
-    None when no step can be planned.
+    None when no step can be planned, or the only way crosses ``reach`` (A128).
 
     Stuck detection and escalation drive each map leg, including the first leg
     toward a known door on another map (A15); escalation step 4 is M9.
     """
     goal = f"travel:{dest.label}"
-    step = route_step(w, m, policy, knowledge, plan_avoid, plan_costly, dest.map_id, dest.pos, goal)
+    step = route_step(w, m, policy, knowledge, plan_avoid, plan_costly, dest.map_id, dest.pos, goal, reach)
     if step is None:
         return None
     note = nav_stuck.level_note(nav_stuck.active(m, w))
@@ -233,12 +235,14 @@ def route_step(
     dest_map: int,
     dest: Pos,
     goal: str,
+    reach: set[Pos],
 ) -> Pos | None:
     """One step toward ``dest_map:dest`` under ``goal``, across maps through
     known door warps (A26), with stuck escalation on this map's leg (A15).
 
-    None when no step can be planned. With no known route to another map the
-    goal's path is cleared and nothing backs off.
+    None when no step can be planned, or the only way crosses ``reach``, the
+    ground the hostiles seen hold (A128). With no known route to another map
+    the goal's path is cleared and nothing backs off.
     """
     plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest_map, dest, goal)
     leg = _map_leg(m, w, goal, dest_map, dest, plan_avoid, plan)
@@ -250,7 +254,7 @@ def route_step(
     def params():
         return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m, w=w, knowledge=knowledge)
 
-    return guided_step(m, w, goal, leg, plan_avoid, plan, knowledge, params=params)
+    return guided_step(m, w, goal, leg, plan_avoid, plan, knowledge, params=params, reach=reach)
 
 
 def _map_leg(

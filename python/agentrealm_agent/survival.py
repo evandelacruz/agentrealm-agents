@@ -7,6 +7,7 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from .executor.pacing import attack_cooldown_ticks
+from .navigation.planner import HOSTILE_DANGER_RADIUS
 from .supplies import is_weapon, weapon_damage, worn_armor_defense
 from .threat import ThreatTable, TypeKey, type_key_for_entity
 from .travel.knowledge import town_from_kb
@@ -46,6 +47,10 @@ COMBAT_HIT_TARGET = 10
 STARTING_WEAPON = "pocket_knife"
 NEW_CHARACTER_HEALTH = 10
 GROUP_JOIN_RADIUS = 2  # hostiles within this of the focus join the fight (PLAYABLE_AGENT_PLAN Fight)
+# A hostile in view this close can reach us within a fight, so the win
+# estimate counts it (``can_reach_us``, A128): the radius inside which the
+# path planner prices a hostile's cells as dangerous.
+FIGHT_REACH_RADIUS = HOSTILE_DANGER_RADIUS
 # How long Flee keeps running from a hostile that hit us once it is out of
 # range: two of its swings, so a pursuer stepping just past ``hostile_range``
 # between hits does not end the flee (A9, A58 run 9).
@@ -175,6 +180,28 @@ def combat_group(w: WorldModel, policy: Policy, also: Entity | None = None) -> l
         if chebyshev(e.pos, focus.pos) <= GROUP_JOIN_RADIUS and e not in group:
             group.append(e)
     return group
+
+
+def can_reach_us(w: WorldModel, policy: Policy, group: list[Entity]) -> list[Entity]:
+    """``group`` and every other hostile in view that can reach us in a fight
+    with it (A128): within ``FIGHT_REACH_RADIUS`` of us, or within
+    ``GROUP_JOIN_RADIUS`` of one already counted, so a pack counts whole.
+    Fighting one of a pack is fighting the pack."""
+    if w.pos is None:
+        return list(group)
+    out = list(group)
+    rest = [e for e in w.entities if is_hostile(w, policy, e) and e not in out]
+    joined = True
+    while joined:
+        joined = False
+        for e in list(rest):
+            if chebyshev(e.pos, w.pos) <= FIGHT_REACH_RADIUS or any(
+                chebyshev(e.pos, g.pos) <= GROUP_JOIN_RADIUS for g in out
+            ):
+                out.append(e)
+                rest.remove(e)
+                joined = True
+    return out
 
 
 def worn_defense(w: WorldModel) -> int:

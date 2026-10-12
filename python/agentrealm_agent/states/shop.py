@@ -10,7 +10,7 @@ from ..loot import Pickup, loot_score
 from ..memory import Memory
 from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, nav_search, next_step, plan_sets
+from ..pathing import enters_reach, grid_params, nav_search, next_step
 from ..healing import supply_matches
 from ..plan import GoalOp, explore_targets
 from ..shop import (
@@ -23,8 +23,8 @@ from ..shop import (
 from ..travel.knowledge import iter_shop_cells
 from ..travel.ops import TravelOp
 from ..travel.resolve import ResolvedDestination, given_up_travel, resolve_travel
-from ..world import Entity, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome, my_op, top_op
+from ..world import Entity, Pos, WorldModel, chebyshev
+from .base import PlayContext, State, StateOutcome, my_op, op_walk, top_op
 from .explore import explore_outcome
 from .intents import set_position
 from .room import planned_take
@@ -107,18 +107,28 @@ def shop_outcome(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
                 ctx.plan.paid_from = w.gems
             out.reason = f"buy {label}" if len(out.intents) == 1 else f"buy {label}: {out.reason}"
         return out
-    step = _step_toward(w, ctx.memory, ctx, supply.pos)
+    walk = op_walk(w, ctx)
+    step = _step_toward(w, ctx.memory, ctx, supply.pos, walk)
     if step is None:
         why = f"no step toward {label} at {supply.pos[0]},{supply.pos[1]}"
-        return clear_the_way(w, ctx, supply.pos, why, state, top_op(ctx))
+        return clear_the_way(w, ctx, supply.pos, why, state, top_op(ctx), reach=walk[2])
     return StateOutcome([set_position(step)], f"shop {label} → {supply.pos}", state=state)
 
 
-def _step_toward(w: WorldModel, m: Memory, ctx: PlayContext, goal) -> object | None:
-    _, plan_avoid, plan_costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
-    if m.goal == GOAL and m.path and m.path[-1] == goal and next_step(w, plan_avoid, m.path):
+def _step_toward(
+    w: WorldModel, m: Memory, ctx: PlayContext, goal, walk: tuple[set[Pos], set[Pos], set[Pos]]
+) -> object | None:
+    """A step toward a supply for sale in sight, on the op's walk sets: kept
+    out of the reach of the hostiles seen that the engagement would not fight
+    (``op_walk``, A128); with no way clear of it, no step, and Shop asks."""
+    plan_avoid, plan_costly, reach = walk
+    kept = m.goal == GOAL and m.path and m.path[-1] == goal and next_step(w, plan_avoid, m.path)
+    if kept and not enters_reach(w, m.path, reach):
         return next_step(w, plan_avoid, m.path)
     found = cost_path(w, goal, grid_params(ctx.policy, plan_avoid, plan_costly), nav=nav_search(m, w, GOAL, goal))
+    if enters_reach(w, found, reach):
+        m.path, m.goal = [], ""
+        return None
     step = next_step(w, plan_avoid, found)
     if step is not None:
         m.path, m.goal = found, GOAL

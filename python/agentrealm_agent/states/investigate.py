@@ -25,7 +25,7 @@ from ..pathing import bounded_step, grid_params, nav_search, plan_sets
 from ..plan import GoalOp
 from ..scroll_investigation import supply_was_read
 from ..world import Entity, Pos, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome, my_op
+from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .intents import read_block, read_supply, say_to, set_position
 from .way import clear_the_way, open_the_way
 
@@ -109,12 +109,12 @@ def _settled(ctx: PlayContext, key: str, recorded: bool) -> bool:
 def _walk(w: WorldModel, ctx: PlayContext, op: GoalOp, goal: Pos, reason: str) -> StateOutcome:
     """A step toward ``goal``; with no way round, the block on the way opened, else the planner asked (A120)."""
     m, policy = ctx.memory, ctx.policy
+    plan_avoid, plan_costly, reach = op_walk(w, ctx)
     # Before the step, not only when it has none: a walk that found no step backs
     # off (``bounded_step``) and would hold on after the block is open.
-    if (out := open_the_way(w, ctx, goal, InvestigateState.name)) is not None:
+    if (out := open_the_way(w, ctx, goal, InvestigateState.name, reach=reach)) is not None:
         out.reason = f"{reason}: {out.reason}"
         return out
-    _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly)
@@ -122,9 +122,9 @@ def _walk(w: WorldModel, ctx: PlayContext, op: GoalOp, goal: Pos, reason: str) -
     def plan() -> list[Pos] | None:
         return cost_path(w, goal, params(), nav=nav_search(m, w, GOAL, goal))
 
-    step = bounded_step(m, w, GOAL, goal, plan_avoid, plan, params=params)
+    step = bounded_step(m, w, GOAL, goal, plan_avoid, plan, params=params, reach=reach)
     if step is None:
-        return clear_the_way(w, ctx, goal, f"{reason}: no path", InvestigateState.name, op)
+        return clear_the_way(w, ctx, goal, f"{reason}: no path", InvestigateState.name, op, reach=reach)
     return _out([set_position(step)], f"{reason} → {goal}")
 
 

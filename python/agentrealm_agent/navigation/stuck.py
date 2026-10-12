@@ -544,6 +544,21 @@ def resume(m: Memory, att: NavAttempt, tick: int) -> None:
     att.seen_decision = now
 
 
+def hold(m: Memory, att: NavAttempt, tick: int) -> None:
+    """The walk holds for something that is not the way being stuck (the
+    reach of hostiles seen, A128): it goes back to its first level with a
+    fresh window and no path or break target, so the ladder never climbs
+    on the hold and no reveal or break walk runs from it. Ending the hold
+    is the planner's call."""
+    att.level = WALK
+    att.reveal_left = 0
+    att.reset_closest = att.reset_level = None
+    att.net_best = None
+    clear_break_target(att)
+    _fresh_window(att, tick)
+    _drop_path(m, att)
+
+
 def _fresh_window(att: NavAttempt, tick: int) -> None:
     att.best, att.moves, att.reject_streak, att.window_tick = None, 0, 0, tick
     att.arm_decisions = 0

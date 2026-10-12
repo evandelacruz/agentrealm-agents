@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from ..break_memory import held_supply
 from ..config import Policy
 from ..fragments import compose_supply_ids, fragment_set_complete, holds_whole
 from ..knowledge_base import KnowledgeBase
 from ..memory import Memory
 from ..navigation import cost_path
-from ..pathing import grid_params, nav_search, next_step, plan_sets
+from ..pathing import enters_reach, grid_params, nav_search, next_step, plan_sets
 from ..plan import GoalOp
 from ..reach import supply_reach
 from ..world import Pos, WorldModel, chebyshev
-from .base import PlayContext, State, StateOutcome, my_op
+from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .intents import arm, compose, set_position, use_block
 from .way import clear_the_way
 
@@ -27,12 +29,14 @@ def solve_outcome(
     *,
     knowledge: KnowledgeBase | None = None,
     state: str = "Solve",
+    hostile_reach: Collection[Pos] = (),
 ) -> StateOutcome:
     """One Solve round for the top ``compose`` or ``use_block`` op, else the re-arm.
 
     A ``Compose``, ``Arm`` or ``Use`` is a try that has not finished the op
     (``progress=False``), so a rejected or ineffective one cannot pin the
     stack: only a step toward the target resets its stall clock (A34).
+    The walk to a cell to use from keeps out of ``hostile_reach`` (A128).
     """
     if op is None:
         return _rearm_outcome(w, m, state)
@@ -40,7 +44,7 @@ def solve_outcome(
     if op["op"] == "compose":
         out = _compose_outcome(w, op, state)
     else:
-        out = _use_block_outcome(w, m, policy, op, plan_avoid, plan_costly, knowledge, state)
+        out = _use_block_outcome(w, m, policy, op, plan_avoid, plan_costly | set(hostile_reach), knowledge, state, hostile_reach)
     out.progress = bool(out.intents) and any(i.get("verb") == "SetPosition" for i in out.intents)
     return out
 
@@ -79,6 +83,7 @@ def _use_block_outcome(
     costly: set[Pos],
     knowledge: KnowledgeBase | None,
     state: str,
+    hostile_reach: Collection[Pos] = (),
 ) -> StateOutcome:
     here = w.pos
     if here is None:
@@ -99,7 +104,7 @@ def _use_block_outcome(
     if chebyshev(here, target) <= reach:
         return StateOutcome(intents + [use_block(target)], f"use {code} @ {target}", state=state)
 
-    step = _step_to_use(w, m, policy, target, reach, blocked, costly)
+    step = _step_to_use(w, m, policy, target, reach, blocked, costly, hostile_reach)
     if step is None:
         return StateOutcome(None, f"cannot reach {target}", state=state)
     return StateOutcome(intents + [set_position(step)], f"solve → {target}", state=state)
@@ -113,12 +118,14 @@ def _step_to_use(
     reach: int,
     blocked: set[Pos],
     costly: set[Pos],
+    hostile_reach: Collection[Pos] = (),
 ) -> Pos | None:
-    """Next step toward a cell from which ``target`` is within ``reach``."""
+    """Next step toward a cell from which ``target`` is within ``reach``, on
+    a way that keeps out of ``hostile_reach`` (A128)."""
     stands = _use_stands(w, target, reach, blocked)
     if not stands:
         return None
-    if m.goal == GOAL and m.path and m.path[-1] in stands:
+    if m.goal == GOAL and m.path and m.path[-1] in stands and not enters_reach(w, m.path, hostile_reach):
         step = next_step(w, blocked, m.path)
         if step is not None:
             return step
@@ -126,7 +133,7 @@ def _step_to_use(
     best: tuple[list[Pos], Pos] | None = None
     for stand in sorted(stands, key=lambda p: (chebyshev(w.pos, p), p)):
         path = cost_path(w, stand, params, nav=nav_search(m, w, GOAL, stand))
-        if not next_step(w, blocked, path):
+        if not next_step(w, blocked, path) or enters_reach(w, path, hostile_reach):
             continue
         if best is None or len(path) < len(best[0]):
             best = (path, stand)
@@ -172,7 +179,8 @@ class SolveState(State):
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
         op = my_op(ctx, self.name)
-        out = solve_outcome(world, ctx.memory, ctx.policy, op, knowledge=ctx.knowledge, state=self.name)
+        reach = op_walk(world, ctx)[2] if op is not None else ()
+        out = solve_outcome(world, ctx.memory, ctx.policy, op, knowledge=ctx.knowledge, state=self.name, hostile_reach=reach)
         if op is None or out.intents or out.wait or ctx.plan is None or ctx.plan.current() is not op:
             return out
         # No try and no step: clear the way to the target, else ask the planner and hold (A120).

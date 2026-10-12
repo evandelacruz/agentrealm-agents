@@ -92,18 +92,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
-    """The self line, then the goal tree's readiness (A139). The world model
-    is filled by its own sync from three reads, inside the burst of 3: the
-    self read, the world read (levels authored) and one round trip that sends
-    no intents (``intents`` left out, so the held queue is untouched) for the
-    snapshot (health, inventory, gems, levels cleared, position), with the
-    world's knowledge base. The round trip takes the events since the last
-    one, so never run it on a character another client is playing."""
+    """The self line, then the goal tree's readiness (A139), from two reads
+    that change nothing (self and world) and the world's knowledge base, by
+    the world model's own sync. A status never makes a round trip: that would
+    take the events a live run on the character is owed. So what only a
+    round trip serves (what is carried, gems, levels cleared) reads as none,
+    and the turn's goal, which rests on it, is not shown."""
     try:
         s = client.self_(cid)
         print(f"{cfg.profile} ({cid}): lives={s['lives']} alive={s['alive']} placed={s['placed']}")
         body = client.world(cid)
-        r = client.tick(cid, None)
     except ApiError as e:
         print(f"{cfg.profile} ({cid}): {e}", file=sys.stderr)
         return 1
@@ -116,15 +114,9 @@ def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
     w.apply_self(s)
     if isinstance(body.get("level_count"), int):
         w.level_count = body["level_count"]
-    w.apply_observation(r.get("observation"))
     load_hostiles(kb, w)
-    held = ", ".join(sorted(x.code for x in w.held_supplies + w.chest_supplies)) or "nothing"
-    worn = ", ".join(sorted(w.worn_codes.values())) or "nothing"
-    print(
-        f"health={w.health}/{w.max_health} gems={w.gems} levels_cleared={w.levels_cleared}"
-        f" armed={w.armed_code} worn={worn} held={held}"
-    )
-    for line in dump(w, kb):
+    print(f"health={w.health}/{w.max_health}; carried, gems and levels cleared are read only in play (none here)")
+    for line in dump(w, kb, goal=False):
         print(line)
     return 0
 

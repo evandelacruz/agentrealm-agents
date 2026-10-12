@@ -29,9 +29,10 @@ it is the planner's answer at "gather" (A140).
 
 **Blocked nodes.** A node the planner says it cannot work (A140) is marked
 in ``Blocks`` with its reason and an expiry; the walk never makes it the
-goal, notes it as skipped with that reason, and descends into its children
-(a ready child is then worked for more: more margin, more gems). A block
-lapses at its expiry.
+goal, notes it as skipped with that reason, and descends into its children,
+taking the first with something to do. A node not ready whose whole way
+down is blocked blocks its parent too, with its reason, so a node is the
+goal only while all its children are ready. A block lapses at its expiry.
 """
 
 from __future__ import annotations
@@ -239,8 +240,11 @@ def holds_the_gems(node: Node, rd: Reading) -> Check:
     return Check(gems >= m.gems, f"{gems} of {m.gems} gems: {priced}{unpriced}")
 
 
-def gather_for_it(node: Node, rd: Reading) -> GoalOp:
-    return {"op": "gather_gems", "count": max(rd.world.gems or 0, rd.missing(node.serves).gems)}
+def gather_for_it(node: Node, rd: Reading) -> GoalOp | None:
+    """Gather up to the gems what is missing costs (``count`` is the total to
+    hold); with none short there is nothing to gather."""
+    need = rd.missing(node.serves).gems
+    return {"op": "gather_gems", "count": need} if need > (rd.world.gems or 0) else None
 
 
 def gathered(node: Node, rd: Reading) -> Check:
@@ -312,10 +316,7 @@ def tree() -> Node:
     return root
 
 
-ROOT = tree()
-
-
-def find(key: str, root: Node = ROOT) -> Node:
+def find(key: str, root: Node) -> Node:
     """The node of ``key`` in the tree under ``root``."""
     stack = [root]
     while stack:
@@ -326,44 +327,60 @@ def find(key: str, root: Node = ROOT) -> Node:
     raise KeyError(key)
 
 
-def walk(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = None, root: Node = ROOT) -> Turn:
+def walk(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = None, root: Node | None = None) -> Turn:
     """The turn's goal: from the root, into the first child not ready, until a
-    node whose children are all ready. A blocked node is skipped with its
-    reason and the walk descends into its children; ``goal`` is None when
-    the world is beaten or every way down is blocked."""
+    node whose children are all ready; only such a node is ever the goal.
+
+    A node marked blocked is skipped with its reason and the walk descends
+    into its children, all ready, taking the first with something to do. A
+    child not ready whose whole way down is blocked blocks its parent too,
+    with the child's reason: the walk tries the parent's next child not
+    ready, and with none the parent gives no goal. ``goal`` is None when the
+    world is beaten or every way down is blocked. ``root`` defaults to a
+    fresh ``tree()``."""
+    root = root if root is not None else tree()
     blocks = blocks if blocks is not None else Blocks()
     rd = Reading(world, kb)
     skipped: list[tuple[Node, Block]] = []
 
-    def down(n: Node, path: list[Node]) -> tuple[Node | None, list[Node]]:
+    def down(n: Node, path: list[Node]) -> tuple[Node | None, list[Node], Block | None]:
+        """The goal under ``n``, the path to it, and why there is none."""
         path = [*path, n]
+        under: Block | None = None
         for c in n.children:
-            if not rd.check(c).ready:
-                goal, to = down(c, path)
-                if goal is not None:
-                    return goal, to
+            if rd.check(c).ready:
+                continue
+            goal, to, why = down(c, path)
+            if goal is not None:
+                return goal, to, None
+            if under is None and why is not None:
+                under = Block(f"{c.title}: {why.reason}", why.until)
+        if under is not None:
+            skipped.append((n, under))
+            return None, path, under
         block = blocks.active(n.key, world.tick)
-        if block is None and n.op(n, rd) is not None:
-            return n, path
-        if block is not None:
-            skipped.append((n, block))
-            for c in n.children:
-                if rd.check(c).ready:
-                    goal, to = down(c, path)
-                    if goal is not None:
-                        return goal, to
-        return None, path
+        if block is None:
+            return (n, path, None) if n.op(n, rd) is not None else (None, path, None)
+        skipped.append((n, block))
+        for c in n.children:
+            goal, to, _ = down(c, path)
+            if goal is not None:
+                return goal, to, None
+        return None, path, block
 
     if rd.check(root).ready:
         return Turn(None, [root], skipped, rd)
-    goal, path = down(root, [])
+    goal, path, _ = down(root, [])
     return Turn(goal, path if goal else [root], skipped, rd)
 
 
-def dump(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = None, root: Node = ROOT) -> list[str]:
-    """The tree's readiness, one line a node, then the turn's goal and its op:
-    what ``ladder status`` prints. It reads what the walk read; a node under
-    both branches is shown once."""
+def dump(
+    world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = None, root: Node | None = None, *, goal: bool = True
+) -> list[str]:
+    """The tree's readiness, one line a node, then (``goal``) the turn's goal
+    and its op. It reads what the walk read; a node under both branches is
+    shown once."""
+    root = root if root is not None else tree()
     turn = walk(world, kb, blocks, root)
     blocked = {n.key: b for n, b in turn.skipped}
     lines: list[str] = []
@@ -383,7 +400,8 @@ def dump(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = No
             line(child, depth + 1)
 
     line(root, 0)
-    op: GoalOp | None = turn.op()
-    goal = turn.goal.title if turn.goal else "none"
-    lines.append(f"goal: {goal}" + (f" op={json.dumps(op, sort_keys=True)}" if op else ""))
+    if goal:
+        op: GoalOp | None = turn.op()
+        title = turn.goal.title if turn.goal else "none"
+        lines.append(f"goal: {title}" + (f" op={json.dumps(op, sort_keys=True)}" if op else ""))
     return lines

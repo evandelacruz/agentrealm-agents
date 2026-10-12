@@ -21,7 +21,7 @@ from tests.test_starter_agent import FakeClient
 MAP = 1
 LEVEL_MAP = 9
 DOOR = (10, 4)
-LEVEL, GATHER = find("level"), find("gather")
+LEVEL, GATHER = find("level", goals.tree()), find("gather", goals.tree())
 
 
 def world(**kw) -> WorldModel:
@@ -275,6 +275,11 @@ class TreeAsDataTest(unittest.TestCase):
         self.assertTrue(turn.checks["risk"].ready)
         self.assertFalse(walk(world(), knowledge()).checks["risk"].ready)
 
+    def test_each_walk_builds_its_own_tree(self):
+        a, b = walk(geared(), knowledge()), walk(geared(), knowledge())
+        self.assertIsNot(a.goal, b.goal)
+        self.assertEqual(a.goal.key, b.goal.key)
+
     def test_a_tree_of_other_nodes_walks_the_same_way(self):
         wait = goals.Node("wait", "wait", lambda n, rd: goals.Check(False, "not yet"), lambda n, rd: {"op": "wait"})
         root = goals.Node("world", "beat the world", goals.world_beaten, goals.no_op, children=[wait])
@@ -320,6 +325,47 @@ class BlocksTest(unittest.TestCase):
         blocks.lift("level")
         self.assertEqual(walk(w, knowledge(), blocks).goal.key, "level")
 
+    def test_a_child_whose_way_down_is_blocked_never_lets_its_parent_be_the_goal(self):
+        w = geared()  # ready for the risk; only the need is unmet
+        kb = knowledge(door_need="fords", sells={"raft": 30})
+        blocks = Blocks()
+        for key in ("requires", "gems", "gather", "alive"):
+            blocks.mark(key, "no way to get it", now=0)
+        turn = walk(w, kb, blocks)
+        self.assertIsNone(turn.goal)  # never enter_level with the need unmet
+        level = [b.reason for n, b in turn.skipped if n.key == "level"]
+        self.assertEqual(len(level), 1)
+        self.assertTrue(level[0].startswith("hold what it requires: "))  # the chain down to the block
+        self.assertTrue(level[0].endswith("no way to get it"))
+
+    def test_after_a_blocked_child_the_walk_tries_the_next_not_ready(self):
+        w = world()  # short of risk, and the need unmet
+        kb = knowledge(door_need="fords", sells={"raft": 30, "large_potion": 20})
+        blocks = Blocks()
+        blocks.mark("requires", "no way to get it", now=0)
+        blocks.mark("gems", "no way to get it", now=0)
+        blocks.mark("gather", "no way to get it", now=0)
+        blocks.mark("alive", "no way to get it", now=0)
+        self.assertIsNone(walk(w, kb, blocks).goal)
+        blocks.lift("gather")
+        blocks.lift("alive")
+        self.assertEqual(walk(w, kb, blocks).goal.key, "gather")
+
+    def test_gems_in_hand_leave_nothing_to_gather(self):
+        w = geared(gems=40)  # the raft is affordable
+        kb = knowledge(door_need="fords", sells={"raft": 30})
+        blocks = Blocks()
+        blocks.mark("requires", "the shop is shut", now=0)
+        turn = walk(w, kb, blocks)
+        self.assertIsNone(turn.goal)  # no gather_gems that is done on arrival
+        gather = find("gather", goals.tree())
+        self.assertIsNone(gather.op(gather, goals.Reading(w, kb)))
+
+    def test_gather_counts_up_to_what_is_missing(self):
+        w = geared(gems=10)
+        kb = knowledge(door_need="fords", sells={"raft": 30})
+        self.assertEqual(walk(w, kb).op(), {"op": "gather_gems", "count": 30})
+
     def test_every_way_down_blocked_leaves_no_goal(self):
         w = world(levels_cleared=[])
         kb = knowledge(door_need="fords", sells={"raft": 30})
@@ -346,30 +392,13 @@ class DumpTest(unittest.TestCase):
         self.assertIn("blocked: the door will not open", lines[1])
 
 
-class SnapshotClient(FakeClient):
-    """Its round trip serves a complete snapshot, its world read the levels authored."""
-
-    def world(self, cid):
-        return {"code": "sandbox", "tick_rate_hz": 1, "level_count": 3}
-
-    def tick(self, cid, intents, snapshot_version=None):
-        self.ticks.append(intents)
-        snapshot = {
-            "health": 10,
-            "max_health": 10,
-            "levels_cleared": [1],
-            "position": {"map_id": MAP, "x": 5, "y": 5},
-            "inventory": {"gems": 12, "armed": {"id": 1, "supply_subtype_code": "sword"}, "held": []},
-        }
-        return {"tick": 9, "observation": {"version": 1, "complete": True, "snapshot": snapshot}}
-
-
 class StatusTest(unittest.TestCase):
-    def test_status_prints_the_tree_from_the_world_models_own_sync(self):
+    def test_status_reads_self_and_world_and_never_ticks(self):
         from ladder.__main__ import status
 
-        client = SnapshotClient()
-
+        client = FakeClient()
+        client.self_ = lambda cid: {"lives": 1, "alive": True, "placed": True, "health": 7, "max_health": 10}
+        client.world = lambda cid: {"code": "sandbox", "tick_rate_hz": 1, "level_count": 3}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "STATE_DIR", Path(tmp)), mock.patch(
             "agentrealm_agent.knowledge_base.WORLDS_DIR", Path(tmp) / "worlds"
         ):
@@ -377,10 +406,10 @@ class StatusTest(unittest.TestCase):
             with redirect_stdout(out):
                 self.assertEqual(status(client, CharacterConfig("T", "sandbox", Policy(), Path("t.toml")), 42), 0)
         text = out.getvalue()
-        self.assertEqual(client.ticks, [None])  # a round trip that sends no intents
-        self.assertIn("health=10/10 gems=12 levels_cleared=[1] armed=sword", text)
-        self.assertIn("level 2 of 3 not cleared", text)
-        self.assertIn("goal: ", text)
+        self.assertEqual(client.ticks, [])  # no round trip: a live run keeps its events
+        self.assertIn("health=7/10", text)
+        self.assertIn("level 1 of 3 not cleared", text)
+        self.assertNotIn("goal: ", text)
 
 
 if __name__ == "__main__":

@@ -142,6 +142,16 @@ class LeaveTest(unittest.TestCase):
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 0, "y": 0}], "onto the door it came in by")
         self.assertEqual(kb.entrances[entrance_key(1, (5, 5))][LEVEL], 2)
 
+    def test_level_4_entered_with_nothing_cleared_is_left(self):
+        w = grid(["D....", "....."], at=(1, 1), map_id=44)
+        w.apply_position({"map_id": 44, "x": 1, "y": 1})
+        w.apply_minimap({"maps": [{"map_id": 44, "level": 4}]})
+        self.assertEqual(w.map_level, 4, "the minimap's level for the current map")
+        plan = Plan([{"op": "explore_area", "x": 0, "y": 0, "radius": 3}], dict(PARAM_DEFAULTS))
+        out = dispatch(w, ctx_for(Memory(level_way_in=(44, (1, 1))), KnowledgeBase.empty("sandbox"), plan))
+        self.assertEqual(plan.current(), {"op": "leave_level"})
+        self.assertEqual(out.state, "Level")
+
     def test_leave_is_done_once_outside(self):
         w = grid(["....."], at=(1, 0), map_id=8)
         w.apply_position({"map_id": 8, "x": 1, "y": 0, "level": 2})

@@ -500,10 +500,24 @@ class Runner:
         from_map, from_pos, block_type = warp
         if (w.map_id, w.pos) != (from_map, from_pos):
             record_warp(self.knowledge, from_map, from_pos, block_type, w.map_id, w.pos)
-            if w.map_level and not is_level_interior(self.knowledge, from_map):
-                # Stepped into a level from outside: the entrance's number, and the way back out (A145).
-                record_entrance_level(self.knowledge, from_map, from_pos, w.map_level)
-                m.level_way_in = (w.map_id, w.pos)
+            if not is_level_interior(self.knowledge, from_map) and w.map_id != from_map:
+                # Off a map outside every level: an entrance once the landing map's level is read (A145).
+                m.level_entry = (from_map, from_pos, w.map_id, w.pos)
+                self.note_level_entry()
+
+    def note_level_entry(self) -> None:
+        """Once the landing map's level is read, a step into a level from
+        outside records the entrance's number and the way back out (A145)."""
+        w, m = self.world, self.mem
+        entry = m.level_entry
+        if entry is None or (w.map_level is None and w.map_id == entry[2]):
+            return
+        m.level_entry = None
+        from_map, from_pos, landing_map, landing = entry
+        if w.map_id != landing_map or not w.map_level:
+            return
+        record_entrance_level(self.knowledge, from_map, from_pos, w.map_level)
+        m.level_way_in = (landing_map, landing)
 
     def sync_terrain(self, t: dict) -> None:
         """Merge the cells of this terrain read's window into the knowledge base (A26)."""
@@ -531,6 +545,7 @@ class Runner:
         except ApiError as e:
             self.log("minimap", f"failed: {e}", {"error": str(e)})
             return
+        self.world.apply_minimap(body)
         sync_entrances(self.knowledge, body)
 
     def _sync_loadout(self) -> None:
@@ -607,6 +622,17 @@ class Runner:
             self.note_held_path_stale()
             seen = ", ".join(f"{x.kind}:{x.id}@{x.pos[0]},{x.pos[1]}" for x in w.entities) or "nobody"
             self.log(call, seen, {"entities": e})
+        elif call == "minimap":
+            # The current map's level is only on the minimap (A145).
+            if w.map_id is not None:
+                m.minimap_reads[w.map_id] = m.minimap_reads.get(w.map_id, 0) + 1
+            body = c.minimap(self.cid)
+            w.apply_minimap(body)
+            if self.knowledge is not None:
+                sync_entrances(self.knowledge, body)
+                record_map_level(self.knowledge, w)
+            self.note_level_entry()
+            self.log(call, f"map {w.map_id} level={w.map_level}", {"minimap": body})
         elif call == "zone":
             probe, m.zone_probe = m.zone_probe, None
             if probe is None:

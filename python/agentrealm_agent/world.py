@@ -309,7 +309,8 @@ class MapView:
 class WorldModel:
     character_id: int
     map_id: int | None = None
-    map_level: int | None = None  # level number on interior maps (position read, Manual §5.3)
+    map_level: int | None = None  # level number of the current map: 0 outside every level, None while unread (A145)
+    map_levels: dict[int, int] = field(default_factory=dict)  # map id -> its level from the minimap, 0 outside every level (A145)
     pos: Pos | None = None
     perception: int = 1
     movement: int = 1
@@ -474,13 +475,28 @@ class WorldModel:
         map_id = int(p["map_id"])
         if map_id != self.map_id:
             self.snapshot_version = None  # entities no longer match its base
-            self.map_level = None
+            self.map_level = self.map_levels.get(map_id)
         self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
         self.asleep = False  # a sleeping character is off the map (GAME_NOTES Sleep)
         self.placed, self.woke = True, False
         if has_level:
             self.map_level = level
+
+    def apply_minimap(self, body: dict) -> None:
+        """Each revealed map's ``level`` from a minimap read (A145): a map inside
+        a level carries it, one outside every level omits it. The position
+        read does not carry it, so this is where the current map's level comes
+        from; a position read that ever names one still counts."""
+        for m in body.get("maps") or []:
+            if not isinstance(m, dict):
+                continue
+            map_id, level = _opt_int(m.get("map_id")), _opt_int(m.get("level"))
+            if map_id is None:
+                continue
+            self.map_levels[map_id] = level if level is not None and level > 0 else 0
+        if self.map_id in self.map_levels:
+            self.map_level = self.map_levels[self.map_id]
 
     def perception_rect(self) -> tuple[int, int, int, int]:
         """x0, y0, width, height of the perception window around us."""

@@ -27,7 +27,7 @@ import json
 from typing import Any
 
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import door_warp_known, is_level_interior, iter_doors
+from .knowledge_maps import door_warp_known, is_level_interior, iter_doors, map_level_known
 from .memory import Memory
 from .stalled import find as find_stalled
 from .travel.knowledge import entrance_from_kb, entrance_key, iter_entrances
@@ -188,13 +188,15 @@ def sync_leave(plan, w: WorldModel, m: Memory) -> None:
 
 
 def _leads_out(kb: KnowledgeBase | None, w: WorldModel, door: dict[str, Any]) -> bool | None:
-    """Whether a door's known warp lands outside every level; None when its warp is unknown."""
+    """Whether a door's known warp lands outside every level; None when that
+    is unknown: its warp is unknown, or the map it lands on has no level read."""
     if not door_warp_known(door):
         return None
     to_map = int(door["to_map_id"])
     if to_map in w.map_levels:
         return w.map_levels[to_map] == 0
-    return kb is not None and not is_level_interior(kb, to_map)
+    level = map_level_known(kb, to_map)
+    return None if level is None else level == 0
 
 
 def landing_cell(kb: KnowledgeBase | None, map_id: int | None) -> Pos | None:
@@ -213,8 +215,9 @@ def way_out(kb: KnowledgeBase | None, w: WorldModel) -> Pos | None:
 
     a door seen here whose known warp lands outside every level; else, on
     the map a known entrance landed on, the door nearest that landing whose
-    warp is not known to lead deeper into a level (the way back the
-    character came in), or the landing cell while no such door is seen;
+    warp is not known to lead deeper into a level (one whose landing level
+    is unread counts only here, with no door known to lead out), or the
+    landing cell while no such door is seen;
     else None: no known way out, and the planner is asked.
     """
     if w.map_id is None:

@@ -81,6 +81,24 @@ def record_map_level(kb: KnowledgeBase, w: WorldModel) -> None:
         _entry(kb, w.map_id)[LEVEL] = w.map_level
 
 
+def record_map_levels(kb: KnowledgeBase | None, levels: dict[int, int]) -> None:
+    """Remember every map's level a minimap read named, 0 outside every level (A145)."""
+    if kb is None:
+        return
+    with kb.lock:
+        for map_id, level in levels.items():
+            _entry(kb, map_id)[LEVEL] = level
+
+
+def map_level_known(kb: KnowledgeBase | None, map_id: int) -> int | None:
+    """The ``level`` a read named for ``map_id`` (0 outside every level), or None while unread (A145)."""
+    if kb is None:
+        return None
+    with kb.lock:
+        level = kb.maps.get(str(map_id), {}).get(LEVEL)
+    return level if isinstance(level, int) and not isinstance(level, bool) and level >= 0 else None
+
+
 def is_level_interior(kb: KnowledgeBase, map_id: int) -> bool:
     """True when a read named a positive ``level`` for ``map_id`` (A37; the minimap since A145)."""
     with kb.lock:

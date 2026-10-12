@@ -50,7 +50,7 @@ from .item_table import (
 from .knowledge_base.death_chests import load_death_chests, save_death_chests
 from .knowledge_base.hostiles import load_hostiles, save_hostiles
 from .knowledge_base import KnowledgeBase
-from .knowledge_maps import record_hunting_zone, record_map_level, record_warp, sync_tiles, sync_world_maps
+from .knowledge_maps import record_hunting_zone, record_map_level, record_map_levels, record_warp, sync_tiles, sync_world_maps
 from .level_order import note_door_step, settle_entry
 from .equip import note_equip_result, sync_refusals
 from .loot import (
@@ -525,8 +525,10 @@ class Runner:
         record_map_level(self.knowledge, self.world)
 
     def _sync_minimap(self) -> None:
-        """Entrance marks into the knowledge base (A27). Read once at startup:
-        marks on maps revealed later are learned on the next run (PLAN.md A27)."""
+        """Entrance marks into the knowledge base (A27), and each revealed map's
+        level into the world model (A145). Read once at startup: marks on maps
+        revealed later are learned on the next run (PLAN.md A27), and the level
+        of a map a door step lands on by the ``minimap`` read then (A145)."""
         if self.knowledge is None:
             return
         try:
@@ -535,6 +537,7 @@ class Runner:
             self.log("minimap", f"failed: {e}", {"error": str(e)})
             return
         self.world.apply_minimap(body)
+        record_map_levels(self.knowledge, self.world.map_levels)
         sync_entrances(self.knowledge, body)
 
     def _sync_loadout(self) -> None:
@@ -619,7 +622,7 @@ class Runner:
             w.apply_minimap(body)
             if self.knowledge is not None:
                 sync_entrances(self.knowledge, body)
-                record_map_level(self.knowledge, w)
+                record_map_levels(self.knowledge, w.map_levels)
             settle_entry(self.knowledge, w, m)
             self.log(call, f"map {w.map_id} level={w.map_level}", {"minimap": body})
         elif call == "zone":

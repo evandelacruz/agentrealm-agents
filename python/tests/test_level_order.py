@@ -166,6 +166,9 @@ class LeaveTest(unittest.TestCase):
         self.assertEqual(plan.current(), {"op": "leave_level"})
         w.apply_position({"map_id": 1, "x": 5, "y": 6})
         dispatch(w, ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan))
+        self.assertEqual(plan.current(), {"op": "leave_level"}, "an unread level is unknown, not out")
+        w.apply_minimap({"maps": [{"map_id": 1}, {"map_id": 8, "level": 2}]})
+        dispatch(w, ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan))
         self.assertEqual(plan.current()["op"], "explore_area")
 
     def test_a_leave_on_the_stack_is_not_pushed_again(self):
@@ -206,7 +209,17 @@ class WayOutTest(unittest.TestCase):
         w = self.level_map()
         kb = kb_with(1, (5, 5))
         record_warp(kb, 1, (5, 5), "framed_door", 8, (4, 1))  # came in beside (4, 0)
-        record_warp(kb, 8, (0, 2), "framed_door", 1, (6, 6))  # known to lead out
+        record_warp(kb, 8, (0, 2), "framed_door", 1, (6, 6))
+        w.apply_minimap({"maps": [{"map_id": 1}]})  # map 1 is read as outside every level
+        self.assertEqual(way_out(kb, w), (0, 2))
+
+    def test_a_warp_to_a_map_whose_level_is_unread_is_unknown_not_out(self):
+        w = self.level_map()
+        kb = kb_with(1, (5, 5))
+        record_warp(kb, 1, (5, 5), "framed_door", 8, (4, 1))
+        record_warp(kb, 8, (0, 2), "framed_door", 3, (6, 6))  # map 3's level never read
+        self.assertEqual(way_out(kb, w), (4, 0), "back the way he came, not the unknown warp")
+        kb.maps["3"] = {"level": 0}  # read since: outside every level
         self.assertEqual(way_out(kb, w), (0, 2))
 
     def test_back_the_way_he_came_never_deeper_in(self):

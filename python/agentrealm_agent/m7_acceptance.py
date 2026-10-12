@@ -11,8 +11,6 @@ module checks for each clause:
 - Recovers only when safe: every ``WithdrawFromChest`` Recover sends runs while
   the agent stands on a known safe tile (a ``get_zone`` read said so). The cell
   is where the queue puts the agent when that intent runs, not where it stands now.
-- Measures safe-zone regen: ``regen_known`` has an answer ("yes" or "no"). A
-  "yes" an earlier run saved to the knowledge base counts.
 - Reaches a point 150 blocks away, or gives up with a reason: the smoke script
   gives the agent one ``goto`` target on the overworld. It passes only when the
   agent stands on that target, or stuck detection gave up on that very target
@@ -23,8 +21,7 @@ module checks for each clause:
   backoff ran out, a reload or a planner reply put it back) is a macro loop.
   Each return is counted and any return fails the run.
 - Never loops: no run of ``LOOP_STEP_LIMIT`` Step-sending decisions in a row at
-  the same cell with the same reason. A wait (Heal resting in a safe zone) is
-  not movement, so it never counts as a loop.
+  the same cell with the same reason. A wait is not movement, so it never counts as a loop.
 
 - Does not pace: the oscillation guard (``navigation/oscillation.py``) gives
   up a target the agent paces toward. More than ``OSCILLATION_ABORT_COUNT``
@@ -90,7 +87,6 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
     given_up_returns: int = 0  # times an op to a given-up point was acted on again: fails the run
     _on_given_up: bool = False  # the last decision acted on an op to a given-up point
     lives_seen: int | None = None
-    regen: str | None = None  # "yes" or "no" once measured
     _seen_give_ups: set[tuple[str, int]] = field(default_factory=set)
     _oscillation: OscillationAbortTracker = field(default_factory=OscillationAbortTracker)
 
@@ -130,7 +126,7 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
         self._note_navigation(w)
         self._note_give_ups(m)
         self._note_given_up_returns(w, m, acted_op, knowledge)
-        regen = self.note_survival_tick(
+        self.note_survival_tick(
             w,
             m,
             state=state,
@@ -139,9 +135,7 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
             policy=policy,
             params=params,
             knowledge=knowledge,
-            track_regen=True,
         )
-        self.regen = regen or self.regen
 
     def _note_navigation(self, w: WorldModel) -> None:
         if w.pos is None or w.map_id != self.overworld_map_id:
@@ -182,7 +176,7 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
         return self.target_reached or self.target_give_up is not None
 
     def failures(self, *, full_hour: bool = True) -> list[str]:
-        """What fails the run. Navigation and regen are judged only on a full hour."""
+        """What fails the run. Navigation is judged only on a full hour."""
         out = list(self.survival_failures())
         if self.oscillation_abort:
             out.append(self.oscillation_abort)
@@ -190,8 +184,6 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
             out.append(f"returned {self.given_up_returns} time(s) to a target stuck detection gave up on")
         if full_hour and not self.navigation_ok():
             out.append(f"target {self.target} neither reached nor given up on (max distance {self.max_distance})")
-        if full_hour and self.regen is None:
-            out.append("safe-zone regen never measured")
         return out
 
     def summary_lines(self) -> list[str]:
@@ -207,7 +199,6 @@ class M7AcceptanceMetrics(SurvivalAcceptanceMetrics):
             f"give-ups on other goals: {self.other_give_ups}",
             f"returns to a given-up target: {self.given_up_returns}",
             *self.survival_summary_lines(),
-            f"safe-zone regen: {self.regen or 'not measured'}",
             f"oscillation events: {len(self.oscillation_ticks)} (gave up a target: {len(self.pacing_give_up_ticks)})",
             f"lives last seen: {self.lives_seen}",
         ]

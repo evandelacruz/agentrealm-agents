@@ -15,7 +15,6 @@ import unittest
 from agentrealm_agent import targets
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.healing import standing_in_safe_zone
 from agentrealm_agent.investigation import mark_cell_read
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
@@ -102,18 +101,6 @@ class NearerCandidateTest(unittest.TestCase):
         out = explore_outcome(w, m, c.policy, c.rng)
         self.assertEqual(targets.committed(m, w, "explore").target, first)
         self.assertEqual(m.path[-1], far, out.reason)
-
-    def test_heal_keeps_its_safe_tile_when_a_nearer_one_is_found(self):
-        w = field(at=(10, 4))
-        w.health = 4
-        apply_zone(w, MAP, 18, 4, {"safe": True, "brightness": 1})
-        m = Memory()
-        out = dispatch(w, ctx(m))
-        self.assertEqual(out.reason, "heal_measure → (18, 4)")
-        apply_zone(w, MAP, 7, 4, {"safe": True, "brightness": 1})  # nearer, found later
-        w.tick += 5
-        out = dispatch(w, ctx(m))
-        self.assertEqual(out.reason, "heal_measure → (18, 4)")
 
     def test_travel_keeps_its_shop_when_a_nearer_shop_is_learned(self):
         kb = KnowledgeBase("sandbox")

@@ -100,6 +100,7 @@ from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
 from .world import DOORS, Pos, WorldModel, terrain_cells
 from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
+from .sellers import lapse_not_sold
 from .states.dispatch import probe_held_queue
 from .states.greet import GREET_STATE
 from .states.intents import is_self_use
@@ -537,7 +538,7 @@ class Runner:
         """A cell holding a supply with a ``gem_price`` is where it can be
         bought: a priced supply "spends those gems when picked up" (manual
         §11, https://agentrealm.gg/docs/manual#11-game-rules). ``travel:shop``
-        heads for one (A27)."""
+        heads for one (A27); the cell keeps what it sells, for a ``buy`` (A131)."""
         if self.knowledge is None or self.world.map_id is None:
             return
         for s in payload.get("supplies") or []:
@@ -547,15 +548,14 @@ class Runner:
             if price is None or isinstance(price, bool):
                 continue
             try:
-                if int(price) <= 0:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            try:
+                price = int(price)
                 pos = (int(s["x"]), int(s["y"]))
             except (KeyError, TypeError, ValueError):
                 continue
-            record_shop_cell(self.knowledge, self.world.map_id, pos)
+            if price <= 0:
+                continue
+            code = s.get("supply_subtype_code")
+            record_shop_cell(self.knowledge, self.world.map_id, pos, code if isinstance(code, str) else None, price)
 
     def read_world(self) -> dict | None:
         """The world read that sets the pace, retried like any other call."""
@@ -1317,6 +1317,7 @@ class Runner:
                     pos,
                     int(result.get("tick", self.world.tick)),
                 )
+                lapse_not_sold(self.knowledge)
         elif target.get("kind") == "supply" and target.get("supply_id") is not None:
             sid = int(target["supply_id"])
             key = read_supply_key(sid)
@@ -1327,6 +1328,7 @@ class Runner:
                 if code:
                     mark_scroll_subtype(self.knowledge, code)
                 note_scroll_clue(self.knowledge, self.mem, self.world, result, sid)
+                lapse_not_sold(self.knowledge)
             elif rej.get("code") == "nothing_to_read":
                 if code and code not in scroll_subtype_codes(self.knowledge):
                     # A probe answered: this code is not a scroll. Nothing was refused.
@@ -1512,6 +1514,7 @@ class Runner:
             kind = ev.get("kind")
             if kind == "SpokenTo":
                 note_spoken_clue(self.knowledge, m, w, ev, w.tick)
+                lapse_not_sold(self.knowledge)
             # These happen to the queue owner and carry no subject_id (docs/API.md, Events).
             if kind in ("Damaged", "Attacked"):
                 m.alarm = True

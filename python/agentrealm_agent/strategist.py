@@ -2034,7 +2034,7 @@ class Strategist:
             # A buy needs a known seller (A110, A131): never a walk to shops that do not sell it.
             record["no_seller_refused"] = unsold
             self.rejected = [*self.rejected, *unsold]
-        goals, off_map = refuse_bad_cells(goals, runner.world, runner.plan.directive_ops())
+        goals, off_map = refuse_bad_cells(goals, runner.world, runner.plan.directive_ops(), runner.mem.stalled_ops)
         if off_map:
             # A cell off the map's edge, or a wall to stand on, is no target (A148).
             record["bad_cell_refused"] = off_map

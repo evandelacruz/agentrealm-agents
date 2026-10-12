@@ -15,8 +15,9 @@ from __future__ import annotations
 import json
 from typing import Any, Sequence
 
-from .level_order import too_high
+from .level_order import LEAVE_OP, too_high
 from .plan import TRAVEL_SYMBOLIC
+from .stalled import StalledOp, find as find_stalled
 from .world import DOORS, Pos, WorldModel
 
 # Ops whose x, y is a cell the character walks onto, so it cannot be a wall.
@@ -90,19 +91,29 @@ def leaves_map(op: dict[str, Any], w: WorldModel) -> bool:
     return p is None or w.view.tiles.get(p) in DOORS
 
 
+def leaving_level(w: WorldModel, stalled_ops: Sequence[StalledOp] = ()) -> bool:
+    """The agent puts ``leave_level`` on top by itself before any reply op
+    runs (``level_order.sync_leave``): inside a level above the target, unless
+    it is remembered as stalled."""
+    return too_high(w) and find_stalled(list(stalled_ops), LEAVE_OP, w.map_id) is None
+
+
 def refuse_bad_cells(
-    goals: list[dict[str, Any]], w: WorldModel, ahead: Sequence[dict[str, Any]] = ()
+    goals: list[dict[str, Any]],
+    w: WorldModel,
+    ahead: Sequence[dict[str, Any]] = (),
+    stalled_ops: Sequence[StalledOp] = (),
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """A reply's ops whose cell on the current map is off it, or a wall to
     stand on, are left out, each with why, before any reaches a state. Only
     the ops that run on this map are judged: those before the first that may
     leave it, counting the ops ``ahead`` of the reply's on the stack (the
     pinned directives ops) and the ``leave_level`` the agent puts on top by
-    itself inside a level above the target (``level_order.too_high``). Every
+    itself inside a level above the target (:func:`leaving_level`). Every
     op after that runs on a map not known yet, so it passes, and its walk
     finds out there."""
     kept, refused = [], []
-    here = not too_high(w) and not any(leaves_map(g, w) for g in ahead)
+    here = not leaving_level(w, stalled_ops) and not any(leaves_map(g, w) for g in ahead)
     for g in goals:
         why = bad_cell(g, w) if here else None
         if why is None:

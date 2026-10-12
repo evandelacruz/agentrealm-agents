@@ -14,6 +14,7 @@ import unittest
 from agentrealm_agent.cells import refuse_bad_cells
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.plan import Plan
+from agentrealm_agent.stalled import RetryBasis, remember as remember_stalled
 from agentrealm_agent.strategist import build_prompt, door_lines, ground_lines, map_lines, ruler_lines
 from agentrealm_agent.world import Entity, WorldModel
 from tests.test_strategist import WAIT_ANSWER, FakeLLM, fake_runner, make, round_trip
@@ -194,6 +195,9 @@ class BadCellTest(unittest.TestCase):
         self.assertEqual(refuse_bad_cells([{"op": "leave_level"}, off], w), ([{"op": "leave_level"}, off], []))
         w.map_level = 3  # above the target: leave_level goes on top first, so the reply runs outside
         self.assertEqual(refuse_bad_cells([off], w), ([off], []))
+        stalled: list = []
+        remember_stalled(stalled, {"op": "leave_level"}, "no way out", 1, RetryBasis(frozenset(), 0, 0), w.map_id)
+        self.assertEqual(refuse_bad_cells([off], w, stalled_ops=stalled)[0], [], "a stalled leave_level is not put back: the reply runs here")
 
     def test_a_map_of_unknown_size_refuses_nothing_off_it(self):
         w = level_room()

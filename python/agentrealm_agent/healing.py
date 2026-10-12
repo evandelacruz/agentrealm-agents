@@ -162,7 +162,7 @@ def carried_heal(
     The armed supply counts too: ``held`` never lists it (Manual §11 Where your
     supplies are), and a potion a drink left armed is still one to drink (A76).
     Food is eaten on pickup and never carried (Manual §11 Food and potions), so
-    the food branch only serves a code the reference does not list."""
+    in play the food branch never fires; it goes with A155."""
     usable = [h for h in in_hand(w) if can_try(m, w, "use", h.id)]
     for h in usable:
         if is_food(h.code):

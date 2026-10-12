@@ -87,7 +87,7 @@ class DoorListTest(unittest.TestCase):
     def test_the_level_door_is_listed_with_its_cell(self):
         w = level_room()
         (line,) = door_lines(w)
-        rows = json.loads(line.split("=", 1)[1].rsplit(" of=", 1)[0])
+        rows = json.loads(line.split("=", 1)[1])
         self.assertEqual((rows[0]["x"], rows[0]["y"]), DOOR)
         self.assertEqual(rows[0]["step_from"], [{"x": 7, "y": 1}])
         self.assertFalse(rows[0]["here"])
@@ -95,7 +95,7 @@ class DoorListTest(unittest.TestCase):
     def test_the_door_under_the_character_is_listed(self):
         w = level_room(at=DOOR)
         (line,) = door_lines(w)
-        rows = json.loads(line.split("=", 1)[1].rsplit(" of=", 1)[0])
+        rows = json.loads(line.split("=", 1)[1])
         self.assertEqual((rows[0]["x"], rows[0]["y"], rows[0]["here"]), (7, 0, True))
 
     def test_state_carries_doors_and_what_lies_on_the_ground(self):
@@ -111,6 +111,33 @@ class DoorListTest(unittest.TestCase):
         self.assertEqual([(r["kind"], r["x"], r["y"]) for r in rows], [("supply", 3, 4), ("chest", 12, 9)])
         self.assertEqual(rows[0]["gem_price"], 6)
         self.assertIn("on_the_ground=", prompt)
+
+
+    def test_every_door_is_listed(self):
+        w = level_room()
+        for x in range(1, ROOM_W - 1):
+            w.view.tiles[(x, ROOM_H - 1)] = "framed_door"
+        (line,) = door_lines(w)
+        self.assertEqual(len(json.loads(line.split("=", 1)[1])), ROOM_W - 1, "doors are few: none is left out")
+
+
+def terrain_read(map_id: int, **size: int) -> dict:
+    """A 3 by 1 terrain read of tile at 1..3, 1, with ``size`` (map_width, map_height) when given."""
+    return {"map_id": map_id, "x0": 1, "y0": 1, "width": 3, "height": 1, "rows": ["ttt"], "legend": {"t": {"block_type": "tile"}}, **size}
+
+
+class MapSizeTest(unittest.TestCase):
+    def test_a_terrain_read_gives_the_map_size_and_one_without_it_keeps_it(self):
+        w = WorldModel(character_id=1, map_id=40, pos=(2, 1))
+        w.apply_terrain(terrain_read(40))
+        self.assertIsNone(w.view.size, "no read has given it yet")
+        w.apply_terrain(terrain_read(40, map_width=ROOM_W, map_height=ROOM_H))
+        self.assertEqual(w.view.size, (ROOM_W, ROOM_H))
+        w.apply_terrain(terrain_read(40))
+        self.assertEqual(w.view.size, (ROOM_W, ROOM_H), "a read without the fields leaves it")
+        kept, refused = refuse_bad_cells([{"op": "travel", "to": "point", "x": 17, "y": 1}], w)
+        self.assertEqual(kept, [])
+        self.assertIn("17,1 is off map 40, which is x 0..15, y 0..11", refused[0])
 
 
 class BadCellTest(unittest.TestCase):

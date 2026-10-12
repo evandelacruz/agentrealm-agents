@@ -219,8 +219,10 @@ def bench(m: Memory, w: WorldModel, states: list[str], moves: list[tuple[str, st
     """Settle a flip between ``states`` that paced with no walk (module
     docstring): bench the losing side for ``FLIP_COOLDOWN_TICKS``, and ask
     the planner (a ``pacing`` trigger) when the same states flipped within
-    twice that before, or at once when no side may be benched. Returns what
-    the ``oscillation`` event records."""
+    twice that before, or at once when no side may be benched. Either way it
+    asks once per flip episode: a catch of the same states within twice the
+    cool-down of the last continues it. Returns what the ``oscillation``
+    event records."""
     stuck, e = m.nav_stuck, m.engagement
     loser = losing_side(m, states, moves)
     out: dict = {}
@@ -230,7 +232,9 @@ def bench(m: Memory, w: WorldModel, states: list[str], moves: list[tuple[str, st
     flip = tuple(states)
     again = stuck.last_flip is not None and stuck.last_flip[0] == flip and w.tick - stuck.last_flip[1] <= 2 * FLIP_COOLDOWN_TICKS
     stuck.last_flip = (flip, w.tick)
-    if again or loser is None:
+    # Once per flip episode: with a bench, when it did not settle the flip;
+    # with none possible, on the episode's first catch only.
+    if (again if loser is not None else not again):
         queue_signal(
             m,
             {

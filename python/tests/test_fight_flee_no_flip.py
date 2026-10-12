@@ -229,6 +229,16 @@ class FlipGuardTest(unittest.TestCase):
         self.assertFalse(oscillation.benched(self.m, self.w, "Fight"))
         self.assertEqual([s["trigger"] for s in self.m.strategist_signals], ["pacing"])
 
+    def test_with_no_side_to_bench_the_planner_is_asked_once_per_episode(self):
+        for _ in range(4):
+            pace(self.m, self.w, ["Fight", "Retreat"] * 4)
+        asks = [s for s in self.m.strategist_signals if s["trigger"] == "pacing"]
+        self.assertEqual(len(asks), 1, asks)
+        self.assertIsNone(asks[0]["benched"])
+        self.w.tick += 3 * oscillation.FLIP_COOLDOWN_TICKS  # the episode is over
+        pace(self.m, self.w, ["Fight", "Retreat"] * 4)
+        self.assertEqual(len([s for s in self.m.strategist_signals if s["trigger"] == "pacing"]), 2)
+
     def test_a_swing_in_the_window_is_progress(self):
         self.m.last_use_tick = self.w.tick + 12
         event = pace(self.m, self.w, ["Fight", "Flee"] * 4)

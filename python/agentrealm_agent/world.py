@@ -446,6 +446,12 @@ class WorldModel:
         with no ``Arm`` first (``supplies.afloat``, A133)."""
         return afloat(self.armed_code, self.worn_codes.values())
 
+    @property
+    def map_size(self) -> tuple[int, int] | None:
+        """The current map's width and height (``map_sizes``), None until a
+        minimap or terrain read gives them."""
+        return None if self.map_id is None else self.map_sizes.get(self.map_id)
+
     def walkable(self, p: Pos, *, map_id: int | None = None, now: bool = False, swing: bool = False) -> bool:
         """``p`` is ground a walk may step on, water too while a fording
         supply is carried (A133): the one test of whether water is ground

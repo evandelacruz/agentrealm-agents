@@ -9,8 +9,8 @@ Shape, under ``kb.maps["<map_id>"]``:
   was refused ``door_locked`` (A14). The API never names a door's destination.
 - ``"hunting"``: ``{"x,y": {"strength_ceiling"?, "closed"?}}`` from ``get_zone``
   reads and ``over_strength_ceiling`` rejections (A14, A27).
-- ``"level"``: the ``level`` a position read named on this map, once one has
-  (Manual §5.3). Positive on level interiors, which Level owns (A37).
+- ``"level"``: the ``level`` the map's minimap entry named (A145), or a
+  position read that ever carries one (Manual §5.3). Positive on level interiors, which Level owns (A37).
 """
 
 from __future__ import annotations
@@ -74,15 +74,33 @@ def sync_world_maps(kb: KnowledgeBase, w: WorldModel) -> None:
 
 
 def record_map_level(kb: KnowledgeBase, w: WorldModel) -> None:
-    """Remember the current map's ``level`` once a position read has named it."""
+    """Remember the current map's ``level`` once a read has named it: its minimap entry (A145), or a position read that ever carries one."""
     if w.map_id is None or w.map_level is None:
         return
     with kb.lock:
         _entry(kb, w.map_id)[LEVEL] = w.map_level
 
 
+def record_map_levels(kb: KnowledgeBase | None, levels: dict[int, int]) -> None:
+    """Remember every map's level a minimap read named, 0 outside every level (A145)."""
+    if kb is None:
+        return
+    with kb.lock:
+        for map_id, level in levels.items():
+            _entry(kb, map_id)[LEVEL] = level
+
+
+def map_level_known(kb: KnowledgeBase | None, map_id: int) -> int | None:
+    """The ``level`` a read named for ``map_id`` (0 outside every level), or None while unread (A145)."""
+    if kb is None:
+        return None
+    with kb.lock:
+        level = kb.maps.get(str(map_id), {}).get(LEVEL)
+    return level if isinstance(level, int) and not isinstance(level, bool) and level >= 0 else None
+
+
 def is_level_interior(kb: KnowledgeBase, map_id: int) -> bool:
-    """True when a position read on ``map_id`` named a positive ``level`` (A37)."""
+    """True when a read named a positive ``level`` for ``map_id`` (A37; the minimap since A145)."""
     with kb.lock:
         level = kb.maps.get(str(map_id), {}).get(LEVEL)
     return isinstance(level, int) and not isinstance(level, bool) and level > 0

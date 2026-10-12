@@ -28,6 +28,7 @@ from typing import TypeVar
 from ..navigation import oscillation
 from ..navigation.rejection import end_decision
 from ..engagement import sync_engagement
+from ..level_order import sync_leave
 from ..equip import note_last_weapon
 from ..fording import ESCAPES, ford_gate, loadout_memory
 from ..healing import note_heal_window
@@ -208,6 +209,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     if ctx.plan is not None:
         paced_op = ctx.plan.current()  # the op on top while it paced, before settling pops any
         _settle_plan(ctx.plan, world, m)
+        sync_leave(ctx.plan, world, m)  # levels in order: out of a level above the target first (A145)
         if paced is not None and paced_op is not None:
             _stall_paced_op(ctx.plan, paced_op, paced, world, m, ctx.knowledge)
     sync_boss(world, m, ctx.plan)

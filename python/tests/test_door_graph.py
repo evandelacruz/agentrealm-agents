@@ -10,6 +10,7 @@ from unittest import mock
 from agentrealm_agent import config
 from agentrealm_agent import knowledge_base as kb_mod
 from agentrealm_agent.brain import Memory, decide
+from agentrealm_agent.level_order import MINIMAP_TRIES, landing_cell, minimap_due
 from agentrealm_agent.config import CharacterConfig, Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
 from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view, view_from_kb
@@ -145,8 +146,11 @@ class DoorGraphRoutingTest(KbTestCase):
 
 
 class FakeReads:
-    def __init__(self, position: dict | None = None, terrain: dict | None = None):
-        self.position_reply, self.terrain_reply = position, terrain
+    def __init__(self, position: dict | None = None, terrain: dict | None = None, minimap: dict | None = None):
+        self.position_reply, self.terrain_reply, self.minimap_reply = position, terrain, minimap
+
+    def minimap(self, cid):
+        return self.minimap_reply
 
     def position(self, cid):
         return self.position_reply
@@ -177,6 +181,50 @@ class RunnerWarpRecordingTest(KbTestCase):
         self.assertIsNone(r.mem.warp_from)
         door = self.kb.maps["1"]["doors"][0]
         self.assertEqual((door["x"], door["y"], door["to_map_id"], door["to_x"], door["to_y"]), (2, 0, 2, 4, 6))
+
+    def test_stepping_into_a_level_records_the_entrance_number(self) -> None:
+        # A145: the number is learned only by going in, and the landing is the way back out.
+        r = self.runner(FakeReads(position={"map_id": 2, "x": 4, "y": 6, "level": 3}))
+        self.door_step(r)
+        r.step("position")
+        self.assertEqual(self.kb.entrances["1:2,0"]["level"], 3)
+        self.assertEqual(landing_cell(self.kb, 2), (4, 6), "the way back out")
+
+    def test_the_minimap_names_the_level_a_door_step_entered(self) -> None:
+        # A145: position carries no level; the minimap's map entry does.
+        reads = FakeReads(position={"map_id": 44, "x": 4, "y": 6}, minimap={"maps": [{"map_id": 1}, {"map_id": 44, "level": 4}]})
+        r = self.runner(reads)
+        self.door_step(r)
+        r.step("position")
+        self.assertIsNone(r.world.map_level)
+        self.assertTrue(minimap_due(r.world, r.mem), "the landing map's level is unread")
+        r.step("minimap")
+        self.assertEqual(r.world.map_level, 4)
+        self.assertFalse(minimap_due(r.world, r.mem))
+        self.assertEqual(self.kb.entrances["1:2,0"]["level"], 4)
+        self.assertEqual(landing_cell(self.kb, 44), (4, 6))
+        self.assertIsNone(r.mem.level_entry)
+
+    def test_the_minimap_is_read_at_most_minimap_tries_times_per_map(self) -> None:
+        # A minimap that leaves the landing map out: the reads stop, and nothing re-arms them.
+        r = self.runner(FakeReads(position={"map_id": 44, "x": 4, "y": 6}, minimap={"maps": [{"map_id": 1}]}))
+        self.door_step(r)
+        r.step("position")
+        for _ in range(MINIMAP_TRIES):
+            self.assertTrue(minimap_due(r.world, r.mem))
+            r.step("minimap")
+        self.assertFalse(minimap_due(r.world, r.mem))
+        self.assertEqual(r.mem.minimap_reads, {44: MINIMAP_TRIES})
+        self.assertIsNone(r.mem.level_entry, "the step is let go once its reads are spent")
+        self.assertEqual(self.kb.entrances, {})
+
+    def test_a_door_onto_a_map_outside_every_level_is_no_entrance(self) -> None:
+        r = self.runner(FakeReads(position={"map_id": 2, "x": 4, "y": 6}, minimap={"maps": [{"map_id": 2}]}))
+        self.door_step(r)
+        r.step("position")
+        r.step("minimap")
+        self.assertEqual(r.world.map_level, 0)
+        self.assertEqual(self.kb.entrances, {})
 
     def test_read_still_on_the_door_records_no_self_loop(self) -> None:
         r = self.runner(FakeReads(position={"map_id": 1, "x": 2, "y": 0}))

@@ -320,7 +320,8 @@ class MapView:
 class WorldModel:
     character_id: int
     map_id: int | None = None
-    map_level: int | None = None  # level number on interior maps (position read, Manual §5.3)
+    map_level: int | None = None  # level number of the current map: 0 outside every level, None while unread (A145)
+    map_levels: dict[int, int] = field(default_factory=dict)  # map id -> its level from the minimap, 0 outside every level (A145)
     pos: Pos | None = None
     perception: int = 1
     movement: int = 1
@@ -475,9 +476,12 @@ class WorldModel:
         self.asleep = asleep
 
     def apply_position(self, p: dict) -> None:
-        # `level` belongs to the map (Manual §5.3): a read that omits it keeps
-        # the map's level, and a new map starts with none until a read names
-        # it. A non-integer `level` is logged and read as omitted (A37).
+        # `level` belongs to the map (Manual §5.3) and comes from its minimap
+        # entry (`apply_minimap`, A145): the position read carries none. A new
+        # map takes the level the minimap gave it, else none until a read
+        # names it. A position read that ever names one still counts, a read
+        # that omits it keeps the map's level, and a non-integer `level` is
+        # logged and read as omitted (A37).
         has_level = "level" in p
         level = p.get("level")
         if level is not None and (isinstance(level, bool) or not isinstance(level, int)):
@@ -486,13 +490,28 @@ class WorldModel:
         map_id = int(p["map_id"])
         if map_id != self.map_id:
             self.snapshot_version = None  # entities no longer match its base
-            self.map_level = None
+            self.map_level = self.map_levels.get(map_id)
         self.map_id = map_id
         self.pos = (int(p["x"]), int(p["y"]))
         self.asleep = False  # a sleeping character is off the map (GAME_NOTES Sleep)
         self.placed, self.woke = True, False
         if has_level:
             self.map_level = level
+
+    def apply_minimap(self, body: dict) -> None:
+        """Each revealed map's ``level`` from a minimap read (A145): a map inside
+        a level carries it, one outside every level omits it. The position
+        read does not carry it, so this is where the current map's level comes
+        from; a position read that ever names one still counts."""
+        for m in body.get("maps") or []:
+            if not isinstance(m, dict):
+                continue
+            map_id, level = _opt_int(m.get("map_id")), _opt_int(m.get("level"))
+            if map_id is None:
+                continue
+            self.map_levels[map_id] = level if level is not None and level > 0 else 0
+        if self.map_id in self.map_levels:
+            self.map_level = self.map_levels[self.map_id]
 
     def perception_rect(self) -> tuple[int, int, int, int]:
         """x0, y0, width, height of the perception window around us."""
@@ -804,9 +823,13 @@ class WorldModel:
                 self.apply_position(pos)
 
     def note_level_clear(self, ceremony: dict | None) -> None:
-        """Records a round trip's one-shot ``level_clear_ceremony`` (A38)."""
+        """Records a round trip's one-shot ``level_clear_ceremony`` (A38), and
+        its ``level_number`` as cleared before the next snapshot says so (A145)."""
         if ceremony:
             self.level_clear_tick = self.tick
+            level = _opt_int(ceremony.get("level_number")) if isinstance(ceremony, dict) else None
+            if level is not None and level not in self.levels_cleared:
+                self.levels_cleared = sorted({*self.levels_cleared, level})
 
     def _apply_boss_fight_clock(self, body: dict, *, complete: bool) -> None:
         if complete or "boss_fight_end_tick" in body:

@@ -28,7 +28,7 @@ from agentrealm_agent.world import WorldModel
 
 from ladder.goals import dump
 
-# Temporary, and the one tie to Stan: until her goal tree replaces it (A139–A141)
+# Temporary, and the one tie to Stan: until her goal tree drives play (A140–A141)
 # `run` is Stan's loop (sync, flee, explore). Run from `python/`, where
 # `starter_agent.py` is importable.
 import starter_agent

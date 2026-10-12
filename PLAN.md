@@ -29,12 +29,12 @@ The agent is a fast algorithmic layer under a slower planner (A61, the redirect 
 |---|---|
 | `POST /worlds/{code}/characters` `{name, avatar, model_agent}` | Create. 201 returns self. |
 | `GET /characters/{id}/self` | Lives, health, perception range, movement speed, alive, placed. |
-| `GET /characters/{id}/position` | `{map_id, x, y}`. 409 `not_on_map` until placed. |
+| `GET /characters/{id}/position` | `{map_id, x, y}`, with no `level` (that is on the minimap). 409 `not_on_map` until placed. |
 | `GET /characters/{id}/world` | Tick rate, sandbox flag, status. |
 | `GET /characters/{id}/terrain-tiles?map_id&x0&y0&width&height` | Block types inside perception, plus revealed ground, as a grid: `rows` of `legend` symbols, `?` for clouds. |
 | `GET /characters/{id}/entity-tiles?…` | Characters, NPCs, supplies inside perception. |
 | `GET /characters/{id}/zone?map_id&x&y` | Zone at a revealed cell: `safe`, `brightness`, and a hunting ground's `strength_ceiling`. |
-| `GET /characters/{id}/minimap` | Every revealed map's size and level entrance marks (`entrances`: `{x, y}` per map). |
+| `GET /characters/{id}/minimap` | Every revealed map's size, its `level` (positive inside a level), and level entrance marks (`entrances`: `{x, y}` per map). |
 | `POST /characters/{id}/tick` `{"intents": [{...}], "snapshot_version": N}` | Replaces the character's queue with an ordered list (`[]` clears it; no `intents` leaves it running). Optional `snapshot_version` is the observation version last applied; the server answers with a delta when it still matches. Returns `queue_id`, `queue` while it is held, `finished_queue` once it ran to its end, `intent_results` since the last call (none for an applied `Wait`, B133), events by tick, dropped count, the observation, and the clock. |
 
 Auth is `Authorization: Bearer <key>`.

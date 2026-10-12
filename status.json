@@ -301,5 +301,7 @@
 
   "A148": {"state": "done"},
 
-  "A149": {"state": "todo"}
+  "A149": {"state": "todo"},
+
+  "A152": {"state": "done"}
 }

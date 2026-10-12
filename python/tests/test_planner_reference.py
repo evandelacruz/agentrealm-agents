@@ -29,7 +29,7 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "refresh_planner_refe
 
 def prompt() -> list[dict]:
     return build_prompt(
-        triggers=[{"trigger": "clue", "text": "a lantern"}],
+        triggers=[{"trigger": "clue", "text": "a zorbleflute"}],
         w=WorldModel(character_id=1, map_id=1, pos=(2, 3), tick=5),
         plan=Plan([{"op": "wait", "seconds": 0, "why": "test"}], dict(PARAM_DEFAULTS)),
         directives=Directives(params=dict(PARAM_DEFAULTS)),
@@ -79,8 +79,8 @@ class PromptTest(unittest.TestCase):
         messages = prompt()
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
         self.assertNotIn("cache", messages[1])
-        self.assertIn("a lantern", messages[1]["content"])
-        self.assertNotIn("a lantern", messages[0]["content"])
+        self.assertIn("a zorbleflute", messages[1]["content"])
+        self.assertNotIn("a zorbleflute", messages[0]["content"])
         self.assertIn("tick=5", messages[1]["content"])
         # Only the dynamic part is charged against tokens_per_min.
         self.assertLess(estimate_tokens(messages), 2_000)

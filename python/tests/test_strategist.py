@@ -995,7 +995,7 @@ class PlannerViewTest(unittest.TestCase):
         # A132: the potion bar and the health bar trade through held heals.
         prompt = system_prompt()
         self.assertIn("A potion is for an actual health need: health at the survival floor (low_health), or a fight ahead that needs the health", prompt)
-        self.assertIn("Never drink one only to meet a readiness bar: health_at_bar already counts the potions and food held", prompt)
+        self.assertIn("Never drink one only to meet a readiness bar: health_at_bar already counts the potions held", prompt)
         self.assertIn("health_at_bar counts held heals: it is met when health plus the heal of the potions and food held reaches the bar", prompt)
         self.assertIn("the potion bar and the health bar trade against each other through held heals", prompt)
         self.assertIn("drinking to meet one bar breaks the other", prompt)

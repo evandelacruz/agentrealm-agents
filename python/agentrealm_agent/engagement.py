@@ -9,7 +9,7 @@ An engagement whose decision is fight holds until that fight ends (A113):
 while Fight still has a target in it (the ``held_target`` dispatch passes:
 the very hostile Fight would swing at or step toward, ``fight.held_target``),
 it does not end, and Fight goes on with that hostile, so a walking op never
-resumes between swings at a hostile that stepped back to its post. It ends
+resumes between swings at a hostile that stepped back out of reach. It ends
 when Fight has no such target (every member dead, gone from view, forbidden
 or out of reach), when a chase stops closing the gap
 (``CHASE_PROBE_TICKS``, as Flee's probe asks running to work), or when the

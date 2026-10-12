@@ -35,8 +35,9 @@ if TYPE_CHECKING:
 
 def potion_count(w: WorldModel) -> int:
     """Held, stowed and armed potions (Boss preconditions, Shop reserve, A21,
-    A38). The armed one counts when ``held`` leaves it out, so a drink that
-    moved a potion into the slot and drank nothing is not a potion gone (A76)."""
+    A38). The armed one counts too: ``held`` never lists the armed supply
+    (Manual §11 Where your supplies are), so a drink that moved a potion into
+    the slot and drank nothing is not a potion gone (A76)."""
     n = sum(1 for h in w.held_supplies if is_potion(h.code))
     n += sum(1 for s in w.chest_supplies if is_potion(s.code))
     if w.armed_id is not None and is_potion(w.armed_code) and all(h.id != w.armed_id for h in w.held_supplies):
@@ -150,9 +151,10 @@ def carried_heal(
 ) -> InventorySupply | None:
     """Carried food first, then a potion (PLAYABLE_AGENT_PLAN.md Heal row),
     a potion only when ``spend_potion`` says it is worth drinking now.
-    The armed supply counts too: the snapshot may leave it out of ``held``
-    (GAME_NOTES open questions), and a potion a drink left armed is still one
-    to drink (A76)."""
+    The armed supply counts too: ``held`` never lists it (Manual §11 Where your
+    supplies are), and a potion a drink left armed is still one to drink (A76).
+    Food is eaten on pickup and never carried (Manual §11 Food and potions), so
+    the food branch only serves a code the reference does not list."""
     usable = [h for h in in_hand(w) if can_try(m, w, "use", h.id)]
     for h in usable:
         if is_food(h.code):

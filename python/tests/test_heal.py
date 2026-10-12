@@ -4,6 +4,7 @@ import random
 import unittest
 import unittest.mock
 
+from agentrealm_agent import healing
 from agentrealm_agent.brain import decide
 from agentrealm_agent.config import Policy
 from agentrealm_agent.executor import DEFAULT_WEAPON_COOLDOWN_TICKS
@@ -538,7 +539,7 @@ class HealWalkOpensItsPricedWayTest(unittest.TestCase):
         from agentrealm_agent.states import heal
 
         c = ctx()
-        with unittest.mock.patch.object(heal, "FOOD_REACH", 5):
+        with unittest.mock.patch.object(healing, "FOOD_REACH", 5):
             out = dispatch(w, c)
         self.assertEqual((out.state, out.reason), ("Heal", "heal_food → (5, 2)"))
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 1, "y": 1}], "round the first bush")
@@ -546,7 +547,7 @@ class HealWalkOpensItsPricedWayTest(unittest.TestCase):
         self.assertEqual(c.memory.nav_stuck.stuck_signals, [], "food priced reachable is never given up")
         # Beside the block, Heal opens it.
         w.pos = c.memory.path[c.memory.path.index((3, 2)) - 1]
-        with unittest.mock.patch.object(heal, "FOOD_REACH", 5):
+        with unittest.mock.patch.object(healing, "FOOD_REACH", 5):
             out = dispatch(w, c)
         self.assertEqual((out.state, out.reason), ("Heal", "heal_food: break cut @ (3, 2)"))
 
@@ -567,7 +568,7 @@ class HealWalkOpensItsPricedWayTest(unittest.TestCase):
         w.hostile_types.add(("npc", "wartlurch"))
         w.entities = [Entity("supply", 1, (10, 0), "apple"), Entity("npc", 20, (3, 1), "wartlurch")]
         c = ctx()
-        with unittest.mock.patch.object(heal, "FOOD_REACH", 10):
+        with unittest.mock.patch.object(healing, "FOOD_REACH", 10):
             out = dispatch(w, c)
         m = c.memory
         self.assertEqual((out.state, out.reason), ("Heal", "heal_food → (10, 0)"))

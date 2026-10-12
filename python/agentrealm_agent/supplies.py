@@ -97,6 +97,10 @@ WORN_CLASSES = frozenset({"armor", "accessory"})
 # Use-self path (``states/use_item.py``) applies it.
 SELF_EFFECTS = frozenset({"heal", "chest"})
 
+# The food a block drops when broken (Manual §16): a bush drops berries. The
+# Supplies reference lists items, not blocks, so a block's drop is known here.
+BLOCK_FOOD: dict[str, str] = {"bush": "berry"}
+
 
 @dataclass(frozen=True)
 class Supply:
@@ -320,6 +324,12 @@ def eaten_on_pickup(code: str | None) -> bool:
 
 def heals(code: str | None) -> bool:
     return is_food(code) or is_potion(code)
+
+
+def heal_of(code: str | None) -> int:
+    """The health it gives back (its Supplies ``heal``), 0 when it heals none or is unlisted."""
+    r = row(code)
+    return r.heal if r is not None and r.heal else 0
 
 
 def is_weapon(code: str | None) -> bool:

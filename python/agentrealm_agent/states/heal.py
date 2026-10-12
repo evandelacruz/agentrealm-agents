@@ -14,37 +14,36 @@ now (``can_try``).
 from __future__ import annotations
 
 from ..break_memory import choice_at, given_up_blocks
-from ..config import Policy
-from ..executor.supply_refusals import must_stand_on
-from ..healing import carried_heal, food_to_take, hurt, potion_count
-from ..hostile_ground import reach_cells
+from ..healing import carried_heal, hurt, in_combat, potion_count
 from ..memory import Memory, queue_signal
-from ..navigation import cost_path, path_cost
-from ..navigation.planner import CostGridParams
+from ..navigation import cost_path
 from ..navigation import stuck as nav_stuck
-from ..navigation.rejection import navigation_avoid_costly
 from .. import targets as targets_mod
-from ..pathing import bounded_step, grid_params, nav_search
+from ..pathing import bounded_step, nav_search
 from ..survival import hostiles_in_range, hostiles_reaching
-from ..world import Entity, Pos, WorldModel, chebyshev
+from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome
 from .break_state import break_toward, in_break_reach
+from .food import block_target, food_target, take_reach, walk_grids
 from .intents import set_position, take
 from .use_item import rearm_after_use, use_on_self
-
-# A reflex takes only food close by: walking further for food is a planner
-# op (``fetch_item``), not something Heal starts on its own.
-FOOD_REACH = 3
 
 
 class HealState(State):
     """Reflex, above Fight. Hurt and no hostile in range, it heals by the
     first of these that can be had:
 
-    1. Food lying within ``FOOD_REACH``, the cheapest by its walk on Heal's
-       ground (``_food_target``).
-    2. Carried food, then a carried potion when ``healing.spend_potion``
-       says it is worth drinking now (A96); the reserve is kept otherwise.
+    1. In combat or about to be (``healing.in_combat``), carried food or a
+       potion that is due goes first (A135).
+    2. Food lying within ``healing.FOOD_REACH``, the cheapest by its walk
+       on Heal's ground (``food.food_target``).
+    3. Out of combat, a block within that reach that drops food (a bush,
+       for berries) and a held blade opens, the cheapest the same way
+       (``food.block_target``, A135).
+    4. Carried food, then a carried potion when ``healing.spend_potion``
+       says it is worth drinking now (A96): out of combat only at the low
+       line, and only once no food near could be had this decision (A135);
+       the reserve is kept otherwise.
 
     With neither, Heal asks the planner once for food and potions (a
     ``heal_supplies`` trigger, counting the potions held back) and sends
@@ -85,8 +84,15 @@ def _wants_heal(w: WorldModel, ctx: PlayContext) -> bool:
 
 
 def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
+    # A potion is for a fight (A135): in one, a heal that is due goes before any walk for food.
+    fighting = in_combat(w, ctx.memory, ctx.policy)
+    if fighting and (out := use_carried_heal(w, ctx)):
+        return out
     if out := _act_food(w, ctx):
         return out
+    if not fighting and (out := _act_block(w, ctx)):
+        return out
+    # No food near could be had this decision: the potion rule weighs no food.
     if out := use_carried_heal(w, ctx):
         return out
     _ask_for_supplies(w, ctx.memory)
@@ -118,31 +124,10 @@ def _out(intents: list[dict] | None, reason: str) -> StateOutcome:
     return StateOutcome(intents, reason, state=HealState.name)
 
 
-def _ground(w: WorldModel, m: Memory, policy: Policy, ctx: PlayContext) -> tuple[set[Pos], set[Pos]]:
-    """Heal's ground, as (avoid, costly), for every walk and pick it makes:
-    hazards are both, and cells in a known hostile's reach, in view or
-    remembered (``hostile_ground.reach_cells``), are costly, so a walk goes
-    round a pack instead of through it."""
-    nav_avoid, nav_costly = navigation_avoid_costly(m.nav, ctx.knowledge, w.map_id, w.tick)
-    hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
-    reach = reach_cells(w, policy)
-    return nav_avoid | hazards, nav_costly | hazards | reach
-
-
-def _walk_grids(w: WorldModel, ctx: PlayContext, at: Pos) -> tuple[CostGridParams, CostGridParams]:
-    """Heal's ground for a walk to ``at``, as the grid it steps on and the same grid with each block on the straight way a held
-    item opens priced at its break (``grid_params`` ``break_goal``)."""
-    m, policy = ctx.memory, ctx.policy
-    plan_avoid, plan_costly = _ground(w, m, policy, ctx)
-    walk = grid_params(policy, plan_avoid, plan_costly)
-    opening = grid_params(policy, plan_avoid, plan_costly, m=m, w=w, knowledge=ctx.knowledge, break_goal=at)
-    return walk, opening
-
-
 def _walk_toward(w: WorldModel, ctx: PlayContext, at: Pos, *, goal: str) -> StateOutcome | None:
     """One move toward ``at``, or None when there is none now.
 
-    One price for every Heal walk: its walk on Heal's ground (``_ground``),
+    One price for every Heal walk: its walk on Heal's ground (``food.ground``),
     a block on the straight way a held item opens costed at its break. When
     the cheapest way crosses such a block, Heal walks that way on its own
     ground and opens the block once it is in the opener's reach
@@ -154,7 +139,7 @@ def _walk_toward(w: WorldModel, ctx: PlayContext, at: Pos, *, goal: str) -> Stat
     prices it.
     """
     m, policy = ctx.memory, ctx.policy
-    plain, opening = _walk_grids(w, ctx, at)
+    plain, opening = walk_grids(w, ctx, at)
     way = cost_path(w, at, opening) if opening.break_costs else None
     grid = plain
     if (cut := next((p for p in way or [] if p in opening.break_costs), None)) is not None:
@@ -179,48 +164,14 @@ def _walk_toward(w: WorldModel, ctx: PlayContext, at: Pos, *, goal: str) -> Stat
     return _out([set_position(step)], f"{goal} → {at}") if step is not None else None
 
 
-def _food_target(w: WorldModel, ctx: PlayContext) -> Entity | None:
-    """The food Heal goes for: of the food lying within ``FOOD_REACH`` that
-    may be taken now (``healing.food_to_take``), the cheapest by its walk
-    (``_walk_toward``'s price; food in reach costs none). The food it went
-    for first stays its target while it is one (A71)."""
-    m = ctx.memory
-    here = w.pos
-    assert here is not None
-    foods = [e for e in food_to_take(w, m) if chebyshev(e.pos, here) <= FOOD_REACH]
-    c = targets_mod.committed(m, w, "heal_food")
-    if (kept := next((f for f in foods if c is not None and f.id == c.target), None)) is not None:
-        return kept
-    targets_mod.release(m, "heal_food")
-
-    def price(f: Entity) -> tuple[int, int, int] | None:
-        if chebyshev(f.pos, here) <= _take_reach(m, f):
-            return (0, 0, f.id)
-        _, opening = _walk_grids(w, ctx, f.pos)
-        way = cost_path(w, f.pos, opening)
-        if not way or way[-1] != f.pos:
-            return None
-        cost = path_cost(w, way, f.pos, opening)
-        return None if cost is None else (cost, chebyshev(f.pos, here), f.id)
-
-    priced = [(p, f) for f in foods if (p := price(f)) is not None]
-    return min(priced, key=lambda pf: pf[0])[1] if priced else None
-
-
-def _take_reach(m: Memory, food: Entity) -> int:
-    """How near a ``Take`` of ``food`` is sent from: beside it, or on its own
-    cell once a ``Take`` from beside it was refused out of reach."""
-    return 0 if must_stand_on(m, food) else 1
-
-
 def _act_food(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
     m = ctx.memory
     here = w.pos
     assert here is not None
-    food = _food_target(w, ctx)
+    food = food_target(w, ctx)
     if food is None:
         return None
-    if chebyshev(food.pos, here) <= _take_reach(m, food):
+    if chebyshev(food.pos, here) <= take_reach(m, food):
         nav_stuck.finish_in_reach(m, w, "heal_food")
         return _out([take(food.id)], f"take food {food.code}")
     # Walking onto it also picks up food eaten on pickup.
@@ -230,10 +181,30 @@ def _act_food(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
     return None
 
 
+def _act_block(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
+    """Break the block Heal goes for food (``food.block_target``): the food
+    it drops (berries, from a bush) is taken on the next decision like any
+    food lying near (A135)."""
+    m = ctx.memory
+    block = block_target(w, ctx)
+    if block is None:
+        return None
+    choice = choice_at(w, ctx.knowledge, block, given_up_blocks(m.nav_stuck, w.map_id, w.tick))
+    if choice is None:
+        return None
+    out = break_toward(w, ctx, choice, HealState.name)
+    if not out.intents:
+        return None
+    targets_mod.commit(m, w, "heal_block", block)
+    out.reason = f"break for food: {out.reason}"
+    return out
+
+
 def use_carried_heal(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
     """``Use`` on yourself carried food, or a potion ``healing.spend_potion``
     says is worth drinking now (health low, or the drink turns the fight,
-    A96), by the one Use-self path (``use_item.use_on_self``, A108). Retreat
+    A96; out of combat only at the low line, A135: Heal calls it there only
+    once no food near could be had), by the one Use-self path (``use_item.use_on_self``, A108). Retreat
     runs it too, when it is losing ground (A9).
 
     A supply the server refused, or whose ``Use`` did nothing, is skipped

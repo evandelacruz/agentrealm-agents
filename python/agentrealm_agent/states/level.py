@@ -2,7 +2,8 @@
 
 Walks to the level's entrance at the op's cell and through it, then walks
 the level's rooms toward unexplored doors, then frontier tiles. The op is
-finished once inside the level there is no door or frontier step left.
+finished once inside the level there is no door or frontier step left, or
+once the entrance, gone through, led onto a map that is no level (A144).
 
 Every target is committed (A71): the entrance, and inside, the door or
 frontier picked, kept until reached, gone or given up. An entrance a look
@@ -20,6 +21,7 @@ from ..config import Policy
 from ..healing import supply_matches
 from ..loot import Pickup, loot_score
 from ..pack import TAKE
+from ..passage import went_through
 from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..memory import Memory
 from ..navigation import cost_path, doors_goal_path, nearest_target
@@ -149,6 +151,10 @@ class LevelState(State):
         op = my_op(ctx, self.name)
         assert op is not None and ctx.plan is not None
         if not inside_level(world):
+            if went_through(op, world, ctx.plan.top_since_tick, ctx.plan.top_map_id):
+                # Through the entrance onto a map that is no level (A144).
+                ctx.plan.finish_current(f"entrance led to map {world.map_id}, no level", memory=m)
+                return StateOutcome(None, "level entrance led to no level", state=self.name)
             return _walk_to_entrance(world, ctx, (op["x"], op["y"]))
         out = level_outcome(world, m, policy, knowledge=ctx.knowledge, state=self.name)
         if out.intents is None:

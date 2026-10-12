@@ -14,6 +14,7 @@ from .directives import PARAM_DEFAULTS, _valid_param
 from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
+from .passage import went_through
 from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
 from .stalled import below_progress, find as find_stalled, forget as forget_stalled
 from .supplies import CAPABILITIES, chest_applied, eaten_on_pickup, used_on_self
@@ -62,7 +63,7 @@ OP_STATE: dict[str, str | None] = {
 # planner needs and the states lack becomes a new op here (with its validator
 # and the state that runs it), never a state that starts itself.
 OP_FIELDS: dict[str, str] = {
-    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" takes x, y for a given one, else the nearest known; "entrance" takes x, y for a given one (a cell from State level_entrances), else walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and resolves nothing while no door has been seen here',
+    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" takes x, y for a given one, else the nearest known; "entrance" takes x, y for a given one (a cell from State level_entrances), else walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and resolves nothing while no door has been seen here; an entrance is reached once he goes through it onto the map it leads to',
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
     "say": "text, and exactly one of npc_id (an id from State nearby_npcs) or npc_type (an NPC type code; the nearest NPC of that type in sight)",
@@ -589,6 +590,7 @@ HEAD_PROGRESS = (
     "wait_started_tick",
     "stalled_since_tick",
     "top_since_tick",
+    "top_map_id",
     "block_before",
     "held_before",
     "paid_from",
@@ -615,6 +617,7 @@ class Plan:
     wait_started_tick: int | None = None
     stalled_since_tick: int | None = None  # first tick the current op found no path
     top_since_tick: int | None = None  # tick the head op reached the top: its own attempts are the ones since (A129)
+    top_map_id: int | None = None  # map the character was on when the head op reached the top: an op that names no map means it (A144)
     acted: GoalOp | None = None  # the head op the current decision acted on; the runner clears it each round (A36)
     block_before: str | None = None  # block_type at a `use_block` or `break_block` target when first seen as the head op
     held_before: int | None = None  # fewest of a `buy` op's item held or stowed since it became the head op
@@ -636,6 +639,7 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.top_since_tick,
+            self.top_map_id,
             self.block_before,
             self.held_before,
             self.paid_from,
@@ -655,6 +659,7 @@ class Plan:
             self.wait_started_tick,
             self.stalled_since_tick,
             self.top_since_tick,
+            self.top_map_id,
             self.block_before,
             self.held_before,
             self.paid_from,
@@ -702,7 +707,7 @@ class Plan:
                     self.demote_current(f"still stalled: {stall.why}", memory)
                     continue
                 if self.top_since_tick is None:
-                    self.top_since_tick = world.tick
+                    self.top_since_tick, self.top_map_id = world.tick, world.map_id
                 if op["op"] == "wait" and self.wait_started_tick is None and world.pos is not None:
                     self.wait_started_tick = world.tick
                 return
@@ -930,6 +935,10 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         # A bounded area counts as explored only once we have seen into it.
         center = (op["x"], op["y"])
         return center in world.view.tiles or chebyshev(world.pos, center) <= op["radius"]
+    if went_through(op, world, plan.top_since_tick, plan.top_map_id) and name != "enter_level":
+        # Through the op's door and on the map it leads to (A144); Level
+        # walks the level it entered.
+        return True
     if name == "travel":
         if op["to"] == "point":
             dest_map = op.get("map_id", world.map_id)

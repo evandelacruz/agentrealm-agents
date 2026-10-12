@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import threading
 
 from agentrealm_agent import config
 from agentrealm_agent.character_select import (
@@ -17,8 +16,10 @@ from agentrealm_agent.character_select import (
 )
 from agentrealm_agent.client import ApiError, Client
 
-# Until her tree is built (A139–A141) she plays Stan's loop: sync, flee, explore.
-from starter_agent import StarterRunner
+# Temporary, and the one tie to Stan: until her goal tree replaces it (A139–A141)
+# `run` is Stan's loop (sync, flee, explore). Run from `python/`, where
+# `starter_agent.py` is importable.
+import starter_agent
 
 # Her characters play the scripted model agent, as Gary's do.
 DEFAULT_CREATE_MODEL = "agentrealm-reference/scripted"
@@ -89,24 +90,8 @@ def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
 
 
 def run(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
-    """Play until Ctrl-C."""
-    try:
-        client.self_(cid)
-    except ApiError as e:
-        print(f"{cfg.profile} ({cid}): {e}", file=sys.stderr)
-        return 2
-    stop = threading.Event()
-    runner = StarterRunner(cfg, client, cid, stop)
-    thread = threading.Thread(target=runner.run, daemon=True)
-    thread.start()
-    try:
-        while thread.is_alive():
-            thread.join(0.5)
-    except KeyboardInterrupt:
-        print("stopping")
-    finally:
-        stop.set()
-    return 1 if runner.failed else 0
+    """Play until Ctrl-C: Stan's loop, until her goal tree replaces it."""
+    return starter_agent.run(client, cfg, cid)
 
 
 if __name__ == "__main__":

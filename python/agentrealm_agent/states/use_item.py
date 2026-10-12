@@ -11,12 +11,15 @@ from __future__ import annotations
 
 from ..equip import weapon_to_rearm
 from ..executor.supply_refusals import can_try, carried_ids, in_hand, must_arm
+from ..healing import in_combat, spend_potion, walk_seconds
 from ..item_table import InventorySupply
 from ..memory import Memory
-from ..supplies import chest_capacity, chest_upgrade, used_on_self
+from ..plan import Plan
+from ..supplies import BLOCK_FOOD, chest_capacity, chest_upgrade, heal_of, is_potion, used_on_self
 from ..survival import hostiles_in_range
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome, my_op
+from .food import food_route
 from .intents import arm_and_use, use_self
 
 
@@ -25,7 +28,9 @@ class UseItemState(State):
 
     With a ``use_item`` op on top it uses one held item of the op's code on
     the character; the op is done once that item is used up, and dropped,
-    with why, when none is held or its ``Use`` was refused or did nothing.
+    with why, when none is held or its ``Use`` was refused or did nothing,
+    or when it is a potion the one potion rule refuses (``potion_refused``,
+    A135).
     With no op it applies a bigger carried chest as soon as one is held and
     no hostile is in range: more carry slots are always better, so that call
     is not the planner's. The weapon the ``Arm`` swapped out goes back on
@@ -66,10 +71,56 @@ def _use_op(world: WorldModel, ctx: PlayContext) -> StateOutcome:
         why = f"its Use on yourself was refused or did nothing: {code}" if held else f"{code} not held"
         plan.drop_current(why, memory=m)
         return StateOutcome(None, why, state=UseItemState.name)
+    if plan.used_id is None and is_potion(code) and (why := potion_refused(world, ctx, plan, code)) is not None:
+        plan.drop_current(why, memory=m)
+        return StateOutcome(None, why, state=UseItemState.name)
     out = use_on_self(world, m, item, UseItemState.name, ctx.tick_hz)
     if out.intents:
         plan.used_id = item.id
     return out
+
+
+# The ops a potion drunk just above them is for (A135): a fight, a boss, a
+# level, or gathering on ground the planner means to fight on.
+FIGHT_OPS = frozenset({"fight", "fight_boss", "enter_level"})
+
+
+def fight_ahead(plan: Plan) -> bool:
+    """The op under the head is a fight (``FIGHT_OPS``, or a
+    ``gather_gems`` with ``fight``): a potion drunk now is for it."""
+    ops = plan.ops_left()
+    nxt = ops[1] if len(ops) > 1 else None
+    return nxt is not None and (nxt["op"] in FIGHT_OPS or (nxt["op"] == "gather_gems" and bool(nxt.get("fight"))))
+
+
+def potion_refused(w: WorldModel, ctx: PlayContext, plan: Plan, code: str) -> str | None:
+    """Why the planner's potion is not drunk, or None to drink it (A135): the
+    one potion rule, ``healing.spend_potion``, with the drink ordered, a fight
+    next on the plan (``fight_ahead``) and Heal's food route
+    (``food.food_route``, the one food test). In combat or about to be the
+    planner's call stands; out of combat the reason names the food Heal
+    eats instead, or the low line the potion is kept above."""
+    m, ahead = ctx.memory, fight_ahead(plan)
+    route = None if in_combat(w, m, ctx.policy, fight_ahead=ahead) else food_route(w, ctx)
+    if spend_potion(w, m, ctx.policy, ctx.params, code, food=route is not None, ordered=True, fight_ahead=ahead):
+        return None
+    if route is not None:
+        cell = f"{w.map_id}:{route.pos[0]},{route.pos[1]}"
+        if route.food is not None:
+            food = route.food.code or ""
+            what = f"{food} at {cell}"
+        else:
+            block = w.view.tiles.get(route.pos) or ""
+            food = BLOCK_FOOD.get(block, "")
+            what = f"a {block} at {cell} to break for {food}"
+        return (
+            f"a potion is for a fight: out of combat with food near ({what}, heal {heal_of(food)}, "
+            f"{walk_seconds(w, route.pos)} s walk; State food_near), Heal eats it"
+        )
+    return (
+        "a potion is for a fight: out of combat above the low_health line it is kept; put the use_item "
+        "directly above the fight, boss or level op it is for"
+    )
 
 
 def self_use_item(w: WorldModel, m: Memory, code: str) -> InventorySupply | None:

@@ -17,13 +17,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .break_memory import choice_at, given_up_blocks
 from .directives import PARAM_DEFAULTS
 from .engagement import drink_turns_fight
 from .executor.supply_refusals import can_try, in_hand
 from .navigation import stuck as nav_stuck
 from .item_table import InventorySupply, merge_heal
-from .supplies import heals, is_food, is_potion, row
-from .world import Entity, WorldModel
+from .supplies import BLOCK_FOOD, heals, is_food, is_potion, kept_on_break, row
+from .survival import hostiles_in_range, recently_attacked
+from .world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -78,14 +80,17 @@ def health_low(w: WorldModel, params: Params) -> bool:
     return w.health <= w.max_health * low_health_share(params)
 
 
-# When a carried potion is spent (A96), in the planner's words: the same rule
-# ``spend_potion`` applies, so a reserve the planner buys is one the
+# When a carried potion is spent (A96, A135), in the planner's words: the
+# same rule ``spend_potion`` applies, so a reserve the planner buys is one the
 # character keeps.
 POTION_RULE = (
-    "A carried potion is drunk only when health is low (at or below the low_health share of max, "
-    "potion_drunk_at under State), or mid-fight when the win estimate says the drink turns the fight "
-    "(to one it would take on, or would win). Otherwise a hurt character eats food and keeps its potions, "
-    "so potions held are a reserve that lasts until then."
+    "A potion is for a fight: it is drunk only in combat or about to be (under attack, a hostile in range, "
+    "a boss fight, inside a level, or a fight op next on the stack), when health is low (at or below the low_health "
+    "share of max, potion_drunk_at under State) or the win estimate says the drink turns the fight (to one it would "
+    "take on, or would win). Out of combat, lost health comes back from food: food lying near, then a bush cut for "
+    "berries (State food_near), which Heal eats whenever hurt; a potion is drunk there only at the low_health line "
+    "when no food near can be had. So potions held are a reserve for fights and levels, and a use_item of a potion "
+    "out of combat is refused while food near can be had or health is above the low_health line."
 )
 
 
@@ -96,12 +101,44 @@ def low_health_line(w: WorldModel, params: Params) -> int | None:
     return int(w.max_health * low_health_share(params))
 
 
-def spend_potion(w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], code: str) -> bool:
-    """Whether a carried potion of ``code`` is worth drinking now (A96):
-    health is low (``health_low``), or the drink turns the engagement under
-    way (``engagement.drink_turns_fight``). Otherwise the potion stays a
-    reserve. Every drink of a potion asks this."""
-    if health_low(w, params):
+def in_combat(w: WorldModel, m: Memory, policy: Policy, *, fight_ahead: bool = False) -> bool:
+    """In a fight or about to be one (A135): inside a level, a boss fight
+    on, a hostile in range, hit by one lately (``survival.recently_attacked``),
+    or a fight next on the plan (``fight_ahead``). Only then is a potion worth
+    more than food."""
+    if (w.map_level or 0) > 0 or fight_ahead:
+        return True
+    if m.boss is not None or w.in_boss_fight():
+        return True
+    return bool(hostiles_in_range(w, policy)) or recently_attacked(w)
+
+
+def spend_potion(
+    w: WorldModel,
+    m: Memory,
+    policy: Policy,
+    params: dict[str, float | int],
+    code: str,
+    *,
+    food: bool = False,
+    ordered: bool = False,
+    fight_ahead: bool = False,
+) -> bool:
+    """Whether a carried potion of ``code`` is worth drinking now (A96,
+    A135). Every drink of a potion asks this: Heal's (with Flee cornered and
+    Retreat losing ground) and the planner's ``use_item``.
+
+    In combat or about to be (``in_combat``, ``fight_ahead``: a fight next on
+    the plan): health is low (``health_low``), the planner ordered the drink
+    (``ordered``: its call on the fight stands), or the drink turns the
+    engagement under way (``engagement.drink_turns_fight``). Out of combat:
+    only at the low line with no food near to go for (``food``: Heal's food
+    route, ``states.food.food_route``), since food heals there. Heal asks
+    only once it could act on no food, so it passes no ``food``. Otherwise
+    the potion stays a reserve."""
+    if not in_combat(w, m, policy, fight_ahead=fight_ahead):
+        return health_low(w, params) and not food
+    if ordered or health_low(w, params):
         return True
     r = row(code)
     heal = r.heal if r is not None and r.heal else (w.max_health or 0)  # unknown: counted as a full heal
@@ -140,6 +177,50 @@ def food_to_take(w: WorldModel, m: Memory) -> list[Entity]:
         and can_try(m, w, "take", e.id, e.pos)
         and not nav_stuck.backed_off(m, "heal_food", w.map_id, e.pos, w.tick)
     ]
+
+
+# A short walk for food (cells, A135): food lying this near, or a block this
+# near that drops food (``supplies.BLOCK_FOOD``), heals out of a fight ahead
+# of any potion. Walking further for food is a planner op (``fetch_item``).
+FOOD_REACH = 3
+
+
+def walk_seconds(w: WorldModel, at: Pos) -> int:
+    """The straight walk to ``at`` in seconds at the character's speed, a rough estimate."""
+    if w.pos is None:
+        return 0
+    return round(chebyshev(w.pos, at) * 1000 / max(1, w.movement_speed))
+
+
+def food_blocks(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None) -> list[Pos]:
+    """The blocks in sight that drop food when broken (``supplies.BLOCK_FOOD``:
+    a bush, for berries) and that a held item opens without being used up
+    (``break_memory.choice_at``, ``supplies.kept_on_break``: a blade, never
+    a match), not given up (A90)."""
+    skip = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
+    out = []
+    for p, block in w.view.tiles.items():
+        if block not in BLOCK_FOOD:
+            continue
+        choice = choice_at(w, knowledge, p, skip)
+        if choice is not None and kept_on_break(choice.supply.code):
+            out.append(p)
+    return out
+
+
+def food_near(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None) -> tuple[list[Entity], list[Pos]]:
+    """The food candidates a short walk away (A135): food that may be taken
+    (``food_to_take``) and blocks that drop food (``food_blocks``), each
+    within ``FOOD_REACH``. Heal prices these by its walk and goes for the
+    cheapest (``states.food.food_route``), which is the one food test for
+    Heal, its potion and the planner's ``use_item``; State ``food_near``
+    shows them."""
+    here = w.pos
+    if here is None:
+        return [], []
+    foods = [e for e in food_to_take(w, m) if chebyshev(e.pos, here) <= FOOD_REACH]
+    blocks = [p for p in food_blocks(w, m, knowledge) if chebyshev(p, here) <= FOOD_REACH]
+    return foods, blocks
 
 
 def note_heal_window(m: Memory, w: WorldModel) -> None:

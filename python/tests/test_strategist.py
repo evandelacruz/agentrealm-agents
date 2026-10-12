@@ -983,7 +983,7 @@ class PlannerViewTest(unittest.TestCase):
         prompt = system_prompt()
         self.assertIn("Health rises only from potions and food", prompt)
         self.assertIn("There is no natural regeneration, on safe ground or anywhere, so resting or waiting restores nothing", prompt)
-        self.assertIn("put a use_item with its code on the stack", prompt)
+        self.assertIn("put a use_item with its code directly above the fight, fight_boss or enter_level op it is for", prompt)
         self.assertIn("For health_at_bar it shows health_short and the ways it closes: eat", prompt)
         self.assertNotIn("rest_minutes_estimate", prompt)
         self.assertNotIn("regen is confirmed", prompt)

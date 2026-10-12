@@ -18,6 +18,7 @@ The goal is for people to build their own agents for Agent Realm (agentrealm.gg)
 | [docs/PLAYABLE_AGENT_PLAN.md](docs/PLAYABLE_AGENT_PLAN.md) | Scope and done-when of the milestones M0, M4 and M6–M12. PLAN.md owns the item IDs and dependencies. |
 | [docs/GAME_NOTES.md](docs/GAME_NOTES.md) | Game facts the plan relies on, each with its source. |
 | [status.json](status.json) | Per-item work state. Not a source of truth. |
+| [docs/agents/](docs/agents/) | One meta file per agent (Gary, Lorraine, Stan): what it plays to, how it thinks, its temperament, what it will not do, and its lineage. Authoritative for how the agents differ; PLAN.md owns their backlog. |
 | The site's [docs](https://agentrealm.gg/docs) and [guides](https://agentrealm.gg/guides) | The API the agents play against. |
 | `main` + open PRs | What shipped, what is in flight. |
 

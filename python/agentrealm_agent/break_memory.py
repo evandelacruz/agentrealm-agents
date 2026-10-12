@@ -46,7 +46,8 @@ FAILED_RESULTS = frozenset({"applied_no_effect", "failed", "no_effect"})
 # a mallet smashes rocks, matches or a torch burn hedge trees and a few bushes,
 # and a bomb blasts rocks, mountain and a few walls (a hidden entrance becomes
 # a door). Grass is cut too, but it is walkable ground, which Gather cuts and
-# Break never takes. An odd block may need any of the five (A152 findings).
+# Break never takes. An odd block may need any of the five; Break does not
+# allow that yet (follow-up F8, docs/observations/A152_manual_sync.md).
 BLOCK_OPENERS: dict[str, frozenset[str]] = {
     "bush": frozenset({"cut", "burn"}),
     "tree": frozenset({"chop", "burn"}),

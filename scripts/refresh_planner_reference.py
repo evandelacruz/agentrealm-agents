@@ -62,7 +62,7 @@ class PageToMarkdown(HTMLParser):
     def _block(self) -> None:
         if self._cell is not None:
             return
-        if self._lists and re.search(r"(^|\n) *(-|\d+\.) +$","".join(self.out[-3:])):
+        if self._lists and re.search(r"(^|\n) *(-|\d+\.) +$", "".join(self.out[-3:])):
             return  # a paragraph that opens a list item stays on its marker's line
         self.out.append("\n\n")
 

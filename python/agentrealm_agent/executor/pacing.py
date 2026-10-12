@@ -33,8 +33,8 @@ def attack_cooldown_ticks(code: str | None, tick_rate_hz: int = DEFAULT_TICK_RAT
     to 1.5 s in Olympuff), the 1 s default for anything else, rounded up to a
     whole tick. Only a weapon ``Use`` that rolls or breaks a block waits on it;
     a consumable's, a tool's or a trap's ``Use`` has no cooldown (Manual §11
-    What waits on a cooldown), yet every ``Use`` is paced by this today (A152
-    findings)."""
+    What waits on a cooldown), yet every ``Use`` is paced by this today (follow-up
+    F1, docs/observations/A152_manual_sync.md)."""
     cooldown_ms = weapon_cooldown_ms(code) or DEFAULT_ATTACK_COOLDOWN_MS
     return max(1, math.ceil(cooldown_ms * tick_rate_hz / 1000))
 

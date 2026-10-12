@@ -159,6 +159,16 @@ class RefreshScriptTest(unittest.TestCase):
         self.assertNotIn("console.log", md)
         self.assertEqual(links, {"/docs", "/docs/api", "/guides/state-machine"})
 
+    def test_a_paragraph_in_a_list_item_stays_on_its_marker_line(self):
+        html = (FIXTURES / "reference_page.html").read_text(encoding="utf-8")
+        _, md, _ = self.mod.page_markdown(html)
+        self.assertIn("\n- **Armed**: one slot.", md)
+        self.assertIn("\n- **Worn**: five slots.", md)
+        self.assertIn("\n1. Step first.", md)
+        self.assertNotRegex(md, r"(?m)^ *(-|\d+\.) *$")  # no bare marker line
+        self.assertNotRegex(md, r"(?m)^ *(-|\d+\.) {2,}\S")  # one space after a marker
+        self.assertIn("  1. first", md)  # a nested list keeps its indent
+
     def test_refresh_fails_when_a_core_section_is_missing(self):
         pages = [("/docs/manual", "Manual", "## Manual\n\n### 1. Contract on one screen\n\nx\n")]
         with self.assertRaises(SystemExit) as e:

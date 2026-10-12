@@ -52,6 +52,14 @@ def held_heal(w: WorldModel) -> int:
     return sum(row(s.code).heal or 0 for s in carried if heals(s.code))
 
 
+def heals_carried(w: WorldModel) -> list[tuple[str, int]]:
+    """Each potion and food carried (held, stowed and armed), as (code, heal),
+    the largest heal first: what ``held_heal`` sums."""
+    carried = in_hand(w) + list(w.chest_supplies)
+    out = [(s.code, row(s.code).heal or 0) for s in carried if heals(s.code)]
+    return sorted(out, key=lambda c: -c[1])
+
+
 def supply_matches(want: str, code: str) -> bool:
     """``code`` satisfies a want for ``want``: the same code, or any potion for a potion (A21)."""
     return want == code or (is_potion(want) and is_potion(code))

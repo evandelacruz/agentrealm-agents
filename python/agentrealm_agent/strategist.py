@@ -161,6 +161,7 @@ from .plan import (
 from .loot import carry_slots_used
 from .oddities import oddities_line
 from .break_memory import capabilities_for_code
+from .cells import doors_here, refuse_bad_cells, step_from
 from .pack import reserved_supplies
 from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
 from .stalled import StalledOp, below_progress, find as find_stalled, target_of
@@ -196,6 +197,10 @@ DEFAULT_HURT_FRACTION = 0.5
 DEFAULT_IDLE_MINUTES = 10
 STALL_SECONDS = 30  # State shows a stall once nothing has changed for this long
 MAP_RADIUS = 15  # State map: the cells this far round the character each way (A114)
+RULER_STEP = 5  # State map: every this-many-th column's whole x is on the ruler (A148)
+# State on_the_ground: the things on the ground listed, nearest first (A148).
+# Doors are few, so doors_seen lists every door seen on the map.
+GROUND_SHOWN = 8
 # After a failed call the next waits BACKOFF_BASE_S, doubling per failure in a row, at most BACKOFF_CAP_S.
 BACKOFF_BASE_S = 2.0
 BACKOFF_CAP_S = 120.0
@@ -245,7 +250,7 @@ Safe ground: hostiles cannot hurt the character only while it stands on safe gro
 
 NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir from here, spoken, greeted, hostile, stays_put); npcs_spoken_to counts the NPCs a say op of yours has spoken to so far, and npcs_greeted those Greet has said hello to. The game does not say which NPCs are helpers and which are monsters. "hostile" true means known hostile: a boss, the last thing that hit the character, or a type that has swung at it, hit it or died in view, in this run or an earlier one; false only means none of its type has done so yet, so it may still be a monster. "stays_put" true means it has stood on one cell for a while, as helpers do; judge the rest from its type and the clues. On safe ground (anywhere, if policy.hostile does not name NPCs), Greet says hello once to an NPC in sight that stays put and is not hostile, and marks it greeted; a helper answers any words with the same line, which lands in Clues. A greeting never counts as spoken: a say op to a greeted NPC still says your text. To talk to one further away, or with your own words, use a say op with its npc_id (from nearby_npcs) or its npc_type (any NPC of that type, the nearest first); the character walks within speech range and says your text. A helper's reply is added to Clues as a row of kind "npc".
 
-Map: State map draws the ground round the character, {MAP_RADIUS} cells each way, one character per cell: rows by y (the number at the left), x by the ruler above (read a column's digits top to bottom), and a legend of the marks used. It shows what the character's reads have shown on this map (? where none has) and what is in view now, so read exact cells off it: a block to break, a sign, a door, a hostile, the way round something. A block is destroyed only by a Use with an item whose capability opens its type (held lists each item's use: cut, chop, smash, burn, blast); a break_block names the cell (x, y) and the capability, and is dropped if that cell holds no block, or a block whose type's known openers exclude the capability; a type with no known opener is still tried, so its opener is learned. A destroyed block may grow back. Water (~) is walkable while an item that fords (held shows fords true: a raft) is armed or worn: with one held, every walk plans across water and puts it on before the first water step: one that is worn (water-walking sandals) is worn, so the weapon stays armed and fights on water go as on land; one that goes in the armed slot (a raft) is armed only when no wearable one is held, so get the wearable one where a level is water. On water nothing is armed, worn, removed or dropped that would leave no fording item armed or worn (the server refuses it): no weapon is armed and no potion drunk there unless the fording item is worn, so fight and drink from land; once ashore the best weapon is armed again. No attack can be made from a safe zone, and nothing can hurt the character there. When the ground the character can walk to is all seen and it has nothing to do, it sends a no_way_on trigger and does nothing until you give it a way on. Any op that finds its way shut sends no_way_on too, with why, the op, blocked_by (the hostiles and blocks on the way, each block with whether a held item opens it) and tried (only what this op actually did since it reached the top: how its walk was given up, the search for a way round, then each Use it sent and break recorded on a block on the way, with its result; never an older break), and holds where it is (it never wanders off to explore); so does an op with nothing to work on (no such NPC or item in sight, nothing to gather, a missing item or fragment, a boss op whose conditions are not met): give it another way (a break_block, a fight op on the hostile, an explore_area, a travel elsewhere first) or another goal. A hostile in blocked_by holds the only way: the walk passes its ground by itself when health and the heals carried cover the hits expected there, and lands beside it to fight it when the fight from land would be won, so it asks only when neither holds: heal, fight it, or route another way. A remembered hostile out of view in blocked_by is ground it held when last seen, not one in sight: a fight op on it is dropped, so route elsewhere, wait for that ground to fade, walk near enough to see it again (then fight it if worth it), or explore_area. To fight an NPC (a hostile that blocks the way, one worth its gems), put a fight op on it: the character goes for it whatever its own fight-or-flee judgement says, stepping off safe ground to swing (never at the health floor: the op is dropped then), so weigh nearby_npcs (each one's cell and swing at us, measured or not) against our_swing, health and potions first. A cornered trigger means fleeing found no step that opens distance from the hostiles in range, no heal was due and no hostile was in weapon reach: the character holds where it is, taking any hits that land. Answer it with a way out: a fight op on the hostile, a use_item potion, a travel or explore_area another way, or a wait only on safe ground. A pacing trigger means two of the character's own states (states, such as Fight and Flee) kept taking turns between two cells with nothing coming of it, and benching the losing side (benched) did not settle it, or no side could be benched (benched is null: only the side carrying out the fight-or-flee decision, or Retreat, paced): decide for it, with a fight op on the hostile, a travel or explore_area away, or another goal.
+Map: State map draws the ground round the character, {MAP_RADIUS} cells each way and never past the map's edge (its head gives the whole map's x and y range once known), one character per cell: rows by y (the whole number at the left), x by the ruler above (every {RULER_STEP}th column carries its whole x, starting at the | under its first digit), and a legend of the marks used. It shows what the character's reads have shown on this map (? where none has) and what is in view now: use it to see what lies where and between (walls, water, the way round something). Take every x, y you target from a State list that gives it outright, never by counting columns in the drawing: doors_seen (every door on this map, the one under the character included, each with step_from, the ground beside it), level_entrances, nearby_npcs (hostiles among them), signs_seen, on_the_ground (the nearest {GROUND_SHOWN} items, gems, items for sale and chests in view, of= counting all: walk nearer to list one further off), sellers, food_near, oddities, death_chests. A cell that is in none of them (a block to break, ground to walk to) you count from the nearest listed cell or ruler label. An op whose cell is off the current map, or a wall to stand on (a travel or fetch_item), is left out with why (last_reply_rejected). That check covers only the ops that run on the current map: those before the first op that may leave it (enter_level, leave_level, fight_boss, buy, a travel to another map, a town, a hunting ground or a door; inside a level above level_target, where leave_level goes on top by itself, none is checked), judged after every other refusal. Ops after that are not checked; their walk finds out on the map they run on. A block is destroyed only by a Use with an item whose capability opens its type (held lists each item's use: cut, chop, smash, burn, blast); a break_block names the cell (x, y) and the capability, and is dropped if that cell holds no block, or a block whose type's known openers exclude the capability; a type with no known opener is still tried, so its opener is learned. A destroyed block may grow back. Water (~) is walkable while an item that fords (held shows fords true: a raft) is armed or worn: with one held, every walk plans across water and puts it on before the first water step: one that is worn (water-walking sandals) is worn, so the weapon stays armed and fights on water go as on land; one that goes in the armed slot (a raft) is armed only when no wearable one is held, so get the wearable one where a level is water. On water nothing is armed, worn, removed or dropped that would leave no fording item armed or worn (the server refuses it): no weapon is armed and no potion drunk there unless the fording item is worn, so fight and drink from land; once ashore the best weapon is armed again. No attack can be made from a safe zone, and nothing can hurt the character there. When the ground the character can walk to is all seen and it has nothing to do, it sends a no_way_on trigger and does nothing until you give it a way on. Any op that finds its way shut sends no_way_on too, with why, the op, blocked_by (the hostiles and blocks on the way, each block with whether a held item opens it) and tried (only what this op actually did since it reached the top: how its walk was given up, the search for a way round, then each Use it sent and break recorded on a block on the way, with its result; never an older break), and holds where it is (it never wanders off to explore); so does an op with nothing to work on (no such NPC or item in sight, nothing to gather, a missing item or fragment, a boss op whose conditions are not met): give it another way (a break_block, a fight op on the hostile, an explore_area, a travel elsewhere first) or another goal. A hostile in blocked_by holds the only way: the walk passes its ground by itself when health and the heals carried cover the hits expected there, and lands beside it to fight it when the fight from land would be won, so it asks only when neither holds: heal, fight it, or route another way. A remembered hostile out of view in blocked_by is ground it held when last seen, not one in sight: a fight op on it is dropped, so route elsewhere, wait for that ground to fade, walk near enough to see it again (then fight it if worth it), or explore_area. To fight an NPC (a hostile that blocks the way, one worth its gems), put a fight op on it: the character goes for it whatever its own fight-or-flee judgement says, stepping off safe ground to swing (never at the health floor: the op is dropped then), so weigh nearby_npcs (each one's cell and swing at us, measured or not) against our_swing, health and potions first. A cornered trigger means fleeing found no step that opens distance from the hostiles in range, no heal was due and no hostile was in weapon reach: the character holds where it is, taking any hits that land. Answer it with a way out: a fight op on the hostile, a use_item potion, a travel or explore_area another way, or a wait only on safe ground. A pacing trigger means two of the character's own states (states, such as Fight and Flee) kept taking turns between two cells with nothing coming of it, and benching the losing side (benched) did not settle it, or no side could be benched (benched is null: only the side carrying out the fight-or-flee decision, or Retreat, paced): decide for it, with a fight op on the hostile, a travel or explore_area away, or another goal.
 
 Oddities: State oddities lists the nearest blocks that look out of place, found on the map and remembered: a breakable block alone among another type (one rock in a garden, one bush in a wheat field, one tree in a maze), each with its cell, cells away, block, may_break_with (the held capabilities that may break it, or none held), failed (capabilities that already failed there: never try one again) and last_try with its result and tick. Each god's region hides one oddity two steps off its road; broken with the capability it needs it always drops a gem cache worth 5, 7 or 10 gems by ring, far more than grass or trees pay, and it returns 10 minutes later (back_at_tick on one opened); any other oddity may hold something or nothing. Weigh the walk and the tool against that, and break one with a break_block.
 
@@ -696,6 +701,8 @@ def build_prompt(
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
         *sign_lines(w, knowledge),
+        *door_lines(w),
+        *ground_lines(w),
         *map_lines(w),
         oddities_line(w, knowledge, plan.tick_hz),
         f"gem_yield={json.dumps(gem_yield_summary(w, knowledge), sort_keys=True)}",
@@ -959,19 +966,43 @@ def _entity_mark(w: WorldModel, e: Any) -> str:
     return "$" if e.code == "gem" else "i"
 
 
+def ruler_lines(xs: range) -> list[str]:
+    """The State map's x ruler (A148): every ``RULER_STEP``-th column carries
+    its whole x, written from that column rightward, with a ``|`` under its
+    first digit, so a column's x is read off whole, never pieced together.
+    A label that would run into the one before is left out, never cut short:
+    a partial number is the very misreading the ruler is there to stop. The
+    last label may run past the right edge."""
+    labels = [" "] * len(xs)
+    ticks = [" "] * len(xs)
+    for i, x in enumerate(xs):
+        text = str(x)
+        if x % RULER_STEP or (i and labels[i - 1] != " "):
+            continue
+        labels[i : i + len(text)] = text  # the last may run past the edge
+        ticks[i] = "|"
+    return ["x".rjust(5) + " " + "".join(labels).rstrip(), " " * 6 + "".join(ticks).rstrip()]
+
+
 def map_lines(w: WorldModel) -> list[str]:
     """The ground round the character as one character per cell (A114):
-    ``MAP_RADIUS`` cells each way, rows by y top to bottom, a ruler of x
-    above (read each column's digits top to bottom), and a legend of the
+    ``MAP_RADIUS`` cells each way, cut at the map's edge once a terrain read
+    has given its size, rows by y top to bottom with each row's whole y at
+    its left, a ruler of x above (:func:`ruler_lines`), and a legend of the
     marks used. Terrain is what this map's reads have shown, ``?`` where
     none has; entities in view are drawn over it, and the character over
-    everything. So the planner can name an exact cell (a block to break, a
-    sign, a door) and see what lies between."""
+    everything. So the planner sees what lies where and between; the cells
+    it targets it takes from State's lists, which give x, y outright (A148)."""
     if w.pos is None or w.map_id is None:
         return []
     cx, cy = w.pos
-    xs = range(cx - MAP_RADIUS, cx + MAP_RADIUS + 1)
-    ys = range(cy - MAP_RADIUS, cy + MAP_RADIUS + 1)
+    size = w.map_size
+    x_lo, x_hi = cx - MAP_RADIUS, cx + MAP_RADIUS
+    y_lo, y_hi = cy - MAP_RADIUS, cy + MAP_RADIUS
+    if size is not None:
+        x_lo, x_hi = max(x_lo, 0), min(x_hi, size[0] - 1)
+        y_lo, y_hi = max(y_lo, 0), min(y_hi, size[1] - 1)
+    xs, ys = range(x_lo, x_hi + 1), range(y_lo, y_hi + 1)
     marks: dict[Pos, str] = {}
     for e in w.entities:
         if e.pos not in marks or e.kind == "npc":  # an NPC shows over an item on its cell
@@ -997,14 +1028,70 @@ def map_lines(w: WorldModel) -> list[str]:
         row = "".join(cell((x, y)) for x in xs)
         used.update(row)
         rows.append(f"{y:>5} {row}")
-    width = max(len(str(x)) for x in xs)
-    ruler = ["x".rjust(5) + " " + "".join(str(x).rjust(width)[i] for x in xs) for i in range(width)]
     legend = ", ".join(f"{mark} {what}" for mark, what in MAP_LEGEND.items() if mark in used)
+    whole = f", the whole map is x 0..{size[0] - 1}, y 0..{size[1] - 1}" if size is not None else ""
     head = (
-        f"map (map {w.map_id}, x {xs[0]}..{xs[-1]} left to right, y {ys[0]}..{ys[-1]} top to bottom, "
+        f"map (map {w.map_id}, x {xs[0]}..{xs[-1]} left to right, y {ys[0]}..{ys[-1]} top to bottom{whole}, "
         f"one character per cell; legend: {legend}):"
     )
-    return [head, *ruler, *rows]
+    return [head, *ruler_lines(xs), *rows]
+
+
+def door_lines(w: WorldModel) -> list[str]:
+    """Every door seen on this map, nearest first (A148): each one's ``x``,
+    ``y``, ``block``, ``locked``, ``here`` (the character stands on it, as
+    on a level's door on arrival), ``cells`` and ``dir`` from here, and
+    ``step_from``, the ground beside it a walk steps onto it from. A level
+    entrance on this map is a door here too; ``level_entrances`` names
+    which."""
+    if w.pos is None or w.map_id is None:
+        return []
+    here = w.pos
+    doors = sorted(doors_here(w), key=lambda p: (chebyshev(p, here), p))
+    if not doors:
+        return ["doors_seen=none on this map"]
+    rows = [
+        {
+            "x": p[0],
+            "y": p[1],
+            "block": w.view.tiles.get(p),
+            "locked": bool(w.view.locked.get(p)),
+            "here": p == here,
+            "cells": chebyshev(p, here),
+            "dir": compass(here, p) or "here",
+            "step_from": [{"x": s[0], "y": s[1]} for s in step_from(w, p)],
+        }
+        for p in doors
+    ]
+    return [f"doors_seen={json.dumps(rows, sort_keys=True)}"]
+
+
+def ground_lines(w: WorldModel) -> list[str]:
+    """What lies on the ground in view, the nearest ``GROUND_SHOWN`` (A148):
+    items, gems, items for sale (``gem_price``) and chests, each with its
+    ``x``, ``y``, ``cells`` and ``dir`` from here; ``of`` counts all in view."""
+    if w.pos is None or w.map_id is None:
+        return []
+    here = w.pos
+    things = sorted((e for e in w.entities if e.kind in ("supply", "chest")), key=lambda e: (chebyshev(e.pos, here), e.id))
+    if not things:
+        return ["on_the_ground=none in view"]
+    rows = []
+    for e in things[:GROUND_SHOWN]:
+        row: dict[str, Any] = {
+            "kind": e.kind,
+            "id": e.id,
+            "x": e.pos[0],
+            "y": e.pos[1],
+            "cells": chebyshev(e.pos, here),
+            "dir": compass(here, e.pos) or "here",
+        }
+        if e.code:
+            row["code"] = e.code
+        if e.gem_price is not None:
+            row["gem_price"] = e.gem_price
+        rows.append(row)
+    return [f"on_the_ground={json.dumps(rows, sort_keys=True)} of={len(things)}"]
 
 
 def _bearing(w: WorldModel, where: tuple[int, Pos]) -> str:
@@ -1953,6 +2040,12 @@ class Strategist:
             record["unmet_need_refused"] = unmet
             self.rejected = [*self.rejected, *unmet]
         goals = self._keep_stalled_below(runner.mem.stalled_ops, goals, record, runner.world.map_id)
+        # Last, on the stack as it will run: what map each op runs on depends on the ops before it.
+        goals, off_map = refuse_bad_cells(goals, runner.world, runner.plan.directive_ops(), runner.mem.stalled_ops)
+        if off_map:
+            # A cell off the map's edge, or a wall to stand on, is no target (A148).
+            record["bad_cell_refused"] = off_map
+            self.rejected = [*self.rejected, *off_map]
         self.deferred = None  # a newer reply decides
         old = runner.plan
         pinned = old.directive_ops()  # directives ops left: they stay on top

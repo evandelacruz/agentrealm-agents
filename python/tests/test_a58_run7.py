@@ -24,7 +24,7 @@ from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact
+from agentrealm_agent.world import Entity, WorldModel
 
 SMALL_BUDGET = 30
 
@@ -208,7 +208,8 @@ class HealWalkBoundedTest(unittest.TestCase):
                 return None
             return [flip[w.pos]] if nav is not None else [flip[w.pos], FOOD]
 
-        with mock.patch("agentrealm_agent.states.heal.cost_path", plan):
+        # Heal walks (heal) on the path its food pick priced (food).
+        with mock.patch("agentrealm_agent.states.heal.cost_path", plan), mock.patch("agentrealm_agent.states.food.cost_path", plan):
             outs = play(w, c, 20)
         events = c.memory.nav_stuck.oscillations
         self.assertEqual([(e.get("goal"), e["states"]) for e in events], [("heal_food", ["Heal"])])
@@ -362,19 +363,6 @@ class HealWalkBoundedTest(unittest.TestCase):
         w.pos = (401, 610)
         self.assertEqual(dispatch(w, c).intents, [{"verb": "Take", "supply_id": 7}])
         self.assertNotIn(loot_key, c.memory.nav_stuck.attempts)
-
-    def test_heal_gives_safe_ground_up_with_its_one_safe_tile(self):
-        # Moving on to the next safe tile would chain unreachable tiles into
-        # a loop: one give-up ends safe ground while it backs off (A89).
-        w, c = pond_world(), ctx(Policy(kind="scripted", goals=["explore"]))
-        w.entities = []
-        w.zones[1] = {(404, 600): ZoneFact(safe=True), (410, 605): ZoneFact(safe=True), (404, 605): ZoneFact(safe=False)}
-        out = dispatch(w, c)
-        self.assertEqual(out.reason, "heal_measure → (404, 600)")
-        nav_stuck.give_up(c.memory, w, nav_stuck.active(c.memory, w), "time")
-        out = dispatch(w, c)
-        self.assertNotEqual(out.state, "Heal")
-        self.assertTrue(nav_stuck.backed_off(c.memory, "heal_measure", 1, (404, 600), w.tick))
 
 
 if __name__ == "__main__":

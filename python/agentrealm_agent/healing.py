@@ -1,5 +1,9 @@
-"""What heals and when (A10): food, potions, safe-zone regen, and the line
-below which health is low.
+"""What heals and when (A10): food and potions, and the line below which
+health is low.
+
+Health rises only from a heal: a potion drunk, food eaten, or food eaten on
+pickup (A130). The game has no natural regeneration, on safe ground or
+anywhere, so nothing here waits for health to come back.
 
 Food and potions are the Supplies reference's (A54, ``supplies.is_food``,
 ``supplies.is_potion``). Food is tried both ways, a ``Take`` and a carried
@@ -11,22 +15,17 @@ tried (``can_try``).
 
 from __future__ import annotations
 
-import statistics
 from typing import TYPE_CHECKING
-
-from dataclasses import dataclass
 
 from .break_memory import choice_at, given_up_blocks
 from .directives import PARAM_DEFAULTS
 from .engagement import drink_turns_fight
 from .executor.supply_refusals import can_try, in_hand
-from .item_table import InventorySupply, merge_heal
-from .memory import RegenStretch
 from .navigation import stuck as nav_stuck
-from .supplies import heals, is_food, is_potion, row
+from .item_table import InventorySupply, merge_heal
+from .supplies import BLOCK_FOOD, heals, is_food, is_potion, kept_on_break, row
 from .survival import hostiles_in_range, recently_attacked
-from .world import Pos, WorldModel, chebyshev
-from .zone_discovery import known_safe, safe_tiles
+from .world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -48,7 +47,7 @@ def potion_count(w: WorldModel) -> int:
 def held_heal(w: WorldModel) -> int:
     """The health the potions and food carried (held, stowed and armed) give
     back between them, each by its Supplies ``heal`` (A132): what the
-    character can heal without buying or resting."""
+    character can heal without buying."""
     carried = in_hand(w) + list(w.chest_supplies)
     return sum(row(s.code).heal or 0 for s in carried if heals(s.code))
 
@@ -56,21 +55,6 @@ def held_heal(w: WorldModel) -> int:
 def supply_matches(want: str, code: str) -> bool:
     """``code`` satisfies a want for ``want``: the same code, or any potion for a potion (A21)."""
     return want == code or (is_potion(want) and is_potion(code))
-
-
-# Ticks at 10 Hz in a safe zone with no health back before this run counts
-# safe-zone regen as absent (~20 s).
-REGEN_MEASURE_TICKS = 200
-# A longer gap between Heal windows than this restarts the regen sample.
-REGEN_SAMPLE_GAP_TICKS = 50
-SURVIVAL_KEY = "survival"
-REGEN_KEY = "safe_zone_regen"
-# Safe-zone regen's rate (A124): the health a tick of each stretch timed
-# from one rise to the next, the newest REGEN_RATES_KEPT; the estimate is
-# their median, so one bad stretch cannot set it. Rough: a decision sees a
-# rise up to a decision late.
-REGEN_RATES_KEY = "safe_zone_regen_rates"
-REGEN_RATES_KEPT = 9
 
 
 def hurt(w: WorldModel) -> bool:
@@ -90,8 +74,7 @@ def low_health_share(params: Params) -> float:
 
 def health_low(w: WorldModel, params: Params) -> bool:
     """Health is at or below ``low_health`` of max. Below it a carried potion
-    is spent (``spend_potion``) and Heal's rest on safe ground goes ahead of
-    the plan's op; above it the planner's op and the potion reserve go first."""
+    is spent (``spend_potion``); above it the potion reserve is kept."""
     if w.health is None or w.max_health is None:
         return False
     return w.health <= w.max_health * low_health_share(params)
@@ -106,8 +89,8 @@ POTION_RULE = (
     "share of max, potion_drunk_at under State) or the win estimate says the drink turns the fight (to one it would "
     "take on, or would win). Out of combat, lost health comes back from food: food lying near, then a bush cut for "
     "berries (State food_near), which Heal eats whenever hurt; a potion is drunk there only at the low_health line "
-    "with no food near. So potions held are a reserve for fights and levels, and a use_item of a potion out of "
-    "combat is refused while food is near or health is above the low_health line."
+    "when no food near can be had. So potions held are a reserve for fights and levels, and a use_item of a potion "
+    "out of combat is refused while food near can be had or health is above the low_health line."
 )
 
 
@@ -116,13 +99,6 @@ def low_health_line(w: WorldModel, params: Params) -> int | None:
     if w.max_health is None:
         return None
     return int(w.max_health * low_health_share(params))
-
-
-# A short walk for food (cells, A135): food lying this near, or a bush this
-# near a held blade cuts for berries, heals out of a fight ahead of any potion.
-FOOD_REACH = 3
-# What a bush cut drops (GAME_NOTES Gems): berries, eaten on pickup.
-BUSH_FOOD = "berry"
 
 
 def in_combat(w: WorldModel, m: Memory, policy: Policy, *, fight_ahead: bool = False) -> bool:
@@ -137,61 +113,6 @@ def in_combat(w: WorldModel, m: Memory, policy: Policy, *, fight_ahead: bool = F
     return bool(hostiles_in_range(w, policy)) or recently_attacked(w)
 
 
-@dataclass(frozen=True)
-class FoodNear:
-    """Food a short walk away (A135): ``food`` lying on the ground, or a
-    ``bush`` a held blade cuts for berries. ``walk_seconds`` is the straight
-    walk at the character's speed; ``heal`` is what it gives back."""
-
-    kind: str
-    pos: Pos
-    code: str
-    heal: int
-    walk_seconds: int
-    id: int | None = None  # the food's entity id; None for a bush
-
-
-def walk_seconds(w: WorldModel, at: Pos) -> int:
-    """The straight walk to ``at`` in seconds at the character's speed."""
-    if w.pos is None:
-        return 0
-    return round(chebyshev(w.pos, at) * 1000 / max(1, w.movement_speed))
-
-
-def food_near(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None) -> list[FoodNear]:
-    """Food within ``FOOD_REACH``, nearest first, food lying before bushes
-    (A135): food that may be taken now (``supply_refusals.can_try``) and
-    whose walk is not backed off, then each bush a held item cuts that is not
-    given up (``break_memory.choice_at``; burning one would spend a match).
-    Heal goes for these, priced by its walk; State shows them; and while
-    one is near, out of a fight, no potion is drunk."""
-    here = w.pos
-    if here is None:
-        return []
-    out: list[FoodNear] = []
-    for e in w.entities:
-        if e.kind != "supply" or not is_food(e.code) or chebyshev(e.pos, here) > FOOD_REACH:
-            continue
-        if not can_try(m, w, "take", e.id, e.pos) or nav_stuck.backed_off(m, "heal_food", w.map_id, e.pos, w.tick):
-            continue
-        out.append(FoodNear("food", e.pos, e.code or "", _heal_of(e.code), walk_seconds(w, e.pos), e.id))
-    skip = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
-    for p, block in w.view.tiles.items():
-        if block != "bush" or chebyshev(p, here) > FOOD_REACH:
-            continue
-        choice = choice_at(w, knowledge, p, skip)
-        if choice is None or choice.capability != "cut":
-            continue
-        out.append(FoodNear("bush", p, BUSH_FOOD, _heal_of(BUSH_FOOD), walk_seconds(w, p)))
-    out.sort(key=lambda f: (f.kind != "food", chebyshev(f.pos, here), f.pos))
-    return out
-
-
-def _heal_of(code: str | None) -> int:
-    r = row(code) if code else None
-    return r.heal if r is not None and r.heal else 0
-
-
 def spend_potion(
     w: WorldModel, m: Memory, policy: Policy, params: dict[str, float | int], code: str, *, food: bool = False
 ) -> bool:
@@ -199,9 +120,9 @@ def spend_potion(
     A135). In combat or about to be (``in_combat``): health is low
     (``health_low``), or the drink turns the engagement under way
     (``engagement.drink_turns_fight``). Out of combat: only at the low line
-    with no food near (``food``: the caller's food a short walk away), since
-    food heals there. Otherwise the potion stays a reserve. Every drink of a
-    potion asks this."""
+    when no food near can be had (``food``: the caller's food it can act on
+    now), since food heals there. Otherwise the potion stays a reserve.
+    Every drink of a potion asks this."""
     if not in_combat(w, m, policy):
         return health_low(w, params) and not food
     if health_low(w, params):
@@ -216,7 +137,7 @@ def carried_heal(
 ) -> InventorySupply | None:
     """Carried food first, then a potion (PLAYABLE_AGENT_PLAN.md Heal row),
     a potion only when ``spend_potion`` says it is worth drinking now
-    (``food``: food lies a short walk away, A135).
+    (``food``: food near can be had, A135).
     The armed supply counts too: the snapshot may leave it out of ``held``
     (GAME_NOTES open questions), and a potion a drink left armed is still one
     to drink (A76)."""
@@ -231,12 +152,63 @@ def carried_heal(
     return None
 
 
-def standing_in_safe_zone(w: WorldModel, pos: Pos | None = None) -> bool:
-    """Whether ``pos`` (default: where the character stands) is a known safe-zone cell."""
-    at = w.pos if pos is None else pos
-    if w.map_id is None or at is None:
-        return False
-    return known_safe(w, w.map_id, at)
+def food_to_take(w: WorldModel, m: Memory) -> list[Entity]:
+    """Food lying in sight that may be taken now: one rule for Heal's pick
+    and State's ``eat`` (A130). A ``Take`` the refusal table holds
+    (``supply_refusals.can_try``) or a walk to it still backed off
+    (``heal_food``, A90) rules it out."""
+    return [
+        e
+        for e in w.entities
+        if e.kind == "supply"
+        and is_food(e.code)
+        and can_try(m, w, "take", e.id, e.pos)
+        and not nav_stuck.backed_off(m, "heal_food", w.map_id, e.pos, w.tick)
+    ]
+
+
+# A short walk for food (cells, A135): food lying this near, or a block this
+# near that drops food (``supplies.BLOCK_FOOD``), heals out of a fight ahead
+# of any potion. Walking further for food is a planner op (``fetch_item``).
+FOOD_REACH = 3
+
+
+def walk_seconds(w: WorldModel, at: Pos) -> int:
+    """The straight walk to ``at`` in seconds at the character's speed, a rough estimate."""
+    if w.pos is None:
+        return 0
+    return round(chebyshev(w.pos, at) * 1000 / max(1, w.movement_speed))
+
+
+def food_blocks(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None) -> list[Pos]:
+    """The blocks in sight that drop food when broken (``supplies.BLOCK_FOOD``:
+    a bush, for berries) and that a held item opens without being used up
+    (``break_memory.choice_at``, ``supplies.kept_on_break``: a blade, never
+    a match), not given up (A90)."""
+    skip = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
+    out = []
+    for p, block in w.view.tiles.items():
+        if block not in BLOCK_FOOD:
+            continue
+        choice = choice_at(w, knowledge, p, skip)
+        if choice is not None and kept_on_break(choice.supply.code):
+            out.append(p)
+    return out
+
+
+def food_near(w: WorldModel, m: Memory, knowledge: KnowledgeBase | None) -> tuple[list[Entity], list[Pos]]:
+    """The food candidates a short walk away (A135): food that may be taken
+    (``food_to_take``) and blocks that drop food (``food_blocks``), each
+    within ``FOOD_REACH``. Heal prices these by its walk and goes for the
+    cheapest (``states.food.food_route``), which is the one food test for
+    Heal, its potion and the planner's ``use_item``; State ``food_near``
+    shows them."""
+    here = w.pos
+    if here is None:
+        return [], []
+    foods = [e for e in food_to_take(w, m) if chebyshev(e.pos, here) <= FOOD_REACH]
+    blocks = [p for p in food_blocks(w, m, knowledge) if chebyshev(p, here) <= FOOD_REACH]
+    return foods, blocks
 
 
 def note_heal_window(m: Memory, w: WorldModel) -> None:
@@ -244,126 +216,6 @@ def note_heal_window(m: Memory, w: WorldModel) -> None:
     ``heal_supplies`` ask, so the next hurt spell asks the planner again."""
     if w.health is not None and not hurt(w):
         m.heal_supplies_asked = False
-
-
-def regen_known(knowledge: KnowledgeBase | None, m: Memory) -> str | None:
-    """``yes`` from the knowledge base, ``no`` measured this run, else ``None``."""
-    if knowledge is not None:
-        surv = knowledge.extra.get(SURVIVAL_KEY)
-        if isinstance(surv, dict) and surv.get(REGEN_KEY) == "yes":
-            return "yes"
-    return "no" if m.heal_regen_absent else None
-
-
-def save_regen_yes(knowledge: KnowledgeBase | None) -> None:
-    """Health came back in a safe zone: a fact for every run on this world."""
-    if knowledge is None:
-        return
-    with knowledge.lock:
-        surv = knowledge.extra.get(SURVIVAL_KEY)
-        if not isinstance(surv, dict):
-            knowledge.extra[SURVIVAL_KEY] = surv = {}
-        surv[REGEN_KEY] = "yes"
-
-
-def regen_per_tick(knowledge: KnowledgeBase | None) -> float | None:
-    """The estimate of safe-zone regen on this world, health a tick: the
-    median of the stretches measured, and only once regen is a confirmed
-    "yes". None otherwise: the published docs give health back only from a
-    heal or a respawn, so with none confirmed a rest heals nothing (A124)."""
-    if knowledge is None:
-        return None
-    with knowledge.lock:
-        surv = knowledge.extra.get(SURVIVAL_KEY)
-        if not isinstance(surv, dict) or surv.get(REGEN_KEY) != "yes":
-            return None
-        rates = [r for r in surv.get(REGEN_RATES_KEY) or [] if isinstance(r, (int, float)) and r > 0]
-    return statistics.median(rates) if rates else None
-
-
-def note_regen_rate(m: Memory, w: WorldModel, knowledge: KnowledgeBase | None) -> None:
-    """One of Heal's rest decisions, hurt in a safe zone: time regen between
-    rises (A124). A stretch from one rise to the next spans whole regen
-    periods, wherever the rest began; each adds its rate (``add_regen``) and
-    the later rise starts the next. Only rest decisions back to back count:
-    any other decision between them (another state ran, or Heal ate or
-    drank), health that falls, a change of max health, or any heal sent
-    (``note_heal_pending``: a potion or food Use, a food Take, from any
-    state) ends the stretch, and timing starts again at the next rise."""
-    s, health, decision = m.heal_regen_stretch, w.health, m.nav_stuck.decision
-    if health is None:
-        m.heal_regen_stretch = None
-        return
-    if s is None or decision != s.decision + 1 or health < s.health or w.max_health != s.max_health:
-        m.heal_regen_stretch = RegenStretch(decision, health, w.max_health)
-        return
-    if health > s.health:
-        if s.rise_tick is not None and s.rise_health is not None and w.tick > s.rise_tick:
-            add_regen(knowledge, (health - s.rise_health) / (w.tick - s.rise_tick))
-        s.rise_tick, s.rise_health = w.tick, health
-    s.decision, s.health = decision, health
-
-
-def add_regen(knowledge: KnowledgeBase | None, per_tick: float) -> None:
-    """One stretch's regen, health a tick, kept with the newest
-    ``REGEN_RATES_KEPT`` on this world (A124)."""
-    if knowledge is None or per_tick <= 0:
-        return
-    with knowledge.lock:
-        surv = knowledge.extra.get(SURVIVAL_KEY)
-        if not isinstance(surv, dict):
-            knowledge.extra[SURVIVAL_KEY] = surv = {}
-        rates = [r for r in surv.get(REGEN_RATES_KEY) or [] if isinstance(r, (int, float))]
-        surv[REGEN_RATES_KEY] = [*rates, per_tick][-REGEN_RATES_KEPT:]
-
-
-def note_regen_sample(m: Memory, w: WorldModel) -> str | None:
-    """One window hurt in a safe zone: ``yes``, ``no``, or still measuring.
-
-    The sample restarts when health falls or the last window seen is too far
-    back (the character left the zone, or another state ran meanwhile).
-
-    Only a hurt character can show regen: health back counts as "yes" even
-    when it reaches full, but a window at full health (or with ``max_health``
-    unknown) starts no sample and gives no verdict. A "no" is only ever a hurt
-    window with no health back.
-    """
-    s = m.heal_regen_sample
-    if w.health is None:
-        m.heal_regen_sample = None
-        return None
-    fresh = s is not None and w.health >= s[1] and w.tick - s[2] <= REGEN_SAMPLE_GAP_TICKS
-    if fresh and w.health > s[1]:
-        m.heal_regen_sample = None
-        return "yes"
-    if not hurt(w):
-        m.heal_regen_sample = None
-        return None
-    if not fresh:
-        m.heal_regen_sample = (w.tick, w.health, w.tick)
-        return None
-    start_tick, start_health, _ = s
-    if w.tick - start_tick >= REGEN_MEASURE_TICKS:
-        m.heal_regen_sample = None
-        return "no"
-    m.heal_regen_sample = (start_tick, start_health, w.tick)
-    return None
-
-
-def known_safe_cells(w: WorldModel) -> list[Pos]:
-    """The known safe cells on the current map, those near town first, then
-    nearest first (ties to the smaller cell). Heal path-checks them in this
-    order (``pathing.reachable_safe_goal``)."""
-    here, map_id = w.pos, w.map_id
-    if here is None or map_id is None:
-        return []
-    anchors = [anchor for am, anchor in w.respawn_anchors if am == map_id]
-
-    def order(pos: Pos) -> tuple[int, int, Pos]:
-        near_town = any(chebyshev(pos, anchor) <= 8 for anchor in anchors)
-        return (0 if near_town else 1, chebyshev(here, pos), pos)
-
-    return sorted(safe_tiles(w, map_id), key=order)
 
 
 def note_heal_pending(m: Memory, w: WorldModel, code: str, kind: str) -> None:
@@ -376,8 +228,6 @@ def note_heal_pending(m: Memory, w: WorldModel, code: str, kind: str) -> None:
         return
     assert w.health is not None
     m.heal_pending = (w.health, code, kind)
-    # A heal is no regen: it ends both the yes/no sample and the stretch timed (A124).
-    m.heal_regen_sample = m.heal_regen_stretch = None
 
 
 def absorb_heal_pending(

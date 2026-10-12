@@ -11,14 +11,15 @@ from __future__ import annotations
 
 from ..equip import weapon_to_rearm
 from ..executor.supply_refusals import can_try, carried_ids, in_hand, must_arm
-from ..healing import food_near, health_low, in_combat
+from ..healing import health_low, in_combat, walk_seconds
 from ..item_table import InventorySupply
 from ..memory import Memory
 from ..plan import Plan
-from ..supplies import chest_capacity, chest_upgrade, is_potion, used_on_self
+from ..supplies import BLOCK_FOOD, chest_capacity, chest_upgrade, heal_of, is_potion, used_on_self
 from ..survival import hostiles_in_range
 from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome, my_op
+from .food import food_route
 from .intents import arm_and_use, use_self
 
 
@@ -95,20 +96,25 @@ def fight_ahead(plan: Plan) -> bool:
 def potion_refused(w: WorldModel, ctx: PlayContext, plan: Plan) -> str | None:
     """Why the planner's potion is not drunk, or None to drink it (A135).
     A potion is for a fight: in combat or with one next on the plan
-    (``healing.in_combat``) it is drunk. Out of combat food heals: with food
-    a short walk away (``healing.food_near``, State ``food_near``) the drink
-    is refused and the reason names that food, which Heal eats; above the
-    ``low_health`` line with none near it is refused too, the potion kept
-    for a fight."""
+    (``healing.in_combat``) it is drunk. Out of combat food heals: while Heal
+    has food near to go for (``food.food_route``, the one food test, priced
+    by its walk) the drink is refused and the reason names that food; above
+    the ``low_health`` line with none it is refused too, the potion kept for
+    a fight."""
     if in_combat(w, ctx.memory, ctx.policy, fight_ahead=fight_ahead(plan)):
         return None
-    if near := food_near(w, ctx.memory, ctx.knowledge):
-        f = near[0]
-        cell = f"{w.map_id}:{f.pos[0]},{f.pos[1]}"
-        what = f"{f.code} at {cell}" if f.kind == "food" else f"a bush at {cell} to cut for {f.code}"
+    if (route := food_route(w, ctx)) is not None:
+        cell = f"{w.map_id}:{route.pos[0]},{route.pos[1]}"
+        if route.food is not None:
+            code = route.food.code or ""
+            what = f"{code} at {cell}"
+        else:
+            block = w.view.tiles.get(route.pos) or ""
+            code = BLOCK_FOOD.get(block, "")
+            what = f"a {block} at {cell} to break for {code}"
         return (
-            f"a potion is for a fight: out of combat with food near ({what}, heal {f.heal}, "
-            f"{f.walk_seconds} s walk; State food_near), Heal eats it"
+            f"a potion is for a fight: out of combat with food near ({what}, heal {heal_of(code)}, "
+            f"{walk_seconds(w, route.pos)} s walk; State food_near), Heal eats it"
         )
     if not health_low(w, ctx.params):
         return (

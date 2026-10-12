@@ -1,6 +1,6 @@
 # Ladder Lorraine
 
-**Short name:** `lorraine`. **Package:** `python/ladder/` (M14, not yet built).
+**Short name:** `lorraine`. **Package:** `python/ladder/` (M14). Run from `python/` with `python3 -m ladder create|run|status <profile>`, the same commands and profile files as Gary. Until her tree lands (A139–A141) she plays Stan's loop: sync, flee, explore.
 
 **Plays to:** levels cleared per hour. Everything else is a means to that.
 

@@ -14,7 +14,8 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.poll_cadence import hostile_within
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.gather import _barred_by_hostile, ground
-from agentrealm_agent.states.gather_safe import gather_ground, hostiles_near
+from agentrealm_agent.hostile_ground import hostiles_near
+from agentrealm_agent.states.gather_safe import gather_ground
 from agentrealm_agent.states.greet import threat_near
 from agentrealm_agent.states.heal import _wants_heal
 from agentrealm_agent.strategist import npc_lines

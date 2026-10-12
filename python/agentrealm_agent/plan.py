@@ -18,12 +18,12 @@ from .passage import went_through
 from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
 from .stalled import below_progress, find as find_stalled, forget as forget_stalled
 from .supplies import CAPABILITIES, chest_applied, eaten_on_pickup, used_on_self
+from .targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from .travel.ops import parse_travel_string, travel_op_from_plan_goal
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 log = logging.getLogger(__name__)
 
-GoalOp = dict[str, Any]
 
 TRAVEL_TO = frozenset({"entrance", "town", "hunting_ground", "shop", "point"})
 # Destinations the agent finds itself: they take no x, y (``shop`` and
@@ -86,8 +86,6 @@ OP_FIELDS: dict[str, str] = {
 BLOCK_CHANGE_OPS = frozenset({"use_block", "break_block"})
 SOLVE_OPS = frozenset({"compose", "use_block"})
 
-# Built-in `explore` explores the whole map: no center, no radius bound.
-EXPLORE_ANYWHERE = 1 << 30
 # A planner `wait` is short and says why: the agent never idles on a long hold.
 MAX_WAIT_SECONDS = 30
 # An op whose executor makes no progress for this long is moved below the
@@ -895,15 +893,6 @@ def builtin_way_on(plan: Plan, trigger: dict, world: WorldModel) -> None:
     if not explore_targets(area, world):
         area = {"op": "explore_area", "x": 0, "y": 0, "radius": EXPLORE_ANYWHERE}
     plan.push(area, f"no way on: {trigger.get('why', '')}")
-
-
-def explore_targets(op: GoalOp, world: WorldModel) -> set[Pos]:
-    """Frontier cells inside an ``explore_area`` op, other than where we stand."""
-    frontier = world.frontier() - {world.pos}
-    if op["radius"] >= EXPLORE_ANYWHERE:
-        return frontier
-    center = (op["x"], op["y"])
-    return {p for p in frontier if chebyshev(p, center) <= op["radius"]}
 
 
 def op_npc(op: GoalOp, world: WorldModel, pinned: int | None = None) -> Entity | None:

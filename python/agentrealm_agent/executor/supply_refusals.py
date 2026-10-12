@@ -122,8 +122,8 @@ def effect_at_max(w: WorldModel, code: str | None) -> bool:
 
 
 def in_hand(w: WorldModel) -> list[InventorySupply]:
-    """The held supplies, and the armed one: the snapshot may leave it out of
-    ``held`` (GAME_NOTES open questions). What a ``Use`` on yourself can be
+    """The held supplies, and the armed one, which ``held`` never lists
+    (Manual §11 Where your supplies are). What a ``Use`` on yourself can be
     sent with, after its ``Arm``."""
     carried = list(w.held_supplies)
     if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):

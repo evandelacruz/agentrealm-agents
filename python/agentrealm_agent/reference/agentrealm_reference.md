@@ -1,6 +1,6 @@
 # Agent Realm reference (for the AI planner)
 
-Source: https://agentrealm.gg/docs and https://agentrealm.gg/guides, every page they link. Fetched 2026-10-11.
+Source: https://agentrealm.gg/docs and https://agentrealm.gg/guides, every page they link. Fetched 2026-10-12.
 Regenerate with `python3 scripts/refresh_planner_reference.py`; do not edit by hand.
 Each page below starts with a `# page:` line; the planner splits on them (`reference_sections`).
 
@@ -10,25 +10,25 @@ Each page below starts with a `# page:` line; the planner splits on them (`refer
 
 How to play Agent Realm through its API: the manual, the rules the API keeps, a walk-through for your first agent, and what changed in each release.
 
--  Agent Realm Manual
+- Agent Realm Manual
 
 The user guide to playing Agent Realm through its API. It is written for two readers: a human writing a client, and an AI agent that is reading this to drive a character. Every section stands on its own, codes are given exactly as they appear on the wire, and anything not yet served is marked.
 
--  API rules
+- API rules
 
 All input to the game is via API. There is no interactive UI.
 
--  Changelog
+- Changelog
 
 What changed in Agent Realm, newest first. Each version since 0.10 is one release to the live game. Earlier versions group changes by period: nothing ran live before September 26, and until October 1 every change went live on its own. Dates are Pacific.
 
--  Create a Character Agent
+- Create a Character Agent
 
 How to write a program that creates a character and drives it. The rules below are settled in API.md. This guide uses its call names (GetSelf, SetPosition); Manual.md has the HTTP paths, bodies, and error codes.
 
 #### Agent guides
 
--  Agent guides
+- Agent guides
 
 Approaches for agents, such as a fast state machine steered by a slower model. Reference code lives in the public reference-agents repo.
 
@@ -46,7 +46,7 @@ Python reference agent on GitHub: a rule-based fast loop, character files, and u
 
 Patterns for splitting slow reasoning from fast ticks. Each is a guide, not something the server runs for you.
 
--  State machine agent: A fast tick loop picks one state from your rules each window; a slow pass, every few minutes, lets a model read logs and adjust strategy from clues your character has seen.
+- State machine agent: A fast tick loop picks one state from your rules each window; a slow pass, every few minutes, lets a model read logs and adjust strategy from clues your character has seen.
 
 Also see Create a character agent · Manual: writing an agent · Quick start
 
@@ -491,7 +491,7 @@ While the character is alive the snapshot also carries `attack_ready_at_tick` an
 
 It is scoped to what the character can perceive. Without that there is no ambush, stealth, hidden area, or reason to explore.
 
-The snapshot's `inventory` is the character's own holdings: `gems`, `armed`, `worn` by slot, `held`, and `chest` for supplies in the carried chest, each supply an `id` and `supply_subtype_code`. A fragment supply also carries `fragment`, the same shape as on entity tiles: the composed whole's subtype code, `piece_count`, this piece's `slot`, and `missing_slots`, the recipe slots of that whole the character does not hold, arm, or wear; a piece's own slot is never missing, including a piece in the carried chest. It never says where a missing piece is.
+The snapshot's `inventory` is the character's own holdings: `gems`, `armed`, `worn` by slot, `held`, and `chest`, each supply an `id` and `supply_subtype_code`. Each supply is in exactly one of them: the armed supply and the worn ones are not also in `held`. `held` is everything else the carried chest holds. `chest` is empty today, since no intent stows a supply in the character's own carried chest apart from holding it. A fragment supply also carries `fragment`, the same shape as on entity tiles: the composed whole's subtype code, `piece_count`, this piece's `slot`, and `missing_slots`, the recipe slots of that whole the character does not hold, arm, or wear; a piece's own slot is never missing, including a piece in the carried chest. It never says where a missing piece is.
 
 The snapshot's `entities.chests` lists the ground chests in sight, storage and dropped alike (B103): each an `id`, `x`, and `y`. A chest dropped at a death leaves the world the moment its last supply is withdrawn, by any character: it is a `removed` id in the patch, as any entity leaving sight, and a later `WithdrawFromChest` or `DepositToChest` naming it is `chest_gone`. A storage chest stays when empty (B116). A carried chest is never listed; its contents are the holder's `inventory.chest`. While a chest is within reach, on the character's block or a neighbouring one, corners included, the reach `WithdrawFromChest` and `DepositToChest` have, its entry also carries `contents`: each supply's `id` and `supply_subtype_code` (and `fragment`, as in `inventory`), `[]` when the chest is empty. Farther away the entry has no `contents`, so a chest is found by sight and opened by walking up to it, and stepping in or out of reach is a `changed` entry. No entry says whose chest it was. This is how a chest's contents are read; `GetChest` is not served.
 
@@ -753,6 +753,8 @@ What changed in Agent Realm, newest first. Each version since 0.10 is one releas
 
 ### Latest
 
+- The Manual now explains the core play rules: what each slot does, what breaks what, what a death costs, how levels and boss fights work, and how hostiles, safe zones, and regrowth behave.
+- Felling a tree in the wilds with a sword now pays a gem at least as often as cutting grass there.
 - Traps now hit as hard as their grade: a grade 1 trap hits about 60% of the time for 1, a grade 5 trap about 80% for 1 to 5, and a grade 9 trap about 95% for 1 to 9 against an unarmored character. Before, every trap hit alike.
 - Weapons now swing at different speeds: the pocket knife is quicker (0.8 s), mallets a little quicker (1.3 s), whips (1.2 s) and bows (1.5 s) slower, and swords stay at 1 s. Every tier of a weapon swings at its family's speed; damage and reach are unchanged.
 - **Breaking:** the Supplies reference lists what each supply does as its capabilities, each with when it acts and its numbers, and the Manual adds a table of every capability. In `/docs/supplies.json`, each row's `capabilities` list replaces `use_effects` and the separate stat fields (`attack_range`, `damage`, `heal`, `teleport_range`, `chest_capacity`, `defense`, `light_radius`, `grants`).
@@ -1631,7 +1633,7 @@ While your last death chest still exists in the world, `self` carries `death_che
 
 ##### `GET /characters/{id}/position`
 
-Auth. Tick-limited. `200 {"map_id": 1, "x": 150, "y": 150}`. `409 not_on_map` while unplaced, `409 character_not_live` before the sim has loaded the character.
+Auth. Tick-limited. `200 {"map_id": 1, "x": 150, "y": 150}`. `409 not_on_map` while unplaced, `409 character_not_live` before the sim has loaded the character. It carries no level number, and neither does the snapshot's `position`: to learn which level you are in, find your `map_id` among the minimap's maps and read that map's `level` (below).
 
 ##### `GET /characters/{id}/minimap`
 
@@ -1642,7 +1644,7 @@ Auth. Tick-limited. Every map you have revealed at least one tile on, with or wi
 
 ```
 
-`entrances` marks every level entrance on that map, found or not, with no level number: where to look, not which level or how to get in. `level` is on a map inside a level. Wear a map supply in the accessory slot and `map_worn` is true: `cells` covers the map, with `block_type` on ground you have revealed and `fog` on the rest. Without one, `cells` is empty and the whole map is fog. Characters, NPCs, and supplies are never on it.
+`entrances` marks every level entrance on that map, found or not, with no level number: where to look, not which level or how to get in. A map that belongs to a level carries `level`, that level's number, on its own entry in `maps`; a map outside every level has no `level`. This is the only read that numbers the map you stand on: match `position.map_id` to a `maps` entry. Wear a map supply in the accessory slot and `map_worn` is true: `cells` covers the map, with `block_type` on ground you have revealed and `fog` on the rest. Without one, `cells` is empty and the whole map is fog. Characters, NPCs, and supplies are never on it.
 
 ##### `GET /characters/{id}/world`
 
@@ -1892,17 +1894,11 @@ A client that falls behind skips to now: its next call returns current state as 
 
 Settled in `API.md`. Worlds tick 10 times per second; a tick is 100 ms.
 
--
+- **Queue.** `intents` is an ordered list. The first runs on the next tick, and each one after it on the tick after the one before, back to back. No intent names a tick. The server never holds one until it becomes legal: next tick means next tick. The one exception is a server that falls behind (One in flight below).
 
-**Queue.** `intents` is an ordered list. The first runs on the next tick, and each one after it on the tick after the one before, back to back. No intent names a tick. The server never holds one until it becomes legal: next tick means next tick. The one exception is a server that falls behind (One in flight below).
+- **Replace and append.** Each request carrying `intents` and no `append_to` replaces your held queue. With `append_to` set to a `queue_id` and `intents`, you add those entries to the end of that queue when it is still held or when it was your last queue and ran to its end with no rejection; the queue keeps its id and the new intents continue its indexes. Otherwise you get 409 `queue_changed` and nothing is stored. A `null`, empty, or blank `append_to`, or one without a non-empty `intents`, is `400 malformed_intent`, never a replace. Leave `intents` out to keep the queue; send `[]` to clear it. `Wait` is an ordinary intent, an idle tick; it does not clear anything.
 
--
-
-**Replace and append.** Each request carrying `intents` and no `append_to` replaces your held queue. With `append_to` set to a `queue_id` and `intents`, you add those entries to the end of that queue when it is still held or when it was your last queue and ran to its end with no rejection; the queue keeps its id and the new intents continue its indexes. Otherwise you get 409 `queue_changed` and nothing is stored. A `null`, empty, or blank `append_to`, or one without a non-empty `intents`, is `400 malformed_intent`, never a replace. Leave `intents` out to keep the queue; send `[]` to clear it. `Wait` is an ordinary intent, an idle tick; it does not clear anything.
-
--
-
-**Pace moves with `Wait`.** The queue never waits for a cooldown: a move queued sooner than your movement speed allows is rejected `movement_cooldown` and clears the rest. Space moves by your speed in ticks: at 10Hz, a speed of 2.5 blocks/s allows one step every 4 ticks, so follow each `Step` with three `Wait`s. Read your speed as `movement_speed` on `self`; worn speed modifiers change it.
+- **Pace moves with `Wait`.** The queue never waits for a cooldown: a move queued sooner than your movement speed allows is rejected `movement_cooldown` and clears the rest. Space moves by your speed in ticks: at 10Hz, a speed of 2.5 blocks/s allows one step every 4 ticks, so follow each `Step` with three `Wait`s. Read your speed as `movement_speed` on `self`; worn speed modifiers change it.
 
 ```
 {"intents": [
@@ -1917,41 +1913,23 @@ Settled in `API.md`. Worlds tick 10 times per second; a tick is 100 ms.
 
 Speech and attacks have their own cooldowns and pace the same way.
 
--
+- **Walk with `Step`.** A `SetPosition` names a block, so a queue of them only works if you are where you thought when you wrote it. After an old head that still ran, a wake onto another block, or anything else that moved you, the next one is `beyond_movement_range` and clears the rest. A `Step` moves from wherever you are, so the queue carries on. Use `SetPosition` when the move must land on one exact block (B101).
 
-**Walk with `Step`.** A `SetPosition` names a block, so a queue of them only works if you are where you thought when you wrote it. After an old head that still ran, a wake onto another block, or anything else that moved you, the next one is `beyond_movement_range` and clears the rest. A `Step` moves from wherever you are, so the queue carries on. Use `SetPosition` when the move must land on one exact block (B101).
+- **Cap.** At most the world's queue horizon in ticks: `worlds.queue_horizon_seconds` (default 4) × the tick rate, 40 at 10Hz. A longer list is `queue_too_long`. On append the cap counts what is still held plus what you add.
 
--
+- **Validated when it runs.** Each intent resolves on its tick against the world as it is then, with its own result.
 
-**Cap.** At most the world's queue horizon in ticks: `worlds.queue_horizon_seconds` (default 4) × the tick rate, 40 at 10Hz. A longer list is `queue_too_long`. On append the cap counts what is still held plus what you add.
+- **The first rejection clears the rest.** The intents after a `rejected` one never run and are not retried. That result lists their indexes in `discarded`. `applied` and `applied_no_effect` do not stop the queue. Resend from the failure point if it still fits.
 
--
+- **All or nothing.** One entry refused at ingest refuses the request: nothing is stored, your held queue stays, and the 400 is `{"code", "index"}` with the first refused entry's zero-based index.
 
-**Validated when it runs.** Each intent resolves on its tick against the world as it is then, with its own result.
+- **Mid-tick replace.** If the old head was already handed to the sim for the closing tick, it still resolves, under its old `queue_id`. The new queue starts on the tick after.
 
--
+- **One in flight.** The sim holds one intent of yours at a time: the next goes out only once the result of the one before has landed. If the server falls behind, your character idles a tick and the queue carries on from the same intent on the next one. Lateness is never a rejection. A replace never leaves more than that one old head to run.
 
-**The first rejection clears the rest.** The intents after a `rejected` one never run and are not retried. That result lists their indexes in `discarded`. `applied` and `applied_no_effect` do not stop the queue. Resend from the failure point if it still fits.
+- **Restarts and loss.** The queue lives on the world's handoff seam, not in Postgres. It survives a sim restart and resumes after the pause. An intent whose tick ran before the sim stopped does not run again: its result, and everything else that tick brought your character (events, observation, sleep state, a level-clear ceremony), arrives on your next round trip as if the sim had never stopped. If the handoff store loses its data the queue is gone without a result. For the latest queue `Q` you set with `n` intents, appends included, read every round trip since you set it. While `queue.queue_id` is `Q`, every index below `queue.next_index` has run, and an index without a result was an applied `Wait`. Any `rejected` result whose `queue_id` is `Q` ended `Q` on that index; every index up to it is accounted for the same way, nothing after it runs, and `discarded` when present lists the indexes after it that will not run (a rejection on the last index has none). When `queue` is absent and `finished_queue` is `{Q, n}`, `Q` ran to its end with no rejection, and every index without a result was an applied `Wait`. A character's end drops its held queue without results for the intents cut off; the round trip that carries the ending tick reports the end (`character_ended`), which is not a store loss. When `queue` is absent and none of the above holds, the handoff store lost `Q`: the indexes after the highest one known to have run (the highest result index for `Q`, or the last `next_index` seen for `Q` minus one) are unaccounted for; send a new queue from there if it still fits. `Q` stops being the latest queue when you set another; from then `queue` and `finished_queue` name the new queue, and `Q`'s unrun intents never run. A late result for `Q`'s in-flight head can still arrive and is read as above, not as a sign about the new queue. An append keeps `Q` the latest queue: it continues `Q`'s indexes, `n` grows by the appended count, `queue.queue_id` is `Q` again, and `finished_queue` is absent until the appended intents run out. A waking `Wait` is an applied `Wait`: no result, and its index is accounted for by `queue.next_index` or `finished_queue`.
 
--
-
-**All or nothing.** One entry refused at ingest refuses the request: nothing is stored, your held queue stays, and the 400 is `{"code", "index"}` with the first refused entry's zero-based index.
-
--
-
-**Mid-tick replace.** If the old head was already handed to the sim for the closing tick, it still resolves, under its old `queue_id`. The new queue starts on the tick after.
-
--
-
-**One in flight.** The sim holds one intent of yours at a time: the next goes out only once the result of the one before has landed. If the server falls behind, your character idles a tick and the queue carries on from the same intent on the next one. Lateness is never a rejection. A replace never leaves more than that one old head to run.
-
--
-
-**Restarts and loss.** The queue lives on the world's handoff seam, not in Postgres. It survives a sim restart and resumes after the pause. An intent whose tick ran before the sim stopped does not run again: its result, and everything else that tick brought your character (events, observation, sleep state, a level-clear ceremony), arrives on your next round trip as if the sim had never stopped. If the handoff store loses its data the queue is gone without a result. For the latest queue `Q` you set with `n` intents, appends included, read every round trip since you set it. While `queue.queue_id` is `Q`, every index below `queue.next_index` has run, and an index without a result was an applied `Wait`. Any `rejected` result whose `queue_id` is `Q` ended `Q` on that index; every index up to it is accounted for the same way, nothing after it runs, and `discarded` when present lists the indexes after it that will not run (a rejection on the last index has none). When `queue` is absent and `finished_queue` is `{Q, n}`, `Q` ran to its end with no rejection, and every index without a result was an applied `Wait`. A character's end drops its held queue without results for the intents cut off; the round trip that carries the ending tick reports the end (`character_ended`), which is not a store loss. When `queue` is absent and none of the above holds, the handoff store lost `Q`: the indexes after the highest one known to have run (the highest result index for `Q`, or the last `next_index` seen for `Q` minus one) are unaccounted for; send a new queue from there if it still fits. `Q` stops being the latest queue when you set another; from then `queue` and `finished_queue` name the new queue, and `Q`'s unrun intents never run. A late result for `Q`'s in-flight head can still arrive and is read as above, not as a sign about the new queue. An append keeps `Q` the latest queue: it continues `Q`'s indexes, `n` grows by the appended count, `queue.queue_id` is `Q` again, and `finished_queue` is absent until the appended intents run out. A waking `Wait` is an applied `Wait`: no result, and its index is accounted for by `queue.next_index` or `finished_queue`.
-
--
-
-**Shape.**
+- **Shape.**
 
 ```
 {"intents": [
@@ -1974,9 +1952,7 @@ Speech and attacks have their own cooldowns and pace the same way.
 
 ```
 
--
-
-**Polling once a second** with a queue longer than a second is enough to act on every tick.
+- **Polling once a second** with a queue longer than a second is enough to act on every tick.
 
 ### 8. Events
 
@@ -2234,15 +2210,39 @@ The rules an agent needs to act well. Coefficients the design has not fixed are 
 - `SetPosition` onto a door warps you to its linked position. A locked door consumes a matching key or rejects with `door_locked`.
 - `SetPosition` onto a ground supply picks it up.
 - Water is walkable only while an armed or worn supply makes it so. While you stand on water, an `Arm`, `Wear`, `Remove`, or `Drop` that would leave you with no such supply is rejected with `would_strand`, and nothing changes (B64). Step onto land first.
+- **Crossing water with a raft.** The raft is a tool, so it is armed, never worn (`Wear` is `not_wearable`), and a raft only carried does not make water walkable. While it is armed you hold no weapon: a `Use` on a character or an NPC does nothing (`applied_no_effect`), so you cannot fight on it, though hostiles can still hit you. You cannot swap it out mid-crossing either: on water, arming anything else or dropping the raft is `would_strand`. Cross, step onto land, then `Arm` your weapon, which costs a tick. A supply that fords and is worn, such as armor whose capabilities include water walking, works from its worn slot and leaves the armed slot free for a weapon. The Supplies reference's raft row reads "armed or worn" because the `fords` capability allows both; the raft itself can only be armed.
+- **What waits on a cooldown.** There are three, each its own: **move** (`SetPosition` and `Step`, a door warp included), **attack** (a weapon `Use` that rolls against a character or an NPC, hit or miss, or that breaks a block), and **speech** (`Say` and `Broadcast`). Every other intent runs on the tick it is queued for with no cooldown: `Arm`, `Wear`, `Remove`, `Take`, `Drop`, `Disarm`, `Compose`, `DepositToChest`, `WithdrawFromChest`, `Read`, `Wait`, `Sleep`, and every `Use` of a consumable, a tool, or a trap, a teleport included. A rejected move or swing spends nothing, and neither does a weapon `Use` that changed nothing. Changing weapons does not reset the attack cooldown: a swing is judged against the cooldown of the weapon armed when it runs, so switching to a quicker weapon can let you swing at once, and switching to a slower one makes you wait out its longer cooldown. `move_ready_at_tick` and `attack_ready_at_tick` in the observation say when the next one may run (§7.2).
 
 Full rules: `API.md` Movement.
 
 #### Supplies and inventory
 
 - **Armed**: one slot. `Use` acts through it. `Arm` costs the tick.
+
 - **Worn**: five slots: `head`, `body`, `legs`, `feet` for armor, `accessory` for accessories. Passive; they apply while you do other things.
+
 - **Carried**: your chest is your carry capacity. Everything held, worn, and armed counts against it. You start with your world's starting chest: the blue chest, which holds 10, in every world so far. A chest upgrade (a middle chest, 30, or a red chest, 50) is armed and used with `Use` on yourself: when it holds more than the chest you carry, your chest becomes that size and the upgrade is used up. One no larger changes nothing and stays armed (`applied_no_effect`). A full chest rejects one more pickup with `carry_capacity_full`.
+
+- **Where your supplies are.** The snapshot's `inventory` puts each supply you carry in exactly one place: `armed` (one supply), `worn` by slot, or `held`, everything else. The armed supply is not also in `held`, and neither is a worn one. `held` is what your carried chest holds; `inventory.chest` stays empty today, since no intent stows a supply in your own chest apart from holding it. `Arm` and `Wear` take a held supply: to arm something you wear, `Remove` it first. `Compose` uses held fragments only, so an armed fragment is `not_held`. `Drop` works on any held, armed, or worn supply; `DepositToChest` only on held ones.
+
+- **Armed, worn, or only carried.** What a supply does depends on where it is. Carrying it does nothing unless the table says so: boots in your chest give no speed, and a lantern in your chest gives no light.
+
+| Works | Capabilities |
+|---|---|
+| Armed, then `Use` | `attacks`, the block breakers (`cuts`, `chops`, `smashes`, `burns`, `blasts`), `heals` on a potion, `holds` (chest upgrade), `teleports`, `traps`, and a torch or lantern you light with `Use` on yourself (it lights only while armed) |
+| Armed or worn | `speeds`, `perceives`, `detects`, `fords`, `unmasks`, and an always-on light |
+| Worn only | `protects` (armor's defense: armor in hand protects nothing), `disguises` and `maps` (accessory slot) |
+| Carried, held or armed | A key: a locked door takes a matching key you hold and uses it up |
+| On pickup | `heals` on food, gems, and hearts |
+
+- **How big your chest is.** No read names your carried chest or its capacity. Work it out: you start with the world's starting chest (10 in every shipped world); a chest upgrade's `Use` on yourself is `applied` when it made your chest bigger and `applied_no_effect` when it did not; and every death resets it to the starting chest. What counts against it is every held supply, the armed one, and each worn one; the chest itself does not. `carry_capacity_full` on a `Take`, a pickup, or a withdrawal, and `left_supply_ids` on a withdrawal of everything, say you are at the limit.
+
+- **Food and potions.** Food is eaten as you pick it up and heals at once, up to your maximum: a berry 1, an apple 2, a mushroom 3, a golden cap 6. It is eaten even at full health, so leave it lying until you need it, and it never takes room in your chest. A potion is carried, armed, and drunk with `Use` on yourself: a potion or a small potion 10, a large potion 30. It is used up even at full health. **Health never comes back on its own.** Only food, potions, a respawn (full health), and a boss clear (refilled to your maximum) raise it.
+
+- **A price belongs to the supply.** A priced subtype costs its `gem_price` wherever a copy lies on the ground, a copy you dropped included: drop a bought sword and picking it up again costs the price again.
+
 - Gems and lives are consumed on pickup into counters. A gem cache (`gem_cache_5`, `gem_cache_7`, `gem_cache_10` in Olympuff) is a gem supply worth that many at once. A priced supply shows its `gem_price` in entity reads and spends those gems when picked up; without enough, the pickup is rejected with `not_enough_gems`.
+
 - Your look is a face and an outfit, both cosmetic, never dropped, and without stats. The face is set when the character is created and never changes (Choosing a face). An outfit is bought on the website with money, with points, or with both together, as that outfit is priced. A worn helmet is drawn over the face.
 
 #### Supplies reference
@@ -2288,7 +2288,7 @@ Every capability, as the game defines it (B138). Parameters are in the units the
 | `traps` | trap | `used` (Use) | `amount`: grade (1 to 9); `duration_seconds`: armed lifetime (seconds) | `Use` on a block within one block, corners included, arms an unarmed trap there that your trap detection reveals; the trap in your hand stays armed. `Drop` sets it down, armed when it was armed. Its grade is the trap detection needed to see or disarm it. Arming starts its armed lifetime; with none, it stays armed until disarmed. |
 | `unmasks` | sees through disguises | `equipped` (armed or worn) | — | Armed or worn, you see other characters' gear through their disguises. |
 
-The blue chest's `chest` capacity is the size you start with, so using one changes nothing. The map does only what its `map` capability says, and no shipped world places it yet, so it has no price.
+The blue chest's `chest` capacity is the size you start with, so using one changes nothing. The raft's water walking shows "armed or worn" because that is what the capability allows; a raft is a tool and can only be armed (Movement). The map does only what its `map` capability says, and no shipped world places it yet, so it has no price.
 
 The same rows are served as JSON with no key: `GET /docs/supplies.json` on the website returns an array of objects with `code`, `name`, `class`, `slot`, `capabilities`, `used_up_on_break`, `stacks`, `eaten_on_pickup`, and `gem_prices` (world code to price). Each entry in `capabilities` has `capability` (the code in the table above), `trigger` (`equipped`, `worn`, `used`, or `picked_up`), and whichever of `amount`, `reach`, `cooldown_ms`, and `duration_seconds` it takes, filled in where the catalog leaves one unset and the rules read a value, as in the table. Numbers are numbers and flags are booleans; a field that does not apply is left out. The table and the JSON are built from the same rows, so they agree. Before B138 finished, each row had `use_effects` and a field per stat (`attack_range`, `damage`, `heal`, `teleport_range`, `chest_capacity`, `defense`, `light_radius`, `grants`); `capabilities` replaces them all.
 
@@ -2351,6 +2351,19 @@ The same rows are served as JSON with no key: `GET /docs/supplies.json` on the w
 - Anything else, and any block that cannot be destroyed, is `applied_no_effect`. A block never says whether it breaks or what breaks it; look for the clues the map leaves.
 - A tool is used up when it breaks a block; a weapon is not.
 - A destroyed block shows its destroyed type until it grows back, may reveal a door, and may drop a supply. Striking it again while it is destroyed changes nothing.
+- A weapon that breaks a block spends its attack cooldown, as a swing does. A strike that breaks nothing spends nothing, and a tool that breaks nothing is not used up. Only reach-1 weapons break blocks: no whip or bow carries a block breaker.
+
+What breaks what in the shipped worlds. This is the rule set, not a map: a block's look never promises it breaks. Many grass, bush, tree, rock, mountain, and wall blocks name no capability and never break, and some trees and bushes fall only to fire, not to a sword.
+
+| Capability | Carried by | Breaks | Tool used up | Becomes |
+|---|---|---|---|---|
+| `cuts` | Pocket knife, every sword | Grass, bushes | — | Dirt |
+| `chops` | Every sword | Trees | — | Dirt |
+| `smashes` | Every mallet | Rocks | — | Dirt |
+| `burns` | Matches, torch | Hedge trees, a few bushes | Yes | Fire, which burns whoever stands on it (`occupy_damage`) until it grows back |
+| `blasts` | Bomb, salvaged bomb | Rocks, mountain, a few walls | Yes | Dirt, or a door where a hidden entrance was |
+
+Dirt, tile, water, fire, lava, and doors never break. In the sandbox every breakable block names `blasts`, so only a bomb breaks anything there. An odd block that wandered in from elsewhere may name any of the five (Regrowth, drops, and returns).
 
 #### Combat
 
@@ -2361,7 +2374,15 @@ The same rows are served as JSON with no key: `GET /docs/supplies.json` on the w
 - A character swung at gets `Attacked`, and `Damaged` too on a hit, even one armour absorbed (`amount` 0). `Attacked` alone is a miss. A swing at an NPC shows to everyone in sight as `NPCAttacked`, plus `NPCDamaged` on a hit.
 - Each weapon has an attack cooldown, default 1 second; sooner is `attack_cooldown`. Hostiles have one too (B22, B47).
 - `fire`, `lava`, and any other block type with `occupy_damage` deal that damage on the tick you enter and every second you stay, less your defense and the armor you wear (B47).
-- **Safe zones** (town, respawn zones) stop all damage, and a swing at a character standing in one sends that character no event. You cannot attack out of one or set a trap in one, but a weapon still breaks a block there (a mallet on a rock).
+- **Safe zones** (town, respawn zones) stop all damage, and a swing at a character standing in one sends that character no event. You cannot attack out of one or set a trap in one, but a weapon still breaks a block there (a mallet on a rock). Safety is judged on the exact block: a block inside the zone is safe and the next one out is not, so stand a block inside the edge, not on the line. `safe` on terrain reads and `GetZone` mark it. Hostiles are not kept out: one may walk in and swing at you, but the swing deals nothing. Damaging blocks and traps do not hurt you there either.
+
+#### Hostiles
+
+- A hostile goes for the nearest living character **on its map**, with no sight or distance limit. None waits to be hit first. It attacks whoever is within its attack range, no faster than its attack cooldown. Otherwise a **chaser** steps one block toward the nearest character at its movement speed, and a **patroller** walks its fixed loop and attacks only what comes into range.
+- A chaser does not find paths. It takes the neighbouring block that brings it closest, and stands still when none does, so a wall or a river between you stops it.
+- There is no leash range. A hostile that spawns across a zone never leaves that zone. A hand-placed one can follow you anywhere walkable on its map.
+- A hostile never heals while it lives and never walks back to its spawn. Killed, it comes back after its own respawn timer (30 seconds to 5 minutes for shipped hostiles), at full health, where it fell (or the nearest free block) or, for a zone spawn, anywhere free in its zone.
+- A kill may drop one supply on the hostile's block, often a gem, by the zone's kill drops. Nothing drops onto a block that already shows a supply.
 
 #### Traps
 
@@ -2385,6 +2406,7 @@ The same rows are served as JSON with no key: `GET /docs/supplies.json` on the w
 - A death drops your carried chest, with everything held, armed, worn, or stowed in it, where you fell and respawns you at full health in the nearest respawn zone, outside any level. Permanent stats and boss clears stay. In Olympuff the respawn zones are the five waystations and a corner of the town plaza, so a death near town brings you back in town.
 - What you keep: gems, lives left, permanent stats, boss clears, and non-transferable supplies. A non-transferable supply, such as Olympuff's pocket knife, is not dropped: you keep it through death, and the starting kit is armed again on respawn when nothing else is. A character that lacks a kit piece is given it again. `Drop` and `DepositToChest` refuse a non-transferable supply with `not_transferable`.
 - Between the two you are **downed** for the world's respawn delay (`respawn_delay_seconds` on `world`, 5 by default). What you see: `Died` on your round trip, naming the dropped chest and every supply in it, then `alive: false` and `respawn_at_tick` in the snapshot and on `self`, no `position`, and no entities, because you perceive nothing. Every intent you send is `character_dead`, `Wait` and `Sleep` included; nothing brings you back early. The life is spent and the chest drops at the death, not at respawn. You respawn carrying a new, empty blue chest (10). On `respawn_at_tick` you get `Respawned` with your new block, and the snapshot delta brings `alive: true`, your new `position`, and `respawn_at_tick: null`. Others cannot see or attack you while you are downed, and you hold no block.
+- **A chest upgrade dies with you.** Capacity belongs to the carried chest, and the chest drops. You respawn with the world's starting chest (10). The upgraded chest on the ground keeps its size for whoever empties it.
 - Your `Died` tells you where your chest went: `chest_id`, and `map_id`, `x`, `y` where it landed, on every death that drops one (B103). Go back, stand on or next to it, read its `contents` in the snapshot's `entities.chests`, and `WithdrawFromChest` what you want, or send just the `chest_id` to take everything that fits. Anyone else who reaches it first can too. When the last supply leaves it, the chest is gone; if it is no longer in `entities.chests` when you get there, someone emptied it. A death with nothing to stow drops no chest, and that `Died` has no `chest_id` and no landing (B116).
 - In the official viewer a death shows: the character falls and fades on its block, a small gravestone stands there while it is downed, and on respawn it fades back in under a beam of light on its respawn block. The dropped chest shows as any chest does: a chest on the ground, on spectator and owner watch alike.
 - A death in a boss room puts the dropped chest outside the level, within 20 blocks of its perimeter.
@@ -2406,6 +2428,24 @@ B45.
 
 - Boss rooms admit one character at a time. The door rejects with `boss_room_occupied` while a fight is on, and also when you are already the challenger in another boss's fight: a character is in at most one boss fight at a time. There is no queue: when it opens, the ordinary same-block roll decides who enters.
 - Clearing every level a world authored transcends and retires the character.
+- **Which level you are in.** The position read and the snapshot's `position` carry no level. The minimap does: the entry in `maps` whose `map_id` matches yours carries `level` when that map belongs to a level (§5.3).
+- **Order.** Levels can be cleared in any order. Beating the world takes one clear of every level number, whichever came first, and a second clear of a level counts once. Content gates the order instead: difficulty first, and some level doors are locked and need a key found elsewhere, often from another level's boss. A locked door uses up its key on every pass, so keep a spare if you mean to come back. Some entrances are hidden and must be broken open first.
+- **The time limit.** Every boss fight has one, set per level: 5 minutes when the level sets none, from 90 seconds to 10 minutes in Olympuff. No read serves it or the time left, so count from the tick your step through the door applied. At the limit your health is set to 0, with no roll: an ordinary death that spends a life, drops your chest outside the level within 20 blocks of its perimeter, and respawns you in the nearest respawn zone.
+- **Leaving a fight.** Before the limit you can walk out through the room's exit door, which is an ordinary door. The fight ends and the boss door reopens. A boss keeps the damage it has taken until it dies: its health does not reset between challengers, and a boss's entity entry carries its `health` and `max_health`.
+- **Clear rewards.** Every clear refills your health to your maximum, drops what the boss holds, and sends `level_clear_ceremony`. Your **first** clear of a level also raises your maximum health first, by the level's authored gain (0 to 15 per level in Olympuff); `max_health_gain` is left out of the ceremony when there is none. A repeat clear only refills. Maximum health starts at 10, and a first clear is the only thing that raises it: no supply does.
+- **Inside a level** you cannot `Sleep`, and auto-sleep never takes you: an idle character stands where it stopped until its agent acts.
+
+#### Regrowth, drops, and returns
+
+- A destroyed block grows back after its type's recovery time in that world, 60 seconds unless the world sets another, and every block of a type alike. Odd blocks in Olympuff take 10 minutes.
+- Each break rolls the zone's destruction drops: at most one supply, on that block, and none while a supply already lies there. Cut grass and felled trees can drop gems; bushes drop berries (§16 has the rates).
+- **Oddities.** A block that looks out of place, alone where it does not belong, may hide a gem cache that drops every time it breaks. It grows back on its timer (10 minutes in Olympuff) and can be broken again, but a cache still lying on the block keeps the next one from dropping. Where they are is found in play.
+- **Authored supplies return.** A placed supply with a return interval comes back on its home block that long after it is taken: gem piles every 10 to 45 minutes in Olympuff, shop stock 2 minutes after it is bought. A returning supply stays hidden while another supply lies on its block.
+
+#### Shops
+
+- A shop is priced supplies on the ground, often beside a helper. `SetPosition` onto one or `Take` it to buy it; without enough gems it is `not_enough_gems` and it stays. The helper only says its line and knows nothing of stock.
+- Each shop sells what was placed there, so stock differs by shop. No read lists a shop's stock: `GetWorld` does not, and there is no shop read. You see stock by sight, as supplies with a `gem_price` on entity reads. `GET /docs/supplies.json` gives each world's price for each subtype, never where it is sold or whether it is in stock.
 
 #### Hunting grounds
 
@@ -2576,9 +2616,9 @@ Gems lie on the ground in the **hunting ground** and in Level 1's hall. Grass an
 - **Attack power.** Every character has a permanent attack power of 2, existing characters included. A swing at a hostile hits on 65% of rolls, and the pocket knife deals 1 to 4. It counts toward hunting-ground strength, and the hunting ground's ceiling of 7 allows for it, so a bronze sword with bronze mail still gets in. Weapons add damage only.
 - **Field work.** Outside town, cutting grass with the pocket knife or a sword sometimes drops a gem: 20% in ring 1, 25% farther out. Bushes drop berries, not gems. A character working the fields makes about 6 gems a minute.
 - **Kill drops.** A hostile you kill may drop a gem, at a better chance than grass on the same ground: the grass chance plus a bonus that grows with the hostile's strength. A Snotling in the ring-1 fields drops one 30% of the time.
-- **Tree felling.** Chopping a wild tree with a sword in a god's region sometimes drops one gem (5% in ring 1, 8% in ring 2, 10% in ring 3), and more rarely that region's gem cache. Hedges are trees too, so burning one in a zone with tree drops rolls the same table; the Hedge Maze pays nothing.
+- **Tree felling.** Chopping a wild tree with a sword in a god's region sometimes drops one gem, at least as often as cutting grass on the same ground (B148), and more rarely that region's gem cache. Hedges are trees too, so burning one in a zone with tree drops rolls the same table; the Hedge Maze pays nothing.
 - **Gem piles.** Authored piles return on an interval: 3 gems every 10 minutes in town and ring 1, 6 every 20 minutes in ring 2, 12 every 45 minutes in ring 3, and 8 every 30 minutes on the islands. Most are free on foot from town; a few need a tool first (a bomb, a match, or the raft).
-- **Gem caches.** Each god's region has one hand-placed **oddity**, a block that looks out of place, two steps off that region's road. Break it with the capability it needs and it always drops a **gem cache** (`gem_cache_5`, `gem_cache_7`, or `gem_cache_10`). The oddity grows back in 10 minutes and can be broken again.
+- **Gem caches.** Each god's region has one hand-placed **oddity**, a block that looks out of place, two steps off that region's road. Break it with the capability it needs and it drops a **gem cache** (`gem_cache_5`, `gem_cache_7`, or `gem_cache_10`) every time, unless the last cache still lies on its block. The oddity grows back in 10 minutes and can be broken again.
 - **Shops.** Town, waystations, and wilderness helpers sell gear for gems (raft, golden caps, bombs, lanterns, and the rest). See Gear and prices below.
 
 Bronze kit from field work is on the order of 8 minutes; iron about half an hour; adamant an evening.

@@ -34,18 +34,20 @@ if TYPE_CHECKING:
 BREAK_GOAL = "break"
 
 BREAKABLE = frozenset({"bush", "tree", "rock", "mountain", "wall"})
-REGROWTH_TICKS = 600  # cut bush grew back in 60 s (GAME_NOTES Breaking blocks)
+REGROWTH_TICKS = 600  # 60 s at 10 Hz: a block's recovery time unless the world sets another (Manual §11 Regrowth)
 BREAK_BASE_COST = DEFAULT_WEAPON_COOLDOWN_TICKS + 1
 # Refusals of a break that say "not yet", not "cannot": the pair is not marked failed.
 TRANSIENT_BREAK_REJECTIONS = frozenset({"attack_cooldown"})
 # Results that mark a (block, capability) pair failed: it is not tried there again.
 FAILED_RESULTS = frozenset({"applied_no_effect", "failed", "no_effect"})
 
-# What opens each breakable block type, by the game's rules: the knife and
-# swords cut bushes, only a sword chops trees, a mallet smashes boulders,
-# matches or a torch burn hedges (hedges are trees) and burnable bushes, and
-# a bomb blasts secrets, level doors, odd rocks and wild mountain
-# (GAME_NOTES Breaking blocks).
+# What opens each breakable block type, by the game's rules (Manual §11
+# Breaking blocks): the knife and swords cut bushes, only a sword chops trees,
+# a mallet smashes rocks, matches or a torch burn hedge trees and a few bushes,
+# and a bomb blasts rocks, mountain and a few walls (a hidden entrance becomes
+# a door). Grass is cut too, but it is walkable ground, which Gather cuts and
+# Break never takes. An odd block may need any of the five; Break does not
+# allow that yet (A160).
 BLOCK_OPENERS: dict[str, frozenset[str]] = {
     "bush": frozenset({"cut", "burn"}),
     "tree": frozenset({"chop", "burn"}),

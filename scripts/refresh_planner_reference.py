@@ -60,8 +60,11 @@ class PageToMarkdown(HTMLParser):
             self.out.append(text)
 
     def _block(self) -> None:
-        if self._cell is None:
-            self.out.append("\n\n")
+        if self._cell is not None:
+            return
+        if self._lists and re.search(r"(^|\n) *(-|\d+\.) +$", "".join(self.out[-3:])):
+            return  # a paragraph that opens a list item stays on its marker's line
+        self.out.append("\n\n")
 
     # -- parser hooks
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -180,6 +183,7 @@ class PageToMarkdown(HTMLParser):
         for i in range(0, len(parts), 2):  # even parts are outside code fences
             text = re.sub(r"[ \t]+\n", "\n", parts[i])
             text = re.sub(r"\n[ \t]+(?=[^\s\-0-9])", "\n", text)  # stray indent; list nesting starts with - or N.
+            text = re.sub(r"(?m)^( *(?:-|\d+\.)) {2,}", r"\1 ", text)  # one space after a list marker
             parts[i] = re.sub(r"\n{3,}", "\n\n", text)
         return "```".join(parts).strip() + "\n"
 

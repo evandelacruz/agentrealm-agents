@@ -185,6 +185,15 @@ class WalkTest(unittest.TestCase):
         self.assertEqual(readiness.risk_budget(GATHER, w, None).have, 19)
         self.assertEqual(readiness.margin_now(GATHER, w, None).have, 10)
 
+    def test_helpers_and_players_in_reach_are_no_foes(self):
+        w = world(health=2)
+        for kind, eid, code in (("npc", 70, "shopkeeper"), ("character", 71, "farmer")):
+            e = Entity(kind, eid, (6, 5), code)
+            w.entities.append(e)
+            w.sightings[(kind, eid)] = Sighting(e, MAP, 0, e.pos)
+        self.assertEqual(readiness.foes_here(w, None), [])
+        self.assertEqual(walk(w, knowledge(door_need="fords", sells={"raft": 30})).goal.key, "gather")
+
     def test_nothing_in_reach_she_gathers_at_any_health(self):
         w = world(health=2)
         hostile(w, 50, (40, 40))
@@ -231,6 +240,12 @@ class RiskBudgetTest(unittest.TestCase):
         w = world(map_levels={LEVEL_MAP: 1})
         hostile(w, 60, (3, 3), code="bogmaw", map_id=LEVEL_MAP, in_view=False)
         self.assertEqual([e.code for e in readiness.level_foes(w, knowledge())], ["bogmaw"])
+
+    def test_helpers_seen_in_the_level_are_no_foes(self):
+        w = world(map_levels={LEVEL_MAP: 1})
+        helper = Entity("npc", 61, (3, 3), "hermit")
+        w.sightings[("npc", 61)] = Sighting(helper, LEVEL_MAP, 0, helper.pos, in_view=False)
+        self.assertEqual(len(readiness.level_foes(w, knowledge())), readiness.LEVEL_PRIOR_FOES)
 
     def test_a_boss_seen_is_priced_by_its_health(self):
         w = world()

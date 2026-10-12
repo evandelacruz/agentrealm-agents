@@ -30,7 +30,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 from agentrealm_agent.discovery import seen_prices
-from agentrealm_agent.entrance_needs import in_sight, meets, unmet_need
+from agentrealm_agent.entrance_needs import lying_in_sight, meets, unmet_need
 from agentrealm_agent.equip import hunting_ceiling, weapon_rank
 from agentrealm_agent.healing import held_heal
 from agentrealm_agent.knowledge_maps import map_level_known
@@ -213,21 +213,26 @@ def next_entrance(w: WorldModel, kb: KnowledgeBase | None) -> tuple[int, Pos] | 
 
 
 def level_foes(w: WorldModel, kb: KnowledgeBase | None) -> list[Entity]:
-    """The hostiles the next level is expected to hold: every one seen on its
-    maps, else ``LEVEL_PRIOR_FOES`` unmeasured ones."""
+    """The hostiles the next level is expected to hold: every known hostile
+    remembered on its maps (``survival.known_hostile``: ``sightings`` keeps
+    every NPC and character seen, helpers and other players too), else
+    ``LEVEL_PRIOR_FOES`` unmeasured ones."""
     level = target_level(w)
     seen = [
         s.entity
         for s in w.sightings.values()
-        if level is not None and s.map_id is not None and map_level(w, kb, s.map_id) == level
+        if level is not None
+        and s.map_id is not None
+        and map_level(w, kb, s.map_id) == level
+        and known_hostile(w, s.entity)
     ]
     return seen or [PRIOR_FOE] * LEVEL_PRIOR_FOES
 
 
 def foes_here(w: WorldModel, kb: KnowledgeBase | None) -> list[Entity]:
     """The hostiles that can reach the character where she works: known
-    hostiles in view or remembered on this map within the fight's reach
-    (``survival.FIGHT_REACH_RADIUS``)."""
+    hostiles (``survival.known_hostile``) in view or remembered on this map
+    within the fight's reach (``survival.FIGHT_REACH_RADIUS``)."""
     if w.pos is None:
         return []
     near: dict[tuple[str, int], Entity] = {}
@@ -235,7 +240,7 @@ def foes_here(w: WorldModel, kb: KnowledgeBase | None) -> list[Entity]:
         if known_hostile(w, e) and chebyshev(w.pos, e.pos) <= FIGHT_REACH_RADIUS:
             near[(e.kind, e.id)] = e
     for key, s in w.sightings.items():
-        if s.map_id == w.map_id and chebyshev(w.pos, s.entity.pos) <= FIGHT_REACH_RADIUS:
+        if s.map_id == w.map_id and known_hostile(w, s.entity) and chebyshev(w.pos, s.entity.pos) <= FIGHT_REACH_RADIUS:
             near.setdefault(key, s.entity)
     return list(near.values())
 
@@ -326,7 +331,7 @@ def missing(w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal) -> Missin
     out = Missing()
     sale = for_sale(w, kb)
     need = need_of_next_level(w, kb)
-    if need and not in_sight(w, need):
+    if need and lying_in_sight(w, need) is None:
         offers = sorted((p, c) for c, p in sale.items() if meets(c, need))
         if offers:
             out.buys.append(Purchase(offers[0][1], offers[0][0], NEED_WHY.format(need)))

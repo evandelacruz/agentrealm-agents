@@ -40,7 +40,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentrealm_agent.entrance_needs import meets
+from agentrealm_agent.entrance_needs import lying_in_sight, meets
 from agentrealm_agent.level_order import target_level
 from agentrealm_agent.supplies import heal_of, is_potion
 from agentrealm_agent.targets import EXPLORE_ANYWHERE, GoalOp
@@ -207,9 +207,9 @@ def get_what_it_requires(node: Node, rd: Reading) -> GoalOp | None:
     need = r.need_of_next_level(w, rd.kb)
     if need is None:
         return None
-    lying = [e for e in w.entities if e.kind == "supply" and e.gem_price is None and meets(e.code, need)]
-    if lying:
-        return {"op": "fetch_item", "code": lying[0].code, "x": lying[0].pos[0], "y": lying[0].pos[1]}
+    lying = lying_in_sight(w, need)
+    if lying is not None:
+        return {"op": "fetch_item", "code": lying.code, "x": lying.pos[0], "y": lying.pos[1]}
     buy = next((p for p in rd.missing(node.serves).buys if meets(p.code, need)), None)
     return {"op": "buy", "code": buy.code} if buy else _explore(w)
 

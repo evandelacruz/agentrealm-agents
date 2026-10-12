@@ -159,9 +159,10 @@ class LevelState(State):
 def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcome:
     m, policy = ctx.memory, ctx.policy
     targets_mod.commit(m, w, ENTRANCE_GOAL, (w.map_id, door), top_op(ctx))
-    if out := _prerequisite_step(w, ctx, door):
+    walk = op_walk(w, ctx)
+    if out := _prerequisite_step(w, ctx, door, walk):
         return out
-    plan_avoid, plan_costly, reach = op_walk(w, ctx)
+    plan_avoid, plan_costly, reach = walk
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
@@ -187,13 +188,17 @@ def _needs(w: WorldModel, ctx: PlayContext, door: Pos) -> str | None:
     return None
 
 
-def _prerequisite_step(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcome | None:
+def _prerequisite_step(
+    w: WorldModel, ctx: PlayContext, door: Pos, walk: tuple[set[Pos], set[Pos], set[Pos]]
+) -> StateOutcome | None:
     """Take the item the entrance needs before walking to it (A71): a stop
     inserted before the committed entrance, which stays the target.
 
     The stop is set when the needed item is in sight and not carried, and
     is finished once the item is carried or seen gone. None when there is
     no stop to walk, or no step toward it now: the entrance walk goes on.
+    The walk to it keeps out of the hostiles' reach as the entrance walk
+    does (``walk``, ``op_walk``, A128).
     """
     m = ctx.memory
     here = w.pos
@@ -224,7 +229,7 @@ def _prerequisite_step(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutco
         stop.tries += 1
         return StateOutcome([take(stop.supply_id)], f"take {needs} before entrance {door}", state=LevelState.name)
     policy = ctx.policy
-    _, plan_avoid, plan_costly = plan_sets(w, m, policy, ctx.knowledge)
+    plan_avoid, plan_costly, reach = walk
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly, m=m)
@@ -232,7 +237,7 @@ def _prerequisite_step(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutco
     def plan():
         return cost_path(w, stop.pos, params(), nav=nav_search(m, w, PREREQUISITE_GOAL, stop.pos))
 
-    step = bounded_step(m, w, PREREQUISITE_GOAL, stop.pos, plan_avoid, plan, params=params)
+    step = bounded_step(m, w, PREREQUISITE_GOAL, stop.pos, plan_avoid, plan, params=params, reach=reach)
     if step is None:
         if nav_stuck.backed_off(m, PREREQUISITE_GOAL, w.map_id, stop.pos, w.tick):
             targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)  # the entrance walk goes on

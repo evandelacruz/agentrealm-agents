@@ -28,6 +28,7 @@ from agentrealm_agent.engagement import decide
 from agentrealm_agent.executor.held_queue import STEP_DOUBT, open_step, possible_positions, unconfirmed_send
 from agentrealm_agent.executor.movement import step_landing
 from agentrealm_agent.hostile_ground import WALK_REACH_MARGIN
+from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.pathing import guided_step
@@ -265,6 +266,88 @@ class OpenTheWayKeepsOffTheReachTest(unittest.TestCase):
         w, c = self.clearing(pack_beside_the_tree=False)
         sent = [i for o in play(w, c, 8) for i in o.intents or []]
         self.assertIn(CHOP, sent)
+
+
+class EveryOpWalkHoldsTest(unittest.TestCase):
+    """Each walk family an op executor runs holds on a strong pack across the
+    only way to its target: the op asks once and sends no step into the reach."""
+
+    ROWS = ["#" * 23, "#" + "." * 20 + "T#", "#" * 23]  # a corridor, a tree at its east end
+    GLYPHS = {**GLYPHS, "T": "tree"}
+
+    def corridor(self) -> WorldModel:
+        w = WorldModel(character_id=1, map_id=7, pos=(1, 1), perception=25)
+        for y, row in enumerate(self.ROWS):
+            for x, ch in enumerate(row):
+                w.view.tiles[(x, y)] = self.GLYPHS[ch]
+        w.terrain_center, w.terrain_map = (1, 1), 7
+        w.alive, w.health, w.max_health, w.lives, w.gems = True, 10, 10, 5, 20
+        return w
+
+    def held(self, w: WorldModel, op: dict, *others: Entity) -> PlayContext:
+        hostiles = pack(w, (11, 1), (12, 1), hit=STRONG)
+        w.entities = [*hostiles, *others]
+        c = ctx(op)
+        reach = {(x, y) for h in hostiles for x in range(h.pos[0] - BAR, h.pos[0] + BAR + 1) for y in range(0, 3)}
+        sent = []
+        for _ in range(3):
+            out = dispatch(w, c)
+            sent += out.intents or []
+            w.tick += 10
+        steps = [(i["x"], i["y"]) for i in sent if i.get("verb") == "SetPosition"]
+        self.assertFalse([p for p in steps if p in reach], f"{out.state}: {out.reason}")
+        self.assertFalse([i for i in sent if i.get("verb") in ("Use", "Take", "Read")], sent)
+        self.assertEqual(len(asks(c)), 1, out.reason)
+        return c
+
+    def test_loot_fetch_item(self):
+        w = self.corridor()
+        self.held(w, {"op": "fetch_item", "code": "small_potion"}, Entity("supply", 50, (20, 1), code="small_potion"))
+
+    def test_investigate_read(self):
+        w = self.corridor()
+        w.perception = 8  # the sign at the far end is out of sight from here
+        self.held(w, {"op": "read", "x": 21, "y": 1})
+
+    def test_shop_buy_in_sight(self):
+        w = self.corridor()
+        self.held(w, {"op": "buy", "code": "small_potion"}, Entity("supply", 60, (20, 1), code="small_potion", gem_price=5))
+
+    def test_solve_use_block(self):
+        w = self.corridor()
+        w.held_supplies = [InventorySupply(5, "matches")]
+        self.held(w, {"op": "use_block", "x": 21, "y": 1, "code": "matches"})
+
+    def test_break_block(self):
+        w = self.corridor()
+        w.held_supplies = [InventorySupply(4, "bronze_sword")]
+        w.armed_code, w.armed_id = "bronze_sword", 4
+        self.held(w, {"op": "break_block", "x": 21, "y": 1, "capability": "chop"})
+
+
+class PrerequisiteWalkHoldsTest(unittest.TestCase):
+    def test_the_walk_to_an_entrances_key_holds_on_a_pack_and_keeps_the_stop(self):
+        """Level's walk to the item a locked entrance needs keeps out of the
+        reach as the entrance walk does: no step into it, and the stop is held,
+        not given up, while the entrance walk goes on."""
+        from tests.test_commit_target import MAP, ctx as level_ctx, field
+        from agentrealm_agent.knowledge_base import KnowledgeBase
+        from agentrealm_agent.states.level import ENTRANCE_GOAL
+        from agentrealm_agent.travel.knowledge import entrance_key
+
+        kb = KnowledgeBase("sandbox")
+        kb.entrances[entrance_key(MAP, (18, 4))] = {"map_id": MAP, "x": 18, "y": 4, "locked": True, "needs": "key"}
+        w = field(at=(10, 4))
+        w.view.tiles[(18, 4)] = "framed_door"
+        hostiles = pack(w, (6, 2), (6, 6), hit=STRONG)  # across every row between us and the key
+        w.entities = [*hostiles, Entity("supply", 51, (1, 4), "key")]
+        m = Memory()
+        plan = Plan([{"op": "enter_level", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
+        out = dispatch(w, level_ctx(m, plan, kb))
+        self.assertEqual(out.state, "Level", out.reason)
+        step = (out.intents[0]["x"], out.intents[0]["y"])
+        self.assertGreater(step[0], 10, "toward the entrance, not into the pack's reach")
+        self.assertEqual([s.pos for s in m.targets[ENTRANCE_GOAL].stops], [(1, 4)], "the stop is kept")
 
 
 class PackIsWeighedWholeTest(unittest.TestCase):

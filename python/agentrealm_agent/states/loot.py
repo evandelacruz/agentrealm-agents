@@ -61,12 +61,14 @@ class LootState(State):
             return clear_the_way(world, ctx, None, f"no {code} at {target[0]},{target[1]}", self.name, op)
         # Before the step, not only when it has none: a walk that found no step backs
         # off (``bounded_step``) and would hold on after the block is open.
-        if (out := open_the_way(world, ctx, target, self.name)) is not None:
+        walk = op_walk(world, ctx)
+        if (out := open_the_way(world, ctx, target, self.name, reach=walk[2])) is not None:
             out.reason = f"fetch {code}: {out.reason}"
             return out
-        step = _step_toward(world, ctx, target)
+        step = _step_toward(world, ctx, target, walk)
         if step is None:
-            return clear_the_way(world, ctx, target, f"no step toward {code} at {target[0]},{target[1]}", self.name, op)
+            why = f"no step toward {code} at {target[0]},{target[1]}"
+            return clear_the_way(world, ctx, target, why, self.name, op, reach=walk[2])
         return StateOutcome([set_position(step)], f"fetch {code} → {target}", state=self.name)
 
 
@@ -113,10 +115,13 @@ def _nearest_supply(w: WorldModel, code: str, skip=lambda pos: False) -> Entity 
     return min(found, key=lambda e: (chebyshev(e.pos, here), e.id)) if found and here is not None else None
 
 
-def _step_toward(w: WorldModel, ctx: PlayContext, goal: Pos) -> Pos | None:
-    """Next step of the kept loot path to ``goal``, bounded like any walk (``bounded_step``, A15)."""
+def _step_toward(
+    w: WorldModel, ctx: PlayContext, goal: Pos, walk: tuple[set[Pos], set[Pos], set[Pos]]
+) -> Pos | None:
+    """Next step of the kept loot path to ``goal``, bounded like any walk
+    (``bounded_step``, A15), on the op's walk sets (``op_walk``, A128)."""
     m, policy = ctx.memory, ctx.policy
-    plan_avoid, plan_costly, reach = op_walk(w, ctx)
+    plan_avoid, plan_costly, reach = walk
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly)

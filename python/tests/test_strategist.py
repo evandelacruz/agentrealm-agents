@@ -890,42 +890,46 @@ class PlannerViewTest(unittest.TestCase):
         self.assertIn("whenever health or potions fall below the stage 2 bar, unless the check is one skipped for its cost", prompt)
 
     def test_readiness_shows_how_an_unmet_health_check_closes(self):
-        # A124: health comes back only from a heal or a respawn, so to_close
-        # shows a carried potion's heal, else a potion to buy and its time,
-        # and a rest only where regen was measured on this world.
-        from agentrealm_agent.healing import add_regen, save_regen_yes
+        # A124, A130: health rises only from potions and food, so to_close
+        # shows a carried potion's heal, food lying in sight and the walk to
+        # it, and a potion to buy with its time and the walk to the shop;
+        # never a rest, whatever an old knowledge base saved.
+        from agentrealm_agent.travel.knowledge import record_shop_cell
 
         self.w.health, self.w.max_health, self.w.gems = 5, 10, 4
         health = lambda **kw: self.readiness(**kw)["stage_2"]["to_close"]["health_at_bar"]
-        self.assertEqual(health(), {"health_short": 3}, "nothing carried or seen for sale closes it")
+        self.assertEqual(health(), {"health_short": 3}, "nothing carried, in sight or for sale closes it")
         self.kb.items["small_potion"] = {"gem_price": 10}
         self.assertEqual(
             health(gather_run={"gems_per_min": 2.0}),
             {"health_short": 3, "buy": {"code": "small_potion", "gems_short": 6, "minutes": 3.0}},
         )
-        self.w.held_supplies = [InventorySupply(1, "large_potion"), InventorySupply(2, "small_potion")]
-        self.assertEqual(health(), {"health_short": 3, "drink": {"code": "small_potion", "heals": 10}}, "the smallest heal that closes it")
-        add_regen(self.kb, 0.01)
-        self.assertNotIn("rest", health(), "a rate with regen not confirmed yes: no rest")
-        save_regen_yes(self.kb)
-        self.assertNotIn("rest", health(), "no safe tile known: nowhere to rest")
-        apply_zone(self.w, 7, 10, 20, {"safe": True})
+        record_shop_cell(self.kb, 7, (10, 20))
         self.assertEqual(
-            health()["rest"],
-            {"safe": "7:10,20", "walk_seconds": 4, "rest_minutes_estimate": 0.5},
-            "10 cells at 2.5 a second, then 3 health at 0.01 a tick at 10 Hz",
+            health()["buy"],
+            {"code": "small_potion", "gems_short": 6, "at": "7:10,20", "walk_seconds": 4},
+            "10 cells at 2.5 a second",
         )
+        self.w.entities = [Entity("supply", 9, (12, 10), "apple"), Entity("supply", 8, (11, 10), "apple", gem_price=3)]
+        self.assertEqual(health()["eat"], {"code": "apple", "heals": 2, "at": "7:12,10", "walk_seconds": 1}, "free food only")
+        self.w.held_supplies = [InventorySupply(1, "large_potion"), InventorySupply(2, "small_potion")]
+        self.assertEqual(health()["drink"], {"code": "small_potion", "heals": 10}, "the smallest heal that closes it")
+        self.kb.extra["survival"] = {"safe_zone_regen": "yes", "safe_zone_regen_rates": [0.01]}
+        apply_zone(self.w, 7, 10, 20, {"safe": True})
+        self.assertNotIn("rest", health())
         self.w.health = 8
         self.assertNotIn("health_at_bar", self.readiness()["stage_2"].get("to_close", {}), "met: nothing to close")
 
-    def test_contract_says_health_does_not_come_back_by_itself(self):
-        # A124: the docs give no regeneration; the planner assumed health
-        # recovers while gathering off safe ground.
+    def test_contract_says_health_rises_only_from_potions_and_food(self):
+        # A124, A130: the game has no natural regeneration; the planner
+        # assumed health recovers by resting or on safe ground.
         prompt = system_prompt()
-        self.assertIn("Safe ground only stops damage: health does not come back by itself, on safe ground or off it", prompt)
-        self.assertIn("The game's documentation gives no regeneration", prompt)
+        self.assertIn("Health rises only from potions and food", prompt)
+        self.assertIn("There is no natural regeneration, on safe ground or anywhere, so resting or waiting restores nothing", prompt)
         self.assertIn("put a use_item with its code on the stack", prompt)
-        self.assertIn("For health_at_bar it shows health_short and the ways it closes", prompt)
+        self.assertIn("For health_at_bar it shows health_short and the ways it closes: drink", prompt)
+        self.assertNotIn("rest_minutes_estimate", prompt)
+        self.assertNotIn("regen is confirmed", prompt)
 
     def test_upgrades_for_sale_show_the_minutes_at_the_gem_rate(self):
         # A124: an upgrade's gems_short in time, as readiness to_close does.

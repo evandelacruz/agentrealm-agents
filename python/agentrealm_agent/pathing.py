@@ -435,16 +435,11 @@ SAFE_UNREACHABLE_TICKS = nav_stuck.BACKOFF_BASE_TICKS
 # A safe cell seen in a known hostile's reach is skipped this long, so the
 # pick does not turn back for it the moment the pack drops out of view.
 SAFE_THREATENED_TICKS = nav_stuck.BACKOFF_BASE_TICKS
-# Heal's walks to safe ground: a cell either gave up on is skipped by every safe walk.
-SAFE_WALK_GOALS = ("heal_rest", "heal_measure")
-# Paths to safe ground: one of these that ends on a cell needs no search to it.
-SAFE_PATH_GOALS = ("safe", *SAFE_WALK_GOALS)
-# The commitments of the walks to safe ground (A71): Retreat's, which Park
-# shares (both walk ``retreat_step``), and Heal's rest and measure walks.
-# Retreat runs from a hostile and Heal does not, so each picks by its own
-# rules and keeps its own cell.
+# The walk to safe ground: a path of it that ends on a cell needs no search to it.
+SAFE_PATH_GOAL = "safe"
+# The commitment of the walk to safe ground (A71): Retreat's, which Park
+# shares (both walk ``retreat_step``).
 RETREAT_TARGET = "safe"
-HEAL_TARGET = "heal_safe"
 
 
 def committed_safe(m: Memory, w: WorldModel, key: str) -> Pos | None:
@@ -494,10 +489,10 @@ def reachable_safe_goal(
     mark by a hostile still in view counts only while ``reach`` says so.
     ``town`` is the last resort only among cells outside every hostile's
     reach. Also a cell ``params`` avoids, one a check found no way to within
-    ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), and one a
-    Heal walk gave up on and still backs off (``safe_ruled_out``). The first ``SAFE_GOAL_CHECKS``
-    left are searched, then the nearest of the rest; a cell a kept safe
-    walk (``SAFE_PATH_GOALS``) already ends on needs no search. "No way" is a
+    ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``,
+    ``safe_ruled_out``). The first ``SAFE_GOAL_CHECKS`` left are searched,
+    then the nearest of the rest; a cell a kept safe walk
+    (``SAFE_PATH_GOAL``) already ends on needs no search. "No way" is a
     search that proved it (``navigation.no_way``): one cut short by its
     budget still counts as a way, since it walks toward the cell. A Retreat
     or Park walk also marks a cell it found no step toward for a stuck
@@ -520,7 +515,7 @@ def reachable_safe_goal(
         return p in params.avoid or safe_ruled_out(m, w, p)
 
     def reaches(p: Pos) -> bool:
-        if m.goal in SAFE_PATH_GOALS and m.path and m.path[-1] == p:
+        if m.goal == SAFE_PATH_GOAL and m.path and m.path[-1] == p:
             return True
         if no_way(w, p, params):
             m.safe_unreachable[(mid, p)] = w.tick
@@ -564,12 +559,9 @@ def reachable_safe_goal(
 
 def safe_ruled_out(m: Memory, w: WorldModel, p: Pos) -> bool:
     """A check or a walk found no way to safe cell ``p`` within
-    ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``), or a Heal walk
-    gave up on it and still backs off."""
+    ``SAFE_UNREACHABLE_TICKS`` (``Memory.safe_unreachable``)."""
     seen = m.safe_unreachable.get((w.map_id, p))
-    if seen is not None and w.tick - seen < SAFE_UNREACHABLE_TICKS:
-        return True
-    return any(nav_stuck.backed_off(m, goal, w.map_id, p, w.tick) for goal in SAFE_WALK_GOALS)
+    return seen is not None and w.tick - seen < SAFE_UNREACHABLE_TICKS
 
 
 def retreat_safe_goal(
@@ -889,8 +881,7 @@ def bounded_step(
 ) -> Pos | None:
     """One move toward ``at`` on a walk that gives up instead of escalating (A15).
 
-    For the short walks to something in sight: Heal to food or a safe tile
-    (A10), Loot to a pickup (A20). Each is a stuck attempt like any walk, so
+    For the short walks to something in sight: Heal to food (A10), Loot to a pickup (A20). Each is a stuck attempt like any walk, so
     the oscillation guard can give it up too, but it skips the escalation
     ladder: nothing in sight is worth a block broken or a reveal walk. No
     path, or a window with no progress (moves, time or pacing), gives ``at``

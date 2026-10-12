@@ -121,6 +121,7 @@ class KnowledgeBase:
         known = {"schema_version", "world_code", *SECTION_KEYS}
         kb.extra = {k: v for k, v in raw.items() if k not in known}
         _migrate_entrance_keys(kb.entrances)
+        _drop_retired_keys(kb.extra)
         return kb
 
     @classmethod
@@ -147,6 +148,25 @@ def _migrate_entrance_keys(entrances: dict[str, Any]) -> None:
             continue
         del entrances[key]
         entrances.setdefault(f"{map_id}:{x},{y}", row)
+
+
+# Keys older agents saved that nothing reads now, dropped at load: the
+# measured safe-zone regen (A130: the game has none, health rises only from
+# potions and food).
+RETIRED_KEYS = {"survival": ("safe_zone_regen", "safe_zone_regen_rates")}
+
+
+def _drop_retired_keys(extra: dict[str, Any]) -> None:
+    """Drop ``RETIRED_KEYS`` from the saved sections outside the schema, and
+    a section they leave empty, once at load."""
+    for section, keys in RETIRED_KEYS.items():
+        entry = extra.get(section)
+        if not isinstance(entry, dict):
+            continue
+        for key in keys:
+            entry.pop(key, None)
+        if not entry:
+            del extra[section]
 
 
 def load(world_code: str) -> KnowledgeBase:

@@ -838,9 +838,9 @@ class Runner:
         # rollback (A133), before the runner tracks what it sends.
         planned = c.submit_queue if c.submit_queue is not None else [c.intent] if c.intent else []
         gated, why = ford_gate(w, m, saved, planned, self.knowledge, rearm=False)
-        if why:
+        if gated != planned:
             queue = gated if c.submit_queue is not None or len(gated) > 1 else None
-            c = dataclasses.replace(c, intent=gated[0] if gated else None, submit_queue=queue, reason=f"{c.reason}; {why}")
+            c = dataclasses.replace(c, intent=gated[0] if gated else None, submit_queue=queue, reason=f"{c.reason}; {why}" if why else c.reason)
         moves = self._apply_never_attack(self.intents_for(c))
         reason = c.reason
         doubt = unconfirmed_send(w, m, policy, self.knowledge, moves, starts) if moves else STEP_DOUBT

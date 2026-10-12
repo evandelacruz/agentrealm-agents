@@ -232,6 +232,24 @@ class UnderAttackStepTest(unittest.TestCase):
         self.assertIsNone(m.self_use, "the drink was never sent: nothing is filed against it")
         self.assertIsNone(m.self_use_rearm)
 
+    def test_cornered_on_water_skips_the_drink_and_still_acts(self):
+        from agentrealm_agent.states.flee import cornered
+        from agentrealm_agent.world import Entity
+        from tests.test_hostile_reach import POLICY
+
+        w = lake(at=(3, 1), held=("raft", "bronze_sword", "small_potion"), armed="raft")
+        w.alive, w.health, w.max_health = True, 2, 10  # a drink is due
+        hitter = Entity("npc", 200, (4, 1), code="bogmaw")
+        w.threat.record(("npc", "bogmaw"), 3)
+        w.entities = [hitter]
+        w.attacker, w.attacked_tick = ("npc", 200), w.tick
+        m = Memory()
+        c = PlayContext(m, POLICY, random.Random(0), knowledge=KnowledgeBase.empty("sandbox"), plan=None)
+        out = cornered(w, c, [hitter])
+        self.assertNotIn(arm(POTION), out.intents or [], "the drink's Arm would strand us")
+        self.assertIsNone(m.self_use)
+        self.assertTrue(out.intents or (out.wait and any(s["trigger"] == "cornered" for s in m.strategist_signals)), out.reason)
+
     def test_a_lone_step_under_attack_is_open_on_water_only_afloat(self):
         from agentrealm_agent.executor.held_queue import _lands_open
 

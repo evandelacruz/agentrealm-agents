@@ -472,7 +472,12 @@ def parse_directives_goals(lines: list[str]) -> list[GoalOp]:
 
 
 # A reply's top-level keys: the type each must have, and its name in a refusal.
-PLAN_FIELDS: dict[str, tuple[type, str]] = {"goals": (list, "a list"), "params": (dict, "an object"), "notes": (str, "a string")}
+PLAN_FIELDS: dict[str, tuple[type, str]] = {
+    "goals": (list, "a list"),
+    "params": (dict, "an object"),
+    "notes": (str, "a string"),
+    "entrance_needs": (list, "a list"),  # recorded by ``entrance_needs.record_needs`` (A147)
+}
 
 
 def plan_fields(raw: object, reject: Callable[[str], None] = _reject) -> dict[str, Any] | None:

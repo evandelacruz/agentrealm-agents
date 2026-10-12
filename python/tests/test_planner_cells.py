@@ -11,12 +11,13 @@ from __future__ import annotations
 import json
 import unittest
 
-from agentrealm_agent.cells import refuse_bad_cells
+from agentrealm_agent.cells import STAYS_ON_MAP_OPS, leaves_map, refuse_bad_cells
 from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.plan import Plan
+from agentrealm_agent.plan import OP_STATE, Plan
 from agentrealm_agent.stalled import RetryBasis, remember as remember_stalled
 from agentrealm_agent.strategist import build_prompt, door_lines, ground_lines, map_lines, ruler_lines
 from agentrealm_agent.world import Entity, WorldModel
+from tests.test_entrance_needs import needs_sandals
 from tests.test_strategist import WAIT_ANSWER, FakeLLM, fake_runner, make, round_trip
 
 # A 16 by 12 level room walled round, with a door in the top wall at x 7.
@@ -198,6 +199,32 @@ class BadCellTest(unittest.TestCase):
         stalled: list = []
         remember_stalled(stalled, {"op": "leave_level"}, "no way out", 1, RetryBasis(frozenset(), 0, 0), w.map_id)
         self.assertEqual(refuse_bad_cells([off], w, stalled_ops=stalled)[0], [], "a stalled leave_level is not put back: the reply runs here")
+
+    def test_a_buy_may_walk_to_another_map(self):
+        w = level_room()
+        off = {"op": "travel", "to": "point", "x": 17, "y": 1}
+        buy = {"op": "buy", "code": "rope", "x": 40, "y": 0, "map_id": 3}
+        self.assertEqual(refuse_bad_cells([buy, off], w), ([buy, off], []))
+
+    def test_every_op_is_known_to_stay_or_taken_to_leave(self):
+        self.assertLessEqual(STAYS_ON_MAP_OPS, set(OP_STATE), "a name here that is no op")
+        w = level_room()
+        leaving = {name for name in OP_STATE if name != "travel" and leaves_map({"op": name}, w)}
+        self.assertEqual(leaving, {"buy", "enter_level", "leave_level", "fight_boss"})
+        self.assertTrue(leaves_map({"op": "an_op_added_later"}, w), "an op not known to stay ends the check")
+
+    def test_judged_after_the_other_refusals(self):
+        """An enter_level another rule leaves out does not shield the ops after it."""
+        enter = {"op": "enter_level", "x": 12, "y": 3}
+        off = {"op": "travel", "to": "point", "x": 17, "y": 1}
+        s = make(FakeLLM({"goals": [enter, off]}))
+        r = fake_runner()
+        r.knowledge = needs_sandals()
+        r.world.map_sizes[r.world.map_id] = (16, 12)
+        round_trip(s, r)
+        self.assertEqual(r.plan.goals, [])
+        self.assertTrue(any("needs sea_sandals" in x for x in s.rejected), s.rejected)
+        self.assertTrue(any("17,1 is off map 7" in x for x in s.rejected), s.rejected)
 
     def test_a_map_of_unknown_size_refuses_nothing_off_it(self):
         w = level_room()

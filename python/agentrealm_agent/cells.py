@@ -25,8 +25,13 @@ from .world import DOORS, Pos, WorldModel
 STAND_ON_OPS = frozenset({"travel", "fetch_item"})
 # Travel destinations whose x, y is a cell (an entrance names its own map).
 TRAVEL_TO_CELL = frozenset({"point", "shop", "entrance"})
-# Ops that end on another map: into a level, out of one, or out of one once its boss is beaten.
-MAP_CHANGING_OPS = frozenset({"enter_level", "leave_level", "fight_boss"})
+# Ops that run where the character is and never take it to another map. Any
+# other op may: a travel elsewhere or onto a door, a buy walking to its seller,
+# entering or leaving a level, a boss beaten; and so may any op added later.
+STAYS_ON_MAP_OPS = frozenset({
+    "explore_area", "read", "say", "break_block", "use_block", "compose", "fetch_item",
+    "gather_gems", "equip", "use_item", "hunt", "fight", "avoid", "wait", "set_param",
+})
 
 
 def in_bounds(w: WorldModel, p: Pos) -> bool:
@@ -79,16 +84,15 @@ def bad_cell(op: dict[str, Any], w: WorldModel) -> str | None:
 
 
 def leaves_map(op: dict[str, Any], w: WorldModel) -> bool:
-    """``op`` may end with the character on another map: an op that enters
-    or clears a level, or a travel that names no cell here (another map's,
-    a town, a hunting ground, an entrance on a map it does not name) or
-    names a door here, which warps."""
-    if op.get("op") in MAP_CHANGING_OPS:
-        return True
-    if op.get("op") != "travel":
-        return False
-    p = target_here(op, w)
-    return p is None or w.view.tiles.get(p) in DOORS
+    """``op`` may end with the character on another map: any op not known to
+    stay on it (``STAYS_ON_MAP_OPS``: a buy, entering or leaving a level, a
+    boss fight), or a travel that names no cell here (another map's, a town,
+    a hunting ground, an entrance on a map it does not name) or names a door
+    here, which warps."""
+    if op.get("op") == "travel":
+        p = target_here(op, w)
+        return p is None or w.view.tiles.get(p) in DOORS
+    return op.get("op") not in STAYS_ON_MAP_OPS
 
 
 def leaving_level(w: WorldModel, stalled_ops: Sequence[StalledOp] = ()) -> bool:

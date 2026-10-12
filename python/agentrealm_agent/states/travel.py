@@ -4,7 +4,13 @@ Resolves the destination (``travel/resolve.py``: a point, the town, the
 nearest known shop or hunting ground, an entrance), then walks there across
 maps through known door warps (A26), with stuck escalation on each map's leg
 (A15). ``entrance`` at ``0, 0`` walks to the nearest unexplored door.
-Arriving finishes the op.
+Arriving finishes the op; for an entrance, going through it onto the map it
+leads to does (``passage.went_through``, A144). A destination on another
+map with no known warp there is walked toward by the way off this map
+(``navigation.walk_toward``), never asked about.
+A level entrance whose recorded need nothing carried meets is never
+walked onto (A147, ``entrance_needs``): a travel to one, or a step onto
+one, drops the op with why.
 
 A ``hunting_ground`` with none known searches for one: it explores the
 map's frontier while spare windows read zones in widening rings around the
@@ -27,7 +33,7 @@ from __future__ import annotations
 from ..config import Policy
 from ..knowledge_base import KnowledgeBase
 from ..memory import HuntSearch, Memory
-from ..navigation import doors_goal_path, route_first_leg
+from ..navigation import doors_goal_path, walk_toward
 from ..navigation import stuck as nav_stuck
 from ..navigation import walk as nav_walk
 from ..pathing import grid_params, guided_step, nav_search, next_step, plan_sets
@@ -36,6 +42,7 @@ from ..travel.ops import travel_op_from_plan_goal
 from .. import targets as targets_mod
 from ..navigation.rejection import locked_doors_from_kb
 from ..travel.resolve import ResolvedDestination, at_destination, given_up_travel, picks_nearest, resolve_travel, still_candidate
+from ..entrance_needs import unmet_need, why_refused
 from ..world import DOORS, Pos, WorldModel
 from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .explore import explore_outcome
@@ -91,13 +98,37 @@ class TravelState(State):
         m.hunt_search = None
         if dest is None:
             return StateOutcome(None, f"travel:{op['to']} not resolved yet", state=self.name)
+        if dest.label == "entrance" and (need := unmet_need(world, ctx.knowledge, dest.map_id, dest.pos)) is not None:
+            # An entrance is never entered with its need unmet (A147): the item comes first.
+            why = why_refused(need, dest.map_id, dest.pos)
+            targets_mod.release(m, TRAVEL_TARGET)
+            ctx.plan.drop_current(why, memory=m)
+            return StateOutcome(None, why, state=self.name)
         if at_destination(world, dest):
             targets_mod.release(m, TRAVEL_TARGET)
             ctx.plan.finish_current(f"at {dest.label}", memory=m)
             if m.goal == f"travel:{dest.label}":
                 m.path, m.goal = [], ""
             return StateOutcome(None, f"travel:{dest.label} arrived", state=self.name)
-        return walk_to(world, ctx, op, dest, self.name)
+        out = walk_to(world, ctx, op, dest, self.name)
+        need = _gated_step(world, ctx, out)
+        if need is not None:
+            # A walk to anywhere never steps onto an entrance whose need is unmet (A147).
+            why = why_refused(need[0], world.map_id, need[1])
+            ctx.plan.drop_current(why, memory=m)
+            return StateOutcome(None, why, state=self.name)
+        return out
+
+
+def _gated_step(world: WorldModel, ctx: PlayContext, out: StateOutcome) -> tuple[str, Pos] | None:
+    """The need and cell of a level entrance ``out`` would step onto with that need unmet."""
+    for intent in out.intents or []:
+        if intent.get("verb") == "SetPosition":
+            cell = (intent["x"], intent["y"])
+            need = unmet_need(world, ctx.knowledge, world.map_id, cell)
+            if need is not None:
+                return need, cell
+    return None
 
 
 def walk_to(world: WorldModel, ctx: PlayContext, op: GoalOp, dest: ResolvedDestination, state: str) -> StateOutcome:
@@ -239,10 +270,12 @@ def route_step(
 ) -> Pos | None:
     """One step toward ``dest_map:dest`` under ``goal``, across maps through
     known door warps (A26), with stuck escalation on this map's leg (A15).
+    With no known warp to another map the leg heads for the way off this map
+    (``navigation.walk_toward``, A144).
 
     None when no step can be planned, or the only way crosses ``reach``, the
-    ground the hostiles seen hold (A128). With no known route to another map
-    the goal's path is cleared and nothing backs off.
+    ground the hostiles seen hold (A128). With neither a known route nor a
+    way off this map left, the goal's path is cleared and nothing backs off.
     """
     plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest_map, dest, goal)
     leg = _map_leg(m, w, goal, dest_map, dest, plan_avoid, plan)
@@ -301,7 +334,7 @@ def _route_plan(
         )
         if params.fog_cost not in routes:
             nav = nav_search(m, w, goal, dest) if dest_map == w.map_id else None
-            routes[params.fog_cost] = route_first_leg(w, knowledge, dest_map, dest, params, nav=nav)
+            routes[params.fog_cost] = walk_toward(w, knowledge, dest_map, dest, params, nav=nav, stuck=m.nav_stuck)
         return routes[params.fog_cost]
 
     return plan

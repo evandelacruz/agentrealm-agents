@@ -2,16 +2,21 @@
 
 Walks to the level's entrance at the op's cell and through it, then walks
 the level's rooms toward unexplored doors, then frontier tiles. The op is
-finished once inside the level there is no door or frontier step left.
+finished once inside the level there is no door or frontier step left, or
+once the entrance, gone through, led onto a map that is no level (A144).
 
 Every target is committed (A71): the entrance, and inside, the door or
-frontier picked, kept until reached, gone or given up. An entrance a look
-filed as locked and needing an item (``needs``) that is not carried, with
-one in sight, gets that item as a prerequisite stop before it: Level walks
-to it and takes it first, then resumes toward the entrance. With no way to
-the entrance it clears the way (stuck step 2 is Break's) or asks the planner
-and holds (``way``, A120). An ``enter_level`` at an entrance known to be a
-level above the target is dropped with why: levels are taken in order (A145).
+frontier picked, kept until reached, gone or given up. An entrance whose
+recorded need (``needs``: a look's key on a locked door, or a clue's item,
+A147) nothing carried meets, with one in sight, gets that item as a
+prerequisite stop before it: Level walks to it and takes it first, then
+resumes toward the entrance. The entrance is never entered while the need
+is unmet (``entrance_needs``): with no stop for the item the op is dropped
+with why, and while a stop waits the walk stops short of the door.
+With no way to the entrance it clears the way (stuck step 2 is Break's) or
+asks the planner and holds (``way``, A120).
+An ``enter_level`` at an entrance known to be a level above the target is
+dropped with why: levels are taken in order (A145).
 
 ``leave_level`` walks out by a door whose known warp leads out of every
 level, else back the way the character came in (``level_order.way_out``),
@@ -23,16 +28,16 @@ from __future__ import annotations
 
 from .. import targets as targets_mod
 from ..config import Policy
-from ..healing import supply_matches
+from ..entrance_needs import meets, unmet_need, why_refused
 from ..loot import Pickup, loot_score
 from ..pack import TAKE
+from ..passage import went_through
 from ..knowledge_base import KnowledgeBase, knowledge_items
 from ..memory import Memory
 from ..navigation import cost_path, doors_goal_path, nearest_target
 from ..navigation import stuck as nav_stuck
 from ..pathing import bounded_step, grid_params, guided_step, nav_search, next_step, plan_sets
 from ..level_order import op_barred_level, target_level, way_out
-from ..travel.knowledge import iter_entrances
 from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, op_walk, top_op
 from .intents import set_position, take
@@ -162,6 +167,10 @@ class LevelState(State):
             if (barred := op_barred_level(op, world, ctx.knowledge)) is not None:
                 ctx.plan.drop_current(f"entrance is level {barred}, above level {target_level(world)} not yet cleared", memory=m)
                 return StateOutcome(None, "entrance barred: levels in order", state=self.name)
+            if went_through(op, world, ctx.plan.top_since_tick, ctx.plan.top_map_id):
+                # Through the entrance onto a map that is no level (A144).
+                ctx.plan.finish_current(f"entrance led to map {world.map_id}, no level", memory=m)
+                return StateOutcome(None, "level entrance led to no level", state=self.name)
             return _walk_to_entrance(world, ctx, (op["x"], op["y"]))
         out = level_outcome(world, m, policy, knowledge=ctx.knowledge, state=self.name)
         if out.intents is None:
@@ -176,6 +185,15 @@ def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcom
     if out := _prerequisite_step(w, ctx, door, walk):
         return out
     plan_avoid, plan_costly, reach = walk
+    # Never entered without what it needs (A147): with no stop for the item
+    # the op is dropped, and while its stop waits the walk stops short of the door.
+    need = unmet_need(w, ctx.knowledge, w.map_id, door)
+    stop = targets_mod.next_stop(m, ENTRANCE_GOAL) if need is not None else None
+    if need is not None and stop is None:
+        why = why_refused(need, w.map_id, door)
+        assert ctx.plan is not None
+        ctx.plan.drop_current(why, memory=m)
+        return StateOutcome(None, why, state=LevelState.name)
 
     def params():
         return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
@@ -184,6 +202,9 @@ def _walk_to_entrance(w: WorldModel, ctx: PlayContext, door: Pos) -> StateOutcom
         return cost_path(w, door, params(), nav=nav_search(m, w, ENTRANCE_GOAL, door))
 
     step = guided_step(m, w, ENTRANCE_GOAL, door, plan_avoid, plan, params=params, reach=reach)
+    if stop is not None and step == door:
+        why = f"no step to {need} at {stop.pos[0]},{stop.pos[1]}, and entrance {door[0]},{door[1]} needs it"
+        return clear_the_way(w, ctx, stop.pos, why, LevelState.name, top_op(ctx), reach=reach)
     if step is None:
         why = f"no path to level entrance {door[0]},{door[1]}"
         return clear_the_way(w, ctx, door, why, LevelState.name, top_op(ctx), reach=reach)
@@ -215,17 +236,6 @@ def _walk_out(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     return StateOutcome([set_position(step)], f"leave level → {door}", state=LevelState.name)
 
 
-def _needs(w: WorldModel, ctx: PlayContext, door: Pos) -> str | None:
-    """The item a look filed as needed at the locked entrance ``door``, when none is carried."""
-    for mid, pos, row in iter_entrances(ctx.knowledge):
-        if (mid, pos) != (w.map_id, door) or not row.get("locked") or not isinstance(row.get("needs"), str):
-            continue
-        needs = row["needs"]
-        carried = [s.code for s in w.held_supplies + w.chest_supplies] + [w.armed_code or ""]
-        return None if any(supply_matches(needs, code) for code in carried if code) else needs
-    return None
-
-
 def _prerequisite_step(
     w: WorldModel, ctx: PlayContext, door: Pos, walk: tuple[set[Pos], set[Pos], set[Pos]]
 ) -> StateOutcome | None:
@@ -234,14 +244,16 @@ def _prerequisite_step(
 
     The stop is set when the needed item is in sight and not carried, and
     is finished once the item is carried or seen gone. None when there is
-    no stop to walk, or no step toward it now: the entrance walk goes on.
+    no stop to walk, or no step toward it now: the entrance walk then goes
+    on only while the stop waits, and never onto the door; with the stop
+    given up and the need unmet the op is dropped (A147).
     The walk to it keeps out of the hostiles' reach as the entrance walk
     does (``walk``, ``op_walk``, A128).
     """
     m = ctx.memory
     here = w.pos
     assert here is not None
-    needs = _needs(w, ctx, door)
+    needs = unmet_need(w, ctx.knowledge, w.map_id, door)
     stop = targets_mod.next_stop(m, ENTRANCE_GOAL)
     if stop is not None:
         item = _supply(w, stop.supply_id)
@@ -249,7 +261,7 @@ def _prerequisite_step(
             targets_mod.finish_stop(m, ENTRANCE_GOAL, stop)
             stop = None
     if stop is None and needs is not None:
-        found = [e for e in w.entities if e.kind == "supply" and e.gem_price is None and supply_matches(needs, e.code or "")]
+        found = [e for e in w.entities if e.kind == "supply" and e.gem_price is None and meets(e.code, needs)]
         if found:
             item = min(found, key=lambda e: (chebyshev(e.pos, here), e.id))
             stop = targets_mod.Stop(item.pos, f"prerequisite: {needs}", item.id)
@@ -261,7 +273,7 @@ def _prerequisite_step(
         items = knowledge_items(ctx.knowledge)
         fits = item is not None and room_for(w, ctx, Pickup(item.id, item.code, item.pos, None, loot_score(item.code, items))).kind == TAKE
         if not fits or stop.tries >= PREREQUISITE_TRIES:
-            # No room, or refused every time: the entrance walk goes on without it.
+            # No room, or refused every time: given up, so with the need unmet the op is dropped (A147).
             targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)
             return None
         stop.tries += 1
@@ -278,7 +290,7 @@ def _prerequisite_step(
     step = bounded_step(m, w, PREREQUISITE_GOAL, stop.pos, plan_avoid, plan, params=params, reach=reach)
     if step is None:
         if nav_stuck.backed_off(m, PREREQUISITE_GOAL, w.map_id, stop.pos, w.tick):
-            targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)  # the entrance walk goes on
+            targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)  # then the op is dropped (A147)
         return None
     return StateOutcome([set_position(step)], f"{needs} → {stop.pos} before entrance {door}", state=LevelState.name)
 

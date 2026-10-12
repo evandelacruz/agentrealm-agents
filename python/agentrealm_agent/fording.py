@@ -11,8 +11,11 @@ So there is one rule, applied to every queue a state sends
 
 - a walk plans over water while a fording supply is carried, held or armed
   (``WorldModel.fords``, passed in, never set on the view: ``WorldModel.walkable``, ``CostGridParams.fords``);
-- before the first ``Step`` onto water, the queue arms a held fording supply
-  unless one is armed or worn already (``ford_queue``);
+- before the first ``Step`` onto water, the queue puts a held fording
+  supply on unless one is armed or worn already (``ford_queue``): a
+  wearable one is worn, so the weapon stays armed, and one that goes in the
+  armed slot (a raft) is armed only when no wearable one is held (A147,
+  ``equip.ford_to_put_on``);
 - on water, the queue stops before any loadout change that would strand: no
   state re-arms a weapon, cutter or potion mid-water;
 - under attack on water with only the fording supply in hand, the
@@ -39,7 +42,7 @@ cell the map did not show as water is not tried again.
 
 from __future__ import annotations
 
-from .equip import FIGHT, hunting_ceiling, weapon_to_arm
+from .equip import ARMED, FIGHT, ford_to_put_on, hunting_ceiling, weapon_to_arm
 from .executor.movement import step_landing
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -145,11 +148,12 @@ def ford_queue(
             landing = step_landing(pos, intent["direction"]) if verb == "Step" else (intent["x"], intent["y"])
             crosses = crosses or on_water(w, m, landing)
             if on_water(w, m, landing) and not afloat(armed, list(worn.values())):
-                raft = next((sid for sid, code in held.items() if fords(code)), None)
-                if raft is None:
+                put_on = _put_on_ford(w, m, held)
+                if not put_on:
                     return out, f"no fording supply to arm before the water at {landing[0]},{landing[1]}"
-                out.append({"verb": "Arm", "supply_id": raft})
-                armed, armed_id = _arm(held, armed, armed_id, raft)
+                for change in put_on:
+                    out.append(change)
+                    armed, armed_id, worn = _loadout_after(change, held, armed, armed_id, worn)
             pos = landing
         elif verb in LOADOUT_VERBS:
             after = _loadout_after(intent, held, armed, armed_id, worn)
@@ -160,6 +164,20 @@ def ford_queue(
     if rearm and not crosses and not any(i.get("verb") == "Arm" for i in out):
         out = rearm_ashore(w, m, kb) + out
     return out, ""
+
+
+def _put_on_ford(w: WorldModel, m: Memory, held: dict[int, str]) -> list[dict]:
+    """The loadout changes that put a held fording supply on before water: a
+    wearable one worn, so the weapon stays armed, else one armed (A147,
+    ``equip.ford_to_put_on``). ``held`` is the hand as the queue left it."""
+    up = ford_to_put_on(w, m)
+    if up is None or up.supply_id not in held:
+        sid = next((sid for sid, code in held.items() if fords(code)), None)
+        return [] if sid is None else [{"verb": "Arm", "supply_id": sid}]
+    if up.slot == ARMED:
+        return [{"verb": "Arm", "supply_id": up.supply_id}]
+    remove = [{"verb": "Remove", "slot": up.slot}] if up.remove_first else []
+    return [*remove, {"verb": "Wear", "supply_id": up.supply_id}]
 
 
 def rearm_ashore(w: WorldModel, m: Memory, kb: KnowledgeBase | None) -> list[dict]:

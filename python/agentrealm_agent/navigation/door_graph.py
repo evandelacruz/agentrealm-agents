@@ -16,6 +16,7 @@ from ..knowledge_base import KnowledgeBase
 from ..knowledge_maps import door_warp_known, iter_doors, view_from_kb
 from ..world import DOORS, MapView, Pos, WorldModel
 from .planner import CostGridParams, NavSearchState, cost_flood, cost_path, nearest_target
+from .stuck import NavStuckMemory, filter_frontiers, goal_key, is_backed_off
 
 
 @dataclass(frozen=True, order=True)
@@ -135,6 +136,55 @@ def route_first_leg(
         if direct is not None:
             return direct
     return _route(w, kb, dest_map, dest, params)
+
+
+def walk_toward(
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    dest_map: int,
+    dest: Pos,
+    params: CostGridParams,
+    nav: NavSearchState | None = None,
+    stuck: NavStuckMemory | None = None,
+) -> list[Pos] | None:
+    """Path on the current map for a walk to ``dest_map:dest`` (A144): the
+    known route (``route_first_leg``), else, for a cell on another map, the
+    way off this map (``way_off_map``), so a cell on a map the character is
+    not on is not out of reach while a door or ground here is still untried.
+    None when neither is found: the walk yields and its executor asks."""
+    path = route_first_leg(w, kb, dest_map, dest, params, nav=nav)
+    if path is None and w.map_id is not None and w.map_id != dest_map:
+        path = way_off_map(w, kb, params, stuck)
+    return path
+
+
+def way_off_map(
+    w: WorldModel, kb: KnowledgeBase | None, params: CostGridParams, stuck: NavStuckMemory | None = None
+) -> list[Pos] | None:
+    """Toward the nearest door here whose warp is not known yet, else the
+    nearest unexplored ground where such a door may be (A144): how a walk
+    looks for another map when no known warp leads there.
+
+    Bounded: a door gone through has its warp recorded and is not taken
+    again, and frontier runs out, so once every door here is known and the
+    ground explored there is no way off and the walk asks. Doors and
+    frontier the stuck ladder gave up on and is still backed off from are
+    left out (``level:door`` and the shared frontier keys, A90). Without a
+    knowledge base no warp is recorded, so no door is taken."""
+    if w.map_id is None or w.pos is None:
+        return None
+    tick = w.tick
+    doors: set[Pos] = set()
+    if kb is not None:
+        doors = unvisited_doors_on_map(kb, w)
+        if stuck is not None:
+            doors = {p for p in doors if not is_backed_off(stuck, goal_key("level:door", w.map_id, p), tick)}
+    frontier = w.frontier() - {w.pos}
+    if stuck is not None:
+        frontier = filter_frontiers(stuck, w.map_id, frontier, tick)
+    door_params = replace(params, allow_goal_door=True)  # a door cell is the target
+    found = nearest_target(w, doors, door_params) or nearest_target(w, frontier, params)
+    return found[1] if found and found[1] else None
 
 
 def alt_route_path(

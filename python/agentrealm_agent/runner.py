@@ -101,7 +101,7 @@ from .executor.held_queue import STEP_DOUBT, held_queue_matches, open_step, poss
 from .acceptance import AcceptanceHooks
 from .poll_cadence import calm_poll_interval, is_urgent
 from .run_metrics import LevelTimer, tick_trace_extras
-from .world import DOORS, Pos, WorldModel, terrain_cells
+from .world import DOORS, Passage, Pos, WorldModel, terrain_cells
 from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
 from .sellers import lapse_not_sold
 from .states.dispatch import probe_held_queue
@@ -488,17 +488,21 @@ class Runner:
         return True
 
     def note_warp_landing(self) -> None:
-        """After a door step, record where the position read says it landed (A26).
+        """After a door step, record where the position read says it landed (A26),
+        and that the character went through that door (``WorldModel.passage``, A144).
 
         A read that still puts us on the door means it did not warp (locked,
         or closed): nothing is recorded, so the graph never gets a self-loop.
         """
         w, m = self.world, self.mem
         warp, m.warp_from = m.warp_from, None
-        if warp is None or self.knowledge is None or w.map_id is None or w.pos is None:
+        if warp is None or w.map_id is None or w.pos is None:
             return
         from_map, from_pos, block_type = warp
-        if (w.map_id, w.pos) != (from_map, from_pos):
+        if (w.map_id, w.pos) == (from_map, from_pos):
+            return
+        w.passage = Passage(from_map, from_pos, w.map_id, w.tick)
+        if self.knowledge is not None:
             record_warp(self.knowledge, from_map, from_pos, block_type, w.map_id, w.pos)
             # An entrance's number once the landing map's level is read (A145).
             note_door_step(m, from_map, from_pos, w.map_id, w.pos)

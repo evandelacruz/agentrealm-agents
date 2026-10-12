@@ -82,6 +82,17 @@ POST_HOLD_STRENGTH = 0.5
 POST_FORGET_STRENGTH = 0.1
 
 
+@dataclass(frozen=True)
+class Passage:
+    """A door the character went through (A144): the door's map and cell, the
+    map its warp landed on, and the tick the landing was read."""
+
+    from_map: int
+    from_pos: Pos
+    to_map: int
+    tick: int
+
+
 @dataclass
 class DeathChest:
     """A chest one of our deaths dropped, remembered until it is seen empty or gone (A122).
@@ -350,6 +361,7 @@ class WorldModel:
     carry_capacity: int = DEFAULT_CARRY_CAPACITY
     undroppable: set[int] = field(default_factory=set)  # supply ids Drop refused not_transferable
     tick: int = 0
+    passage: Passage | None = None  # the last door gone through (A144)
     maps: dict[int, MapView] = field(default_factory=dict)
     entities: list[Entity] = field(default_factory=list)
     entities_tick: int = -10**9  # tick of the last entity read, or of a tick delta that carried entities

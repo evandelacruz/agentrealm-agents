@@ -24,7 +24,7 @@ from agentrealm_agent.navigation.stuck import on_break_opened
 from agentrealm_agent.break_memory import capabilities_for_code, record_attempt
 from agentrealm_agent.item_table import use_target_block
 from agentrealm_agent.plan import Plan
-from agentrealm_agent.world import DOORS, WALKABLE, Entity, MapView, Pos, WorldModel, chebyshev
+from agentrealm_agent.world import DOORS, WALKABLE, Entity, MapView, Passage, Pos, WorldModel, chebyshev
 
 from .grids import GLYPHS, Scenario
 
@@ -176,6 +176,7 @@ def apply(
             m.path = m.path[1:]
         nav_stuck.on_step(m, w)
         if cross is not None and w.map_id == 1 and cell == cross.door:
+            w.passage = Passage(1, cell, 2, w.tick)  # as the runner records the landing (A144)
             w.map_id = 2
             w.pos = cross.landing
             w.maps.setdefault(2, map2)

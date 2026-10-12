@@ -199,7 +199,9 @@ def _prerequisite_step(
 
     The stop is set when the needed item is in sight and not carried, and
     is finished once the item is carried or seen gone. None when there is
-    no stop to walk, or no step toward it now: the entrance walk goes on.
+    no stop to walk, or no step toward it now: the entrance walk then goes
+    on only while the stop waits, and never onto the door; with the stop
+    given up and the need unmet the op is dropped (A147).
     The walk to it keeps out of the hostiles' reach as the entrance walk
     does (``walk``, ``op_walk``, A128).
     """
@@ -226,7 +228,7 @@ def _prerequisite_step(
         items = knowledge_items(ctx.knowledge)
         fits = item is not None and room_for(w, ctx, Pickup(item.id, item.code, item.pos, None, loot_score(item.code, items))).kind == TAKE
         if not fits or stop.tries >= PREREQUISITE_TRIES:
-            # No room, or refused every time: the entrance walk goes on without it.
+            # No room, or refused every time: given up, so with the need unmet the op is dropped (A147).
             targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)
             return None
         stop.tries += 1
@@ -243,7 +245,7 @@ def _prerequisite_step(
     step = bounded_step(m, w, PREREQUISITE_GOAL, stop.pos, plan_avoid, plan, params=params, reach=reach)
     if step is None:
         if nav_stuck.backed_off(m, PREREQUISITE_GOAL, w.map_id, stop.pos, w.tick):
-            targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)  # the entrance walk goes on
+            targets_mod.finish_stop(m, ENTRANCE_GOAL, stop, given_up=True)  # then the op is dropped (A147)
         return None
     return StateOutcome([set_position(step)], f"{needs} → {stop.pos} before entrance {door}", state=LevelState.name)
 

@@ -12,6 +12,7 @@ from agentrealm_agent.entrance_needs import refuse_unmet, unmet_need
 from agentrealm_agent.fording import ford_queue
 from agentrealm_agent.item_table import InventorySupply
 from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_agent.m9_acceptance import clear_entrance_looks, entrance_row_recorded
 from agentrealm_agent.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
@@ -48,7 +49,7 @@ def kb_with_door() -> KnowledgeBase:
 
 def needs_sandals() -> KnowledgeBase:
     kb = kb_with_door()
-    kb.entrances[entrance_key(7, LAKE_DOOR)]["needs"] = "sea_sandals"
+    kb.entrances[entrance_key(7, LAKE_DOOR)]["clue_needs"] = "sea_sandals"
     return kb
 
 
@@ -79,12 +80,13 @@ class ClueSetsTheNeedTest(unittest.TestCase):
         self.assertIn(CLUE, sent, "the clue reaches the planner")
         self.assertIn("entrance_needs", llm.messages[0][0]["content"], "the contract tells it how to record one")
         row = runner.knowledge.entrances[entrance_key(7, LAKE_DOOR)]
-        self.assertEqual((row["needs"], row["clue"]), ("sea_sandals", "Sandals get you through"))
+        self.assertEqual((row["clue_needs"], row["clue_needs_why"]), ("sea_sandals", "Sandals get you through"))
+        self.assertNotIn("needs", row, "a look's field is not the planner's")
         prompt = build_prompt(
             triggers=[], w=runner.world, plan=runner.plan, directives=runner.directives.directives, knowledge=runner.knowledge
         )[1]["content"]
         self.assertIn('"need_met": false', prompt)
-        self.assertIn('"needs": "sea_sandals"', prompt)
+        self.assertIn('"clue_needs": "sea_sandals"', prompt)
 
     def test_a_need_on_no_known_entrance_is_refused_with_why(self):
         runner = fake_runner()
@@ -98,7 +100,96 @@ class ClueSetsTheNeedTest(unittest.TestCase):
         runner.knowledge = needs_sandals()
         s = make(client=FakeLLM({"entrance_needs": [{"x": 12, "y": 3, "map_id": 7, "item": None}]}))
         round_trip(s, runner)
-        self.assertNotIn("needs", runner.knowledge.entrances[entrance_key(7, LAKE_DOOR)])
+        self.assertNotIn("clue_needs", runner.knowledge.entrances[entrance_key(7, LAKE_DOOR)])
+
+
+class FieldOwnershipTest(unittest.TestCase):
+    """A look owns ``needs``; the planner owns ``clue_needs``. Neither writes the other's."""
+
+    def locked_with_clue_need(self) -> KnowledgeBase:
+        kb = needs_sandals()
+        kb.entrances[entrance_key(7, LAKE_DOOR)].update(
+            looked=True, block_type="framed_door", locked=True, needs="key", clue_needs_why="Sandals get you through"
+        )
+        return kb
+
+    def test_a_clue_need_keeps_the_m9_gate_passing(self):
+        row = self.locked_with_clue_need().entrances[entrance_key(7, LAKE_DOOR)]
+        self.assertTrue(entrance_row_recorded(row))
+
+    def test_a_look_clear_keeps_the_clue_need_and_its_why(self):
+        kb = self.locked_with_clue_need()
+        clear_entrance_looks(kb)
+        row = kb.entrances[entrance_key(7, LAKE_DOOR)]
+        self.assertEqual((row.get("needs"), row["clue_needs"], row["clue_needs_why"]), (None, "sea_sandals", "Sandals get you through"))
+
+    def test_a_look_refile_leaves_the_clue_need(self):
+        kb = self.locked_with_clue_need()
+        kb.entrances[entrance_key(7, LAKE_DOOR)]["needs"] = "key"  # filed again by a look
+        w = ground()
+        w.held_supplies = [InventorySupply(1, "key")]
+        self.assertEqual(unmet_need(w, kb, 7, LAKE_DOOR), "sea_sandals", "both needs are read")
+
+    def test_the_planners_null_never_erases_a_looks_key(self):
+        runner = fake_runner()
+        runner.knowledge = self.locked_with_clue_need()
+        s = make(client=FakeLLM({"entrance_needs": [{"x": 12, "y": 3, "map_id": 7, "item": None}]}))
+        round_trip(s, runner)
+        row = runner.knowledge.entrances[entrance_key(7, LAKE_DOOR)]
+        self.assertEqual(row["needs"], "key")
+        self.assertNotIn("clue_needs_why", row)
+        self.assertEqual(unmet_need(ground(), runner.knowledge, 7, LAKE_DOOR), "key")
+
+    def test_a_new_need_with_no_why_drops_the_old_why(self):
+        runner = fake_runner()
+        runner.knowledge = self.locked_with_clue_need()
+        s = make(client=FakeLLM({"entrance_needs": [{"x": 12, "y": 3, "map_id": 7, "item": "fords"}]}))
+        round_trip(s, runner)
+        row = runner.knowledge.entrances[entrance_key(7, LAKE_DOOR)]
+        self.assertEqual(row["clue_needs"], "fords")
+        self.assertNotIn("clue_needs_why", row)
+
+
+class TravelNeverEntersTest(unittest.TestCase):
+    def ctx(self, w, kb, op) -> tuple[PlayContext, Plan]:
+        plan = Plan([op], dict(PARAM_DEFAULTS))
+        return PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb, plan=plan), plan
+
+    def test_a_travel_is_refused_even_with_the_item_in_sight(self):
+        with with_sandals():
+            w, kb = ground(), needs_sandals()
+            w.entities = [Entity("supply", SANDALS, (2, 5), "sea_sandals")]
+            travel = {"op": "travel", "to": "entrance", "x": 12, "y": 3, "map_id": 7}
+            self.assertEqual(refuse_unmet([travel], w, kb)[0], [], "Travel has no stop to take it")
+
+    def test_a_travel_on_the_stack_is_dropped_once_the_need_is_recorded(self):
+        w, kb = ground(), needs_sandals()
+        ctx, plan = self.ctx(w, kb, {"op": "travel", "to": "entrance", "x": 12, "y": 3, "map_id": 7})
+        dispatch(w, ctx)
+        self.assertIsNone(plan.current())
+        self.assertIn("needs sea_sandals", ctx.memory.strategist_signals[-1]["reason"])
+
+    def test_the_nearest_door_pick_is_dropped_when_gated(self):
+        w, kb = ground(), needs_sandals()
+        ctx, plan = self.ctx(w, kb, {"op": "travel", "to": "entrance", "x": 0, "y": 0})
+        dispatch(w, ctx)
+        self.assertIsNone(plan.current())
+
+    def test_a_point_walk_never_steps_onto_a_gated_door(self):
+        w, kb = ground(at=(11, 3)), needs_sandals()
+        ctx, plan = self.ctx(w, kb, {"op": "travel", "to": "point", "x": 12, "y": 3})
+        out = dispatch(w, ctx)
+        self.assertNotIn({"verb": "SetPosition", "x": 12, "y": 3}, out.intents or [])
+        self.assertIsNone(plan.current())
+
+    def test_a_travel_walks_once_the_need_is_held(self):
+        with with_sandals():
+            w, kb = ground(), needs_sandals()
+            w.held_supplies = [InventorySupply(SANDALS, "sea_sandals")]
+            ctx, plan = self.ctx(w, kb, {"op": "travel", "to": "entrance", "x": 12, "y": 3, "map_id": 7})
+            out = dispatch(w, ctx)
+            self.assertEqual(out.state, "Travel", out.reason)
+            self.assertIsNotNone(out.intents)
 
 
 class GetTheNeedFirstTest(unittest.TestCase):

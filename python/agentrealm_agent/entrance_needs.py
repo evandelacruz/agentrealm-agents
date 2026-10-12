@@ -1,18 +1,23 @@
 """What a level entrance needs before it is entered (A147).
 
-A clue may tie a level to an item or a capability ("Sandals get you
-through"). The planner reads the clue (every clue is in its prompt) and
-records the need with its reply's ``entrance_needs`` key; the need is kept
-on the entrance's ``kb.entrances`` row as ``needs`` (``clue`` keeps the
-planner's reason), the same field a look files on a locked door.
+An entrance row in ``kb.entrances`` holds two needs, each with one owner:
 
-One rule then holds for every way in: an entrance whose need is not met is
-not entered (``unmet_need``). A need is met when a carried, armed or worn
-supply is the item, or has the capability (a break capability, or
-``fords``). The one exception is the item lying in sight: Level takes it on
-the way (its prerequisite stop, A71). Otherwise a reply's ``enter_level``,
-or ``travel`` to that entrance, is left out with why (``refuse_unmet``), and
-Level drops an ``enter_level`` that reaches the top: the item comes first.
+- ``needs``: what a look filed (Investigate, A30: ``key`` on a locked
+  door). Only a look writes or clears it (M9's ``LOOK_FIELDS``).
+- ``clue_needs``: what a clue ties to the level ("Sandals get you
+  through"), with the planner's reason in ``clue_needs_why``. Only the
+  planner writes or clears it, with its reply's ``entrance_needs`` key
+  (``record_needs``); every clue is in its prompt, and no code reads the
+  clue text. A look's clear or refile leaves it as it is.
+
+One rule then holds for every way in: an entrance is not entered while
+either need is unmet (``unmet_need``). A need is met when a carried, armed
+or worn supply is the item, or has the capability (a break capability, or
+``fords``). A reply's ``enter_level`` or ``travel`` to such an entrance is
+left out with why (``refuse_unmet``); the one exception is an
+``enter_level`` whose item lies in sight, which Level takes on the way (its
+prerequisite stop, A71). Level drops an ``enter_level`` and Travel a
+``travel`` that would step onto such an entrance.
 """
 
 from __future__ import annotations
@@ -26,8 +31,9 @@ from .supplies import break_capabilities, fords
 from .travel.knowledge import entrance_from_kb, entrance_key
 from .world import Pos, WorldModel
 
-NEEDS = "needs"
-CLUE = "clue"  # the planner's reason for a need it recorded
+NEEDS = "needs"  # a look's (A30)
+CLUE_NEEDS = "clue_needs"  # the planner's, from a clue
+CLUE_WHY = "clue_needs_why"  # the planner's reason for it
 
 
 def meets(code: str | None, need: str) -> bool:
@@ -37,14 +43,14 @@ def meets(code: str | None, need: str) -> bool:
     return supply_matches(need, code) or need in break_capabilities(code) or (need == "fords" and fords(code))
 
 
-def need_of(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> str | None:
-    """The need recorded on the entrance at ``pos`` on ``map_id``, if any."""
+def needs_of(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> list[str]:
+    """Every need recorded on the entrance at ``pos`` on ``map_id``: a look's, then a clue's."""
     if kb is None or map_id is None:
-        return None
+        return []
     with kb.lock:
         row = kb.entrances.get(entrance_key(map_id, pos))
-        need = row.get(NEEDS) if isinstance(row, dict) else None
-    return need if isinstance(need, str) and need else None
+        found = [row.get(NEEDS), row.get(CLUE_NEEDS)] if isinstance(row, dict) else []
+    return [n for n in found if isinstance(n, str) and n]
 
 
 def carried(w: WorldModel) -> list[str]:
@@ -54,11 +60,9 @@ def carried(w: WorldModel) -> list[str]:
 
 
 def unmet_need(w: WorldModel, kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> str | None:
-    """The entrance's recorded need when nothing carried meets it, else None."""
-    need = need_of(kb, map_id, pos)
-    if need is None or any(meets(code, need) for code in carried(w)):
-        return None
-    return need
+    """The first need recorded on the entrance that nothing carried meets, else None."""
+    codes = carried(w)
+    return next((n for n in needs_of(kb, map_id, pos) if not any(meets(c, n) for c in codes)), None)
 
 
 def in_sight(w: WorldModel, need: str) -> bool:
@@ -86,13 +90,14 @@ def entrance_of(op: dict[str, Any], w: WorldModel, kb: KnowledgeBase | None) -> 
 def refuse_unmet(
     goals: list[dict[str, Any]], w: WorldModel, kb: KnowledgeBase | None
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """A reply's ops that would enter an entrance whose need is unmet are
-    left out, each with why, unless the item lies in sight for Level to take."""
+    """A reply's ops that would enter an entrance whose need is unmet are left
+    out, each with why. Only an ``enter_level`` whose item lies in sight is
+    kept, for Level's prerequisite stop; Travel has none."""
     kept, refused = [], []
     for g in goals:
         where = entrance_of(g, w, kb)
         need = unmet_need(w, kb, *where) if where is not None else None
-        if need is not None and not in_sight(w, need):
+        if need is not None and not (g["op"] == "enter_level" and in_sight(w, need)):
             refused.append(f"{json.dumps(g, sort_keys=True)} left out: {why_refused(need, *where)}")
             continue
         kept.append(g)
@@ -101,12 +106,12 @@ def refuse_unmet(
 
 def record_needs(raw: Any, kb: KnowledgeBase | None) -> list[str]:
     """Record a reply's ``entrance_needs``: each ``{x, y, map_id, item, why}``
-    sets ``needs`` on that known entrance's row (``item`` null clears it).
-    Returns why each entry not recorded was refused."""
-    if raw is None:
-        return []
+    sets ``clue_needs`` (and ``clue_needs_why``, dropped when no why is given)
+    on that known entrance's row; ``item`` null clears both. A look's
+    ``needs`` is never touched. Returns why each entry not recorded was
+    refused. A value that is not a list was already refused by ``plan_fields``."""
     if not isinstance(raw, list):
-        return ["`entrance_needs` must be a list"]
+        return []
     refused = []
     for entry in raw:
         coords = isinstance(entry, dict) and all(
@@ -116,20 +121,19 @@ def record_needs(raw: Any, kb: KnowledgeBase | None) -> list[str]:
         if not coords or not (item is None or (isinstance(item, str) and item)):
             refused.append(f"entrance_needs entry {entry!r} dropped: it takes x, y, map_id and item (a code, a capability, or null)")
             continue
-        key = entrance_key(entry["map_id"], (entry["x"], entry["y"]))
         if kb is None:
             continue
         with kb.lock:
-            row = kb.entrances.get(key)
+            row = kb.entrances.get(entrance_key(entry["map_id"], (entry["x"], entry["y"])))
             if not isinstance(row, dict):
                 refused.append(f"entrance_needs entry {entry!r} dropped: no known entrance there (name one from level_entrances)")
                 continue
+            row.pop(CLUE_NEEDS, None)
+            row.pop(CLUE_WHY, None)
             if item is None:
-                row.pop(NEEDS, None)
-                row.pop(CLUE, None)
                 continue
-            row[NEEDS] = item
+            row[CLUE_NEEDS] = item
             why = entry.get("why")
             if isinstance(why, str) and why:
-                row[CLUE] = why
+                row[CLUE_WHY] = why
     return refused

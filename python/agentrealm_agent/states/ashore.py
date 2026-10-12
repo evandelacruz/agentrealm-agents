@@ -47,7 +47,7 @@ class AshoreState(State):
         land = {
             p
             for p, block in w.view.tiles.items()
-            if block != WATER and w.view.walkable(p) and p not in blocked and chebyshev(p, here) <= LAND_RADIUS
+            if block != WATER and w.walkable(p) and p not in blocked and chebyshev(p, here) <= LAND_RADIUS
         } - w.occupied()
         params = grid_params(ctx.policy, plan_avoid, plan_costly, m=m, w=w, knowledge=ctx.knowledge)
         found = nearest_target(w, land, params)

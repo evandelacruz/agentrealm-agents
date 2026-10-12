@@ -1135,7 +1135,7 @@ class Runner:
                 int(result.get("tick", w.tick)),
             )
         learn_loot_rejection(w, intent, (result.get("rejection") or {}).get("code"))
-        note_would_strand(m, (result.get("rejection") or {}).get("code"))
+        note_would_strand(w, m, (result.get("rejection") or {}).get("code"))
         self._note_supply_refused(index, result)
         target = use_target_block(intent, w.entities) if intent and intent.get("verb") == "Use" else None
         self._note_break_use(intent, result, target, index)

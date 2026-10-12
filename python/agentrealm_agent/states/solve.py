@@ -151,7 +151,7 @@ def _use_stands(w: WorldModel, target: Pos, reach: int, blocked: set[Pos]) -> se
             continue
         if p in blocked:
             continue
-        if w.view.walkable(p) and p not in w.occupied():
+        if w.walkable(p) and p not in w.occupied():
             out.add(p)
     if w.pos is not None and chebyshev(w.pos, target) <= reach and w.pos not in blocked:
         out.add(w.pos)

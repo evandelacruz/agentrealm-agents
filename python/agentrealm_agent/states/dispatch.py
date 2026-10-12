@@ -29,7 +29,7 @@ from ..navigation import oscillation
 from ..navigation.rejection import end_decision
 from ..engagement import sync_engagement
 from ..equip import note_last_weapon
-from ..fording import ford_queue, sync as sync_fording
+from ..fording import ford_queue, loadout_memory, restore_loadout_memory
 from ..healing import note_heal_window
 from ..pathing import note_goto_reached
 from ..plan import OP_STATE, PLAN_STALL_SECONDS, Plan
@@ -204,7 +204,6 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     note_goto_reached(world, m, ctx.policy)
     note_heal_window(m, world)
     note_last_weapon(m, world)
-    sync_fording(world, m)
     sync_shop(world, m, ctx.plan)  # before the plan settles: a Take gone stale has paid nothing (A112)
     if ctx.plan is not None:
         paced_op = ctx.plan.current()  # the op on top while it paced, before settling pops any
@@ -326,9 +325,10 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
 
     Every queue crosses water by one rule (A133, ``fording.ford_queue``): a
     held fording supply is armed before the first water step, and on water
-    the queue stops before a loadout change that would strand us; ashore,
-    the weapon is armed again. A queue cut to nothing falls through like a
-    state that sends nothing.
+    the queue stops before a loadout change that would strand us, and what
+    the state wrote to memory for it is put back; ashore, the weapon is
+    armed again in front of a queue that is no reflex or attack queue. A
+    queue cut to nothing falls through like a state that sends nothing.
 
     In the held-queue probe, when none does, ``Memory.state`` stays the state
     that sent the held queue (A64).
@@ -338,10 +338,14 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
         active = state.name == m.state and not state.done(world, ctx)
         if not (active or state.guard(world, ctx)):
             continue
+        saved = loadout_memory(m)
         outcome = state.act(world, ctx)
         if outcome.intents:
-            outcome.intents, why = ford_queue(world, m, outcome.intents, ctx.knowledge)
-            if why and not outcome.intents:
+            rearm = not (outcome.reflex or outcome.paced)
+            outcome.intents, why = ford_queue(world, m, outcome.intents, ctx.knowledge, rearm=rearm)
+            if why:
+                # The loadout change the state wrote memory for was cut: put it back.
+                restore_loadout_memory(m, saved)
                 outcome.reason = f"{outcome.reason}; {why}"
         if outcome.intents or outcome.wait:
             m.state = state.name

@@ -175,4 +175,4 @@ def open_step(
 
 def _lands_open(w: WorldModel, blocked: set[Pos], pos: Pos) -> bool:
     """A Step may land on ``pos``: known walkable or a door, and off the blocked cells."""
-    return pos not in blocked and (w.view.walkable(pos) or w.view.tiles.get(pos) in DOORS)
+    return pos not in blocked and (w.walkable(pos) or w.view.tiles.get(pos) in DOORS)

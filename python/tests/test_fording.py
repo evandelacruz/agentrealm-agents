@@ -2,6 +2,7 @@
 
 import random
 import unittest
+from unittest import mock
 
 from agentrealm_agent.config import Policy
 from agentrealm_agent.directives import PARAM_DEFAULTS
@@ -119,18 +120,63 @@ class OnWaterTest(unittest.TestCase):
             out = dispatch(w, ctx_for(m, plan))
             self.assertNotIn("Arm", [i.get("verb") for i in out.intents or []], out.reason)
 
-    def test_a_would_strand_refusal_marks_the_cell_as_water(self):
+    def test_a_would_strand_refusal_marks_the_cell_it_came_from(self):
         w = lake(at=(1, 1), armed="raft")  # the map shows dirt, the server says water
         m = Memory()
-        note_would_strand(m, "would_strand")
-        dispatch(w, ctx_for(m, None))
-        self.assertEqual(m.water_at, (1, (1, 1)))
+        note_would_strand(w, m, "would_strand")
+        w.pos = (0, 1)  # the observation moves us on before the next decision
+        note_would_strand(w, m, "would_strand")
+        self.assertEqual(list(m.water_cells), [(1, (1, 1)), (1, (0, 1))], "each refused cell, kept")
+        w.pos = (1, 1)
         out, why = ford_queue(w, m, [arm(SWORD)])
         self.assertEqual(out, [], "the same Arm is not sent again from there")
         self.assertIn("would strand", why)
+        note_would_strand(w, m, "not_held")
+        self.assertEqual(len(m.water_cells), 2, "another refusal marks nothing")
+
+    def test_a_cut_arm_leaves_no_memory_of_it(self):
+        from agentrealm_agent.states.base import StateOutcome
+
+        w = lake(at=(3, 1), armed="raft")
+        m = Memory()
+
+        class ArmsForABreak:
+            name = "ArmsForABreak"
+
+            def guard(self, world, ctx):
+                return True
+
+            def done(self, world, ctx):
+                return False
+
+            def act(self, world, ctx):
+                ctx.memory.break_rearm = world.armed_code  # as Break does before its Arm
+                ctx.memory.break_pending = (1, (3, 0), "chop")
+                return StateOutcome([arm(SWORD), {"verb": "Use", "target": {"kind": "block", "x": 3, "y": 0}}], "break", state=self.name)
+
+        c = ctx_for(m, None)
+        with mock.patch("agentrealm_agent.states.dispatch._states", return_value=(ArmsForABreak(),)):
+            out = dispatch(w, c)
+        self.assertIsNone(out.intents)
+        self.assertIn("would strand", "; ".join(out.yielded))
+        self.assertIsNone(m.break_rearm, "the Arm was never sent: no re-arm remembered for it")
+        self.assertIsNone(m.break_pending)
 
 
 class AshoreTest(unittest.TestCase):
+    def test_never_in_front_of_a_reflex_or_attack_queue(self):
+        w = lake(at=(5, 1), armed="raft")
+        flee = [{"verb": "Step", "direction": "right"}]
+        self.assertEqual(ford_queue(w, Memory(), flee, rearm=False), (flee, ""))
+        self.assertEqual(ford_queue(w, Memory(), flee)[0][0], arm(SWORD), "a walk's queue is re-armed")
+
+    def test_not_while_water_lies_on_the_walk_ahead(self):
+        w = lake(at=(5, 1), armed="raft")
+        m = Memory()
+        m.path = [(6, 1), (6, 2), (5, 2), (4, 1)]  # an island hop: back over the water at (4, 1)
+        queue = [{"verb": "Step", "direction": "right"}]
+        self.assertEqual(ford_queue(w, m, queue), (queue, ""))
+
     def test_the_weapon_is_armed_again_after_landing(self):
         w = lake(at=(5, 1), armed="raft")
         out = dispatch(w, ctx_for(Memory(), travel_to(6, 1)))
@@ -186,6 +232,41 @@ class AttackedOnWaterTest(unittest.TestCase):
     def test_fights_or_flees_normally_once_ashore(self):
         w = wide(at=(1, 5))
         self.assertNotEqual(dispatch(w, under_attack(w)).state, "Ashore")
+
+
+class WaterIsGroundEverywhereTest(unittest.TestCase):
+    def test_reading_the_view_changes_nothing(self):
+        w = lake(armed="raft")
+        view = w.view
+        self.assertTrue(w.walkable((3, 1)))
+        self.assertFalse(view.walkable((3, 1)), "the view keeps no fording flag")
+        self.assertTrue(view.walkable((3, 1), fords=True))
+
+    def test_a_route_through_a_door_crosses_water(self):
+        from agentrealm_agent.knowledge_maps import record_warp
+        from agentrealm_agent.navigation.door_graph import route_first_leg
+
+        kb = KnowledgeBase.empty("sandbox")
+        record_warp(kb, 1, (1, 1), "framed_door", 2, (0, 1))
+        known = CostGridParams(fog_cost=None)
+
+        def world(held):
+            w = lake(at=(0, 1), held=held)
+            w.maps[2] = w.maps.pop(1)  # the lake is on map 2
+            w.map_id = 1
+            w.view.tiles.update({(0, 1): "dirt", (1, 1): "framed_door"})
+            return w
+
+        self.assertIsNone(route_first_leg(world(("bronze_sword",)), kb, 2, (6, 1), known))
+        self.assertEqual(route_first_leg(world(("raft", "bronze_sword")), kb, 2, (6, 1), known), [(1, 1)])
+
+    def test_the_waters_edge_is_a_frontier_with_a_fording_supply(self):
+        w = lake(held=("bronze_sword",))
+        self.assertNotIn((2, 1), w.frontier())
+        w = lake()
+        frontier = w.frontier()
+        self.assertTrue(any(w.view.tiles[p] == "water" for p in frontier), frontier)
+        self.assertFalse(any(w.view.tiles[p] == "water" for p in w.view.frontier()), "kept apart per fords")
 
 
 class CrossingKeepsOffReachTest(unittest.TestCase):

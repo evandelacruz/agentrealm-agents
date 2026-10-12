@@ -332,7 +332,7 @@ def armed_in_hand(code: str | None) -> bool:
     row's ``slot`` is ``armed`` (a raft, A133). A consumable is used, not
     armed by Equip."""
     r = row(code)
-    return r is not None and r.supply_class != "consumable" and (r.supply_class == "weapon" or r.slot == "armed")
+    return r is not None and (r.supply_class == "weapon" or (r.slot == "armed" and r.supply_class != "consumable"))
 
 
 def fords(code: str | None) -> bool:

@@ -215,7 +215,7 @@ def walkable_prefix(
     """
     avoid = _plan_avoid(w, m, policy, knowledge)
     out: list[Pos] = []
-    for p in known_prefix(path, w.view):
+    for p in known_prefix(path, w.view, w.fords):
         if _cell_on_path_blocked(w, avoid, p):
             break
         out.append(p)
@@ -239,7 +239,7 @@ def _cell_on_path_blocked(w: WorldModel, avoid: set[Pos], p: Pos) -> bool:
         return True
     if w.view.tiles.get(p) in DOORS:
         return False
-    if not w.view.walkable(p):
+    if not w.walkable(p):
         return True
     return p in w.occupied() or p in w.for_sale()
 

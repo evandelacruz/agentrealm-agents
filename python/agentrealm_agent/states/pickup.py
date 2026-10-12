@@ -5,11 +5,14 @@ never walks. Walking to a supply further away is **Loot**'s, for a
 ``fetch_item`` op.
 
 With a full pack it never drops: what to give up is the planner's call
-(``pack.make_room``, A102), so a pickup that does not fit is skipped.
+(``pack.make_room``, A102), so a pickup that does not fit is skipped. A
+``Take`` the server refused is sent again only when the executor's refusal
+table allows it (``supply_refusals.can_try``, A80).
 """
 
 from __future__ import annotations
 
+from ..executor.supply_refusals import can_try
 from ..knowledge_base import knowledge_items
 from ..loot import Pickup, pickups
 from ..navigation import stuck as nav_stuck
@@ -33,6 +36,8 @@ def pickup_outcome(w: WorldModel, ctx: PlayContext, *, state: str) -> StateOutco
     found = [p for p in pickups(w, items) if chebyshev(p.pos, here) <= NEAR]
     found.sort(key=lambda p: (-p.score, chebyshev(p.pos, here), p.supply_id))
     for p in found:
+        if p.chest_id is None and not can_try(ctx.memory, w, "take", p.supply_id, p.pos):
+            continue
         room = room_for(w, ctx, p)
         if room.kind != TAKE:
             continue

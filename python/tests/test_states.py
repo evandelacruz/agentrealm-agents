@@ -225,21 +225,17 @@ class DispatcherFallThroughTest(unittest.TestCase):
         out = dispatch(w, ctx(w, on_hostile="flee", hostile=["npc"], hostile_range=2))
         self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Flee", None, "nowhere to flee: asked the planner", True))
 
-    def test_heal_in_safe_zone_keeps_moving(self):
-        from agentrealm_agent.healing import save_regen_yes
-        from agentrealm_agent.knowledge_base import KnowledgeBase
+    def test_heal_in_safe_zone_with_nothing_to_heal_with_yields(self):
+        # A130: no natural regeneration, so Heal never rests or waits on safe ground.
         from agentrealm_agent.world import ZoneFact
 
         w = world(["...", "...", "..."], at=(0, 0))
         w.health, w.max_health = 5, 10
         w.record_respawn_anchor(7, (0, 0))
         w.zones[7] = {(x, y): ZoneFact(safe=True) for x in range(3) for y in range(3)}
-        kb = KnowledgeBase.empty("sandbox")
-        save_regen_yes(kb)
-        out = dispatch(w, PlayContext(Memory(), Policy(kind="scripted"), random.Random(0), knowledge=kb))
-        self.assertEqual((out.state, out.wait), ("Heal", False))
-        self.assertEqual(out.intents[0]["verb"], "SetPosition", "Heal keeps moving inside a safe zone with room")
-        self.assertTrue(out.reason.startswith("heal in safe ground: "), out.reason)
+        out = dispatch(w, PlayContext(Memory(), Policy(kind="scripted"), random.Random(0)))
+        self.assertNotEqual(out.state, "Heal")
+        self.assertIn("Heal: nothing to heal with", out.yielded)
 
     def test_recover_waits_to_open_chest(self):
         from agentrealm_agent.zone_discovery import apply_zone
@@ -380,7 +376,7 @@ class SafeDefaultPushesTheBoundaryTest(unittest.TestCase):
 
     def test_explores_the_nearest_frontier_outside_safe_ground(self):
         w = self.hurt_in_a_small_safe_zone()
-        m = Memory(heal_regen_absent=True)  # Heal yields: no food, no regen
+        m = Memory()  # Heal yields: nothing to heal with
         out = dispatch(w, ctx(w, m))
         self.assertEqual(out.state, "Explore")
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 2, "y": 1}])
@@ -392,7 +388,7 @@ class SafeDefaultPushesTheBoundaryTest(unittest.TestCase):
         w = self.hurt_in_a_small_safe_zone()
         for x in range(1, 10):
             w.pos, w.terrain_center = (x, 1), (x, 1)
-            out = dispatch(w, ctx(w, Memory(heal_regen_absent=True)))
+            out = dispatch(w, ctx(w, Memory()))
             self.assertNotIn("look around", out.reason)
             self.assertEqual(out.intents, [{"verb": "SetPosition", "x": x + 1, "y": 1}])
 
@@ -400,13 +396,13 @@ class SafeDefaultPushesTheBoundaryTest(unittest.TestCase):
         w = self.hurt_in_a_small_safe_zone()
         w.entities = [Entity("npc", 5, (10, 1), "slime")]
         w.hostile_types.add(("npc", "slime"))  # a type seen attacking (survival.is_hostile)
-        out = dispatch(w, ctx(w, Memory(heal_regen_absent=True), hostile=["npc"], hostile_range=2))
+        out = dispatch(w, ctx(w, Memory(), hostile=["npc"], hostile_range=2))
         self.assertIn("asked the planner", out.reason)
 
     def test_a_townsperson_by_the_frontier_does_not_close_it(self):
         w = self.hurt_in_a_small_safe_zone()
         w.entities = [Entity("npc", 5, (10, 1), "villager")]
-        out = dispatch(w, ctx(w, Memory(heal_regen_absent=True), hostile=["npc"], hostile_range=2))
+        out = dispatch(w, ctx(w, Memory(), hostile=["npc"], hostile_range=2))
         self.assertNotIn("look around", out.reason)
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 2, "y": 1}])
 

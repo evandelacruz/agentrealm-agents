@@ -14,7 +14,6 @@ from typing import ClassVar
 from .acceptance_run import TimedRunHooks
 from .config import Policy
 from .executor.movement import step_landing
-from .healing import regen_known
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .engagement import fights
@@ -60,9 +59,8 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
         policy: Policy,
         params: dict[str, float | int],
         knowledge: KnowledgeBase | None,
-        track_regen: bool = False,
-    ) -> str | None:
-        """Shared ``before_tick`` survival checks. Returns regen verdict when tracked."""
+    ) -> None:
+        """Shared ``before_tick`` survival checks."""
         if should_retreat(w, policy, params, fights(m)) and state not in self.survival_states:
             self.retreat_misses += 1
         if intents and state == "Heal":
@@ -75,9 +73,6 @@ class SurvivalAcceptanceMetrics(TimedRunHooks):
                     self.recover_unsafe += 1
         if intents is not None:
             self._note_loop(w, reason, intents)
-        if track_regen:
-            return regen_known(knowledge, m)
-        return None
 
     def _note_loop(self, w: WorldModel, reason: str, intents: list[dict]) -> None:
         moving = any(i.get("verb") == "Step" for i in intents)

@@ -99,6 +99,26 @@ class KnowledgeBaseTest(unittest.TestCase):
         roundtrip = json.loads(path.read_text())
         self.assertEqual(roundtrip["future_section"], {"note": "keep"})
 
+    def test_saved_regen_keys_are_dropped_on_load(self) -> None:
+        # A130: the game has no natural regeneration; a base an older agent
+        # saved its measured safe-zone regen in loads cleanly without it.
+        self._write(
+            "sandbox",
+            {
+                "schema_version": 1,
+                "world_code": "sandbox",
+                "survival": {"safe_zone_regen": "yes", "safe_zone_regen_rates": [0.01, 0.0125]},
+                "other": {"safe_zone_regen": "kept"},
+            },
+        )
+        loaded = kb.load("sandbox")
+        self.assertNotIn("survival", loaded.extra, "a section the retired keys leave empty goes too")
+        self.assertEqual(loaded.extra["other"], {"safe_zone_regen": "kept"}, "only the retired keys go")
+        kb.save(loaded)
+        self.assertNotIn("survival", json.loads(kb.world_path("sandbox").read_text()))
+        self._write("sandbox", {"survival": {"safe_zone_regen": "yes", "later_fact": 1}})
+        self.assertEqual(kb.load("sandbox").extra["survival"], {"later_fact": 1})
+
     def _write(self, world: str, raw) -> None:
         path = kb.world_path(world)
         path.parent.mkdir(parents=True, exist_ok=True)

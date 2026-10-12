@@ -476,22 +476,20 @@ class CrossMapStuckTest(unittest.TestCase):
         self.assertIsNone(nav_stuck.leg_toward(m, w, "travel:town", 2, (0, 0), None), "another goal")
         self.assertEqual(nav_stuck.leg_toward(m, w, "goto", 1, (3, 2), None), nav_stuck.Leg((3, 2)))
 
-    def test_travel_with_no_known_route_yields_without_backoff(self):
+    def test_travel_with_no_known_route_walks_off_this_map(self):
+        # A cell on a map no known warp reaches is walked toward by the way
+        # off this map, a door, never asked about (A144).
         sc = grids.CROSS_MAP_OPEN
         cross = _cross_map_run(sc, (4, 0), landing=(5, 0))
         policy = sim.scripted(goals=["goto"], goto=(2, 1), goto_map=3)
         plan = builtin_plan(policy)
         w = sim.world_for(sc, cross=cross)
         out = dispatch(w, PlayContext(Memory(), policy, random.Random(0), knowledge=cross.kb, plan=plan))
-        self.assertEqual((out.state, out.intents, out.wait), ("Travel", None, True), out.reason)
-        self.assertIn("no step toward it: asked the planner", out.reason)
-        r = run_plan(sc, policy, plan, cross=cross, max_decisions=100)
-        self.assertEqual(r.outcome, "budget")
-        self.assertFalse(any(row["intent"] and row["reason"].startswith(WALK) for row in r.trace), "Travel never stepped")
-        self.assertEqual(r.memory.nav_stuck.stuck_signals, [])
-        self.assertEqual(r.memory.nav_stuck.given_up, {})
-        self.assertNotIn(WALK, {a.goal for a in r.memory.nav_stuck.attempts.values()})
-        self.assertIsNone(plan.current(), "the stalled op is dropped (A34)")
+        self.assertEqual((out.state, out.intents), ("Travel", [{"verb": "SetPosition", "x": 1, "y": 0}]), out.reason)
+        self.assertEqual(out.reason, f"{WALK} → (4, 0)")
+        r = run_plan(sc, policy, plan, cross=cross, max_decisions=10)
+        self.assertEqual(r.world.map_id, 2, "through the door off map 1")
+        self.assertFalse(any("no step toward it" in row["reason"] for row in r.trace), r.trace)
 
 
 class CrossMapTraceReplayTest(unittest.TestCase):

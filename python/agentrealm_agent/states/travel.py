@@ -4,7 +4,10 @@ Resolves the destination (``travel/resolve.py``: a point, the town, the
 nearest known shop or hunting ground, an entrance), then walks there across
 maps through known door warps (A26), with stuck escalation on each map's leg
 (A15). ``entrance`` at ``0, 0`` walks to the nearest unexplored door.
-Arriving finishes the op.
+Arriving finishes the op; for an entrance, going through it onto the map it
+leads to does (``passage.went_through``, A144). A destination on another
+map with no known warp there is walked toward by the way off this map
+(``navigation.walk_toward``), never asked about.
 
 A ``hunting_ground`` with none known searches for one: it explores the
 map's frontier while spare windows read zones in widening rings around the
@@ -27,7 +30,7 @@ from __future__ import annotations
 from ..config import Policy
 from ..knowledge_base import KnowledgeBase
 from ..memory import HuntSearch, Memory
-from ..navigation import doors_goal_path, route_first_leg
+from ..navigation import doors_goal_path, walk_toward
 from ..navigation import stuck as nav_stuck
 from ..navigation import walk as nav_walk
 from ..pathing import grid_params, guided_step, nav_search, next_step, plan_sets
@@ -301,7 +304,7 @@ def _route_plan(
         )
         if params.fog_cost not in routes:
             nav = nav_search(m, w, goal, dest) if dest_map == w.map_id else None
-            routes[params.fog_cost] = route_first_leg(w, knowledge, dest_map, dest, params, nav=nav)
+            routes[params.fog_cost] = walk_toward(w, knowledge, dest_map, dest, params, nav=nav)
         return routes[params.fog_cost]
 
     return plan

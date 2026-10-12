@@ -14,6 +14,7 @@ from .directives import PARAM_DEFAULTS, _valid_param
 from .healing import supply_matches
 from .fragments import holds_whole
 from .executor.constants import DEFAULT_TICK_RATE_HZ
+from .passage import went_through
 from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
 from .stalled import below_progress, find as find_stalled, forget as forget_stalled
 from .supplies import CAPABILITIES, chest_applied, eaten_on_pickup, used_on_self
@@ -62,7 +63,7 @@ OP_STATE: dict[str, str | None] = {
 # planner needs and the states lack becomes a new op here (with its validator
 # and the state that runs it), never a state that starts itself.
 OP_FIELDS: dict[str, str] = {
-    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" takes x, y for a given one, else the nearest known; "entrance" takes x, y for a given one (a cell from State level_entrances), else walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and resolves nothing while no door has been seen here',
+    "travel": 'to ("entrance"|"town"|"hunting_ground"|"shop"|"point"), x, y, optional map_id. "point" needs x, y; "town" and "hunting_ground" take none (the agent finds them; with no hunting ground known it explores and reads zones until it finds one); "shop" takes x, y for a given one, else the nearest known; "entrance" takes x, y for a given one (a cell from State level_entrances), else walks to the nearest door seen on this map whose warp is not known yet, else the nearest door seen on this map, and resolves nothing while no door has been seen here; an entrance is reached once he goes through it onto the map it leads to',
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
     "say": "text, and exactly one of npc_id (an id from State nearby_npcs) or npc_type (an NPC type code; the nearest NPC of that type in sight)",
@@ -930,6 +931,10 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
         # A bounded area counts as explored only once we have seen into it.
         center = (op["x"], op["y"])
         return center in world.view.tiles or chebyshev(world.pos, center) <= op["radius"]
+    if went_through(op, world, plan.top_since_tick) and name != "enter_level":
+        # Through the op's door and on the map it leads to (A144); Level
+        # walks the level it entered.
+        return True
     if name == "travel":
         if op["to"] == "point":
             dest_map = op.get("map_id", world.map_id)

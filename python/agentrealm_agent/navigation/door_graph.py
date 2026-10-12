@@ -137,6 +137,36 @@ def route_first_leg(
     return _route(w, kb, dest_map, dest, params)
 
 
+def walk_toward(
+    w: WorldModel,
+    kb: KnowledgeBase | None,
+    dest_map: int,
+    dest: Pos,
+    params: CostGridParams,
+    nav: NavSearchState | None = None,
+) -> list[Pos] | None:
+    """Path on the current map for a walk to ``dest_map:dest`` (A144): the
+    known route (``route_first_leg``), else, for a cell on another map, the
+    way off this map (``way_off_map``). A cell on a map the character is not
+    on is never out of reach for want of a known warp. None when neither is
+    found."""
+    path = route_first_leg(w, kb, dest_map, dest, params, nav=nav)
+    if path is None and w.map_id is not None and w.map_id != dest_map:
+        path = way_off_map(w, kb, params)
+    return path
+
+
+def way_off_map(w: WorldModel, kb: KnowledgeBase | None, params: CostGridParams) -> list[Pos] | None:
+    """Toward a door whose warp is not known yet, else any door here, else the
+    nearest unexplored ground where a door may be (A144): how a walk heads for
+    another map when no known warp leads there."""
+    found = doors_goal_path(w, kb, params)
+    if found:
+        return found
+    frontier = nearest_target(w, w.frontier() - {w.pos}, params) if w.pos is not None else None
+    return frontier[1] if frontier and frontier[1] else None
+
+
 def alt_route_path(
     w: WorldModel,
     kb: KnowledgeBase | None,

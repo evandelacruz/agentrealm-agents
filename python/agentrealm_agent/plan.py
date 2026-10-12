@@ -66,7 +66,7 @@ OP_FIELDS: dict[str, str] = {
     "explore_area": "x, y, radius",
     "read": "x, y, or supply_id",
     "say": "text, and exactly one of npc_id (an id from State nearby_npcs) or npc_type (an NPC type code; the nearest NPC of that type in sight)",
-    "buy": "code (a potion, a tool, gear). Buys one more, whatever is already held: holding some does not skip it or finish it, it spends the price again (State held shows how many are held). It is done once one more is held than the fewest held since it reached the top (one picked up for free counts too), so put two buy ops on the stack to buy two. With none in sight it walks to the nearest known shop, or to town to look for one; it is dropped when no known shop sells it or it costs more gems than are held. Optional drop (the code of a held item to drop for room when the pack is full; see State pack)",
+    "buy": "code (a potion, a tool, gear). Buys one more, whatever is already held: holding some does not skip it or finish it, it spends the price again (State held shows how many are held). It is done once one more is held than the fewest held since it reached the top (one picked up for free counts too), so put two buy ops on the stack to buy two. With none in sight it walks only toward a seller known to sell it (State sellers), the cheapest walk first: a shop seen selling it, or the place a clue naming it with a gem price was found, searched round once there; never to a shop that does not sell it. A buy with no seller known is refused (State no_seller_known); it is dropped when every known seller was reached without it for sale, or it costs more gems than are held. Optional x, y and map_id, all three: the place a seller is said to be (a town a clue names, say), walked to and searched round like a clue's. Optional drop (the code of a held item to drop for room when the pack is full; see State pack)",
     "break_block": 'x, y, capability ("cut"|"chop"|"smash"|"burn"|"blast")',
     "use_block": "x, y, code (the supply to use on it)",
     "compose": "composes_into (the whole item to make)",
@@ -231,7 +231,15 @@ def _validate_drop(op: dict[str, Any]) -> bool:
 
 
 def _validate_buy(op: dict[str, Any]) -> bool:
-    return _require_fields(op, ("code",)) and _is_str(op["code"]) and _validate_drop(op)
+    """``x, y, map_id``, when given, are where a seller is said to be (A131):
+    all three together, so the place stays on its map across a warp."""
+    if not (_require_fields(op, ("code",)) and _is_str(op["code"]) and _validate_drop(op)):
+        return False
+    place = [k for k in ("x", "y", "map_id") if k in op]
+    if place and (len(place) < 3 or not all(_is_int(op[k]) for k in place)):
+        _drop("bad seller place: x, y and map_id go together, as integers", op)
+        return False
+    return True
 
 
 def _validate_break_block(op: dict[str, Any]) -> bool:
@@ -586,6 +594,7 @@ HEAD_PROGRESS = (
     "paid_from",
     "used_id",
     "fight_npc",
+    "sellers_searched",
 )
 
 
@@ -612,6 +621,7 @@ class Plan:
     paid_from: int | None = None  # gems held when Shop last sent a Take for the head `buy` op (A106); None once it failed (A112)
     used_id: int | None = None  # supply UseItem sent a Use on yourself for, for the head `use_item` op (A108)
     fight_npc: int | None = None  # id of the head `fight` op's NPC, pinned when first in view since it became the head op (A114)
+    sellers_searched: frozenset[tuple[int, Pos]] | None = None  # (map id, cell) of each seller the head `buy` op reached without its item for sale (A131)
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
     map_id: int | None = None  # the map ``advance`` last settled the stack on: stalled records are read for it (A111)
@@ -631,6 +641,7 @@ class Plan:
             self.paid_from,
             self.used_id,
             self.fight_npc,
+            self.sellers_searched,
             self.directive_end,
         )
 
@@ -649,6 +660,7 @@ class Plan:
             self.paid_from,
             self.used_id,
             self.fight_npc,
+            self.sellers_searched,
             self.directive_end,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)

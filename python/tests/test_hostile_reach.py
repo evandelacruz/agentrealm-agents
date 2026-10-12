@@ -3,7 +3,8 @@ and a walk under attack never stops to wait.
 
 - A walk on an op's behalf prices the ground within a seen hostile's reach
   (plus ``WALK_REACH_MARGIN``) as costly, so it goes round a pack it has
-  seen. With no way round, it asks the planner and does not walk through.
+  seen. With no way round, it asks the planner and does not walk through,
+  at any level of the stuck ladder.
 - The engagement's win estimate counts every hostile that can reach us
   (``survival.can_reach_us``): a pack is weighed whole.
 - A reflex walk under attack whose Steps are not sound from every position
@@ -28,11 +29,12 @@ from agentrealm_agent.executor.held_queue import STEP_DOUBT, open_step, possible
 from agentrealm_agent.executor.movement import step_landing
 from agentrealm_agent.hostile_ground import WALK_REACH_MARGIN
 from agentrealm_agent.memory import Memory
+from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.survival import win_ratio, worn_defense
-from agentrealm_agent.world import Entity, WorldModel, chebyshev
+from agentrealm_agent.world import Entity, Sighting, WorldModel, chebyshev
 from tests.test_runner import FakeClient
 
 GLYPHS = {".": "dirt", "#": "wall"}
@@ -137,6 +139,55 @@ class NoWayRoundAsksTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual(out.state, "Travel", out.reason)
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (2, 1))
+
+
+    def held_at(self, level: int) -> PlayContext:
+        """Travel down the corridor whose walk had already climbed to ``level``
+        of the stuck ladder when the pack across it came into view."""
+        w = world(self.CORRIDOR, at=(1, 1))
+        c = ctx(travel(21, 1))
+        self.assertEqual(dispatch(w, c).state, "Travel")
+        att = nav_stuck.active(c.memory, w)
+        att.level = level
+        if level == nav_stuck.BREAK:
+            nav_stuck.set_break_target(att, (12, 1), "chop")
+        elif level == nav_stuck.REVEAL:
+            att.reveal_left = nav_stuck.REVEAL_MOVE_BUDGET
+        pack(w, (12, 1))
+        w.tick += 4
+        out = dispatch(w, c)
+        self.assertIsNone(out.intents, out.reason)
+        self.assertEqual((att.level, nav_stuck.break_target(att)), (nav_stuck.WALK, None), "back to its first level")
+        self.assertEqual(c.memory.path, [])
+        return c
+
+    def test_an_escalating_walk_is_held_at_every_level(self):
+        for level in (nav_stuck.CAUTIOUS, nav_stuck.ALT_ROUTE, nav_stuck.REVEAL, nav_stuck.BREAK):
+            with self.subTest(level=level):
+                self.held_at(level)
+
+    def test_a_walk_whose_window_ran_out_is_held_too(self):
+        w = world(self.CORRIDOR, at=(1, 1))
+        c = ctx(travel(21, 1))
+        dispatch(w, c)
+        att = nav_stuck.active(c.memory, w)
+        pack(w, (12, 1))
+        w.tick += nav_stuck.PROGRESS_TICK_LIMIT + 1  # the window failed before the pack was seen
+        att.window_tick = 0
+        c.plan.stalled_since_tick = None
+        self.assertIsNone(dispatch(w, c).intents)
+        self.assertEqual(att.level, nav_stuck.WALK)
+
+    def test_blocked_by_names_a_remembered_hostile_out_of_view(self):
+        w = world(self.CORRIDOR, at=(1, 1))
+        guard = pack(w, (12, 1))[0]
+        w.entities = []  # gone from view; its post still holds the corridor
+        w.sightings[(guard.kind, guard.id)] = Sighting(guard, 7, w.tick, (12, 1), post=True)
+        c = ctx(travel(21, 1))
+        out = dispatch(w, c)
+        self.assertEqual((out.state, out.intents), ("Travel", None), out.reason)
+        [ask] = asks(c)
+        self.assertIn("remembered hostile bogmaw 200, out of view, holding ground round 12,1", ask["blocked_by"])
 
 
 class PackIsWeighedWholeTest(unittest.TestCase):

@@ -799,9 +799,9 @@ def guided_step(
 
     ``reach`` is the ground a walk on an op's behalf keeps out of
     (``op_walk_sets``, A128): a kept path that comes to enter it is planned
-    again, and when the new plan still enters it the walk does not go
-    through: None, the path dropped and the window held
-    (``nav_stuck.hold_window``), so the caller asks the planner.
+    again, and when the new plan still enters it, at any escalation level,
+    the walk does not go through: None, the path dropped and the walk back
+    at its first level (``nav_stuck.hold``), so the caller asks the planner.
     """
     leg = target if isinstance(target, Leg) else Leg(target)
     backoff = leg.backoff_key or nav_stuck.goal_key(goal, w.map_id, leg.target)
@@ -817,6 +817,13 @@ def guided_step(
         nav_stuck.finish(m, att)
         return None
     reason = None if att.level in (nav_stuck.REVEAL, nav_stuck.BREAK) else nav_stuck.stuck_reason(att, w.tick)
+    if reach and (reason is not None or att.level != nav_stuck.WALK):
+        # An escalating walk's plan is held to the reach as a walk's is: at
+        # every level, so no reveal, alternative or break walk goes through it.
+        found = plan(att)
+        if enters_reach(w, found, reach):
+            return _hold_for_reach(m, att, w.tick)
+        plan = _once(plan, att, found)
     if reason is None and att.level not in (nav_stuck.REVEAL, nav_stuck.BREAK):
         if m.goal == goal and next_step(w, avoid, m.path) and not enters_reach(w, m.path, reach):
             nav_stuck.observe(att, w, m.path)
@@ -826,11 +833,7 @@ def guided_step(
             nav_walk.drop(m, goal)  # a committed path into the reach is never kept over a new plan
         found = commit_walk(m, w, goal, leg.target, plan(att), _walk_grid(params, avoid))
         if enters_reach(w, found, reach):
-            if m.goal == goal:
-                m.path, m.goal = [], ""
-            nav_walk.drop(m, goal)
-            nav_stuck.hold_window(att, w.tick)
-            return None
+            return _hold_for_reach(m, att, w.tick)
         if next_step(w, avoid, found):
             m.path, m.goal = found, goal
             nav_stuck.observe(att, w, found)
@@ -838,7 +841,28 @@ def guided_step(
         if found:
             return _wait(m, att, found)
         reason = "no_path"
-    return escalation_step(m, w, att, avoid, plan, reason, knowledge)
+    step = escalation_step(m, w, att, avoid, plan, reason, knowledge)
+    if step is not None and step in reach and w.pos not in reach:
+        return _hold_for_reach(m, att, w.tick)  # a reveal step into the reach
+    return step
+
+
+def _hold_for_reach(m: Memory, att: NavAttempt, tick: int) -> None:
+    """No way that keeps out of the reach of the hostiles seen: no move, the
+    walk back at its first level with its path dropped (``nav_stuck.hold``),
+    so the caller asks the planner (A128)."""
+    nav_stuck.hold(m, att, tick)
+    return None
+
+
+def _once(plan: AttemptPlan, att: NavAttempt, found: list[Pos] | None) -> AttemptPlan:
+    """``plan`` with its answer for ``att`` at its level now already known: one search, not two."""
+    level = att.level
+
+    def planned(a: NavAttempt) -> list[Pos] | None:
+        return found if a is att and a.level == level else plan(a)
+
+    return planned
 
 
 def bounded_step(

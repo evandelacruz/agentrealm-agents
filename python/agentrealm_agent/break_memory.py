@@ -113,12 +113,18 @@ def attempt_open(kb: KnowledgeBase | None, map_id: int | None, pos: Pos, capabil
     return isinstance(row, dict) and row.get("result") == "opened"
 
 
-def attempts_at(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> list[tuple[str, str]]:
-    """Each capability a break of ``pos`` was recorded with, and its result."""
+def attempts_at(kb: KnowledgeBase | None, map_id: int | None, pos: Pos, since: int) -> list[tuple[str, str]]:
+    """Each capability a break of ``pos`` was recorded with at tick ``since``
+    or later, and its result. The records are kept across runs, so an older
+    one, or one with no tick, is someone else's try."""
     if map_id is None:
         return []
     rows = ((c, _break_row(kb, break_key(map_id, pos, c))) for c in sorted(CAPABILITIES))
-    return [(c, str(row.get("result"))) for c, row in rows if row is not None]
+    return [
+        (c, str(row.get("result")))
+        for c, row in rows
+        if row is not None and isinstance(row.get("tick"), int) and row["tick"] >= since
+    ]
 
 
 def known_openers(w: WorldModel, kb: KnowledgeBase | None, pos: Pos) -> frozenset[str]:

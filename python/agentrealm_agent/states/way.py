@@ -97,7 +97,7 @@ def open_the_way(
         return None
     m = ctx.memory
     _, plan_avoid, plan_costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
-    opening = _opening_grid(w, ctx, at)
+    opening = _opening_grid(w, ctx, at, plan_avoid, plan_costly)
     if not opening.break_costs:
         return None
     round_grid = grid_params(ctx.policy, plan_avoid, plan_costly, allow_goal_door=True)
@@ -117,20 +117,20 @@ def open_the_way(
     if not out.intents:
         return None
     opened = (w.map_id, at, choice.pos)
-    if opened not in m.way_blocks:
-        m.way_blocks = [*m.way_blocks, opened][-WAY_BLOCKS_KEPT:]
+    m.way_blocks = [*(b for b in m.way_blocks if b[:3] != opened), (*opened, w.tick)][-WAY_BLOCKS_KEPT:]
     return out
 
 
-def _opening_grid(w: WorldModel, ctx: PlayContext, at: Pos) -> CostGridParams:
+def _opening_grid(
+    w: WorldModel, ctx: PlayContext, at: Pos, plan_avoid: set[Pos], plan_costly: set[Pos]
+) -> CostGridParams:
     """The grid the way to ``at`` is priced on: each block on the straight
     route a held item opens costed at its break, unexplored ground at fog
-    cost. ``open_the_way`` picks its block from the cheapest way on it, and
+    cost, from the cost sets every walk plans with (``plan_sets``).
+    ``open_the_way`` picks its block from the cheapest way on it, and
     ``_tried`` reads the same cells."""
-    m = ctx.memory
-    _, plan_avoid, plan_costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
     return grid_params(
-        ctx.policy, plan_avoid, plan_costly, allow_goal_door=True, m=m, w=w, knowledge=ctx.knowledge, break_goal=at
+        ctx.policy, plan_avoid, plan_costly, allow_goal_door=True, m=ctx.memory, w=w, knowledge=ctx.knowledge, break_goal=at
     )
 
 
@@ -145,9 +145,11 @@ def clear_the_way(
     """The executor's walk to ``at`` has no step: open the way, else ask and hold.
 
     ``at`` is None when the op has no target to walk to (none in sight): it
-    asks at once. At stuck step 2 it sends nothing and holds nothing, so
-    Break, below, opens the nominated block this decision; the safe default
-    holds meanwhile (``explore.HOLD_THEIR_WALK``).
+    asks at once. When the executor's own walk to ``at`` was given up, the
+    ask's ``tried`` leads with how each level of its ladder failed
+    (``walk_given_up``, A125). At stuck step 2 it sends nothing and holds
+    nothing, so Break, below, opens the nominated block this decision; the
+    safe default holds meanwhile (``explore.HOLD_THEIR_WALK``).
     """
     m = ctx.memory
     if break_due(w, m, state):
@@ -162,8 +164,23 @@ def clear_the_way(
         m.way_shut = key  # still shut until something it was found under changes
     blocked = tried = None
     if at is not None and m.no_way_on != ask_key(w, why, op):
-        blocked, tried = what_blocks(w, ctx, at), _tried(w, ctx, at)  # only for an ask that goes out
+        blocked = what_blocks(w, ctx, at)  # only for an ask that goes out
+        walked = walk_given_up(w, m, state, at)
+        tried = f"{walked}, then {_tried(w, ctx, at)}" if walked else _tried(w, ctx, at)
     return ask_the_planner(w, ctx, why, state, op, blocked_by=blocked, tried=tried)
+
+
+def walk_given_up(w: WorldModel, m: Memory, owner: str, at: Pos) -> str | None:
+    """How ``owner``'s own walk to ``at`` failed, when the stuck ladder gave it
+    up and it is still backed off (``OWNER_WALKS``): each level's reason in
+    order (A125). A walk to another map is given up under its destination
+    there, so ``at``, None for it, never names it: that ask goes out at once."""
+    walks = OWNER_WALKS.get(owner, ())
+    for rec in m.nav_stuck.given_up.values():
+        mine = (rec.map_id, rec.target) == (w.map_id, at) and rec.goal.startswith(walks)
+        if mine and w.tick < rec.until and rec.reasons:
+            return f"the walk, given up ({', '.join(rec.reasons)})"
+    return None
 
 
 def _shut_key(w: WorldModel, ctx: PlayContext, state: str, op: GoalOp | None, at: Pos | None) -> tuple:
@@ -175,27 +192,33 @@ def _shut_key(w: WorldModel, ctx: PlayContext, state: str, op: GoalOp | None, at
     top has the way searched again (A129)."""
     m = ctx.memory
     held = tuple(sorted((s.code or "") for s in w.held_supplies)) + (w.armed_code or "",)
-    backed_off = frozenset(k for k, r in m.nav_stuck.given_up.items() if r.map_id == w.map_id and w.tick < r.until)
+    backed_off = frozenset(
+        k for k, r in m.nav_stuck.given_up.items() if r.map_id == w.map_id and nav_stuck.is_backed_off(m.nav_stuck, k, w.tick)
+    )
     _, avoid, costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
     learned = (frozenset(avoid), frozenset(costly))
     return (state, op_key(op), w.map_id, w.pos, at, w.view.tiles.revision, held, backed_off, learned)
 
 
 def _tried(w: WorldModel, ctx: PlayContext, at: Pos) -> str:
-    """What was actually tried on the way to ``at``: the walk's search for a
-    way round, then each break the knowledge base records, and a ``Use``
-    still in flight, on a block of the way: the cells ``open_the_way`` picks
-    from (``_opening_grid``, ``_way_cells``) and the blocks it chose for ``at``
-    from other cells (``Memory.way_blocks``). Never what is merely held (A129)."""
+    """What this op actually tried on the way to ``at``: the walk's search for
+    a way round, then each break the knowledge base records since the op
+    reached the top (``Plan.top_since_tick``), and a ``Use`` still in flight,
+    on a block of the way: the cells ``open_the_way`` picks from
+    (``_opening_grid``, ``_way_cells``) and the blocks it chose for ``at``
+    from other cells since then (``Memory.way_blocks``). Never what is merely
+    held, nor an older break the knowledge base keeps from another op or run (A129)."""
     parts = ["a way round"]
-    if w.pos is None or w.map_id is None:
+    since = ctx.plan.top_since_tick if ctx.plan is not None else None
+    if w.pos is None or w.map_id is None or since is None:
         return parts[0]
     m = ctx.memory
-    chosen = [b for mid, to, b in m.way_blocks if (mid, to) == (w.map_id, at)]
-    path = cost_path(w, at, _opening_grid(w, ctx, at)) or []
+    chosen = [b for mid, to, b, tick in m.way_blocks if (mid, to) == (w.map_id, at) and tick >= since]
+    _, plan_avoid, plan_costly = plan_sets(w, m, ctx.policy, ctx.knowledge)
+    path = cost_path(w, at, _opening_grid(w, ctx, at, plan_avoid, plan_costly)) or []
     for p in dict.fromkeys([*_way_cells(w.pos, at, path), *chosen]):
         block = breakable_block(w, p)
-        for cap, result in attempts_at(ctx.knowledge, w.map_id, p):
+        for cap, result in attempts_at(ctx.knowledge, w.map_id, p, since):
             parts.append(f"{cap} on {block or 'the block'} at {p[0]},{p[1]}: {result}")
         if m.break_pending is not None and m.break_pending[:2] == (w.map_id, p):
             parts.append(f"{m.break_pending[2]} on {block or 'the block'} at {p[0]},{p[1]}: sent")

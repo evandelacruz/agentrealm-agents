@@ -32,10 +32,15 @@ held (a hit on the way, say), or whose risk health no longer covers, is
 dropped, and one with no clear path is skipped for the run (free-play run 5).
 
 A detour is a short insert, never a new target: the walk it interrupts
-keeps its committed target (``targets``). Once the find is taken, seen gone
-or given up (no step, or ``DETOUR_TICKS`` without taking it, after which
-that find is skipped for the run), the state that was walking plans again
-to the same target.
+keeps its committed target (``targets``). A detour is taken only when its
+gain beats its cost (the allowance above), and once taken it is kept until
+the find is taken or a concrete reason drops it: the find is gone, its
+ground or path is held, its risk is no longer covered, or the walk to it
+gives up (no step, or its window passes with the walk no shorter,
+``pathing.bounded_step``). It is never dropped for being slow: a walk of a
+step a decision takes as long as it takes (A125). A find given up is
+skipped for the run. Then the state that was walking plans again to the
+same target.
 """
 
 from __future__ import annotations
@@ -70,8 +75,6 @@ GEM_CLUSTER_STEPS = 4
 GEM_CLUSTER_MAX = 3
 LIFE_STEPS = 16
 FOOD_STEPS = 4
-# A detour that has not taken its find in this long is given up (10 s at 10 ticks/s).
-DETOUR_TICKS = 100
 # A find this close to a known hostile is a risk: the radius in which Gather
 # keeps off the hostile that hit us and the path planner prices danger (#162).
 RISK_RADIUS = GATHER_HOSTILE_RADIUS
@@ -85,7 +88,6 @@ class Detour:
     pos: Pos
     code: str
     resumes: str  # ``Memory.goal`` of the walk it left
-    since: int  # tick it began
 
 
 class DetourState(State):
@@ -107,15 +109,13 @@ class DetourState(State):
         known = danger(world, ctx.policy, chosen_fight(ctx))  # once per decision
         d = m.detour
         if d is not None and not _still_on(world, d, ctx, known):
-            if world.tick - d.since >= DETOUR_TICKS:
-                m.detour_skipped.add(d.supply_id)  # timed out: given up for the run, never re-picked
             _end(m, d)
             d = None
         if d is None:
             find = detour_find(world, ctx, known)
             if find is None:
                 return StateOutcome(None, "no find off the walk", state=self.name)
-            d = m.detour = Detour(find.id, find.pos, find.code, m.goal, world.tick)
+            d = m.detour = Detour(find.id, find.pos, find.code, m.goal)
         step = _step_toward(world, ctx, d.pos, known)
         if step is None or not route_clear(world, ctx.policy, m.path, known):
             m.detour_skipped.add(d.supply_id)
@@ -259,11 +259,11 @@ def chosen_fight(ctx: PlayContext) -> bool:
 
 def _still_on(w: WorldModel, d: Detour, ctx: PlayContext, known: Danger) -> bool:
     """The find is still there, on ground Gather may work, its risk still
-    covered by health, the path being walked to it is clear of known reach,
-    and the detour has time left."""
+    covered by health, and the path being walked to it is clear of known
+    reach. How long the detour has run is no reason to drop it (A125)."""
     m = ctx.memory
     there = any(e.kind == "supply" and e.id == d.supply_id for e in w.entities)
-    if not there or w.tick - d.since >= DETOUR_TICKS or not gather_ground(w, d.pos, ctx.policy, known):
+    if not there or not gather_ground(w, d.pos, ctx.policy, known):
         return False
     if not risk_allowed(w, ctx, d.pos, known):
         return False

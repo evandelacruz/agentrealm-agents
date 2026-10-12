@@ -111,6 +111,15 @@ class TriedTest(unittest.TestCase):
         self.assertEqual(ask["tried"], "a way round, then chop on tree at 5,5: failed")
 
 
+    def test_a_break_recorded_before_the_op_reached_the_top_is_not_reported(self):
+        w, c = clearing(), ctx()
+        w.tick = 1000
+        # Kept in the knowledge base from an earlier run, or another op.
+        record_attempt(c.knowledge, map_id=w.map_id, pos=TREE, capability="chop", result="failed", tick=10)
+        record_attempt(c.knowledge, map_id=w.map_id, pos=TREE, capability="burn", result="opened")  # no tick
+        ask = self.ask_from_beside_the_tree(c, w)
+        self.assertEqual(ask["tried"], "a way round")
+
     def test_a_use_in_flight_is_reported_as_sent(self):
         w, c = clearing(), ctx()
         w.held_supplies, w.armed_code, w.armed_id = [], None, None  # the sword's chop is out, nothing left to open it

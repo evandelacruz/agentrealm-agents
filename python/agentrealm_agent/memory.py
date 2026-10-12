@@ -193,8 +193,9 @@ class Memory:
     # searches are not run again on every held decision.
     way_shut: tuple | None = None
     # The blocks the way-clearing chose to open (``way.open_the_way``, A129), each as (map, the
-    # target it opened the way to, the block), newest last: ``tried`` names their breaks from any cell.
-    way_blocks: list[tuple[int, Pos, Pos]] = field(default_factory=list)
+    # target it opened the way to, the block, the tick last chosen), newest last: ``tried`` names
+    # their breaks from any cell.
+    way_blocks: list[tuple[int, Pos, Pos, int]] = field(default_factory=list)
     # The decision (``NavStuckMemory.decision``) an executor last left the round to Break at
     # stuck step 2 of its own walk: the safe default holds for it then, without asking (A120).
     break_yield: int | None = None

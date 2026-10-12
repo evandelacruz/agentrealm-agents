@@ -117,13 +117,25 @@ from .knowledge_base import KnowledgeBase
 from .memory import Memory
 from .navigation import entrance_routes
 from .gem_yield import RATE_MIN_SECONDS, keep_gather_region, summary as gem_yield_summary
-from .healing import POTION_RULE, food_to_take, held_heal, low_health_line, potion_count, supply_matches
+from .healing import (
+    FOOD_REACH,
+    POTION_RULE,
+    food_near,
+    food_to_take,
+    held_heal,
+    low_health_line,
+    potion_count,
+    supply_matches,
+    walk_seconds,
+)
 from .equip import CUT, damage_per_second, does_job, hunting_ceiling, loadout_strength, weapon_rank
 from .supplies import (
+    BLOCK_FOOD,
     armor_defense,
     chest_applied,
     chest_capacity,
     eaten_on_pickup,
+    heal_of,
     is_potion,
     is_weapon,
     row as supply_row,
@@ -226,7 +238,7 @@ State lists the current stack, each op marked "pinned" or "planner". Pinned ops 
 The survival params ("params" under State, set by "params" or a set_param op). Survival params may only tighten past params_floor; a change that loosens one is ignored:
 {_param_table()}
 
-Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first. Safe ground only stops damage. Health rises only from potions and food: a potion drunk, food eaten (Heal eats carried food whenever hurt), or food eaten on pickup, plus a respawn, which is at full health. There is no natural regeneration, on safe ground or anywhere, so resting or waiting restores nothing. An op that leaves health below a bar leaves it there until a potion or food heals it: readiness to_close health_at_bar shows the ways that close it (eat, buy). A potion is for an actual health need: health at the survival floor (low_health), or a fight ahead that needs the health (a boss, a hostile the character means to take on). Never drink one only to meet a readiness bar: health_at_bar already counts the potions and food held, so a drink leaves it where it was and takes one off potions_at_bar. For an actual need before health is low, put a use_item with its code on the stack (or raise low_health, which makes Heal drink one sooner); to eat food lying in sight, fetch_item it; to buy a potion, buy it at a shop.
+Safe ground: hostiles cannot hurt the character only while it stands on safe ground. State safe_ground says whether it does now, and nearest_safe and town say how far away (Chebyshev cells) and which way those are. Away from safe ground, a wait or any op that stays put leaves a hurt character exposed: travel to town or let Retreat walk to the nearest safe tile first. Safe ground only stops damage. Health rises only from potions and food: a potion drunk, food eaten (whenever hurt, Heal eats carried food, food lying near and the berries of a bush near it cuts: State food_near), or food eaten on pickup, plus a respawn, which is at full health. There is no natural regeneration, on safe ground or anywhere, so resting or waiting restores nothing. An op that leaves health below a bar leaves it there until a potion or food heals it: readiness to_close health_at_bar shows the ways that close it (eat, buy). A potion is for an actual health need: health at the survival floor (low_health), or a fight ahead that needs the health (a boss, a hostile the character means to take on). Never drink one only to meet a readiness bar: health_at_bar already counts the potions and food held, so a drink leaves it where it was and takes one off potions_at_bar. For a fight ahead, put a use_item with its code directly above the fight, fight_boss or enter_level op it is for (or a gather_gems with fight true); out of combat a use_item of a potion is refused while food near can be had or health is above low_health, and the why names the food (raising low_health makes a potion due sooner, still only once no food near can be had); to eat food lying in sight, fetch_item it; to buy a potion, buy it at a shop.
 
 NPCs: State nearby_npcs lists the nearest NPCs in sight (id, type, cells and dir from here, spoken, greeted, hostile, stays_put); npcs_spoken_to counts the NPCs a say op of yours has spoken to so far, and npcs_greeted those Greet has said hello to. The game does not say which NPCs are helpers and which are monsters. "hostile" true means known hostile: a boss, the last thing that hit the character, or a type that has swung at it, hit it or died in view, in this run or an earlier one; false only means none of its type has done so yet, so it may still be a monster. "stays_put" true means it has stood on one cell for a while, as helpers do; judge the rest from its type and the clues. On safe ground (anywhere, if policy.hostile does not name NPCs), Greet says hello once to an NPC in sight that stays put and is not hostile, and marks it greeted; a helper answers any words with the same line, which lands in Clues. A greeting never counts as spoken: a say op to a greeted NPC still says your text. To talk to one further away, or with your own words, use a say op with its npc_id (from nearby_npcs) or its npc_type (any NPC of that type, the nearest first); the character walks within speech range and says your text. A helper's reply is added to Clues as a row of kind "npc".
 
@@ -675,6 +687,7 @@ def build_prompt(
         held_line(w, knowledge),
         pack_line(w, plan, knowledge),
         potion_line(w, plan.params),
+        *([food_line(w, knowledge, memory)] if memory is not None else []),
         f"levels_cleared={w.levels_cleared} level_count={w.level_count}",
         *safety_lines(w, knowledge),
         *npc_lines(w, knowledge),
@@ -734,6 +747,34 @@ def potion_line(w: WorldModel, params: dict[str, float | int]) -> str:
     line = low_health_line(w, params)
     at = f"health<={line}" if line is not None else "unknown"
     return f"potions={potion_count(w)} potion_drunk_at={at}"
+
+
+def food_line(w: WorldModel, knowledge: KnowledgeBase | None, memory: Memory) -> str:
+    """The food candidates a short walk away (``healing.food_near``, A135):
+    food lying near and blocks that drop food (a bush, for berries), each
+    with its heal and walk (straight, a rough estimate, as ``to_close``
+    gives it). Out of combat Heal goes for the cheapest by its walk, ahead of
+    any potion. It reads the run's memory, so a refused take or a given-up
+    block is left out as Heal leaves it out; with no memory the line is not
+    shown."""
+    foods, blocks = food_near(w, memory, knowledge)
+    rows = [{"kind": "food", "code": e.code, "pos": e.pos} for e in foods]
+    rows += [{"kind": w.view.tiles.get(p), "code": BLOCK_FOOD.get(w.view.tiles.get(p) or ""), "pos": p} for p in blocks]
+    shown = [
+        {
+            "kind": r["kind"],
+            "cell": f"{w.map_id}:{r['pos'][0]},{r['pos'][1]}",
+            "code": r["code"],
+            "heal": heal_of(r["code"]),
+            "walk_seconds": walk_seconds(w, r["pos"]),
+        }
+        for r in rows
+    ]
+    return (
+        f"food_near={json.dumps(shown, sort_keys=True) if shown else 'none'} (within {FOOD_REACH} cells: hurt out of "
+        "combat, Heal takes food lying here or cuts a bush for its berries before any potion, so a potion is not "
+        "drunk out of combat while food here can be had)"
+    )
 
 
 def safety_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
@@ -1378,7 +1419,7 @@ def _walk_to(w: WorldModel, map_id: int | None, cell: Pos) -> dict[str, Any]:
     straight line at the character's speed, a rough estimate)."""
     out: dict[str, Any] = {"at": f"{map_id}:{cell[0]},{cell[1]}"}
     if map_id == w.map_id and w.pos is not None:
-        out["walk_seconds"] = round(chebyshev(w.pos, cell) * 1000 / max(1, w.movement_speed))
+        out["walk_seconds"] = walk_seconds(w, cell)
     return out
 
 

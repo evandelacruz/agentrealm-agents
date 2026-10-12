@@ -208,7 +208,8 @@ class HealWalkBoundedTest(unittest.TestCase):
                 return None
             return [flip[w.pos]] if nav is not None else [flip[w.pos], FOOD]
 
-        with mock.patch("agentrealm_agent.states.heal.cost_path", plan):
+        # Heal walks (heal) on the path its food pick priced (food).
+        with mock.patch("agentrealm_agent.states.heal.cost_path", plan), mock.patch("agentrealm_agent.states.food.cost_path", plan):
             outs = play(w, c, 20)
         events = c.memory.nav_stuck.oscillations
         self.assertEqual([(e.get("goal"), e["states"]) for e in events], [("heal_food", ["Heal"])])

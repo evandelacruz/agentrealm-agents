@@ -4,9 +4,13 @@ Resolves the destination (``travel/resolve.py``: a point, the town, the
 nearest known shop or hunting ground, an entrance), then walks there across
 maps through known door warps (A26), with stuck escalation on each map's leg
 (A15). ``entrance`` at ``0, 0`` walks to the nearest unexplored door.
-Arriving finishes the op. A level entrance whose recorded need nothing
-carried meets is never walked onto (A147, ``entrance_needs``): a travel to
-one, or a step onto one, drops the op with why.
+Arriving finishes the op; for an entrance, going through it onto the map it
+leads to does (``passage.went_through``, A144). A destination on another
+map with no known warp there is walked toward by the way off this map
+(``navigation.walk_toward``), never asked about.
+A level entrance whose recorded need nothing carried meets is never
+walked onto (A147, ``entrance_needs``): a travel to one, or a step onto
+one, drops the op with why.
 
 A ``hunting_ground`` with none known searches for one: it explores the
 map's frontier while spare windows read zones in widening rings around the
@@ -29,7 +33,7 @@ from __future__ import annotations
 from ..config import Policy
 from ..knowledge_base import KnowledgeBase
 from ..memory import HuntSearch, Memory
-from ..navigation import doors_goal_path, route_first_leg
+from ..navigation import doors_goal_path, walk_toward
 from ..navigation import stuck as nav_stuck
 from ..navigation import walk as nav_walk
 from ..pathing import grid_params, guided_step, nav_search, next_step, plan_sets
@@ -266,10 +270,12 @@ def route_step(
 ) -> Pos | None:
     """One step toward ``dest_map:dest`` under ``goal``, across maps through
     known door warps (A26), with stuck escalation on this map's leg (A15).
+    With no known warp to another map the leg heads for the way off this map
+    (``navigation.walk_toward``, A144).
 
     None when no step can be planned, or the only way crosses ``reach``, the
-    ground the hostiles seen hold (A128). With no known route to another map
-    the goal's path is cleared and nothing backs off.
+    ground the hostiles seen hold (A128). With neither a known route nor a
+    way off this map left, the goal's path is cleared and nothing backs off.
     """
     plan = _route_plan(m, w, policy, knowledge, plan_avoid, plan_costly, dest_map, dest, goal)
     leg = _map_leg(m, w, goal, dest_map, dest, plan_avoid, plan)
@@ -328,7 +334,7 @@ def _route_plan(
         )
         if params.fog_cost not in routes:
             nav = nav_search(m, w, goal, dest) if dest_map == w.map_id else None
-            routes[params.fog_cost] = route_first_leg(w, knowledge, dest_map, dest, params, nav=nav)
+            routes[params.fog_cost] = walk_toward(w, knowledge, dest_map, dest, params, nav=nav, stuck=m.nav_stuck)
         return routes[params.fog_cost]
 
     return plan

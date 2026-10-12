@@ -476,22 +476,37 @@ class CrossMapStuckTest(unittest.TestCase):
         self.assertIsNone(nav_stuck.leg_toward(m, w, "travel:town", 2, (0, 0), None), "another goal")
         self.assertEqual(nav_stuck.leg_toward(m, w, "goto", 1, (3, 2), None), nav_stuck.Leg((3, 2)))
 
-    def test_travel_with_no_known_route_yields_without_backoff(self):
+    def test_travel_to_an_unreachable_map_asks_once_no_way_off_is_left(self):
+        # Map 3: no known warp leads there, and the one door here has its warp
+        # known (to map 2), so it is no way off. The walk explores the ground
+        # left here for a door, never through the known one, then yields and
+        # asks, and the stalled op is dropped (A34, A120, A144).
         sc = grids.CROSS_MAP_OPEN
         cross = _cross_map_run(sc, (4, 0), landing=(5, 0))
         policy = sim.scripted(goals=["goto"], goto=(2, 1), goto_map=3)
         plan = builtin_plan(policy)
-        w = sim.world_for(sc, cross=cross)
-        out = dispatch(w, PlayContext(Memory(), policy, random.Random(0), knowledge=cross.kb, plan=plan))
-        self.assertEqual((out.state, out.intents, out.wait), ("Travel", None, True), out.reason)
-        self.assertIn("no step toward it: asked the planner", out.reason)
         r = run_plan(sc, policy, plan, cross=cross, max_decisions=100)
         self.assertEqual(r.outcome, "budget")
-        self.assertFalse(any(row["intent"] and row["reason"].startswith(WALK) for row in r.trace), "Travel never stepped")
+        self.assertEqual(r.world.map_id, 1, "never through the door whose warp is known")
+        asked = [i for i, row in enumerate(r.trace) if "no step toward it: asked the planner" in row["reason"]]
+        self.assertTrue(asked, "asked once the ground here was explored")
+        self.assertFalse(any(row["intent"] for row in r.trace[asked[0]:]), "no wandering after the ask")
         self.assertEqual(r.memory.nav_stuck.stuck_signals, [])
         self.assertEqual(r.memory.nav_stuck.given_up, {})
-        self.assertNotIn(WALK, {a.goal for a in r.memory.nav_stuck.attempts.values()})
         self.assertIsNone(plan.current(), "the stalled op is dropped (A34)")
+
+    def test_travel_with_no_known_route_walks_off_through_a_door_not_yet_taken(self):
+        # The same walk, with the door's warp not yet known: it is the way off
+        # this map, so the walk heads for it rather than asking (A144).
+        sc = grids.CROSS_MAP_OPEN
+        cross = _cross_map_run(sc, (4, 0), landing=(5, 0))
+        cross.kb.maps["1"]["doors"] = []
+        policy = sim.scripted(goals=["goto"], goto=(2, 1), goto_map=3)
+        plan = builtin_plan(policy)
+        w = sim.world_for(sc, cross=cross)
+        out = dispatch(w, PlayContext(Memory(), policy, random.Random(0), knowledge=cross.kb, plan=plan))
+        self.assertEqual((out.state, out.intents), ("Travel", [{"verb": "SetPosition", "x": 1, "y": 0}]), out.reason)
+        self.assertEqual(out.reason, f"{WALK} → (4, 0)")
 
 
 class CrossMapTraceReplayTest(unittest.TestCase):

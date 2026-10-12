@@ -23,7 +23,7 @@ from agentrealm_agent.memory import Memory
 from agentrealm_agent.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
-from agentrealm_agent.states.detour import DETOUR_TICKS, GEM_PILE_STEPS, extra_steps
+from agentrealm_agent.states.detour import GEM_PILE_STEPS, extra_steps
 from agentrealm_agent.states.explore import explore_outcome
 from agentrealm_agent.states.level import ENTRANCE_GOAL
 from agentrealm_agent.states.travel import TRAVEL_TARGET, resolve_destination
@@ -507,7 +507,8 @@ class DetourTest(unittest.TestCase):
         w.entities = [Entity("supply", 78, (8, 6), "dirt_clod"), Entity("supply", 79, (9, 6), "apple")]  # food while not hurt
         self.assertEqual(self.play(w, m, plan, 1)[0].state, "Travel")
 
-    def test_a_detour_that_times_out_gives_its_find_up(self):
+    def test_a_slow_detour_is_kept(self):
+        # A125: a detour is never given up for the time it takes.
         w = field(at=(2, 4))
         plan = Plan([{"op": "travel", "to": "point", "x": 18, "y": 4}], dict(PARAM_DEFAULTS))
         m = Memory()
@@ -515,12 +516,15 @@ class DetourTest(unittest.TestCase):
         x, y = m.path[5]
         gem = (x, y + 2 if y + 2 <= 7 else y - 2)
         w.entities = [Entity("supply", 77, gem, "gem")]
-        self.assertEqual(dispatch(w, ctx(m, plan, pickup=True)).state, "Detour")
-        w.tick += DETOUR_TICKS  # never got there
         out = dispatch(w, ctx(m, plan, pickup=True))
-        self.assertEqual(out.state, "Travel", out.reason)
-        self.assertIn(77, m.detour_skipped)
-        self.assertIsNone(m.detour)
+        self.assertEqual(out.state, "Detour")
+        w.pos = (out.intents[0]["x"], out.intents[0]["y"])
+        nav_stuck.on_step(m, w)
+        w.tick += 150  # a step a decision, decisions far apart
+        out = dispatch(w, ctx(m, plan, pickup=True))
+        self.assertEqual(out.state, "Detour", out.reason)
+        self.assertNotIn(77, m.detour_skipped)
+        self.assertEqual(m.detour.supply_id, 77)
 
     def test_extra_steps_bound(self):
         w, path = field(height=20), [(x, 4) for x in range(3, 19)]

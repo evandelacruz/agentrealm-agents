@@ -216,7 +216,8 @@ def no_progress(w: WorldModel, m: Memory, goal: Pos) -> bool:
     if paused is not None and paused[0] == goal:
         att.window_tick = min(w.tick, att.window_tick + w.tick - paused[1])
     started = att.window_tick if att.best is None else None
-    nav_stuck.observe(att, w, m.path if m.goal == "safe" and m.path and m.path[-1] == goal else None)
+    path = m.path if m.goal == "safe" and m.path and m.path[-1] == goal else None
+    nav_stuck.observe(att, w, path, nav_stuck.corridor_for(m, w, att))
     if started is not None:
         att.window_tick = started  # the first path planned sets the bar; it is not progress
     if w.tick - att.window_tick < nav_stuck.PROGRESS_TICK_LIMIT:

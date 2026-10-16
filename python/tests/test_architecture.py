@@ -373,8 +373,8 @@ class ImportLineTest(unittest.TestCase):
     def test_ladder_loads_nothing_of_garys(self):
         # Lorraine imports nothing of Gary's (A138), his planner's prompt
         # included: her one question shares only the ADK's call plumbing
-        # (`agentrealm_adk.llm`, A140). Stan stays allowed: her play rides
-        # his sync and flee until A141.
+        # (`agentrealm_adk.llm`, A140). Since A141 she plays on her own loop
+        # over the ADK's executor and pathing, so nothing of Stan's either.
         mods = sorted(
             ".".join(("ladder", *f.relative_to(PYTHON_DIR / "ladder").with_suffix("").parts)).removesuffix(".__init__")
             for f in (PYTHON_DIR / "ladder").rglob("*.py")
@@ -391,6 +391,9 @@ class ImportLineTest(unittest.TestCase):
         loaded = json.loads(out.stdout)
         crossed = [m for m in loaded if m == "agentrealm_agent" or m.startswith("agentrealm_agent.")]
         self.assertEqual(crossed, [], "Lorraine reached into Gary's agentrealm_agent")
+        self.assertNotIn("starter_agent", loaded, "Lorraine plays on her own loop, not Stan's (A141)")
+        self.assertIn("agentrealm_adk.executor", loaded, "her ops run through the ADK's executor (A141)")
+        self.assertIn("ladder.reflexes", loaded)
         self.assertIn("agentrealm_adk.pathing", loaded, "the closure should include the ADK she plays on")
         self.assertIn("agentrealm_adk.llm", loaded, "her question calls the planner through the ADK")
         self.assertIn("ladder.ask", loaded)

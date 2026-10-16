@@ -2,9 +2,10 @@
 
 The parser and ``status``'s self line are the ADK's (``agentrealm_adk.cli``),
 as Gary's are. ``status`` then prints her goal tree's readiness (A139,
-``ladder.goals.dump``). ``run`` plays the tree (``ladder.play``): the one
-planner question at its goal (A140), off with ``--no-planner`` or
-``AGENTREALM_NO_PLANNER``.
+``ladder.goals.dump``). ``run`` plays on her own loop (``ladder.play``, A141):
+her reflexes, then the one planner question at the tree's goal (A140), off
+with ``--no-planner`` or ``AGENTREALM_NO_PLANNER``, and the op carried out
+over the ADK's executor and pathing (``ladder.act``).
 """
 
 from __future__ import annotations
@@ -96,8 +97,8 @@ def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
 
 
 def run(client: Client, cfg: config.CharacterConfig, cid: int, planner: Planner | None = None) -> int:
-    """Play until Ctrl-C: walk the tree, ask the one question at its goal, run
-    the op (``ladder.play``; A141 replaces how the op is carried out)."""
+    """Play until Ctrl-C on her own loop (``ladder.play``): her reflexes, then
+    the tree's goal, the one question about it, and the op carried out (A141)."""
     try:
         client.self_(cid)
     except ApiError as e:
@@ -110,7 +111,6 @@ def run(client: Client, cfg: config.CharacterConfig, cid: int, planner: Planner 
         return 1
     stop = threading.Event()
     runner = LadderRunner(cfg, client, cid, stop, planner or Planner.off(), knowledge=kb)
-    load_hostiles(kb, runner.world)
     thread = threading.Thread(target=runner.run, daemon=True)
     thread.start()
     try:

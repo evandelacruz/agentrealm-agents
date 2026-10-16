@@ -26,12 +26,15 @@ the block holds to its expiry (``lift_changed``).
 
 The call itself is the ADK's (``agentrealm_adk.llm``): the provider, the
 call budget and backoff Gary's planner has, and its reply parsing.
-Lorraine imports nothing of Gary's, his prompt included.
+Lorraine imports nothing of Gary's, his prompt included. In play the call
+runs off the tick thread (``Planner.start``, ``Planner.finish``, A141), so a
+slow or hung call never holds up her reflexes.
 """
 
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
@@ -56,6 +59,7 @@ from agentrealm_adk.targets import GoalOp
 from agentrealm_adk.world import WorldModel
 
 from . import readiness as r
+from .act import refuse
 from .goals import BLOCK_TICKS, Block, Blocks, Node, Reading
 
 if TYPE_CHECKING:
@@ -275,20 +279,71 @@ class Planner:
             self._tokens = self.tokens_per_min or default_tokens_per_min(question_prefix(self.reference_sections))
         return not self.backoff.waiting(now) and not self.budget.limit_reached(now, self.calls_per_min, self._tokens)
 
-    def ask(self, node: Node, rd: Reading, note: str = "") -> Reply | None:
+    def start(self, node: Node, rd: Reading, note: str = "") -> Call | None:
+        """Send the question about ``node`` on its own thread (A141); None
+        when no call is made (no planner, the budget spent, backing off).
+        The messages are built and the budget charged here, on the caller's
+        thread: the call's thread only waits on the provider."""
         if self.client is None or not self.ready():
             return None
         messages = question(node, rd, self.reference_sections, note)
-        now = self.clock()
         self.calls += 1
-        self.budget.charge(now, messages)
+        self.budget.charge(self.clock(), messages)
+        call = Call(node, messages, note)
+        call.thread = threading.Thread(target=call.run, args=(self.client,), name="ladder-planner", daemon=True)
+        call.thread.start()
+        return call
+
+    def finish(self, call: Call) -> Reply | None:
+        """The reply of a call that is back (``Call.back``), or None when it
+        failed: an error, an unreadable reply, or an op she cannot carry out
+        as given (``act.refuse``), which is logged with why."""
         try:
-            raw, usage = self.client.complete(messages)
-            self.budget.settle(usage)
-            reply = read_reply(raw, node.ops)
+            if call.error is not None:
+                raise call.error
+            self.budget.settle(call.usage)
+            reply = read_reply(call.raw, call.node.ops)
+            if reply.op is not None and (why := refuse(reply.op)):
+                raise ValueError(f"refused {reply.op}: {why}")
         except Exception as e:  # network, HTTP status, refusal, an unreadable reply
             self.last_error = str(e) or type(e).__name__
             self.backoff.fail(self.clock())
             return None
         self.backoff.ok()
         return reply
+
+    def ask(self, node: Node, rd: Reading, note: str = "") -> Reply | None:
+        """Ask and wait for the reply: ``start``, then ``finish`` once it is back."""
+        call = self.start(node, rd, note)
+        if call is None:
+            return None
+        call.wait()
+        return self.finish(call)
+
+
+@dataclass
+class Call:
+    """One question out on its own thread: only the provider's call runs there (A141)."""
+
+    node: Node
+    messages: list[dict[str, Any]]
+    note: str = ""
+    raw: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
+    error: Exception | None = None
+    thread: threading.Thread | None = None
+
+    def run(self, client: LLMClient) -> None:
+        try:
+            self.raw, self.usage = client.complete(self.messages)
+        except Exception as e:  # read on the caller's thread, by ``Planner.finish``
+            self.error = e
+
+    @property
+    def back(self) -> bool:
+        """The call has returned, with a reply or an error."""
+        return self.thread is not None and not self.thread.is_alive()
+
+    def wait(self, timeout: float | None = None) -> None:
+        if self.thread is not None:
+            self.thread.join(timeout)

@@ -5,10 +5,10 @@ pathing, navigation, executor, supplies, knowledge base, the command line)
 and imports nothing of Gary's (``agentrealm_agent``).
 
 Her goal tree is ``goals`` (A139) and what it reads is ``readiness``; ``status``
-prints the tree's readiness. ``run`` walks the tree and asks the planner one
-question at its goal (``ask``, A140), then carries out the op in ``play``:
-minimally, on Starter Stan's sync, flee and explore, until the executor and
-reflexes (A141) land.
+prints the tree's readiness. ``run`` plays on her own loop (``play``, A141):
+her reflexes (``reflexes``) first, then the tree's goal and the one question
+the planner is asked about it (``ask``, A140), and the op carried out over the
+ADK's executor and pathing (``act``).
 
 Run (from ``python/``, after ``export AGENTREALM_API_KEY=...``):
 

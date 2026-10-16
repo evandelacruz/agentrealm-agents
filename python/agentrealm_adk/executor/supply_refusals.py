@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Literal
 from ..item_table import InventorySupply
 from ..supplies import heals
 from ..world import Entity, Pos, WorldModel
-from .pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
 
 if TYPE_CHECKING:
     from ..memory import Memory
@@ -36,10 +35,11 @@ if TYPE_CHECKING:
 REARM_CODES = frozenset({"nothing_armed", "not_held"})
 GONE_CODES = frozenset({"supply_gone"})
 REACH_CODES = frozenset({"target_not_nearby", "target_out_of_range"})
-# A "wait" refusal is sent again no sooner than this: one weapon cooldown (1 s
-# at 10 Hz), the longest blocker a transient code names for a Use, so a
+# A "wait" refusal is sent again no sooner than this: 1 s at 10 Hz, so a
 # blocker that persists costs one refused intent a second, not one a tick.
-REFUSAL_WAIT_TICKS = DEFAULT_WEAPON_COOLDOWN_TICKS
+# Its own constant: a Use on yourself waits on no weapon cooldown (Manual §11
+# What waits on a cooldown, A153).
+REFUSAL_WAIT_TICKS = 10
 # Codes whose handling is "hold" by what they mean (the situation they need
 # changed is in ``refusal_situation``), so the trace does not call them unknown.
 HOLD_CODES = frozenset({"would_strand", "carry_capacity_full", "not_allowed_in_safe_zone"})

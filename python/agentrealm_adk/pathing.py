@@ -30,7 +30,7 @@ from . import targets as targets_mod
 from .directives import attack_forbidden
 from .engagement import would_fight
 from .hostile_ground import HostileKey, WalkGround, ground_by_hostile, hostiles_near, is_safe_ish, walk_ground
-from .executor.pacing import DEFAULT_TICK_RATE_HZ, attack_cooldown_ticks
+from .executor.pacing import DEFAULT_TICK_RATE_HZ, use_cooldown_ticks
 from .fording import on_water
 from .supplies import afloat
 from .survival import (
@@ -1143,16 +1143,17 @@ def heal_on_pass(
     worn would leave none armed (``would_strand``, A133), so a pass with a
     water cell (``fording.on_water``, Ashore's test, a would_strand-marked
     cell included) counts none unless the fording supply is worn. Each one used
-    takes its ``Arm`` tick and its ``Use``'s cooldown, the largest heal
-    first, and only while it gives back more than those ticks cost; never
-    more than the pass takes (``covers_pass`` caps it), so a heal never
+    takes its ``Arm`` tick and its ``Use``'s, which waits on no cooldown (a
+    ``Use`` on yourself is no swing, A153), the largest heal first, and only
+    while it gives back more than those ticks cost; never more than the pass
+    takes (``covers_pass`` caps it), so a heal never
     counts above the health we start with."""
     worn = afloat(None, w.worn_codes.values())
     if not worn and any(on_water(w, m, p) for p in inside):
         return 0, 0
     healed = drinking = 0
     for code, heal in heals_carried(w):
-        cost = 1 + attack_cooldown_ticks(code, tick_hz)
+        cost = 2 + use_cooldown_ticks({"verb": "Use", "target": {"kind": "self"}}, code, tick_hz)
         if heal <= per_tick * cost:
             break
         healed, drinking = healed + heal, drinking + cost

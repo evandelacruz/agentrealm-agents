@@ -71,7 +71,7 @@ class Memory:
     queue_sent_tick: int = 0  # tick the last multi-intent queue was answered at
     cancel_queue: bool = False  # send [] next tick: the held queue was planned from a stale position
     last_step_tick: int | None = None  # tick our last Step applied, to pace the next queue
-    last_use_tick: int | None = None  # tick our last Use applied (weapon cooldown, A1)
+    last_use_tick: int | None = None  # tick our last weapon swing applied (attack cooldown, A1, A153)
     last_speech_tick: int | None = None  # tick our last Say/Broadcast applied (A1)
     nav: NavMemory = field(default_factory=NavMemory)  # what Step rejections taught the map (A14)
     nav_stuck: NavStuckMemory = field(default_factory=NavStuckMemory)  # stuck detection and escalation (A15)

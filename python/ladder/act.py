@@ -24,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from agentrealm_adk.config import Policy
-from agentrealm_adk.equip import ARMED, CUT, best_equip_upgrade, hunting_ceiling, weapon_to_arm
+from agentrealm_adk.equip import ARMED, CUT, FIGHT, best_equip_upgrade, hunting_ceiling, weapon_to_arm
 from agentrealm_adk.executor import (
     DEFAULT_TICK_RATE_HZ,
     QUEUE_HORIZON_INTENTS,
@@ -36,7 +36,7 @@ from agentrealm_adk.executor import (
     use_cooldown_ticks,
 )
 from agentrealm_adk.gem_yield import GATHER_BLOCKS, take_raises_gems
-from agentrealm_adk.hostile_ground import walk_reach
+from agentrealm_adk.hostile_ground import off_safe, walk_reach
 from agentrealm_adk.knowledge_base import KnowledgeBase, knowledge_items
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation import walk_toward
@@ -102,11 +102,44 @@ class Act:
 
 
 def act(op: GoalOp, ctx: Ctx) -> Act:
-    """This round of ``op``: the function ``OPS`` names for it."""
-    work = OPS.get(op.get("op", ""))
-    if work is None:
-        return Act(None, f"{op.get('op')}: not an op she carries out", over=True)
-    return work(op, ctx)
+    """This round of ``op``: the function ``OPS`` names for it; over at once
+    with why when it cannot be carried out as given (``refuse``)."""
+    why = refuse(op)
+    if why:
+        return Act(None, why, over=True)
+    return OPS[op["op"]](op, ctx)
+
+
+def _int(v: object) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def refuse(op: GoalOp | None) -> str:
+    """Why ``op`` cannot be carried out as given, or "": not an op she runs,
+    or a field it needs missing or of the wrong kind. The planner's reply is
+    held to it before it runs (``ask.Planner.finish``)."""
+    if not isinstance(op, dict) or op.get("op") not in OPS:
+        return f"{op.get('op') if isinstance(op, dict) else op}: not an op she carries out"
+    name = op["op"]
+    cell = _int(op.get("x")) and _int(op.get("y"))
+    if name in ("enter_level", "fight_boss") and not cell:
+        return f"{name} needs the door's x and y"
+    if name in ("fetch_item", "buy") and not (isinstance(op.get("code"), str) and op["code"]):
+        return f"{name} needs a code"
+    if name == "gather_gems" and not _int(op.get("count")):
+        return "gather_gems needs a count"
+    if name == "fight" and not (_int(op.get("npc_id")) or (isinstance(op.get("npc_type"), str) and op["npc_type"])):
+        return "fight needs an npc_id or an npc_type"
+    if name == "travel":
+        if op.get("to") not in TRAVEL_TO:
+            return f"travel to {op.get('to')!r}: not one of {', '.join(TRAVEL_TO)}"
+        if op["to"] == "point" and not cell:
+            return "travel to a point needs its x and y"
+    return ""
+
+
+# Where a ``travel`` may go; ``shop`` and ``entrance`` with no cell go to the nearest known one.
+TRAVEL_TO = ("town", "point", "entrance", "shop", "hunting_ground")
 
 
 # The intents she sends (API intents, https://agentrealm.gg/docs/api).
@@ -157,7 +190,7 @@ def walk_sets(ctx: Ctx, toward: Entity | None = None) -> tuple[set[Pos], set[Pos
     fit = {(e.kind, e.id) for e in w.entities if is_hostile(w, ctx.policy, e) and fits_now(e, w, ctx.kb, ctx.value)}
     if toward is not None:
         fit.add((toward.kind, toward.id))
-    reach = frozenset(walk_reach(w, ctx.policy, skip=fit))
+    reach = frozenset(off_safe(w, walk_reach(w, ctx.policy, skip=fit)))  # nothing hurts on a safe block (A162)
     return avoid, costly | reach, reach
 
 
@@ -256,7 +289,9 @@ def lying(w: WorldModel, code: str, *, priced: bool) -> list[Entity]:
 def travel(op: GoalOp, ctx: Ctx) -> Act:
     """Walk to where the travel names (``travel.resolve``); over once there."""
     w = ctx.world
-    dest = resolve_travel(travel_op_from_plan_goal(op), w, ctx.kb, ctx.mem.strength)
+    # No cell means the nearest known one, as 0, 0 does (``travel_op_from_plan_goal``).
+    where = {"x": 0, "y": 0, **op} if not (_int(op.get("x")) and _int(op.get("y"))) else op
+    dest = resolve_travel(travel_op_from_plan_goal(where), w, ctx.kb, ctx.mem.strength)
     if dest is None:
         return Act(None, f"travel to {op.get('to')}: nowhere known", over=True)
     if (w.map_id, w.pos) == (dest.map_id, dest.pos) or went_through(op, w, ctx.started.tick, ctx.started.map_id):
@@ -363,6 +398,26 @@ def cut(ctx: Ctx, cell: Pos) -> list[dict]:
     )
 
 
+def swings(ctx: Ctx, foe: Entity, count: int = 1) -> list[dict]:
+    """``count`` swings at ``foe``, each behind the cooldown the weapon in
+    hand still owes (A153). With another weapon to fight with
+    (``equip.weapon_to_arm``, A99) than the one in hand, a cutter or a heal
+    say, it is armed first and one swing follows it."""
+    w, m = ctx.world, ctx.mem
+    since = max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None
+    weapon = weapon_to_arm(w, ctx.kb, FIGHT, hunting_ceiling(w, ctx.kb))
+    use = use_on(foe)
+    if weapon is not None and weapon.code != w.armed_code:
+        return arm_then_use(
+            arm(weapon.id), use, cooldown_ticks=use_cooldown_ticks(use, weapon.code, ctx.tick_hz),
+            horizon_ticks=ctx.horizon, ticks_since_last_use=since,
+        )
+    return build_attack_queue(
+        [use] * count, poll_interval_ticks=ctx.horizon, horizon_ticks=ctx.horizon,
+        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code, ctx.tick_hz), ticks_since_last_use=since,
+    )
+
+
 def explore_area(op: GoalOp, ctx: Ctx) -> Act:
     """Walk to the nearest frontier cell in the area (``targets.explore_targets``)
     not given up nor stood on already, kept until reached; over when none is left."""
@@ -398,16 +453,7 @@ def fight(op: GoalOp, ctx: Ctx) -> Act:
     st.target = foe.id
     reach = weapon_reach(w, ctx.kb)
 
-    def swings() -> list[dict]:
-        m = ctx.mem
-        since = max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None
-        cooldown = attack_cooldown_ticks(w.armed_code, ctx.tick_hz)
-        return build_attack_queue(
-            [use_on(foe)] * 3, poll_interval_ticks=ctx.horizon, horizon_ticks=ctx.horizon,
-            weapon_cooldown_ticks=cooldown, ticks_since_last_use=since,
-        )
-
-    return reach_and(ctx, f"lorraine:{op['op']}", foe.pos, reach, swings, f"swing at npc {foe.id}", toward=foe)
+    return reach_and(ctx, f"lorraine:{op['op']}", foe.pos, reach, lambda: swings(ctx, foe, 3), f"swing at npc {foe.id}", toward=foe)
 
 
 def pick_foe(op: GoalOp, w: WorldModel) -> Entity | None:

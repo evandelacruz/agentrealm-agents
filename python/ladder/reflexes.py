@@ -1,19 +1,26 @@
 """Lorraine's reflexes (A141): what runs above the op, every round, before the tree is walked.
 
-In order, the first that fires holds the round:
+In order, the first that fires with something to send holds the round:
 
 - **sync**: her place is unknown. Asleep, a ``Wait`` wakes her; else she
   holds until a position read places her.
 - **downed**: dead. She holds until the world respawns her.
 - **flee**: a hostile is in range and her margin cannot pay for the
   hostiles that can reach her: she steps away (``pathing.flee_step``, then
-  ``flee_run``), toward the nearest safe cell.
+  ``flee_run``), toward the refuge. Cornered, she drinks, else swings.
 - **retreat**: the margin is short and hostiles can reach her, none in
-  range yet: she walks to safe ground (``survival.safe_goals``).
+  range yet: she walks to the refuge.
 - **heal**: in a fight, health alone no longer pays for it but the heals
   carried do: she drinks or eats one.
 - **fight back**: a hostile hits her from her weapon's reach and the margin
   pays for the fight: she swings, rather than walking on taking hits.
+
+Only sync and downed hold the round with nothing to send. Any other reflex
+with nothing to send, or whose intents the water gate cuts to nothing
+(``fording.ford_gate``, A133, run by the loop), yields to the next one and
+then to the op: she never stands taking hits for want of a move (A114). Flee
+and retreat head for one refuge, ``pathing.retreat_safe_goal``: the nearest
+safe block she gets to before any hostile, each priced as a chaser (A162).
 
 Every one of them reads one number, her margin now
 (``readiness.margin_now`` on :class:`readiness.Here`, the hostiles that can
@@ -24,18 +31,19 @@ and the next walk of the tree decides what she works on.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from agentrealm_adk.executor import arm_then_use, attack_cooldown_ticks, build_attack_queue, use_cooldown_ticks, wait
+from agentrealm_adk.executor import arm_then_use, use_cooldown_ticks, wait
 from agentrealm_adk.executor.movement import build_paced_walk_queue
 from agentrealm_adk.item_table import InventorySupply
-from agentrealm_adk.pathing import flee_run, flee_step, plan_sets
+from agentrealm_adk.pathing import flee_run, flee_step, plan_sets, retreat_safe_goal
 from agentrealm_adk.reach import weapon_reach
 from agentrealm_adk.supplies import heal_of, heals
-from agentrealm_adk.survival import hostiles_in_range, is_attacker, is_hostile, on_safe_tile, recently_attacked, safe_goals
-from agentrealm_adk.world import Entity, chebyshev
+from agentrealm_adk.survival import hostiles_in_range, is_attacker, is_hostile, on_safe_tile, recently_attacked
+from agentrealm_adk.world import Entity, Pos, chebyshev
 
-from .act import Ctx, arm, use_on, use_self, walk
+from .act import Ctx, arm, swings, use_self, walk
 from .readiness import Budget, Here, margin_now, room
 
 # The goal a retreat walk is given up under, as any walk is (A90).
@@ -56,13 +64,26 @@ def margin(ctx: Ctx) -> Budget:
     return margin_now(Here(ctx.value), ctx.world, ctx.kb)
 
 
-def reflex(ctx: Ctx) -> Reflex | None:
-    """The first reflex that fires this round, else None: the op runs."""
+def reflex(ctx: Ctx, gate: Callable[[str, list[dict]], list[dict]] | None = None) -> Reflex | None:
+    """The first reflex that fires this round with something to send, else
+    None: the op runs. ``gate`` is the water gate the loop sends through;
+    a reflex it cuts to nothing yields. Only sync and downed hold with nothing."""
     for check in REFLEXES:
         fired = check(ctx)
-        if fired is not None:
+        if fired is None:
+            continue
+        if fired.name in HOLDS:
             return fired
+        intents = gate(fired.name, fired.intents) if gate is not None and fired.intents else fired.intents
+        if intents:
+            return replace(fired, intents=intents)
     return None
+
+
+def refuge(ctx: Ctx) -> Pos | None:
+    """Where flee runs toward and retreat walks (``pathing.retreat_safe_goal``, A162)."""
+    _, avoid, costly = plan_sets(ctx.world, ctx.mem, ctx.policy, ctx.kb)
+    return retreat_safe_goal(ctx.mem, ctx.world, ctx.policy, ctx.kb, avoid, costly)
 
 
 def sync(ctx: Ctx) -> Reflex | None:
@@ -98,13 +119,15 @@ def flee(ctx: Ctx) -> Reflex | None:
     if b.ok:
         return None
     blocked, _, _ = plan_sets(w, ctx.mem, ctx.policy, ctx.kb)
-    first = flee_step(w, hostiles, blocked, safe_goals(w, ctx.kb))
+    safe = refuge(ctx)
+    first = flee_step(w, hostiles, blocked, [safe] if safe is not None else ())
     if first is None:
+        # Cornered: a drink, else a swing; with neither the next reflex acts.
         drink = heal_now(ctx)
         if drink is not None:
             return Reflex("flee", drink, f"cornered: drink ({b.why()})")
         swing = swing_at_hitter(ctx)
-        return Reflex("flee", swing, f"cornered: {'swing' if swing else 'hold'} ({b.why()})")
+        return Reflex("flee", swing, f"cornered: swing ({b.why()})") if swing else None
     run = flee_run(w, hostiles, blocked, first)
     m = ctx.mem
     since = max(1, w.tick - m.last_step_tick) if m.last_step_tick is not None else None
@@ -122,11 +145,11 @@ def retreat(ctx: Ctx) -> Reflex | None:
     b = margin(ctx)
     if b.ok:
         return None
-    goals = safe_goals(w, ctx.kb)
-    if not goals:
+    goal = refuge(ctx)
+    if goal is None:
         return None
-    a = walk(ctx, RETREAT_GOAL, goals[0])
-    return Reflex("retreat", a.intents, f"retreat to {goals[0]}: {b.why()}")
+    a = walk(ctx, RETREAT_GOAL, goal)
+    return Reflex("retreat", a.intents, f"retreat to {goal}: {b.why()}") if a.intents else None
 
 
 def heal(ctx: Ctx) -> Reflex | None:
@@ -172,8 +195,9 @@ def fight_back(ctx: Ctx) -> Reflex | None:
 
 
 def swing_at_hitter(ctx: Ctx) -> list[dict] | None:
-    """Swings at the hostile hitting her, when it stands in her weapon's reach."""
-    w, m = ctx.world, ctx.mem
+    """A swing at the hostile hitting her, when it stands in her weapon's
+    reach, the weapon to fight with armed first (``act.swings``)."""
+    w = ctx.world
     reach = weapon_reach(w, ctx.kb)
     hitter = next(
         (e for e in w.entities if is_attacker(w, e) and is_hostile(w, ctx.policy, e) and chebyshev(e.pos, w.pos) <= reach),
@@ -181,16 +205,12 @@ def swing_at_hitter(ctx: Ctx) -> list[dict] | None:
     )
     if hitter is None:
         return None
-    since = max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None
-    queue = build_attack_queue(
-        [use_on(hitter)],
-        poll_interval_ticks=ctx.horizon,
-        horizon_ticks=ctx.horizon,
-        weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code, ctx.tick_hz),
-        ticks_since_last_use=since,
-    )
-    return queue or None
+    return swings(ctx, hitter) or None
 
 
-# The order they are asked in: the first that fires holds the round.
+# The order they are asked in: the first that fires with something to send holds the round.
 REFLEXES = (sync, downed, flee, retreat, heal, fight_back)
+# The reflexes that hold the round with nothing to send: there is nothing else to do.
+HOLDS = ("sync", "downed")
+# The reflexes that run away: the water gate arms no weapon in front of them (``fording.ESCAPES``).
+ESCAPES = ("flee", "retreat")

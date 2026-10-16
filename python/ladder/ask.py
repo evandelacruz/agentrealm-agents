@@ -59,6 +59,7 @@ from agentrealm_adk.targets import GoalOp
 from agentrealm_adk.world import WorldModel
 
 from . import readiness as r
+from .act import refuse
 from .goals import BLOCK_TICKS, Block, Blocks, Node, Reading
 
 if TYPE_CHECKING:
@@ -294,12 +295,16 @@ class Planner:
         return call
 
     def finish(self, call: Call) -> Reply | None:
-        """The reply of a call that is back (``Call.back``), or None when it failed."""
+        """The reply of a call that is back (``Call.back``), or None when it
+        failed: an error, an unreadable reply, or an op she cannot carry out
+        as given (``act.refuse``), which is logged with why."""
         try:
             if call.error is not None:
                 raise call.error
             self.budget.settle(call.usage)
             reply = read_reply(call.raw, call.node.ops)
+            if reply.op is not None and (why := refuse(reply.op)):
+                raise ValueError(f"refused {reply.op}: {why}")
         except Exception as e:  # network, HTTP status, refusal, an unreadable reply
             self.last_error = str(e) or type(e).__name__
             self.backoff.fail(self.clock())

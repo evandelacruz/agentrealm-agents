@@ -4,9 +4,9 @@ Every window spends one call (``choose_call``): a read the world model is
 owed, else a round trip (``POST tick``). Each round trip:
 
 1. **Reflexes** (``ladder/reflexes.py``): sync, downed, flee, retreat, heal,
-   fight back, each on her one risk function. The first that fires holds the
-   round: its intents go out and the op and the goal are left as they were,
-   so the next walk of the tree decides.
+   fight back, each on her one risk function. The first that fires with
+   something to send holds the round: its intents go out and the op and the
+   goal are left as they were, so the next walk of the tree decides.
 2. **A walk under way** runs on: the queue an op sent is not sent again
    while the op is unchanged and the queue still has intents to run.
 3. **The op** for the turn's goal (``goal_op``): every round the tree is
@@ -21,6 +21,9 @@ owed, else a round trip (``POST tick``). Each round trip:
 4. **Carried out** by ``ladder/act.py``: the op's walk and intents on the
    ADK's executor and pathing. An op over (done, or nothing left it can do)
    is not run again for that goal, and the tree is asked afresh.
+
+Every send, a reflex's or an op's, goes through the one water gate
+(``fording.ford_gate``, A133), as Gary's do.
 
 What a round trip brings back is folded in by the world model; the queue
 she sent is tracked by its results (a ``Step`` applied moves her, a door
@@ -44,6 +47,7 @@ from agentrealm_adk.executor import (
     queue_horizon_intents,
     step_landing,
 )
+from agentrealm_adk.fording import ford_gate, loadout_memory
 from agentrealm_adk.executor.held_queue import STEP_DOUBT, open_step, possible_positions, unconfirmed_send
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.knowledge_base.hostiles import load_hostiles, save_hostiles
@@ -65,7 +69,7 @@ from .act import Ctx, Started, act
 from .ask import ALREADY_MET, Call, Planner, Reply, already_met, answer, lift_changed, watch_lines
 from .goals import Blocks, Node, Turn, tree, walk
 from .readiness import ORDINARY
-from .reflexes import reflex, threats
+from .reflexes import ESCAPES, reflex, threats
 
 # Windows between self reads.
 SELF_REFRESH = 60
@@ -248,11 +252,17 @@ class LadderRunner:
                    goal.value if goal is not None else ORDINARY)
 
     def decide(self) -> Decision:
-        """The reflexes first; then the walk under way; then the op for the turn's goal."""
-        fired = reflex(self.ctx())
+        """The reflexes first; then the walk under way; then the op for the
+        turn's goal. Everything sent goes through the water gate (``gate``)."""
+        saved = loadout_memory(self.mem)
+        fired = reflex(self.ctx(), lambda name, intents: self.gate(intents, saved, escape=name in ESCAPES)[0])
         if fired is not None:
             if self.running() and self.queue_of == fired.name:
                 return Decision(None, f"{fired.why}: queue under way", fired.name)
+            if fired.intents is None and self.running():
+                # A hold stops what another sent: the op's walk does not run on under it.
+                self.drop_queue()
+                return Decision([], f"{fired.why}: stop", fired.name)
             return self.send(fired.intents, fired.why, fired.name)
         op = self.goal_op()
         if self.running() and self.queue_of == op_key(op):
@@ -262,11 +272,22 @@ class LadderRunner:
                 return Decision(None, "no op to work", "tree")
             a = act(op, self.ctx())
             if not a.over:
-                return self.send(a.intents, a.why, op["op"], op_key(op))
+                intents, cut = self.gate(a.intents, saved)
+                return self.send(intents or None, f"{a.why}; {cut}" if cut else a.why, op["op"], op_key(op))
             self.log("op", f"{op['op']} over: {a.why}")
-            self.end_op()
+            self.end_op(a.why)
             op = self.goal_op()
         return Decision(None, "no op to work", "tree")
+
+    def gate(self, intents: list[dict] | None, saved: dict, *, escape: bool = False) -> tuple[list[dict] | None, str]:
+        """The one water gate every send goes through (``fording.ford_gate``,
+        A133): a fording supply armed before the first step onto water, a
+        queue that would strand her afloat cut short, the weapon armed again
+        ashore (never in front of an escape). Returns what goes out, and why
+        it was cut ("" when it was not)."""
+        if not intents:
+            return intents, ""
+        return ford_gate(self.world, self.mem, saved, intents, self.knowledge, rearm=not escape)
 
     def send(self, intents: list[dict] | None, why: str, by: str, owner: str | None = None) -> Decision:
         """Send ``intents`` in place of the queue running, or poll when there are none.
@@ -370,13 +391,21 @@ class LadderRunner:
         if op != self.op:
             self.op, self.started = op, None
 
-    def end_op(self) -> None:
-        """The op is over: never run again for this goal, and the tree's op stands in."""
+    def end_op(self, why: str) -> None:
+        """The op is over: never run again for this goal, and the tree's op
+        stands in. With that one over too, nothing is left to work the goal:
+        it is blocked with why, as a ``cannot`` blocks it, to its expiry, so
+        the next walk descends past it and asks afresh there."""
         if self.op is not None:
             self.done.append(self.op)
         self.set_op(None)
-        if self.turn is not None and self.turn.goal is not None:
-            self.set_op(self.own_op(self.turn))
+        goal = self.turn.goal if self.turn is not None else None
+        if goal is None:
+            return
+        self.set_op(self.own_op(self.turn))
+        if self.op is None:
+            self.blocks.mark(goal.key, f"every op for it is over: {why}", self.world.tick)
+            self.log("planner", f"{goal.title}: blocked, every op for it is over ({why})")
 
     # Folding a round trip in.
 

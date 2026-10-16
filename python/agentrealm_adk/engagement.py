@@ -118,11 +118,8 @@ def sync_engagement(
     can still act on and the chase after it closes the gap (``chase_on``);
     with no ``held_target``, it ends as a flee does.
 
-    A hostile that joins the engagement off its post stretches that post's
-    reach to where we stand (``WorldModel.note_came_for_us``): it came out
-    that far for us.
-    That changes what ground costs, so committed targets are priced again
-    (``Memory.reprice_targets``).
+    A hostile that joins the engagement changes what ground costs, so
+    committed targets are priced again (``Memory.reprice_targets``).
     """
     if policy.on_hostile == "ignore" or not w.alive or w.pos is None:
         m.engagement = None
@@ -140,8 +137,6 @@ def sync_engagement(
             return None
     known = e.group if e is not None else frozenset()
     newcomers = [h for h in joined if (h.kind, h.id) not in known]
-    for h in newcomers:
-        w.note_came_for_us(h)
     if newcomers:
         m.reprice_targets()
     group = known | {(h.kind, h.id) for h in joined}
@@ -219,7 +214,12 @@ def decide(
         ratio = 0.0  # afloat with only a fording supply in hand: no swing (A146)
     else:
         ratio = win_ratio(
-            estimate_health(w) if health is None else health, members, w.threat, w.armed_code, worn_defense(w)
+            estimate_health(w) if health is None else health,
+            members,
+            w.threat,
+            w.armed_code,
+            worn_defense(w),
+            w.npc_damage,
         )
     bar = fight_bar(w, policy, params, outrun_failed)
     weighed = frozenset((h.kind, h.id) for h in members)

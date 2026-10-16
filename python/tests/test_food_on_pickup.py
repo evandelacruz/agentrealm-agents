@@ -168,6 +168,14 @@ class HeldHealsArePotionsTest(unittest.TestCase):
         w.health = 8
         self.assertEqual(readiness.food_in_sight(w).id, 50)
 
+    def test_lorraine_still_fetches_a_free_potion_at_any_health(self):
+        # A potion is carried, not eaten on pickup: only food waits (A155).
+        w = world(10)
+        w.entities = [apple(), Entity("supply", 52, (7, 5), "small_potion")]
+        self.assertEqual(readiness.food_in_sight(w).id, 52)
+        w.entities.append(Entity("supply", 53, (5, 6), "small_potion", gem_price=3))
+        self.assertEqual(readiness.food_in_sight(w).id, 52, "a priced one is the shop's")
+
 
 class NoPotionAtFullHealthTest(unittest.TestCase):
     def test_spend_potion_never_drinks_at_full_health(self):

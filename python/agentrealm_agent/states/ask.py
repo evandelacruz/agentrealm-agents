@@ -11,13 +11,12 @@ above every state that asks, so a hold never stands taking hits.
 
 from __future__ import annotations
 
-from agentrealm_adk.hostile_ground import held_by_hostile
 from agentrealm_adk.break_memory import breakable_block, choice_at, given_up_blocks, straight_route
 from agentrealm_adk.memory import queue_signal
 from agentrealm_adk.navigation import cost_path
 from agentrealm_adk.pathing import HostileReach, grid_params, plan_sets
 from agentrealm_adk.survival import hostiles_reaching
-from agentrealm_adk.world import Pos, WorldModel, chebyshev
+from agentrealm_adk.world import Pos, WorldModel
 
 from ..plan import GoalOp
 from .base import PlayContext, StateOutcome, op_walk
@@ -76,7 +75,7 @@ def what_blocks(w: WorldModel, ctx: PlayContext, at: Pos, reach: HostileReach | 
     whose ground the op's walk keeps out of (``base.op_walk``) the way (or,
     with none, the straight route) crosses, named with its cell, one in view
     where it stands and one remembered out of view where it was last seen
-    and by the ground it holds (A128, A151); a hostile in view the
+    (A128, A151, A162); a hostile in view the
     engagement would fight, left out of that ground, named when its range
     reaches the way; and the first block on the straight route, with
     whether a held item opens it. ``reach``: the op walk's, when the caller
@@ -93,16 +92,11 @@ def what_blocks(w: WorldModel, ctx: PlayContext, at: Pos, reach: HostileReach | 
     crossed = reach.crossed(cells)
     named = {(g.entity.kind, g.entity.id) for g in crossed}
     fought = [e for e in w.entities if (e.kind, e.id) in hostiles_reaching(w, ctx.policy, cells, skip=named)]
-    held_by = held_by_hostile(w, ctx.policy)
     for e in sorted([g.entity for g in crossed if g.in_view] + fought, key=lambda e: (e.kind, e.id)):
         parts.append(f"hostile {e.code or e.kind} {e.id} at {e.pos[0]},{e.pos[1]}")
     for g in sorted((g for g in crossed if not g.in_view), key=lambda g: (g.entity.kind, g.entity.id)):
         e = g.entity
-        line = f"remembered hostile {e.code or e.kind} {e.id}, last seen at {e.pos[0]},{e.pos[1]}, out of view"
-        zones = held_by.get((e.kind, e.id), [])
-        if (held := next(((c, r) for c, r in zones if any(chebyshev(c, p) <= r for p in cells)), None)) is not None:
-            line += f", holding ground round {held[0][0]},{held[0][1]}"
-        parts.append(line)
+        parts.append(f"remembered hostile {e.code or e.kind} {e.id}, last seen at {e.pos[0]},{e.pos[1]}, out of view")
     skip = given_up_blocks(m.nav_stuck, w.map_id, w.tick)
     if (p := next((p for p in route if breakable_block(w, p) is not None), None)) is not None:
         opens = choice_at(w, ctx.knowledge, p, skip) is not None

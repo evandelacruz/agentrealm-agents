@@ -14,7 +14,7 @@ import dataclasses
 
 from agentrealm_adk.directives import attack_forbidden
 from agentrealm_adk.engagement import cannot_outrun, fights
-from agentrealm_adk.hostile_ground import ground_by_hostile
+from agentrealm_adk.hostile_ground import ground_by_hostile, off_safe
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation import cost_path, no_way, oscillation
 from agentrealm_adk.navigation import stuck as nav_stuck
@@ -152,9 +152,11 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
         return StateOutcome(None, f"retreat → safe {goal}: queue under way", state=state, wait=True)
     pursuers = pursuer_peaks(w, policy, everyone=losing)
     # Ground a hostile it is not running from holds, in view or remembered,
-    # costs a detour, and a kept path that now crosses the reach of one it
-    # did not cross when planned is planned again (A63 run 4).
-    plan_costly |= set().union(*(cells for key, cells in ground_by_hostile(w, policy).items() if key not in pursuers))
+    # costs a detour, but for a known safe block, where no hit lands, and a
+    # kept path that now crosses the reach of one it did not cross when
+    # planned is planned again (A63 run 4).
+    held = set().union(*(cells for key, cells in ground_by_hostile(w, policy).items() if key not in pursuers))
+    plan_costly |= off_safe(w, held)
     params = dataclasses.replace(grid_params(policy, plan_avoid, plan_costly), danger_peaks=pursuers)
     # Each danger profile keeps its own corridor (``RETREAT_NAV``, ``LOSING_NAV``).
     nav_key = LOSING_NAV if losing else RETREAT_NAV

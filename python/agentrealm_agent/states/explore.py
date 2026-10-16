@@ -131,7 +131,7 @@ def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateO
     is closing in (``survival.approaching``); None with none near, or with
     no step away from a hostile that is not closing.
 
-    Free-play run 6: the character started hurt beside a hostile's post, and
+    Free-play run 6: the character started hurt beside a hostile, and
     before the planner's first reply the safe default walked ten steps
     toward it and died. The reflexes (Retreat, Flee, Fight, Heal) still act
     above this; it covers the ground between them, a hostile near but not in
@@ -163,7 +163,7 @@ def keep_away(w: WorldModel, ctx: PlayContext, state: str = "Explore") -> StateO
         return StateOutcome(None, "hurt, hostile near: hold", state=state, wait=True)
     m.keep_away_hold = None
     m.path = []  # one step at a time: no walk queue toward anything
-    step = min(options, key=lambda p: (not is_safe_ish(w, p, ctx.policy), -gap(p), p))
+    step = min(options, key=lambda p: (not is_safe_ish(w, p), -gap(p), p))
     return StateOutcome([set_position(step)], "hurt, hostile near: step away", state=state)
 
 

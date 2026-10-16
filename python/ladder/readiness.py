@@ -37,13 +37,13 @@ from agentrealm_adk.healing import held_heal, worth_eating
 from agentrealm_adk.knowledge_maps import map_level_known
 from agentrealm_adk.level_order import CLEARED, entrance_rank, target_level
 from agentrealm_adk.sellers import sellers_of
-from agentrealm_adk.supplies import armor_defense, heal_of, heals, is_weapon, sold_codes, worn_slot
+from agentrealm_adk.supplies import armor_defense, heal_of, heals, is_potion, is_weapon, sold_codes, worn_slot
 from agentrealm_adk.survival import (
     FIGHT_REACH_RADIUS,
-    UNKILLED_HOSTILE_HEALTH,
     estimate_health,
     expected_damage,
     known_hostile,
+    UNKILLED_HOSTILE_HEALTH,
     ticks_to_kill_them,
     worn_defense,
 )
@@ -138,10 +138,12 @@ class Budget:
 
 def fight_cost(foe: Entity, w: WorldModel, loadout: Loadout) -> float:
     """The damage ``foe`` is expected to deal while ``loadout`` kills it alone:
-    Gary's win estimate, its health scaled from his assumed hostile's when a
+    Gary's win estimate, against the health it has left (``survival.health_left``:
+    less the damage it has taken), scaled from his assumed hostile's when a
     read served it (a boss)."""
-    hp = foe.max_health or foe.health or UNKILLED_HOSTILE_HEALTH
-    ticks = ticks_to_kill_them([foe], loadout.weapon) * hp / UNKILLED_HOSTILE_HEALTH
+    ticks = ticks_to_kill_them([foe], loadout.weapon, w.npc_damage)
+    if foe.is_boss:
+        ticks *= (foe.max_health or foe.health or UNKILLED_HOSTILE_HEALTH) / UNKILLED_HOSTILE_HEALTH
     return expected_damage([foe], w.threat, ticks, loadout.armor)
 
 
@@ -359,11 +361,16 @@ def missing(w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal) -> Missin
 
 
 def food_in_sight(w: WorldModel) -> Entity | None:
-    """The nearest free food lying in sight that she is hurt by at least the
-    heal of (``healing.worth_eating``, A155): food is eaten on pickup, even at
-    full health, so it is left lying until then."""
+    """The nearest free heal lying in sight: a potion, which is carried, or
+    food she is hurt by at least the heal of (``healing.worth_eating``, A155):
+    food is eaten on pickup, even at full health, so it is left lying until
+    then."""
     here = w.pos
-    free = [e for e in w.entities if e.kind == "supply" and e.gem_price is None and worth_eating(w, e.code)]
+    free = [
+        e
+        for e in w.entities
+        if e.kind == "supply" and e.gem_price is None and (is_potion(e.code) or worth_eating(w, e.code))
+    ]
     if here is None or not free:
         return None
     return min(free, key=lambda e: (chebyshev(here, e.pos), e.pos))

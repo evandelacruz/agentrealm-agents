@@ -204,14 +204,15 @@ class NoWayRoundAsksTest(unittest.TestCase):
 
     def test_blocked_by_names_a_remembered_hostile_out_of_view(self):
         w = world(self.CORRIDOR, at=(1, 1))
+        w.perception = 5  # a dark map: its cell is out of sight
         guard = pack(w, (12, 1))[0]
-        w.entities = []  # gone from view; its post still holds the corridor
-        w.sightings[(guard.kind, guard.id)] = Sighting(guard, 7, w.tick, (12, 1), post=True)
+        w.entities = []  # gone from view; it stood still there, so the cell it was last seen on still holds the corridor
+        w.sightings[(guard.kind, guard.id)] = Sighting(guard, 7, w.tick, still=True, in_view=False)
         c = ctx(travel(21, 1))
         out = dispatch(w, c)
         self.assertEqual((out.state, out.intents), ("Travel", None), out.reason)
         [ask] = asks(c)
-        self.assertIn("remembered hostile bogmaw 200, last seen at 12,1, out of view, holding ground round 12,1", ask["blocked_by"])
+        self.assertIn("remembered hostile bogmaw 200, last seen at 12,1, out of view", ask["blocked_by"])
 
 
 def step_to(w: WorldModel, m: Memory, cell: tuple[int, int]) -> None:
@@ -291,14 +292,16 @@ class OnlyWayPassTest(unittest.TestCase):
         self.assertIn(goal, reach)
         self.assertFalse(reach.only_way(goal), "reached round the reach: the goal is left out of it")
 
-    def test_a_remembered_hostiles_post_is_never_passed_within_its_range(self):
-        """A151: remembered ground is passed like seen ground, but never
-        within ``hostile_range`` of where its hostile is known to stand."""
+    def test_a_remembered_hostile_is_never_passed_within_its_range(self):
+        """A151, A162: remembered ground is passed like seen ground, but
+        never where the hostile, chasing from where it was last seen, comes
+        within ``hostile_range``."""
         w = world(NoWayRoundAsksTest.CORRIDOR, at=(1, 1))
+        w.perception = 5  # a dark map: its cell is out of sight
         w.health = w.max_health = 100
         guard = pack(w, (12, 1))[0]
-        w.entities = []  # its post at (12, 1) still holds the corridor, which runs through its range
-        w.sightings[(guard.kind, guard.id)] = Sighting(guard, 7, w.tick, (12, 1), post=True)
+        w.entities = []  # last seen still at (12, 1), in the corridor
+        w.sightings[(guard.kind, guard.id)] = Sighting(guard, 7, w.tick, still=True, in_view=False)
         c = ctx(travel(21, 1))
         self.assertIsNone(dispatch(w, c).intents)
         self.assertEqual(len(asks(c)), 1)
@@ -388,6 +391,7 @@ class CoversPassTest(unittest.TestCase):
         self.assertFalse(self.covers())
 
     def test_every_hostile_whose_reach_it_crosses_is_counted(self):
+        self.w.health = 80
         self.assertTrue(self.covers())
         self.w.entities.append(Entity("npc", 201, (13, 4), code="bogmaw"))  # a second in the pocket's reach
         self.reach = self.ground_reach()

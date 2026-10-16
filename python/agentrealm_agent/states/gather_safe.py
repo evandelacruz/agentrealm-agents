@@ -7,8 +7,8 @@ known hostile's reach (``route_bar``, ``route_clear``). Detour (A71) uses the sa
 tests for its finds. That includes the
 open field, where the gems are, and safe zones, where breaking a block is
 allowed; Gather learns which ground does not cut (``gem_yield``). Staying alive in the field is the reflexes' job (Retreat,
-Flee, Fight, Heal), not Gather's. The stricter safe-zone ground a hurt
-character walks first is ``hostile_ground.is_safe_ish`` (``safe_explore_path``).
+Flee, Fight, Heal), not Gather's. The safe-zone blocks a hurt character
+walks first are ``hostile_ground.is_safe_ish`` (``safe_explore_path``).
 """
 
 from __future__ import annotations

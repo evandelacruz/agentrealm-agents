@@ -128,11 +128,12 @@ def remembered_rows(rows: dict[str, Any], map_id: int) -> dict[Pos, str]:
 
 
 def is_oddity(w: WorldModel, kb: KnowledgeBase | None, pos: Pos) -> bool:
-    """Whether ``pos`` on this map is an oddity State ``oddities`` draws from
-    (remembered, :func:`remember`). An odd block may need any of the five
-    capabilities whatever its type (Manual §11 Breaking blocks, A160), so
-    Break tries one with any capability held."""
-    return pos in remembered(w, kb)
+    """Whether ``pos`` on this map is an oddity State ``oddities`` lists:
+    remembered (:func:`remember`) or odd in what the agent sees now
+    (:func:`is_odd`), as :func:`oddities_line` merges them. An odd block may
+    need any of the five capabilities whatever its type (Manual §11 Breaking
+    blocks, A160), so Break tries one with any capability held."""
+    return pos in remembered(w, kb) or is_odd(w.view.tiles, pos)
 
 
 def oddity_row(w: WorldModel, kb: KnowledgeBase | None, pos: Pos, block: str, tick_hz: int) -> dict[str, Any]:

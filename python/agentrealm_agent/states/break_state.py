@@ -30,8 +30,8 @@ from agentrealm_adk.break_memory import (
     pick_supply_for_capability,
 )
 from agentrealm_adk.navigation import cost_path
-from agentrealm_adk.oddities import is_oddity
 from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.oddities import is_oddity
 from agentrealm_adk.pathing import HostileReach, enters_reach, grid_params, nav_search, next_step, plan_sets
 from agentrealm_adk.reach import supply_reach
 from agentrealm_adk.world import VOID, Pos, WorldModel, chebyshev

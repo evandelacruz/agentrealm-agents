@@ -196,6 +196,7 @@ class MapTest(unittest.TestCase):
         text = system_prompt()
         self.assertIn("State map draws the ground round the character", text)
         self.assertIn("A block is destroyed only by a Use with an item whose capability opens its type", text)
+        self.assertIn("unless State oddities lists it", text)
         self.assertIn("No attack can be made from a safe zone", text)
         self.assertIn("no_way_on", text)
 

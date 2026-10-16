@@ -352,8 +352,13 @@ class WorldModel:
     # size of the chest we applied (``carried_chest``, None for the blue chest a
     # character starts with), bounded by the most a carry_capacity_full refusal
     # left room for (``full_at``, ``loot.full_bound``) and never below the slots
-    # the inventory carries.
+    # the inventory carries. Every death resets it to the blue chest (A157,
+    # Manual §11 How big your chest is, Death): a death seen (``Died``), or one
+    # not seen, shown by fewer lives than when the chest was saved
+    # (``chest_lives``, ``loot.load_carried_chest``) or by a served death
+    # chest we never knew of.
     carried_chest: str | None = None
+    chest_lives: int | None = None  # lives when the loaded chest was saved; checked at the first lives read
     full_at: int | None = None
     carry_capacity: int = DEFAULT_CARRY_CAPACITY
     undroppable: set[int] = field(default_factory=set)  # supply ids Drop refused not_transferable
@@ -507,7 +512,8 @@ class WorldModel:
         if "movement_speed" in s:
             self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
-        self.lives = int(s.get("lives", 0))
+        if "lives" in s:
+            self._read_lives(int(s["lives"]))
         if "asleep" in s:
             self._set_asleep(bool(s["asleep"]))
         self.placed = bool(s.get("placed", True)) or (self.woke and self.alive and not self.asleep)
@@ -868,7 +874,7 @@ class WorldModel:
     def _apply_body_scalars(self, body: dict) -> None:
         """Fields a snapshot and a delta share: present means replace."""
         if "lives" in body:
-            self.lives = int(body["lives"])
+            self._read_lives(int(body["lives"]))
         if "alive" in body:
             self.alive = bool(body["alive"])
         if isinstance(body.get("levels_cleared"), list):
@@ -878,7 +884,10 @@ class WorldModel:
         served = body.get("death_chest")
         if isinstance(served, dict):
             try:
-                self.remember_death_chest(int(served["chest_id"]), int(served["map_id"]), (int(served["x"]), int(served["y"])))
+                chest_id = int(served["chest_id"])
+                if chest_id not in self.death_chests and chest_id not in self.death_chests_gone:
+                    self.reset_carried_chest()  # a death we never saw
+                self.remember_death_chest(chest_id, int(served["map_id"]), (int(served["x"]), int(served["y"])))
             except (KeyError, TypeError, ValueError):
                 pass  # a malformed field names no chest
         if "position" in body:
@@ -994,6 +1003,7 @@ class WorldModel:
                     self.entities = [x for x in self.entities if not (x.kind == "supply" and x.id == ev.get("supply_id"))]
                 elif kind == "Died":
                     self.forget_position()
+                    self.reset_carried_chest()
                     self.placed = self.woke = False  # off the map until Respawned: no position read can answer (A5)
                     if ev.get("chest_id"):
                         self.remember_death_chest(
@@ -1002,8 +1012,7 @@ class WorldModel:
                 elif kind == "Respawned":
                     self.placed, self.attacked_tick = True, None
                     self.attacker = self.attacker_tick = None
-                    self.carried_chest = self.full_at = None  # a new, empty blue chest (10), Manual §11
-                    self.sync_carry_capacity()
+                    self.reset_carried_chest()
                     try:
                         self.record_respawn_anchor(int(ev["map_id"]), (int(ev["x"]), int(ev["y"])))
                     except (KeyError, TypeError, ValueError):
@@ -1089,6 +1098,24 @@ class WorldModel:
         lives are counters and take none)."""
         n = len(self.held_supplies) + len(self.chest_supplies) + len(self.worn_codes)
         return n + (1 if self.armed_code else 0)
+
+    def reset_carried_chest(self) -> None:
+        """A death drops the carried chest and the respawn brings a new, empty
+        blue chest (10): any upgrade applied dies with it (A157, Manual §11
+        How big your chest is, Death)."""
+        self.carried_chest = self.full_at = self.chest_lives = None
+        self.sync_carry_capacity()
+
+    def _read_lives(self, lives: int) -> None:
+        """Lives from a self read or a snapshot that carries them (a read
+        without them leaves lives unknown and checks nothing). The first one
+        after the applied chest was loaded checks it: fewer lives than when it
+        was saved is a death since, which reset it (A157)."""
+        self.lives = lives
+        if self.chest_lives is not None:
+            if lives < self.chest_lives:
+                self.reset_carried_chest()
+            self.chest_lives = None
 
     def sync_carry_capacity(self) -> None:
         """Carry capacity from what the server tells us, at every inventory

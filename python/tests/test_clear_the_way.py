@@ -278,6 +278,7 @@ class EveryIdleOpAsksTest(unittest.TestCase):
         self.assertEqual(dispatch(w, c).state, "Wait")
         w.held_supplies.append(InventorySupply(7, "small_potion"))
         w.map_level = 1  # inside a level, where a potion may be drunk (A135)
+        w.health = 9  # never at full health (A155)
         c2 = ctx({"op": "use_item", "code": "small_potion"})
         out = dispatch(w, c2)
         self.assertEqual(out.state, "UseItem", out.reason)

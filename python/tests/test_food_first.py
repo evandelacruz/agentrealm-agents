@@ -152,10 +152,10 @@ class InCombatPotionTest(unittest.TestCase):
         self.assertEqual(out.intents[-1]["verb"], "Use")
 
     def test_a_fight_next_on_the_plan_lets_the_planner_drink(self):
-        w = world(10)
+        w = world(9)
         w.entities = [berry()]
         c = ctx({"op": "use_item", "code": "potion"}, {"op": "fight", "npc_type": "rat"})
-        self.assertEqual(dispatch(w, c).state, "UseItem")
+        self.assertIsNone(potion_refused(w, c, c.plan, "potion"))
 
     def test_what_counts_as_a_fight_next(self):
         use = {"op": "use_item", "code": "potion"}
@@ -175,16 +175,16 @@ class PlannerPotionRefusedTest(unittest.TestCase):
         self.assertIn("a potion is for a fight", why)
         self.assertIn("berry at 7:7,5, heal 1, 1 s walk", why)
         self.assertIn("State food_near", why)
-        # Hurt, Heal goes for the food; unhurt, UseItem refuses the drink with why.
+        # Hurt, Heal goes for the food; at full health UseItem refuses the drink with why (A155).
         self.assertEqual(dispatch(w, c).reason, "heal_food → (7, 5)")
         w.health = 10
         dispatch(w, c)
         self.assertIsNone(c.plan.current())
-        self.assertIn("berry at 7:7,5", failures(c)[-1]["reason"])
+        self.assertIn("none is drunk at full health", failures(c)[-1]["reason"])
         self.assertIn(POTION, w.held_supplies)
 
     def test_a_bush_near_is_named_as_the_food(self):
-        w = world(10)
+        w = world(9)
         w.view.tiles[(6, 5)] = "bush"
         c = ctx({"op": "use_item", "code": "potion"})
         self.assertIn("a bush at 7:6,5 to break for berry", potion_refused(w, c, c.plan, "potion"))
@@ -199,7 +199,7 @@ class PlannerPotionRefusedTest(unittest.TestCase):
 
     def test_the_refusal_is_the_one_potion_rule(self):
         # UseItem asks spend_potion, ordered, with Heal's food route.
-        w = world(10)
+        w = world(9)
         w.entities = [berry()]
         c = ctx({"op": "use_item", "code": "potion"})
         from agentrealm_agent.states import use_item

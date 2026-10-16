@@ -9,7 +9,8 @@ from unittest import mock
 from agentrealm_adk import config, llm
 from agentrealm_adk.config import CharacterConfig, Policy
 from agentrealm_adk.item_table import InventorySupply
-from agentrealm_adk.travel.knowledge import record_shop_cell
+from agentrealm_adk.travel.knowledge import iter_shop_cells, record_shop_cell, save_our_drops
+from agentrealm_adk.world import Entity, WorldModel
 from agentrealm_agent.strategist import Strategist, StrategistConfig
 from ladder import goals
 from ladder.ask import CONTRACT, Planner, Reply, answer, lift_changed, node_state, question, read_reply
@@ -274,6 +275,22 @@ class PlayTest(unittest.TestCase):
         self.addCleanup(r.trace.close)
         r.world = w
         return r
+
+    def test_our_drops_are_kept_across_runs(self):
+        # A priced supply this character dropped in an earlier run is no shop (A158).
+        w, kb = short_of_a_raft()
+        earlier = WorldModel(character_id=42)
+        earlier.note_our_drop(9)
+        save_our_drops(kb, earlier)
+        cfg = CharacterConfig("T", "sandbox", Policy(), Path("t.toml"))
+        r = LadderRunner(cfg, FakeClient(), 42, threading.Event(), planner()[0], knowledge=kb, out=lambda *_: None)
+        self.addCleanup(r.trace.close)
+        self.assertTrue(r.world.is_our_drop(9))
+        r.world.map_id = 1
+        before = set(iter_shop_cells(kb))
+        r.world.entities = [Entity("supply", 9, (33, 33), "bronze_sword", gem_price=15)]
+        r.learn_shops()
+        self.assertEqual(set(iter_shop_cells(kb)), before)
 
     def test_the_planners_op_for_the_goal_runs(self):
         w, kb = short_of_a_raft()

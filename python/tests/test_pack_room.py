@@ -1,7 +1,7 @@
 """A102: one rule for making room in a full pack (``pack.make_room``).
 
-Reserved items are never dropped, nothing is dropped on a shop cell, and
-what to drop is always the planner's choice (``drop`` on ``buy`` and
+Reserved items are never dropped, a drop of a priced item forfeits its price
+on any cell, a shop cell no different (A158), and what to drop is always the planner's choice (``drop`` on ``buy`` and
 ``fetch_item``): no code ranks a held item as useless. Shop, Loot and the
 Pickup reflex share it.
 """
@@ -16,7 +16,7 @@ from agentrealm_adk.item_table import FragmentMeta, InventorySupply
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.loot import Pickup
 from agentrealm_adk.memory import Memory
-from agentrealm_adk.pack import ASK, DROP, MOVE, TAKE, drop_makes_stock, make_room, reserved_supplies
+from agentrealm_adk.pack import ASK, DROP, TAKE, forfeit, make_room, reserved_supplies
 from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
@@ -159,14 +159,32 @@ class MakeRoomTest(unittest.TestCase):
         ops = [{"op": "use_block", "x": 1, "y": 1, "code": "rope"}]
         self.assertEqual(make_room(w, self.potion(), plan_ops=ops, knowledge=kb(), named="rope").drop.id, 5)
 
-    def test_no_drop_on_a_shop_cell(self):
+    def test_a_drop_on_a_shop_cell_is_a_drop_like_any_other(self):
+        # A price belongs to the supply (A158): no cell turns a drop into stock.
         w = world()
         full_pack(w)
         k = kb()
         record_shop_cell(k, 1, (2, 2))
-        self.assertTrue(drop_makes_stock(w, k))
         room = make_room(w, self.potion(), knowledge=k, named="bronze_mallet")
-        self.assertEqual((room.kind, room.drop.id), (MOVE, MALLET))
+        self.assertEqual((room.kind, room.drop.id), (DROP, MALLET))
+
+    def test_a_drop_of_a_priced_item_forfeits_its_price_on_any_cell(self):
+        w = world(at=(4, 4))
+        full_pack(w)
+        room = make_room(w, self.potion(), knowledge=kb(), named="bronze_mallet")
+        self.assertEqual(room.kind, DROP)
+        self.assertIn("forfeits its 25-gem price", room.why)
+
+    def test_the_choices_name_what_each_drop_forfeits(self):
+        w = world()
+        full_pack(w)
+        room = make_room(w, self.potion(), knowledge=kb())
+        self.assertEqual(room.kind, ASK)
+        self.assertIn("bronze_mallet (forfeits its 25-gem price)", room.why)
+        self.assertIn("matches (forfeits its 5-gem price)", room.why)
+
+    def test_an_unpriced_item_forfeits_nothing(self):
+        self.assertEqual(forfeit("pocket_knife", {}), "")
 
 
 class ShopRoomTest(unittest.TestCase):
@@ -190,7 +208,8 @@ class ShopRoomTest(unittest.TestCase):
         self.assertEqual(out.state, "Shop")
         self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": MALLET}, {"verb": "Take", "supply_id": POTION.id}])
 
-    def test_buy_steps_off_a_shop_cell_before_dropping(self):
+    def test_buy_drops_on_a_shop_cell_without_stepping_off(self):
+        # No step off a shop cell (A158): the drop forfeits the same price anywhere.
         w = world()
         full_pack(w)
         w.entities = [POTION]
@@ -199,27 +218,7 @@ class ShopRoomTest(unittest.TestCase):
         record_shop_cell(k, 1, (2, 3))
         out = dispatch(w, ctx(plan({"op": "buy", "code": "small_potion", "drop": "bronze_mallet"}), k))
         self.assertEqual(out.state, "Shop")
-        self.assertEqual(len(out.intents), 1)
-        step = out.intents[0]
-        self.assertEqual(step["verb"], "SetPosition")
-        spot = (step["x"], step["y"])
-        self.assertNotIn(spot, {(2, 2), (2, 3)})
-        self.assertLessEqual(max(abs(spot[0] - 2), abs(spot[1] - 3)), 1)
-
-    def test_no_cell_off_the_shop_hands_the_buy_back(self):
-        w = world()
-        full_pack(w)
-        w.entities = [POTION]
-        k = kb()
-        for x in range(1, 4):
-            for y in range(1, 5):
-                record_shop_cell(k, 1, (x, y))
-        c = ctx(plan({"op": "buy", "code": "small_potion", "drop": "bronze_mallet"}), k)
-        out = dispatch(w, c)
-        self.assertFalse(any(i.get("verb") in ("Drop", "Take") for i in out.intents or []), out.intents)
-        failed = [s for s in c.memory.strategist_signals if s["trigger"] == "goal_failed"]
-        self.assertIn("off the shop", failed[0]["reason"])
-        self.assertIsNone(c.plan.current())
+        self.assertEqual(out.intents, [{"verb": "Drop", "supply_id": MALLET}, {"verb": "Take", "supply_id": POTION.id}])
 
 
 class LootRoomTest(unittest.TestCase):

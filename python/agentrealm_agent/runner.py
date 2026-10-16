@@ -65,7 +65,7 @@ from agentrealm_adk.executor.supply_refusals import (
 from agentrealm_adk.fording import ford_gate, loadout_memory, note_would_strand
 from agentrealm_adk.supplies import is_food
 from agentrealm_adk.travel.resolve import given_up_travel, travel_given_up
-from agentrealm_adk.travel.knowledge import record_shop_cell, sync_entrances, sync_town
+from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, save_our_drops, sync_entrances, sync_town
 from agentrealm_adk.travel.strength import loadout_key
 from agentrealm_adk.executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
@@ -208,6 +208,7 @@ class Runner:
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
         load_carried_chest(knowledge, self.world)  # the chest applied in an earlier run (A115)
         load_death_chests(knowledge, self.world)  # chests earlier deaths left (A122)
+        load_our_drops(knowledge, self.world)  # supplies earlier runs dropped: no shop's (A158)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
         self.rng = random.Random(seed)
@@ -394,6 +395,7 @@ class Runner:
                 save_hostiles(self.knowledge, self.world, self._loaded_hostiles)
                 save_carried_chest(self.knowledge, self.world)
                 save_death_chests(self.knowledge, self.world)
+                save_our_drops(self.knowledge, self.world)
             self.trace.close()
 
     def next_window(self, not_before: float) -> None:
@@ -552,7 +554,8 @@ class Runner:
         """A cell holding a supply with a ``gem_price`` is where it can be
         bought: a priced supply "spends those gems when picked up" (manual
         §11, https://agentrealm.gg/docs/manual#11-game-rules). ``travel:shop``
-        heads for one (A27); the cell keeps what it sells, for a ``buy`` (A131)."""
+        heads for one (A27); the cell keeps what it sells, for a ``buy`` (A131).
+        A priced supply our own ``Drop`` put down is no shop's (A158)."""
         if self.knowledge is None or self.world.map_id is None:
             return
         for s in payload.get("supplies") or []:
@@ -564,9 +567,10 @@ class Runner:
             try:
                 price = int(price)
                 pos = (int(s["x"]), int(s["y"]))
+                sid = int(s["id"]) if s.get("id") is not None else None
             except (KeyError, TypeError, ValueError):
                 continue
-            if price <= 0:
+            if price <= 0 or self.world.is_our_drop(sid):
                 continue
             code = s.get("supply_subtype_code")
             record_shop_cell(self.knowledge, self.world.map_id, pos, code if isinstance(code, str) else None, price)
@@ -1148,6 +1152,8 @@ class Runner:
                         self.gem_cuts.note_no_effect(w, block, tile, used_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
+            if intent and intent.get("verb") == "Drop":
+                w.note_our_drop(intent.get("supply_id"))
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
             if intent and intent.get("verb") == "Take":

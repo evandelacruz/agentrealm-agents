@@ -12,8 +12,8 @@ from agentrealm_adk.navigation import cost_path
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.pathing import enters_reach, grid_params, nav_search, next_step
 from agentrealm_adk.healing import supply_matches
-from agentrealm_adk.sellers import SELLER_SEARCH_RADIUS, Seller, sellers_of
-from agentrealm_adk.travel.knowledge import forget_sale, iter_shop_sales, note_not_sold
+from agentrealm_adk.sellers import SELLER_SEARCH_RADIUS, Seller, sellers_of, sold_out_until
+from agentrealm_adk.travel.knowledge import iter_shop_sales, note_not_sold, note_sold_out
 from agentrealm_adk.travel.resolve import ResolvedDestination, given_up_travel
 from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
@@ -44,7 +44,8 @@ class ShopState(State):
     toward a seller known to sell the item (``sellers``, A131), the cheapest
     walk first, committed until it comes into sight: a shop cell seen selling
     it, or the place a clue or the op names, searched round once there; a
-    shop cell in sight without it sells it no more (``forget_sale``). It
+    shop cell in sight without it is sold out until its stock returns
+    (``note_sold_out``, A159), and is walked to only once it is back. It
     never walks to a shop that does not sell it, and never leaves the buy to
     the safe default: with no way it opens the block on the way a held item
     opens, else asks the planner and holds (``way``, A120). The op is dropped
@@ -178,6 +179,10 @@ def _toward_shop(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome:
     if any((s.map_id, s.pos) in given_up for s in known):
         # The walk to a seller was given up and is backed off: ``ShopState`` asks and holds (A120).
         return StateOutcome(None, f"buy {code}: the walk to its seller was given up", state=state)
+    back = sold_out_until(code, w, ctx.knowledge, op)
+    if back is not None:
+        plan.drop_current(f"{code} sold out at every known seller until tick {back}", memory=m)
+        return StateOutcome(None, f"buy {code}: sold out", state=state)
     if searched:
         plan.drop_current(f"no {code} for sale at any known seller ({len(searched)} reached without it)", memory=m)
         return StateOutcome(None, f"buy {code}: not for sale at any known seller", state=state)
@@ -193,14 +198,16 @@ def _note_searched(plan: Plan, seller: Seller) -> None:
 
 def _check_off_in_sight(w: WorldModel, ctx: PlayContext, code: str, op: GoalOp) -> None:
     """A shop cell of the item in sight with none of it for sale (Shop asks
-    this only then) sells it no more: the knowledge base forgets the sale,
-    and the head buy counts it reached (A131)."""
+    this only then) is sold out until its stock returns, hidden while
+    another supply lies there (``note_sold_out``, A159), and the head buy
+    counts it reached (A131)."""
     assert ctx.plan is not None and w.pos is not None and w.map_id is not None
     for s in sellers_of(code, w, ctx.knowledge, op):
         if s.exact and s.map_id == w.map_id and in_sight(w, s.map_id, w.pos, s.pos):
             sold = {c for mid, pos, c, _ in iter_shop_sales(ctx.knowledge) if (mid, pos) == (s.map_id, s.pos)}
+            hidden = any(e.kind == "supply" and e.pos == s.pos for e in w.entities)
             for c in {code} | {c for c in sold if supply_matches(code, c)}:
-                forget_sale(ctx.knowledge, s.map_id, s.pos, c)
+                note_sold_out(ctx.knowledge, s.map_id, s.pos, c, w.tick, ctx.tick_hz, hidden=hidden)
             _note_searched(ctx.plan, s)
 
 
@@ -212,14 +219,15 @@ def _sale_price(e: Entity, code: str, items: dict) -> int | None:
 
 
 def _sellers_to_walk(w: WorldModel, ctx: PlayContext, code: str, op: GoalOp) -> list[Seller]:
-    """The sellers of ``code`` still worth the walk, cheapest walk first: not
-    given up and not yet reached by this buy (``Plan.sellers_searched``)."""
+    """The sellers of ``code`` still worth the walk, cheapest walk first: in
+    stock (A159), not given up and not yet reached by this buy
+    (``Plan.sellers_searched``)."""
     assert ctx.plan is not None
     given_up = given_up_travel(ctx.memory.nav_stuck, w.tick)
     searched = ctx.plan.sellers_searched or frozenset()
     return [
         s for s in sellers_of(code, w, ctx.knowledge, op)
-        if (s.map_id, s.pos) not in given_up and (s.map_id, s.pos) not in searched
+        if s.in_stock and (s.map_id, s.pos) not in given_up and (s.map_id, s.pos) not in searched
     ]
 
 

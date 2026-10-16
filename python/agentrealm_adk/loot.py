@@ -16,11 +16,9 @@ Sourced rules (docs/GAME_NOTES.md, Items, slots and gear):
 - Gems and lives are consumed on pickup into counters, so they take no slot
   (Manual §11).
 
-Ground gems use ``supply_subtype_code`` ``gem`` (GAME_NOTES, Obs). Which
-code a life has on the ground is still unknown. A47 learns it in play: when
-``lives`` rises in a response whose only applied ``Take`` was one supply,
-that supply's code is filed as ``life_on_pickup`` in the item table, and
-from then on scores above gems (``learn_life_code``).
+Ground gems use ``supply_subtype_code`` ``gem`` (GAME_NOTES, Obs). A life
+is any supply of class ``life`` in the Supplies reference (``heart``, eaten
+on pickup, A156): it scores above gems (``is_life_supply``).
 """
 
 from __future__ import annotations
@@ -31,7 +29,7 @@ from typing import Any
 from typing import TYPE_CHECKING
 
 from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
-from .supplies import chest_capacity, heals
+from .supplies import chest_capacity, heals, is_life
 from .world import Entity, Pos, WorldModel
 
 if TYPE_CHECKING:
@@ -46,34 +44,28 @@ GEM_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
 # Steps of walk a gem pile is worth: a sure gem, where a cut may drop none.
 # Detour's allowance for one (A73).
 GEM_PILE_STEPS = 8
-# A life's ground code once live play confirms it (A47). Until then the item
-# table's ``life_on_pickup`` rows, learned by ``learn_life_code``, stand in.
-# The Supplies reference names it, ``heart`` (class ``life``); reading it from
-# there changes what Detour and Pickup go for, so it is A156.
-LIFE_SUPPLY_CODES: frozenset[str] = frozenset()
-
 LIFE_SCORE = 10_000
 GEM_SCORE = 5_000
 UNKNOWN_SCORE = 50
 
 
-def is_life_supply(code: str | None, items: dict[str, dict[str, Any]]) -> bool:
-    """A life on the ground: a confirmed code, or one the item table learned (A47)."""
-    if not code:
-        return False
-    return code in LIFE_SUPPLY_CODES or (items.get(code) or {}).get("life_on_pickup") is True
+def is_life_supply(code: str | None) -> bool:
+    """A life on the ground: a supply of class ``life`` in the Supplies
+    reference (``heart``, eaten on pickup into the ``lives`` counter, A156).
+    Read from the reference the run loaded, never learned in play."""
+    return is_life(code)
 
 
-def is_counter_supply(code: str | None, items: dict[str, dict[str, Any]]) -> bool:
+def is_counter_supply(code: str | None) -> bool:
     """Gems and lives are consumed on pickup into counters (Manual §11)."""
-    return bool(code) and (code in GEM_SUPPLY_CODES or is_life_supply(code, items))
+    return bool(code) and (code in GEM_SUPPLY_CODES or is_life_supply(code))
 
 
 def loot_score(code: str | None, items: dict[str, dict[str, Any]]) -> int:
     """Higher is more worth carrying: lives, then gems, then priced gear, potions and food."""
     if not code:
         return UNKNOWN_SCORE
-    if is_life_supply(code, items):
+    if is_life_supply(code):
         return LIFE_SCORE
     if code in GEM_SUPPLY_CODES:
         return GEM_SCORE
@@ -94,13 +86,15 @@ def inventory_full(w: WorldModel) -> bool:
 
 
 def droppable_supplies(w: WorldModel) -> list[InventorySupply]:
-    """Held supplies ``Drop`` may shed.
+    """Supplies ``Drop`` may shed: held, armed and worn (Manual §11 Where
+    your supplies are: ``Drop`` works on any of them, A154).
 
     Stowed supplies (``inventory.chest``) are left out; nothing is stowed there
-    today (Manual §11 Where your supplies are). ``Drop`` also takes an armed or
-    worn supply, which this does not offer yet (A154).
+    today. The non-transferable kit and a supply a ``Drop`` was refused for
+    are never offered.
     """
-    return [s for s in w.held_supplies if s.code not in NON_TRANSFERABLE and s.id not in w.undroppable]
+    carried = w.held_supplies + w.loadout_supplies()
+    return [s for s in carried if s.code not in NON_TRANSFERABLE and s.id not in w.undroppable]
 
 
 @dataclass(frozen=True)
@@ -201,30 +195,6 @@ def save_carried_chest(knowledge: KnowledgeBase | None, w: WorldModel) -> None:
         else:
             knowledge.extra.pop(CARRIED_CHESTS_KEY, None)
 
-
-def learn_life_code(
-    knowledge: KnowledgeBase | None,
-    take_codes: list[str | None],
-    lives_before: int,
-    lives_after: int,
-) -> str | None:
-    """File a life's ground code after a response where ``lives`` rose (A47).
-
-    ``take_codes`` are the codes of this response's applied ``Take``s of our
-    own queue. Only when exactly one could explain the rise is its code filed
-    as ``life_on_pickup``; with two or more, or none, nothing is learned, since
-    a wrong guess would score that supply above gems for good. Returns the
-    code filed, so the runner can log it for promotion to
-    ``LIFE_SUPPLY_CODES``.
-    """
-    if knowledge is None or lives_after <= lives_before or len(take_codes) != 1:
-        return None
-    code = take_codes[0]
-    if not code or code in GEM_SUPPLY_CODES:
-        return None
-    with knowledge.lock:
-        knowledge.items.setdefault(code, {})["life_on_pickup"] = True
-    return code
 
 
 def full_bound(intent: dict, used: int) -> int:

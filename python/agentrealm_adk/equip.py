@@ -265,8 +265,8 @@ def weapon_to_arm(
     do ``job``, the one to have armed. For cutting, one a cut does not use up
     comes first; then :func:`weapon_rank` (within ``ceiling`` first, then
     damage), so a cutter is also the best weapon to be caught with. The armed
-    one wins a tie, so the arm never flips. An armed result has id -1 when
-    it is not also held. None when nothing carried does the job (for
+    one wins a tie, so the arm never flips. An armed result has id -1
+    (``break_memory.held_supplies``: already armed, no ``Arm``). None when nothing carried does the job (for
     fighting, nothing beats bare hands with no weapon armed); a refused
     ``Arm`` is skipped until the loadout changes, and a compose fragment is
     never armed."""

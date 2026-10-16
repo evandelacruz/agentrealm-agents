@@ -322,6 +322,13 @@ def eaten_on_pickup(code: str | None) -> bool:
     return r is not None and r.eaten_on_pickup
 
 
+def is_life(code: str | None) -> bool:
+    """A life: class ``life`` (``heart``), eaten on pickup into the ``lives``
+    counter (Supplies reference, A156)."""
+    r = row(code)
+    return r is not None and r.supply_class == "life"
+
+
 def heals(code: str | None) -> bool:
     return is_food(code) or is_potion(code)
 
